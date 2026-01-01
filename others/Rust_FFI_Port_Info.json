@@ -1,0 +1,770 @@
+{
+  "project": {
+    "name": "DixScript",
+    "subtitle": "MidManStudio Data Interchange Extension Script",
+    "namespace": "MidManStudio::DixScript",
+    "version": "1.0.0",
+    "description": "Secure data interchange format with built-in encryption, compile-time functions, and cross-platform support. Originally built in C#, now being ported to Rust for maximum performance and safety.",
+    "file_extension": ".mdix",
+    "original_language": "C# (.NET 8+)",
+    "target_language": "Rust (2021 edition, rustc 1.70+)",
+    "development_machine": "MacBook Pro Mid 2010 (Intel Core 2 Duo, 8GB RAM)",
+    "repository": "https://github.com/Mid-D-Man/DixScript"
+  },
+
+  "why_rust": {
+    "reasons": [
+      "✅ Memory safety without runtime cost (compile-time guarantees)",
+      "✅ Performance equivalent to C++ (3-5x faster than C#)",
+      "✅ Better FFI tools than C++ (UniFFI, csbindgen for automatic bindings)",
+      "✅ Direct C# feature equivalents (enums with data, pattern matching, Result<T,E>)",
+      "✅ No segfaults, no buffer overflows, no null pointer exceptions",
+      "✅ Easier to port from C# than C++ (enum syntax is identical)",
+      "✅ First-class WebAssembly support (better than C++)",
+      "✅ Single build system (cargo handles everything, no CMake hell)",
+      "✅ Excellent tooling (rust-analyzer, clippy, rustfmt)",
+      "✅ Already started DixScript prototype in Rust (familiar territory)"
+    ],
+    "c_plus_plus_problems_we_avoided": [
+      "❌ std::variant is a nightmare (14+ compilation errors on Token class)",
+      "❌ Template error messages are cryptic (500 lines of gibberish)",
+      "❌ Manual memory management across FFI boundaries",
+      "❌ Header/implementation split causes confusion",
+      "❌ No standard package manager (vcpkg/conan fragmentation)",
+      "❌ Multiple build systems (CMake, Make, Ninja, MSBuild)",
+      "❌ Runtime memory bugs (segfaults in production)",
+      "❌ Manual FFI bindings for every language"
+    ],
+    "timeline_comparison": {
+      "c_plus_plus_estimate": "12-18 weeks (3-4.5 months)",
+      "rust_estimate": "5-7 weeks (1.25-1.75 months)",
+      "savings": "2-3x faster development"
+    }
+  },
+
+  "porting_strategy": {
+    "approach": "Hybrid: Manual port with C# naming conventions",
+    "philosophy": "Keep C# naming to minimize cognitive overhead during porting",
+    "naming_convention": {
+      "types": "PascalCase (e.g., DixData, TokenType, List, Dictionary)",
+      "methods": "PascalCase (e.g., Add, Remove, GetValue, ParseFile)",
+      "fields": "PascalCase (e.g., Line, Column, TokenType)",
+      "variables_local": "camelCase (internal Rust style)",
+      "rationale": "C# developers can read the code naturally, easier to map between C# and Rust during porting"
+    },
+    "phases": [
+      {
+        "phase": 1,
+        "name": "DixCore - C# Collection Wrappers",
+        "duration": "Week 1",
+        "status": "✅ COMPLETE",
+        "description": "Create Rust wrappers that mimic C# collections with identical method names",
+        "deliverables": [
+          "List<T> - wrapper around Vec<T>",
+          "Dictionary<K, V> - wrapper around HashMap<K, V>",
+          "HashSet<T> - wrapper around std::collections::HashSet",
+          "ImmutableArray<T> - immutable wrapper around Vec<T>",
+          "Linq - static class with LINQ methods (Select, Where, OrderBy, etc.)"
+        ]
+      },
+      {
+        "phase": 2,
+        "name": "Utilities",
+        "duration": "Week 1",
+        "status": "✅ COMPLETE",
+        "description": "Port core utility types and helper functions",
+        "deliverables": [
+          "Result<TSuccess, TError> - railway-oriented programming",
+          "DixError enum - all error types",
+          "Token & TokenType - lexical tokens",
+          "Keywords - context-aware keyword management",
+          "MID_Logger - high-performance logger with scopes",
+          "MID_HelperFunctions - validation and debug utilities",
+          "StringExtensions - C# style string methods"
+        ]
+      },
+      {
+        "phase": 3,
+        "name": "Compiler - Lexer",
+        "duration": "Week 2",
+        "status": "⏳ IN PROGRESS",
+        "description": "Port lexical analyzer (tokenization)",
+        "deliverables": [
+          "Lexer - tokenizes source code",
+          "Token recognition",
+          "Comment handling",
+          "String interpolation"
+        ]
+      },
+      {
+        "phase": 4,
+        "name": "Compiler - Parser",
+        "duration": "Week 2-3",
+        "status": "⏳ PENDING",
+        "description": "Port parser and AST construction",
+        "deliverables": [
+          "GeneralParser - main parser",
+          "Section parsers (Data, Config, Enums, QuickFuncs, Security)",
+          "AST node types",
+          "Expression parsing"
+        ]
+      },
+      {
+        "phase": 5,
+        "name": "Compiler - Semantic Analysis",
+        "duration": "Week 3-4",
+        "status": "⏳ PENDING",
+        "description": "Port semantic analyzer and symbol table",
+        "deliverables": [
+          "GeneralSemanticsAnalyzer",
+          "Section analyzers",
+          "SymbolTable",
+          "Type checking"
+        ]
+      },
+      {
+        "phase": 6,
+        "name": "Compiler - Value Resolution",
+        "duration": "Week 4-5",
+        "status": "⏳ PENDING",
+        "description": "Port QuickFunction interpreter (compile-time execution)",
+        "deliverables": [
+          "ValueResolver",
+          "FunctionInterpreter",
+          "ExecutionContext",
+          "Built-in functions"
+        ]
+      },
+      {
+        "phase": 7,
+        "name": "Runtime & Binary Serialization",
+        "duration": "Week 5-6",
+        "status": "⏳ PENDING",
+        "description": "Port runtime API and binary format",
+        "deliverables": [
+          "Dix - main public API",
+          "DixData - data access",
+          "BinaryPacker/Unpacker",
+          "DLM pipeline (compression, encryption)"
+        ]
+      },
+      {
+        "phase": 8,
+        "name": "FFI & Language Bindings",
+        "duration": "Week 6-7",
+        "status": "⏳ PENDING",
+        "description": "Generate bindings for C#, JavaScript, Python",
+        "deliverables": [
+          "C API (extern C functions)",
+          "UniFFI definitions",
+          "C# P/Invoke bindings",
+          "JavaScript/WASM bindings"
+        ]
+      }
+    ]
+  },
+
+  "cross_platform_architecture": {
+    "strategy": "One Rust core → Multiple language bindings via FFI",
+    "platforms": {
+      "desktop": ["Windows", "macOS", "Linux"],
+      "mobile": ["iOS", "Android"],
+      "web": ["WebAssembly (browsers)"],
+      "game_engines": ["Unity", "Godot", "Unreal Engine"],
+      "blockchain": ["Solana", "Ethereum", "Polkadot"]
+    },
+    "architecture_diagram": {
+      "layer_1_core": {
+        "name": "Rust Core Library",
+        "components": [
+          "Compiler (Lexer, Parser, Semantic Analyzer)",
+          "Runtime (Dix, DixData, DixLoader)",
+          "DLM (Compression, Encryption, Auditing)",
+          "Builtins (Math, DateTime, Array, String methods)"
+        ],
+        "output": "libdixscript.a (static) or libdixscript.so/.dylib/.dll (dynamic)"
+      },
+      "layer_2_c_api": {
+        "name": "C FFI Layer",
+        "purpose": "Stable ABI for language bindings",
+        "example": "extern \"C\" fn dix_parse(source: *const c_char) -> *mut DixHandle",
+        "output": "dixscript.h (C header)"
+      },
+      "layer_3_bindings": {
+        "name": "Language-Specific Bindings",
+        "technologies": {
+          "csharp": {
+            "tool": "csbindgen + P/Invoke",
+            "output": "DixScript.Native.cs (auto-generated)",
+            "use_case": "Unity, .NET applications, Blazor"
+          },
+          "javascript": {
+            "tool": "wasm-bindgen",
+            "output": "dixscript.js + dixscript.wasm",
+            "use_case": "Browsers, Node.js, Deno"
+          },
+          "python": {
+            "tool": "PyO3",
+            "output": "dixscript.pyd/.so",
+            "use_case": "Data science, scripting, Django"
+          },
+          "swift": {
+            "tool": "UniFFI",
+            "output": "DixScript.swift",
+            "use_case": "iOS, macOS apps"
+          },
+          "kotlin": {
+            "tool": "UniFFI",
+            "output": "DixScript.kt",
+            "use_case": "Android apps"
+          }
+        }
+      },
+      "layer_4_integrations": {
+        "name": "Platform-Specific Integrations",
+        "unity": {
+          "approach": "P/Invoke with .NET DLL wrapper",
+          "files": ["DixScript.Runtime.dll", "Plugins/libdixscript.so"],
+          "example": "[DllImport(\"dixscript\")] private static extern IntPtr dix_parse(string source);"
+        },
+        "godot": {
+          "approach": "GDExtension (native C++ interface)",
+          "files": ["dixscript.gdextension", "libdixscript.so"],
+          "example": "extends Resource class_name DixScriptResource"
+        },
+        "unreal": {
+          "approach": "UE Plugin with Blueprint nodes",
+          "files": ["DixScript.uplugin", "libdixscript.dll"],
+          "example": "UFUNCTION(BlueprintCallable) static FString ParseDixScript(FString Source);"
+        },
+        "webassembly": {
+          "approach": "wasm-bindgen with JavaScript glue",
+          "files": ["dixscript_bg.wasm", "dixscript.js"],
+          "example": "import { parse_dixscript } from './dixscript.js';"
+        }
+      }
+    },
+    "no_dependencies_strategy": {
+      "philosophy": "Embed everything to avoid version conflicts",
+      "embedded_libraries": [
+        {
+          "name": "TweetNaCl",
+          "purpose": "Crypto (ChaCha20-Poly1305, Ed25519)",
+          "license": "Public domain",
+          "size": "~1,000 lines of C",
+          "rust_crate": "tweetnacl or crypto primitives"
+        },
+        {
+          "name": "Argon2",
+          "purpose": "Password hashing (KDF)",
+          "license": "CC0/Apache",
+          "size": "~2,000 lines of C",
+          "rust_crate": "argon2"
+        },
+        {
+          "name": "miniz",
+          "purpose": "Compression (gzip)",
+          "license": "Public domain",
+          "size": "~5,000 lines of C",
+          "rust_crate": "flate2"
+        },
+        {
+          "name": "bzip2",
+          "purpose": "Compression (better ratio)",
+          "license": "BSD-like",
+          "size": "~5,000 lines of C",
+          "rust_crate": "bzip2"
+        },
+        {
+          "name": "LZMA",
+          "purpose": "Compression (best ratio)",
+          "license": "Public domain",
+          "size": "~2,000 lines of C",
+          "rust_crate": "lzma-rs"
+        }
+      ],
+      "benefits": [
+        "Zero external dependencies in production",
+        "No version conflicts",
+        "Smaller binary size",
+        "Predictable behavior",
+        "Easy deployment"
+      ]
+    }
+  },
+
+  "dixcore_implementation": {
+    "purpose": "Provide C#-style collections so ported code reads naturally",
+    "philosophy": "Wrap Rust std collections with C# method names",
+    "components": [
+      {
+        "name": "List<T>",
+        "rust_wraps": "Vec<T>",
+        "key_methods": {
+          "Add": "list.Add(item)",
+          "Remove": "list.Remove(&item)",
+          "Count": "list.Count()",
+          "Contains": "list.Contains(&item)",
+          "Get": "list.Get(index) -> Option<&T>",
+          "Insert": "list.Insert(index, item)",
+          "Clear": "list.Clear()",
+          "LINQ": {
+            "Select": "list.Select(|x| x * 2)",
+            "Where": "list.Where(|x| x % 2 == 0)",
+            "OrderBy": "list.OrderBy(|x| x)",
+            "First": "list.First()",
+            "Any": "list.Any(|x| x > 10)",
+            "Sum": "list.Sum()",
+            "Take": "list.Take(5)",
+            "Skip": "list.Skip(5)"
+          }
+        },
+        "usage_example": "let mut names = List::New();\nnames.Add(\"Alice\".to_string());\nnames.Add(\"Bob\".to_string());\nlet filtered = names.Where(|n| n.starts_with('A'));"
+      },
+      {
+        "name": "Dictionary<K, V>",
+        "rust_wraps": "HashMap<K, V>",
+        "key_methods": {
+          "Add": "dict.Add(key, value)",
+          "Set": "dict.Set(key, value)",
+          "Get": "dict.Get(&key) -> Option<&V>",
+          "TryGetValue": "dict.TryGetValue(&key) -> Option<&V>",
+          "ContainsKey": "dict.ContainsKey(&key)",
+          "Remove": "dict.Remove(&key)",
+          "Count": "dict.Count()",
+          "Keys": "dict.Keys()",
+          "Values": "dict.Values()"
+        },
+        "usage_example": "let mut config = Dictionary::New();\nconfig.Add(\"host\", \"localhost\");\nif let Some(host) = config.TryGetValue(&\"host\") {\n  println!(\"Host: {}\", host);\n}"
+      },
+      {
+        "name": "HashSet<T>",
+        "rust_wraps": "std::collections::HashSet<T>",
+        "key_methods": {
+          "Add": "set.Add(item)",
+          "Remove": "set.Remove(&item)",
+          "Contains": "set.Contains(&item)",
+          "Count": "set.Count()",
+          "UnionWith": "set1.UnionWith(&set2)",
+          "IntersectWith": "set1.IntersectWith(&set2)",
+          "IsSubsetOf": "set1.IsSubsetOf(&set2)"
+        },
+        "usage_example": "let mut tags = HashSet::New();\ntags.Add(\"rust\");\ntags.Add(\"performance\");\nif tags.Contains(&\"rust\") {\n  println!(\"Found!\");\n}"
+      },
+      {
+        "name": "ImmutableArray<T>",
+        "rust_wraps": "Vec<T> (immutable)",
+        "key_methods": {
+          "Create": "ImmutableArray::Create(vec![1, 2, 3])",
+          "Length": "arr.Length()",
+          "Get": "arr.Get(index) -> Option<&T>",
+          "index": "arr[0]",
+          "IsEmpty": "arr.IsEmpty()"
+        },
+        "usage_example": "let arr = ImmutableArray::Create(vec![1, 2, 3, 4, 5]);\nlet first = arr[0];\nlet second = arr.Get(1);"
+      },
+      {
+        "name": "Linq (Static Class)",
+        "rust_type": "Struct with static methods",
+        "key_methods": {
+          "Select": "Linq::Select(collection, |x| x * 2)",
+          "Where": "Linq::Where(collection, |x| x % 2 == 0)",
+          "OrderBy": "Linq::OrderBy(collection, |x| x)",
+          "GroupBy": "Linq::GroupBy(collection, |x| x.category)",
+          "Join": "Linq::Join(outer, inner, |o| o.id, |i| i.id, |o, i| (o, i))",
+          "Distinct": "Linq::Distinct(collection)",
+          "Take": "Linq::Take(collection, 5)",
+          "Skip": "Linq::Skip(collection, 5)",
+          "Sum": "Linq::Sum(collection)",
+          "Min": "Linq::Min(collection)",
+          "Max": "Linq::Max(collection)"
+        },
+        "usage_example": "let numbers = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];\nlet evens = Linq::Where(numbers, |x| x % 2 == 0);\nlet doubled = Linq::Select(evens, |x| x * 2);\nlet sorted = Linq::OrderBy(doubled, |x| x);"
+      }
+    ],
+    "why_dixcore_exists": [
+      "C# code uses List<T>, Dictionary<K,V>, LINQ everywhere",
+      "Direct port would be vec![], HashMap::new(), .iter().filter(), etc.",
+      "That's jarring during porting - hard to match line-by-line",
+      "DixCore makes porting mechanical: List<T> → List<T>, .Where() → .Where()",
+      "Reduces cognitive load during translation",
+      "Makes code readable to C# developers"
+    ]
+  },
+
+  "utilities_implementation": {
+    "purpose": "Core types and helpers used throughout DixScript",
+    "components": [
+      {
+        "name": "Result<TSuccess, TError>",
+        "purpose": "Railway-oriented programming (Rust's Result but with C# names)",
+        "key_methods": {
+          "Ok": "Result::Ok(value)",
+          "Err": "Result::Err(error)",
+          "IsSuccess": "result.IsSuccess()",
+          "IsFailure": "result.IsFailure()",
+          "SuccessResult": "result.SuccessResult()",
+          "Error": "result.Error()",
+          "Match": "result.Match(|ok| ..., |err| ...)",
+          "Map": "result.Map(|x| x * 2)",
+          "AndThen": "result.AndThen(|x| other_function(x))",
+          "UnwrapOr": "result.UnwrapOr(default_value)",
+          "Tap": "result.Tap(|x| println!(\"{}\", x))"
+        },
+        "usage_example": "let result = Dix::Load(\"config.mdix\");\nresult.Match(\n  |data| println!(\"Success: {:?}\", data),\n  |error| println!(\"Error: {}\", error)\n);"
+      },
+      {
+        "name": "DixError",
+        "purpose": "All error types in DixScript",
+        "variants": [
+          "ParseError(String)",
+          "LexicalError(String)",
+          "SemanticError(String)",
+          "RuntimeError(String)",
+          "TypeError(String)",
+          "FileIOError(String)",
+          "CompilationError(String)",
+          "EncryptionError(String)",
+          "CompressionError(String)",
+          "ValidationError(String)"
+        ],
+        "usage_example": "return Result::Err(DixError::ParseError(\"Unexpected token\".to_string()));"
+      },
+      {
+        "name": "Token & TokenType",
+        "purpose": "Lexical tokens with position information",
+        "token_types": [
+          "Keyword(String)",
+          "Identifier(String)",
+          "Integer(i32)",
+          "Float(f32)",
+          "String(String)",
+          "Symbol(char)",
+          "... 40+ more variants"
+        ],
+        "key_methods": {
+          "New": "Token::New(TokenType::Integer(42), 10, 5)",
+          "ToString": "token.ToString()",
+          "GetTokenValue": "token.GetTokenValue()",
+          "WithSection": "token.WithSection(\"DATA\".to_string())"
+        },
+        "usage_example": "let token = Token::New(TokenType::Keyword(\"if\".to_string()), 1, 0);\nprintln!(\"{}\", token.ToString());"
+      },
+      {
+        "name": "Keywords",
+        "purpose": "Context-aware keyword management",
+        "key_methods": {
+          "IsReservedInContext": "Keywords::IsReservedInContext(\"if\", \"DATA\")",
+          "TrulyReservedKeywords": "Keywords::TrulyReservedKeywords()",
+          "DataTypeKeywords": "Keywords::DataTypeKeywords()",
+          "IsSectionKeyword": "Keywords::IsSectionKeyword(\"@CONFIG\")",
+          "GetKeywordCategory": "Keywords::GetKeywordCategory(\"int\")"
+        },
+        "usage_example": "if Keywords::IsReservedInContext(\"if\", \"DATA\") {\n  return Err(DixError::ParseError(\"Reserved keyword\".to_string()));\n}"
+      },
+      {
+        "name": "MID_Logger",
+        "purpose": "High-performance logger with indentation and scopes",
+        "key_methods": {
+          "New": "MID_Logger::New(LogLevel::Info, true)",
+          "Debug": "logger.Debug(\"Debug message\")",
+          "Info": "logger.Info(\"Info message\")",
+          "Warning": "logger.Warning(\"Warning\")",
+          "Error": "logger.Error(\"Error\")",
+          "CreateScope": "let _scope = logger.CreateScope(\"Parsing\");",
+          "IncreaseIndent": "logger.IncreaseIndent()",
+          "GetLogContents": "logger.GetLogContents()"
+        },
+        "usage_example": "let logger = MID_Logger::New(LogLevel::Debug, true);\nlogger.Info(\"Starting compilation\");\n{\n  let _scope = logger.CreateScope(\"Lexer\");\n  logger.Debug(\"Tokenizing...\");\n}"
+      },
+      {
+        "name": "MID_HelperFunctions",
+        "purpose": "Common utility functions",
+        "key_methods": {
+          "IsValidString": "MID_HelperFunctions::IsValidString(\"test\")",
+          "GetEnvironment": "MID_HelperFunctions::GetEnvironment()",
+          "GenerateRandomString": "MID_HelperFunctions::GenerateRandomString(16, false)"
+        }
+      },
+      {
+        "name": "StringExtensions",
+        "purpose": "C# style string methods",
+        "key_methods": {
+          "Split": "StringExtensions::Split(\"a,b,c\", ',')",
+          "Join": "StringExtensions::Join(\",\", &parts)",
+          "StartsWith": "StringExtensions::StartsWith(text, \"@\")",
+          "ToUpper": "StringExtensions::ToUpper(text)",
+          "Substring": "StringExtensions::Substring(text, 0, Some(5))"
+        }
+      }
+    ]
+  },
+
+  "project_structure": {
+    "root": "DixScript-Rust/",
+    "directories": {
+      "src/": "Source code",
+      "src/DixCore/": "C# collection wrappers (List, Dictionary, HashSet, ImmutableArray, Linq)",
+      "src/Utilities/": "Core utilities (Result, Token, Logger, Keywords, etc.)",
+      "src/Builtins/": "Built-in types and methods (Core, Instance, Static, Resolver)",
+      "src/Compiler/": "Compilation pipeline (AST, Core, DLM, Extensions, Utilities, VersionControl)",
+      "src/Compiler/Core/": "Lexer, Parser, Semantic Analyzer, Value Resolution, Binary Serialization",
+      "src/Compiler/DLM/": "Data Lifecycle Modules (Auditor, Compressor, Encryptor, KeyManagement)",
+      "src/Runtime/": "Public API (Dix, DixData, DixLoader, etc.)",
+      "tests/": "Unit and integration tests",
+      "examples/": "Example usage",
+      "benches/": "Performance benchmarks",
+      "docs/": "Documentation"
+    },
+    "key_files": {
+      "Cargo.toml": "Rust package manifest",
+      "src/lib.rs": "Library root (exports all modules)",
+      ".cargo/config.toml": "Cargo configuration (optimized for MacBook Pro 2010)",
+      "rustfmt.toml": "Code formatting rules",
+      ".gitignore": "Git ignore patterns"
+    }
+  },
+
+  "current_status": {
+    "completed": [
+      "✅ Project structure created",
+      "✅ DixCore implemented (List, Dictionary, HashSet, ImmutableArray)",
+      "✅ Linq static class with 30+ LINQ methods",
+      "✅ Result<TSuccess, TError> with railway-oriented methods",
+      "✅ Token & TokenType with 40+ variants",
+      "✅ Keywords context-aware management",
+      "✅ MID_Logger with scopes and indentation",
+      "✅ MID_HelperFunctions utility class",
+      "✅ StringExtensions C# style methods",
+      "✅ All utilities compile successfully",
+      "✅ Basic test structure in place"
+    ],
+    "in_progress": [
+      "⏳ Incremental testing of DixCore and Utilities"
+    ],
+    "next_steps": [
+      "⏳ Port Lexer (tokenization)",
+      "⏳ Port Parser (AST construction)",
+      "⏳ Port Semantic Analyzer",
+      "⏳ Port Value Resolution (QuickFunction interpreter)",
+      "⏳ Port Binary Serialization",
+      "⏳ Port Runtime API",
+      "⏳ Generate FFI bindings",
+      "⏳ Unity integration testing"
+    ]
+  },
+
+  "how_to_use_dixcore": {
+    "scenario_1_list": {
+      "description": "Working with dynamic lists",
+      "csharp_code": "var tokens = new List<Token>();\ntokens.Add(token1);\ntokens.Add(token2);\nvar keywords = tokens.Where(t => t.TokenType is Keyword).ToList();",
+      "rust_code": "let mut tokens = List::New();\ntokens.Add(token1);\ntokens.Add(token2);\nlet keywords = tokens.Where(|t| matches!(t.TokenType, TokenType::Keyword(_)));"
+    },
+    "scenario_2_dictionary": {
+      "description": "Symbol table / configuration",
+      "csharp_code": "var symbolTable = new Dictionary<string, Symbol>();\nsymbolTable.Add(\"x\", symbol);\nif (symbolTable.TryGetValue(\"x\", out var sym)) { ... }",
+      "rust_code": "let mut symbol_table = Dictionary::New();\nsymbol_table.Add(\"x\".to_string(), symbol);\nif let Some(sym) = symbol_table.TryGetValue(&\"x\".to_string()) { ... }"
+    },
+    "scenario_3_linq": {
+      "description": "Complex data queries",
+      "csharp_code": "var results = items\n  .Where(x => x.Value > 10)\n  .OrderBy(x => x.Name)\n  .Select(x => x.ToString())\n  .Take(5);",
+      "rust_code": "let results = Linq::Take(\n  Linq::Select(\n    Linq::OrderBy(\n      Linq::Where(items, |x| x.Value > 10),\n      |x| &x.Name\n    ),\n    |x| x.ToString()\n  ),\n  5\n);"
+    },
+    "scenario_4_result": {
+      "description": "Error handling with Result",
+      "csharp_code": "var result = Dix.Load(\"config.mdix\");\nresult.Match(\n  success => Console.WriteLine(success),\n  error => Console.WriteLine(error)\n);",
+      "rust_code": "let result = Dix::Load(\"config.mdix\");\nresult.Match(\n  |success| println!(\"{:?}\", success),\n  |error| println!(\"{}\", error)\n);"
+    },
+    "scenario_5_logger": {
+      "description": "Structured logging with scopes",
+      "csharp_code": "logger.Info(\"Starting\");\nusing (logger.CreateScope(\"Lexer\")) {\n  logger.Debug(\"Tokenizing\");\n}",
+      "rust_code": "logger.Info(\"Starting\");\n{\n  let _scope = logger.CreateScope(\"Lexer\");\n  logger.Debug(\"Tokenizing\");\n}"
+    }
+  },
+
+  "building_and_testing": {
+    "setup": {
+      "install_rust": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+      "verify": "rustc --version && cargo --version",
+      "clone": "git clone https://github.com/Mid-D-Man/DixScript.git && cd DixScript-Rust"
+    },
+    "commands": {
+      "check": "cargo check",
+      "build_debug": "cargo build",
+      "build_release": "cargo build --release",
+      "test_all": "cargo test",
+      "test_specific": "cargo test test_linq_select",
+      "run_example": "cargo run --example basic_usage",
+      "format": "cargo fmt",
+      "lint": "cargo clippy",
+      "clean": "cargo clean",
+      "doc": "cargo doc --open"
+    },
+    "rustRover_setup": [
+      "1. Open RustRover",
+      "2. File → Open → Select DixScript-Rust folder",
+      "3. RustRover auto-detects Cargo.toml",
+      "4. Settings → Rust → Verify toolchain",
+      "5. Build: Ctrl+F9 or ⌘F9"
+    ]
+  },
+
+  "ffi_strategy": {
+    "overview": "Generate bindings automatically using UniFFI and csbindgen",
+    "c_api_layer": {
+      "purpose": "Stable C ABI for all language bindings",
+      "location": "src/ffi.rs",
+      "example": "extern \"C\" fn dix_parse(source: *const c_char, len: usize) -> *mut DixHandle"
+    },
+    "csharp_bindings": {
+      "tool": "csbindgen",
+      "install": "cargo install csbindgen",
+      "generate": "csbindgen --crate dixscript --output bindings/csharp/DixScript.Native.cs",
+      "usage_in_unity": "[DllImport(\"dixscript\")]\nprivate static extern IntPtr dix_parse([MarshalAs(UnmanagedType.LPUTF8Str)] string source);"
+    },
+    "javascript_bindings": {
+      "tool": "wasm-bindgen",
+      "install": "cargo install wasm-pack",
+      "generate": "wasm-pack build --target web",
+      "usage": "import { parse_dixscript } from './pkg/dixscript.js';\nconst result = parse_dixscript(source);"
+    },
+    "python_bindings": {
+      "tool": "PyO3",
+      "add_dep": "[dependencies]\npyo3 = { version = \"0.20\", features = [\"extension-module\"] }",
+      "build": "maturin develop",
+      "usage": "import dixscript\nresult = dixscript.parse(source)"
+    },
+    "multi_language_uniffi": {
+      "tool": "UniFFI (Mozilla)",
+      "add_dep": "[dependencies]\nuniffi = \"0.25\"",
+      "define_interface": "Create dixscript.udl file",
+      "generate_all": "cargo uniffi-bindgen generate src/dixscript.udl --language kotlin --language swift --language python",
+      "benefit": "Single definition → Multiple languages automatically"
+    }
+  },
+
+  "deployment": {
+    "targets": {
+      "windows": {
+        "build": "cargo build --release --target x86_64-pc-windows-msvc",
+        "output": "target/x86_64-pc-windows-msvc/release/dixscript.dll"
+      },
+      "macos": {
+        "build": "cargo build --release --target x86_64-apple-darwin",
+        "output": "target/x86_64-apple-darwin/release/libdixscript.dylib"
+      },
+      "linux": {
+        "build": "cargo build --release --target x86_64-unknown-linux-gnu",
+        "output": "target/x86_64-unknown-linux-gnu/release/libdixscript.so"
+      },
+      "ios": {
+        "build": "cargo build --release --target aarch64-apple-ios",
+        "output": "target/aarch64-apple-ios/release/libdixscript.a"
+      },
+      "android": {
+        "build": "cargo ndk --target aarch64-linux-android --platform 21 -- build --release",
+        "output": "target/aarch64-linux-android/release/libdixscript.so"
+      },
+      "wasm": {
+        "build": "wasm-pack build --target web",
+        "output": "pkg/dixscript_bg.wasm + pkg/dixscript.js"
+      }
+    },
+    "unity_integration": {
+      "steps": [
+        "1. Build Rust library for target platform",
+        "2. Generate C# bindings with csbindgen",
+        "3. Copy libdixscript.dll/so/dylib to Unity/Assets/Plugins/",
+        "4. Copy DixScript.Native.cs to Unity/Assets/Scripts/",
+        "5. Use: var result = DixNative.Parse(source);"
+      ]
+    }
+  },
+
+  "performance_optimizations": {
+    "macbook_pro_2010": {
+      "cpu": "Intel Core 2 Duo 2.4 GHz",
+      "ram": "8 GB DDR3",
+      "optimizations": [
+        "Set jobs = 2 in .cargo/config.toml",
+        "Use --release for production builds",
+        "Enable LTO (link-time optimization)",
+        "Use incremental compilation for debug builds",
+        "Close other apps during compilation"
+      ]
+    },
+    "cargo_config": {
+      "jobs": 2,
+      "incremental": true,
+      "target_cpu": "native",
+      "lto": "thin"
+    },
+    "release_profile": {
+      "opt_level": 3,
+      "lto": true,
+      "codegen_units": 1,
+      "strip": true
+    }
+  },
+
+  "important_notes": {
+    "memory_safety": [
+      "Rust guarantees no buffer overflows at compile time",
+      "Rust guarantees no null pointer dereferences (use Option<T>)",
+      "Rust guarantees no data races in concurrent code",
+      "Rust guarantees no use-after-free bugs",
+      "All of this with ZERO runtime cost"
+    ],
+    "naming_philosophy": [
+      "We deliberately use PascalCase for methods (C# style)",
+      "This is non-idiomatic Rust, but intentional",
+      "Makes porting mechanical and reduces errors",
+      "C# developers can read the code naturally",
+      "Internal Rust code uses snake_case as normal"
+    ],
+    "dixcore_is_not_bloat": [
+      "DixCore methods are thin wrappers (inline candidate)",
+      "Compiler will optimize away the abstraction",
+      "Runtime performance is identical to using Vec/HashMap directly",
+      "The abstraction exists for developer ergonomics during porting"
+    ],
+    "result_vs_option": [
+      "Result<T, E> for operations that can fail with an error",
+      "Option<T> for operations that might return nothing (no error context)",
+      "We use Result<T, DixError> everywhere for consistency"
+    ]
+  },
+
+  "next_chat_handoff": {
+    "what_is_done": [
+      "✅ Complete project structure",
+      "✅ DixCore (List, Dictionary, HashSet, ImmutableArray, Linq)",
+      "✅ Utilities (Result, Token, Keywords, Logger, Helpers, StringExtensions)",
+      "✅ All code compiles successfully",
+      "✅ Ready to start porting Compiler components"
+    ],
+    "what_to_continue": [
+      "Port Lexer (tokenization) - this is the next priority",
+      "Write comprehensive tests for DixCore and Utilities",
+      "Port Parser (AST construction)",
+      "Port Semantic Analyzer",
+      "Port Value Resolution (QuickFunction interpreter)"
+    ],
+    "files_to_reference": [
+      "src/lib.rs - Library root",
+      "src/DixCore/mod.rs - Collection wrappers",
+      "src/Utilities/mod.rs - Core utilities",
+      "C# source: DixScript/Compiler/Core/Lexer.cs",
+      "C# source: DixScript/Utilities/Token.cs",
+      "C# source: DixScript/Utilities/KeywordDefinitions.cs"
+    ],
+    "key_points_for_next_dev": [
+      "All methods use PascalCase (C# style) - this is intentional",
+      "Use DixCore types (List, Dictionary) instead of Vec, HashMap",
+      "Use Result<T, DixError> for error handling",
+      "Follow the C# implementation closely - line-by-line where possible",
+      "Test incrementally as you port each component",
+      "The project compiles right now - keep it compiling after each change"
+    ]
+  }
+}

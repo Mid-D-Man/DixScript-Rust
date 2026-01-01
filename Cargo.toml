@@ -1,0 +1,41 @@
+[package]
+name = "dixscript"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.70"
+authors = ["MidManStudio"]
+description = "DixScript - Secure data interchange format with built-in encryption"
+license = "MIT"
+repository = "https://github.com/Mid-D-Man/DixScript-Rust"
+keywords = ["config", "data", "encryption", "serialization"]
+categories = ["config", "encoding", "data-structures"]
+
+[lib]
+name = "dixscript"
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[dependencies]
+# For random string generation
+rand = "0.8"
+#chrono = "0.4"  # For timestamps in error reports
+
+[dev-dependencies]
+# Test dependencies
+# criterion = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+# Optimize for old MacBook Pro 2010
+[profile.dev.build-override]
+opt-level = 0
+
+[profile.release.build-override]
+opt-level = 3

@@ -1,0 +1,395 @@
+{
+  "project": {
+    "name": "DixScript Rust Port",
+    "status": "Phase 2 - Compiler Implementation",
+    "completed": [
+      "✅ DixCore (List, Dictionary, HashSet, ImmutableArray, Linq)",
+      "✅ Utilities (Token, Keywords, Logger, HelperFunctions, StringExtensions)",
+      "✅ Test infrastructure",
+      "✅ Project structure"
+    ],
+    "current_phase": "Porting Compiler (Lexer → Parser → Semantic Analysis)"
+  },
+
+  "rust_fundamentals": {
+    "must_understand_before_porting": {
+      "ownership": {
+        "what": "Rust's core memory safety feature - each value has ONE owner",
+        "rules": [
+          "Each value has exactly one owner",
+          "When the owner goes out of scope, the value is dropped (freed)",
+          "You can transfer ownership (move) or lend it (borrow)"
+        ],
+        "example_move": {
+          "code": "let s1 = String::from(\"hello\");\nlet s2 = s1; // s1 is MOVED to s2, can't use s1 anymore",
+          "explanation": "s1 no longer valid after this line"
+        },
+        "example_clone": {
+          "code": "let s1 = String::from(\"hello\");\nlet s2 = s1.clone(); // Both s1 and s2 are valid",
+          "explanation": "Make a copy when you need both"
+        }
+      },
+
+      "borrowing": {
+        "what": "Temporarily lending data without transferring ownership",
+        "immutable_borrow": {
+          "syntax": "&value",
+          "rule": "Can have MANY immutable borrows at once",
+          "example": "fn process(data: &String) { /* read-only access */ }"
+        },
+        "mutable_borrow": {
+          "syntax": "&mut value",
+          "rule": "Can have ONLY ONE mutable borrow at a time",
+          "example": "fn modify(data: &mut String) { data.push_str(\"!\"); }",
+          "why": "Prevents data races - can't modify while someone else is reading"
+        },
+        "common_mistake": {
+          "wrong": "let data = String::from(\"x\");\nlet r1 = &mut data;\nlet r2 = &mut data; // ERROR!",
+          "right": "let mut data = String::from(\"x\");\n{\n  let r1 = &mut data;\n  r1.push_str(\"!\");\n} // r1 scope ends\nlet r2 = &mut data; // OK now",
+          "explanation": "Mutable borrows can't overlap - use scopes to separate them"
+        }
+      },
+
+      "mut_keyword": {
+        "what": "Makes a variable mutable (changeable)",
+        "immutable_by_default": "let x = 5; // Can't change x",
+        "make_it_mutable": "let mut x = 5; x = 10; // Now you can change it",
+        "when_to_use": [
+          "Use `mut` when the variable will change",
+          "Use `&mut` when a function needs to modify borrowed data"
+        ],
+        "examples": {
+          "variable": "let mut list = List::New();\nlist.Add(42); // Need mut to modify",
+          "parameter": "fn add_item(list: &mut List<i32>, item: i32) {\n  list.Add(item); // Function modifies borrowed list\n}",
+          "dont_need": "let name = String::from(\"Alice\"); // Don't need mut if never changing"
+        }
+      },
+
+      "lifetimes": {
+        "what": "Tell Rust how long borrowed data lives",
+        "when_needed": "Only when compiler can't figure it out (usually with multiple references)",
+        "syntax": "'a is a lifetime name (like a generic, but for lifetimes)",
+        "example_simple": {
+          "code": "fn get_first<'a>(items: &'a Vec<String>) -> &'a String {\n  &items[0]\n}",
+          "explanation": "The returned reference lives as long as 'items' does"
+        },
+        "example_complex": {
+          "code": "fn longest<'a>(s1: &'a str, s2: &'a str) -> &'a str {\n  if s1.len() > s2.len() { s1 } else { s2 }\n}",
+          "explanation": "Output lives as long as BOTH inputs (whichever is shorter)"
+        },
+        "common_dixscript_case": {
+          "scenario": "Token stores references to source code",
+          "solution": "Either copy the data (String) or use lifetimes if storing references (&str)"
+        },
+        "when_not_needed": [
+          "Single input reference → Output lifetime is obvious",
+          "No references involved",
+          "Using owned types (String, Vec, etc.) instead of references"
+        ]
+      },
+
+      "closure_syntax": {
+        "what": "Anonymous functions (lambdas in C#)",
+        "basic": {
+          "syntax": "|param| expression",
+          "example": "|x| x * 2",
+          "csharp_equivalent": "x => x * 2"
+        },
+        "multiple_params": {
+          "syntax": "|param1, param2| expression",
+          "example": "|x, y| x + y",
+          "csharp_equivalent": "(x, y) => x + y"
+        },
+        "ignore_param": {
+          "syntax": "|_| expression",
+          "example": "|_| println!(\"Ignore the parameter\")",
+          "explanation": "The underscore _ means 'I don't care about this value'",
+          "use_case": "When Match requires a function but you don't need the error: |_| panic!(\"Unexpected error\")"
+        },
+        "block_body": {
+          "syntax": "|param| { /* multiple statements */ }",
+          "example": "|x| {\n  let doubled = x * 2;\n  doubled + 1\n}",
+          "explanation": "Use braces for multi-line closures"
+        },
+        "type_annotations": {
+          "when": "Compiler can't infer types",
+          "syntax": "|x: i32| -> i32 { x * 2 }",
+          "example": "result.Map(|x: String| -> String { x.to_uppercase() })"
+        }
+      }
+    }
+  },
+
+  "porting_strategy": {
+    "use_native_rust_types": {
+      "result": {
+        "dont_create_wrapper": "Use Rust's built-in Result<T, E>",
+        "create_error_enum": {
+          "file": "src/Utilities/dix_error.rs",
+          "example": "pub enum DixError {\n  ParseError(String),\n  LexicalError(String),\n  RuntimeError(String),\n}\n\npub type DixResult<T> = Result<T, DixError>;"
+        },
+        "usage": {
+          "ok": "Ok(value)",
+          "err": "Err(DixError::ParseError(\"message\".to_string()))",
+          "match": "match result {\n  Ok(val) => /* use val */,\n  Err(e) => /* handle error */\n}",
+          "question_mark": "let value = might_fail()?; // Auto-propagate errors"
+        },
+        "c_sharp_comparison": {
+          "c_sharp": "return Result<int, string>.Ok(42);",
+          "rust": "return Ok(42); // Type inference knows it's Result<i32, DixError>"
+        }
+      },
+
+      "string_vs_str": {
+        "String": {
+          "what": "Owned, growable string (heap-allocated)",
+          "use_when": "Need to own/modify the string",
+          "create": "String::from(\"hello\") or \"hello\".to_string()"
+        },
+        "str": {
+          "what": "String slice (reference to string data)",
+          "use_when": "Just reading, not owning",
+          "always_borrowed": "&str (never own a str, only borrow it)"
+        },
+        "when_porting": {
+          "c_sharp_string_parameter": "fn Process(text: string)",
+          "rust_equivalent": "fn Process(text: &str) // Accepts String OR &str",
+          "why": "&str is more flexible - accepts both owned and borrowed strings"
+        }
+      },
+
+      "vec_vs_slice": {
+        "Vec<T>": {
+          "what": "Owned, growable array",
+          "use_when": "Building/modifying collections",
+          "create": "vec![1, 2, 3] or Vec::new()"
+        },
+        "slice": {
+          "what": "&[T] - reference to array data",
+          "use_when": "Just reading, not owning",
+          "example": "fn sum(numbers: &[i32]) -> i32"
+        }
+      },
+
+      "option_vs_null": {
+        "rust_has_no_null": "Use Option<T> instead",
+        "syntax": {
+          "some": "Some(value)",
+          "none": "None",
+          "check": "if let Some(val) = option { /* use val */ }",
+          "unwrap": "option.unwrap() // Panics if None, use carefully"
+        },
+        "when_porting": {
+          "c_sharp_nullable": "string? name",
+          "rust_equivalent": "name: Option<String>"
+        }
+      }
+    },
+
+    "common_porting_patterns": {
+      "c_sharp_class_to_rust_struct": {
+        "c_sharp": "public class Token {\n  public TokenType TokenType { get; set; }\n  public int Line { get; set; }\n}",
+        "rust": "pub struct Token {\n  pub TokenType: TokenType,\n  pub Line: usize,\n}\n\nimpl Token {\n  pub fn New(token_type: TokenType, line: usize) -> Self {\n    Self { TokenType: token_type, Line: line }\n  }\n}",
+        "notes": [
+          "struct for data",
+          "impl block for methods",
+          "Use pub for public fields/methods",
+          "Self refers to the struct type"
+        ]
+      },
+
+      "c_sharp_list_to_rust_vec": {
+        "c_sharp": "List<string> items = new List<string>();",
+        "rust_option1": "let mut items = Vec::new();",
+        "rust_option2": "let mut items = List::New(); // Use our DixCore wrapper",
+        "which_to_use": "For porting, use List::New() to match C# code structure"
+      },
+
+      "c_sharp_dictionary_to_rust_hashmap": {
+        "c_sharp": "Dictionary<string, int> map = new Dictionary<string, int>();",
+        "rust_option1": "let mut map = HashMap::new();",
+        "rust_option2": "let mut map = Dictionary::New(); // Use our DixCore wrapper",
+        "which_to_use": "Use Dictionary::New() to match C# code"
+      },
+
+      "c_sharp_foreach_to_rust_for": {
+        "c_sharp": "foreach (var item in items) { Process(item); }",
+        "rust": "for item in items.Iter() { Process(item); }",
+        "notes": [
+          "items.Iter() borrows",
+          "items.into_iter() consumes (moves)",
+          "Use .Iter() when you still need items after the loop"
+        ]
+      },
+
+      "c_sharp_linq_to_rust_iterator": {
+        "c_sharp": "var result = items.Where(x => x > 5).Select(x => x * 2).ToList();",
+        "rust_native": "let result: Vec<_> = items.iter().filter(|x| **x > 5).map(|x| x * 2).collect();",
+        "rust_dixcore": "let result = items.Where(|x| *x > 5).Select(|x| x * 2);",
+        "which_to_use": "Use DixCore methods for easier porting"
+      },
+
+      "c_sharp_ref_out_parameters": {
+        "c_sharp_ref": "void Modify(ref int value) { value++; }",
+        "rust_equivalent": "fn Modify(value: &mut i32) { *value += 1; }",
+        "c_sharp_out": "bool TryParse(string s, out int result) { /*...*/ }",
+        "rust_equivalent": "fn TryParse(s: &str) -> Option<i32> { /*...*/ }",
+        "explanation": "Rust uses Option instead of out parameters"
+      }
+    },
+
+    "step_by_step_porting": {
+      "1_read_c_sharp_code": "Understand what the class/method does",
+      "2_identify_dependencies": "What other types does it use?",
+      "3_check_skills": "Is there a skill for this? (e.g., /mnt/skills/public/...)",
+      "4_create_rust_file": "Create snake_case.rs file",
+      "5_port_struct": "Convert C# class to Rust struct",
+      "6_port_methods": "Convert methods one by one",
+      "7_handle_ownership": "Add &, &mut, or clone() as needed",
+      "8_fix_types": "String vs &str, Vec vs slice, etc.",
+      "9_test_incrementally": "Write tests as you go",
+      "10_iterate": "Fix compiler errors, adjust types"
+    }
+  },
+
+  "common_compiler_errors_and_fixes": {
+    "cannot_move_out_of_borrowed_content": {
+      "error": "cannot move out of `*list` which is behind a shared reference",
+      "cause": "Trying to take ownership of borrowed data",
+      "fix": "Use .clone() if you need ownership: let owned = borrowed.clone();"
+    },
+    "cannot_borrow_as_mutable": {
+      "error": "cannot borrow `x` as mutable more than once",
+      "cause": "Two mutable borrows at same time",
+      "fix": "Use scopes: { let r1 = &mut x; } let r2 = &mut x;"
+    },
+    "temporary_value_dropped": {
+      "error": "temporary value dropped while borrowed",
+      "cause": "Reference outlives the value",
+      "fix": "Store the value in a variable first: let temp = create_value(); let ref_to_temp = &temp;"
+    },
+    "expected_reference_found_type": {
+      "error": "expected `&str`, found `String`",
+      "cause": "Type mismatch between owned and borrowed",
+      "fix": "Use &string or string.as_str() to convert String to &str"
+    }
+  },
+
+  "porting_order_for_compiler": {
+    "phase_1_lexer": {
+      "start_with": "src/Compiler/Core/lexer.rs",
+      "c_sharp_file": "DixScript/Compiler/Core/Lexer.cs",
+      "dependencies": ["Token", "TokenType", "Keywords"],
+      "key_challenges": [
+        "String scanning without GC",
+        "Character iteration (use .chars() iterator)",
+        "Lookahead (peek without consuming)"
+      ],
+      "testing": "Create tests/lexer_tests.rs for incremental testing"
+    },
+    "phase_2_parser": {
+      "files": [
+        "src/Compiler/Core/general_parser.rs",
+        "src/Compiler/Core/SectionParsers/*.rs"
+      ],
+      "dependencies": ["Lexer", "AST nodes", "Token"],
+      "key_challenges": [
+        "Recursive parsing with ownership",
+        "Building AST without GC",
+        "Error recovery"
+      ]
+    },
+    "phase_3_semantic_analysis": {
+      "files": [
+        "src/Compiler/Core/general_semantics_analyzer.rs",
+        "src/Compiler/Core/SectionAnalyzers/*.rs"
+      ],
+      "dependencies": ["Parser", "AST", "SymbolTable"],
+      "key_challenges": [
+        "Symbol table with borrows",
+        "Type checking",
+        "Scope management"
+      ]
+    },
+    "phase_4_value_resolution": {
+      "files": ["src/Compiler/Core/ValueResolution/*.rs"],
+      "dependencies": ["AST", "Builtins"],
+      "key_challenges": [
+        "Interpreting at compile-time",
+        "Function calls",
+        "Variable scoping"
+      ]
+    }
+  },
+
+  "tips_and_tricks": {
+    "when_stuck": [
+      "1. Read the compiler error CAREFULLY - Rust errors are helpful",
+      "2. Search docs.rs for the type causing issues",
+      "3. Use web search: 'rust [error message]'",
+      "4. Check if there's a Rust equivalent: 'C# List to Rust equivalent'",
+      "5. Ask for help - explain what you're trying to do"
+    ],
+    "debugging": [
+      "Use println!(\"Debug: {:?}\", value);",
+      "Use dbg!(value); to print and return value",
+      "Add #[derive(Debug)] to your structs",
+      "Use the logger for structured output"
+    ],
+    "performance": [
+      "Don't .clone() unless necessary",
+      "Use &str instead of String when possible",
+      "Use iterators instead of collecting to Vec",
+      "Profile before optimizing"
+    ],
+    "testing": [
+      "Write tests BEFORE porting complex functions",
+      "Test incrementally - don't wait until everything is done",
+      "Use assert_eq! for value comparisons",
+      "Use assert! for boolean checks"
+    ]
+  },
+
+  "rust_syntax_cheat_sheet": {
+    "closures": {
+      "|x| x * 2": "Lambda with one parameter",
+      "|x, y| x + y": "Lambda with two parameters",
+      "|_| 42": "Lambda ignoring parameter (don't care)",
+      "|x| { println!(\"x={}\", x); x * 2 }": "Multi-line lambda"
+    },
+    "pattern_matching": {
+      "if let Some(val) = option": "Extract value from Option",
+      "match result { Ok(v) => ..., Err(e) => ... }": "Handle Result",
+      "matches!(token, TokenType::Integer(_))": "Check enum variant"
+    },
+    "references": {
+      "&value": "Immutable borrow (read-only)",
+      "&mut value": "Mutable borrow (can modify)",
+      "*ref_value": "Dereference (get value from reference)"
+    },
+    "common_methods": {
+      ".clone()": "Make a copy",
+      ".to_string()": "Convert to String",
+      ".unwrap()": "Extract value, panic if None/Err",
+      ".unwrap_or(default)": "Extract or use default",
+      ".map(|x| ...)": "Transform Option/Result",
+      "?": "Propagate error (return early if Err)"
+    }
+  },
+
+  "next_steps": {
+    "immediate": [
+      "1. Run ./create_project_structure.sh",
+      "2. Read this entire guide",
+      "3. Start porting Lexer.cs → lexer.rs",
+      "4. Write tests for each function as you port",
+      "5. Ask questions when confused"
+    ],
+    "resources": [
+      "Rust Book: https://doc.rust-lang.org/book/",
+      "Rust by Example: https://doc.rust-lang.org/rust-by-example/",
+      "Rust docs.rs: https://docs.rs/",
+      "Stack Overflow: search 'rust [your question]'"
+    ]
+  }
+}

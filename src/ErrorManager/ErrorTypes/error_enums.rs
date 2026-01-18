@@ -1,16 +1,16 @@
-//! Core error enums and severity levels
+//! Core error enumerations shared across all error types
 
-/// Error severity levels
+/// Severity level for errors
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ErrorSeverity {
-    Info = 0,
-    Warning = 1,
-    Error = 2,
-    Fatal = 3,
+    Info,
+    Warning,
+    Error,
+    Fatal,
 }
 
 impl std::fmt::Display for ErrorSeverity {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ErrorSeverity::Info => write!(f, "INFO"),
             ErrorSeverity::Warning => write!(f, "WARNING"),
@@ -20,7 +20,7 @@ impl std::fmt::Display for ErrorSeverity {
     }
 }
 
-/// Error source modules
+/// Source of the error in the compilation pipeline
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorSource {
     Configuration,
@@ -33,21 +33,4 @@ pub enum ErrorSource {
     DLM,
     Runtime,
     General,
-}
-
-impl std::fmt::Display for ErrorSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            ErrorSource::Configuration => write!(f, "Configuration"),
-            ErrorSource::Lexer => write!(f, "Lexer"),
-            ErrorSource::Parser => write!(f, "Parser"),
-            ErrorSource::SemanticAnalyzer => write!(f, "SemanticAnalyzer"),
-            ErrorSource::AstEnhancement => write!(f, "AstEnhancement"),
-            ErrorSource::ValueResolution => write!(f, "ValueResolution"),
-            ErrorSource::BinarySerialization => write!(f, "BinarySerialization"),
-            ErrorSource::DLM => write!(f, "DLM"),
-            ErrorSource::Runtime => write!(f, "Runtime"),
-            ErrorSource::General => write!(f, "General"),
-        }
-    }
 }

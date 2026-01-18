@@ -1,9 +1,9 @@
-//! Lexical error types and handling
+//! Lexical analysis errors (tokenization phase)
 
-use super::error_enums::ErrorSeverity;
+use super::ErrorSeverity;
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LexicalErrorType {
     InvalidCharacter,
     UnterminatedString,
@@ -14,7 +14,7 @@ pub enum LexicalErrorType {
     InvalidStaticCallPattern,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LexicalError {
     pub error_id: String,
     pub error_type: LexicalErrorType,
@@ -37,14 +37,11 @@ impl LexicalError {
         source_line: Option<String>,
         severity: ErrorSeverity,
     ) -> Self {
-        let error_id = format!("DXL{:03}L{}C{}", error_type as u32, line, column);
-
-        let error_indicator = if source_line.is_some() && column > 0 {
-            let spaces = " ".repeat(column);
-            Some(format!("{}^--", spaces))
-        } else {
-            None
-        };
+        let error_id = format!("DXL{:?}L{}C{}", error_type, line, column);
+        let error_indicator = source_line.as_ref().map(|sl| {
+            let spaces = " ".repeat(column.saturating_sub(1));
+            format!("{}\n{}^-- Here", sl, spaces)
+        });
 
         Self {
             error_id,
@@ -61,24 +58,19 @@ impl LexicalError {
 }
 
 impl fmt::Display for LexicalError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
             f,
-            "[{}] {}: {:?} at line {}, column {}",
-            self.error_id, self.severity, self.error_type, self.line, self.column
+            "[{}] {} at Line {}, Column {}: {}",
+            self.severity, self.error_id, self.line, self.column, self.message
         )?;
-        writeln!(f, "Message: {}", self.message)?;
 
-        if let Some(ref source) = self.source_line {
-            writeln!(f, "Source:")?;
-            writeln!(f, "{}", source)?;
-            if let Some(ref indicator) = self.error_indicator {
-                writeln!(f, "{}", indicator)?;
-            }
+        if let Some(ref indicator) = self.error_indicator {
+            write!(f, "\n{}", indicator)?;
         }
 
         if let Some(ref suggestion) = self.suggestion {
-            writeln!(f, "Suggestion: {}", suggestion)?;
+            write!(f, "\n💡 Suggestion: {}", suggestion)?;
         }
 
         Ok(())

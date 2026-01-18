@@ -1,10 +1,11 @@
-//! Semantic error types and handling
+//! Semantic analysis errors (type checking, scope validation)
 
-use super::error_enums::ErrorSeverity;
+use super::ErrorSeverity;
 use crate::DixCore::List;
+use std::collections::HashMap;
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemanticErrorType {
     UndefinedReference,
     DuplicateDefinition,
@@ -21,7 +22,7 @@ pub enum SemanticErrorType {
     InvalidOperation,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SemanticError {
     pub error_id: String,
     pub error_type: SemanticErrorType,
@@ -32,7 +33,7 @@ pub struct SemanticError {
     pub suggestion: Option<String>,
     pub severity: ErrorSeverity,
     pub quick_fixes: List<String>,
-    pub metadata: std::collections::HashMap<String, String>,
+    pub metadata: HashMap<String, String>,
 }
 
 impl SemanticError {
@@ -45,128 +46,73 @@ impl SemanticError {
         suggestion: Option<String>,
         severity: ErrorSeverity,
     ) -> Self {
-        let error_id = format!("DXSEM{:03}L{}C{}", error_type as u32, line, column);
+        let error_id = format!("DXSEM{:?}L{}C{}", error_type, line, column);
+        let quick_fixes = Self::generate_quick_fixes(error_type);
 
-        let mut error = Self {
+        Self {
             error_id,
-            error_type: error_type.clone(),
+            error_type,
             message,
             line,
             column,
             section_name,
             suggestion,
             severity,
-            quick_fixes: List::New(),
-            metadata: std::collections::HashMap::new(),
-        };
-
-        error.generate_quick_fixes(&error_type);
-        error
-    }
-
-    pub fn generate_suggestion(error_type: &SemanticErrorType, context: &str) -> String {
-        match error_type {
-            SemanticErrorType::UndefinedReference => {
-                format!("Identifier '{}' is not defined in current scope.", context)
-            }
-            SemanticErrorType::DuplicateDefinition => {
-                format!("Identifier '{}' is already defined.", context)
-            }
-            SemanticErrorType::TypeMismatch => {
-                format!("Type mismatch in '{}'. Check expected type.", context)
-            }
-            SemanticErrorType::InvalidScope => {
-                format!("Invalid scope access for '{}'.", context)
-            }
-            SemanticErrorType::CircularDependency => {
-                format!("Circular dependency detected involving '{}'.", context)
-            }
-            SemanticErrorType::UnreachableCode => {
-                "Code is unreachable and will never execute.".to_string()
-            }
-            SemanticErrorType::MissingReturn => {
-                format!("Function '{}' missing return statement.", context)
-            }
-            SemanticErrorType::InvalidEnumValue => {
-                format!("Invalid enum value '{}'. Check @ENUMS section.", context)
-            }
-            SemanticErrorType::ScopeViolation => {
-                format!("Function '{}' not accessible from current scope.", context)
-            }
-            _ => format!("Semantic error: {}", context),
+            quick_fixes,
+            metadata: HashMap::new(),
         }
     }
 
-    fn generate_quick_fixes(&mut self, error_type: &SemanticErrorType) {
+    #[inline]
+    fn generate_quick_fixes(error_type: SemanticErrorType) -> List<String> {
+        let mut fixes = List::New();
+
         match error_type {
             SemanticErrorType::UndefinedReference => {
-                self.quick_fixes.Add("Check if identifier is defined before use".to_string());
-                self.quick_fixes.Add("Verify spelling of identifier".to_string());
-                self.quick_fixes.Add("Check scope visibility".to_string());
+                fixes.Add("Define the variable before using it".to_string());
+                fixes.Add("Check for typos in the identifier name".to_string());
             }
             SemanticErrorType::DuplicateDefinition => {
-                self.quick_fixes.Add("Use a different name".to_string());
-                self.quick_fixes.Add("Remove duplicate definition".to_string());
+                fixes.Add("Rename one of the duplicate identifiers".to_string());
+                fixes.Add("Remove the duplicate definition".to_string());
             }
             SemanticErrorType::TypeMismatch => {
-                self.quick_fixes.Add("Check expected type".to_string());
-                self.quick_fixes.Add("Add type conversion".to_string());
-            }
-            SemanticErrorType::InvalidScope => {
-                self.quick_fixes.Add("Check function scope declaration".to_string());
-                self.quick_fixes.Add("Verify scope matches usage location".to_string());
+                fixes.Add("Cast the value to the expected type".to_string());
+                fixes.Add("Change the variable's type annotation".to_string());
             }
             SemanticErrorType::CircularDependency => {
-                self.quick_fixes.Add("Break circular reference".to_string());
-                self.quick_fixes.Add("Restructure dependencies".to_string());
+                fixes.Add("Refactor to break the circular dependency".to_string());
             }
-            SemanticErrorType::UnreachableCode => {
-                self.quick_fixes.Add("Remove unreachable code".to_string());
-                self.quick_fixes.Add("Fix control flow logic".to_string());
-            }
-            SemanticErrorType::MissingReturn => {
-                self.quick_fixes.Add("Add return statement".to_string());
-                self.quick_fixes.Add("Ensure all code paths return".to_string());
-            }
-            SemanticErrorType::InvalidEnumValue => {
-                self.quick_fixes.Add("Check enum definition in @ENUMS".to_string());
-                self.quick_fixes.Add("Use valid enum member".to_string());
-            }
-            SemanticErrorType::ScopeViolation => {
-                self.quick_fixes.Add("Check function scope matches call location".to_string());
-                self.quick_fixes.Add("Make function globally accessible".to_string());
+            SemanticErrorType::MissingRequiredSection => {
+                fixes.Add("Add the required section to your script".to_string());
             }
             _ => {}
         }
+
+        fixes
     }
 }
 
 impl fmt::Display for SemanticError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
             f,
-            "[{}] {}: {:?}",
-            self.error_id, self.severity, self.error_type
+            "[{}] {} at Line {}, Column {}: {}",
+            self.severity, self.error_id, self.line, self.column, self.message
         )?;
 
         if let Some(ref section) = self.section_name {
-            writeln!(f, "Section: {}", section)?;
+            write!(f, "\n📍 Section: {}", section)?;
         }
-
-        if self.line > 0 || self.column > 0 {
-            writeln!(f, "Location: Line {}, Column {}", self.line, self.column)?;
-        }
-
-        writeln!(f, "Message: {}", self.message)?;
 
         if let Some(ref suggestion) = self.suggestion {
-            writeln!(f, "Suggestion: {}", suggestion)?;
+            write!(f, "\n💡 Suggestion: {}", suggestion)?;
         }
 
         if !self.quick_fixes.IsEmpty() {
-            writeln!(f, "Quick Fixes:")?;
+            write!(f, "\n🔧 Quick Fixes:")?;
             for fix in self.quick_fixes.Iter() {
-                writeln!(f, "  - {}", fix)?;
+                write!(f, "\n  - {}", fix)?;
             }
         }
 

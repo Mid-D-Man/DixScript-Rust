@@ -1,395 +1,557 @@
 {
   "project": {
     "name": "DixScript Rust Port",
-    "status": "Phase 2 - Compiler Implementation",
-    "completed": [
-      "✅ DixCore (List, Dictionary, HashSet, ImmutableArray, Linq)",
-      "✅ Utilities (Token, Keywords, Logger, HelperFunctions, StringExtensions)",
-      "✅ Test infrastructure",
-      "✅ Project structure"
-    ],
-    "current_phase": "Porting Compiler (Lexer → Parser → Semantic Analysis)"
+    "subtitle": "MidManStudio Data Interchange Extension Script",
+    "version": "1.0.0",
+    "status": "Phase 2 - ErrorManager Complete, Starting Compiler",
+    "repository": "https://github.com/Mid-D-Man/DixScript-Rust",
+    "file_extension": ".mdix"
   },
 
-  "rust_fundamentals": {
-    "must_understand_before_porting": {
-      "ownership": {
-        "what": "Rust's core memory safety feature - each value has ONE owner",
-        "rules": [
-          "Each value has exactly one owner",
-          "When the owner goes out of scope, the value is dropped (freed)",
-          "You can transfer ownership (move) or lend it (borrow)"
-        ],
-        "example_move": {
-          "code": "let s1 = String::from(\"hello\");\nlet s2 = s1; // s1 is MOVED to s2, can't use s1 anymore",
-          "explanation": "s1 no longer valid after this line"
-        },
-        "example_clone": {
-          "code": "let s1 = String::from(\"hello\");\nlet s2 = s1.clone(); // Both s1 and s2 are valid",
-          "explanation": "Make a copy when you need both"
-        }
-      },
+  "⚡_CRITICAL_RULES_READ_FIRST": {
+    "⭐_importance": "These rules are NON-NEGOTIABLE and prevent 90% of porting issues",
 
-      "borrowing": {
-        "what": "Temporarily lending data without transferring ownership",
-        "immutable_borrow": {
-          "syntax": "&value",
-          "rule": "Can have MANY immutable borrows at once",
-          "example": "fn process(data: &String) { /* read-only access */ }"
-        },
-        "mutable_borrow": {
-          "syntax": "&mut value",
-          "rule": "Can have ONLY ONE mutable borrow at a time",
-          "example": "fn modify(data: &mut String) { data.push_str(\"!\"); }",
-          "why": "Prevents data races - can't modify while someone else is reading"
-        },
-        "common_mistake": {
-          "wrong": "let data = String::from(\"x\");\nlet r1 = &mut data;\nlet r2 = &mut data; // ERROR!",
-          "right": "let mut data = String::from(\"x\");\n{\n  let r1 = &mut data;\n  r1.push_str(\"!\");\n} // r1 scope ends\nlet r2 = &mut data; // OK now",
-          "explanation": "Mutable borrows can't overlap - use scopes to separate them"
-        }
-      },
-
-      "mut_keyword": {
-        "what": "Makes a variable mutable (changeable)",
-        "immutable_by_default": "let x = 5; // Can't change x",
-        "make_it_mutable": "let mut x = 5; x = 10; // Now you can change it",
-        "when_to_use": [
-          "Use `mut` when the variable will change",
-          "Use `&mut` when a function needs to modify borrowed data"
-        ],
-        "examples": {
-          "variable": "let mut list = List::New();\nlist.Add(42); // Need mut to modify",
-          "parameter": "fn add_item(list: &mut List<i32>, item: i32) {\n  list.Add(item); // Function modifies borrowed list\n}",
-          "dont_need": "let name = String::from(\"Alice\"); // Don't need mut if never changing"
-        }
-      },
-
-      "lifetimes": {
-        "what": "Tell Rust how long borrowed data lives",
-        "when_needed": "Only when compiler can't figure it out (usually with multiple references)",
-        "syntax": "'a is a lifetime name (like a generic, but for lifetimes)",
-        "example_simple": {
-          "code": "fn get_first<'a>(items: &'a Vec<String>) -> &'a String {\n  &items[0]\n}",
-          "explanation": "The returned reference lives as long as 'items' does"
-        },
-        "example_complex": {
-          "code": "fn longest<'a>(s1: &'a str, s2: &'a str) -> &'a str {\n  if s1.len() > s2.len() { s1 } else { s2 }\n}",
-          "explanation": "Output lives as long as BOTH inputs (whichever is shorter)"
-        },
-        "common_dixscript_case": {
-          "scenario": "Token stores references to source code",
-          "solution": "Either copy the data (String) or use lifetimes if storing references (&str)"
-        },
-        "when_not_needed": [
-          "Single input reference → Output lifetime is obvious",
-          "No references involved",
-          "Using owned types (String, Vec, etc.) instead of references"
-        ]
-      },
-
-      "closure_syntax": {
-        "what": "Anonymous functions (lambdas in C#)",
-        "basic": {
-          "syntax": "|param| expression",
-          "example": "|x| x * 2",
-          "csharp_equivalent": "x => x * 2"
-        },
-        "multiple_params": {
-          "syntax": "|param1, param2| expression",
-          "example": "|x, y| x + y",
-          "csharp_equivalent": "(x, y) => x + y"
-        },
-        "ignore_param": {
-          "syntax": "|_| expression",
-          "example": "|_| println!(\"Ignore the parameter\")",
-          "explanation": "The underscore _ means 'I don't care about this value'",
-          "use_case": "When Match requires a function but you don't need the error: |_| panic!(\"Unexpected error\")"
-        },
-        "block_body": {
-          "syntax": "|param| { /* multiple statements */ }",
-          "example": "|x| {\n  let doubled = x * 2;\n  doubled + 1\n}",
-          "explanation": "Use braces for multi-line closures"
-        },
-        "type_annotations": {
-          "when": "Compiler can't infer types",
-          "syntax": "|x: i32| -> i32 { x * 2 }",
-          "example": "result.Map(|x: String| -> String { x.to_uppercase() })"
-        }
+    "1_USE_NATIVE_RUST_RESULT": {
+      "rule": "DO NOT create custom Result<T,E> wrapper - USE RUST'S BUILT-IN",
+      "reason": "Rust's Result IS what the C# Result was modeled after",
+      "wrong": "pub struct Result<T, E> { /* custom wrapper */ }",
+      "right": "Use std::result::Result<T, E> directly",
+      "dixscript_pattern": "pub type DixResult<T> = Result<T, DixError>;",
+      "usage": {
+        "ok": "Ok(value)",
+        "err": "Err(DixError::ParseError(\"message\".to_string()))",
+        "match": "match result {\n  Ok(val) => /* use val */,\n  Err(e) => /* handle error */\n}",
+        "propagate": "let value = might_fail()?; // Auto-return Err if failed"
       }
-    }
-  },
+    },
 
-  "porting_strategy": {
-    "use_native_rust_types": {
-      "result": {
-        "dont_create_wrapper": "Use Rust's built-in Result<T, E>",
-        "create_error_enum": {
-          "file": "src/Utilities/dix_error.rs",
-          "example": "pub enum DixError {\n  ParseError(String),\n  LexicalError(String),\n  RuntimeError(String),\n}\n\npub type DixResult<T> = Result<T, DixError>;"
-        },
-        "usage": {
-          "ok": "Ok(value)",
-          "err": "Err(DixError::ParseError(\"message\".to_string()))",
-          "match": "match result {\n  Ok(val) => /* use val */,\n  Err(e) => /* handle error */\n}",
-          "question_mark": "let value = might_fail()?; // Auto-propagate errors"
-        },
-        "c_sharp_comparison": {
-          "c_sharp": "return Result<int, string>.Ok(42);",
-          "rust": "return Ok(42); // Type inference knows it's Result<i32, DixError>"
+    "2_BORROWING_RULES": {
+      "rule": "You can have EITHER many readers OR one writer, NEVER both",
+      "the_golden_rule": "Aliasing XOR Mutability - many reads OR one write, not both",
+      "immutable_borrows": {
+        "syntax": "&value",
+        "can_have": "UNLIMITED immutable borrows at once",
+        "cannot_do": "Modify the value",
+        "example": "fn read_data(data: &String) { println!(\"{}\", data); }"
+      },
+      "mutable_borrows": {
+        "syntax": "&mut value",
+        "can_have": "ONLY ONE mutable borrow at a time",
+        "cannot_do": "Have other borrows (even immutable) while mutable exists",
+        "example": "fn modify_data(data: &mut String) { data.push_str(\"!\"); }",
+        "common_error": {
+          "wrong": "let r1 = &mut data;\nlet r2 = &mut data; // ERROR!",
+          "right": "{\n  let r1 = &mut data;\n  r1.push_str(\"!\");\n} // r1 scope ends\nlet r2 = &mut data; // OK now"
         }
       },
+      "lifetime_basics": {
+        "what": "References must NEVER outlive the data they point to",
+        "when_needed": "When compiler can't infer (multiple inputs/outputs)",
+        "syntax": "'a is a lifetime parameter",
+        "example": "fn longest<'a>(s1: &'a str, s2: &'a str) -> &'a str",
+        "meaning": "Output lives as long as BOTH inputs (shortest lifetime)"
+      }
+    },
 
-      "string_vs_str": {
-        "String": {
-          "what": "Owned, growable string (heap-allocated)",
-          "use_when": "Need to own/modify the string",
-          "create": "String::from(\"hello\") or \"hello\".to_string()"
+    "3_OWNERSHIP_RULES": {
+      "rule": "Each value has EXACTLY ONE owner. When owner drops, value is freed.",
+      "three_ways_to_handle_data": {
+        "1_move": {
+          "what": "Transfer ownership (original becomes invalid)",
+          "example": "let s1 = String::from(\"hello\");\nlet s2 = s1; // s1 MOVED, can't use anymore",
+          "when": "Passing to function that consumes it",
+          "cost": "Zero (just pointer reassignment)"
         },
-        "str": {
-          "what": "String slice (reference to string data)",
-          "use_when": "Just reading, not owning",
-          "always_borrowed": "&str (never own a str, only borrow it)"
+        "2_borrow": {
+          "what": "Temporary access WITHOUT ownership transfer",
+          "example": "fn process(data: &String) { /* read only */ }",
+          "when": "Function needs to READ but not own",
+          "cost": "Zero (just a pointer)"
         },
-        "when_porting": {
-          "c_sharp_string_parameter": "fn Process(text: string)",
-          "rust_equivalent": "fn Process(text: &str) // Accepts String OR &str",
-          "why": "&str is more flexible - accepts both owned and borrowed strings"
-        }
-      },
-
-      "vec_vs_slice": {
-        "Vec<T>": {
-          "what": "Owned, growable array",
-          "use_when": "Building/modifying collections",
-          "create": "vec![1, 2, 3] or Vec::new()"
-        },
-        "slice": {
-          "what": "&[T] - reference to array data",
-          "use_when": "Just reading, not owning",
-          "example": "fn sum(numbers: &[i32]) -> i32"
-        }
-      },
-
-      "option_vs_null": {
-        "rust_has_no_null": "Use Option<T> instead",
-        "syntax": {
-          "some": "Some(value)",
-          "none": "None",
-          "check": "if let Some(val) = option { /* use val */ }",
-          "unwrap": "option.unwrap() // Panics if None, use carefully"
-        },
-        "when_porting": {
-          "c_sharp_nullable": "string? name",
-          "rust_equivalent": "name: Option<String>"
+        "3_clone": {
+          "what": "Deep copy - creates NEW owned value",
+          "example": "let s2 = s1.clone(); // Both valid, but expensive",
+          "when": "ONLY when you actually need TWO independent copies",
+          "cost": "Expensive (allocates and copies all data)",
+          "warning": "⚠️ CLONING IS YOUR LAST RESORT, NOT YOUR FIRST"
         }
       }
     },
 
-    "common_porting_patterns": {
-      "c_sharp_class_to_rust_struct": {
-        "c_sharp": "public class Token {\n  public TokenType TokenType { get; set; }\n  public int Line { get; set; }\n}",
-        "rust": "pub struct Token {\n  pub TokenType: TokenType,\n  pub Line: usize,\n}\n\nimpl Token {\n  pub fn New(token_type: TokenType, line: usize) -> Self {\n    Self { TokenType: token_type, Line: line }\n  }\n}",
-        "notes": [
-          "struct for data",
-          "impl block for methods",
-          "Use pub for public fields/methods",
-          "Self refers to the struct type"
+    "4_WHEN_TO_CLONE_VS_BORROW": {
+      "⚠️_performance_impact": "Cloning can be 10-1000x slower than borrowing",
+      "the_decision_tree": {
+        "ask_yourself": [
+          "1. Do I need to OWN this data? → Clone or move",
+          "2. Do I just need to READ it? → Borrow (&T)",
+          "3. Do I need to MODIFY it temporarily? → Mutable borrow (&mut T)",
+          "4. Is the borrow checker complaining? → DON'T clone yet, understand why first"
         ]
       },
-
-      "c_sharp_list_to_rust_vec": {
-        "c_sharp": "List<string> items = new List<string>();",
-        "rust_option1": "let mut items = Vec::new();",
-        "rust_option2": "let mut items = List::New(); // Use our DixCore wrapper",
-        "which_to_use": "For porting, use List::New() to match C# code structure"
+      "when_clone_is_ok": {
+        "valid_reasons": [
+          "Storing data in multiple independent collections",
+          "Sending data to another thread (Arc<T> is better though)",
+          "Creating a snapshot before modification",
+          "Working around complex lifetime issues (after trying borrowing first)"
+        ],
+        "example_ok": "let snapshot = current_state.clone();\nmodify(&mut current_state);\nif bad { current_state = snapshot; }"
       },
-
-      "c_sharp_dictionary_to_rust_hashmap": {
-        "c_sharp": "Dictionary<string, int> map = new Dictionary<string, int>();",
-        "rust_option1": "let mut map = HashMap::new();",
-        "rust_option2": "let mut map = Dictionary::New(); // Use our DixCore wrapper",
-        "which_to_use": "Use Dictionary::New() to match C# code"
+      "when_clone_is_wrong": {
+        "anti_patterns": [
+          "❌ Cloning just to satisfy borrow checker without understanding",
+          "❌ Cloning in hot loops (lexer, parser main loops)",
+          "❌ Cloning when function only needs to read",
+          "❌ Cloning large collections to iterate",
+          "❌ Cloning in return values when reference would work"
+        ],
+        "example_bad": "fn process(data: String) { /* uses data.clone() everywhere */ }",
+        "example_good": "fn process(data: &str) { /* just borrows */ }"
       },
-
-      "c_sharp_foreach_to_rust_for": {
-        "c_sharp": "foreach (var item in items) { Process(item); }",
-        "rust": "for item in items.Iter() { Process(item); }",
-        "notes": [
-          "items.Iter() borrows",
-          "items.into_iter() consumes (moves)",
-          "Use .Iter() when you still need items after the loop"
-        ]
-      },
-
-      "c_sharp_linq_to_rust_iterator": {
-        "c_sharp": "var result = items.Where(x => x > 5).Select(x => x * 2).ToList();",
-        "rust_native": "let result: Vec<_> = items.iter().filter(|x| **x > 5).map(|x| x * 2).collect();",
-        "rust_dixcore": "let result = items.Where(|x| *x > 5).Select(|x| x * 2);",
-        "which_to_use": "Use DixCore methods for easier porting"
-      },
-
-      "c_sharp_ref_out_parameters": {
-        "c_sharp_ref": "void Modify(ref int value) { value++; }",
-        "rust_equivalent": "fn Modify(value: &mut i32) { *value += 1; }",
-        "c_sharp_out": "bool TryParse(string s, out int result) { /*...*/ }",
-        "rust_equivalent": "fn TryParse(s: &str) -> Option<i32> { /*...*/ }",
-        "explanation": "Rust uses Option instead of out parameters"
+      "specific_dixscript_guidance": {
+        "lexer_tokens": "DON'T clone tokens in main loop - use Vec<Token> and borrow",
+        "parser_state": "DON'T clone parse state - use &mut references",
+        "error_collections": "OK to clone individual errors when adding to collection",
+        "ast_nodes": "DON'T clone during traversal - use &Node or &mut Node",
+        "symbol_tables": "Store owned values, return references",
+        "string_literals": "Use &str for reading, String for ownership"
       }
     },
 
-    "step_by_step_porting": {
-      "1_read_c_sharp_code": "Understand what the class/method does",
-      "2_identify_dependencies": "What other types does it use?",
-      "3_check_skills": "Is there a skill for this? (e.g., /mnt/skills/public/...)",
-      "4_create_rust_file": "Create snake_case.rs file",
-      "5_port_struct": "Convert C# class to Rust struct",
-      "6_port_methods": "Convert methods one by one",
-      "7_handle_ownership": "Add &, &mut, or clone() as needed",
-      "8_fix_types": "String vs &str, Vec vs slice, etc.",
-      "9_test_incrementally": "Write tests as you go",
-      "10_iterate": "Fix compiler errors, adjust types"
+    "5_COPY_VS_CLONE": {
+      "Copy": {
+        "what": "Implicit bitwise copy (like C# value types)",
+        "types": "i32, f64, bool, char, and other primitives",
+        "behavior": "let y = x; // x is COPIED, both valid",
+        "cost": "Zero (single CPU instruction)",
+        "derive": "#[derive(Copy, Clone)] // Copy requires Clone"
+      },
+      "Clone": {
+        "what": "Explicit deep copy (like C# .Clone())",
+        "types": "String, Vec, complex structs",
+        "behavior": "let y = x.clone(); // Explicit copy",
+        "cost": "Expensive (allocates and copies data)",
+        "derive": "#[derive(Clone)]"
+      },
+      "when_to_use": {
+        "use_Copy_for": "Small structs with only Copy fields (Point, Token metadata)",
+        "use_Clone_for": "Types with heap data (String, Vec) or large structs",
+        "never_both_for": "Types with heap allocations (can't be Copy)"
+      }
     }
   },
 
-  "common_compiler_errors_and_fixes": {
-    "cannot_move_out_of_borrowed_content": {
-      "error": "cannot move out of `*list` which is behind a shared reference",
-      "cause": "Trying to take ownership of borrowed data",
-      "fix": "Use .clone() if you need ownership: let owned = borrowed.clone();"
+  "🎯_HYBRID_WRAPPER_STRATEGY": {
+    "philosophy": "Use wrappers for ease of porting, native types for performance",
+    "decision_matrix": {
+      "use_dixcore_wrappers": {
+        "where": [
+          "ErrorManager collections (not in hot path)",
+          "Configuration data (parsed once)",
+          "Symbol tables (moderate frequency access)",
+          "Quick prototyping during initial porting"
+        ],
+        "why": "Easier to port from C#, method names match exactly",
+        "performance": "⚡ Wrappers have ZERO runtime cost (compiler inlines them)",
+        "types": "List<T>, Dictionary<K,V>, HashSet<T>"
+      },
+      "use_native_rust": {
+        "where": [
+          "Lexer token buffer (hot path - accessed per character)",
+          "Parser lookahead (hot path - accessed per token)",
+          "AST node children (traversed constantly)",
+          "Any loop that runs per-character or per-token"
+        ],
+        "why": "Direct access, no wrapper overhead, idiomatic Rust",
+        "performance": "⚡⚡ Maximum performance, zero abstraction",
+        "types": "Vec<T>, HashMap<K,V>, HashSet<T>, &[T] (slices)"
+      }
+    },
+    "performance_reality": {
+      "wrapper_overhead": "0-2% in release builds (compiler optimizes away)",
+      "real_bottlenecks": [
+        "❌ Cloning in loops (10-100x slowdown)",
+        "❌ Unnecessary allocations (10x slowdown)",
+        "❌ Bad algorithm choice (100-1000x slowdown)"
+      ],
+      "conclusion": "Wrapper vs native is negligible. Cloning and allocation matter WAY more."
+    }
+  },
+
+  "📊_PERFORMANCE_GUIDELINES": {
+    "hot_paths": {
+      "definition": "Code executed thousands+ times per file (lexer loops, parser lookahead)",
+      "rules": [
+        "❌ NEVER clone in hot paths",
+        "✅ Use slices (&[T]) instead of Vec<T>",
+        "✅ Borrow, don't own",
+        "✅ Reuse allocations (Vec::with_capacity)",
+        "✅ Profile BEFORE optimizing (cargo flamegraph)"
+      ]
+    },
+    "cold_paths": {
+      "definition": "Code executed once or rarely (setup, error reporting)",
+      "rules": [
+        "✅ Clone is fine here",
+        "✅ Readability > micro-optimization",
+        "✅ Use String instead of &str for simplicity",
+        "✅ Don't worry about wrapper overhead"
+      ]
+    },
+    "specific_optimizations": {
+      "avoid": {
+        "collect_then_iterate": "items.iter().collect::<Vec<_>>().iter() // ❌ Wasteful",
+        "repeated_cloning": "for item in &items { let owned = item.clone(); } // ❌ Bad",
+        "string_concat_loop": "for s in &strings { result = result + s; } // ❌ O(n²)"
+      },
+      "prefer": {
+        "lazy_iteration": "items.iter().filter(...).map(...) // ✅ No allocation",
+        "borrowing": "for item in &items { process(item); } // ✅ Zero copy",
+        "string_join": "strings.join(\"\") // ✅ Single allocation"
+      }
+    },
+    "cow_pattern": {
+      "what": "Clone-on-Write - borrows when possible, clones only when modified",
+      "type": "Cow<'a, T> (std::borrow::Cow)",
+      "use_when": "Data is USUALLY not modified, but SOMETIMES needs to be",
+      "example": "use std::borrow::Cow;\nfn process(s: Cow<str>) -> Cow<str> {\n  if s.contains(\"bad\") {\n    Cow::Owned(s.replace(\"bad\", \"good\"))\n  } else {\n    s // No clone!\n  }\n}"
+    }
+  },
+
+  "🔧_COMMON_ERRORS_AND_FIXES": {
+    "value_moved_error": {
+      "error": "value used after move",
+      "cause": "Tried to use value after moving it",
+      "example_wrong": "let s1 = String::from(\"hello\");\nlet s2 = s1;\nprintln!(\"{}\", s1); // ❌ s1 was moved",
+      "fix_1_clone": "let s2 = s1.clone(); // Both valid",
+      "fix_2_borrow": "let s2 = &s1; // Borrow instead",
+      "fix_3_use_after": "println!(\"{}\", s1);\nlet s2 = s1; // Use before move"
     },
     "cannot_borrow_as_mutable": {
-      "error": "cannot borrow `x` as mutable more than once",
-      "cause": "Two mutable borrows at same time",
-      "fix": "Use scopes: { let r1 = &mut x; } let r2 = &mut x;"
+      "error": "cannot borrow as mutable because it is also borrowed as immutable",
+      "cause": "Trying to mutate while immutable borrows exist",
+      "example_wrong": "let r1 = &data;\nlet r2 = &mut data; // ❌ Can't have both",
+      "fix": "// Ensure immutable borrow ends before mutable\n{\n  let r1 = &data;\n  println!(\"{}\", r1);\n} // r1 dropped\nlet r2 = &mut data; // ✅ OK now"
     },
-    "temporary_value_dropped": {
-      "error": "temporary value dropped while borrowed",
-      "cause": "Reference outlives the value",
-      "fix": "Store the value in a variable first: let temp = create_value(); let ref_to_temp = &temp;"
-    },
-    "expected_reference_found_type": {
-      "error": "expected `&str`, found `String`",
-      "cause": "Type mismatch between owned and borrowed",
-      "fix": "Use &string or string.as_str() to convert String to &str"
+    "cannot_move_out_of_borrowed": {
+      "error": "cannot move out of `*list` which is behind a shared reference",
+      "cause": "Trying to take ownership from a borrow",
+      "example_wrong": "fn process(list: &List<String>) {\n  let item = list.First(); // ❌ Can't move\n}",
+      "fix": "fn process(list: &List<String>) {\n  if let Some(item) = list.First() {\n    let owned = item.clone(); // Clone if need ownership\n    // Or just use &item\n  }\n}"
     }
   },
 
-  "porting_order_for_compiler": {
-    "phase_1_lexer": {
-      "start_with": "src/Compiler/Core/lexer.rs",
-      "c_sharp_file": "DixScript/Compiler/Core/Lexer.cs",
-      "dependencies": ["Token", "TokenType", "Keywords"],
-      "key_challenges": [
-        "String scanning without GC",
-        "Character iteration (use .chars() iterator)",
-        "Lookahead (peek without consuming)"
-      ],
-      "testing": "Create tests/lexer_tests.rs for incremental testing"
+  "🏗️_PORTING_STRATEGY": {
+    "approach": "Hybrid: Manual port with C# naming conventions where beneficial",
+    "naming_decisions": {
+      "rust_style_snake_case": {
+        "what": "New Rust code uses standard Rust naming",
+        "applies_to": [
+          "All new modules (error_manager, lexer, parser)",
+          "All functions (fn parse_token(), fn add_error())",
+          "All local variables (let token_type, let error_count)",
+          "All file names (error_manager.rs, lexical_error.rs)"
+        ],
+        "reason": "Standard Rust conventions, better tooling support"
+      },
+      "c_sharp_style_PascalCase": {
+        "what": "DixCore and Utilities maintain C# naming during porting phase",
+        "applies_to": [
+          "DixCore types (List, Dictionary, HashSet)",
+          "DixCore methods (Add, Remove, Where, Select)",
+          "Utility types (Token, TokenType, MID_Logger)",
+          "Utility methods (GetSharedInstance, CreateScope)"
+        ],
+        "reason": "Easier 1:1 mapping during initial port, minimize cognitive load"
+      },
+      "transition_plan": {
+        "phase_1": "Use DixCore/Utilities with C# naming (CURRENT)",
+        "phase_2": "Port compiler using Rust naming + DixCore",
+        "phase_3": "Optionally add snake_case aliases to DixCore",
+        "phase_4": "Maybe refactor to pure Rust style later (low priority)"
+      }
     },
-    "phase_2_parser": {
-      "files": [
-        "src/Compiler/Core/general_parser.rs",
-        "src/Compiler/Core/SectionParsers/*.rs"
-      ],
-      "dependencies": ["Lexer", "AST nodes", "Token"],
-      "key_challenges": [
-        "Recursive parsing with ownership",
-        "Building AST without GC",
-        "Error recovery"
-      ]
-    },
-    "phase_3_semantic_analysis": {
-      "files": [
-        "src/Compiler/Core/general_semantics_analyzer.rs",
-        "src/Compiler/Core/SectionAnalyzers/*.rs"
-      ],
-      "dependencies": ["Parser", "AST", "SymbolTable"],
-      "key_challenges": [
-        "Symbol table with borrows",
-        "Type checking",
-        "Scope management"
-      ]
-    },
-    "phase_4_value_resolution": {
-      "files": ["src/Compiler/Core/ValueResolution/*.rs"],
-      "dependencies": ["AST", "Builtins"],
-      "key_challenges": [
-        "Interpreting at compile-time",
-        "Function calls",
-        "Variable scoping"
-      ]
+
+    "phases": [
+      {
+        "phase": 1,
+        "name": "DixCore - C# Collection Wrappers",
+        "status": "✅ COMPLETE",
+        "files": [
+          "src/DixCore/list.rs",
+          "src/DixCore/dictionary.rs",
+          "src/DixCore/hash_set.rs",
+          "src/DixCore/immutable_array.rs",
+          "src/DixCore/linq.rs"
+        ]
+      },
+      {
+        "phase": 2,
+        "name": "Utilities",
+        "status": "✅ COMPLETE",
+        "files": [
+          "src/Utilities/token.rs",
+          "src/Utilities/keyword_definitions.rs",
+          "src/Utilities/mid_logger.rs",
+          "src/Utilities/mid_helper_functions.rs",
+          "src/Utilities/utilities.rs"
+        ]
+      },
+      {
+        "phase": 3,
+        "name": "ErrorManager",
+        "status": "✅ COMPLETE",
+        "files": [
+          "src/ErrorManager/error_manager.rs",
+          "src/ErrorManager/operational_settings.rs",
+          "src/ErrorManager/ErrorTypes/*.rs (all 10 error types)"
+        ],
+        "note": "Uses Rust naming (snake_case), Result<T,E>, and DixCore wrappers"
+      },
+      {
+        "phase": 4,
+        "name": "Compiler - Lexer",
+        "status": "⏳ NEXT",
+        "files": ["src/Compiler/Core/lexer.rs"],
+        "strategy": "Use Vec<Token> directly (hot path), borrow heavily",
+        "c_sharp_ref": "DixScript/Compiler/Core/Lexer.cs"
+      },
+      {
+        "phase": 5,
+        "name": "Compiler - Parser",
+        "status": "⏳ PENDING",
+        "files": [
+          "src/Compiler/Core/general_parser.rs",
+          "src/Compiler/Core/SectionParsers/*.rs"
+        ],
+        "strategy": "AST with owned nodes, borrow during traversal"
+      },
+      {
+        "phase": 6,
+        "name": "Compiler - Semantic Analysis",
+        "status": "⏳ PENDING",
+        "files": [
+          "src/Compiler/Core/general_semantics_analyzer.rs",
+          "src/Compiler/Core/SectionAnalyzers/*.rs"
+        ]
+      }
+    ],
+
+    "step_by_step_porting_workflow": {
+      "1_understand_c_sharp": "Read C# code, understand algorithm",
+      "2_identify_types": "What types does it use? (List, Dictionary, Token)",
+      "3_check_hot_path": "Is this called in a loop? (Yes = native types, No = wrappers OK)",
+      "4_create_skeleton": "Create struct with pub fields",
+      "5_port_methods": "One method at a time, test each",
+      "6_handle_ownership": {
+        "reading": "Use &T (borrow)",
+        "modifying": "Use &mut T (mutable borrow)",
+        "consuming": "Take ownership (move)",
+        "last_resort": "Clone if truly needed"
+      },
+      "7_test_incrementally": "cargo test after each method",
+      "8_fix_errors": "Read error messages carefully, they're helpful",
+      "9_profile_if_slow": "cargo flamegraph to find real bottlenecks",
+      "10_iterate": "Refine and optimize based on benchmarks"
     }
   },
 
-  "tips_and_tricks": {
+  "🚀_FFI_STRATEGY": {
+    "overview": "One Rust core → Multiple language bindings",
+    "platforms": {
+      "desktop": ["Windows", "macOS", "Linux"],
+      "mobile": ["iOS", "Android"],
+      "web": ["WebAssembly"],
+      "game_engines": ["Unity", "Godot", "Unreal"],
+      "blockchain": ["Solana", "Ethereum"]
+    },
+    "tools": {
+      "c_api": {
+        "what": "extern \"C\" functions for stable ABI",
+        "file": "src/ffi.rs",
+        "example": "extern \"C\" fn dix_parse(source: *const c_char) -> *mut DixHandle"
+      },
+      "csharp": {
+        "tool": "csbindgen",
+        "install": "cargo install csbindgen",
+        "generate": "csbindgen --crate dixscript --output bindings/csharp/",
+        "use_in_unity": "[DllImport(\"dixscript\")]"
+      },
+      "javascript": {
+        "tool": "wasm-bindgen + wasm-pack",
+        "install": "cargo install wasm-pack",
+        "build": "wasm-pack build --target web",
+        "output": "pkg/dixscript.js + dixscript_bg.wasm"
+      },
+      "python": {
+        "tool": "PyO3",
+        "add": "[dependencies]\npyo3 = \"0.20\"",
+        "build": "maturin develop"
+      },
+      "multi_language": {
+        "tool": "UniFFI (recommended for 3+ languages)",
+        "what": "Single .udl definition → Kotlin, Swift, Python, Ruby auto-generated",
+        "add": "[dependencies]\nuniffi = \"0.25\""
+      }
+    },
+    "size_estimates": {
+      "base_tools": "Built-in FFI (0 MB - part of std)",
+      "csbindgen": "~2 MB",
+      "wasm_pack": "~15 MB",
+      "pyo3": "~8 MB",
+      "uniffi": "~5 MB",
+      "total_optional": "~30 MB (only install what you need)"
+    }
+  },
+
+  "⚡_PERFORMANCE_BENCHMARKING": {
+    "setup": {
+      "add_to_cargo_toml": {
+        "dev_dependencies": "criterion = \"0.5\"",
+        "bench_section": "[[bench]]\nname = \"wrapper_benchmark\"\nharness = false"
+      },
+      "create_file": "benches/wrapper_benchmark.rs",
+      "run": "cargo bench"
+    },
+    "what_to_benchmark": {
+      "wrappers_vs_native": "List<T> vs Vec<T> add/iterate",
+      "clone_vs_borrow": "Cloning in loop vs borrowing",
+      "iteration_patterns": ".iter() vs .into_iter() vs .Iter()",
+      "hot_path_operations": "Token buffer operations, parser lookahead"
+    },
+    "interpretation": {
+      "< 5%_difference": "Negligible, choose for readability",
+      "5_20%_difference": "Noticeable, consider native types",
+      "> 20%_difference": "Significant, use native types or optimize algorithm"
+    }
+  },
+
+  "📚_RUST_SYNTAX_QUICK_REFERENCE": {
+    "return_types": {
+      "-> Self": "Returns instance of current type (like C# 'return this;' type)",
+      "-> ()": "Void/Unit (empty tuple, often omitted)",
+      "-> Result<T, E>": "Operation that can succeed (Ok) or fail (Err)",
+      "-> Option<T>": "Value that might be None",
+      "no_arrow": "Implicitly returns () (void)"
+    },
+    "closures": {
+      "|x| x * 2": "Lambda: x => x * 2",
+      "|x, y| x + y": "Lambda: (x, y) => x + y",
+      "|_| 42": "Lambda ignoring param: _ => 42",
+      "|x| { let y = x * 2; y + 1 }": "Multi-line lambda with block"
+    },
+    "result_option": {
+      "Ok(value)": "Success case of Result",
+      "Err(error)": "Error case of Result",
+      "Some(value)": "Present case of Option",
+      "None": "Absent case of Option",
+      "?": "Early return on Err (propagate error up)"
+    },
+    "derive_macros": {
+      "#[derive(Debug)]": "Auto-implement Debug trait (like ToString)",
+      "#[derive(Clone)]": "Auto-implement Clone trait (deep copy)",
+      "#[derive(Copy)]": "Auto-implement Copy trait (bitwise copy, requires Clone)",
+      "#[derive(PartialEq)]": "Auto-implement == and != operators",
+      "#[derive(Default)]": "Auto-implement default constructor",
+      "multiple": "#[derive(Debug, Clone, PartialEq)]"
+    },
+    "references": {
+      "&value": "Immutable borrow/reference (read-only)",
+      "&mut value": "Mutable borrow/reference (can modify)",
+      "*reference": "Dereference (get value from reference)",
+      "&&value": "Reference to reference (rare, usually auto-deref)"
+    }
+  },
+
+  "🔍_DEBUGGING_AND_TOOLING": {
+    "cargo_commands": {
+      "cargo check": "Fast compile check (no binary)",
+      "cargo build": "Debug build (fast, unoptimized)",
+      "cargo build --release": "Release build (slow, optimized)",
+      "cargo test": "Run all tests",
+      "cargo test test_name": "Run specific test",
+      "cargo bench": "Run benchmarks",
+      "cargo clippy": "Lint (find common mistakes)",
+      "cargo fmt": "Auto-format code"
+    },
+    "debugging_macros": {
+      "println!(\"x = {:?}\", x)": "Print debug representation",
+      "dbg!(x)": "Print and return value (inline debugging)",
+      "eprintln!(\"error: {}\", e)": "Print to stderr",
+      "panic!(\"msg\")": "Crash with message"
+    },
+    "profiling": {
+      "install": "cargo install flamegraph",
+      "run": "cargo flamegraph --bench wrapper_benchmark",
+      "output": "flamegraph.svg (open in browser)"
+    }
+  },
+
+  "💡_TIPS_FOR_C_SHARP_DEVELOPERS": {
+    "mindset_shifts": {
+      "no_null": "Use Option<T> instead of null",
+      "no_exceptions": "Use Result<T, E> instead of try/catch",
+      "no_gc": "Ownership system instead of garbage collector",
+      "immutable_default": "Use 'mut' to make variables mutable",
+      "explicit_copies": "Clone is explicit, not automatic"
+    },
+    "common_patterns": {
+      "c_sharp_null_check": "if (value != null)",
+      "rust_equivalent": "if let Some(v) = value",
+      "c_sharp_try_catch": "try { x() } catch (Exception e) { }",
+      "rust_equivalent": "match x() { Ok(v) => {}, Err(e) => {} }",
+      "c_sharp_foreach": "foreach (var item in items)",
+      "rust_equivalent": "for item in &items"
+    },
     "when_stuck": [
-      "1. Read the compiler error CAREFULLY - Rust errors are helpful",
-      "2. Search docs.rs for the type causing issues",
-      "3. Use web search: 'rust [error message]'",
-      "4. Check if there's a Rust equivalent: 'C# List to Rust equivalent'",
-      "5. Ask for help - explain what you're trying to do"
-    ],
-    "debugging": [
-      "Use println!(\"Debug: {:?}\", value);",
-      "Use dbg!(value); to print and return value",
-      "Add #[derive(Debug)] to your structs",
-      "Use the logger for structured output"
-    ],
-    "performance": [
-      "Don't .clone() unless necessary",
-      "Use &str instead of String when possible",
-      "Use iterators instead of collecting to Vec",
-      "Profile before optimizing"
-    ],
-    "testing": [
-      "Write tests BEFORE porting complex functions",
-      "Test incrementally - don't wait until everything is done",
-      "Use assert_eq! for value comparisons",
-      "Use assert! for boolean checks"
+      "1. Read error message CAREFULLY (Rust errors are exceptionally helpful)",
+      "2. Check if you need ownership, mutable borrow, or just read access",
+      "3. Search: 'rust [error code]' (e.g., 'rust E0502')",
+      "4. Run 'cargo clippy' - it catches common mistakes",
+      "5. Ask: 'Why is Rust preventing this?' (usually a real safety issue)"
     ]
   },
 
-  "rust_syntax_cheat_sheet": {
-    "closures": {
-      "|x| x * 2": "Lambda with one parameter",
-      "|x, y| x + y": "Lambda with two parameters",
-      "|_| 42": "Lambda ignoring parameter (don't care)",
-      "|x| { println!(\"x={}\", x); x * 2 }": "Multi-line lambda"
-    },
-    "pattern_matching": {
-      "if let Some(val) = option": "Extract value from Option",
-      "match result { Ok(v) => ..., Err(e) => ... }": "Handle Result",
-      "matches!(token, TokenType::Integer(_))": "Check enum variant"
-    },
-    "references": {
-      "&value": "Immutable borrow (read-only)",
-      "&mut value": "Mutable borrow (can modify)",
-      "*ref_value": "Dereference (get value from reference)"
-    },
-    "common_methods": {
-      ".clone()": "Make a copy",
-      ".to_string()": "Convert to String",
-      ".unwrap()": "Extract value, panic if None/Err",
-      ".unwrap_or(default)": "Extract or use default",
-      ".map(|x| ...)": "Transform Option/Result",
-      "?": "Propagate error (return early if Err)"
+  "🎯_NEXT_STEPS": {
+    "completed": [
+      "✅ DixCore collection wrappers",
+      "✅ Utilities (Token, Logger, Keywords)",
+      "✅ ErrorManager (all 10 error types)",
+      "✅ Consolidated porting strategy",
+      "✅ Ownership/borrowing/lifetime research"
+    ],
+    "immediate_next": [
+      "1. Benchmark DixCore wrappers vs native (verify performance)",
+      "2. Fix ErrorManager move errors (return references, not clones)",
+      "3. Port Lexer using native Vec<Token> (hot path optimization)",
+      "4. Port Parser with AST using owned nodes",
+      "5. Continuous testing and profiling"
+    ],
+    "files_to_reference": {
+      "this_strategy": "DixScript_Rust_Porting_Strategy.json",
+      "c_sharp_lexer": "DixScript/Compiler/Core/Lexer.cs",
+      "c_sharp_parser": "DixScript/Compiler/Core/GeneralParser.cs",
+      "rust_error_manager": "src/ErrorManager/error_manager.rs",
+      "rust_dixcore": "src/DixCore/mod.rs"
     }
   },
 
-  "next_steps": {
-    "immediate": [
-      "1. Run ./create_project_structure.sh",
-      "2. Read this entire guide",
-      "3. Start porting Lexer.cs → lexer.rs",
-      "4. Write tests for each function as you port",
-      "5. Ask questions when confused"
-    ],
-    "resources": [
-      "Rust Book: https://doc.rust-lang.org/book/",
+  "📖_RESOURCES": {
+    "official_docs": [
+      "The Rust Book: https://doc.rust-lang.org/book/",
       "Rust by Example: https://doc.rust-lang.org/rust-by-example/",
       "Rust docs.rs: https://docs.rs/",
-      "Stack Overflow: search 'rust [your question]'"
+      "Ownership explained: https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html"
+    ],
+    "performance": [
+      "Rust Performance Book: https://nnethercote.github.io/perf-book/",
+      "Criterion benchmarking: https://bheisler.github.io/criterion.rs/book/",
+      "Flamegraph: https://github.com/flamegraph-rs/flamegraph"
+    ],
+    "best_practices": [
+      "Rust Design Patterns: https://rust-unofficial.github.io/patterns/",
+      "API Guidelines: https://rust-lang.github.io/api-guidelines/",
+      "Clippy lints: https://rust-lang.github.io/rust-clippy/"
     ]
   }
 }

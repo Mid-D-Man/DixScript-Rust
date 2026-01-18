@@ -1,9 +1,8 @@
-//! MID_Logger - High-performance logger with C# style API
-//! Zero-cost abstractions with compile-time conditionals
-
+use chrono::Local;
+use std::fmt::Write as FmtWrite;
 use std::sync::{Arc, Mutex};
-use std::fmt;
 
+/// Log levels for the logger
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
     Debug = 0,
@@ -13,326 +12,466 @@ pub enum LogLevel {
     None = 4,
 }
 
-impl fmt::Display for LogLevel {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            LogLevel::Debug => write!(f, "DEBUG"),
-            LogLevel::Info => write!(f, "INFO"),
-            LogLevel::Warning => write!(f, "WARNING"),
-            LogLevel::Error => write!(f, "ERROR"),
-            LogLevel::None => write!(f, "NONE"),
-        }
-    }
-}
-
-/// MID_Logger - Thread-safe logger with indentation support
-#[derive(Clone)]
+/// High-Performance Zero-Cost Logger v1.0.0
+/// Thread-safe with proper RAII scope guards
 pub struct MID_Logger {
-    current_level: Arc<Mutex<LogLevel>>,
-    indentation_level: Arc<Mutex<usize>>,
-    is_enabled: Arc<Mutex<bool>>,
-    log_buffer: Arc<Mutex<Vec<String>>>,
+    current_level: LogLevel,
+    indentation_level: usize,
+    is_enabled: bool,
+    log_buffer: String,
 }
 
 impl MID_Logger {
     const INDENTATION_SPACES: usize = 2;
 
-    /// Creates a new logger with specified level
-    pub fn New(level: LogLevel, enabled: bool) -> Self {
-        Self {
-            current_level: Arc::new(Mutex::new(level)),
-            indentation_level: Arc::new(Mutex::new(0)),
-            is_enabled: Arc::new(Mutex::new(enabled)),
-            log_buffer: Arc::new(Mutex::new(Vec::new())),
+    /// Create a new logger instance
+    pub fn new(level: LogLevel, enabled: bool) -> Self {
+        MID_Logger {
+            current_level: level,
+            indentation_level: 0,
+            is_enabled: enabled,
+            log_buffer: String::new(),
         }
     }
 
-    /// Gets a shared instance (singleton pattern)
-    pub fn GetSharedInstance() -> Self {
-        // For now, create a new instance each time
-        // In production, you'd want a true singleton
-        Self::New(LogLevel::Info, true)
+    // ========== Shared Instance Management ==========
+
+    /// Get or create shared instance (thread-safe)
+    pub fn GetSharedInstance(level: Option<LogLevel>, enabled: Option<bool>) -> Arc<Mutex<Self>> {
+        use std::sync::OnceLock;
+        static SHARED: OnceLock<Arc<Mutex<MID_Logger>>> = OnceLock::new();
+
+        let instance = SHARED.get_or_init(|| {
+            Arc::new(Mutex::new(MID_Logger::new(
+                level.unwrap_or(LogLevel::Info),
+                enabled.unwrap_or(true),
+            )))
+        });
+
+        // Update existing instance if parameters provided
+        if let (Some(lvl), Some(en)) = (level, enabled) {
+            if let Ok(mut logger) = instance.lock() {
+                logger.SetLogLevel(lvl);
+                logger.SetEnabled(en);
+            }
+        }
+
+        instance.clone()
     }
 
-    // ========== Core Logging Methods ==========
-
-    /// Logs an error message (always logged)
-    pub fn Error(&self, message: &str) {
-        self.LogInternal(message, LogLevel::Error);
-    }
-
-    /// Logs a warning message
-    pub fn Warning(&self, message: &str) {
-        if !self.IsEnabled() {
-            return;
-        }
-        if self.GetCurrentLevel() <= LogLevel::Warning {
-            self.LogInternal(message, LogLevel::Warning);
-        }
-    }
-
-    /// Logs an info message
-    pub fn Info(&self, message: &str) {
-        if !self.IsEnabled() {
-            return;
-        }
-        if self.GetCurrentLevel() <= LogLevel::Info {
-            self.LogInternal(message, LogLevel::Info);
-        }
-    }
-
-    /// Logs a debug message
-    pub fn Debug(&self, message: &str) {
-        if !self.IsEnabled() {
-            return;
-        }
-        if self.GetCurrentLevel() <= LogLevel::Debug {
-            self.LogInternal(message, LogLevel::Debug);
-        }
-    }
-
-    /// Verbose debug logging (compile-time conditional)
-    #[cfg(feature = "verbose_logging")]
-    pub fn Verbose(&self, message: &str) {
-        if !self.IsEnabled() {
-            return;
-        }
-        if self.GetCurrentLevel() <= LogLevel::Debug {
-            self.LogInternal(&format!("[VERBOSE] {}", message), LogLevel::Debug);
-        }
-    }
-
-    #[cfg(not(feature = "verbose_logging"))]
-    pub fn Verbose(&self, _message: &str) {
-        // No-op when verbose logging is disabled
+    /// Check if shared instance exists
+    pub fn HasSharedInstance() -> bool {
+        use std::sync::OnceLock;
+        static SHARED: OnceLock<Arc<Mutex<MID_Logger>>> = OnceLock::new();
+        SHARED.get().is_some()
     }
 
     // ========== Indentation Control ==========
 
-    /// Increases indentation level
-    pub fn IncreaseIndent(&self) {
-        let mut level = self.indentation_level.lock().unwrap();
-        *level += 1;
+    pub fn IncreaseIndent(&mut self) {
+        self.indentation_level += 1;
     }
 
-    /// Decreases indentation level
-    pub fn DecreaseIndent(&self) {
-        let mut level = self.indentation_level.lock().unwrap();
-        if *level > 0 {
-            *level -= 1;
+    pub fn DecreaseIndent(&mut self) {
+        if self.indentation_level > 0 {
+            self.indentation_level -= 1;
         }
     }
 
-    /// Resets indentation to zero
-    pub fn ResetIndent(&self) {
-        let mut level = self.indentation_level.lock().unwrap();
-        *level = 0;
+    pub fn ResetIndent(&mut self) {
+        self.indentation_level = 0;
     }
 
-    // ========== Configuration ==========
+    // ========== Core Logging Methods ==========
 
-    /// Sets the log level
-    pub fn SetLogLevel(&self, level: LogLevel) {
-        let mut current = self.current_level.lock().unwrap();
-        *current = level;
+    pub fn Error(&mut self, message: &str) {
+        if !self.is_enabled {
+            return;
+        }
+        self.log_internal(message, LogLevel::Error);
     }
 
-    /// Gets the current log level
+    pub fn Warning(&mut self, message: &str) {
+        if !self.is_enabled {
+            return;
+        }
+        self.log_internal(message, LogLevel::Warning);
+    }
+
+    pub fn Info(&mut self, message: &str) {
+        if !self.is_enabled {
+            return;
+        }
+        if self.current_level > LogLevel::Info {
+            return;
+        }
+        self.log_internal(message, LogLevel::Info);
+    }
+
+    /// Debug logging - uses closure for deferred evaluation
+    #[inline]
+    pub fn Debug<F>(&mut self, message_builder: F)
+    where
+        F: FnOnce() -> String,
+    {
+        if !self.is_enabled {
+            return;
+        }
+        if self.current_level > LogLevel::Debug {
+            return;
+        }
+        let message = message_builder();
+        self.log_internal(&message, LogLevel::Debug);
+    }
+
+    /// Debug logging - string overload
+    #[inline]
+    pub fn DebugStr(&mut self, message: &str) {
+        if !self.is_enabled {
+            return;
+        }
+        if self.current_level > LogLevel::Debug {
+            return;
+        }
+        self.log_internal(message, LogLevel::Debug);
+    }
+
+    /// Verbose logging - uses closure for deferred evaluation
+    #[inline]
+    pub fn Verbose<F>(&mut self, message_builder: F)
+    where
+        F: FnOnce() -> String,
+    {
+        if !self.is_enabled {
+            return;
+        }
+        if self.current_level > LogLevel::Debug {
+            return;
+        }
+        let message = format!("[VERBOSE] {}", message_builder());
+        self.log_internal(&message, LogLevel::Debug);
+    }
+
+    /// Verbose logging - string overload
+    #[inline]
+    pub fn VerboseStr(&mut self, message: &str) {
+        if !self.is_enabled {
+            return;
+        }
+        if self.current_level > LogLevel::Debug {
+            return;
+        }
+        let message = format!("[VERBOSE] {}", message);
+        self.log_internal(&message, LogLevel::Debug);
+    }
+
+    // ========== Internal Logging Implementation ==========
+
+    #[inline]
+    fn log_internal(&mut self, message: &str, level: LogLevel) {
+        let indentation = " ".repeat(self.indentation_level * Self::INDENTATION_SPACES);
+        let timestamp = Local::now().format("%H:%M:%S%.3f");
+        let formatted_message = format!("[{}] {}[{:?}] {}", timestamp, indentation, level, message);
+
+        Self::write_to_console(&formatted_message, level);
+
+        writeln!(self.log_buffer, "{}", formatted_message).ok();
+    }
+
+    #[inline]
+    fn write_to_console(message: &str, level: LogLevel) {
+        // Color output based on level
+        match level {
+            LogLevel::Debug => println!("\x1b[90m{}\x1b[0m", message),      // Gray
+            LogLevel::Info => println!("\x1b[97m{}\x1b[0m", message),       // White
+            LogLevel::Warning => println!("\x1b[93m{}\x1b[0m", message),    // Yellow
+            LogLevel::Error => println!("\x1b[91m{}\x1b[0m", message),      // Red
+            LogLevel::None => {}
+        }
+    }
+
+    // ========== RAII Scoped Logging (Proper Implementation) ==========
+
+    /// Create a scope with RAII guard
+    /// The guard will automatically end the scope when dropped
+    pub fn CreateScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a> {
+        if !self.is_enabled {
+            return LoggerScope::null();
+        }
+
+        if self.current_level <= LogLevel::Info {
+            self.log_internal(&format!("▶ {}", scope_name), LogLevel::Info);
+        }
+
+        self.IncreaseIndent();
+
+        LoggerScope {
+            logger: Some(self),
+            scope_name: scope_name.to_string(),
+            is_debug: false,
+            is_verbose: false,
+        }
+    }
+
+    /// Create a debug scope with RAII guard
+    pub fn CreateDebugScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a> {
+        if !self.is_enabled {
+            return LoggerScope::null();
+        }
+
+        if self.current_level <= LogLevel::Debug {
+            self.log_internal(&format!("▶ [DEBUG] {}", scope_name), LogLevel::Debug);
+        }
+
+        self.IncreaseIndent();
+
+        LoggerScope {
+            logger: Some(self),
+            scope_name: scope_name.to_string(),
+            is_debug: true,
+            is_verbose: false,
+        }
+    }
+
+    /// Create a verbose scope with RAII guard
+    pub fn CreateVerboseScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a> {
+        if !self.is_enabled {
+            return LoggerScope::null();
+        }
+
+        if self.current_level <= LogLevel::Debug {
+            self.log_internal(&format!("▶ [VERBOSE] {}", scope_name), LogLevel::Debug);
+        }
+
+        self.IncreaseIndent();
+
+        LoggerScope {
+            logger: Some(self),
+            scope_name: scope_name.to_string(),
+            is_debug: false,
+            is_verbose: true,
+        }
+    }
+
+    /// Internal method called by LoggerScope on drop
+    fn end_scope(&mut self, scope_name: &str, is_debug: bool, is_verbose: bool) {
+        self.DecreaseIndent();
+
+        if !self.is_enabled {
+            return;
+        }
+
+        if is_verbose {
+            self.log_internal(&format!("◀ [VERBOSE] {}", scope_name), LogLevel::Debug);
+        } else if is_debug {
+            self.log_internal(&format!("◀ [DEBUG] {}", scope_name), LogLevel::Debug);
+        } else if self.current_level <= LogLevel::Info {
+            self.log_internal(&format!("◀ {}", scope_name), LogLevel::Info);
+        }
+    }
+
+    // ========== Configuration and State ==========
+
+    pub fn SetLogLevel(&mut self, level: LogLevel) {
+        self.current_level = level;
+    }
+
+    pub fn SetEnabled(&mut self, enabled: bool) {
+        self.is_enabled = enabled;
+    }
+
     pub fn GetCurrentLevel(&self) -> LogLevel {
-        *self.current_level.lock().unwrap()
+        self.current_level
     }
 
-    /// Enables/disables logging
-    pub fn SetEnabled(&self, enabled: bool) {
-        let mut is_enabled = self.is_enabled.lock().unwrap();
-        *is_enabled = enabled;
-    }
-
-    /// Returns true if logging is enabled
     pub fn IsEnabled(&self) -> bool {
-        *self.is_enabled.lock().unwrap()
+        self.is_enabled
     }
 
-    /// Checks if debug logging is enabled
+    #[inline]
     pub fn IsDebugEnabled(&self) -> bool {
-        self.IsEnabled() && self.GetCurrentLevel() <= LogLevel::Debug
+        #[cfg(feature = "debug_logging")]
+        {
+            self.is_enabled && self.current_level <= LogLevel::Debug
+        }
+        #[cfg(not(feature = "debug_logging"))]
+        {
+            false
+        }
     }
 
-    /// Checks if verbose logging is enabled
-    #[cfg(feature = "verbose_logging")]
+    #[inline]
     pub fn IsVerboseEnabled(&self) -> bool {
-        self.IsEnabled() && self.GetCurrentLevel() <= LogLevel::Debug
+        #[cfg(feature = "verbose_logging")]
+        {
+            self.is_enabled && self.current_level <= LogLevel::Debug
+        }
+        #[cfg(not(feature = "verbose_logging"))]
+        {
+            false
+        }
     }
 
-    #[cfg(not(feature = "verbose_logging"))]
-    pub fn IsVerboseEnabled(&self) -> bool {
-        false
-    }
-
-    /// Returns true if a given level would be logged
     pub fn WouldLog(&self, level: LogLevel) -> bool {
-        self.IsEnabled() && level >= self.GetCurrentLevel()
+        self.is_enabled && level >= self.current_level
     }
 
     // ========== Log Buffer Management ==========
 
-    /// Gets all logged content as a string
-    pub fn GetLogContents(&self) -> String {
-        let buffer = self.log_buffer.lock().unwrap();
-        buffer.join("\n")
+    pub fn GetLogContents(&self) -> &str {
+        &self.log_buffer
     }
 
-    /// Clears the log buffer
-    pub fn ClearLogBuffer(&self) {
-        let mut buffer = self.log_buffer.lock().unwrap();
-        buffer.clear();
-    }
-
-    // ========== Scoped Logging ==========
-
-    /// Creates a logging scope (C# using pattern)
-    pub fn CreateScope(&self, scope_name: &str) -> LoggerScope {
-        if self.IsEnabled() && self.GetCurrentLevel() <= LogLevel::Info {
-            self.LogInternal(&format!("▶ {}", scope_name), LogLevel::Info);
-        }
-        self.IncreaseIndent();
-        LoggerScope::new(self.clone(), scope_name.to_string(), false, false)
-    }
-
-    /// Creates a debug scope
-    pub fn CreateDebugScope(&self, scope_name: &str) -> LoggerScope {
-        if self.IsEnabled() && self.GetCurrentLevel() <= LogLevel::Debug {
-            self.LogInternal(&format!("▶ [DEBUG] {}", scope_name), LogLevel::Debug);
-        }
-        self.IncreaseIndent();
-        LoggerScope::new(self.clone(), scope_name.to_string(), true, false)
-    }
-
-    /// Creates a verbose scope
-    #[cfg(feature = "verbose_logging")]
-    pub fn CreateVerboseScope(&self, scope_name: &str) -> LoggerScope {
-        if self.IsEnabled() && self.GetCurrentLevel() <= LogLevel::Debug {
-            self.LogInternal(&format!("▶ [VERBOSE] {}", scope_name), LogLevel::Debug);
-        }
-        self.IncreaseIndent();
-        LoggerScope::new(self.clone(), scope_name.to_string(), false, true)
-    }
-
-    #[cfg(not(feature = "verbose_logging"))]
-    pub fn CreateVerboseScope(&self, scope_name: &str) -> LoggerScope {
-        // Create a no-op scope
-        LoggerScope::new(self.clone(), scope_name.to_string(), false, true)
-    }
-
-    // ========== Internal Implementation ==========
-
-    fn LogInternal(&self, message: &str, level: LogLevel) {
-        if !self.IsEnabled() {
-            return;
-        }
-
-        let indentation = self.indentation_level.lock().unwrap();
-        let indent_str = " ".repeat(*indentation * Self::INDENTATION_SPACES);
-
-        // Get timestamp
-        let timestamp = Self::GetTimestamp();
-
-        // Format message
-        let formatted = format!(
-            "[{}] {}[{}] {}",
-            timestamp,
-            indent_str,
-            level,
-            message
-        );
-
-        // Store in buffer
-        let mut buffer = self.log_buffer.lock().unwrap();
-        buffer.push(formatted.clone());
-
-        // Print to console with color
-        Self::WriteToConsole(&formatted, level);
-    }
-
-    fn WriteToConsole(message: &str, level: LogLevel) {
-        let color = match level {
-            LogLevel::Debug => "\x1b[90m",      // Gray
-            LogLevel::Info => "\x1b[97m",       // White
-            LogLevel::Warning => "\x1b[93m",    // Yellow
-            LogLevel::Error => "\x1b[91m",      // Red
-            LogLevel::None => "\x1b[0m",        // Reset
-        };
-
-        println!("{}{}\x1b[0m", color, message);
-    }
-
-    fn GetTimestamp() -> String {
-        // Simple timestamp (you might want to use chrono crate for better formatting)
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap();
-        let millis = now.as_millis() % 1000;
-        let secs = now.as_secs() % 86400; // Seconds in a day
-        let hours = (secs / 3600) % 24;
-        let minutes = (secs / 60) % 60;
-        let seconds = secs % 60;
-
-        format!("{:02}:{:02}:{:02}.{:03}", hours, minutes, seconds, millis)
+    pub fn ClearLogBuffer(&mut self) {
+        self.log_buffer.clear();
     }
 }
 
-impl Default for MID_Logger {
-    fn default() -> Self {
-        Self::New(LogLevel::Info, true)
-    }
-}
+// ========== RAII LoggerScope Guard ==========
 
-// ========== LoggerScope (RAII Pattern) ==========
-
-/// Logger scope - automatically decreases indent when dropped
-pub struct LoggerScope {
-    logger: MID_Logger,
+/// RAII guard for scoped logging
+/// Automatically ends the scope when dropped (goes out of scope)
+pub struct LoggerScope<'a> {
+    logger: Option<&'a mut MID_Logger>,
     scope_name: String,
     is_debug: bool,
     is_verbose: bool,
 }
 
-impl LoggerScope {
-    fn new(logger: MID_Logger, scope_name: String, is_debug: bool, is_verbose: bool) -> Self {
-        Self {
-            logger,
-            scope_name,
-            is_debug,
-            is_verbose,
+impl<'a> LoggerScope<'a> {
+    /// Create a null scope (no-op)
+    fn null() -> Self {
+        LoggerScope {
+            logger: None,
+            scope_name: String::new(),
+            is_debug: false,
+            is_verbose: false,
+        }
+    }
+
+    /// Manually dismiss the scope (prevent end message)
+    pub fn dismiss(mut self) {
+        // Setting logger to None prevents Drop from running end_scope
+        self.logger = None;
+    }
+}
+
+impl<'a> Drop for LoggerScope<'a> {
+    fn drop(&mut self) {
+        if let Some(logger) = self.logger.as_mut() {
+            logger.end_scope(&self.scope_name, self.is_debug, self.is_verbose);
         }
     }
 }
 
-impl Drop for LoggerScope {
-    fn drop(&mut self) {
-        self.logger.DecreaseIndent();
+// ========== Tests ==========
 
-        if !self.logger.IsEnabled() {
-            return;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_logger_basic() {
+        let mut logger = MID_Logger::new(LogLevel::Debug, true);
+
+        logger.Info("Test info message");
+        logger.Warning("Test warning message");
+        logger.Error("Test error message");
+        logger.DebugStr("Test debug message");
+
+        let contents = logger.GetLogContents();
+        assert!(contents.contains("Test info message"));
+        assert!(contents.contains("Test warning message"));
+        assert!(contents.contains("Test error message"));
+        assert!(contents.contains("Test debug message"));
+    }
+
+    #[test]
+    fn test_logger_scopes() {
+        let mut logger = MID_Logger::new(LogLevel::Debug, true);
+
+        logger.Info("Before scope");
+
+        {
+            let _scope = logger.CreateScope("TestScope");
+            logger.Info("Inside scope");
+        } // Scope automatically ends here
+
+        logger.Info("After scope");
+
+        let contents = logger.GetLogContents();
+        assert!(contents.contains("▶ TestScope"));
+        assert!(contents.contains("Inside scope"));
+        assert!(contents.contains("◀ TestScope"));
+    }
+
+    #[test]
+    fn test_logger_nested_scopes() {
+        let mut logger = MID_Logger::new(LogLevel::Debug, true);
+
+        {
+            let _scope1 = logger.CreateScope("Outer");
+            logger.Info("In outer");
+
+            {
+                let _scope2 = logger.CreateScope("Inner");
+                logger.Info("In inner");
+            } // Inner scope ends
+
+            logger.Info("Back in outer");
+        } // Outer scope ends
+
+        let contents = logger.GetLogContents();
+        assert!(contents.contains("▶ Outer"));
+        assert!(contents.contains("▶ Inner"));
+        assert!(contents.contains("◀ Inner"));
+        assert!(contents.contains("◀ Outer"));
+    }
+
+    #[test]
+    fn test_logger_debug_scope() {
+        let mut logger = MID_Logger::new(LogLevel::Debug, true);
+
+        {
+            let _scope = logger.CreateDebugScope("DebugScope");
+            logger.DebugStr("Debug message in scope");
         }
 
-        let message = if self.is_verbose {
-            format!("◀ [VERBOSE] {}", self.scope_name)
-        } else if self.is_debug {
-            format!("◀ [DEBUG] {}", self.scope_name)
-        } else {
-            format!("◀ {}", self.scope_name)
-        };
+        let contents = logger.GetLogContents();
+        assert!(contents.contains("▶ [DEBUG] DebugScope"));
+        assert!(contents.contains("◀ [DEBUG] DebugScope"));
+    }
 
-        let level = if self.is_debug || self.is_verbose {
-            LogLevel::Debug
-        } else {
-            LogLevel::Info
-        };
+    #[test]
+    fn test_logger_level_filtering() {
+        let mut logger = MID_Logger::new(LogLevel::Warning, true);
 
-        if self.logger.GetCurrentLevel() <= level {
-            self.logger.LogInternal(&message, level);
+        logger.DebugStr("This should not appear");
+        logger.Info("This should not appear");
+        logger.Warning("This should appear");
+        logger.Error("This should also appear");
+
+        let contents = logger.GetLogContents();
+        assert!(!contents.contains("This should not appear"));
+        assert!(contents.contains("This should appear"));
+        assert!(contents.contains("This should also appear"));
+    }
+
+    #[test]
+    fn test_shared_instance() {
+        let logger1 = MID_Logger::GetSharedInstance(Some(LogLevel::Info), Some(true));
+        let logger2 = MID_Logger::GetSharedInstance(None, None);
+
+        // Both should point to the same instance
+        {
+            let mut l1 = logger1.lock().unwrap();
+            l1.Info("Test from instance 1");
+        }
+
+        {
+            let l2 = logger2.lock().unwrap();
+            let contents = l2.GetLogContents();
+            assert!(contents.contains("Test from instance 1"));
         }
     }
 }

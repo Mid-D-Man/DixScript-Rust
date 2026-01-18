@@ -12,7 +12,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use dixscript::DixCore::{List, Dictionary, HashSet as DixHashSet};
 use std::collections::{HashMap, HashSet};
-use std::hint::black_box;
+
 // ============================================================================
 // SCENARIO 1: List Operations (Most common in DixScript)
 // ============================================================================
@@ -20,35 +20,35 @@ use std::hint::black_box;
 fn bench_list_add(c: &mut Criterion) {
     let mut group = c.benchmark_group("list_add");
 
-    for size in [100, 1000, 10000].iter() {
+    for size in [100, 1000, 10000] {
         // DixCore List wrapper
-        group.bench_with_input(BenchmarkId::new("wrapper", size), size, |b, &size| {
+        group.bench_with_input(BenchmarkId::new("wrapper", size), &size, |b, &size| {
             b.iter(|| {
                 let mut list = List::<i32>::New();
                 for i in 0..size {
-                    list.Add(black_box(i));
+                    list.Add(black_box(i as i32));
                 }
                 list
             });
         });
 
         // Native Vec
-        group.bench_with_input(BenchmarkId::new("native", size), size, |b, &size| {
+        group.bench_with_input(BenchmarkId::new("native", size), &size, |b, &size| {
             b.iter(|| {
                 let mut vec = Vec::<i32>::new();
                 for i in 0..size {
-                    vec.push(black_box(i));
+                    vec.push(black_box(i as i32));
                 }
                 vec
             });
         });
 
         // Native Vec with capacity (best practice)
-        group.bench_with_input(BenchmarkId::new("native_with_capacity", size), size, |b, &size| {
+        group.bench_with_input(BenchmarkId::new("native_with_capacity", size), &size, |b, &size| {
             b.iter(|| {
                 let mut vec = Vec::<i32>::with_capacity(size);
                 for i in 0..size {
-                    vec.push(black_box(i));
+                    vec.push(black_box(i as i32));
                 }
                 vec
             });
@@ -61,17 +61,17 @@ fn bench_list_add(c: &mut Criterion) {
 fn bench_list_iterate(c: &mut Criterion) {
     let mut group = c.benchmark_group("list_iterate");
 
-    for size in [100, 1000, 10000].iter() {
+    for size in [100, 1000, 10000] {
         // Setup
         let mut wrapper_list = List::<i32>::New();
         let mut native_vec = Vec::<i32>::new();
-        for i in 0..*size {
-            wrapper_list.Add(i);
-            native_vec.push(i);
+        for i in 0..size {
+            wrapper_list.Add(i as i32);
+            native_vec.push(i as i32);
         }
 
         // DixCore List iteration
-        group.bench_with_input(BenchmarkId::new("wrapper", size), size, |b, _| {
+        group.bench_with_input(BenchmarkId::new("wrapper", size), &size, |b, _| {
             b.iter(|| {
                 let sum: i32 = wrapper_list.Iter().map(|x| *x).sum();
                 black_box(sum)
@@ -79,7 +79,7 @@ fn bench_list_iterate(c: &mut Criterion) {
         });
 
         // Native Vec iteration
-        group.bench_with_input(BenchmarkId::new("native", size), size, |b, _| {
+        group.bench_with_input(BenchmarkId::new("native", size), &size, |b, _| {
             b.iter(|| {
                 let sum: i32 = native_vec.iter().copied().sum();
                 black_box(sum)
@@ -97,14 +97,14 @@ fn bench_list_access(c: &mut Criterion) {
     let mut wrapper_list = List::<i32>::New();
     let mut native_vec = Vec::<i32>::new();
     for i in 0..size {
-        wrapper_list.Add(i);
-        native_vec.push(i);
+        wrapper_list.Add(i as i32);
+        native_vec.push(i as i32);
     }
 
     // DixCore List random access
     group.bench_function("wrapper", |b| {
         b.iter(|| {
-            let mut sum = 0;
+            let mut sum = 0i32;
             for i in (0..size).step_by(10) {
                 sum += wrapper_list.Get(i).unwrap_or(&0);
             }
@@ -115,7 +115,7 @@ fn bench_list_access(c: &mut Criterion) {
     // Native Vec random access
     group.bench_function("native", |b| {
         b.iter(|| {
-            let mut sum = 0;
+            let mut sum = 0i32;
             for i in (0..size).step_by(10) {
                 sum += native_vec.get(i).unwrap_or(&0);
             }
@@ -133,35 +133,35 @@ fn bench_list_access(c: &mut Criterion) {
 fn bench_dictionary_insert(c: &mut Criterion) {
     let mut group = c.benchmark_group("dictionary_insert");
 
-    for size in [100, 1000, 10000].iter() {
+    for size in [100, 1000, 10000] {
         // DixCore Dictionary wrapper
-        group.bench_with_input(BenchmarkId::new("wrapper", size), size, |b, &size| {
+        group.bench_with_input(BenchmarkId::new("wrapper", size), &size, |b, &size| {
             b.iter(|| {
                 let mut dict = Dictionary::<i32, String>::New();
                 for i in 0..size {
-                    dict.Add(black_box(i), format!("value_{}", i));
+                    dict.Add(black_box(i as i32), format!("value_{}", i));
                 }
                 dict
             });
         });
 
         // Native HashMap
-        group.bench_with_input(BenchmarkId::new("native", size), size, |b, &size| {
+        group.bench_with_input(BenchmarkId::new("native", size), &size, |b, &size| {
             b.iter(|| {
                 let mut map = HashMap::<i32, String>::new();
                 for i in 0..size {
-                    map.insert(black_box(i), format!("value_{}", i));
+                    map.insert(black_box(i as i32), format!("value_{}", i));
                 }
                 map
             });
         });
 
         // Native HashMap with capacity
-        group.bench_with_input(BenchmarkId::new("native_with_capacity", size), size, |b, &size| {
+        group.bench_with_input(BenchmarkId::new("native_with_capacity", size), &size, |b, &size| {
             b.iter(|| {
                 let mut map = HashMap::<i32, String>::with_capacity(size);
                 for i in 0..size {
-                    map.insert(black_box(i), format!("value_{}", i));
+                    map.insert(black_box(i as i32), format!("value_{}", i));
                 }
                 map
             });
@@ -178,8 +178,8 @@ fn bench_dictionary_lookup(c: &mut Criterion) {
     let mut wrapper_dict = Dictionary::<i32, String>::New();
     let mut native_map = HashMap::<i32, String>::new();
     for i in 0..size {
-        wrapper_dict.Add(i, format!("value_{}", i));
-        native_map.insert(i, format!("value_{}", i));
+        wrapper_dict.Add(i as i32, format!("value_{}", i));
+        native_map.insert(i as i32, format!("value_{}", i));
     }
 
     // DixCore Dictionary lookup
@@ -187,7 +187,7 @@ fn bench_dictionary_lookup(c: &mut Criterion) {
         b.iter(|| {
             let mut found = 0;
             for i in (0..size).step_by(10) {
-                if wrapper_dict.ContainsKey(&black_box(i)) {
+                if wrapper_dict.ContainsKey(&black_box(i as i32)) {
                     found += 1;
                 }
             }
@@ -200,7 +200,7 @@ fn bench_dictionary_lookup(c: &mut Criterion) {
         b.iter(|| {
             let mut found = 0;
             for i in (0..size).step_by(10) {
-                if native_map.contains_key(&black_box(i)) {
+                if native_map.contains_key(&black_box(i as i32)) {
                     found += 1;
                 }
             }
@@ -276,8 +276,8 @@ fn bench_hot_path_token_buffer(c: &mut Criterion) {
                 tokens.Add(black_box((i / 80, i % 80)));
             }
             // Simulate lookahead
-            let mut sum = 0;
-            for i in 0..tokens.Count() - 1 {
+            let mut sum = 0usize;
+            for i in 0..tokens.Count().saturating_sub(1) {
                 if let (Some(curr), Some(next)) = (tokens.Get(i), tokens.Get(i + 1)) {
                     sum += curr.0 + next.0;
                 }
@@ -294,8 +294,8 @@ fn bench_hot_path_token_buffer(c: &mut Criterion) {
                 tokens.push(black_box((i / 80, i % 80)));
             }
             // Simulate lookahead
-            let mut sum = 0;
-            for i in 0..tokens.len() - 1 {
+            let mut sum = 0usize;
+            for i in 0..tokens.len().saturating_sub(1) {
                 sum += tokens[i].0 + tokens[i + 1].0;
             }
             black_box(sum)
@@ -310,8 +310,8 @@ fn bench_hot_path_token_buffer(c: &mut Criterion) {
                 tokens.push(black_box((i / 80, i % 80)));
             }
             // Simulate lookahead
-            let mut sum = 0;
-            for i in 0..tokens.len() - 1 {
+            let mut sum = 0usize;
+            for i in 0..tokens.len().saturating_sub(1) {
                 sum += tokens[i].0 + tokens[i + 1].0;
             }
             black_box(sum)
@@ -327,8 +327,8 @@ fn bench_hot_path_token_buffer(c: &mut Criterion) {
 
         b.iter(|| {
             let slice = &tokens[..];
-            let mut sum = 0;
-            for i in 0..slice.len() - 1 {
+            let mut sum = 0usize;
+            for i in 0..slice.len().saturating_sub(1) {
                 sum += slice[i].0 + slice[i + 1].0;
             }
             black_box(sum)

@@ -1,1 +1,72 @@
 
+name: Update Project Structure
+
+on:
+  push:
+    branches: [ master, main, develop ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-structure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update Project Structure
+        run: |
+          echo "=== Updating DixScript Rust project structure ==="
+          mkdir -p "others"
+          
+          {
+            echo "Project Structure Documentation - DixScript Rust Port"
+            echo "Generated: $(date -u)"
+            echo "Repository: ${{ github.repository }}"
+            echo "Commit: ${{ github.sha }}"
+            echo "Branch: ${{ github.ref_name }}"
+            echo "=================================="
+            echo
+            echo "Source Files:"
+            echo "============"
+            find src -type f -name "*.rs" | sort
+            echo
+            echo "Test Files:"
+            echo "==========="
+            find tests -type f -name "*.rs" 2>/dev/null | sort || echo "No tests directory"
+            echo
+            echo "Benchmark Files:"
+            echo "==============="
+            find benches -type f -name "*.rs" 2>/dev/null | sort || echo "No benches directory"
+            echo
+            echo "Configuration Files:"
+            echo "==================="
+            ls -1 *.toml *.md 2>/dev/null | sort
+            echo
+            echo "Total Rust Files:"
+            echo "================"
+            echo "Source: $(find src -type f -name "*.rs" | wc -l)"
+            echo "Tests: $(find tests -type f -name "*.rs" 2>/dev/null | wc -l || echo 0)"
+            echo "Benches: $(find benches -type f -name "*.rs" 2>/dev/null | wc -l || echo 0)"
+          } > "others/ProjectStructure.txt"
+          
+          cat "others/ProjectStructure.txt"
+
+      - name: Commit Updated Project Structure
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action - DixScript Rust"
+          
+          if ! git diff --quiet "others/ProjectStructure.txt" 2>/dev/null; then
+            git add "others/ProjectStructure.txt"
+            git commit -m "Auto-update DixScript Rust project structure [skip ci]"
+            git push
+          else
+            echo "No changes to project structure"
+          fi

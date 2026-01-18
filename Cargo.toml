@@ -15,13 +15,20 @@ name = "dixscript"
 crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
-# For random string generation
+# Random number generation for helper functions
 rand = "0.8"
-#chrono = "0.4"  # For timestamps in error reports
+
+# Date and time handling for error timestamps
+chrono = "0.4"
 
 [dev-dependencies]
-# Test dependencies
-# criterion = "0.5"
+# Benchmarking framework
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Note: Configure benchmark harness
+[[bench]]
+name = "wrapper_benchmark"
+harness = false
 
 [profile.release]
 opt-level = 3

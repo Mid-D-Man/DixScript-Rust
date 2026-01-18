@@ -1,0 +1,85 @@
+Project Structure Documentation - DixScript Rust Port
+Generated: Sun Jan 18 14:30:39 UTC 2026
+Repository: Mid-D-Man/DixScript-Rust
+Commit: c0126b867643464b390fad6cb586fed0b94bb5ae
+Branch: master
+==================================
+
+Source Files:
+============
+src/Builtins/Core/mod.rs
+src/Builtins/Instance/mod.rs
+src/Builtins/Resolver/mod.rs
+src/Builtins/Static/mod.rs
+src/Builtins/mod.rs
+src/Compiler/AST/Visitors/mod.rs
+src/Compiler/AST/mod.rs
+src/Compiler/Core/BinarySerialization/SectionReaders/mod.rs
+src/Compiler/Core/BinarySerialization/SectionWriters/mod.rs
+src/Compiler/Core/BinarySerialization/mod.rs
+src/Compiler/Core/SectionAnalyzers/mod.rs
+src/Compiler/Core/SectionEnhancers/mod.rs
+src/Compiler/Core/SectionParsers/mod.rs
+src/Compiler/Core/ValueResolution/mod.rs
+src/Compiler/Core/mod.rs
+src/Compiler/DLM/Auditor/mod.rs
+src/Compiler/DLM/Compressor/mod.rs
+src/Compiler/DLM/Encryptor/mod.rs
+src/Compiler/DLM/KeyManagement/mod.rs
+src/Compiler/DLM/mod.rs
+src/Compiler/Extensions/mod.rs
+src/Compiler/Utilities/mod.rs
+src/Compiler/VersionControl/mod.rs
+src/Compiler/mod.rs
+src/DixCore/dictionary.rs
+src/DixCore/hash_set.rs
+src/DixCore/immutable_array.rs
+src/DixCore/linq.rs
+src/DixCore/list.rs
+src/DixCore/mod.rs
+src/ErrorManager/ErrorTypes/ast_enhancement_error.rs
+src/ErrorManager/ErrorTypes/binary_serialization_error.rs
+src/ErrorManager/ErrorTypes/config_error.rs
+src/ErrorManager/ErrorTypes/dlm_error.rs
+src/ErrorManager/ErrorTypes/error_enums.rs
+src/ErrorManager/ErrorTypes/general_error.rs
+src/ErrorManager/ErrorTypes/lexical_error.rs
+src/ErrorManager/ErrorTypes/mod.rs
+src/ErrorManager/ErrorTypes/parse_error.rs
+src/ErrorManager/ErrorTypes/runtime_error.rs
+src/ErrorManager/ErrorTypes/semantic_error.rs
+src/ErrorManager/ErrorTypes/value_resolution_error.rs
+src/ErrorManager/error_manager.rs
+src/ErrorManager/mod.rs
+src/ErrorManager/operational_settings.rs
+src/Runtime/mod.rs
+src/Utilities/keyword_definitions.rs
+src/Utilities/mid_helper_functions.rs
+src/Utilities/mid_logger.rs
+src/Utilities/mod.rs
+src/Utilities/token.rs
+src/Utilities/utilities.rs
+src/lib.rs
+
+Test Files:
+===========
+tests/error_manager_tests.rs
+tests/integration/mod.rs
+tests/test_dixcore_incremental.rs
+tests/unit/mod.rs
+
+Benchmark Files:
+===============
+benches/wrapper_benchmark.rs
+
+Configuration Files:
+===================
+Cargo.toml
+README.md
+rustfmt.toml
+
+Total Rust Files:
+================
+Source: 53
+Tests: 4
+Benches: 1

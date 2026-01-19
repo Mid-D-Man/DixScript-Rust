@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Sun Jan 18 23:29:20 UTC 2026
+Generated: Mon Jan 19 00:10:31 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: e0d582ddda0b0833b363103bd2a79c2265b2ee46
+Commit: b999ffd91be8758ef03a1b50550334e274d85e65
 Branch: master
 ==================================
 
@@ -43,6 +43,7 @@ src/ErrorManager/ErrorTypes/config_error.rs
 src/ErrorManager/ErrorTypes/dlm_error.rs
 src/ErrorManager/ErrorTypes/error_enums.rs
 src/ErrorManager/ErrorTypes/general_error.rs
+src/ErrorManager/ErrorTypes/imports_resolution_error.rs
 src/ErrorManager/ErrorTypes/lexical_error.rs
 src/ErrorManager/ErrorTypes/mod.rs
 src/ErrorManager/ErrorTypes/parse_error.rs
@@ -80,6 +81,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 53
+Source: 54
 Tests: 4
 Benches: 1

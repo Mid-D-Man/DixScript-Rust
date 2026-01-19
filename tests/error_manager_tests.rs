@@ -454,7 +454,7 @@ fn test_log_delegation() {
 
     manager.log_debug("Debug message");
     manager.log_info("Info message");
-    manager.log_warning("Warning message");
+    manager.log_Warning("Warning message");
     manager.log_error("Error message");
 
     let log_contents = manager.get_log_contents();

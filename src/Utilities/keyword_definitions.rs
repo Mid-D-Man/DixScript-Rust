@@ -76,10 +76,10 @@ impl Keywords {
     pub fn language_keywords() -> &'static HashSet<String> {
         static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
             let mut set = HashSet::New();
-            for kw in Self::truly_reserved_keywords().Iter() {
+            for kw in Keywords::truly_reserved_keywords().Iter() {
                 set.Add(kw.clone());
             }
-            for kw in Self::data_type_keywords().Iter() {
+            for kw in Keywords::data_type_keywords().Iter() {
                 set.Add(kw.clone());
             }
             set
@@ -195,7 +195,7 @@ impl Keywords {
         let context_upper = context.to_uppercase();
 
         // Truly reserved keywords are ALWAYS reserved
-        if Self::truly_reserved_keywords()
+        if Keywords::truly_reserved_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
@@ -203,7 +203,7 @@ impl Keywords {
         }
 
         // Data type keywords CANNOT be used as variable/parameter names in QUICKFUNCS
-        if Self::data_type_keywords()
+        if Keywords::data_type_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
@@ -220,17 +220,17 @@ impl Keywords {
         // Section-specific keywords
         match context_upper.as_str() {
             "CONFIG" => {
-                Self::config_section_keywords()
+                Keywords::config_section_keywords()
                     .Iter()
                     .any(|k| k.to_lowercase() == word_lower)
-                    || Self::config_value_keywords()
+                    || Keywords::config_value_keywords()
                     .Iter()
                     .any(|k| k.to_lowercase() == word_lower)
             }
-            "SECURITY" => Self::security_section_keywords()
+            "SECURITY" => Keywords::security_section_keywords()
                 .Iter()
                 .any(|k| k.to_lowercase() == word_lower),
-            "DLM" => Self::dlm_keywords()
+            "DLM" => Keywords::dlm_keywords()
                 .Iter()
                 .any(|k| k.to_lowercase() == word_lower),
             "QUICKFUNCS" | "DATA" => false,
@@ -240,19 +240,19 @@ impl Keywords {
 
     /// Check if word can be used as identifier in context
     pub fn can_be_identifier_in_context(word: &str, context: &str) -> bool {
-        !Self::is_reserved_in_context(word, context)
+        !Keywords::is_reserved_in_context(word, context)
     }
 
     /// Check if word is a contextual identifier
     pub fn is_contextual_identifier(word: &str) -> bool {
-        Self::contextual_identifiers()
+        Keywords::contextual_identifiers()
             .Iter()
             .any(|k| k.to_lowercase() == word.to_lowercase())
     }
 
     /// Check if word is a data type keyword
     pub fn is_data_type_keyword(word: &str) -> bool {
-        Self::data_type_keywords()
+        Keywords::data_type_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word.to_lowercase())
     }
@@ -260,19 +260,19 @@ impl Keywords {
     /// Check if word is any kind of keyword
     pub fn is_keyword(word: &str) -> bool {
         let word_lower = word.to_lowercase();
-        Self::language_keywords()
+        Keywords::language_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
-            || Self::config_section_keywords()
+            || Keywords::config_section_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
-            || Self::security_section_keywords()
+            || Keywords::security_section_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
-            || Self::dlm_keywords()
+            || Keywords::dlm_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
-            || Self::config_value_keywords()
+            || Keywords::config_value_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
     }
@@ -281,43 +281,43 @@ impl Keywords {
     pub fn get_keyword_category(word: &str) -> &'static str {
         let word_lower = word.to_lowercase();
 
-        if Self::truly_reserved_keywords()
+        if Keywords::truly_reserved_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "Reserved Keyword";
         }
-        if Self::data_type_keywords()
+        if Keywords::data_type_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "Data Type Keyword (can be identifier)";
         }
-        if Self::config_section_keywords()
+        if Keywords::config_section_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "Config Keyword";
         }
-        if Self::security_section_keywords()
+        if Keywords::security_section_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "Security Keyword";
         }
-        if Self::dlm_keywords()
+        if Keywords::dlm_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "DLM Keyword";
         }
-        if Self::config_value_keywords()
+        if Keywords::config_value_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "Config Value Keyword";
         }
-        if Self::contextual_identifiers()
+        if Keywords::contextual_identifiers()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
@@ -331,7 +331,7 @@ impl Keywords {
     pub fn get_keyword_usage_error(word: &str, context: &str) -> String {
         let word_lower = word.to_lowercase();
 
-        if Self::truly_reserved_keywords()
+        if Keywords::truly_reserved_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
@@ -341,7 +341,7 @@ impl Keywords {
             );
         }
 
-        if Self::data_type_keywords()
+        if Keywords::data_type_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
@@ -362,7 +362,7 @@ impl Keywords {
             );
         }
 
-        if Self::config_section_keywords()
+        if Keywords::config_section_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
             && context == "CONFIG"
@@ -373,7 +373,7 @@ impl Keywords {
             );
         }
 
-        if Self::security_section_keywords()
+        if Keywords::security_section_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
             && context == "SECURITY"
@@ -384,7 +384,7 @@ impl Keywords {
             );
         }
 
-        if Self::dlm_keywords()
+        if Keywords::dlm_keywords()
             .Iter()
             .any(|k| k.to_lowercase() == word_lower)
             && context == "DLM"

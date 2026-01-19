@@ -1,5 +1,5 @@
 /// Error severity levels for DixScript compilation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ErrorSeverity {
     Info,
     Warning,

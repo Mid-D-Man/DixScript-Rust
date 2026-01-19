@@ -21,6 +21,13 @@ rand = "0.8"
 # Date and time handling for error timestamps
 chrono = "0.4"
 
+# JSON serialization for error reporting
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Hostname for diagnostic dumps
+hostname = "0.3"
+
 [dev-dependencies]
 # Benchmarking framework
 criterion = { version = "0.5", features = ["html_reports"] }

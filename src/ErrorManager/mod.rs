@@ -1,11 +1,23 @@
+// src/ErrorManager/mod.rs
+
 //! # ErrorManager Module
 //!
 //! Comprehensive error handling for DixScript compilation and runtime
 
 pub mod ErrorTypes;
+pub mod Helpers;
+
 mod operational_settings;
 mod error_manager;
+mod diagnostic_dumper;
 
 pub use ErrorTypes::*;
-pub use operational_settings::{OperationalSettings, ErrorHandlingStrategy, DebugMode, CompatibilityMode};
+pub use Helpers::*;
+pub use operational_settings::{
+    OperationalSettings,
+    ErrorHandlingStrategy,
+    DebugMode,
+    CompatibilityMode
+};
 pub use error_manager::ErrorManager;
+pub use diagnostic_dumper::DiagnosticDumper;

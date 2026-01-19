@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Mon Jan 19 00:10:31 UTC 2026
+Generated: Mon Jan 19 00:53:13 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: b999ffd91be8758ef03a1b50550334e274d85e65
+Commit: 3bdad29a4a5ab5b344aff7d61a4c9f4284fcf6b4
 Branch: master
 ==================================
 
@@ -50,6 +50,19 @@ src/ErrorManager/ErrorTypes/parse_error.rs
 src/ErrorManager/ErrorTypes/runtime_error.rs
 src/ErrorManager/ErrorTypes/semantic_error.rs
 src/ErrorManager/ErrorTypes/value_resolution_error.rs
+src/ErrorManager/Helpers/ast_enhancement_exception.rs
+src/ErrorManager/Helpers/binary_serialization_exception.rs
+src/ErrorManager/Helpers/dlm_pipeline_exception.rs
+src/ErrorManager/Helpers/imports_resolution_exception.rs
+src/ErrorManager/Helpers/mod.rs
+src/ErrorManager/Helpers/parse_exception.rs
+src/ErrorManager/Helpers/parse_state.rs
+src/ErrorManager/Helpers/runtime_exception.rs
+src/ErrorManager/Helpers/semantics_exception.rs
+src/ErrorManager/Helpers/source_line_extensions.rs
+src/ErrorManager/Helpers/tokenization_exception.rs
+src/ErrorManager/Helpers/value_resolution_exception.rs
+src/ErrorManager/diagnostic_dumper.rs
 src/ErrorManager/error_manager.rs
 src/ErrorManager/mod.rs
 src/ErrorManager/operational_settings.rs
@@ -66,7 +79,6 @@ Test Files:
 ===========
 tests/error_manager_tests.rs
 tests/integration/mod.rs
-tests/test_dixcore_incremental.rs
 tests/unit/mod.rs
 
 Benchmark Files:
@@ -81,6 +93,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 54
-Tests: 4
+Source: 67
+Tests: 3
 Benches: 1

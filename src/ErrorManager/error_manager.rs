@@ -26,7 +26,7 @@ struct ErrorManagerInner {
     imports_resolution_errors: Vec<ImportsResolutionError>,
     ast_enhancement_errors: Vec<AstEnhancementError>,
     value_resolution_errors: Vec<ValueResolutionError>,
-    dlm_errors: Vec<DLMError>,
+    dlm_errors: Vec<DlmError>,
     binary_serialization_errors: Vec<BinarySerializationError>,
     runtime_errors: Vec<RuntimeError>,
     config_errors: Vec<ConfigError>,
@@ -242,7 +242,7 @@ impl ErrorManager {
     /// Add a DLM error
     pub fn add_dlm_error(
         &self,
-        error_type: DLMErrorType,
+        error_type: DlmErrorType,
         message: String,
         library_path: Option<String>,
         function_name: Option<String>,
@@ -253,7 +253,7 @@ impl ErrorManager {
     }
 
     /// Get all DLM errors
-    pub fn get_dlm_errors(&self) -> Vec<DLMError> {
+    pub fn get_dlm_errors(&self) -> Vec<DlmError> {
         let inner = self.inner.lock().unwrap();
         inner.dlm_errors.clone()
     }
@@ -412,7 +412,7 @@ impl ErrorManager {
 
 impl ErrorManagerInner {
     fn new() -> Self {
-        let logger = MID_Logger::get_shared_instance(None, None);
+        let logger = MID_Logger::GetSharedInstance(None, None);
 
         ErrorManagerInner {
             lexical_errors: Vec::new(),
@@ -487,7 +487,7 @@ impl ErrorManagerInner {
             severity,
         );
 
-        self.logger.error(&format!("[Lexer] {}", error));
+        self.logger.Error(&format!("[Lexer] {}", error));
         self.lexical_errors.push(error);
         self.has_errors = true;
     }
@@ -512,7 +512,7 @@ impl ErrorManagerInner {
             severity,
         );
 
-        self.logger.error(&format!("[Parser] {}", error));
+        self.logger.Error(&format!("[Parser] {}", error));
         self.parse_errors.push(error);
         self.has_errors = true;
     }
@@ -537,7 +537,7 @@ impl ErrorManagerInner {
             severity,
         );
 
-        self.logger.warning(&format!("[Semantic] {}", error));
+        self.logger.Warning(&format!("[Semantic] {}", error));
         self.semantic_errors.push(error);
         self.has_errors = true;
     }
@@ -568,7 +568,7 @@ impl ErrorManagerInner {
             severity,
         );
 
-        self.logger.error(&format!("[Imports] {}", error));
+        self.logger.Error(&format!("[Imports] {}", error));
         self.imports_resolution_errors.push(error);
         self.has_errors = true;
     }
@@ -593,7 +593,7 @@ impl ErrorManagerInner {
             severity,
         );
 
-        self.logger.error(&format!("[AstEnhancement] {}", error));
+        self.logger.Error(&format!("[AstEnhancement] {}", error));
         self.ast_enhancement_errors.push(error);
         self.has_errors = true;
     }
@@ -622,21 +622,21 @@ impl ErrorManagerInner {
             severity,
         );
 
-        self.logger.error(&format!("[ValueResolution] {}", error));
+        self.logger.Error(&format!("[ValueResolution] {}", error));
         self.value_resolution_errors.push(error);
         self.has_errors = true;
     }
 
     fn add_dlm_error(
         &mut self,
-        error_type: DLMErrorType,
+        error_type: DlmErrorType,
         message: String,
         library_path: Option<String>,
         function_name: Option<String>,
         suggestion: Option<String>,
     ) {
         let severity = self.determine_severity(ErrorSource::DLM);
-        let error = DLMError::new(
+        let error = DlmError::new(
             error_type,
             message,
             library_path,
@@ -645,7 +645,7 @@ impl ErrorManagerInner {
             severity,
         );
 
-        self.logger.error(&format!("[DLM] {}", error));
+        self.logger.Error(&format!("[DLM] {}", error));
         self.dlm_errors.push(error);
         self.has_errors = true;
     }
@@ -670,7 +670,7 @@ impl ErrorManagerInner {
             severity,
         );
 
-        self.logger.error(&format!("[BinarySerialization] {}", error));
+        self.logger.Error(&format!("[BinarySerialization] {}", error));
         self.binary_serialization_errors.push(error);
         self.has_errors = true;
     }
@@ -697,7 +697,7 @@ impl ErrorManagerInner {
             severity,
         );
 
-        self.logger.error(&format!("[Runtime] {}", error));
+        self.logger.Error(&format!("[Runtime] {}", error));
         self.runtime_errors.push(error);
         self.has_errors = true;
     }
@@ -728,7 +728,7 @@ impl ErrorManagerInner {
             severity,
         );
 
-        self.logger.error(&format!("[Config] {}", error));
+        self.logger.Error(&format!("[Config] {}", error));
         self.config_errors.push(error);
         self.has_errors = true;
     }
@@ -751,7 +751,7 @@ impl ErrorManagerInner {
             severity,
         );
 
-        self.logger.error(&format!("[General] {}", error));
+        self.logger.Error(&format!("[General] {}", error));
         self.general_errors.push(error);
         self.has_errors = true;
     }
@@ -849,7 +849,7 @@ impl ErrorManager {
     /// Get log contents from logger
     pub fn get_log_contents(&self) -> String {
         let inner = self.inner.lock().unwrap();
-        inner.logger.get_log_contents()
+        inner.logger.GetLogContents()
     }
 
     // ==================== LOGGING DELEGATION ====================
@@ -857,25 +857,25 @@ impl ErrorManager {
     /// Log debug message
     pub fn log_debug(&self, message: &str) {
         let inner = self.inner.lock().unwrap();
-        inner.logger.debug(message);
+        inner.logger.Debug(message);
     }
 
     /// Log info message
     pub fn log_info(&self, message: &str) {
         let inner = self.inner.lock().unwrap();
-        inner.logger.info(message);
+        inner.logger.Info(message);
     }
 
-    /// Log warning message
-    pub fn log_warning(&self, message: &str) {
+    /// Log Warning message
+    pub fn log_Warning(&self, message: &str) {
         let inner = self.inner.lock().unwrap();
-        inner.logger.warning(message);
+        inner.logger.Warning(message);
     }
 
     /// Log error message
     pub fn log_error(&self, message: &str) {
         let inner = self.inner.lock().unwrap();
-        inner.logger.error(message);
+        inner.logger.Error(message);
     }
 
     // ==================== DEBUG INFO ====================

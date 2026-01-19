@@ -16,6 +16,7 @@ pub enum ConfigErrorType {
     InvalidSectionName,
     CircularReference,
     IncompatibleVersions,
+    InvalidVersion,
 }
 
 /// Configuration error with validation context

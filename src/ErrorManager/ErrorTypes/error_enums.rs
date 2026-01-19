@@ -1,6 +1,4 @@
-//! Core error enumerations shared across all error types
-
-/// Severity level for errors
+/// Error severity levels for DixScript compilation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ErrorSeverity {
     Info,
@@ -9,23 +7,13 @@ pub enum ErrorSeverity {
     Fatal,
 }
 
-impl std::fmt::Display for ErrorSeverity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ErrorSeverity::Info => write!(f, "INFO"),
-            ErrorSeverity::Warning => write!(f, "WARNING"),
-            ErrorSeverity::Error => write!(f, "ERROR"),
-            ErrorSeverity::Fatal => write!(f, "FATAL"),
-        }
-    }
-}
-
-/// Source of the error in the compilation pipeline
+/// Error source categories
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorSource {
     Configuration,
     Lexer,
     Parser,
+    ImportsResolution,
     SemanticAnalyzer,
     AstEnhancement,
     ValueResolution,

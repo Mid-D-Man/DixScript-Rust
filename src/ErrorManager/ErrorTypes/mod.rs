@@ -11,6 +11,7 @@ mod binary_serialization_error;
 mod config_error;
 mod runtime_error;
 mod general_error;
+mod imports_resolution_error;
 
 pub use error_enums::{ErrorSeverity, ErrorSource};
 pub use lexical_error::{LexicalError, LexicalErrorType};

@@ -1,134 +1,200 @@
-//! @CONFIG section parsing errors
-
-use super::ErrorSeverity;
 use std::fmt;
 
+/// Configuration error types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigErrorType {
+    MissingRequiredSection,
+    InvalidSectionFormat,
+    DuplicateSection,
+    InvalidConfiguration,
+    ValidationFailed,
+    InvalidValue,
     MissingRequiredField,
-    InvalidFieldValue,
-    InvalidVersion,
-    InvalidEncoding,
-    InvalidFeatures,
-    InvalidDebugMode,
-    InvalidErrorHandling,
-    InvalidCompatibilityMode,
-    InvalidDateFormat,
-    InvalidTimestampFormat,
-    MalformedSection,
-    MissingArrowOperator,
-    EmptyKey,
-    EmptyValue,
-    DuplicateKey,
-    UnsupportedField,
-    ParsingFailed,
+    InvalidFieldType,
+    ConstraintViolation,
+    SchemaValidationFailed,
+    InvalidSectionName,
+    CircularReference,
+    IncompatibleVersions,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Configuration error with validation context
+#[derive(Debug, Clone)]
 pub struct ConfigError {
     pub error_id: String,
     pub error_type: ConfigErrorType,
     pub message: String,
-    pub line: usize,
-    pub column: usize,
+    pub section_name: Option<String>,
     pub field_name: Option<String>,
-    pub invalid_value: Option<String>,
+    pub expected_value: Option<String>,
+    pub actual_value: Option<String>,
+    pub line: i32,
+    pub column: i32,
     pub suggestion: Option<String>,
-    pub severity: ErrorSeverity,
+    pub severity: super::ErrorSeverity,
+    pub quick_fixes: Vec<String>,
+    pub metadata: std::collections::HashMap<String, String>,
 }
 
 impl ConfigError {
     pub fn new(
         error_type: ConfigErrorType,
         message: String,
-        line: usize,
-        column: usize,
+        section_name: Option<String>,
         field_name: Option<String>,
-        invalid_value: Option<String>,
-        severity: ErrorSeverity,
+        expected_value: Option<String>,
+        actual_value: Option<String>,
+        line: i32,
+        column: i32,
+        suggestion: Option<String>,
+        severity: super::ErrorSeverity,
     ) -> Self {
-        let error_id = format!("DXCFG{:?}L{}C{}", error_type, line, column);
-        let suggestion = Self::generate_suggestion(error_type, field_name.as_deref(), invalid_value.as_deref());
+        let error_id = if line > 0 || column > 0 {
+            format!("DXCFG{:03}L{}C{}", error_type as u32, line, column)
+        } else {
+            format!("DXCFG{:03}", error_type as u32)
+        };
 
-        Self {
+        let quick_fixes = Self::generate_quick_fixes(error_type);
+
+        ConfigError {
             error_id,
             error_type,
             message,
+            section_name,
+            field_name,
+            expected_value,
+            actual_value,
             line,
             column,
-            field_name,
-            invalid_value,
-            suggestion: Some(suggestion),
+            suggestion,
             severity,
+            quick_fixes,
+            metadata: std::collections::HashMap::new(),
         }
     }
 
-    #[inline]
-    fn generate_suggestion(
+    fn generate_quick_fixes(error_type: ConfigErrorType) -> Vec<String> {
+        match error_type {
+            ConfigErrorType::MissingRequiredSection => vec![
+                "Add missing section to configuration".to_string(),
+                "Check section name spelling".to_string(),
+            ],
+            ConfigErrorType::InvalidSectionFormat => vec![
+                "Check section syntax".to_string(),
+                "Verify section follows DixScript format".to_string(),
+            ],
+            ConfigErrorType::DuplicateSection => vec![
+                "Remove duplicate section".to_string(),
+                "Merge duplicate sections".to_string(),
+            ],
+            ConfigErrorType::InvalidValue => vec![
+                "Check value type matches expected".to_string(),
+                "Verify value format".to_string(),
+            ],
+            ConfigErrorType::MissingRequiredField => vec![
+                "Add missing field".to_string(),
+                "Check field name spelling".to_string(),
+            ],
+            ConfigErrorType::InvalidFieldType => vec![
+                "Use correct type for field".to_string(),
+                "Check type definition".to_string(),
+            ],
+            ConfigErrorType::ConstraintViolation => vec![
+                "Check value meets constraints".to_string(),
+                "Review validation rules".to_string(),
+            ],
+            ConfigErrorType::CircularReference => vec![
+                "Break circular dependency".to_string(),
+                "Restructure configuration".to_string(),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Generate suggestion for config error
+    pub fn generate_suggestion(
         error_type: ConfigErrorType,
+        section_name: Option<&str>,
         field_name: Option<&str>,
-        invalid_value: Option<&str>,
     ) -> String {
         match error_type {
-            ConfigErrorType::InvalidVersion => {
-                "Version must be in format: MAJOR.MINOR.PATCH (e.g., 1.0.0)".to_string()
+            ConfigErrorType::MissingRequiredSection => {
+                format!("Required section '{}' is missing from configuration.",
+                        section_name.unwrap_or("unknown"))
             }
-            ConfigErrorType::InvalidEncoding => {
-                "Valid encodings: utf8, utf16, ascii".to_string()
+            ConfigErrorType::InvalidSectionFormat => {
+                format!("Section '{}' has invalid format. Check syntax.",
+                        section_name.unwrap_or("unknown"))
             }
-            ConfigErrorType::InvalidDebugMode => {
-                "Valid debug modes: 0 (off), 1 (regular), 2 (verbose)".to_string()
+            ConfigErrorType::DuplicateSection => {
+                format!("Section '{}' is defined multiple times. Remove duplicates.",
+                        section_name.unwrap_or("unknown"))
             }
-            ConfigErrorType::InvalidErrorHandling => {
-                "Valid values: halt, continue, recover".to_string()
+            ConfigErrorType::InvalidValue => {
+                format!("Invalid value for field '{}' in section '{}'.",
+                        field_name.unwrap_or("unknown"),
+                        section_name.unwrap_or("unknown"))
             }
-            ConfigErrorType::InvalidCompatibilityMode => {
-                "Valid values: strict, best_effort, permissive".to_string()
+            ConfigErrorType::MissingRequiredField => {
+                format!("Required field '{}' is missing in section '{}'.",
+                        field_name.unwrap_or("unknown"),
+                        section_name.unwrap_or("unknown"))
             }
-            ConfigErrorType::MissingArrowOperator => {
-                "Each config line must use: key => value".to_string()
+            ConfigErrorType::InvalidFieldType => {
+                format!("Field '{}' has incorrect type.",
+                        field_name.unwrap_or("unknown"))
             }
-            ConfigErrorType::DuplicateKey => {
-                if let Some(field) = field_name {
-                    format!("Field '{}' is already defined", field)
-                } else {
-                    "Remove duplicate configuration key".to_string()
-                }
+            ConfigErrorType::ConstraintViolation => {
+                format!("Field '{}' violates validation constraint.",
+                        field_name.unwrap_or("unknown"))
             }
-            ConfigErrorType::InvalidFieldValue => {
-                if let Some(field) = field_name {
-                    if let Some(value) = invalid_value {
-                        format!("'{}' is not a valid value for '{}'", value, field)
-                    } else {
-                        format!("Invalid value for field '{}'", field)
-                    }
-                } else {
-                    "Check the field value format".to_string()
-                }
+            ConfigErrorType::CircularReference => {
+                "Circular reference detected in configuration.".to_string()
             }
-            _ => "Check @CONFIG section syntax".to_string(),
+            ConfigErrorType::IncompatibleVersions => {
+                "Configuration version incompatible with current DixScript version.".to_string()
+            }
+            _ => "Configuration validation failed.".to_string(),
         }
     }
 }
 
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "[{}] {} at Line {}, Column {}: {}",
-            self.severity, self.error_id, self.line, self.column, self.message
-        )?;
+        writeln!(f, "[{}] {:?}: {:?}", self.error_id, self.severity, self.error_type)?;
 
-        if let Some(ref field) = self.field_name {
-            write!(f, "\n📍 Field: {}", field)?;
+        if let Some(ref section) = self.section_name {
+            writeln!(f, "Section: {}", section)?;
         }
 
-        if let Some(ref value) = self.invalid_value {
-            write!(f, "\n📍 Invalid Value: {}", value)?;
+        if let Some(ref field) = self.field_name {
+            writeln!(f, "Field: {}", field)?;
+        }
+
+        if self.line > 0 || self.column > 0 {
+            writeln!(f, "Location: Line {}, Column {}", self.line, self.column)?;
+        }
+
+        writeln!(f, "Message: {}", self.message)?;
+
+        if let Some(ref expected) = self.expected_value {
+            writeln!(f, "Expected: {}", expected)?;
+        }
+
+        if let Some(ref actual) = self.actual_value {
+            writeln!(f, "Actual: {}", actual)?;
         }
 
         if let Some(ref suggestion) = self.suggestion {
-            write!(f, "\n💡 Suggestion: {}", suggestion)?;
+            writeln!(f, "Suggestion: {}", suggestion)?;
+        }
+
+        if !self.quick_fixes.is_empty() {
+            writeln!(f, "Quick Fixes:")?;
+            for fix in &self.quick_fixes {
+                writeln!(f, "  - {}", fix)?;
+            }
         }
 
         Ok(())

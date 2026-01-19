@@ -1,11 +1,7 @@
-//! Parser errors (syntax analysis phase)
-
-use super::ErrorSeverity;
-use crate::DixCore::List;
 use crate::Utilities::Token;
-use std::collections::HashMap;
 use std::fmt;
 
+/// Parse error types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseErrorType {
     UnexpectedToken,
@@ -23,9 +19,12 @@ pub enum ParseErrorType {
     InvalidBuiltinCall,
     SectionSyntaxError,
     Other,
+    InvalidIdentifier,
+    InvalidLiteral,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// Parse error with location and quick fixes
+#[derive(Debug, Clone)]
 pub struct ParseError {
     pub error_id: String,
     pub error_type: ParseErrorType,
@@ -35,9 +34,9 @@ pub struct ParseError {
     pub suggestion: Option<String>,
     pub source_line: Option<String>,
     pub error_indicator: Option<String>,
-    pub severity: ErrorSeverity,
-    pub quick_fixes: List<String>,
-    pub metadata: HashMap<String, String>,
+    pub severity: super::ErrorSeverity,
+    pub quick_fixes: Vec<String>,
+    pub metadata: std::collections::HashMap<String, String>,
 }
 
 impl ParseError {
@@ -48,17 +47,28 @@ impl ParseError {
         column: usize,
         suggestion: Option<String>,
         source_line: Option<String>,
-        severity: ErrorSeverity,
+        severity: super::ErrorSeverity,
     ) -> Self {
-        let error_id = format!("DX{:?}L{}C{}", error_type, line, column);
-        let error_indicator = source_line.as_ref().map(|sl| {
-            let spaces = " ".repeat(column.saturating_sub(1));
-            format!("{}\n{}^-- Here", sl, spaces)
-        });
+        let error_id = format!("DX{:03}L{}C{}", error_type as u32, line, column);
+
+        let error_indicator = if let Some(ref src) = source_line {
+            if column > 0 {
+                let mut indicator = String::new();
+                for _ in 0..column {
+                    indicator.push(' ');
+                }
+                indicator.push_str("^--");
+                Some(indicator)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         let quick_fixes = Self::generate_quick_fixes(error_type);
 
-        Self {
+        ParseError {
             error_id,
             error_type,
             message,
@@ -69,10 +79,98 @@ impl ParseError {
             error_indicator,
             severity,
             quick_fixes,
-            metadata: HashMap::new(),
+            metadata: std::collections::HashMap::new(),
         }
     }
 
+    fn generate_quick_fixes(error_type: ParseErrorType) -> Vec<String> {
+        match error_type {
+            ParseErrorType::MissingToken => vec![
+                "Insert missing token".to_string(),
+                "Check surrounding syntax".to_string(),
+            ],
+            ParseErrorType::UnexpectedToken => vec![
+                "Remove unexpected token".to_string(),
+                "Replace with expected token".to_string(),
+            ],
+            ParseErrorType::UnknownStaticObject => vec![
+                "Use Math, DateTime, Array, Random, or Enum".to_string(),
+                "Check object name spelling".to_string(),
+            ],
+            ParseErrorType::UnknownStaticMethod => vec![
+                "Check available methods for this object".to_string(),
+                "Verify method name spelling".to_string(),
+            ],
+            ParseErrorType::SectionSyntaxError => vec![
+                "Check section syntax in documentation".to_string(),
+                "Verify parentheses and commas".to_string(),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Generate suggestion for parse error
+    pub fn generate_suggestion(
+        error_type: ParseErrorType,
+        token: &Token,
+        _context_tokens: Option<&[Token]>,
+    ) -> String {
+        match error_type {
+            ParseErrorType::UnexpectedToken => {
+                format!("Unexpected token '{}'. Consider checking the syntax here.", token.get_token_value())
+            }
+            ParseErrorType::MissingToken => {
+                format!("Missing expected token before '{}'. Check if required delimiters or keywords are present.",
+                        token.get_token_value())
+            }
+            ParseErrorType::InvalidType => {
+                format!("Invalid type '{}'. Use a valid DixScript type.", token.get_token_value())
+            }
+            ParseErrorType::DuplicateDefinition => {
+                format!("'{}' is already defined. Use a different name.", token.get_token_value())
+            }
+            ParseErrorType::UndefinedReference => {
+                format!("Reference to undefined identifier '{}'.", token.get_token_value())
+            }
+            ParseErrorType::TypeMismatch => {
+                format!("Type mismatch with '{}'. Check the expected type.", token.get_token_value())
+            }
+            ParseErrorType::InvalidOperation => {
+                format!("Invalid operation with '{}'. Check if the operation is allowed for this type.",
+                        token.get_token_value())
+            }
+            ParseErrorType::UnsupportedFeature => {
+                format!("Feature '{}' is not supported in the current version.", token.get_token_value())
+            }
+            ParseErrorType::UnknownStaticObject => {
+                format!("Static object '{}' not found. Available objects: Math, DateTime, Array, Random, Enum.",
+                        token.get_token_value())
+            }
+            ParseErrorType::UnknownStaticMethod => {
+                format!("Method '{}' not available on this static object. Check the object's available methods.",
+                        token.get_token_value())
+            }
+            ParseErrorType::UnknownInstanceMethod => {
+                format!("Method '{}' not available for this expression type. Check type-specific methods.",
+                        token.get_token_value())
+            }
+            ParseErrorType::InvalidMethodSignature => {
+                format!("Method call '{}' has incorrect parameters. Check parameter count and types.",
+                        token.get_token_value())
+            }
+            ParseErrorType::InvalidBuiltinCall => {
+                format!("Invalid built-in call pattern near '{}'. Check syntax: Object.method() or expression.method().",
+                        token.get_token_value())
+            }
+            ParseErrorType::SectionSyntaxError => {
+                format!("Section syntax error near '{}'. Check section formatting and delimiters.",
+                        token.get_token_value())
+            }
+            _ => format!("Check syntax near line {}, column {}.", token.line, token.column),
+        }
+    }
+
+    /// Create registry error (for built-in validation failures)
     pub fn create_registry_error(
         error_type: ParseErrorType,
         object_name: &str,
@@ -83,100 +181,70 @@ impl ParseError {
     ) -> Self {
         let message = match error_type {
             ParseErrorType::UnknownStaticObject => {
-                format!("Unknown static object: '{}'", object_name)
+                format!("Unknown static object '{}'", object_name)
             }
             ParseErrorType::UnknownStaticMethod => {
-                format!("Unknown static method: '{}.{}'", object_name, method_name)
+                format!("Unknown method '{}' on object '{}'", method_name, object_name)
             }
             ParseErrorType::UnknownInstanceMethod => {
-                format!("Unknown instance method: '{}.{}'", object_name, method_name)
+                format!("Unknown instance method '{}' for expression type", method_name)
             }
-            _ => format!("Registry error for '{}.{}'", object_name, method_name),
+            ParseErrorType::InvalidMethodSignature => {
+                format!("Invalid signature for {}.{}()", object_name, method_name)
+            }
+            _ => format!("Registry error with {}.{}", object_name, method_name),
         };
 
-        let suggestion = format!(
-            "Check if '{}' is registered in the built-in registry",
-            object_name
-        );
+        let suggestion = match error_type {
+            ParseErrorType::UnknownStaticObject => {
+                "Available static objects: Math, DateTime, Array, Random, Enum".to_string()
+            }
+            ParseErrorType::UnknownStaticMethod => {
+                format!("Check available methods for {} object", object_name)
+            }
+            ParseErrorType::UnknownInstanceMethod => {
+                "Check methods available for this expression type".to_string()
+            }
+            ParseErrorType::InvalidMethodSignature => {
+                format!("Check parameter count and types for {}.{}()", object_name, method_name)
+            }
+            _ => "Check built-in function documentation".to_string(),
+        };
 
-        Self::new(
+        ParseError::new(
             error_type,
             message,
             line,
             column,
             Some(suggestion),
             source_line,
-            ErrorSeverity::Error,
+            super::ErrorSeverity::Error,
         )
-    }
-
-    #[inline]
-    fn generate_quick_fixes(error_type: ParseErrorType) -> List<String> {
-        let mut fixes = List::New();
-
-        match error_type {
-            ParseErrorType::MissingToken => {
-                fixes.Add("Add the missing token".to_string());
-            }
-            ParseErrorType::UnexpectedToken => {
-                fixes.Add("Remove or replace the unexpected token".to_string());
-            }
-            ParseErrorType::UndefinedReference => {
-                fixes.Add("Define the referenced variable or function".to_string());
-                fixes.Add("Check spelling of the identifier".to_string());
-            }
-            ParseErrorType::TypeMismatch => {
-                fixes.Add("Cast the value to the expected type".to_string());
-            }
-            ParseErrorType::UnknownStaticObject | ParseErrorType::UnknownStaticMethod => {
-                fixes.Add("Check the built-in function registry".to_string());
-                fixes.Add("Ensure the static object is properly imported".to_string());
-            }
-            _ => {}
-        }
-
-        fixes
-    }
-
-    #[inline]
-    pub fn generate_suggestion(
-        error_type: &ParseErrorType,
-        token: &Token,
-        _context_tokens: Option<&List<Token>>,
-    ) -> String {
-        match error_type {
-            ParseErrorType::UnexpectedToken => {
-                format!("Unexpected token '{}' at this position", token.Lexeme)
-            }
-            ParseErrorType::MissingToken => "Expected a token here".to_string(),
-            ParseErrorType::UndefinedReference => {
-                format!("'{}' is not defined in this scope", token.Lexeme)
-            }
-            _ => "Check syntax and try again".to_string(),
-        }
     }
 }
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "[{}] {} at Line {}, Column {}: {}",
-            self.severity, self.error_id, self.line, self.column, self.message
-        )?;
+        writeln!(f, "[{}] {:?}: {:?} at line {}, column {}",
+                 self.error_id, self.severity, self.error_type, self.line, self.column)?;
+        writeln!(f, "Message: {}", self.message)?;
 
-        if let Some(ref indicator) = self.error_indicator {
-            write!(f, "\n{}", indicator)?;
+        if let Some(ref src) = self.source_line {
+            writeln!(f, "Source:")?;
+            writeln!(f, "{}", src)?;
+            if let Some(ref indicator) = self.error_indicator {
+                writeln!(f, "{}", indicator)?;
+            }
         }
 
         if let Some(ref suggestion) = self.suggestion {
-            write!(f, "\n💡 Suggestion: {}", suggestion)?;
+            writeln!(f, "Suggestion: {}", suggestion)?;
         }
 
-        if !self.quick_fixes.IsEmpty() {
-            write!(f, "\n🔧 Quick Fixes:")?;
-            for fix in self.quick_fixes.Iter() {
-                write!(f, "\n  - {}", fix)?;
+        if !self.quick_fixes.is_empty() {
+            writeln!(f, "Quick Fixes:")?;
+            for fix in &self.quick_fixes {
+                writeln!(f, "  - {}", fix)?;
             }
         }
 

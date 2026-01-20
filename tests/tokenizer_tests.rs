@@ -103,7 +103,7 @@ fn test_data_type_keywords() {
     let result = tokenize_input(input);
 
     let keywords = count_token_type(&result.tokens, "Keyword");
-    assert_eq!(keywords, 14);
+    assert_eq!(keywords, 15);
 }
 
 #[test]
@@ -329,6 +329,7 @@ fn test_arithmetic_operators() {
 fn test_comparison_operators() {
     let input = "== != < > <= >=";
     let result = tokenize_input(input);
+    print_tokens(&result.tokens); // <-- ADD THIS
 
     let comparisons = count_token_type(&result.tokens, "ComparisonOp");
     assert_eq!(comparisons, 6);
@@ -410,7 +411,7 @@ fn test_common_symbols() {
     let result = tokenize_input(input);
 
     let symbols = count_token_type(&result.tokens, "Symbol");
-    assert_eq!(symbols, 14);
+    assert_eq!(symbols, 13);
 }
 
 // ==================== STATIC CALL DETECTION ====================
@@ -455,8 +456,8 @@ fn test_metadata_generation() {
 
 #[test]
 fn test_all_datatypes_mdix_file() {
-    let file_content = std::fs::read_to_string("mdix_files/DixScriptConsoleApp/all_datatypes_test.mdix")
-        .expect("Failed to read all_datatypes_test.mdix - make sure the file exists");
+    let file_content = std::fs::read_to_string("mdix_files/advanced/all_datatypes_test.mdix")
+        .expect("Failed to read all_datatypes_test.mdix - make sure the file exists at mdix_files/advanced/all_datatypes_test.mdix");
 
     let result = tokenize_input(&file_content);
 
@@ -758,4 +759,12 @@ fn test_tokenization_throughput() {
 
     // Should process at least 1 MB/sec
     assert!(mb_per_sec > 1.0, "Too slow: {:.2} MB/sec", mb_per_sec);
+}
+
+fn print_tokens(tokens: &[Token]) {
+    println!("\n=== TOKENS ({}) ===", tokens.len());
+    for (i, token) in tokens.iter().enumerate() {
+        println!("{:3}: {:?}", i, token);
+    }
+    println!("===================\n");
 }

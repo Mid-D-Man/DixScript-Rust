@@ -1,8 +1,9 @@
-//! DixScript Lexer v1.0.0
+//! DixScript Lexer v1.0.0 - Rust Port
 //!
 //! High-performance manual tokenization with zero-allocation optimizations.
-//! This is a HOT PATH - avoid cloning at all costs.
+//! This is a HOT PATH - byte-indexed for O(1) character access.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use crate::Utilities::{Token, TokenType};
 use crate::ErrorManager::{ErrorManager, LexicalErrorType};
@@ -14,8 +15,8 @@ const MAX_RECOVERY_ATTEMPTS: usize = 10;
 
 /// Position tracking state for tokenization
 ///
-/// This struct is kept small and stack-allocated for performance.
-/// All fields are Copy types to avoid any allocation overhead.
+/// Uses byte-based indexing for O(1) access to ASCII tokens.
+/// String content (UTF-8) is handled separately in scan_string_literal.
 #[derive(Debug, Clone, Copy)]
 struct TokenizerState {
     position: usize,
@@ -40,31 +41,45 @@ impl TokenizerState {
         self.position >= self.input_length
     }
 
+    /// Peek at current character - O(1) for ASCII tokens
     #[inline]
     fn peek(&self, input: &str) -> char {
         if self.is_at_end() {
             '\0'
         } else {
-            input.chars().nth(self.position).unwrap_or('\0')
+            input.as_bytes()[self.position] as char
         }
     }
 
+    /// Peek at next character - O(1)
     #[inline]
     fn peek_next(&self, input: &str) -> char {
         if self.position + 1 >= self.input_length {
             '\0'
         } else {
-            input.chars().nth(self.position + 1).unwrap_or('\0')
+            input.as_bytes()[self.position + 1] as char
         }
     }
 
+    /// Peek at character at offset - O(1)
+    #[inline]
+    fn peek_at(&self, input: &str, offset: usize) -> char {
+        let pos = self.position + offset;
+        if pos >= self.input_length {
+            '\0'
+        } else {
+            input.as_bytes()[pos] as char
+        }
+    }
+
+    /// Advance and return current character - O(1)
     #[inline]
     fn advance(&mut self, input: &str) -> char {
         if self.is_at_end() {
             return '\0';
         }
 
-        let current = input.chars().nth(self.position).unwrap_or('\0');
+        let current = input.as_bytes()[self.position] as char;
         self.position += 1;
 
         if current == '\n' {
@@ -77,6 +92,7 @@ impl TokenizerState {
         current
     }
 
+    /// Extract string slice - zero-copy
     #[inline]
     fn slice<'a>(&self, input: &'a str, start: usize, length: usize) -> &'a str {
         let bytes = input.as_bytes();
@@ -87,7 +103,7 @@ impl TokenizerState {
 
 /// Main tokenizer for DixScript
 ///
-/// Uses a pre-allocated token buffer and borrows input heavily to minimize allocations.
+/// Uses byte-based indexing for ASCII tokens and proper UTF-8 handling for string content.
 pub struct Tokenizer {
     input: String,
     version_manager: &'static VersionManager,
@@ -95,7 +111,7 @@ pub struct Tokenizer {
     current_section: Option<String>,
     prefixed_constructors_found: Vec<PrefixedConstructorInfo>,
     static_calls_found: Vec<StaticCallInfo>,
-    identifier_cache: HashMap<String, String>,
+    identifier_cache: RefCell<HashMap<String, String>>,
     token_pool: Vec<Token>,
 }
 
@@ -112,7 +128,7 @@ impl Tokenizer {
             current_section: None,
             prefixed_constructors_found: Vec::new(),
             static_calls_found: Vec::new(),
-            identifier_cache: HashMap::new(),
+            identifier_cache: RefCell::new(HashMap::new()),
             token_pool: Vec::with_capacity(initial_capacity),
         }
     }
@@ -325,14 +341,11 @@ impl Tokenizer {
 
     #[inline]
     fn supports_recovery(&self) -> bool {
-        // Check if strategy is Recover
-        // If not terminating and has errors, we're in Continue or Recover mode
         !self.should_terminate() || self.should_continue()
     }
 
     #[inline]
     fn should_continue(&self) -> bool {
-        // If not terminating and has errors, we're in Continue or Recover mode
         self.error_manager.has_errors() && !self.should_terminate()
     }
 
@@ -360,14 +373,17 @@ impl Tokenizer {
         c.is_ascii_hexdigit()
     }
 
-    fn intern_string(&mut self, s: &str) -> String {
-        if let Some(interned) = self.identifier_cache.get(s) {
-            interned.clone()
-        } else {
-            let owned = s.to_string();
-            self.identifier_cache.insert(owned.clone(), owned.clone());
-            owned
+    /// String interning with RefCell for interior mutability
+    fn intern_string(&self, s: &str) -> String {
+        // Check if already interned (immutable borrow)
+        if let Some(interned) = self.identifier_cache.borrow().get(s) {
+            return interned.clone();
         }
+
+        // Not found, insert it (mutable borrow in separate scope)
+        let owned = s.to_string();
+        self.identifier_cache.borrow_mut().insert(owned.clone(), owned.clone());
+        owned
     }
 
     #[inline]
@@ -389,6 +405,7 @@ impl Tokenizer {
         }
     }
 }
+
 // ==================== CORE SCANNING ====================
 
 impl Tokenizer {
@@ -469,7 +486,7 @@ impl Tokenizer {
 
     // ==================== COMMENT SCANNING ====================
 
-    fn scan_single_line_comment(&mut self, state: &mut TokenizerState) -> Token {
+    fn scan_single_line_comment(&self, state: &mut TokenizerState) -> Token {
         let start_column = state.column;
         let start_line = state.line;
 
@@ -484,9 +501,8 @@ impl Tokenizer {
             state.advance(&self.input);
         }
 
-        let comment_text = self.intern_string(
-            state.slice(&self.input, comment_start, state.position - comment_start)
-        );
+        let comment_slice = state.slice(&self.input, comment_start, state.position - comment_start);
+        let comment_text = self.intern_string(comment_slice);
 
         // Consume newline if present
         if !state.is_at_end() && state.peek(&self.input) == '\n' {
@@ -501,7 +517,7 @@ impl Tokenizer {
         )
     }
 
-    fn scan_multi_line_comment(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
+    fn scan_multi_line_comment(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line = state.line;
 
@@ -514,9 +530,8 @@ impl Tokenizer {
         // Find closing */
         while !state.is_at_end() {
             if state.peek(&self.input) == '*' && state.peek_next(&self.input) == '/' {
-                let comment_text = self.intern_string(
-                    state.slice(&self.input, comment_start, state.position - comment_start)
-                );
+                let comment_slice = state.slice(&self.input, comment_start, state.position - comment_start);
+                let comment_text = self.intern_string(comment_slice);
 
                 // Consume */
                 state.advance(&self.input);
@@ -551,9 +566,8 @@ impl Tokenizer {
         }
 
         // Return partial comment
-        let comment_text = self.intern_string(
-            state.slice(&self.input, comment_start, state.position - comment_start)
-        );
+        let comment_slice = state.slice(&self.input, comment_start, state.position - comment_start);
+        let comment_text = self.intern_string(comment_slice);
 
         Ok(Some(Token::new(
             TokenType::Comment(comment_text),
@@ -565,7 +579,7 @@ impl Tokenizer {
 
     // ==================== SECTION KEYWORD SCANNING ====================
 
-    fn try_scan_section_keyword(&mut self, state: &mut TokenizerState) -> Option<Token> {
+    fn try_scan_section_keyword(&self, state: &mut TokenizerState) -> Option<Token> {
         let start_pos = state.position;
         let start_line = state.line;
         let start_column = state.column;
@@ -624,7 +638,7 @@ impl Tokenizer {
 
     // ==================== STRING LITERAL SCANNING ====================
 
-    fn scan_string_literal(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
+    fn scan_string_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_line = state.line;
         let start_column = state.column;
         let quote = state.peek(&self.input);
@@ -668,13 +682,13 @@ impl Tokenizer {
             }
 
             // Return partial string
-            let partial = state.slice(&self.input, content_start, bytes.len() - content_start);
+            let partial = state.slice(&self.input, content_start, bytes.len() - content_start).to_string();
             state.position = bytes.len();
 
             let token_type = if quote == '\'' {
-                TokenType::StringSingle(self.intern_string(partial))
+                TokenType::StringSingle(self.intern_string(&partial))
             } else {
-                TokenType::String(self.intern_string(partial))
+                TokenType::String(self.intern_string(&partial))
             };
 
             return Ok(Some(Token::new(
@@ -693,7 +707,7 @@ impl Tokenizer {
                 if ch == '\\' {
                     state.position += 1;
                     if state.position < scan_pos {
-                        let escaped = self.input.chars().nth(state.position).unwrap_or('\0');
+                        let escaped = self.input.as_bytes()[state.position] as char;
                         result.push(self.process_escape_sequence(escaped));
                         state.position += 1;
                         state.column += 2;
@@ -729,7 +743,7 @@ impl Tokenizer {
         )))
     }
 
-    fn scan_interpolated_string(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
+    fn scan_interpolated_string(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_line = state.line;
         let start_column = state.column;
 
@@ -811,7 +825,7 @@ impl Tokenizer {
 // ==================== NUMERIC LITERAL SCANNING ====================
 
 impl Tokenizer {
-    fn scan_numeric_literal(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
+    fn scan_numeric_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line = state.line;
         let start_pos = state.position;
@@ -886,12 +900,13 @@ impl Tokenizer {
             }
         }
 
-        let number_string = state.slice(&self.input, start_pos, state.position - start_pos);
+        // Convert slice to owned String to break the borrow
+        let number_string = state.slice(&self.input, start_pos, state.position - start_pos).to_string();
 
         // Return appropriate token type
         if is_timestamp {
             return Ok(Some(Token::new(
-                TokenType::Timestamp(self.intern_string(number_string)),
+                TokenType::Timestamp(self.intern_string(&number_string)),
                 start_line,
                 start_column,
                 self.current_section.clone(),
@@ -900,18 +915,18 @@ impl Tokenizer {
 
         if is_date {
             return Ok(Some(Token::new(
-                TokenType::Date(self.intern_string(number_string)),
+                TokenType::Date(self.intern_string(&number_string)),
                 start_line,
                 start_column,
                 self.current_section.clone(),
             )));
         }
 
-        self.create_numeric_token(number_string, has_dot, has_exponent, state, start_line, start_column)
+        self.create_numeric_token(&number_string, has_dot, has_exponent, state, start_line, start_column)
     }
 
     fn create_numeric_token(
-        &mut self,
+        &self,
         number_string: &str,
         has_dot: bool,
         has_exponent: bool,
@@ -1015,7 +1030,7 @@ impl Tokenizer {
 
     // ==================== HEX SCANNING ====================
 
-    fn scan_hex_color(&mut self, state: &mut TokenizerState) -> Token {
+    fn scan_hex_color(&self, state: &mut TokenizerState) -> Token {
         let start_column = state.column;
         let start_line = state.line;
         let start_pos = state.position;
@@ -1029,17 +1044,18 @@ impl Tokenizer {
             state.advance(&self.input);
         }
 
-        let hex_value = state.slice(&self.input, start_pos, state.position - start_pos);
+        let hex_slice = state.slice(&self.input, start_pos, state.position - start_pos);
+        let hex_value = self.intern_string(hex_slice);
 
         Token::new(
-            TokenType::HexColor(self.intern_string(hex_value)),
+            TokenType::HexColor(hex_value),
             start_line,
             start_column,
             self.current_section.clone(),
         )
     }
 
-    fn scan_hex_literal(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
+    fn scan_hex_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line = state.line;
         let start_pos = state.position;
@@ -1054,40 +1070,45 @@ impl Tokenizer {
 
         let hex_part = state.slice(&self.input, start_pos + 2, state.position - start_pos - 2);
 
-        match i32::from_str_radix(hex_part, 16) {
-            Ok(value) => Ok(Some(Token::new(
-                TokenType::Integer(value),
+        // Try i32 first, then i64 for larger values like 0xDEADBEEF
+        let value = if let Ok(val) = i32::from_str_radix(hex_part, 16) {
+            val
+        } else if let Ok(val) = i64::from_str_radix(hex_part, 16) {
+            // For values that exceed i32 but fit in u32, just truncate to i32
+            val as i32
+        } else {
+            self.error_manager.add_lexical_error(
+                LexicalErrorType::InvalidNumericFormat,
+                format!("Invalid hex literal: 0x{}", hex_part),
+                start_line,
+                start_column,
+                None,
+                None,
+            );
+
+            if self.should_terminate() {
+                return Err(format!("Invalid hex literal: 0x{}", hex_part));
+            }
+
+            return Ok(Some(Token::new(
+                TokenType::Error(format!("Invalid hex: 0x{}", hex_part)),
                 start_line,
                 start_column,
                 self.current_section.clone(),
-            ))),
-            Err(_) => {
-                self.error_manager.add_lexical_error(
-                    LexicalErrorType::InvalidNumericFormat,
-                    format!("Invalid hex literal: {}", hex_part),
-                    start_line,
-                    start_column,
-                    None,
-                    None,
-                );
+            )));
+        };
 
-                if self.should_terminate() {
-                    return Err(format!("Invalid hex literal: {}", hex_part));
-                }
-
-                Ok(Some(Token::new(
-                    TokenType::Error(format!("Invalid hex: {}", hex_part)),
-                    start_line,
-                    start_column,
-                    self.current_section.clone(),
-                )))
-            }
-        }
+        Ok(Some(Token::new(
+            TokenType::Integer(value),
+            start_line,
+            start_column,
+            self.current_section.clone(),
+        )))
     }
 
     // ==================== MULTI-CHAR OPERATOR SCANNING ====================
 
-    fn try_scan_multi_char_operator(&mut self, state: &mut TokenizerState) -> Option<Token> {
+    fn try_scan_multi_char_operator(&self, state: &mut TokenizerState) -> Option<Token> {
         let start_column = state.column;
         let start_line = state.line;
         let current = state.peek(&self.input);
@@ -1100,7 +1121,7 @@ impl Tokenizer {
 
         // Check for three-character operators
         if state.position + 2 < state.input_length {
-            let third = self.input.chars().nth(state.position + 2).unwrap_or('\0');
+            let third = state.peek_at(&self.input, 2);
 
             let three_char = match (current, next, third) {
                 ('*', '*', '=') => Some(TokenType::ArithmeticAssignOp("**=".to_string())),
@@ -1162,7 +1183,7 @@ impl Tokenizer {
 impl Tokenizer {
     // ==================== IDENTIFIER AND KEYWORD SCANNING ====================
 
-    fn scan_identifier_or_keyword(&mut self, state: &mut TokenizerState) -> Token {
+    fn scan_identifier_or_keyword(&self, state: &mut TokenizerState) -> Token {
         let start_column = state.column;
         let start_line = state.line;
         let start_pos = state.position;
@@ -1308,19 +1329,32 @@ impl Tokenizer {
 
     // ==================== SINGLE CHARACTER SCANNING ====================
 
-    fn scan_single_character(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
+    fn scan_single_character(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line = state.line;
         let symbol = state.advance(&self.input);
 
-        // Special arithmetic operators
+        // Special operators
         let token_type = match symbol {
+            // Comparison operators (FIX: Add these)
+            '<' => TokenType::ComparisonOp("<".to_string()),
+            '>' => TokenType::ComparisonOp(">".to_string()),
+            '=' => TokenType::Symbol('='), // Single = is assignment, not comparison
+            '!' => TokenType::Symbol('!'),
+
+            // Arithmetic operators
             '+' => TokenType::ArithmeticOp("+".to_string()),
+            '-' => TokenType::ArithmeticOp("-".to_string()),
             '*' => TokenType::ArithmeticOp("*".to_string()),
+            '/' => TokenType::ArithmeticOp("/".to_string()),
             '%' => TokenType::ArithmeticOp("%".to_string()),
+
+            // Bitwise operators
             '^' => TokenType::BitwiseOp("^".to_string()),
             '&' => TokenType::BitwiseOp("&".to_string()),
             '|' => TokenType::BitwiseOp("|".to_string()),
+
+            // Everything else is a symbol
             _ if !symbol.is_control() && !symbol.is_whitespace() => TokenType::Symbol(symbol),
             _ => {
                 self.error_manager.add_lexical_error(
@@ -1447,7 +1481,6 @@ impl Tokenizer {
 
         count
     }
-
 }
 
 /// Tokenization result structure

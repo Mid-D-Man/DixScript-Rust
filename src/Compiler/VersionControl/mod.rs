@@ -1,2 +1,4 @@
-//! Version control - Forward compatibility
-// TODO: Implement VersionManager, VersionConstraints, ForwardCompatabilityManager
+// src/Compiler/VersionControl/mod.rs
+pub mod version_manager;
+
+pub use version_manager::VersionManager;

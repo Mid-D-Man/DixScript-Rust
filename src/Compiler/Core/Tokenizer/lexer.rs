@@ -4,8 +4,8 @@
 //! This is a HOT PATH - avoid cloning at all costs.
 
 use std::collections::HashMap;
-use crate::Utilities::{Token, TokenType, Keywords};
-use crate::ErrorManager::{ErrorManager, LexicalErrorType, ErrorHandlingStrategy};
+use crate::Utilities::{Token, TokenType};
+use crate::ErrorManager::{ErrorManager, LexicalErrorType};
 use crate::Compiler::VersionControl::VersionManager;
 
 // Constants for optimization
@@ -41,7 +41,7 @@ impl TokenizerState {
     }
 
     #[inline]
-    fn peek<'a>(&self, input: &'a str) -> char {
+    fn peek(&self, input: &str) -> char {
         if self.is_at_end() {
             '\0'
         } else {
@@ -50,7 +50,7 @@ impl TokenizerState {
     }
 
     #[inline]
-    fn peek_next<'a>(&self, input: &'a str) -> char {
+    fn peek_next(&self, input: &str) -> char {
         if self.position + 1 >= self.input_length {
             '\0'
         } else {
@@ -90,7 +90,7 @@ impl TokenizerState {
 /// Uses a pre-allocated token buffer and borrows input heavily to minimize allocations.
 pub struct Tokenizer {
     input: String,
-    version_manager: VersionManager,
+    version_manager: &'static VersionManager,
     error_manager: ErrorManager,
     current_section: Option<String>,
     prefixed_constructors_found: Vec<PrefixedConstructorInfo>,
@@ -107,7 +107,7 @@ impl Tokenizer {
 
         Tokenizer {
             input,
-            version_manager: VersionManager::Instance,
+            version_manager: VersionManager::instance(),
             error_manager: ErrorManager::get_shared_instance(),
             current_section: None,
             prefixed_constructors_found: Vec::new(),
@@ -213,10 +213,13 @@ impl Tokenizer {
         // Analyze token sequences
         self.analyze_token_sequences();
 
+        // Create metadata BEFORE moving token_pool
+        let metadata = self.create_metadata();
+
         // Build result
         TokenizationResult {
             tokens: self.token_pool,
-            metadata: self.create_metadata(),
+            metadata,
             prefixed_constructors: self.prefixed_constructors_found,
             static_calls: self.static_calls_found,
         }
@@ -250,12 +253,12 @@ impl Tokenizer {
     }
 
     #[inline]
-    fn handle_unsupported_token(&self, token: &Token, state: &TokenizerState) {
+    fn handle_unsupported_token(&self, token: &Token, _state: &TokenizerState) {
         self.error_manager.add_lexical_error(
             LexicalErrorType::InvalidCharacter,
             format!(
                 "Token type not supported in version {}",
-                self.version_manager.CurrentVersion
+                self.version_manager.get_current_version()
             ),
             token.line,
             token.column,
@@ -323,8 +326,7 @@ impl Tokenizer {
     #[inline]
     fn supports_recovery(&self) -> bool {
         // Check if strategy is Recover
-        // We need to access operational_settings, but it's not directly exposed
-        // For now, we'll check if it's NOT Halt (meaning it could be Continue or Recover)
+        // If not terminating and has errors, we're in Continue or Recover mode
         !self.should_terminate() || self.should_continue()
     }
 
@@ -336,11 +338,60 @@ impl Tokenizer {
 
     #[inline]
     fn is_token_supported(&self, token: &Token) -> bool {
-        self.version_manager.IsTokenValidForVersion(&token.token_type)
+        self.version_manager.is_token_valid_for_version(&token.token_type)
     }
 
-    // ==================== CORE SCANNING ====================
+    // ==================== HELPER METHODS ====================
 
+    #[inline]
+    fn skip_whitespace(&self, state: &mut TokenizerState) {
+        while !state.is_at_end() {
+            let current = state.peek(&self.input);
+            if current.is_whitespace() {
+                state.advance(&self.input);
+            } else {
+                break;
+            }
+        }
+    }
+
+    #[inline]
+    fn is_hex_digit(&self, c: char) -> bool {
+        c.is_ascii_hexdigit()
+    }
+
+    fn intern_string(&mut self, s: &str) -> String {
+        if let Some(interned) = self.identifier_cache.get(s) {
+            interned.clone()
+        } else {
+            let owned = s.to_string();
+            self.identifier_cache.insert(owned.clone(), owned.clone());
+            owned
+        }
+    }
+
+    #[inline]
+    fn update_section_context(&mut self, token: &Token) {
+        if let Some(section) = token.token_type.get_section_context() {
+            self.current_section = Some(section.to_string());
+        }
+    }
+
+    #[inline]
+    fn is_advanced_section(&self) -> bool {
+        if let Some(ref section) = self.current_section {
+            matches!(
+                section.to_uppercase().as_str(),
+                "QUICKFUNCS" | "IMPORTS" | "DLM"
+            )
+        } else {
+            false
+        }
+    }
+}
+// ==================== CORE SCANNING ====================
+
+impl Tokenizer {
     fn scan_token(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         if state.is_at_end() {
             return Ok(None);
@@ -366,16 +417,54 @@ impl Tokenizer {
             }
         }
 
-        // Strings (will be in Response 2)
-        // Numbers (will be in Response 2)
-        // Hex colors (will be in Response 2)
-        // Multi-char operators (will be in Response 2)
-        // Prefixed constructors (will be in Response 2)
-        // Identifiers (will be in Response 2)
-        // Single characters (will be in Response 2)
+        // Strings
+        if current == '"' || current == '\'' {
+            return self.scan_string_literal(state);
+        }
 
-        // Placeholder for Response 2
-        Err(format!("Unhandled character at position {}", state.position))
+        // Interpolated strings (advanced sections only)
+        if current == '$' && self.is_advanced_section() {
+            let next = state.peek_next(&self.input);
+            if next == '"' || next == '\'' {
+                return self.scan_interpolated_string(state);
+            }
+        }
+
+        // Hex literals
+        if current == '0' {
+            let next = state.peek_next(&self.input);
+            if next == 'x' || next == 'X' {
+                return self.scan_hex_literal(state);
+            }
+        }
+
+        // Numbers
+        if current.is_ascii_digit() || (current == '-' && state.peek_next(&self.input).is_ascii_digit()) {
+            return self.scan_numeric_literal(state);
+        }
+
+        // Hex colors
+        if current == '#' {
+            return Ok(Some(self.scan_hex_color(state)));
+        }
+
+        // Multi-char operators
+        if let Some(multi_char_op) = self.try_scan_multi_char_operator(state) {
+            return Ok(Some(multi_char_op));
+        }
+
+        // Prefixed constructors (b:, t:, r:)
+        if current.is_ascii_alphabetic() && state.peek_next(&self.input) == ':' && self.is_valid_prefixed_constructor(state) {
+            return Ok(Some(self.scan_prefixed_constructor(state)));
+        }
+
+        // Identifiers and keywords
+        if current.is_ascii_alphabetic() || current == '_' {
+            return Ok(Some(self.scan_identifier_or_keyword(state)));
+        }
+
+        // Single characters
+        self.scan_single_character(state)
     }
 
     // ==================== COMMENT SCANNING ====================
@@ -412,7 +501,7 @@ impl Tokenizer {
         )
     }
 
-    fn scan_multi_line_comment(&mut self, state: &mut TokenizerState) -> Result<Token, String> {
+    fn scan_multi_line_comment(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line = state.line;
 
@@ -433,12 +522,12 @@ impl Tokenizer {
                 state.advance(&self.input);
                 state.advance(&self.input);
 
-                return Ok(Token::new(
+                return Ok(Some(Token::new(
                     TokenType::Comment(comment_text),
                     start_line,
                     start_column,
                     self.current_section.clone(),
-                ));
+                )));
             }
 
             state.advance(&self.input);
@@ -466,12 +555,12 @@ impl Tokenizer {
             state.slice(&self.input, comment_start, state.position - comment_start)
         );
 
-        Ok(Token::new(
+        Ok(Some(Token::new(
             TokenType::Comment(comment_text),
             start_line,
             start_column,
             self.current_section.clone(),
-        ))
+        )))
     }
 
     // ==================== SECTION KEYWORD SCANNING ====================
@@ -533,154 +622,9 @@ impl Tokenizer {
         }
     }
 
-    // ==================== HELPER METHODS ====================
-
-    #[inline]
-    fn skip_whitespace(&self, state: &mut TokenizerState) {
-        while !state.is_at_end() {
-            let current = state.peek(&self.input);
-            if current.is_whitespace() {
-                state.advance(&self.input);
-            } else {
-                break;
-            }
-        }
-    }
-
-    #[inline]
-    fn is_hex_digit(&self, c: char) -> bool {
-        c.is_ascii_hexdigit()
-    }
-
-    fn intern_string(&mut self, s: &str) -> String {
-        if let Some(interned) = self.identifier_cache.get(s) {
-            interned.clone()
-        } else {
-            let owned = s.to_string();
-            self.identifier_cache.insert(owned.clone(), owned.clone());
-            owned
-        }
-    }
-
-    #[inline]
-    fn update_section_context(&mut self, token: &Token) {
-        if let Some(section) = token.token_type.get_section_context() {
-            self.current_section = Some(section.to_string());
-        }
-    }
-
-    #[inline]
-    fn is_advanced_section(&self) -> bool {
-        if let Some(ref section) = self.current_section {
-            matches!(
-                section.to_uppercase().as_str(),
-                "QUICKFUNCS" | "IMPORTS" | "DLM"
-            )
-        } else {
-            false
-        }
-    }
-
-    // ==================== TOKEN SEQUENCE ANALYSIS ====================
-
-    fn analyze_token_sequences(&mut self) {
-        let len = self.token_pool.len();
-
-        for i in 0..len.saturating_sub(2) {
-            let token1 = &self.token_pool[i];
-            let token2 = &self.token_pool[i + 1];
-            let token3 = &self.token_pool[i + 2];
-
-            // Check for static calls: Identifier . Identifier
-            if let TokenType::Identifier(obj_name) = &token1.token_type {
-                if let TokenType::Symbol('.') = &token2.token_type {
-                    if let TokenType::Identifier(method_name) = &token3.token_type {
-                        if self.could_be_static_object(obj_name) {
-                            self.static_calls_found.push(StaticCallInfo {
-                                object_name: obj_name.clone(),
-                                method_name: method_name.clone(),
-                                line: token1.line,
-                                column: token1.column,
-                                section: self.current_section.clone(),
-                                token_index: i,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[inline]
-    fn could_be_static_object(&self, identifier: &str) -> bool {
-        !identifier.is_empty()
-            && identifier.chars().next().unwrap().is_uppercase()
-            && identifier != "Dix"
-    }
-
-    fn create_metadata(&self) -> TokenizationMetadata {
-        let sections_detected = self.get_sections_from_tokens();
-        let potential_builtin_calls = self.analyze_potential_builtin_calls();
-
-        TokenizationMetadata {
-            version: "1.0.0".to_string(),
-            total_lines: self.token_pool.last().map(|t| t.line).unwrap_or(1),
-            total_tokens: self.token_pool.len().saturating_sub(1), // Exclude EOF
-            sections_detected,
-            prefixed_constructors_found: self.prefixed_constructors_found.len(),
-            blob_constructors: self.prefixed_constructors_found.iter()
-                .filter(|p| p.constructor_type == "BLOB_CONSTRUCTOR")
-                .count(),
-            tuple_constructors: self.prefixed_constructors_found.iter()
-                .filter(|p| p.constructor_type == "TUPLE_CONSTRUCTOR")
-                .count(),
-            regex_constructors: self.prefixed_constructors_found.iter()
-                .filter(|p| p.constructor_type == "REGEX_CONSTRUCTOR")
-                .count(),
-            static_calls_found: self.static_calls_found.len(),
-            potential_builtin_calls,
-        }
-    }
-
-    fn get_sections_from_tokens(&self) -> Vec<String> {
-        let mut sections = Vec::new();
-
-        for token in &self.token_pool {
-            if let Some(section) = token.token_type.get_section_context() {
-                if !sections.contains(&section.to_string()) {
-                    sections.push(section.to_string());
-                }
-            }
-        }
-
-        sections
-    }
-
-    fn analyze_potential_builtin_calls(&self) -> usize {
-        let len = self.token_pool.len();
-        let mut count = 0;
-
-        for i in 0..len.saturating_sub(3) {
-            let token2 = &self.token_pool[i + 1];
-            let token3 = &self.token_pool[i + 2];
-            let token4 = &self.token_pool[i + 3];
-
-            // Pattern: . Identifier (
-            if let TokenType::Symbol('.') = &token2.token_type {
-                if let TokenType::Identifier(_) = &token3.token_type {
-                    if let TokenType::Symbol('(') = &token4.token_type {
-                        count += 1;
-                    }
-                }
-            }
-        }
-
-        count
-    }
-
     // ==================== STRING LITERAL SCANNING ====================
 
-    fn scan_string_literal(&mut self, state: &mut TokenizerState) -> Result<Token, String> {
+    fn scan_string_literal(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_line = state.line;
         let start_column = state.column;
         let quote = state.peek(&self.input);
@@ -733,12 +677,12 @@ impl Tokenizer {
                 TokenType::String(self.intern_string(partial))
             };
 
-            return Ok(Token::new(
+            return Ok(Some(Token::new(
                 token_type,
                 start_line,
                 start_column,
                 self.current_section.clone(),
-            ));
+            )));
         }
 
         // Process the string content
@@ -777,15 +721,15 @@ impl Tokenizer {
             TokenType::String(content)
         };
 
-        Ok(Token::new(
+        Ok(Some(Token::new(
             token_type,
             start_line,
             start_column,
             self.current_section.clone(),
-        ))
+        )))
     }
 
-    fn scan_interpolated_string(&mut self, state: &mut TokenizerState) -> Result<Token, String> {
+    fn scan_interpolated_string(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_line = state.line;
         let start_column = state.column;
 
@@ -839,12 +783,12 @@ impl Tokenizer {
             }
         }
 
-        Ok(Token::new(
+        Ok(Some(Token::new(
             TokenType::InterpolatedString(self.intern_string(&content)),
             start_line,
             start_column,
             self.current_section.clone(),
-        ))
+        )))
     }
 
     #[inline]
@@ -862,10 +806,12 @@ impl Tokenizer {
             _ => escaped,
         }
     }
+}
 
-    // ==================== NUMERIC LITERAL SCANNING ====================
+// ==================== NUMERIC LITERAL SCANNING ====================
 
-    fn scan_numeric_literal(&mut self, state: &mut TokenizerState) -> Result<Token, String> {
+impl Tokenizer {
+    fn scan_numeric_literal(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line = state.line;
         let start_pos = state.position;
@@ -928,7 +874,6 @@ impl Tokenizer {
                 state.advance(&self.input);
                 break;
             } else if (current == '+' || current == '-') && is_timestamp {
-                // Check if this is timezone offset
                 let scanned = state.slice(&self.input, start_pos, state.position - start_pos);
                 if scanned.contains('T') {
                     in_timezone_offset = true;
@@ -945,21 +890,21 @@ impl Tokenizer {
 
         // Return appropriate token type
         if is_timestamp {
-            return Ok(Token::new(
+            return Ok(Some(Token::new(
                 TokenType::Timestamp(self.intern_string(number_string)),
                 start_line,
                 start_column,
                 self.current_section.clone(),
-            ));
+            )));
         }
 
         if is_date {
-            return Ok(Token::new(
+            return Ok(Some(Token::new(
                 TokenType::Date(self.intern_string(number_string)),
                 start_line,
                 start_column,
                 self.current_section.clone(),
-            ));
+            )));
         }
 
         self.create_numeric_token(number_string, has_dot, has_exponent, state, start_line, start_column)
@@ -973,9 +918,9 @@ impl Tokenizer {
         state: &mut TokenizerState,
         start_line: usize,
         start_column: usize,
-    ) -> Result<Token, String> {
+    ) -> Result<Option<Token>, String> {
         let mut has_float_suffix = false;
-        let mut number_to_parse = number_string;
+        let number_to_parse = number_string;
 
         // Check for float suffix
         if !state.is_at_end() && matches!(state.peek(&self.input), 'f' | 'F') {
@@ -1033,12 +978,12 @@ impl Tokenizer {
             }
         };
 
-        Ok(Token::new(
+        Ok(Some(Token::new(
             token_type,
             start_line,
             start_column,
             self.current_section.clone(),
-        ))
+        )))
     }
 
     fn handle_invalid_number(
@@ -1046,7 +991,7 @@ impl Tokenizer {
         number_string: &str,
         start_line: usize,
         start_column: usize,
-    ) -> Result<Token, String> {
+    ) -> Result<Option<Token>, String> {
         self.error_manager.add_lexical_error(
             LexicalErrorType::InvalidNumericFormat,
             format!("Invalid numeric format: {}", number_string),
@@ -1060,12 +1005,12 @@ impl Tokenizer {
             return Err(format!("Invalid number format: {}", number_string));
         }
 
-        Ok(Token::new(
+        Ok(Some(Token::new(
             TokenType::Error(format!("Invalid number: {}", number_string)),
             start_line,
             start_column,
             self.current_section.clone(),
-        ))
+        )))
     }
 
     // ==================== HEX SCANNING ====================
@@ -1094,7 +1039,7 @@ impl Tokenizer {
         )
     }
 
-    fn scan_hex_literal(&mut self, state: &mut TokenizerState) -> Result<Token, String> {
+    fn scan_hex_literal(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line = state.line;
         let start_pos = state.position;
@@ -1110,12 +1055,12 @@ impl Tokenizer {
         let hex_part = state.slice(&self.input, start_pos + 2, state.position - start_pos - 2);
 
         match i32::from_str_radix(hex_part, 16) {
-            Ok(value) => Ok(Token::new(
+            Ok(value) => Ok(Some(Token::new(
                 TokenType::Integer(value),
                 start_line,
                 start_column,
                 self.current_section.clone(),
-            )),
+            ))),
             Err(_) => {
                 self.error_manager.add_lexical_error(
                     LexicalErrorType::InvalidNumericFormat,
@@ -1130,12 +1075,12 @@ impl Tokenizer {
                     return Err(format!("Invalid hex literal: {}", hex_part));
                 }
 
-                Ok(Token::new(
+                Ok(Some(Token::new(
                     TokenType::Error(format!("Invalid hex: {}", hex_part)),
                     start_line,
                     start_column,
                     self.current_section.clone(),
-                ))
+                )))
             }
         }
     }
@@ -1175,9 +1120,9 @@ impl Tokenizer {
 
         // Check for two-character operators
         let two_char = match (current, next) {
-            ('=', '>') => Some(TokenType::Arrow("=>".to_string())),
-            (':', ':') => Some(TokenType::DoubleColon()),
-            ('-', '>') => Some(TokenType::SwitchCase()),
+            ('=', '>') => Some(TokenType::Arrow),
+            (':', ':') => Some(TokenType::DoubleColon),
+            ('-', '>') => Some(TokenType::SwitchCase),
             ('*', '*') => Some(TokenType::ArithmeticOp("**".to_string())),
             ('<', '<') => Some(TokenType::BitwiseOp("<<".to_string())),
             ('>', '>') => Some(TokenType::BitwiseOp(">>".to_string())),
@@ -1212,7 +1157,9 @@ impl Tokenizer {
 
         None
     }
+}
 
+impl Tokenizer {
     // ==================== IDENTIFIER AND KEYWORD SCANNING ====================
 
     fn scan_identifier_or_keyword(&mut self, state: &mut TokenizerState) -> Token {
@@ -1361,7 +1308,7 @@ impl Tokenizer {
 
     // ==================== SINGLE CHARACTER SCANNING ====================
 
-    fn scan_single_character(&mut self, state: &mut TokenizerState) -> Result<Token, String> {
+    fn scan_single_character(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line = state.line;
         let symbol = state.advance(&self.input);
@@ -1396,14 +1343,122 @@ impl Tokenizer {
             }
         };
 
-        Ok(Token::new(
+        Ok(Some(Token::new(
             token_type,
             start_line,
             start_column,
             self.current_section.clone(),
-        ))
+        )))
     }
+
+    // ==================== TOKEN SEQUENCE ANALYSIS ====================
+
+    fn analyze_token_sequences(&mut self) {
+        let len = self.token_pool.len();
+
+        for i in 0..len.saturating_sub(2) {
+            let token1 = &self.token_pool[i];
+            let token2 = &self.token_pool[i + 1];
+            let token3 = &self.token_pool[i + 2];
+
+            // Check for static calls: Identifier . Identifier
+            if let TokenType::Identifier(obj_name) = &token1.token_type {
+                if let TokenType::Symbol('.') = &token2.token_type {
+                    if let TokenType::Identifier(method_name) = &token3.token_type {
+                        if self.could_be_static_object(obj_name) {
+                            self.static_calls_found.push(StaticCallInfo {
+                                object_name: obj_name.clone(),
+                                method_name: method_name.clone(),
+                                line: token1.line,
+                                column: token1.column,
+                                section: self.current_section.clone(),
+                                token_index: i,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn could_be_static_object(&self, identifier: &str) -> bool {
+        !identifier.is_empty()
+            && identifier.chars().next().unwrap().is_uppercase()
+            && identifier != "Dix"
+    }
+
+    fn create_metadata(&self) -> TokenizationMetadata {
+        let sections_detected = self.get_sections_from_tokens();
+        let potential_builtin_calls = self.analyze_potential_builtin_calls();
+
+        TokenizationMetadata {
+            version: "1.0.0".to_string(),
+            total_lines: self.token_pool.last().map(|t| t.line).unwrap_or(1),
+            total_tokens: self.token_pool.len().saturating_sub(1), // Exclude EOF
+            sections_detected,
+            prefixed_constructors_found: self.prefixed_constructors_found.len(),
+            blob_constructors: self.prefixed_constructors_found.iter()
+                .filter(|p| p.constructor_type == "BLOB_CONSTRUCTOR")
+                .count(),
+            tuple_constructors: self.prefixed_constructors_found.iter()
+                .filter(|p| p.constructor_type == "TUPLE_CONSTRUCTOR")
+                .count(),
+            regex_constructors: self.prefixed_constructors_found.iter()
+                .filter(|p| p.constructor_type == "REGEX_CONSTRUCTOR")
+                .count(),
+            static_calls_found: self.static_calls_found.len(),
+            potential_builtin_calls,
+        }
+    }
+
+    fn get_sections_from_tokens(&self) -> Vec<String> {
+        let mut sections = Vec::new();
+
+        for token in &self.token_pool {
+            if let Some(section) = token.token_type.get_section_context() {
+                if !sections.contains(&section.to_string()) {
+                    sections.push(section.to_string());
+                }
+            }
+        }
+
+        sections
+    }
+
+    fn analyze_potential_builtin_calls(&self) -> usize {
+        let len = self.token_pool.len();
+        let mut count = 0;
+
+        for i in 0..len.saturating_sub(3) {
+            let token2 = &self.token_pool[i + 1];
+            let token3 = &self.token_pool[i + 2];
+            let token4 = &self.token_pool[i + 3];
+
+            // Pattern: . Identifier (
+            if let TokenType::Symbol('.') = &token2.token_type {
+                if let TokenType::Identifier(_) = &token3.token_type {
+                    if let TokenType::Symbol('(') = &token4.token_type {
+                        count += 1;
+                    }
+                }
+            }
+        }
+
+        count
+    }
+
 }
+
+/// Tokenization result structure
+#[derive(Debug, Clone)]
+pub struct TokenizationResult {
+    pub tokens: Vec<Token>,
+    pub metadata: TokenizationMetadata,
+    pub prefixed_constructors: Vec<PrefixedConstructorInfo>,
+    pub static_calls: Vec<StaticCallInfo>,
+}
+
 /// Metadata about the tokenization process
 #[derive(Debug, Clone)]
 pub struct TokenizationMetadata {

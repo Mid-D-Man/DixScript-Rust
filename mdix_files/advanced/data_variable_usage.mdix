@@ -1,0 +1,230 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    author -> "DATA Variable Reference Test",
+    features -> "advanced",
+    debug_mode -> "verbose",
+    error_handling -> "halt"
+)
+
+@ENUMS(
+    ServerType { DEVELOPMENT = 1, STAGING = 2, PRODUCTION = 3 }
+)
+
+@QUICKFUNCS(
+    // Global scope - can reference any DATA variables
+    ~buildConnectionString<string> => global(host<string>, port<int>, database<string>) {
+        return $"Server={host};Port={port};Database={database}";
+    }
+
+    ~calculateTotal<float> => global(base<float>, tax<float>, discount<float>) {
+        let subtotal = base - discount;
+        let total = subtotal + tax;
+        return total;
+    }
+
+    ~formatServerInfo<string> => global(name<string>, type<enum>, port<int>) {
+        let typeStr = type == ServerType.DEVELOPMENT ? "DEV" :
+                      type == ServerType.STAGING ? "STAGE" : "PROD";
+        return $"{name} ({typeStr}:{port})";
+    }
+
+    // Scoped to server.config - should ONLY access variables within server.config
+    ~validateServerConfig<bool> => server.config(host<string>, port<int>) {
+        let valid_host = host.length() > 0;
+        let valid_port = port > 1024 && port < 65536;
+        return valid_host && valid_port;
+    }
+
+    // Scoped to database.primary
+    ~buildDatabaseUrl<string> => database.primary(host<string>, port<int>, name<string>) {
+        return $"postgresql://{host}:{port}/{name}";
+    }
+
+    // Scoped to player object
+    ~calculatePlayerPower<int> => player(strength<int>, agility<int>, intelligence<int>) {
+        return (strength * 2) + agility + (intelligence * 3);
+    }
+
+    ~arraySum<int> => global(numbers<array>) {
+        let total<int> = numbers.sum();
+        return total;
+    }
+
+    ~processConfig<string> => global(config<object>) {
+        return "Config processed";
+    }
+
+    ~chainedCalculation<int> => global(a<int>, b<int>) {
+        let sum = a + b;
+        return sum * 2;
+    }
+
+    ~useChainedResult<string> => global(value<int>) {
+        return $"Chained result: {value}";
+    }
+)
+
+@DATA(
+    // Test 1: Simple flat variables passed to global function
+    simple_host = "localhost",
+    simple_port = 8080,
+    simple_db = "mydb",
+    simple_connection = buildConnectionString(simple_host, simple_port, simple_db),
+
+    // Test 2: Variables with calculations
+    base_price = 100.0f,
+    tax_amount = 15.0f,
+    discount_amount = 10.0f,
+    final_total = calculateTotal(base_price, tax_amount, discount_amount),
+
+    // Test 3: Mixed types including enums
+    server_name = "MainServer",
+    server_type<enum> = ServerType.PRODUCTION,
+    server_port = 443,
+    server_info = formatServerInfo(server_name, server_type, server_port),
+
+    // Test 4: Table properties with scoped function
+    server.config:
+        host = "prod-server.com",
+        port = 8443,
+        ssl_enabled = true,
+        is_valid = validateServerConfig(host, port)
+
+    // Test 5: Another scoped function in different table
+    database.primary:
+        host = "db.production.com",
+        port = 5432,
+        name = "production_db",
+        connection_url = buildDatabaseUrl(host, port, name)
+
+    // Test 6: Object with scoped function
+    player = {
+        name = "Hero",
+        level = 10,
+        strength = 25,
+        agility = 18,
+        intelligence = 30,
+        power = calculatePlayerPower(strength, agility, intelligence)
+    }
+
+    // Test 7: Arrays passed to functions
+    number_set = [10, 20, 30, 40, 50],
+    number_total = arraySum(number_set),
+
+    // Test 8: Objects passed to functions
+    app_config = {
+        name = "MyApp",
+        version = "1.0.0",
+        debug = false
+    },
+    config_processed = processConfig(app_config),
+
+    // Test 9: Chained function calls with variable references
+    value_a = 10,
+    value_b = 20,
+    chained_calc = chainedCalculation(value_a, value_b),
+    chained_final = useChainedResult(chained_calc),
+
+    // Test 10: Complex nested table with multiple variable references
+    ecommerce.shop:
+        base_price<float> = 99.99f,
+        tax_rate<float> = 0.08f,
+        discount_rate<float> = 0.10f,
+        tax_value<float> = base_price * tax_rate,
+        discount_value<float> = base_price * discount_rate,
+        final_price<float> = calculateTotal(base_price, tax_value, discount_value)
+
+    // Test 11: Multiple variables from same group
+    user.profile:
+        first_name = "John",
+        last_name = "Doe",
+        age = 30,
+        full_name = $"{first_name} {last_name}",
+        bio = $"{first_name} is {age} years old"
+
+    // Test 12: Cross-referencing variables from different depths
+    api.endpoints:
+        base_url = "https://api.example.com",
+        version = "v2",
+        users_endpoint = $"{base_url}/{version}/users",
+        posts_endpoint = $"{base_url}/{version}/posts"
+
+    // Test 13: Variables in arrays within table
+    inventory.items::
+        { id = 1, name = "Sword", damage = 50, price = 100.0f },
+        { id = 2, name = "Shield", defense = 30, price = 75.0f },
+        { id = 3, name = "Potion", healing = 25, price = 10.0f }
+
+    inventory.summary:
+        item_count = 3,
+        total_value<float> = 185.0f,
+        average_price<float> = total_value / item_count
+
+    // Test 14: Date/timestamp variables
+    event.schedule:
+        start_date<date> = 2025-01-15,
+        start_time<timestamp> = 2025-01-15T09:00:00Z,
+        end_time<timestamp> = 2025-01-15T17:00:00Z,
+        formatted_start = DateTime.format(start_time, "yyyy-MM-dd HH:mm")
+
+    // Test 15: Enum variables passed around
+    system.settings:
+        environment<enum> = ServerType.PRODUCTION,
+        backup_environment<enum> = ServerType.STAGING,
+        primary_name = "Production System",
+        backup_name = "Staging System",
+        primary_info = formatServerInfo(primary_name, environment, 443),
+        backup_info = formatServerInfo(backup_name, backup_environment, 8080)
+
+    // Test 16: Boolean logic with variables
+    feature.flags:
+        new_ui_enabled = true,
+        analytics_enabled = false,
+        experimental_enabled = true,
+        all_enabled = new_ui_enabled && analytics_enabled && experimental_enabled,
+        any_enabled = new_ui_enabled || analytics_enabled || experimental_enabled
+
+    // Test 17: Hex colors and manipulation
+    theme.colors:
+        primary<hex> = #FF5733,
+        secondary<hex> = #3498DB,
+        success<hex> = #2ECC71,
+        primary_str = $"Primary color: {primary}"
+
+    // Test 18: Nested objects with variable references
+    game.settings = {
+        player = {
+            start_health = 100,
+            start_mana = 50,
+            start_level = 1
+        },
+        difficulty = {
+            easy_multiplier = 0.5f,
+            normal_multiplier = 1.0f,
+            hard_multiplier = 1.5f
+        }
+    }
+
+    // Test 19: Variables referencing computed values
+    math.operations:
+        x = 10,
+        y = 5,
+        sum = x + y,
+        product = x * y,
+        combined = sum + product,
+        description = $"Sum: {sum}, Product: {product}, Combined: {combined}"
+
+    // Test 20: Edge case - variable shadowing in nested tables
+    outer.value = 100
+
+    outer.inner:
+        value = 200,
+        double = value * 2,
+        description = $"Inner value: {value}"
+
+    outer.summary:
+        outer_val = 100,
+        inner_val = 200,
+        total = outer_val + inner_val
+)

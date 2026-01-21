@@ -761,6 +761,35 @@ fn test_tokenization_throughput() {
     assert!(mb_per_sec > 1.0, "Too slow: {:.2} MB/sec", mb_per_sec);
 }
 
+#[test]
+#[ignore] // Run with: cargo test --release -- --ignored
+fn test_release_mode_throughput() {
+    // Generate 1MB of input
+    let mut input = String::new();
+    for i in 0..30000 {
+        input.push_str(&format!("let var_{} = {} + {} * {};", i, i, i+1, i+2));
+    }
+
+    let char_count = input.len();
+    println!("Input size: {} bytes ({:.2} KB)", char_count, char_count as f64 / 1024.0);
+
+    let start = Instant::now();
+    let result = tokenize_input(&input);
+    let duration = start.elapsed();
+
+    let mb_per_sec = (char_count as f64) / (duration.as_secs_f64() * 1_000_000.0);
+    let tokens_per_sec = result.tokens.len() as f64 / duration.as_secs_f64();
+
+    println!("\n=== RELEASE MODE PERFORMANCE ===");
+    println!("Tokens: {}", result.tokens.len());
+    println!("Time: {:?}", duration);
+    println!("Throughput: {:.2} MB/sec", mb_per_sec);
+    println!("Token rate: {:.0} tokens/sec", tokens_per_sec);
+    println!("================================\n");
+
+    // In release mode, should be AT LEAST 10 MB/sec with optimizations
+    assert!(mb_per_sec > 10.0, "Too slow in release: {:.2} MB/sec", mb_per_sec);
+}
 fn print_tokens(tokens: &[Token]) {
     println!("\n=== TOKENS ({}) ===", tokens.len());
     for (i, token) in tokens.iter().enumerate() {

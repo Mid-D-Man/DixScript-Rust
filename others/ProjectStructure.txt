@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Fri Jan 23 06:16:35 UTC 2026
+Generated: Fri Jan 23 10:32:31 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 4082facce06ab64eb587beff274a5e08e93bf96b
+Commit: 1cdc4505dee972c5ce095d9378e06feaca145c0a
 Branch: master
 ==================================
 
@@ -33,6 +33,10 @@ src/Compiler/AST/values.rs
 src/Compiler/Core/BinarySerialization/SectionReaders/mod.rs
 src/Compiler/Core/BinarySerialization/SectionWriters/mod.rs
 src/Compiler/Core/BinarySerialization/mod.rs
+src/Compiler/Core/Config/config_schema.rs
+src/Compiler/Core/Config/config_section_handler.rs
+src/Compiler/Core/Config/mod.rs
+src/Compiler/Core/Config/operational_settings.rs
 src/Compiler/Core/SectionAnalyzers/mod.rs
 src/Compiler/Core/SectionEnhancers/mod.rs
 src/Compiler/Core/SectionParsers/mod.rs
@@ -82,7 +86,6 @@ src/ErrorManager/Helpers/value_resolution_exception.rs
 src/ErrorManager/diagnostic_dumper.rs
 src/ErrorManager/error_manager.rs
 src/ErrorManager/mod.rs
-src/ErrorManager/operational_settings.rs
 src/Runtime/mod.rs
 src/Utilities/keyword_definitions.rs
 src/Utilities/mid_helper_functions.rs
@@ -112,6 +115,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 83
+Source: 86
 Tests: 5
 Benches: 2

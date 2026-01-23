@@ -168,7 +168,6 @@ impl TokenizerState {
 /// Uses byte-based indexing for ASCII tokens and proper UTF-8 handling for string content.
 pub struct Tokenizer {
     input: String,
-    version_manager: &'static VersionManager,
     error_manager: ErrorManager,
     current_section: Option<String>,
     prefixed_constructors_found: Vec<PrefixedConstructorInfo>,
@@ -184,7 +183,6 @@ impl Tokenizer {
 
         Tokenizer {
             input,
-            version_manager: version_manager(),
             error_manager: ErrorManager::get_shared_instance(),
             current_section: None,
             prefixed_constructors_found: Vec::new(),
@@ -334,13 +332,12 @@ impl Tokenizer {
         );
     }
 
-    #[inline]
     fn handle_unsupported_token(&self, token: &Token, _state: &TokenizerState) {
         self.error_manager.add_lexical_error(
             LexicalErrorType::InvalidCharacter,
             format!(
                 "Token type not supported in version {}",
-                self.version_manager.get_current_version()
+                self.version_manager().get_current_version()
             ),
             token.line,
             token.column,
@@ -417,7 +414,7 @@ impl Tokenizer {
 
     #[inline]
     fn is_token_supported(&self, token: &Token) -> bool {
-        self.version_manager.is_token_valid_for_version(&token.token_type)
+        self.version_manager().is_token_valid_for_version(&token.token_type)
     }
 
     // ==================== HELPER METHODS ====================

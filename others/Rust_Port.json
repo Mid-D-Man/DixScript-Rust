@@ -3,7 +3,7 @@
     "name": "DixScript Rust Port",
     "subtitle": "MidManStudio Data Interchange Extension Script",
     "version": "1.0.0",
-    "status": "Phase 2 - ErrorManager Complete, Starting Compiler",
+    "status": "Phase 3 - Native Rust Collections, Starting Compiler",
     "repository": "https://github.com/Mid-D-Man/DixScript-Rust",
     "file_extension": ".mdix"
   },
@@ -25,7 +25,40 @@
       }
     },
 
-    "2_BORROWING_RULES": {
+    "2_USE_NATIVE_RUST_COLLECTIONS": {
+      "rule": "DO NOT use DixCore wrappers - USE RUST'S BUILT-IN COLLECTIONS + ITERTOOLS",
+      "reason": "Native Rust collections are zero-cost, well-tested, and idiomatic",
+      "decision": "DixCore wrappers removed - too much trait bound complexity for minimal benefit",
+      "replacement_guide": {
+        "collections": {
+          "C#_List": "Vec<T>",
+          "C#_Dictionary": "HashMap<K, V> or BTreeMap<K, V>",
+          "C#_HashSet": "HashSet<T> or BTreeSet<T>",
+          "C#_ImmutableArray": "Box<[T]> or Arc<[T]>"
+        },
+        "linq_equivalents": {
+          "Select": ".map()",
+          "Where": ".filter()",
+          "Any": ".any()",
+          "All": ".all()",
+          "First": ".next() or .nth(0)",
+          "FirstOrDefault": ".next()",
+          "Count": ".count()",
+          "Sum": ".sum()",
+          "Min_Max": ".min() / .max()",
+          "Take": ".take()",
+          "Skip": ".skip()",
+          "OrderBy": ".sorted() // itertools",
+          "Distinct": ".unique() // itertools",
+          "Reverse": ".rev()",
+          "SelectMany": ".flat_map()",
+          "GroupBy": ".group_by() // itertools",
+          "Join": ".join() // itertools"
+        }
+      }
+    },
+
+    "3_BORROWING_RULES": {
       "rule": "You can have EITHER many readers OR one writer, NEVER both",
       "the_golden_rule": "Aliasing XOR Mutability - many reads OR one write, not both",
       "immutable_borrows": {
@@ -53,7 +86,7 @@
       }
     },
 
-    "3_OWNERSHIP_RULES": {
+    "4_OWNERSHIP_RULES": {
       "rule": "Each value has EXACTLY ONE owner. When owner drops, value is freed.",
       "three_ways_to_handle_data": {
         "1_move": {
@@ -78,7 +111,7 @@
       }
     },
 
-    "4_WHEN_TO_CLONE_VS_BORROW": {
+    "5_WHEN_TO_CLONE_VS_BORROW": {
       "⚠️_performance_impact": "Cloning can be 10-1000x slower than borrowing",
       "the_decision_tree": {
         "ask_yourself": [
@@ -118,7 +151,7 @@
       }
     },
 
-    "5_COPY_VS_CLONE": {
+    "6_COPY_VS_CLONE": {
       "Copy": {
         "what": "Implicit bitwise copy (like C# value types)",
         "types": "i32, f64, bool, char, and other primitives",
@@ -141,40 +174,249 @@
     }
   },
 
-  "🎯_HYBRID_WRAPPER_STRATEGY": {
-    "philosophy": "Use wrappers for ease of porting, native types for performance",
-    "decision_matrix": {
-      "use_dixcore_wrappers": {
-        "where": [
-          "ErrorManager collections (not in hot path)",
-          "Configuration data (parsed once)",
-          "Symbol tables (moderate frequency access)",
-          "Quick prototyping during initial porting"
-        ],
-        "why": "Easier to port from C#, method names match exactly",
-        "performance": "⚡ Wrappers have ZERO runtime cost (compiler inlines them)",
-        "types": "List<T>, Dictionary<K,V>, HashSet<T>"
+  "🎯_NATIVE_RUST_COLLECTIONS_GUIDE": {
+    "philosophy": "Use native Rust collections + itertools for all collection operations",
+
+    "collections_cheat_sheet": {
+      "Vec<T>": {
+        "c_sharp_equivalent": "List<T>",
+        "when_to_use": "Dynamic arrays, default choice for lists",
+        "create": "let mut vec = Vec::new(); or vec![1, 2, 3]",
+        "common_ops": {
+          "add": "vec.push(item)",
+          "insert": "vec.insert(index, item)",
+          "remove": "vec.remove(index)",
+          "get": "vec.get(index) or vec[index]",
+          "length": "vec.len()",
+          "iterate": "for item in &vec { ... }"
+        }
       },
-      "use_native_rust": {
-        "where": [
-          "Lexer token buffer (hot path - accessed per character)",
-          "Parser lookahead (hot path - accessed per token)",
-          "AST node children (traversed constantly)",
-          "Any loop that runs per-character or per-token"
-        ],
-        "why": "Direct access, no wrapper overhead, idiomatic Rust",
-        "performance": "⚡⚡ Maximum performance, zero abstraction",
-        "types": "Vec<T>, HashMap<K,V>, HashSet<T>, &[T] (slices)"
+      "HashMap<K, V>": {
+        "c_sharp_equivalent": "Dictionary<K, V>",
+        "when_to_use": "Key-value pairs with O(1) lookup, unordered",
+        "create": "let mut map = HashMap::new();",
+        "common_ops": {
+          "add": "map.insert(key, value)",
+          "get": "map.get(&key) or map[&key]",
+          "remove": "map.remove(&key)",
+          "contains": "map.contains_key(&key)",
+          "iterate": "for (k, v) in &map { ... }"
+        }
+      },
+      "BTreeMap<K, V>": {
+        "c_sharp_equivalent": "SortedDictionary<K, V>",
+        "when_to_use": "Key-value pairs with sorted keys",
+        "create": "let mut map = BTreeMap::new();",
+        "advantage": "Maintains sorted order, range queries"
+      },
+      "HashSet<T>": {
+        "c_sharp_equivalent": "HashSet<T>",
+        "when_to_use": "Unique values, O(1) membership test",
+        "create": "let mut set = HashSet::new();",
+        "common_ops": {
+          "add": "set.insert(item)",
+          "contains": "set.contains(&item)",
+          "remove": "set.remove(&item)"
+        }
+      },
+      "BTreeSet<T>": {
+        "c_sharp_equivalent": "SortedSet<T>",
+        "when_to_use": "Unique sorted values",
+        "create": "let mut set = BTreeSet::new();"
+      },
+      "Box<[T]>": {
+        "c_sharp_equivalent": "ImmutableArray<T>",
+        "when_to_use": "Fixed-size array on heap, immutable",
+        "create": "let arr: Box<[i32]> = vec![1, 2, 3].into_boxed_slice();"
+      },
+      "Arc<[T]>": {
+        "c_sharp_equivalent": "Shared ImmutableArray<T>",
+        "when_to_use": "Shared immutable array across threads",
+        "create": "let arr: Arc<[i32]> = Arc::from(vec![1, 2, 3]);"
       }
     },
-    "performance_reality": {
-      "wrapper_overhead": "0-2% in release builds (compiler optimizes away)",
-      "real_bottlenecks": [
-        "❌ Cloning in loops (10-100x slowdown)",
-        "❌ Unnecessary allocations (10x slowdown)",
-        "❌ Bad algorithm choice (100-1000x slowdown)"
-      ],
-      "conclusion": "Wrapper vs native is negligible. Cloning and allocation matter WAY more."
+
+    "linq_to_rust_iterator_guide": {
+      "basic_operations": {
+        "Select": {
+          "c_sharp": "list.Select(x => x * 2)",
+          "rust": "vec.iter().map(|x| x * 2).collect::<Vec<_>>()",
+          "notes": "Must call .collect() to materialize"
+        },
+        "Where": {
+          "c_sharp": "list.Where(x => x > 5)",
+          "rust": "vec.iter().filter(|x| **x > 5).collect::<Vec<_>>()"
+        },
+        "Any": {
+          "c_sharp": "list.Any(x => x > 5)",
+          "rust": "vec.iter().any(|x| *x > 5)",
+          "notes": "Returns bool, no .collect() needed"
+        },
+        "All": {
+          "c_sharp": "list.All(x => x > 0)",
+          "rust": "vec.iter().all(|x| *x > 0)"
+        },
+        "First": {
+          "c_sharp": "list.First()",
+          "rust": "vec.first() or vec.iter().next()",
+          "notes": "Returns Option<&T>"
+        },
+        "Count": {
+          "c_sharp": "list.Count()",
+          "rust": "vec.len() or vec.iter().count()"
+        },
+        "Sum": {
+          "c_sharp": "list.Sum()",
+          "rust": "vec.iter().sum::<i32>()"
+        }
+      },
+      "itertools_operations": {
+        "note": "Add 'use itertools::Itertools;' at top",
+        "OrderBy": {
+          "c_sharp": "list.OrderBy(x => x.name)",
+          "rust": "vec.iter().sorted_by_key(|x| &x.name).collect::<Vec<_>>()"
+        },
+        "Distinct": {
+          "c_sharp": "list.Distinct()",
+          "rust": "vec.iter().unique().collect::<Vec<_>>()"
+        },
+        "GroupBy": {
+          "c_sharp": "list.GroupBy(x => x.category)",
+          "rust": "vec.iter().group_by(|x| &x.category)"
+        },
+        "Join": {
+          "c_sharp": "list1.Join(list2, x => x.id, y => y.id, (x, y) => ...)",
+          "rust": "vec1.iter().cartesian_product(vec2.iter()).filter(|(x, y)| x.id == y.id)"
+        }
+      },
+      "performance_tips": {
+        "lazy_evaluation": "Iterators are lazy - chain operations before .collect()",
+        "avoid_collect": "Don't .collect() if you don't need to - keep it lazy",
+        "reuse_iterators": "Can't reuse after .collect() - clone source if needed",
+        "parallel": "Use rayon crate for parallel iteration on large datasets"
+      }
+    },
+
+    "common_patterns": {
+      "filter_and_map": {
+        "c_sharp": "list.Where(x => x != null).Select(x => x.value)",
+        "rust": "vec.iter().filter(|x| x.is_some()).map(|x| x.unwrap()).collect()",
+        "better_rust": "vec.iter().filter_map(|x| x.as_ref()).collect()"
+      },
+      "find_first": {
+        "c_sharp": "list.FirstOrDefault(x => x > 5)",
+        "rust": "vec.iter().find(|x| **x > 5)"
+      },
+      "take_and_skip": {
+        "c_sharp": "list.Skip(10).Take(5)",
+        "rust": "vec.iter().skip(10).take(5).collect()"
+      },
+      "flatten": {
+        "c_sharp": "list.SelectMany(x => x.items)",
+        "rust": "vec.iter().flat_map(|x| &x.items).collect()"
+      }
+    }
+  },
+
+  "🏗️_PORTING_STRATEGY": {
+    "approach": "Use native Rust collections + itertools instead of custom wrappers",
+    "naming_decisions": {
+      "rust_style_snake_case": {
+        "what": "All Rust code uses standard Rust naming",
+        "applies_to": [
+          "All modules (error_manager, lexer, parser)",
+          "All functions (fn parse_token(), fn add_error())",
+          "All local variables (let token_type, let error_count)",
+          "All file names (error_manager.rs, lexical_error.rs)"
+        ],
+        "reason": "Standard Rust conventions, better tooling support"
+      },
+      "collections_usage": {
+        "vec_t": "For dynamic lists - replaces C# List<T>",
+        "hashmap_k_v": "For dictionaries - replaces C# Dictionary<K, V>",
+        "hashset_t": "For unique sets - replaces C# HashSet<T>",
+        "itertools": "For LINQ operations - replaces C# LINQ methods"
+      }
+    },
+
+    "phases": [
+      {
+        "phase": 1,
+        "name": "Utilities",
+        "status": "✅ COMPLETE",
+        "files": [
+          "src/Utilities/keyword_definitions.rs",
+          "src/Utilities/mid_logger.rs",
+          "src/Utilities/mid_helper_functions.rs",
+          "src/Utilities/utilities.rs"
+        ],
+        "note": "Moved Token to Tokenizer module"
+      },
+      {
+        "phase": 2,
+        "name": "ErrorManager",
+        "status": "✅ COMPLETE",
+        "files": [
+          "src/ErrorManager/error_manager.rs",
+          "src/ErrorManager/operational_settings.rs",
+          "src/ErrorManager/ErrorTypes/*.rs (all 10 error types)"
+        ],
+        "note": "Uses Rust naming (snake_case), Result<T,E>, and native collections"
+      },
+      {
+        "phase": 3,
+        "name": "Compiler - Tokenizer (Lexer)",
+        "status": "⏳ IN PROGRESS",
+        "files": [
+          "src/Compiler/Core/Tokenizer/lexer.rs",
+          "src/Compiler/Core/Tokenizer/token.rs"
+        ],
+        "strategy": "Use Vec<Token> directly (hot path), borrow heavily",
+        "c_sharp_ref": "DixScript/Compiler/Core/Lexer.cs"
+      },
+      {
+        "phase": 4,
+        "name": "Compiler - Parser",
+        "status": "⏳ PENDING",
+        "files": [
+          "src/Compiler/Core/general_parser.rs",
+          "src/Compiler/Core/SectionParsers/*.rs"
+        ],
+        "strategy": "AST with owned nodes, borrow during traversal"
+      },
+      {
+        "phase": 5,
+        "name": "Compiler - Semantic Analysis",
+        "status": "⏳ PENDING",
+        "files": [
+          "src/Compiler/Core/general_semantics_analyzer.rs",
+          "src/Compiler/Core/SectionAnalyzers/*.rs"
+        ]
+      }
+    ],
+
+    "step_by_step_porting_workflow": {
+      "1_understand_c_sharp": "Read C# code, understand algorithm",
+      "2_identify_types": "What types does it use? (List → Vec, Dictionary → HashMap)",
+      "3_check_hot_path": "Is this called in a loop? (Yes = native types, borrow heavily)",
+      "4_create_skeleton": "Create struct with pub fields",
+      "5_port_methods": "One method at a time, test each",
+      "6_handle_ownership": {
+        "reading": "Use &T (borrow)",
+        "modifying": "Use &mut T (mutable borrow)",
+        "consuming": "Take ownership (move)",
+        "last_resort": "Clone if truly needed"
+      },
+      "7_replace_linq": {
+        "select": "Use .map()",
+        "where": "Use .filter()",
+        "orderby": "Use .sorted() from itertools",
+        "groupby": "Use .group_by() from itertools"
+      },
+      "8_test_incrementally": "cargo test after each method",
+      "9_fix_errors": "Read error messages carefully, they're helpful",
+      "10_profile_if_slow": "cargo flamegraph to find real bottlenecks",
+      "11_iterate": "Refine and optimize based on benchmarks"
     }
   },
 
@@ -186,6 +428,7 @@
         "✅ Use slices (&[T]) instead of Vec<T>",
         "✅ Borrow, don't own",
         "✅ Reuse allocations (Vec::with_capacity)",
+        "✅ Keep iterators lazy (don't .collect() early)",
         "✅ Profile BEFORE optimizing (cargo flamegraph)"
       ]
     },
@@ -195,7 +438,7 @@
         "✅ Clone is fine here",
         "✅ Readability > micro-optimization",
         "✅ Use String instead of &str for simplicity",
-        "✅ Don't worry about wrapper overhead"
+        "✅ Don't worry about allocation overhead"
       ]
     },
     "specific_optimizations": {
@@ -234,305 +477,34 @@
       "fix": "// Ensure immutable borrow ends before mutable\n{\n  let r1 = &data;\n  println!(\"{}\", r1);\n} // r1 dropped\nlet r2 = &mut data; // ✅ OK now"
     },
     "cannot_move_out_of_borrowed": {
-      "error": "cannot move out of `*list` which is behind a shared reference",
+      "error": "cannot move out of `*vec` which is behind a shared reference",
       "cause": "Trying to take ownership from a borrow",
-      "example_wrong": "fn process(list: &List<String>) {\n  let item = list.First(); // ❌ Can't move\n}",
-      "fix": "fn process(list: &List<String>) {\n  if let Some(item) = list.First() {\n    let owned = item.clone(); // Clone if need ownership\n    // Or just use &item\n  }\n}"
+      "example_wrong": "fn process(vec: &Vec<String>) {\n  let item = vec[0]; // ❌ Can't move\n}",
+      "fix": "fn process(vec: &Vec<String>) {\n  if let Some(item) = vec.get(0) {\n    let owned = item.clone(); // Clone if need ownership\n    // Or just use &item\n  }\n}"
     }
-  },
-
-  "🏗️_PORTING_STRATEGY": {
-    "approach": "Hybrid: Manual port with C# naming conventions where beneficial",
-    "naming_decisions": {
-      "rust_style_snake_case": {
-        "what": "New Rust code uses standard Rust naming",
-        "applies_to": [
-          "All new modules (error_manager, lexer, parser)",
-          "All functions (fn parse_token(), fn add_error())",
-          "All local variables (let token_type, let error_count)",
-          "All file names (error_manager.rs, lexical_error.rs)"
-        ],
-        "reason": "Standard Rust conventions, better tooling support"
-      },
-      "c_sharp_style_PascalCase": {
-        "what": "DixCore and Utilities maintain C# naming during porting phase",
-        "applies_to": [
-          "DixCore types (List, Dictionary, HashSet)",
-          "DixCore methods (Add, Remove, Where, Select)",
-          "Utility types (Token, TokenType, MID_Logger)",
-          "Utility methods (GetSharedInstance, CreateScope)"
-        ],
-        "reason": "Easier 1:1 mapping during initial port, minimize cognitive load"
-      },
-      "transition_plan": {
-        "phase_1": "Use DixCore/Utilities with C# naming (CURRENT)",
-        "phase_2": "Port compiler using Rust naming + DixCore",
-        "phase_3": "Optionally add snake_case aliases to DixCore",
-        "phase_4": "Maybe refactor to pure Rust style later (low priority)"
-      }
-    },
-
-    "phases": [
-      {
-        "phase": 1,
-        "name": "DixCore - C# Collection Wrappers",
-        "status": "✅ COMPLETE",
-        "files": [
-          "src/DixCore/list.rs",
-          "src/DixCore/dictionary.rs",
-          "src/DixCore/hash_set.rs",
-          "src/DixCore/immutable_array.rs",
-          "src/DixCore/linq.rs"
-        ]
-      },
-      {
-        "phase": 2,
-        "name": "Utilities",
-        "status": "✅ COMPLETE",
-        "files": [
-          "src/Utilities/token.rs",
-          "src/Utilities/keyword_definitions.rs",
-          "src/Utilities/mid_logger.rs",
-          "src/Utilities/mid_helper_functions.rs",
-          "src/Utilities/utilities.rs"
-        ]
-      },
-      {
-        "phase": 3,
-        "name": "ErrorManager",
-        "status": "✅ COMPLETE",
-        "files": [
-          "src/ErrorManager/error_manager.rs",
-          "src/ErrorManager/operational_settings.rs",
-          "src/ErrorManager/ErrorTypes/*.rs (all 10 error types)"
-        ],
-        "note": "Uses Rust naming (snake_case), Result<T,E>, and DixCore wrappers"
-      },
-      {
-        "phase": 4,
-        "name": "Compiler - Lexer",
-        "status": "⏳ NEXT",
-        "files": ["src/Compiler/Core/lexer.rs"],
-        "strategy": "Use Vec<Token> directly (hot path), borrow heavily",
-        "c_sharp_ref": "DixScript/Compiler/Core/Lexer.cs"
-      },
-      {
-        "phase": 5,
-        "name": "Compiler - Parser",
-        "status": "⏳ PENDING",
-        "files": [
-          "src/Compiler/Core/general_parser.rs",
-          "src/Compiler/Core/SectionParsers/*.rs"
-        ],
-        "strategy": "AST with owned nodes, borrow during traversal"
-      },
-      {
-        "phase": 6,
-        "name": "Compiler - Semantic Analysis",
-        "status": "⏳ PENDING",
-        "files": [
-          "src/Compiler/Core/general_semantics_analyzer.rs",
-          "src/Compiler/Core/SectionAnalyzers/*.rs"
-        ]
-      }
-    ],
-
-    "step_by_step_porting_workflow": {
-      "1_understand_c_sharp": "Read C# code, understand algorithm",
-      "2_identify_types": "What types does it use? (List, Dictionary, Token)",
-      "3_check_hot_path": "Is this called in a loop? (Yes = native types, No = wrappers OK)",
-      "4_create_skeleton": "Create struct with pub fields",
-      "5_port_methods": "One method at a time, test each",
-      "6_handle_ownership": {
-        "reading": "Use &T (borrow)",
-        "modifying": "Use &mut T (mutable borrow)",
-        "consuming": "Take ownership (move)",
-        "last_resort": "Clone if truly needed"
-      },
-      "7_test_incrementally": "cargo test after each method",
-      "8_fix_errors": "Read error messages carefully, they're helpful",
-      "9_profile_if_slow": "cargo flamegraph to find real bottlenecks",
-      "10_iterate": "Refine and optimize based on benchmarks"
-    }
-  },
-
-  "🚀_FFI_STRATEGY": {
-    "overview": "One Rust core → Multiple language bindings",
-    "platforms": {
-      "desktop": ["Windows", "macOS", "Linux"],
-      "mobile": ["iOS", "Android"],
-      "web": ["WebAssembly"],
-      "game_engines": ["Unity", "Godot", "Unreal"],
-      "blockchain": ["Solana", "Ethereum"]
-    },
-    "tools": {
-      "c_api": {
-        "what": "extern \"C\" functions for stable ABI",
-        "file": "src/ffi.rs",
-        "example": "extern \"C\" fn dix_parse(source: *const c_char) -> *mut DixHandle"
-      },
-      "csharp": {
-        "tool": "csbindgen",
-        "install": "cargo install csbindgen",
-        "generate": "csbindgen --crate dixscript --output bindings/csharp/",
-        "use_in_unity": "[DllImport(\"dixscript\")]"
-      },
-      "javascript": {
-        "tool": "wasm-bindgen + wasm-pack",
-        "install": "cargo install wasm-pack",
-        "build": "wasm-pack build --target web",
-        "output": "pkg/dixscript.js + dixscript_bg.wasm"
-      },
-      "python": {
-        "tool": "PyO3",
-        "add": "[dependencies]\npyo3 = \"0.20\"",
-        "build": "maturin develop"
-      },
-      "multi_language": {
-        "tool": "UniFFI (recommended for 3+ languages)",
-        "what": "Single .udl definition → Kotlin, Swift, Python, Ruby auto-generated",
-        "add": "[dependencies]\nuniffi = \"0.25\""
-      }
-    },
-    "size_estimates": {
-      "base_tools": "Built-in FFI (0 MB - part of std)",
-      "csbindgen": "~2 MB",
-      "wasm_pack": "~15 MB",
-      "pyo3": "~8 MB",
-      "uniffi": "~5 MB",
-      "total_optional": "~30 MB (only install what you need)"
-    }
-  },
-
-  "⚡_PERFORMANCE_BENCHMARKING": {
-    "setup": {
-      "add_to_cargo_toml": {
-        "dev_dependencies": "criterion = \"0.5\"",
-        "bench_section": "[[bench]]\nname = \"wrapper_benchmark\"\nharness = false"
-      },
-      "create_file": "benches/wrapper_benchmark.rs",
-      "run": "cargo bench"
-    },
-    "what_to_benchmark": {
-      "wrappers_vs_native": "List<T> vs Vec<T> add/iterate",
-      "clone_vs_borrow": "Cloning in loop vs borrowing",
-      "iteration_patterns": ".iter() vs .into_iter() vs .Iter()",
-      "hot_path_operations": "Token buffer operations, parser lookahead"
-    },
-    "interpretation": {
-      "< 5%_difference": "Negligible, choose for readability",
-      "5_20%_difference": "Noticeable, consider native types",
-      "> 20%_difference": "Significant, use native types or optimize algorithm"
-    }
-  },
-
-  "📚_RUST_SYNTAX_QUICK_REFERENCE": {
-    "return_types": {
-      "-> Self": "Returns instance of current type (like C# 'return this;' type)",
-      "-> ()": "Void/Unit (empty tuple, often omitted)",
-      "-> Result<T, E>": "Operation that can succeed (Ok) or fail (Err)",
-      "-> Option<T>": "Value that might be None",
-      "no_arrow": "Implicitly returns () (void)"
-    },
-    "closures": {
-      "|x| x * 2": "Lambda: x => x * 2",
-      "|x, y| x + y": "Lambda: (x, y) => x + y",
-      "|_| 42": "Lambda ignoring param: _ => 42",
-      "|x| { let y = x * 2; y + 1 }": "Multi-line lambda with block"
-    },
-    "result_option": {
-      "Ok(value)": "Success case of Result",
-      "Err(error)": "Error case of Result",
-      "Some(value)": "Present case of Option",
-      "None": "Absent case of Option",
-      "?": "Early return on Err (propagate error up)"
-    },
-    "derive_macros": {
-      "#[derive(Debug)]": "Auto-implement Debug trait (like ToString)",
-      "#[derive(Clone)]": "Auto-implement Clone trait (deep copy)",
-      "#[derive(Copy)]": "Auto-implement Copy trait (bitwise copy, requires Clone)",
-      "#[derive(PartialEq)]": "Auto-implement == and != operators",
-      "#[derive(Default)]": "Auto-implement default constructor",
-      "multiple": "#[derive(Debug, Clone, PartialEq)]"
-    },
-    "references": {
-      "&value": "Immutable borrow/reference (read-only)",
-      "&mut value": "Mutable borrow/reference (can modify)",
-      "*reference": "Dereference (get value from reference)",
-      "&&value": "Reference to reference (rare, usually auto-deref)"
-    }
-  },
-
-  "🔍_DEBUGGING_AND_TOOLING": {
-    "cargo_commands": {
-      "cargo check": "Fast compile check (no binary)",
-      "cargo build": "Debug build (fast, unoptimized)",
-      "cargo build --release": "Release build (slow, optimized)",
-      "cargo test": "Run all tests",
-      "cargo test test_name": "Run specific test",
-      "cargo bench": "Run benchmarks",
-      "cargo clippy": "Lint (find common mistakes)",
-      "cargo fmt": "Auto-format code"
-    },
-    "debugging_macros": {
-      "println!(\"x = {:?}\", x)": "Print debug representation",
-      "dbg!(x)": "Print and return value (inline debugging)",
-      "eprintln!(\"error: {}\", e)": "Print to stderr",
-      "panic!(\"msg\")": "Crash with message"
-    },
-    "profiling": {
-      "install": "cargo install flamegraph",
-      "run": "cargo flamegraph --bench wrapper_benchmark",
-      "output": "flamegraph.svg (open in browser)"
-    }
-  },
-
-  "💡_TIPS_FOR_C_SHARP_DEVELOPERS": {
-    "mindset_shifts": {
-      "no_null": "Use Option<T> instead of null",
-      "no_exceptions": "Use Result<T, E> instead of try/catch",
-      "no_gc": "Ownership system instead of garbage collector",
-      "immutable_default": "Use 'mut' to make variables mutable",
-      "explicit_copies": "Clone is explicit, not automatic"
-    },
-    "common_patterns": {
-      "c_sharp_null_check": "if (value != null)",
-      "rust_equivalent": "if let Some(v) = value",
-      "c_sharp_try_catch": "try { x() } catch (Exception e) { }",
-      "rust_equivalent": "match x() { Ok(v) => {}, Err(e) => {} }",
-      "c_sharp_foreach": "foreach (var item in items)",
-      "rust_equivalent": "for item in &items"
-    },
-    "when_stuck": [
-      "1. Read error message CAREFULLY (Rust errors are exceptionally helpful)",
-      "2. Check if you need ownership, mutable borrow, or just read access",
-      "3. Search: 'rust [error code]' (e.g., 'rust E0502')",
-      "4. Run 'cargo clippy' - it catches common mistakes",
-      "5. Ask: 'Why is Rust preventing this?' (usually a real safety issue)"
-    ]
   },
 
   "🎯_NEXT_STEPS": {
     "completed": [
-      "✅ DixCore collection wrappers",
       "✅ Utilities (Token, Logger, Keywords)",
       "✅ ErrorManager (all 10 error types)",
-      "✅ Consolidated porting strategy",
-      "✅ Ownership/borrowing/lifetime research"
+      "✅ Decided to use native Rust collections instead of DixCore",
+      "✅ Added itertools for LINQ-like operations",
+      "✅ Consolidated porting strategy"
     ],
     "immediate_next": [
-      "1. Benchmark DixCore wrappers vs native (verify performance)",
-      "2. Fix ErrorManager move errors (return references, not clones)",
-      "3. Port Lexer using native Vec<Token> (hot path optimization)",
-      "4. Port Parser with AST using owned nodes",
-      "5. Continuous testing and profiling"
+      "1. Remove DixCore module entirely (no longer needed)",
+      "2. Update any existing code using DixCore to use native collections",
+      "3. Continue porting Lexer using native Vec<Token>",
+      "4. Port Parser with AST using owned nodes + native collections",
+      "5. Use itertools for any LINQ-style operations needed"
     ],
     "files_to_reference": {
-      "this_strategy": "DixScript_Rust_Porting_Strategy.json",
+      "this_strategy": "others/Rust_Port.json",
       "c_sharp_lexer": "DixScript/Compiler/Core/Lexer.cs",
       "c_sharp_parser": "DixScript/Compiler/Core/GeneralParser.cs",
       "rust_error_manager": "src/ErrorManager/error_manager.rs",
-      "rust_dixcore": "src/DixCore/mod.rs"
+      "rust_tokenizer": "src/Compiler/Core/Tokenizer/lexer.rs"
     }
   },
 
@@ -541,7 +513,14 @@
       "The Rust Book: https://doc.rust-lang.org/book/",
       "Rust by Example: https://doc.rust-lang.org/rust-by-example/",
       "Rust docs.rs: https://docs.rs/",
-      "Ownership explained: https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html"
+      "Ownership explained: https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html",
+      "Collections: https://doc.rust-lang.org/book/ch08-00-common-collections.html"
+    ],
+    "crates": [
+      "itertools: https://docs.rs/itertools/",
+      "HashMap: https://doc.rust-lang.org/std/collections/struct.HashMap.html",
+      "Vec: https://doc.rust-lang.org/std/vec/struct.Vec.html",
+      "Iterator: https://doc.rust-lang.org/std/iter/trait.Iterator.html"
     ],
     "performance": [
       "Rust Performance Book: https://nnethercote.github.io/perf-book/",

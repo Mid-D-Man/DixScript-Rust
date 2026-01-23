@@ -27,14 +27,21 @@ serde_json = "1.0"
 
 # Hostname for diagnostic dumps
 hostname = "0.3"
+
+# Perfect hash maps for keywords
 phf = { version = "0.11", features = ["macros"] }
+
+# SIMD string scanning
 memchr = "2.7"
 
-# NEW: Base64 encoding/decoding for blob values
+# Base64 encoding/decoding for blob values
 base64 = "0.21"
 
-# NEW: Regex support for regex values
+# Regex support for regex values
 regex = "1.10"
+
+# LINQ-like iterator extensions (replaces DixCore wrappers)
+itertools = "0.13"
 
 [dev-dependencies]
 # Benchmarking framework

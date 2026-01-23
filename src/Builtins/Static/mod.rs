@@ -16,6 +16,7 @@ mod array_object;
 mod random_object;
 mod enum_object;
 mod guid_object;
+mod ip_address_object;
 
 // Re-export the trait and base
 pub use static_object_base::{IStaticObject, StaticObjectBase};

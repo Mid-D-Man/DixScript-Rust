@@ -5,9 +5,8 @@
 //! CRITICAL: This is a hot-path type - avoid cloning in loops!
 
 use super::dix_type::DixType;
-use crate::DixCore::List;
-use crate::DixCore::Dictionary;
-use chrono::{DateTime, Utc, NaiveDate};
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 use std::cmp::Ordering;
 
 /// Core value type for DixScript runtime
@@ -25,9 +24,9 @@ enum ValueData {
     Double(f64),
     String(String),
     Bool(bool),
-    Array(Box<List<DixValue>>),
-    Tuple(Box<List<DixValue>>),
-    Object(Box<Dictionary<String, DixValue>>),
+    Array(Box<Vec<DixValue>>),
+    Tuple(Box<Vec<DixValue>>),
+    Object(Box<HashMap<String, DixValue>>),
     Date(DateTime<Utc>),
     Timestamp(DateTime<Utc>),
     Regex(String),   // Store pattern as string
@@ -78,21 +77,21 @@ impl DixValue {
         }
     }
 
-    pub fn from_array(values: List<DixValue>) -> Self {
+    pub fn from_array(values: Vec<DixValue>) -> Self {
         DixValue {
             value: ValueData::Array(Box::new(values)),
             dix_type: DixType::Array,
         }
     }
 
-    pub fn from_tuple(values: List<DixValue>) -> Self {
+    pub fn from_tuple(values: Vec<DixValue>) -> Self {
         DixValue {
             value: ValueData::Tuple(Box::new(values)),
             dix_type: DixType::Tuple,
         }
     }
 
-    pub fn from_object(obj: Dictionary<String, DixValue>) -> Self {
+    pub fn from_object(obj: HashMap<String, DixValue>) -> Self {
         DixValue {
             value: ValueData::Object(Box::new(obj)),
             dix_type: DixType::Object,
@@ -196,9 +195,9 @@ impl DixValue {
             ValueData::Regex(p) => p.clone(),
             ValueData::Blob(b) => b.clone(),
             ValueData::Hex(h) => h.clone(),
-            ValueData::Array(arr) => format!("[...]"), // Simplified
-            ValueData::Tuple(tup) => format!("t:(...)"),
-            ValueData::Object(obj) => format!("{{...}}"),
+            ValueData::Array(_) => "[...]".to_string(),
+            ValueData::Tuple(_) => "t:(...)".to_string(),
+            ValueData::Object(_) => "{...}".to_string(),
         }
     }
 
@@ -241,12 +240,12 @@ impl DixValue {
             ValueData::Double(d) => *d != 0.0,
             ValueData::String(s) => !s.is_empty(),
             ValueData::Null => false,
-            ValueData::Array(arr) => arr.Count() > 0,
+            ValueData::Array(arr) => !arr.is_empty(),
             _ => true,
         }
     }
 
-    pub fn as_array(&self) -> &List<DixValue> {
+    pub fn as_array(&self) -> &Vec<DixValue> {
         match &self.value {
             ValueData::Array(arr) => arr,
             ValueData::Tuple(tup) => tup,
@@ -254,7 +253,7 @@ impl DixValue {
         }
     }
 
-    pub fn as_array_mut(&mut self) -> &mut List<DixValue> {
+    pub fn as_array_mut(&mut self) -> &mut Vec<DixValue> {
         match &mut self.value {
             ValueData::Array(arr) => arr,
             ValueData::Tuple(tup) => tup,
@@ -262,14 +261,14 @@ impl DixValue {
         }
     }
 
-    pub fn as_object(&self) -> &Dictionary<String, DixValue> {
+    pub fn as_object(&self) -> &HashMap<String, DixValue> {
         match &self.value {
             ValueData::Object(obj) => obj,
             _ => panic!("Cannot convert {:?} to object", self.dix_type),
         }
     }
 
-    pub fn as_object_mut(&mut self) -> &mut Dictionary<String, DixValue> {
+    pub fn as_object_mut(&mut self) -> &mut HashMap<String, DixValue> {
         match &mut self.value {
             ValueData::Object(obj) => obj,
             _ => panic!("Cannot convert {:?} to object", self.dix_type),
@@ -281,9 +280,9 @@ impl DixValue {
             ValueData::Date(dt) | ValueData::Timestamp(dt) => *dt,
             ValueData::String(s) => {
                 s.parse::<DateTime<Utc>>()
-                    .unwrap_or_else(|_| DateTime::<Utc>::MIN_UTC)
+                    .unwrap_or_else(|_| Utc::now())
             }
-            _ => DateTime::<Utc>::MIN_UTC,
+            _ => Utc::now(),
         }
     }
 
@@ -310,9 +309,7 @@ impl DixValue {
 
         if self.is_array() && other.is_array() {
             let mut combined = self.as_array().clone();
-            for item in other.as_array().Iter() {
-                combined.Add(item.clone());
-            }
+            combined.extend(other.as_array().iter().cloned());
             return Ok(DixValue::from_array(combined));
         }
 
@@ -425,7 +422,8 @@ impl DixValue {
             const EPSILON: f64 = 1e-10;
             (self.as_double() - other.as_double()).abs() < EPSILON
         } else {
-            self == other
+            // FIX: Use PartialEq::eq explicitly instead of ==
+            PartialEq::eq(self, other)
         }
     }
 
@@ -435,6 +433,98 @@ impl DixValue {
 
     pub fn less_than(&self, other: &DixValue) -> Result<bool, String> {
         Ok(self.compare_to(other)? == Ordering::Less)
+    }
+
+    // ==================== BLOB METHODS ====================
+
+    /// Get blob as base64 string
+    pub fn as_blob_base64(&self) -> Result<String, String> {
+        match &self.value {
+            ValueData::Blob(b) => Ok(b.clone()),
+            _ => Err(format!("Cannot get blob data from {:?}", self.dix_type)),
+        }
+    }
+
+    /// Get blob as byte array
+    pub fn as_blob_bytes(&self) -> Result<Vec<u8>, String> {
+        match &self.value {
+            ValueData::Blob(b) => {
+                base64::decode(b)
+                    .map_err(|e| format!("Failed to decode blob: {}", e))
+            }
+            _ => Err(format!("Cannot convert {:?} to byte array", self.dix_type)),
+        }
+    }
+
+    /// Detect MIME type from magic numbers
+    fn detect_mime_type(bytes: &[u8]) -> String {
+        if bytes.len() < 4 {
+            return "application/octet-stream".to_string();
+        }
+
+        // Check magic numbers
+        if bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF {
+            return "image/jpeg".to_string();
+        }
+
+        if bytes.len() >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 {
+            return "image/png".to_string();
+        }
+
+        if bytes.len() >= 3 && bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 {
+            return "image/gif".to_string();
+        }
+
+        if bytes.len() >= 4 && bytes[0] == 0x00 && bytes[1] == 0x00 && bytes[2] == 0x00
+            && (bytes[3] == 0x18 || bytes[3] == 0x20) {
+            return "video/mp4".to_string();
+        }
+
+        if bytes.len() >= 4 && bytes[0] == 0x25 && bytes[1] == 0x50 && bytes[2] == 0x44 && bytes[3] == 0x46 {
+            return "application/pdf".to_string();
+        }
+
+        if bytes.len() >= 2 && bytes[0] == 0x50 && bytes[1] == 0x4B {
+            return "application/zip".to_string();
+        }
+
+        "application/octet-stream".to_string()
+    }
+
+    /// Get blob metadata (mime type, size, dimensions if image)
+    pub fn get_blob_metadata(&self) -> Result<(String, usize, Option<String>), String> {
+        let bytes = self.as_blob_bytes()?;
+        let size_bytes = bytes.len();
+
+        let mime_type = Self::detect_mime_type(&bytes);
+
+        let dimensions = if mime_type.starts_with("image/") {
+            Self::try_extract_image_dimensions(&bytes)
+        } else {
+            None
+        };
+
+        Ok((mime_type, size_bytes, dimensions))
+    }
+
+    /// Try to extract image dimensions from byte data
+    fn try_extract_image_dimensions(bytes: &[u8]) -> Option<String> {
+        // PNG dimensions (bytes 16-23)
+        if bytes.len() > 23 && bytes[0] == 0x89 && bytes[1] == 0x50 {
+            let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+            let height = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+            return Some(format!("{}x{}", width, height));
+        }
+
+        // GIF dimensions (bytes 6-9)
+        if bytes.len() > 9 && bytes[0] == 0x47 && bytes[1] == 0x49 {
+            let width = u16::from_le_bytes([bytes[6], bytes[7]]);
+            let height = u16::from_le_bytes([bytes[8], bytes[9]]);
+            return Some(format!("{}x{}", width, height));
+        }
+
+        // JPEG - more complex, skip for now
+        None
     }
 
     // ==================== DEEP CLONE ====================
@@ -461,7 +551,7 @@ impl std::fmt::Display for DixValue {
             ValueData::Hex(h) => write!(f, "{}", h),
             ValueData::Array(arr) => {
                 write!(f, "[")?;
-                for (i, item) in arr.Iter().enumerate() {
+                for (i, item) in arr.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
@@ -471,7 +561,7 @@ impl std::fmt::Display for DixValue {
             }
             ValueData::Tuple(tup) => {
                 write!(f, "t:(")?;
-                for (i, item) in tup.Iter().enumerate() {
+                for (i, item) in tup.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
@@ -481,7 +571,7 @@ impl std::fmt::Display for DixValue {
             }
             ValueData::Object(obj) => {
                 write!(f, "{{")?;
-                for (i, (key, value)) in obj.Iter().enumerate() {
+                for (i, (key, value)) in obj.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
@@ -542,5 +632,27 @@ mod tests {
         let float_val = DixValue::from_float(10.0);
 
         assert!(int_val.equal_to(&float_val));
+    }
+
+    #[test]
+    fn test_array_operations() {
+        let arr = DixValue::from_array(vec![
+            DixValue::from_int(1),
+            DixValue::from_int(2),
+            DixValue::from_int(3),
+        ]);
+
+        assert_eq!(arr.as_array().len(), 3);
+        assert!(!arr.as_bool()); // Array with items is truthy
+    }
+
+    #[test]
+    fn test_object_operations() {
+        let mut obj = HashMap::new();
+        obj.insert("key1".to_string(), DixValue::from_int(42));
+        obj.insert("key2".to_string(), DixValue::from_string("value".to_string()));
+
+        let obj_val = DixValue::from_object(obj);
+        assert_eq!(obj_val.as_object().len(), 2);
     }
 }

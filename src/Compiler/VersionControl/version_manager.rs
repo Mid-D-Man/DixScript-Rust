@@ -29,8 +29,8 @@ impl VersionManager {
         let validated_version = Self::validate_version_static(version);
         let feature_map = Self::initialize_features_for_version(&validated_version);
 
-        let mut version_hierarchy = HashSet::New();
-        version_hierarchy.Add(VERSION_1_0.to_string());
+        let mut version_hierarchy = HashSet::new();
+        version_hierarchy.insert(VERSION_1_0.to_string());
 
         VersionManager {
             current_version: validated_version,
@@ -69,12 +69,12 @@ impl VersionManager {
     /// PERFORMANCE: O(1) - HashSet lookup (~20ns)
     #[inline]
     pub fn supports_feature(&self, feature_key: &str) -> bool {
-        self.feature_map.Contains(&feature_key.to_string())
+        self.feature_map.contains(&feature_key.to_string())
     }
 
     /// Check if current version is compatible with target version
     pub fn is_compatible_with(&self, target_version: &str) -> bool {
-        self.version_hierarchy.Contains(&target_version.to_string())
+        self.version_hierarchy.contains(&target_version.to_string())
     }
 
     /// Check if token type is valid for current version
@@ -165,7 +165,7 @@ impl VersionManager {
         let mut info = std::collections::HashMap::new();
         info.insert("CurrentVersion".to_string(), self.current_version.clone());
         info.insert("SupportedVersions".to_string(), VERSION_1_0.to_string());
-        info.insert("FeatureCount".to_string(), self.feature_map.Count().to_string());
+        info.insert("FeatureCount".to_string(), self.feature_map.len().to_string());
         info.insert("CompatibilityMode".to_string(), "v1.0.0 Foundation".to_string());
         info.insert("BackwardCompatibility".to_string(), "None (foundation version)".to_string());
         info.insert("ForwardCompatibility".to_string(), "Limited (unknown features handled gracefully)".to_string());
@@ -177,116 +177,116 @@ impl VersionManager {
     /// Called ONCE during singleton construction
     fn initialize_features_for_version(version: &str) -> HashSet<String> {
         if version != VERSION_1_0 {
-            return HashSet::New();
+            return HashSet::new();
         }
 
-        let mut features = HashSet::New();
+        let mut features = HashSet::new();
 
         // Core language
-        features.Add("basic_types".to_string());
-        features.Add("enhanced_types".to_string());
-        features.Add("data_types_with_annotations".to_string());
+        features.insert("basic_types".to_string());
+        features.insert("enhanced_types".to_string());
+        features.insert("data_types_with_annotations".to_string());
 
         // Sections
-        features.Add("config_section".to_string());
-        features.Add("imports_section".to_string());
-        features.Add("dlm_section".to_string());
-        features.Add("enums_section".to_string());
-        features.Add("quickfuncs_section".to_string());
-        features.Add("data_section".to_string());
-        features.Add("security_section".to_string());
+        features.insert("config_section".to_string());
+        features.insert("imports_section".to_string());
+        features.insert("dlm_section".to_string());
+        features.insert("enums_section".to_string());
+        features.insert("quickfuncs_section".to_string());
+        features.insert("data_section".to_string());
+        features.insert("security_section".to_string());
 
         // CONFIG features
-        features.Add("feature_control".to_string());
-        features.Add("debug_modes".to_string());
-        features.Add("config_constants".to_string());
+        features.insert("feature_control".to_string());
+        features.insert("debug_modes".to_string());
+        features.insert("config_constants".to_string());
 
         // IMPORTS features
-        features.Add("imports_local".to_string());
-        features.Add("imports_cloud".to_string());
-        features.Add("imports_verification".to_string());
-        features.Add("imports_namespaces".to_string());
-        features.Add("imports_nested".to_string());
-        features.Add("imports_cycle_detection".to_string());
+        features.insert("imports_local".to_string());
+        features.insert("imports_cloud".to_string());
+        features.insert("imports_verification".to_string());
+        features.insert("imports_namespaces".to_string());
+        features.insert("imports_nested".to_string());
+        features.insert("imports_cycle_detection".to_string());
 
         // DLM modules
-        features.Add("dlm_dcompressor".to_string());
-        features.Add("dlm_dauditor".to_string());
-        features.Add("dlm_dencryptor".to_string());
+        features.insert("dlm_dcompressor".to_string());
+        features.insert("dlm_dauditor".to_string());
+        features.insert("dlm_dencryptor".to_string());
 
         // DATA section
-        features.Add("table_group_syntax".to_string());
-        features.Add("group_arrays".to_string());
-        features.Add("simple_properties".to_string());
-        features.Add("object_properties".to_string());
-        features.Add("property_type_annotations".to_string());
+        features.insert("table_group_syntax".to_string());
+        features.insert("group_arrays".to_string());
+        features.insert("simple_properties".to_string());
+        features.insert("object_properties".to_string());
+        features.insert("property_type_annotations".to_string());
 
         // QUICKFUNCS
-        features.Add("quickfunctions".to_string());
-        features.Add("function_scoping".to_string());
-        features.Add("function_type_annotations".to_string());
-        features.Add("function_parameters".to_string());
-        features.Add("quickfunc_calls_in_data".to_string());
-        features.Add("parameter_defaults".to_string());
-        features.Add("imported_function_calls".to_string());
+        features.insert("quickfunctions".to_string());
+        features.insert("function_scoping".to_string());
+        features.insert("function_type_annotations".to_string());
+        features.insert("function_parameters".to_string());
+        features.insert("quickfunc_calls_in_data".to_string());
+        features.insert("parameter_defaults".to_string());
+        features.insert("imported_function_calls".to_string());
 
         // Expressions
-        features.Add("expressions_full".to_string());
-        features.Add("conditional_expressions".to_string());
-        features.Add("property_access".to_string());
-        features.Add("index_access".to_string());
-        features.Add("method_chaining".to_string());
+        features.insert("expressions_full".to_string());
+        features.insert("conditional_expressions".to_string());
+        features.insert("property_access".to_string());
+        features.insert("index_access".to_string());
+        features.insert("method_chaining".to_string());
 
         // Built-ins
-        features.Add("static_object_registry".to_string());
-        features.Add("instance_method_registry".to_string());
-        features.Add("dix_function_calls".to_string());
+        features.insert("static_object_registry".to_string());
+        features.insert("instance_method_registry".to_string());
+        features.insert("dix_function_calls".to_string());
 
         // Control flow
-        features.Add("if_elif_else".to_string());
-        features.Add("switch_statements".to_string());
-        features.Add("return_statements".to_string());
+        features.insert("if_elif_else".to_string());
+        features.insert("switch_statements".to_string());
+        features.insert("return_statements".to_string());
 
         // String features
-        features.Add("interpolated_strings".to_string());
-        features.Add("single_quoted_strings".to_string());
-        features.Add("double_quoted_strings".to_string());
+        features.insert("interpolated_strings".to_string());
+        features.insert("single_quoted_strings".to_string());
+        features.insert("double_quoted_strings".to_string());
 
         // Literals
-        features.Add("array_literals".to_string());
-        features.Add("object_literals".to_string());
-        features.Add("prefixed_constructors".to_string());
-        features.Add("hex_colors".to_string());
-        features.Add("hex_literals".to_string());
-        features.Add("scientific_notation".to_string());
-        features.Add("date_literals".to_string());
-        features.Add("timestamp_literals".to_string());
+        features.insert("array_literals".to_string());
+        features.insert("object_literals".to_string());
+        features.insert("prefixed_constructors".to_string());
+        features.insert("hex_colors".to_string());
+        features.insert("hex_literals".to_string());
+        features.insert("scientific_notation".to_string());
+        features.insert("date_literals".to_string());
+        features.insert("timestamp_literals".to_string());
 
         // Access patterns
-        features.Add("config_access".to_string());
-        features.Add("enum_access".to_string());
-        features.Add("imported_enum_access".to_string());
-        features.Add("qualified_identifiers".to_string());
+        features.insert("config_access".to_string());
+        features.insert("enum_access".to_string());
+        features.insert("imported_enum_access".to_string());
+        features.insert("qualified_identifiers".to_string());
 
         // Architecture
-        features.Add("dual_parser_system".to_string());
-        features.Add("section_routing".to_string());
-        features.Add("context_aware_tokenization".to_string());
+        features.insert("dual_parser_system".to_string());
+        features.insert("section_routing".to_string());
+        features.insert("context_aware_tokenization".to_string());
 
         // Compatibility
-        features.Add("forward_compatibility".to_string());
-        features.Add("version_constraints".to_string());
-        features.Add("compatibility_modes".to_string());
+        features.insert("forward_compatibility".to_string());
+        features.insert("version_constraints".to_string());
+        features.insert("compatibility_modes".to_string());
 
         // Format
-        features.Add("mdix_extension".to_string());
-        features.Add("single_file_format".to_string());
+        features.insert("mdix_extension".to_string());
+        features.insert("single_file_format".to_string());
 
         // Validation
-        features.Add("semantic_analysis".to_string());
-        features.Add("type_checking".to_string());
-        features.Add("scope_validation".to_string());
-        features.Add("built_in_validation".to_string());
+        features.insert("semantic_analysis".to_string());
+        features.insert("type_checking".to_string());
+        features.insert("scope_validation".to_string());
+        features.insert("built_in_validation".to_string());
 
         features
     }

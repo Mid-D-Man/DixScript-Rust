@@ -1,0 +1,106 @@
+// tests/fixtures/sample_9kb.mdix
+// This file should be created in your tests/fixtures directory
+
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    author -> "DixScript Performance Test Suite",
+    created -> "2024-01-23T12:00:00.000Z",
+    features -> "advanced",
+    debug_mode -> "verbose",
+    error_handling -> "continue",
+    compatibility_mode -> "strict"
+)
+
+@IMPORTS(
+    utils from "shared/utilities.mdix" verify "sha256:abc123def456",
+    crypto from "security/crypto.mdix",
+    validators from "validation/validators.mdix"
+)
+
+@DLM(
+    DCompressor.gzip,
+    DAuditor.enhanced,
+    DEncryptor.aes256
+)
+
+@ENUMS(
+    Status {
+        PENDING = 0,
+        ACTIVE = 1,
+        INACTIVE = 2,
+        SUSPENDED = 3,
+        ARCHIVED = 4
+    },
+    Priority {
+        LOW = 1,
+        MEDIUM = 2,
+        HIGH = 3,
+        CRITICAL = 4
+    },
+    UserRole {
+        GUEST = 0,
+        USER = 1,
+        MODERATOR = 2,
+        ADMIN = 3,
+        SUPERADMIN = 4
+    }
+)
+
+@QUICKFUNCS(
+    ~calculateTotal<double> => global(items<array>) {
+        let sum = 0.0;
+        return sum;
+    }
+
+    ~validateUser<bool> => global(userId<int>, role<enum>) {
+        if: userId > 0 {
+            return true;
+        }
+        return false;
+    }
+)
+
+@DATA(
+    // Performance test data - lots of entries
+    app_name = "DixScript Performance Test",
+    app_version = "1.0.0",
+    max_connections = 1000,
+    timeout_ms = 5000,
+    retry_count = 3,
+
+    server:
+    host = "localhost",
+    port = 8080,
+   protocol = "https",
+
+    database:
+    host = "db.example.com",
+    port = 5432,
+    name = "testdb",
+   pool_size = 20,
+
+    cache:
+    enabled = true,
+    ttl_seconds = 3600,
+    max_size_mb = 512,
+
+    // Add many more entries to reach 9KB...
+    more:
+    data_001 = "value_001",
+    data_002 = "value_002",
+    data_003 = "value_003"
+    // ... continue up to data_500
+)
+
+@SECURITY(
+    encryption -> {
+        algorithm = "AES256",
+        key_size = 256,
+        enabled = true
+    },
+    validation -> {
+        strict_mode = true,
+        check_hashes = true
+    }
+)

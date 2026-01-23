@@ -1,6 +1,7 @@
 //! Tokenizer - Lexical analysis
 
 pub mod lexer;
+pub mod token;
 
 pub use lexer::{
     Tokenizer,
@@ -9,3 +10,4 @@ pub use lexer::{
     PrefixedConstructorInfo,
     StaticCallInfo
 };
+pub use token::{Token, TokenType, TokenExtensions};

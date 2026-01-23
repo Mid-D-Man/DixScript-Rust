@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use phf::phf_map;
 use memchr::memchr;
-use crate::Utilities::{Token, TokenType};
+use super::token::{Token, TokenType};
 use crate::ErrorManager::{ErrorManager, LexicalErrorType};
 use crate::Compiler::VersionControl::VersionManager;
 
@@ -184,13 +184,19 @@ impl Tokenizer {
 
         Tokenizer {
             input,
-            version_manager: VersionManager::instance(),
+            version_manager: version_manager(),
             error_manager: ErrorManager::get_shared_instance(),
             current_section: None,
             prefixed_constructors_found: Vec::new(),
             static_calls_found: Vec::new(),
             token_pool: Vec::with_capacity(initial_capacity),
         }
+    }
+
+    // Helper method to access version manager
+    #[inline]
+    fn version_manager(&self) -> std::sync::RwLockReadGuard<'static, VersionManager> {
+        VersionManager::instance().read().unwrap()
     }
 
     /// Main tokenization entry point

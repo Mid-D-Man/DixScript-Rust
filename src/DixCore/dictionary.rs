@@ -1,10 +1,9 @@
 //! Dictionary - Hash map with C# style API
-//! Dictionary - Hash map with C# style API
 
 use std::collections::HashMap;
 use std::hash::Hash;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Dictionary<K, V> {
     data: HashMap<K, V>,
 }

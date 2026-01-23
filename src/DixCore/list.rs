@@ -2,7 +2,7 @@
 
 use std::ops::{Index, IndexMut};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct List<T> {
     data: Vec<T>,
 }
@@ -263,7 +263,7 @@ impl<T> List<T> {
     }
 
     /// ToArray: Converts to an array (ImmutableArray)
-    pub fn ToArray(&self) -> crate::DixCore::ImmutableArray<T>  //With <T>
+    pub fn ToArray(&self) -> crate::DixCore::ImmutableArray<T>
     where
         T: Clone,
     {

@@ -32,17 +32,15 @@ impl ForwardCompatibilityManager {
         &self,
         element_type: &str,
         element_name: &str,
-        element_data: Option<&str>,
-        context: Option<&HashMap<String, String>>,
+        _element_data: Option<&str>,
+        _context: Option<&HashMap<String, String>>,
     ) -> Result<bool, String> {
         let error_manager = ErrorManager::get_shared_instance();
 
-        if error_manager.is_info_enabled() {
-            error_manager.log_info(&format!(
-                "Processing unknown element: {}::{}",
-                element_type, element_name
-            ));
-        }
+        error_manager.log_info(&format!(
+            "Processing unknown element: {}::{}",
+            element_type, element_name
+        ));
 
         match self.mode {
             CompatibilityMode::Strict => self.handle_strict(element_type, element_name),
@@ -71,20 +69,16 @@ impl ForwardCompatibilityManager {
         };
 
         let error_manager = ErrorManager::get_shared_instance();
-        if error_manager.is_info_enabled() {
-            error_manager.log_info(&format!(
-                "Validating compatibility: Script v{} with Compiler v{}",
-                result.script_version, result.compiler_version
-            ));
-        }
+        error_manager.log_info(&format!(
+            "Validating compatibility: Script v{} with Compiler v{}",
+            result.script_version, result.compiler_version
+        ));
 
         if !manager.is_compatible_with(&script_version) {
-            if error_manager.is_warning_enabled() {
-                error_manager.log_warning(&format!(
-                    "Script version {} is newer than compiler",
-                    script_version
-                ));
-            }
+            error_manager.log_Warning(&format!(
+                "Script version {} is newer than compiler",
+                script_version
+            ));
 
             result.is_newer_version = true;
 
@@ -112,9 +106,7 @@ impl ForwardCompatibilityManager {
         );
 
         let error_manager = ErrorManager::get_shared_instance();
-        if error_manager.is_error_enabled() {
-            error_manager.log_error(&message);
-        }
+        error_manager.log_error(&message);
 
         Err(message)
     }
@@ -123,21 +115,17 @@ impl ForwardCompatibilityManager {
         let message = format!("Ignoring unknown {}: {}", element_type, element_name);
 
         let error_manager = ErrorManager::get_shared_instance();
-        if error_manager.is_warning_enabled() {
-            error_manager.log_warning(&message);
-        }
+        error_manager.log_Warning(&message);
 
         Ok(true)
     }
 
     fn handle_best_effort(&self, element_type: &str, element_name: &str) -> Result<bool, String> {
         let error_manager = ErrorManager::get_shared_instance();
-        if error_manager.is_warning_enabled() {
-            error_manager.log_warning(&format!(
-                "Unknown {} '{}' - using tolerant handling",
-                element_type, element_name
-            ));
-        }
+        error_manager.log_Warning(&format!(
+            "Unknown {} '{}' - using tolerant handling",
+            element_type, element_name
+        ));
 
         self.handle_tolerant(element_type, element_name)
     }

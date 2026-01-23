@@ -30,6 +30,12 @@ hostname = "0.3"
 phf = { version = "0.11", features = ["macros"] }
 memchr = "2.7"
 
+# NEW: Base64 encoding/decoding for blob values
+base64 = "0.21"
+
+# NEW: Regex support for regex values
+regex = "1.10"
+
 [dev-dependencies]
 # Benchmarking framework
 criterion = { version = "0.5", features = ["html_reports"] }

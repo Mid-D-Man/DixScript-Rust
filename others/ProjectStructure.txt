@@ -1,16 +1,24 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Fri Jan 23 10:40:19 UTC 2026
+Generated: Fri Jan 23 11:44:27 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 7bb906ab9d8182a49ddc261136a428e0c2e86a47
+Commit: 8b12335efdc205d54cfe12b1a9c86aeced4b0933
 Branch: master
 ==================================
 
 Source Files:
 ============
+src/Builtins/Core/builtin_method.rs
 src/Builtins/Core/dix_type.rs
 src/Builtins/Core/dix_value.rs
 src/Builtins/Core/mod.rs
+src/Builtins/Instance/array_methods.rs
+src/Builtins/Instance/blob_methods.rs
 src/Builtins/Instance/mod.rs
+src/Builtins/Instance/number_methods.rs
+src/Builtins/Instance/regex_methods.rs
+src/Builtins/Instance/string_methods.rs
+src/Builtins/Instance/tuple_methods.rs
+src/Builtins/Instance/universal_methods.rs
 src/Builtins/Resolver/mod.rs
 src/Builtins/Static/mod.rs
 src/Builtins/mod.rs
@@ -56,6 +64,7 @@ src/Compiler/Utilities/mod.rs
 src/Compiler/VersionControl/compatibility_result.rs
 src/Compiler/VersionControl/forward_compatibility_manager.rs
 src/Compiler/VersionControl/mod.rs
+src/Compiler/VersionControl/version_constraints.rs
 src/Compiler/VersionControl/version_manager.rs
 src/Compiler/mod.rs
 src/ErrorManager/ErrorTypes/ast_enhancement_error.rs
@@ -116,6 +125,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 86
+Source: 95
 Tests: 6
 Benches: 2

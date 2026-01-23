@@ -6,5 +6,5 @@ pub mod SectionAnalyzers;
 pub mod SectionEnhancers;
 pub mod ValueResolution;
 pub mod BinarySerialization;
-
+mod Config;
 // TODO: Implement GeneralParser, GeneralSemanticsAnalyzer

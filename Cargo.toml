@@ -49,10 +49,6 @@ criterion = { version = "0.5", features = ["html_reports"] }
 
 # Note: Configure benchmark harness
 [[bench]]
-name = "wrapper_benchmark"
-harness = false
-
-[[bench]]
 name = "throughput_benchmark"
 harness = false
 

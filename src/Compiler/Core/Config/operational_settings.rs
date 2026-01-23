@@ -1,3 +1,5 @@
+//! Operational settings extracted from configuration
+
 /// Error handling strategy
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorHandlingStrategy {
@@ -12,6 +14,16 @@ pub enum ErrorHandlingStrategy {
 impl Default for ErrorHandlingStrategy {
     fn default() -> Self {
         ErrorHandlingStrategy::Halt
+    }
+}
+
+impl std::fmt::Display for ErrorHandlingStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorHandlingStrategy::Halt => write!(f, "halt"),
+            ErrorHandlingStrategy::Continue => write!(f, "continue"),
+            ErrorHandlingStrategy::Recover => write!(f, "recover"),
+        }
     }
 }
 
@@ -32,6 +44,16 @@ impl Default for CompatibilityMode {
     }
 }
 
+impl std::fmt::Display for CompatibilityMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompatibilityMode::Strict => write!(f, "strict"),
+            CompatibilityMode::BestEffort => write!(f, "best_effort"),
+            CompatibilityMode::Permissive => write!(f, "permissive"),
+        }
+    }
+}
+
 /// Debug mode level
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DebugMode {
@@ -49,8 +71,17 @@ impl Default for DebugMode {
     }
 }
 
+impl std::fmt::Display for DebugMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DebugMode::Off => write!(f, "off"),
+            DebugMode::Regular => write!(f, "regular"),
+            DebugMode::Verbose => write!(f, "verbose"),
+        }
+    }
+}
+
 /// Operational settings extracted from configuration
-/// PLACEHOLDER: This will be fully implemented when we port ConfigSchema
 #[derive(Debug, Clone)]
 pub struct OperationalSettings {
     pub error_handling_strategy: ErrorHandlingStrategy,

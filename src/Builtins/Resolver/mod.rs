@@ -2,6 +2,7 @@
 //! Resolver - Resolves builtin method calls and validates them
 
 pub mod instance_method_registry;
+mod static_object_registry;
 
 // Re-export commonly used items
 pub use instance_method_registry::{

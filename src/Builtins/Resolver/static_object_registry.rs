@@ -282,6 +282,7 @@ impl ValidationResult {
 // ==================== REGISTRY INFORMATION TYPES ====================
 
 use crate::Builtins::Core::DixType;
+use crate::Builtins::Static::{ArrayObject, DateTimeObject, DixObject, EnumObject, GuidObject, IStaticObject, IpAddressObject, MathObject, RandomObject};
 
 /// Complete registry information
 #[derive(Debug, Clone)]

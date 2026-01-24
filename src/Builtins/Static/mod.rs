@@ -1,4 +1,4 @@
-// src/Builtins/Static/mod.rs - FIXED
+// src/Builtins/Static/mod.rs
 //! Static - Static objects (Math, DateTime, Array, Dix, etc.)
 
 pub mod static_object_base;

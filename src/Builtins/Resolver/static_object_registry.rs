@@ -1,9 +1,12 @@
-// src/Builtins/Static/static_object_registry.rs
+// src/Builtins/Resolver/static_object_registry.rs
 //! Central registry for all static objects in DixScript
 //! Provides thread-safe access to Math, DateTime, Array, Dix, etc.
 
-use super::*;
-use crate::Builtins::Core::{DixValue, IBuiltinMethod};
+use crate::Builtins::Core::{DixValue, IBuiltinMethod, DixType};
+use crate::Builtins::Static::{
+    IStaticObject, ArrayObject, DateTimeObject, DixObject,
+    EnumObject, GuidObject, IpAddressObject, MathObject, RandomObject,
+};
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
@@ -63,20 +66,6 @@ pub fn has_static_object(name: &str) -> bool {
     let registry = StaticObjectRegistry::get();
     let objects = registry.objects.read().unwrap();
     objects.contains_key(name)
-}
-
-/// Get a static object by name
-pub fn get_static_object(name: &str) -> Option<&'static dyn IStaticObject> {
-    if name.is_empty() {
-        return None;
-    }
-
-    let registry = StaticObjectRegistry::get();
-    let objects = registry.objects.read().unwrap();
-
-    // This is tricky - we can't return a reference from inside the lock
-    // We'll need to redesign this slightly
-    objects.get(name).map(|boxed| &**boxed as &dyn IStaticObject)
 }
 
 /// Call a method on a static object
@@ -280,9 +269,6 @@ impl ValidationResult {
 }
 
 // ==================== REGISTRY INFORMATION TYPES ====================
-
-use crate::Builtins::Core::DixType;
-use crate::Builtins::Static::{ArrayObject, DateTimeObject, DixObject, EnumObject, GuidObject, IStaticObject, IpAddressObject, MathObject, RandomObject};
 
 /// Complete registry information
 #[derive(Debug, Clone)]

@@ -19,10 +19,13 @@ pub use builtin_call_resolver::{
 
 // Re-export commonly used items from compile_time_validator
 pub use compile_time_validator::{
-    generate_validation_report, get_instance_completions, get_instance_method_signature as get_instance_sig,
-    get_method_signature, get_static_completions, validate_instance_call as validate_instance,
+    generate_validation_report, get_instance_completions,
+    get_instance_method_signature as get_instance_sig,
+    get_method_signature, get_static_completions,
+    validate_instance_call as validate_instance,
     validate_instance_call_with_types, validate_multiple_calls,
-    validate_static_call as validate_static, validate_static_call_with_types as validate_static_with_types,
+    validate_static_call as validate_static,
+    validate_static_call_with_types as validate_static_with_types,
     CallValidationRequest, CompletionInfo, MethodSignatureInfo, ParameterInfo, ValidationReport,
     ValidationSummary,
 };
@@ -30,4 +33,12 @@ pub use compile_time_validator::{
 // Re-export from instance_method_registry
 pub use instance_method_registry::{
     call_instance_method, get_universal_methods, is_universal_method,
+};
+
+// Re-export from static_object_registry
+pub use static_object_registry::{
+    initialize_static_registry, has_static_object as registry_has_static_object,
+    has_static_method as registry_has_static_method,
+    call_static_method as registry_call_static_method,
+    get_object_names, get_method_names as get_static_method_names,
 };

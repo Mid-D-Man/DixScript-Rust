@@ -1,6 +1,6 @@
 // src/ErrorManager/Helpers/source_line_extensions.rs
 
-use crate::Utilities::Token;
+use crate::Compiler::Core::Tokenizer::Token;
 
 /// Extension trait for extracting source lines from token streams
 pub trait SourceLineExtensions {

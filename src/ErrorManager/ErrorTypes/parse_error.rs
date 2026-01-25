@@ -1,4 +1,4 @@
-use crate::Utilities::Token;
+use crate::Compiler::Core::Tokenizer::Token;
 use std::fmt;
 
 /// Parse error types

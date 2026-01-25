@@ -8,7 +8,7 @@ use crate::Compiler::AST::{
 };
 use crate::Builtins::Core::DixType;
 use crate::ErrorManager::ErrorManager;
-use crate::Utilities::TokenType;
+use crate::Compiler::Core::Tokenizer::TokenType;
 
 /// Unified type system manager - all static methods
 pub struct TypeSystemManager;

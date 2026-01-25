@@ -4,7 +4,7 @@
 //! SINGLETON PATTERN using LazyLock (thread-safe, zero-cost after first access)
 
 use std::collections::HashSet;
-use crate::Utilities::TokenType;
+use crate::Compiler::Core::Tokenizer::TokenType;
 use std::sync::{LazyLock, RwLock};
 
 /// Version constants

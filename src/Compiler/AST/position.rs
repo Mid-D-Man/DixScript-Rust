@@ -35,7 +35,7 @@ impl Position {
     }
 
     /// Create position from token (will be used by parser)
-    pub fn from_token(token: &crate::Utilities::Token) -> Self {
+    pub fn from_token(token: &crate::Compiler::Core::Tokenizer::Token) -> Self {
         Position {
             line: token.line,
             column: token.column,

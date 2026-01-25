@@ -598,7 +598,7 @@ fn array_distinct(args: &[DixValue]) -> Result<DixValue, String> {
     let mut distinct = Vec::new();
 
     for item in array.iter() {
-        if !distinct.iter().any(|d| d.equal_to(item)) {
+        if !distinct.iter().any(|d: &DixValue| d.equal_to(item)) {  // ADD TYPE ANNOTATION
             distinct.push(item.clone());
         }
     }

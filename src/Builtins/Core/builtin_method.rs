@@ -6,7 +6,7 @@ use super::dix_type::DixType;
 use super::dix_value::DixValue;
 
 /// Trait for all built-in methods in DixScript
-pub trait IBuiltinMethod {
+pub trait IBuiltinMethod: Send + Sync {
     fn name(&self) -> &str;
     fn parameter_count(&self) -> i32;
     fn min_parameter_count(&self) -> i32;

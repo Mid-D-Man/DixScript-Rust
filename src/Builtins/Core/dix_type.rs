@@ -41,6 +41,7 @@ pub enum DixType {
     // Special types
     Null,
     Void,
+    Any,
 }
 
 impl DixType {
@@ -87,6 +88,7 @@ impl DixType {
     }
 
     /// Get the string representation of the type name (lowercase)
+    // In the same file, update get_type_name()
     pub fn get_type_name(self) -> &'static str {
         match self {
             DixType::Int => "int",
@@ -105,6 +107,7 @@ impl DixType {
             DixType::Enum => "enum",
             DixType::Null => "null",
             DixType::Void => "void",
+            DixType::Any => "any",  // ADD THIS
         }
     }
 
@@ -147,6 +150,7 @@ impl DixType {
             DixType::Date => Ok(DataType::Date),
             DixType::Timestamp => Ok(DataType::Timestamp),
             DixType::Enum => Ok(DataType::Enum),
+            DixType::Any => Ok(DataType::Any),
             DixType::Null | DixType::Void => {
                 Err(format!("Cannot convert DixType::{:?} to AST DataType", self))
             }

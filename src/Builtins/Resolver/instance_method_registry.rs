@@ -27,12 +27,12 @@ impl InstanceMethodRegistry {
             universal_methods: HashMap::new(),
         };
 
-        registry.initialize();
+        registry.initialize_methods();
         registry
     }
 
     /// Initialize all instance methods
-    fn initialize(&mut self) {
+    fn initialize_methods(&mut self) {
         self.register_string_methods();
         self.register_number_methods();
         self.register_array_methods();
@@ -84,10 +84,8 @@ impl InstanceMethodRegistry {
 
     /// Register universal methods (available on all types)
     fn register_universal_methods(&mut self) {
-        let universal = universal_methods::get_methods();
-
-        // Store universal methods separately
-        self.universal_methods = universal.clone();
+        // Get universal methods once and store them
+        self.universal_methods = universal_methods::get_methods();
 
         // Add universal methods to all types
         for dix_type in [
@@ -109,10 +107,13 @@ impl InstanceMethodRegistry {
         ] {
             let type_methods = self.type_methods.entry(dix_type).or_insert_with(HashMap::new);
 
+            // Get a fresh set of universal methods for this type
+            let universal_for_type = universal_methods::get_methods();
+
             // Add universal methods, but don't override type-specific methods
-            for (name, method) in &universal {
-                if !type_methods.contains_key(name) {
-                    type_methods.insert(name.clone(), method.clone());
+            for (name, method) in universal_for_type {
+                if !type_methods.contains_key(&name) {
+                    type_methods.insert(name, method);
                 }
             }
         }
@@ -125,6 +126,12 @@ impl InstanceMethodRegistry {
 }
 
 // ==================== PUBLIC API ====================
+
+/// Initialize the instance method registry
+pub fn initialize() {
+    // Force initialization of the registry
+    let _ = InstanceMethodRegistry::get();
+}
 
 /// Call an instance method on a value
 pub fn call_instance_method(
@@ -380,12 +387,14 @@ mod tests {
 
     #[test]
     fn test_registry_initialization() {
+        initialize();
         let types = get_types_with_methods();
         assert!(!types.is_empty());
     }
 
     #[test]
     fn test_has_instance_method() {
+        initialize();
         assert!(has_instance_method(DixType::String, "toUpper"));
         assert!(has_instance_method(DixType::Int, "abs"));
         assert!(!has_instance_method(DixType::String, "nonexistent"));
@@ -393,6 +402,7 @@ mod tests {
 
     #[test]
     fn test_universal_methods() {
+        initialize();
         let universal = get_universal_methods();
         assert!(!universal.is_empty());
         assert!(is_universal_method("toString"));
@@ -401,6 +411,7 @@ mod tests {
 
     #[test]
     fn test_call_instance_method() {
+        initialize();
         let value = DixValue::from_string("hello".to_string());
         let result = call_instance_method(&value, "toUpper", &[]).unwrap();
         assert_eq!(result.as_string(), "HELLO");

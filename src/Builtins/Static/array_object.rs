@@ -218,7 +218,7 @@ impl ArrayObject {
                 let mut unique = Vec::new();
 
                 for item in array {
-                    if !unique.iter().any(|u| u.equal_to(item)) {
+                    if !unique.iter().any(|u: &DixValue| u.equal_to(item)) {  // ADD TYPE ANNOTATION
                         unique.push(item.clone());
                     }
                 }

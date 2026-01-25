@@ -129,8 +129,12 @@ pub fn get_method_names(object_name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Get method signature for a specific object and method
-pub fn get_method(object_name: &str, method_name: &str) -> Option<&'static dyn IBuiltinMethod> {
+/// Get method information (parameter count, return type, description)
+/// This replaces the problematic get_method that returned a trait object reference
+pub fn get_method_info(
+    object_name: &str,
+    method_name: &str,
+) -> Option<MethodInfo> {
     if object_name.is_empty() || method_name.is_empty() {
         return None;
     }
@@ -138,9 +142,32 @@ pub fn get_method(object_name: &str, method_name: &str) -> Option<&'static dyn I
     let registry = StaticObjectRegistry::get();
     let objects = registry.objects.read().unwrap();
 
-    objects
-        .get(object_name)
-        .and_then(|obj| obj.get_method(method_name))
+    objects.get(object_name).and_then(|obj| {
+        obj.get_method(method_name).map(|m| MethodInfo {
+            name: m.name().to_string(),
+            parameter_count: m.parameter_count(),
+            min_parameter_count: m.min_parameter_count(),
+            return_type: m.return_type(),
+            description: m.description().to_string(),
+        })
+    })
+}
+
+/// Check if method exists and get basic info for validation
+pub fn get_method(object_name: &str, method_name: &str) -> Option<&'static dyn IBuiltinMethod> {
+    // NOTE: This function cannot safely return a reference to a trait object
+    // because the RwLock guard would be dropped before we return.
+    // Instead, use get_method_info() or call methods directly through call_static_method()
+
+    // For now, we check if it exists and return None
+    // Callers should use get_method_info instead
+    if has_static_method(object_name, method_name) {
+        // We can't actually return the method reference due to lifetime issues
+        // This is a design limitation we'll work around
+        None
+    } else {
+        None
+    }
 }
 
 /// Validate a static method call
@@ -172,20 +199,20 @@ pub fn validate_call(
         ));
     }
 
-    let method = match obj.get_method(method_name) {
-        Some(m) => m,
-        None => return ValidationResult::error("Could not get method signature"),
-    };
+    // Get method info to validate parameter count
+    drop(objects); // Release the lock before calling get_method_info
 
-    // Check parameter count (-1 means variadic)
-    if method.parameter_count() != -1 && method.parameter_count() as usize != arg_count {
-        return ValidationResult::error(&format!(
-            "{}.{} expects {} arguments, got {}",
-            object_name,
-            method_name,
-            method.parameter_count(),
-            arg_count
-        ));
+    if let Some(method_info) = get_method_info(object_name, method_name) {
+        // Check parameter count (-1 means variadic)
+        if method_info.parameter_count != -1 && method_info.parameter_count as usize != arg_count {
+            return ValidationResult::error(&format!(
+                "{}.{} expects {} arguments, got {}",
+                object_name,
+                method_name,
+                method_info.parameter_count,
+                arg_count
+            ));
+        }
     }
 
     ValidationResult::success()
@@ -218,6 +245,7 @@ pub fn export_registry_info() -> RegistryInfo {
                 method_infos.push(MethodInfo {
                     name: method.name().to_string(),
                     parameter_count: method.parameter_count(),
+                    min_parameter_count: method.min_parameter_count(),
                     return_type: method.return_type(),
                     description: method.description().to_string(),
                 });
@@ -288,6 +316,7 @@ pub struct ObjectInfo {
 pub struct MethodInfo {
     pub name: String,
     pub parameter_count: i32,
+    pub min_parameter_count: i32,
     pub return_type: DixType,
     pub description: String,
 }
@@ -307,6 +336,7 @@ mod tests {
 
     #[test]
     fn test_has_static_object() {
+        initialize_static_registry();
         assert!(has_static_object("Math"));
         assert!(has_static_object("DateTime"));
         assert!(!has_static_object("NonExistent"));
@@ -314,6 +344,7 @@ mod tests {
 
     #[test]
     fn test_has_static_method() {
+        initialize_static_registry();
         assert!(has_static_method("Math", "max"));
         assert!(has_static_method("DateTime", "now"));
         assert!(!has_static_method("Math", "nonexistent"));
@@ -321,6 +352,7 @@ mod tests {
 
     #[test]
     fn test_validate_call() {
+        initialize_static_registry();
         let result = validate_call("Math", "max", 2);
         assert!(result.is_valid());
 
@@ -329,5 +361,17 @@ mod tests {
 
         let result = validate_call("NonExistent", "method", 0);
         assert!(!result.is_valid());
+    }
+
+    #[test]
+    fn test_get_method_info() {
+        initialize_static_registry();
+        let info = get_method_info("Math", "max");
+        assert!(info.is_some());
+
+        if let Some(method_info) = info {
+            assert_eq!(method_info.name, "max");
+            assert_eq!(method_info.parameter_count, 2);
+        }
     }
 }

@@ -5,22 +5,19 @@
 use crate::Builtins::Core::{BuiltinMethod, DixType, DixValue, IBuiltinMethod, validation_helpers};
 use crate::Builtins::Static::{IStaticObject, StaticObjectBase};
 use rand::Rng;
-use std::sync::Mutex;
 
 /// Random static object implementation
+/// Note: Does not store ThreadRng to maintain thread safety (Send + Sync)
+/// ThreadRng is created on-demand in each method
 pub struct RandomObject {
     base: StaticObjectBase,
-    rng: Mutex<rand::rngs::ThreadRng>,
 }
 
 impl RandomObject {
     pub fn new() -> Self {
         let mut base = StaticObjectBase::new("Random".to_string());
         Self::initialize_methods(&mut base);
-        RandomObject {
-            base,
-            rng: Mutex::new(rand::thread_rng()),
-        }
+        RandomObject { base }
     }
 
     fn initialize_methods(base: &mut StaticObjectBase) {

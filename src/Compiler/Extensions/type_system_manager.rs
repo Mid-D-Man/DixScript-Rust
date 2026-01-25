@@ -320,6 +320,7 @@ impl TypeSystemManager {
             DixType::Date => DataType::Date,
             DixType::Timestamp => DataType::Timestamp,
             DixType::Enum => DataType::Enum,
+            DixType::Any => DataType::Any,
             DixType::Null | DixType::Void => DataType::Any,
         }
     }

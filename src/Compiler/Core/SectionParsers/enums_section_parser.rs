@@ -76,10 +76,12 @@ impl<'a> EnumsSectionParser<'a> {
 
         // Expect opening parenthesis
         if !self.match_and_consume_symbol('(') {
+            // Clone token BEFORE calling handle_parse_error
+            let current = self.current().clone();
             self.handle_parse_error(
                 ParseErrorType::MissingToken,
                 "Expected '(' to start ENUMS section",
-                self.current(),
+                &current,
             );
 
             if self.should_halt_section() {
@@ -106,10 +108,12 @@ impl<'a> EnumsSectionParser<'a> {
 
             // Check for invalid comma between enum declarations
             if self.is_current_symbol(',') {
+                // Clone token BEFORE calling handle_parse_error
+                let current = self.current().clone();
                 self.handle_parse_error(
                     ParseErrorType::SectionSyntaxError,
                     "Commas are not allowed between enum declarations",
-                    self.current(),
+                    &current,
                 );
                 self.advance();
                 continue;
@@ -143,10 +147,12 @@ impl<'a> EnumsSectionParser<'a> {
 
         // Expect closing parenthesis
         if !self.match_and_consume_symbol(')') {
+            // Clone token BEFORE calling handle_parse_error
+            let current = self.current().clone();
             self.handle_parse_error(
                 ParseErrorType::MissingToken,
                 "Expected ')' to close ENUMS section",
-                self.current(),
+                &current,
             );
 
             if self.should_halt_section() {
@@ -460,7 +466,7 @@ impl<'a> EnumsSectionParser<'a> {
             message.to_string(),
             token.line,
             token.column,
-            None, // No suggestion generation
+            None,
             source_line,
         );
 

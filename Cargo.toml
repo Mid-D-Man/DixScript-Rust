@@ -17,8 +17,8 @@ crate-type = ["lib", "staticlib", "cdylib"]
 [dependencies]
 # Random number generation for helper functions
 rand = "0.8"
-#uuid for guid ops
-uuid = "1.0.0-alpha.1"
+# UUID for GUID operations - ENABLE v4 feature
+uuid = { version = "1.0", features = ["v4", "serde"] }
 # Date and time handling for error timestamps
 chrono = "0.4"
 

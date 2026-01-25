@@ -71,15 +71,15 @@ impl ConfigSchema {
 
     /// Validate a single configuration entry
     fn validate_entry(key: &str, value: &str) -> Result<(), String> {
-        match key.len() {
-            7 if key.starts_with('v') => Self::validate_version(value),
-            8 if key.starts_with('e') && key == "encoding" => Self::validate_encoding(value),
-            8 if key.starts_with('f') => Self::validate_features(value),
-            7 if key.starts_with('c') && key == "created" => Self::validate_timestamp(value),
-            6 if key.starts_with('a') => Ok(()), // author - any string is valid
-            10 if key.starts_with('d') => Self::validate_debug_mode(value),
-            14 if key.starts_with('e') => Self::validate_error_handling(value),
-            19 if key.starts_with('c') => Self::validate_compatibility(value),
+        match key {
+            "version" => Self::validate_version(value),
+            "encoding" => Self::validate_encoding(value),
+            "features" => Self::validate_features(value),
+            "created" => Self::validate_timestamp(value),
+            "author" => Ok(()), // any string is valid
+            "debug_mode" => Self::validate_debug_mode(value),
+            "error_handling" => Self::validate_error_handling(value),
+            "compatibility_mode" => Self::validate_compatibility(value),
             _ => Ok(()), // Unknown keys are allowed
         }
     }
@@ -179,7 +179,8 @@ impl ConfigSchema {
 
         if version.starts_with("1.0") {
             if let Some(features) = config.get("features") {
-                if features == "legacy" || features == "minimal" {
+                // FIX: Use .as_str() to compare &String with &str
+                if features.as_str() == "legacy" || features.as_str() == "minimal" {
                     config.insert("features".to_string(), "advanced".to_string());
                     warnings.push("Updated legacy features to 'advanced' for v1.0.0".to_string());
                 }
@@ -205,25 +206,13 @@ impl ConfigSchema {
 
     /// Create enhanced ConfigValue based on key type
     fn create_enhanced_config_value(key: &str, value: &str) -> ConfigValue {
-        match (key.len(), key.chars().next().unwrap_or('\0')) {
-            (14, 'e') if key == "error_handling" => {
-                Self::create_error_handling_value(value)
-            }
-            (19, 'c') if key == "compatibility_mode" => {
-                Self::create_compatibility_value(value)
-            }
-            (10, 'd') if key == "debug_mode" => {
-                Self::create_debug_value(value)
-            }
-            (8, 'f') if key == "features" => {
-                Self::create_feature_value(value)
-            }
-            (7, 'c') if key == "created" && Self::is_timestamp(value) => {
-                ConfigValue::Timestamp(value.to_string())
-            }
-            (7, 'c') if key == "created" => {
-                ConfigValue::Date(value.to_string())
-            }
+        match key {
+            "error_handling" => Self::create_error_handling_value(value),
+            "compatibility_mode" => Self::create_compatibility_value(value),
+            "debug_mode" => Self::create_debug_value(value),
+            "features" => Self::create_feature_value(value),
+            "created" if Self::is_timestamp(value) => ConfigValue::Timestamp(value.to_string()),
+            "created" => ConfigValue::Date(value.to_string()),
             _ => ConfigValue::String(value.to_string()),
         }
     }

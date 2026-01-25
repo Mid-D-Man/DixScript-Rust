@@ -1,85 +1,11 @@
-///! Operational settings extracted from configuration
+//! Operational settings extracted from configuration
 
-/// Error handling strategy
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ErrorHandlingStrategy {
-    /// Halt execution on first error
-    Halt,
-    /// Continue execution, collect all errors
-    Continue,
-    /// Attempt to recover from errors
-    Recover,
-}
-
-impl Default for ErrorHandlingStrategy {
-    fn default() -> Self {
-        ErrorHandlingStrategy::Halt
-    }
-}
-
-impl std::fmt::Display for ErrorHandlingStrategy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ErrorHandlingStrategy::Halt => write!(f, "halt"),
-            ErrorHandlingStrategy::Continue => write!(f, "continue"),
-            ErrorHandlingStrategy::Recover => write!(f, "recover"),
-        }
-    }
-}
-
-/// Compatibility mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompatibilityMode {
-    /// Strict mode - enforce all rules
-    Strict,
-    /// Best effort - try to work with issues
-    BestEffort,
-    /// Permissive - allow most variations
-    Permissive,
-}
-
-impl Default for CompatibilityMode {
-    fn default() -> Self {
-        CompatibilityMode::Strict
-    }
-}
-
-impl std::fmt::Display for CompatibilityMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CompatibilityMode::Strict => write!(f, "strict"),
-            CompatibilityMode::BestEffort => write!(f, "best_effort"),
-            CompatibilityMode::Permissive => write!(f, "permissive"),
-        }
-    }
-}
-
-/// Debug mode level
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DebugMode {
-    /// No debug output
-    Off,
-    /// Regular debug output
-    Regular,
-    /// Verbose debug output
-    Verbose,
-}
-
-impl Default for DebugMode {
-    fn default() -> Self {
-        DebugMode::Off
-    }
-}
-
-impl std::fmt::Display for DebugMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DebugMode::Off => write!(f, "off"),
-            DebugMode::Regular => write!(f, "regular"),
-            DebugMode::Verbose => write!(f, "verbose"),
-        }
-    }
-}
+// IMPORTANT: Use the enums from AST data_types, not duplicates
+pub use crate::Compiler::AST::data_types::{
+    ErrorHandlingStrategy,
+    CompatibilityMode,
+    DebugMode,
+};
 
 /// Operational settings extracted from configuration
 #[derive(Debug, Clone)]

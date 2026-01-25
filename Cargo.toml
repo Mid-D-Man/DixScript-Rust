@@ -57,6 +57,16 @@ harness = false
 name = "config_tests"
 path = "tests/config_tests.rs"
 
+[[bench]]
+name = "lexer_throughput"
+harness = false
+
+[[bin]]
+name = "simple_bench"
+path = "benches/simple_bench.rs"
+test = false
+bench = false
+
 [profile.release]
 opt-level = 3
 lto = true

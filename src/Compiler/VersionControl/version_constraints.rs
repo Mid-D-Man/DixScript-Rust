@@ -6,12 +6,12 @@ use std::collections::{HashMap, HashSet};
 use crate::Compiler::AST::*;
 use crate::Compiler::VersionControl::{VersionManager, ForwardCompatibilityManager, CompatibilityResult};
 use crate::Compiler::Extensions::TypeSystemManager;
-use crate::Builtins::Static::StaticObjectRegistry;
-use crate::Builtins::Instance::InstanceMethodRegistry;
+use crate::Builtins::Resolver::static_object_registry;
+use crate::Builtins::Resolver::instance_method_registry;
 use crate::Builtins::Core::DixType;
 
 /// Defines constraints and limitations based on DixScript version
-/// SINGLETON PATTERN - Single shared instance coordinated with VersionManager
+/// Singleton instance coordinated with VersionManager
 pub struct VersionConstraints {
     version_manager: &'static std::sync::RwLock<VersionManager>,
     forward_compat_manager: Option<ForwardCompatibilityManager>,
@@ -43,7 +43,7 @@ impl VersionConstraints {
         }
 
         let supported_types = TypeSystemManager::get_supported_types();
-        supported_types.contains(&value_type.to_lowercase())
+        supported_types.contains(&value_type.to_lowercase().as_str())
     }
 
     /// Checks if a default value is compatible with a parameter type
@@ -192,12 +192,9 @@ impl VersionConstraints {
 
     /// Validates QuickFunction signature - delegates to TypeSystemManager
     pub fn validate_quick_function_signature(&self, function: &QuickFunction) -> Vec<String> {
-        let validation_result = TypeSystemManager::validate_quick_function_signature(function);
-
-        if validation_result.is_success {
-            Vec::new()
-        } else {
-            validation_result.errors
+        match TypeSystemManager::validate_quick_function_signature(function) {
+            Ok(_) => Vec::new(),
+            Err(errors) => errors,
         }
     }
 
@@ -210,7 +207,7 @@ impl VersionConstraints {
             return false;
         }
 
-        StaticObjectRegistry::has_object(object_name)
+        static_object_registry::has_static_object(object_name)
     }
 
     /// Validates instance method call on a type
@@ -220,7 +217,7 @@ impl VersionConstraints {
             return false;
         }
 
-        InstanceMethodRegistry::has_instance_method(type_name, method_name)
+        instance_method_registry::has_instance_method(type_name, method_name)
     }
 
     /// Validates Dix function call

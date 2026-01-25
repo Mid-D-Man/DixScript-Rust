@@ -1,45 +1,46 @@
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 /// Context-aware keyword management for DixScript v1.0.0
-/// Maintains C# naming convention (PascalCase) for compatibility
+/// Uses Rust naming conventions (snake_case methods)
 pub struct Keywords;
 
 impl Keywords {
     /// TRULY RESERVED KEYWORDS - Never allowed as identifiers anywhere
     pub fn truly_reserved_keywords() -> &'static HashSet<String> {
         static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::New();
+            let mut set = HashSet::new();
             // Control flow
-            set.Add("if".to_string());
-            set.Add("elif".to_string());
-            set.Add("else".to_string());
-            set.Add("chk".to_string());
-            set.Add("miss".to_string());
-            set.Add("then".to_string());
-            set.Add("return".to_string());
+            set.insert("if".to_string());
+            set.insert("elif".to_string());
+            set.insert("else".to_string());
+            set.insert("chk".to_string());
+            set.insert("miss".to_string());
+            set.insert("then".to_string());
+            set.insert("return".to_string());
 
             // Logical operators
-            set.Add("and".to_string());
-            set.Add("or".to_string());
-            set.Add("not".to_string());
+            set.insert("and".to_string());
+            set.insert("or".to_string());
+            set.insert("not".to_string());
 
             // Literals
-            set.Add("true".to_string());
-            set.Add("false".to_string());
-            set.Add("null".to_string());
+            set.insert("true".to_string());
+            set.insert("false".to_string());
+            set.insert("null".to_string());
 
             // Scope keywords
-            set.Add("global".to_string());
+            set.insert("global".to_string());
 
             // Variable declaration keywords
-            set.Add("const".to_string());
-            set.Add("let".to_string());
-            set.Add("mut".to_string());
+            set.insert("const".to_string());
+            set.insert("let".to_string());
+            set.insert("mut".to_string());
 
             // Imports keywords
-            set.Add("from".to_string());
-            set.Add("from_cloud".to_string());
-            set.Add("verify".to_string());
+            set.insert("from".to_string());
+            set.insert("from_cloud".to_string());
+            set.insert("verify".to_string());
 
             set
         });
@@ -49,22 +50,22 @@ impl Keywords {
     /// DATA TYPE KEYWORDS - Only special in type annotations
     pub fn data_type_keywords() -> &'static HashSet<String> {
         static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::New();
-            set.Add("int".to_string());
-            set.Add("float".to_string());
-            set.Add("double".to_string());
-            set.Add("string".to_string());
-            set.Add("bool".to_string());
-            set.Add("array".to_string());
-            set.Add("tuple".to_string());
-            set.Add("hex".to_string());
-            set.Add("blob".to_string());
-            set.Add("regex".to_string());
-            set.Add("object".to_string());
-            set.Add("timestamp".to_string());
-            set.Add("date".to_string());
-            set.Add("enum".to_string());
-            set.Add("any".to_string());
+            let mut set = HashSet::new();
+            set.insert("int".to_string());
+            set.insert("float".to_string());
+            set.insert("double".to_string());
+            set.insert("string".to_string());
+            set.insert("bool".to_string());
+            set.insert("array".to_string());
+            set.insert("tuple".to_string());
+            set.insert("hex".to_string());
+            set.insert("blob".to_string());
+            set.insert("regex".to_string());
+            set.insert("object".to_string());
+            set.insert("timestamp".to_string());
+            set.insert("date".to_string());
+            set.insert("enum".to_string());
+            set.insert("any".to_string());
             set
         });
         &KEYWORDS
@@ -73,12 +74,12 @@ impl Keywords {
     /// ALL LANGUAGE KEYWORDS - Combined set
     pub fn language_keywords() -> &'static HashSet<String> {
         static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::New();
-            for kw in Keywords::truly_reserved_keywords().Iter() {
-                set.Add(kw.clone());
+            let mut set = HashSet::new();
+            for kw in Keywords::truly_reserved_keywords().iter() {
+                set.insert(kw.clone());
             }
-            for kw in Keywords::data_type_keywords().Iter() {
-                set.Add(kw.clone());
+            for kw in Keywords::data_type_keywords().iter() {
+                set.insert(kw.clone());
             }
             set
         });
@@ -88,15 +89,15 @@ impl Keywords {
     /// CONFIG SECTION KEYWORDS
     pub fn config_section_keywords() -> &'static HashSet<String> {
         static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::New();
-            set.Add("version".to_string());
-            set.Add("encoding".to_string());
-            set.Add("author".to_string());
-            set.Add("created".to_string());
-            set.Add("features".to_string());
-            set.Add("debug_mode".to_string());
-            set.Add("error_handling".to_string());
-            set.Add("compatibility_mode".to_string());
+            let mut set = HashSet::new();
+            set.insert("version".to_string());
+            set.insert("encoding".to_string());
+            set.insert("author".to_string());
+            set.insert("created".to_string());
+            set.insert("features".to_string());
+            set.insert("debug_mode".to_string());
+            set.insert("error_handling".to_string());
+            set.insert("compatibility_mode".to_string());
             set
         });
         &KEYWORDS
@@ -105,12 +106,12 @@ impl Keywords {
     /// SECURITY SECTION KEYWORDS
     pub fn security_section_keywords() -> &'static HashSet<String> {
         static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::New();
-            set.Add("encryption".to_string());
-            set.Add("validation".to_string());
-            set.Add("keystore".to_string());
-            set.Add("override".to_string());
-            set.Add("metadata".to_string());
+            let mut set = HashSet::new();
+            set.insert("encryption".to_string());
+            set.insert("validation".to_string());
+            set.insert("keystore".to_string());
+            set.insert("override".to_string());
+            set.insert("metadata".to_string());
             set
         });
         &KEYWORDS
@@ -119,26 +120,26 @@ impl Keywords {
     /// DLM MODULE KEYWORDS
     pub fn dlm_keywords() -> &'static HashSet<String> {
         static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::New();
+            let mut set = HashSet::new();
             // Module types
-            set.Add("DCompressor".to_string());
-            set.Add("DAuditor".to_string());
-            set.Add("DEncryptor".to_string());
+            set.insert("DCompressor".to_string());
+            set.insert("DAuditor".to_string());
+            set.insert("DEncryptor".to_string());
 
             // DCompressor subtypes
-            set.Add("gzip".to_string());
-            set.Add("bzip2".to_string());
-            set.Add("lzma".to_string());
+            set.insert("gzip".to_string());
+            set.insert("bzip2".to_string());
+            set.insert("lzma".to_string());
 
             // DAuditor subtypes
-            set.Add("diy".to_string());
-            set.Add("enhanced".to_string());
+            set.insert("diy".to_string());
+            set.insert("enhanced".to_string());
 
             // DEncryptor subtypes
-            set.Add("xor".to_string());
-            set.Add("aes128".to_string());
-            set.Add("aes256".to_string());
-            set.Add("chacha20".to_string());
+            set.insert("xor".to_string());
+            set.insert("aes128".to_string());
+            set.insert("aes256".to_string());
+            set.insert("chacha20".to_string());
             set
         });
         &KEYWORDS
@@ -147,29 +148,29 @@ impl Keywords {
     /// CONFIG VALUE KEYWORDS
     pub fn config_value_keywords() -> &'static HashSet<String> {
         static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::New();
+            let mut set = HashSet::new();
             // Error handling strategies
-            set.Add("halt".to_string());
-            set.Add("continue".to_string());
-            set.Add("recover".to_string());
+            set.insert("halt".to_string());
+            set.insert("continue".to_string());
+            set.insert("recover".to_string());
 
             // Compatibility modes
-            set.Add("strict".to_string());
-            set.Add("best_effort".to_string());
-            set.Add("permissive".to_string());
+            set.insert("strict".to_string());
+            set.insert("best_effort".to_string());
+            set.insert("permissive".to_string());
 
             // Debug modes
-            set.Add("off".to_string());
-            set.Add("regular".to_string());
-            set.Add("verbose".to_string());
+            set.insert("off".to_string());
+            set.insert("regular".to_string());
+            set.insert("verbose".to_string());
 
             // Feature values
-            set.Add("basic".to_string());
-            set.Add("advanced".to_string());
-            set.Add("quickfuncs".to_string());
-            set.Add("enums".to_string());
-            set.Add("dlm".to_string());
-            set.Add("data".to_string());
+            set.insert("basic".to_string());
+            set.insert("advanced".to_string());
+            set.insert("quickfuncs".to_string());
+            set.insert("enums".to_string());
+            set.insert("dlm".to_string());
+            set.insert("data".to_string());
             set
         });
         &KEYWORDS
@@ -178,9 +179,9 @@ impl Keywords {
     /// CONTEXTUAL IDENTIFIERS
     pub fn contextual_identifiers() -> &'static HashSet<String> {
         static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::New();
-            set.Add("config".to_string());
-            set.Add("Dix".to_string());
+            let mut set = HashSet::new();
+            set.insert("config".to_string());
+            set.insert("Dix".to_string());
             set
         });
         &KEYWORDS
@@ -194,7 +195,7 @@ impl Keywords {
 
         // Truly reserved keywords are ALWAYS reserved
         if Keywords::truly_reserved_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return true;
@@ -202,7 +203,7 @@ impl Keywords {
 
         // Data type keywords CANNOT be used as variable/parameter names in QUICKFUNCS
         if Keywords::data_type_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             if context_upper == "QUICKFUNCS" {
@@ -219,17 +220,17 @@ impl Keywords {
         match context_upper.as_str() {
             "CONFIG" => {
                 Keywords::config_section_keywords()
-                    .Iter()
+                    .iter()
                     .any(|k| k.to_lowercase() == word_lower)
                     || Keywords::config_value_keywords()
-                    .Iter()
+                    .iter()
                     .any(|k| k.to_lowercase() == word_lower)
             }
             "SECURITY" => Keywords::security_section_keywords()
-                .Iter()
+                .iter()
                 .any(|k| k.to_lowercase() == word_lower),
             "DLM" => Keywords::dlm_keywords()
-                .Iter()
+                .iter()
                 .any(|k| k.to_lowercase() == word_lower),
             "QUICKFUNCS" | "DATA" => false,
             _ => false,
@@ -244,14 +245,14 @@ impl Keywords {
     /// Check if word is a contextual identifier
     pub fn is_contextual_identifier(word: &str) -> bool {
         Keywords::contextual_identifiers()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word.to_lowercase())
     }
 
     /// Check if word is a data type keyword
     pub fn is_data_type_keyword(word: &str) -> bool {
         Keywords::data_type_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word.to_lowercase())
     }
 
@@ -259,19 +260,19 @@ impl Keywords {
     pub fn is_keyword(word: &str) -> bool {
         let word_lower = word.to_lowercase();
         Keywords::language_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
             || Keywords::config_section_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
             || Keywords::security_section_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
             || Keywords::dlm_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
             || Keywords::config_value_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
     }
 
@@ -280,43 +281,43 @@ impl Keywords {
         let word_lower = word.to_lowercase();
 
         if Keywords::truly_reserved_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "Reserved Keyword";
         }
         if Keywords::data_type_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "Data Type Keyword (can be identifier)";
         }
         if Keywords::config_section_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "Config Keyword";
         }
         if Keywords::security_section_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "Security Keyword";
         }
         if Keywords::dlm_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "DLM Keyword";
         }
         if Keywords::config_value_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "Config Value Keyword";
         }
         if Keywords::contextual_identifiers()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return "Contextual Identifier";
@@ -330,7 +331,7 @@ impl Keywords {
         let word_lower = word.to_lowercase();
 
         if Keywords::truly_reserved_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             return format!(
@@ -340,7 +341,7 @@ impl Keywords {
         }
 
         if Keywords::data_type_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
         {
             if context == "QUICKFUNCS" {
@@ -361,7 +362,7 @@ impl Keywords {
         }
 
         if Keywords::config_section_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
             && context == "CONFIG"
         {
@@ -372,7 +373,7 @@ impl Keywords {
         }
 
         if Keywords::security_section_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
             && context == "SECURITY"
         {
@@ -383,7 +384,7 @@ impl Keywords {
         }
 
         if Keywords::dlm_keywords()
-            .Iter()
+            .iter()
             .any(|k| k.to_lowercase() == word_lower)
             && context == "DLM"
         {

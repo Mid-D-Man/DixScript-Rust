@@ -45,6 +45,7 @@ impl VersionManager {
     }
 
     /// Initialize with specific version (call once at startup)
+    /// Note: This updates the existing singleton, does not return Result
     pub fn initialize(version: &str) {
         let mut manager = VERSION_MANAGER.write().unwrap();
         manager.current_version = Self::validate_version_static(version);
@@ -61,6 +62,11 @@ impl VersionManager {
     }
 
     /// Get current version
+    pub fn current_version(&self) -> &str {
+        &self.current_version
+    }
+
+    /// Get current version (deprecated, use current_version)
     pub fn get_current_version(&self) -> &str {
         &self.current_version
     }

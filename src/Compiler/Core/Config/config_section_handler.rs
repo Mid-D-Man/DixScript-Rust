@@ -3,17 +3,11 @@
 //! CRITICAL RESPONSIBILITIES:
 //! 1. Extract and parse @CONFIG section from source
 //! 2. Initialize VersionManager singleton with detected version
-//! 3. Initialize VersionConstraints singleton (depends on VersionManager)
-//! 4. Configure ErrorManager with operational settings
-//! 5. Return validated config + operational settings
-//!
-//! OPTIMIZATION TARGETS:
-//! - Time: < 0.5ms for 9 KB file
-//! - Memory: < 2KB allocations
-//! - Zero-copy string scanning with &str slices
+//! 3. Configure ErrorManager with operational settings
+//! 4. Return validated config + operational settings
 
 use crate::Compiler::AST::{ConfigSection, ConfigEntry, ConfigValue};
-use crate::Compiler::VersionControl::{VersionManager, VersionConstraints};
+use crate::Compiler::VersionControl::VersionManager;
 use crate::ErrorManager::ErrorManager;
 use crate::Utilities::MID_Logger;
 use super::{ConfigSchema, OperationalSettings};
@@ -62,7 +56,7 @@ impl ConfigSectionHandler {
             result.cleaned_input_string = String::new();
 
             // Initialize singletons with default config
-            self.initialize_singletons(&result.config_section, &mut result);
+            self.initialize_singletons(&mut result);
 
             return result;
         }
@@ -75,7 +69,7 @@ impl ConfigSectionHandler {
             result.cleaned_input_string = input_string.to_string();
 
             // Initialize singletons with default config
-            self.initialize_singletons(&result.config_section, &mut result);
+            self.initialize_singletons(&mut result);
 
             return result;
         }
@@ -118,18 +112,19 @@ impl ConfigSectionHandler {
         }
 
         // Initialize all singletons with parsed config
-        self.initialize_singletons(&result.config_section, &mut result);
+        self.initialize_singletons(&mut result);
 
         result
     }
 
     /// Initialize all singletons in correct order
-    /// Order matters: VersionManager → VersionConstraints → ErrorManager
-    fn initialize_singletons(&self, config: &ConfigSection, result: &mut ProcessConfigResult) {
+    /// Order matters: VersionManager → ErrorManager
+    /// Takes mutable reference to access config_section inside
+    fn initialize_singletons(&self, result: &mut ProcessConfigResult) {
         self.log_info("Starting singleton initialization");
 
         // Step 1: Extract operational settings from config
-        result.operational_settings = ConfigSchema::extract_operational_settings(config);
+        result.operational_settings = ConfigSchema::extract_operational_settings(&result.config_section);
 
         self.log_info(&format!(
             "Settings: {:?}, {:?}, Version: {}",
@@ -138,45 +133,26 @@ impl ConfigSectionHandler {
             result.operational_settings.version
         ));
 
-        // Step 2: Initialize VersionManager singleton
-        match VersionManager::initialize(&result.operational_settings.version) {
-            Ok(_) => {
-                self.log_info(&format!(
-                    "VersionManager initialized with version {}",
-                    result.operational_settings.version
-                ));
-            }
-            Err(e) => {
-                // Already initialized - this is OK for subsequent compilations
-                self.log_info(&format!(
-                    "VersionManager already initialized: {}",
-                    e
-                ));
+        // Step 2: Initialize VersionManager singleton (no Result return)
+        VersionManager::initialize(&result.operational_settings.version);
 
-                // Verify version compatibility
-                if let Ok(vm) = VersionManager::instance() {
-                    if vm.current_version() != result.operational_settings.version {
-                        self.log_warning(&format!(
-                            "Version mismatch: Config requests {}, but VersionManager is {}",
-                            result.operational_settings.version,
-                            vm.current_version()
-                        ));
-                    }
-                }
+        self.log_info(&format!(
+            "VersionManager initialized with version {}",
+            result.operational_settings.version
+        ));
+
+        // Verify version compatibility
+        if let Ok(vm) = VersionManager::instance().read() {
+            if vm.current_version() != result.operational_settings.version {
+                self.log_warning(&format!(
+                    "Version mismatch: Config requests {}, but VersionManager is {}",
+                    result.operational_settings.version,
+                    vm.current_version()
+                ));
             }
         }
 
-        // Step 3: Ensure VersionConstraints singleton is initialized
-        match VersionConstraints::instance() {
-            Ok(_) => {
-                self.log_info("VersionConstraints singleton ready");
-            }
-            Err(e) => {
-                self.log_warning(&format!("VersionConstraints initialization issue: {}", e));
-            }
-        }
-
-        // Step 4: Update ErrorManager with operational settings
+        // Step 3: Update ErrorManager with operational settings
         self.error_manager.update_settings(result.operational_settings.clone());
         self.log_info("ErrorManager configured with operational settings");
 
@@ -377,6 +353,7 @@ impl ConfigSectionHandler {
     }
 
     /// Parse CONFIG content string
+    /// Parse CONFIG content string
     fn parse_config_string_optimized(&self, config_string: &str) -> Result<ConfigParseResult, String> {
         let content = self.extract_config_content_optimized(config_string)?;
 
@@ -388,7 +365,7 @@ impl ConfigSectionHandler {
             });
         }
 
-        let entries_result = self.parse_config_entries_optimized(content);
+        let entries_result = self.parse_config_entries_optimized(&content); // ADD & HERE
 
         // Use static ConfigSchema for validation
         match ConfigSchema::validate_and_enhance_config(entries_result.entries) {
@@ -410,8 +387,8 @@ impl ConfigSectionHandler {
     }
 
     /// Extract content between @CONFIG( and )
-    #[inline]
-    fn extract_config_content_optimized(&self, config_string: &str) -> Result<&str, String> {
+    /// Returns a String instead of &str to avoid lifetime issues
+    fn extract_config_content_optimized(&self, config_string: &str) -> Result<String, String> {
         let open_paren_index = config_string.find('(')
             .ok_or("Missing '(' in CONFIG")?;
 
@@ -422,7 +399,7 @@ impl ConfigSectionHandler {
             return Err("Invalid CONFIG parentheses".to_string());
         }
 
-        Ok(&config_string[open_paren_index + 1..close_paren_index])
+        Ok(config_string[open_paren_index + 1..close_paren_index].to_string())
     }
 
     /// Parse config entries from content
@@ -511,12 +488,12 @@ impl ConfigSectionHandler {
 
         let cleaned_value = self.clean_config_value_optimized(value);
 
-        Ok((key.to_string(), cleaned_value.to_string()))
+        Ok((key.to_string(), cleaned_value))
     }
 
     /// Clean config value (remove quotes)
     #[inline]
-    fn clean_config_value_optimized<'a>(&self, value: &'a str) -> &'a str {
+    fn clean_config_value_optimized(&self, value: &str) -> String {
         let value = value.trim();
 
         if value.len() >= 2 {
@@ -524,11 +501,11 @@ impl ConfigSectionHandler {
             let last = value.chars().last().unwrap();
 
             if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
-                return &value[1..value.len() - 1];
+                return value[1..value.len() - 1].to_string();
             }
         }
 
-        value
+        value.to_string()
     }
 
     // Logging helpers

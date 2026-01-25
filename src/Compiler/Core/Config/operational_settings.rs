@@ -1,4 +1,4 @@
-//! Operational settings extracted from configuration
+///! Operational settings extracted from configuration
 
 /// Error handling strategy
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,11 +1,10 @@
 // src/ErrorManager/error_manager.rs
-
-use std::sync::{Arc, Mutex, OnceLock};
-use crate::ErrorManager::{
-    ErrorTypes::*,
-    OperationalSettings,
-};
+use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
+use crate::ErrorManager::ErrorTypes::*;
+use crate::ErrorManager::Helpers::*;
 use crate::Utilities::MID_Logger;
+use std::sync::{Arc, Mutex, OnceLock};
+
 
 /// Thread-safe singleton ErrorManager
 /// Uses OnceLock for lazy initialization
@@ -393,7 +392,7 @@ impl ErrorManager {
         let inner = self.inner.lock().unwrap();
         inner.has_errors && matches!(
             inner.operational_settings.error_handling_strategy,
-            crate::ErrorManager::ErrorHandlingStrategy::Halt
+           ErrorHandlingStrategy::Halt
         )
     }
 
@@ -438,7 +437,6 @@ impl ErrorManagerInner {
     }
 
     fn determine_severity(&self, source: ErrorSource) -> ErrorSeverity {
-        use crate::ErrorManager::ErrorHandlingStrategy;
 
         match source {
             ErrorSource::Lexer if matches!(

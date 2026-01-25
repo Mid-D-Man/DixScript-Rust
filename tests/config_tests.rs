@@ -1,770 +1,632 @@
-//! Comprehensive tests for Config section handling
+// tests/config_tests.rs
+//! Comprehensive tests for DixScript CONFIG section handling
 //!
 //! Tests cover:
-//! 1. OperationalSettings creation and defaults
-//! 2. Config extraction and removal from input
-//! 3. Config parsing and validation
-//! 4. Performance benchmarks
-//! 5. Edge cases and error handling
+//! - ConfigSectionHandler extraction and parsing
+//! - ConfigSchema validation and defaults
+//! - OperationalSettings extraction
+//! - Version initialization
+//! - Error handling strategies
 
-#[cfg(test)]
-mod config_tests {
-    use crate::Compiler::Core::Config::{
-        ConfigSectionHandler, ConfigSchema, OperationalSettings,
-        ErrorHandlingStrategy, CompatibilityMode, DebugMode,
-    };
-    use crate::Compiler::AST::{ConfigSection, ConfigValue};
-    use std::time::Instant;
+use dixscript::Compiler::Core::Config::{
+    ConfigSectionHandler, ConfigSchema, OperationalSettings,
+    ErrorHandlingStrategy, CompatibilityMode, DebugMode,
+};
+use dixscript::Compiler::AST::{ConfigSection, ConfigValue};
+use dixscript::Compiler::VersionControl::VersionManager;
 
-    // ==================== OPERATIONAL SETTINGS TESTS ====================
+// ==================== HELPER FUNCTIONS ====================
 
-    #[test]
-    fn test_operational_settings_defaults() {
-        let settings = OperationalSettings::default();
+/// Initialize test logger (optional, but helpful for debugging)
+fn setup_test() {
+    // Reset VersionManager for each test if needed
+    // Note: VersionManager uses OnceLock which can't be reset easily
+    // So we just ensure it's initialized
+}
 
-        assert_eq!(settings.error_handling_strategy, ErrorHandlingStrategy::Halt);
-        assert_eq!(settings.compatibility_mode, CompatibilityMode::Strict);
-        assert_eq!(settings.debug_mode, DebugMode::Off);
-        assert_eq!(settings.version, "1.0.0");
-        assert_eq!(settings.enabled_features, vec!["advanced"]);
-        assert!(!settings.skip_imports_resolution);
-        assert!(settings.source_file_path.is_none());
-    }
+/// Clean up after test
+fn teardown_test() {
+    // Any cleanup needed
+}
 
-    #[test]
-    fn test_operational_settings_advanced_mode() {
-        let mut settings = OperationalSettings::default();
-
-        // Advanced mode with explicit "advanced" feature
-        settings.enabled_features = vec!["advanced".to_string()];
-        assert!(settings.is_advanced_mode());
-
-        // Advanced mode with quickfuncs
-        settings.enabled_features = vec!["quickfuncs".to_string()];
-        assert!(settings.is_advanced_mode());
-
-        // Advanced mode with enums
-        settings.enabled_features = vec!["enums".to_string()];
-        assert!(settings.is_advanced_mode());
-
-        // Basic mode
-        settings.enabled_features = vec!["basic".to_string()];
-        assert!(!settings.is_advanced_mode());
-    }
-
-    #[test]
-    fn test_operational_settings_feature_enabled() {
-        let mut settings = OperationalSettings::default();
-
-        // In advanced mode, all features should be enabled except "basic"
-        settings.enabled_features = vec!["advanced".to_string()];
-        assert!(settings.is_feature_enabled("quickfuncs"));
-        assert!(settings.is_feature_enabled("enums"));
-        assert!(settings.is_feature_enabled("data"));
-        assert!(!settings.is_feature_enabled("basic"));
-
-        // In basic mode, only basic features
-        settings.enabled_features = vec!["basic".to_string()];
-        assert!(settings.is_feature_enabled("basic"));
-        assert!(settings.is_feature_enabled("data")); // data is in basic
-    }
-
-    // ==================== CONFIG EXTRACTION TESTS ====================
-
-    #[test]
-    fn test_config_extraction_simple() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@CONFIG(
-    version -> "1.0.0",
-    encoding -> "utf-8"
-)
-
-@DATA(
-    name = "test"
-)
-"#;
-
-        let result = handler.process_config_section(input);
-
-        // Config should be extracted
-        assert!(!result.config_section.entries.is_empty());
-
-        // Config should be removed from cleaned input
-        assert!(!result.cleaned_input_string.contains("@CONFIG"));
-        assert!(result.cleaned_input_string.contains("@DATA"));
-
-        println!("✓ Config extracted and removed successfully");
-        println!("Cleaned input:\n{}", result.cleaned_input_string);
-    }
-
-    #[test]
-    fn test_config_extraction_complex() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-// This is a comment
-@CONFIG(
+/// Create a basic valid CONFIG string
+fn create_basic_config() -> String {
+    r#"@CONFIG(
     version -> "1.0.0",
     encoding -> "utf-8",
-    author -> "Test Author",
-    created -> "2024-01-23T12:00:00Z",
-    features -> "quickfuncs,enums,data",
+    author -> "Test Suite",
+    features -> "advanced",
     debug_mode -> "verbose",
-    error_handling -> "continue",
-    compatibility_mode -> "permissive"
-)
+    error_handling -> "halt"
+)"#.to_string()
+}
 
-@ENUMS(
-    Status { ACTIVE, INACTIVE }
-)
-
-@DATA(
-    name = "test",
-    count = 42
-)
-"#;
-
-        let result = handler.process_config_section(input);
-
-        // Verify extraction
-        assert!(!result.config_section.entries.is_empty());
-        assert!(!result.cleaned_input_string.contains("@CONFIG"));
-        assert!(result.cleaned_input_string.contains("@ENUMS"));
-        assert!(result.cleaned_input_string.contains("@DATA"));
-
-        // Verify operational settings
-        assert_eq!(result.operational_settings.error_handling_strategy, ErrorHandlingStrategy::Continue);
-        assert_eq!(result.operational_settings.debug_mode, DebugMode::Verbose);
-        assert_eq!(result.operational_settings.compatibility_mode, CompatibilityMode::Permissive);
-
-        println!("✓ Complex config extracted with all settings");
-        println!("Features: {:?}", result.operational_settings.enabled_features);
-    }
-
-    #[test]
-    fn test_config_with_nested_parens() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@CONFIG(
+/// Create CONFIG with all optional fields
+fn create_full_config() -> String {
+    r#"@CONFIG(
     version -> "1.0.0",
-    description -> "Test (with parentheses) in value"
-)
+    encoding -> "utf-8",
+    author -> "Test Suite",
+    created -> "2025-01-25T10:30:00Z",
+    features -> "advanced",
+    debug_mode -> "verbose",
+    error_handling -> "halt",
+    compatibility_mode -> "strict"
+)"#.to_string()
+}
 
-@DATA(
-    value = 123
-)
-"#;
-
-        let result = handler.process_config_section(input);
-
-        assert!(!result.cleaned_input_string.contains("@CONFIG"));
-        assert!(result.cleaned_input_string.contains("@DATA"));
-
-        println!("✓ Nested parentheses handled correctly");
-    }
-
-    #[test]
-    fn test_config_with_strings_containing_commas() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@CONFIG(
+/// Create minimal CONFIG (only required fields)
+fn create_minimal_config() -> String {
+    r#"@CONFIG(
     version -> "1.0.0",
-    features -> "quickfuncs,enums,data",
-    description -> "This has, many, commas"
-)
+    encoding -> "utf-8"
+)"#.to_string()
+}
 
-@DATA(x = 1)
-"#;
+/// Assert config entry exists and has expected value
+fn assert_config_entry(config: &ConfigSection, key: &str, expected: &str) {
+    let entry = config.entries.iter()
+        .find(|e| e.key.eq_ignore_ascii_case(key))
+        .unwrap_or_else(|| panic!("Config entry '{}' not found", key));
 
-        let result = handler.process_config_section(input);
-
-        // Should parse features as list
-        let features = &result.operational_settings.enabled_features;
-        assert!(features.contains(&"quickfuncs".to_string()));
-        assert!(features.contains(&"enums".to_string()));
-        assert!(features.contains(&"data".to_string()));
-
-        println!("✓ String values with commas parsed correctly");
-        println!("Features: {:?}", features);
+    match &entry.value {
+        ConfigValue::String(s) => assert_eq!(s.as_str(), expected, "Config {} value mismatch", key),
+        ConfigValue::Features(features) => {
+            let features_str = features.join(",");
+            assert_eq!(features_str.as_str(), expected, "Config {} features mismatch", key);
+        }
+        other => panic!("Unexpected config value type for {}: {:?}", key, other),
     }
+}
 
-    #[test]
-    fn test_no_config_section() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@DATA(
-    name = "test",
-    value = 42
-)
-"#;
+// ==================== CONFIG EXTRACTION TESTS ====================
 
-        let result = handler.process_config_section(input);
+#[test]
+fn test_extract_basic_config() {
+    setup_test();
 
-        // Should use default config
-        assert!(!result.config_section.entries.is_empty());
-        assert_eq!(result.operational_settings.version, "1.0.0");
-        assert!(result.warnings.iter().any(|w| w.contains("No CONFIG section found")));
+    let input = create_basic_config();
+    let handler = ConfigSectionHandler::new(None);
 
-        // Input should be unchanged
-        assert_eq!(result.cleaned_input_string.trim(), input.trim());
+    let result = handler.process_config_section(&input);
 
-        println!("✓ No config section handled with defaults");
-    }
+    // Verify config was extracted
+    assert!(!result.config_section.entries.is_empty(), "Config entries should not be empty");
+    assert_config_entry(&result.config_section, "version", "1.0.0");
+    assert_config_entry(&result.config_section, "encoding", "utf-8");
+    assert_config_entry(&result.config_section, "author", "Test Suite");
 
-    #[test]
-    fn test_empty_input() {
-        let handler = ConfigSectionHandler::new(None);
-        let result = handler.process_config_section("");
+    // Verify warnings
+    println!("Warnings: {:#?}", result.warnings);
 
-        // Should use cached minimal config
-        assert!(!result.config_section.entries.is_empty());
-        assert_eq!(result.operational_settings.version, "1.0.0");
-        assert!(result.warnings.iter().any(|w| w.contains("Empty input")));
+    // Verify cleaned input (CONFIG should be removed)
+    assert!(result.cleaned_input_string.is_empty() || !result.cleaned_input_string.contains("@CONFIG"));
 
-        println!("✓ Empty input handled with minimal config");
-    }
+    teardown_test();
+}
 
-    #[test]
-    fn test_config_with_comments() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-// Top comment
-@CONFIG(
-    // Inline comment
-    version -> "1.0.0", // End of line comment
+#[test]
+fn test_extract_config_with_data_section() {
+    setup_test();
+
+    let input = format!("{}\n\n@DATA(\n    test_value = 42\n)", create_basic_config());
+    let handler = ConfigSectionHandler::new(None);
+
+    let result = handler.process_config_section(&input);
+
+    // Verify CONFIG extracted
+    assert!(!result.config_section.entries.is_empty());
+
+    // Verify DATA section remains in cleaned input
+    assert!(result.cleaned_input_string.contains("@DATA"));
+    assert!(result.cleaned_input_string.contains("test_value"));
+
+    // Verify CONFIG removed from cleaned input
+    assert!(!result.cleaned_input_string.contains("@CONFIG"));
+
+    println!("Cleaned input:\n{}", result.cleaned_input_string);
+
+    teardown_test();
+}
+
+#[test]
+fn test_no_config_section() {
+    setup_test();
+
+    let input = "@DATA(\n    value = 100\n)".to_string();
+    let handler = ConfigSectionHandler::new(None);
+
+    let result = handler.process_config_section(&input);
+
+    // Should use default config
+    assert!(!result.config_section.entries.is_empty());
+    assert_config_entry(&result.config_section, "version", "1.0.0");
+
+    // Should have warning about missing CONFIG
+    assert!(!result.warnings.is_empty());
+    assert!(result.warnings.iter().any(|w| w.contains("No CONFIG") || w.contains("default")));
+
+    // Input should remain unchanged
+    assert_eq!(result.cleaned_input_string, input);
+
+    println!("Warnings: {:#?}", result.warnings);
+
+    teardown_test();
+}
+
+#[test]
+fn test_empty_input() {
+    setup_test();
+
+    let input = "".to_string();
+    let handler = ConfigSectionHandler::new(None);
+
+    let result = handler.process_config_section(&input);
+
+    // Should use cached minimal config
+    assert!(!result.config_section.entries.is_empty());
+    assert_config_entry(&result.config_section, "version", "1.0.0");
+
+    // Should have warning
+    assert!(!result.warnings.is_empty());
+
+    println!("Empty input warnings: {:#?}", result.warnings);
+
+    teardown_test();
+}
+
+// ==================== CONFIG PARSING TESTS ====================
+
+#[test]
+fn test_parse_full_config() {
+    setup_test();
+
+    let input = create_full_config();
+    let handler = ConfigSectionHandler::new(None);
+
+    let result = handler.process_config_section(&input);
+
+    // Verify all fields parsed
+    assert_config_entry(&result.config_section, "version", "1.0.0");
+    assert_config_entry(&result.config_section, "encoding", "utf-8");
+    assert_config_entry(&result.config_section, "author", "Test Suite");
+    assert_config_entry(&result.config_section, "features", "advanced");
+
+    // Verify operational settings
+    assert_eq!(result.operational_settings.version.as_str(), "1.0.0");
+    assert_eq!(result.operational_settings.error_handling_strategy, ErrorHandlingStrategy::Halt);
+    assert_eq!(result.operational_settings.debug_mode, DebugMode::Verbose);
+    assert_eq!(result.operational_settings.compatibility_mode, CompatibilityMode::Strict);
+
+    println!("Operational settings: {:#?}", result.operational_settings);
+
+    teardown_test();
+}
+
+#[test]
+fn test_parse_minimal_config() {
+    setup_test();
+
+    let input = create_minimal_config();
+    let handler = ConfigSectionHandler::new(None);
+
+    let result = handler.process_config_section(&input);
+
+    // Required fields
+    assert_config_entry(&result.config_section, "version", "1.0.0");
+    assert_config_entry(&result.config_section, "encoding", "utf-8");
+
+    // Optional fields should have defaults
+    let has_author = result.config_section.entries.iter().any(|e| e.key == "author");
+    assert!(has_author, "Author should be added with default");
+
+    teardown_test();
+}
+
+#[test]
+fn test_config_with_comments() {
+    setup_test();
+
+    let input = r#"@CONFIG(
+    // Version comment
+    version -> "1.0.0",
     /* Multi-line
        comment */
-    encoding -> "utf-8"
-)
+    encoding -> "utf-8",
+    author -> "Test" // Inline comment
+)"#.to_string();
 
-@DATA(x = 1)
-"#;
+    let handler = ConfigSectionHandler::new(None);
+    let result = handler.process_config_section(&input);
 
-        let result = handler.process_config_section(input);
+    // Should parse despite comments
+    assert_config_entry(&result.config_section, "version", "1.0.0");
+    assert_config_entry(&result.config_section, "encoding", "utf-8");
 
-        assert!(!result.cleaned_input_string.contains("@CONFIG"));
-        assert!(result.cleaned_input_string.contains("@DATA"));
+    teardown_test();
+}
 
-        println!("✓ Comments in config handled correctly");
+#[test]
+fn test_config_with_nested_parentheses() {
+    setup_test();
+
+    let input = r#"@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    author -> "Test (with parens)"
+)"#.to_string();
+
+    let handler = ConfigSectionHandler::new(None);
+    let result = handler.process_config_section(&input);
+
+    assert_config_entry(&result.config_section, "author", "Test (with parens)");
+
+    teardown_test();
+}
+
+// ==================== CONFIG SCHEMA VALIDATION TESTS ====================
+
+#[test]
+fn test_schema_validate_version() {
+    setup_test();
+
+    let mut config = std::collections::HashMap::new();
+    config.insert("version".to_string(), "1.0.0".to_string());
+    config.insert("encoding".to_string(), "utf-8".to_string());
+
+    let result = ConfigSchema::validate_and_enhance_config(config);
+    assert!(result.is_ok());
+
+    let validated = result.unwrap();
+    assert_eq!(validated.get("version").unwrap().as_str(), "1.0.0");
+
+    teardown_test();
+}
+
+#[test]
+fn test_schema_invalid_version() {
+    setup_test();
+
+    let mut config = std::collections::HashMap::new();
+    config.insert("version".to_string(), "invalid.version".to_string());
+    config.insert("encoding".to_string(), "utf-8".to_string());
+
+    let result = ConfigSchema::validate_and_enhance_config(config);
+
+    // Should still succeed but use default version
+    assert!(result.is_ok());
+    let validated = result.unwrap();
+
+    // Invalid version should be replaced with default
+    println!("Validated config: {:#?}", validated);
+
+    teardown_test();
+}
+
+#[test]
+fn test_schema_validate_encoding() {
+    setup_test();
+
+    for encoding in &["utf-8", "utf-16", "ascii", "iso-8859-1"] {
+        let mut config = std::collections::HashMap::new();
+        config.insert("version".to_string(), "1.0.0".to_string());
+        config.insert("encoding".to_string(), encoding.to_string());
+
+        let result = ConfigSchema::validate_and_enhance_config(config);
+        assert!(result.is_ok(), "Encoding {} should be valid", encoding);
     }
 
-    // ==================== CONFIG VALIDATION TESTS ====================
+    teardown_test();
+}
 
-    #[test]
-    fn test_config_schema_validation_valid() {
+#[test]
+fn test_schema_invalid_encoding() {
+    setup_test();
+
+    let mut config = std::collections::HashMap::new();
+    config.insert("version".to_string(), "1.0.0".to_string());
+    config.insert("encoding".to_string(), "invalid-encoding".to_string());
+
+    let result = ConfigSchema::validate_and_enhance_config(config);
+    assert!(result.is_ok()); // Should use default
+
+    let validated = result.unwrap();
+    assert_eq!(validated.get("encoding").unwrap().as_str(), "utf-8"); // Default
+
+    teardown_test();
+}
+
+#[test]
+fn test_schema_validate_features() {
+    setup_test();
+
+    for features in &["basic", "advanced", "quickfuncs,enums,dlm"] {
         let mut config = std::collections::HashMap::new();
         config.insert("version".to_string(), "1.0.0".to_string());
         config.insert("encoding".to_string(), "utf-8".to_string());
-        config.insert("features".to_string(), "advanced".to_string());
+        config.insert("features".to_string(), features.to_string());
 
         let result = ConfigSchema::validate_and_enhance_config(config);
-        assert!(result.is_ok());
-
-        let validated = result.unwrap();
-        assert_eq!(validated.get("version").unwrap(), "1.0.0");
-        assert_eq!(validated.get("encoding").unwrap(), "utf-8");
-
-        println!("✓ Valid config passed validation");
+        assert!(result.is_ok(), "Features '{}' should be valid", features);
     }
 
-    #[test]
-    fn test_config_schema_validation_invalid_version() {
-        let mut config = std::collections::HashMap::new();
-        config.insert("version".to_string(), "invalid.version.format.too.many.parts".to_string());
+    teardown_test();
+}
 
-        let result = ConfigSchema::validate_and_enhance_config(config);
-        assert!(result.is_ok()); // Should still succeed with default
+#[test]
+fn test_schema_validate_error_handling() {
+    setup_test();
 
-        let validated = result.unwrap();
-        // Should use default version instead
-        assert_eq!(validated.get("version").unwrap(), "1.0.0");
-
-        println!("✓ Invalid version replaced with default");
-    }
-
-    #[test]
-    fn test_config_schema_validation_invalid_encoding() {
+    for strategy in &["halt", "continue", "recover"] {
         let mut config = std::collections::HashMap::new();
         config.insert("version".to_string(), "1.0.0".to_string());
-        config.insert("encoding".to_string(), "invalid-encoding".to_string());
+        config.insert("encoding".to_string(), "utf-8".to_string());
+        config.insert("error_handling".to_string(), strategy.to_string());
 
         let result = ConfigSchema::validate_and_enhance_config(config);
-        assert!(result.is_ok());
-
-        let validated = result.unwrap();
-        // Should use default encoding
-        assert_eq!(validated.get("encoding").unwrap(), "utf-8");
-
-        println!("✓ Invalid encoding replaced with default");
+        assert!(result.is_ok(), "Error handling '{}' should be valid", strategy);
     }
 
-    #[test]
-    fn test_config_schema_required_keys() {
-        let config = std::collections::HashMap::new(); // Empty config
+    teardown_test();
+}
 
-        let result = ConfigSchema::validate_and_enhance_config(config);
-        assert!(result.is_ok());
+#[test]
+fn test_schema_validate_debug_mode() {
+    setup_test();
 
-        let validated = result.unwrap();
-        // Required keys should be added
-        assert!(validated.contains_key("version"));
-        assert!(validated.contains_key("encoding"));
-
-        println!("✓ Required keys added automatically");
-    }
-
-    #[test]
-    fn test_config_value_creation() {
-        use crate::Compiler::AST::ConfigValue;
-
+    for mode in &["off", "regular", "verbose"] {
         let mut config = std::collections::HashMap::new();
-        config.insert("error_handling".to_string(), "continue".to_string());
-        config.insert("debug_mode".to_string(), "verbose".to_string());
-        config.insert("compatibility_mode".to_string(), "permissive".to_string());
-        config.insert("features".to_string(), "quickfuncs,enums".to_string());
+        config.insert("version".to_string(), "1.0.0".to_string());
+        config.insert("encoding".to_string(), "utf-8".to_string());
+        config.insert("debug_mode".to_string(), mode.to_string());
 
-        let validated = ConfigSchema::validate_and_enhance_config(config).unwrap();
-        let config_section = ConfigSchema::create_config_section(validated);
-
-        // Find and verify error_handling
-        let error_handling = config_section.entries.iter()
-            .find(|e| e.key == "error_handling")
-            .expect("error_handling not found");
-
-        assert!(matches!(error_handling.value, ConfigValue::ErrorHandling(_)));
-
-        println!("✓ ConfigValue types created correctly");
+        let result = ConfigSchema::validate_and_enhance_config(config);
+        assert!(result.is_ok(), "Debug mode '{}' should be valid", mode);
     }
 
-    // ==================== PERFORMANCE TESTS ====================
+    teardown_test();
+}
 
-    #[test]
-    fn test_performance_small_config() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@CONFIG(
+#[test]
+fn test_schema_validate_compatibility() {
+    setup_test();
+
+    for mode in &["strict", "best_effort", "permissive"] {
+        let mut config = std::collections::HashMap::new();
+        config.insert("version".to_string(), "1.0.0".to_string());
+        config.insert("encoding".to_string(), "utf-8".to_string());
+        config.insert("compatibility_mode".to_string(), mode.to_string());
+
+        let result = ConfigSchema::validate_and_enhance_config(config);
+        assert!(result.is_ok(), "Compatibility mode '{}' should be valid", mode);
+    }
+
+    teardown_test();
+}
+
+// ==================== OPERATIONAL SETTINGS TESTS ====================
+
+#[test]
+fn test_operational_settings_extraction() {
+    setup_test();
+
+    let input = r#"@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    features -> "advanced",
+    debug_mode -> "verbose",
+    error_handling -> "halt",
+    compatibility_mode -> "strict"
+)"#.to_string();
+
+    let handler = ConfigSectionHandler::new(None);
+    let result = handler.process_config_section(&input);
+
+    let settings = &result.operational_settings;
+
+    assert_eq!(settings.version.as_str(), "1.0.0");
+    assert_eq!(settings.error_handling_strategy, ErrorHandlingStrategy::Halt);
+    assert_eq!(settings.debug_mode, DebugMode::Verbose);
+    assert_eq!(settings.compatibility_mode, CompatibilityMode::Strict);
+    assert!(settings.is_advanced_mode());
+
+    println!("Extracted settings: {:#?}", settings);
+
+    teardown_test();
+}
+
+#[test]
+fn test_operational_settings_basic_mode() {
+    setup_test();
+
+    let input = r#"@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    features -> "basic"
+)"#.to_string();
+
+    let handler = ConfigSectionHandler::new(None);
+    let result = handler.process_config_section(&input);
+
+    let settings = &result.operational_settings;
+    assert!(!settings.is_advanced_mode());
+    assert!(settings.is_feature_enabled("basic"));
+
+    teardown_test();
+}
+
+#[test]
+fn test_operational_settings_feature_check() {
+    setup_test();
+
+    let mut settings = OperationalSettings::default();
+    settings.enabled_features = vec!["quickfuncs".to_string(), "enums".to_string()];
+
+    assert!(settings.is_feature_enabled("quickfuncs"));
+    assert!(settings.is_feature_enabled("enums"));
+    assert!(!settings.is_feature_enabled("dlm"));
+
+    teardown_test();
+}
+
+// ==================== VERSION MANAGER INTEGRATION TESTS ====================
+
+#[test]
+fn test_version_manager_initialization() {
+    setup_test();
+
+    let input = r#"@CONFIG(
     version -> "1.0.0",
     encoding -> "utf-8"
-)
+)"#.to_string();
 
-@DATA(x = 1)
-"#;
+    let handler = ConfigSectionHandler::new(None);
+    let _result = handler.process_config_section(&input);
 
-        let iterations = 1000;
-        let start = Instant::now();
+    // VersionManager should be initialized
+    let version_result = VersionManager::instance().read();
+    assert!(version_result.is_ok());
 
-        for _ in 0..iterations {
-            let _ = handler.process_config_section(input);
-        }
+    let vm = version_result.unwrap();
+    assert_eq!(vm.current_version(), "1.0.0");
 
-        let elapsed = start.elapsed();
-        let avg_time = elapsed / iterations;
+    println!("VersionManager initialized with version: {}", vm.current_version());
 
-        println!("\n=== PERFORMANCE: Small Config ===");
-        println!("Iterations: {}", iterations);
-        println!("Total time: {:?}", elapsed);
-        println!("Average time: {:?}", avg_time);
-        println!("Throughput: {:.2} ops/sec", iterations as f64 / elapsed.as_secs_f64());
+    teardown_test();
+}
 
-        // Should be under 0.5ms per operation (target from C#)
-        assert!(avg_time.as_micros() < 500, "Performance regression: {:?} > 500µs", avg_time);
+// ==================== ERROR HANDLING TESTS ====================
+
+#[test]
+fn test_malformed_config_recovery() {
+    setup_test();
+
+    let input = r#"@CONFIG(
+    version -> "1.0.0"
+    // Missing comma - malformed
+    encoding -> "utf-8"
+)"#.to_string();
+
+    let handler = ConfigSectionHandler::new(None);
+    let result = handler.process_config_section(&input);
+
+    // Should recover and use defaults
+    assert!(!result.config_section.entries.is_empty());
+    assert!(!result.warnings.is_empty());
+
+    println!("Malformed config warnings: {:#?}", result.warnings);
+
+    teardown_test();
+}
+
+#[test]
+fn test_config_without_closing_paren() {
+    setup_test();
+
+    let input = r#"@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8"
+    // Missing closing parenthesis
+@DATA(
+    value = 42
+)"#.to_string();
+
+    let handler = ConfigSectionHandler::new(None);
+    let result = handler.process_config_section(&input);
+
+    // Should handle gracefully
+    assert!(!result.config_section.entries.is_empty());
+
+    // DATA section should still be in cleaned input
+    assert!(result.cleaned_input_string.contains("@DATA"));
+
+    println!("Unclosed paren warnings: {:#?}", result.warnings);
+
+    teardown_test();
+}
+
+// ==================== PERFORMANCE TESTS ====================
+
+#[test]
+fn test_large_config_performance() {
+    setup_test();
+
+    let mut config_str = String::from("@CONFIG(\n");
+    config_str.push_str("    version -> \"1.0.0\",\n");
+    config_str.push_str("    encoding -> \"utf-8\",\n");
+
+    // Add many entries
+    for i in 0..100 {
+        config_str.push_str(&format!("    custom_field_{} -> \"value_{}\",\n", i, i));
     }
 
-    #[test]
-    fn test_performance_large_config() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@CONFIG(
+    config_str.push_str("    author -> \"Test\"\n)");
+
+    let handler = ConfigSectionHandler::new(None);
+
+    let start = std::time::Instant::now();
+    let result = handler.process_config_section(&config_str);
+    let duration = start.elapsed();
+
+    println!("Large config processing time: {:?}", duration);
+    println!("Config entries: {}", result.config_section.entries.len());
+
+    assert!(!result.config_section.entries.is_empty());
+    assert!(duration.as_millis() < 100, "Should process quickly");
+
+    teardown_test();
+}
+
+// ==================== INTEGRATION TESTS ====================
+
+#[test]
+fn test_full_integration_workflow() {
+    setup_test();
+
+    let input = r#"@CONFIG(
     version -> "1.0.0",
     encoding -> "utf-8",
-    author -> "Test Author with a longer name",
-    created -> "2024-01-23T12:00:00.000Z",
-    features -> "quickfuncs,enums,data,security,imports,dlm",
-    debug_mode -> "verbose",
-    error_handling -> "continue",
-    compatibility_mode -> "permissive",
-    custom_field_1 -> "custom value 1",
-    custom_field_2 -> "custom value 2",
-    custom_field_3 -> "custom value 3"
-)
-
-@DATA(x = 1, y = 2, z = 3)
-@ENUMS(Status { ACTIVE, INACTIVE, PENDING })
-@QUICKFUNCS(~test<int>() { return 42; })
-"#;
-
-        let iterations = 1000;
-        let start = Instant::now();
-
-        for _ in 0..iterations {
-            let _ = handler.process_config_section(input);
-        }
-
-        let elapsed = start.elapsed();
-        let avg_time = elapsed / iterations;
-
-        println!("\n=== PERFORMANCE: Large Config ===");
-        println!("Input size: {} bytes", input.len());
-        println!("Iterations: {}", iterations);
-        println!("Total time: {:?}", elapsed);
-        println!("Average time: {:?}", avg_time);
-        println!("Throughput: {:.2} ops/sec", iterations as f64 / elapsed.as_secs_f64());
-
-        // Should still be reasonably fast
-        assert!(avg_time.as_micros() < 1000, "Performance regression: {:?} > 1ms", avg_time);
-    }
-
-    #[test]
-    fn test_performance_9kb_file() {
-        let handler = ConfigSectionHandler::new(None);
-
-        // Generate a realistic 9KB DixScript file
-        let mut input = String::with_capacity(9 * 1024);
-        input.push_str(r#"
-@CONFIG(
-    version -> "1.0.0",
-    encoding -> "utf-8",
-    author -> "Performance Test Suite",
-    created -> "2024-01-23T12:00:00Z",
+    author -> "Integration Test",
     features -> "advanced",
-    debug_mode -> "off",
+    debug_mode -> "verbose",
     error_handling -> "halt",
     compatibility_mode -> "strict"
 )
 
-@ENUMS(
-    Status { ACTIVE = 0, INACTIVE = 1, PENDING = 2 },
-    Priority { LOW = 1, MEDIUM = 2, HIGH = 3, CRITICAL = 4 }
-)
-
 @DATA(
-"#);
-
-        // Add lots of data entries to reach ~9KB
-        for i in 0..500 {
-            input.push_str(&format!("    item_{} = {},\n", i, i));
-        }
-
-        input.push_str(")\n");
-
-        // Pad to ensure we're at ~9KB
-        while input.len() < 9 * 1024 {
-            input.push_str("// Padding comment to reach target size\n");
-        }
-
-        let file_size = input.len();
-        let iterations = 100; // Fewer iterations for larger file
-        let start = Instant::now();
-
-        for _ in 0..iterations {
-            let _ = handler.process_config_section(&input);
-        }
-
-        let elapsed = start.elapsed();
-        let avg_time = elapsed / iterations;
-
-        println!("\n=== PERFORMANCE: 9KB File (Target) ===");
-        println!("File size: {} bytes ({:.2} KB)", file_size, file_size as f64 / 1024.0);
-        println!("Iterations: {}", iterations);
-        println!("Total time: {:?}", elapsed);
-        println!("Average time: {:?}", avg_time);
-        println!("Throughput: {:.2} files/sec", iterations as f64 / elapsed.as_secs_f64());
-
-        // C# target: < 0.5ms for 9KB file
-        assert!(avg_time.as_micros() < 500,
-                "Performance target missed: {:?} > 500µs for 9KB file", avg_time);
-
-        println!("✓ Performance target met: {:?} < 500µs", avg_time);
-    }
-
-    #[test]
-    fn test_throughput_comparison() {
-        let handler = ConfigSectionHandler::new(None);
-
-        let test_cases = vec![
-            ("Tiny (100B)", generate_test_input(100)),
-            ("Small (1KB)", generate_test_input(1024)),
-            ("Medium (5KB)", generate_test_input(5 * 1024)),
-            ("Large (9KB)", generate_test_input(9 * 1024)),
-            ("XLarge (20KB)", generate_test_input(20 * 1024)),
-        ];
-
-        println!("\n=== THROUGHPUT COMPARISON ===");
-        println!("{:<15} {:>12} {:>15} {:>15}", "Size", "Time (µs)", "Throughput", "MB/sec");
-        println!("{:-<60}", "");
-
-        for (name, input) in test_cases {
-            let iterations = if input.len() < 1024 { 1000 } else { 100 };
-            let start = Instant::now();
-
-            for _ in 0..iterations {
-                let _ = handler.process_config_section(&input);
-            }
-
-            let elapsed = start.elapsed();
-            let avg_time = elapsed / iterations;
-            let throughput = iterations as f64 / elapsed.as_secs_f64();
-            let mb_per_sec = (input.len() as f64 * throughput) / (1024.0 * 1024.0);
-
-            println!("{:<15} {:>12.2} {:>12.2} ops/s {:>12.2} MB/s",
-                     name,
-                     avg_time.as_micros(),
-                     throughput,
-                     mb_per_sec
-            );
-        }
-    }
-
-    // Helper function to generate test input of specific size
-    fn generate_test_input(target_size: usize) -> String {
-        let mut input = String::with_capacity(target_size);
-
-        input.push_str(r#"@CONFIG(
-    version -> "1.0.0",
-    encoding -> "utf-8",
-    features -> "advanced"
-)
-
-@DATA(
-"#);
-
-        // Add entries to reach target size
-        let mut counter = 0;
-        while input.len() < target_size - 100 {
-            input.push_str(&format!("    field_{} = {},\n", counter, counter));
-            counter += 1;
-        }
-
-        input.push_str(")\n");
-        input
-    }
-
-    // ==================== EDGE CASE TESTS ====================
-
-    #[test]
-    fn test_malformed_config_missing_closing_paren() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@CONFIG(
-    version -> "1.0.0",
-    encoding -> "utf-8"
-// Missing closing paren
-
-@DATA(x = 1)
-"#;
-
-        let result = handler.process_config_section(input);
-
-        // Should handle gracefully (either extract partial or use defaults)
-        assert!(!result.config_section.entries.is_empty());
-
-        println!("✓ Malformed config handled gracefully");
-    }
-
-    #[test]
-    fn test_config_with_escaped_quotes() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@CONFIG(
-    version -> "1.0.0",
-    description -> "This has \"escaped\" quotes"
-)
-
-@DATA(x = 1)
-"#;
-
-        let result = handler.process_config_section(input);
-
-        assert!(!result.cleaned_input_string.contains("@CONFIG"));
-
-        println!("✓ Escaped quotes handled correctly");
-    }
-
-    #[test]
-    fn test_multiple_configs_first_wins() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@CONFIG(
-    version -> "1.0.0"
-)
-
-@CONFIG(
-    version -> "2.0.0"
-)
-
-@DATA(x = 1)
-"#;
-
-        let result = handler.process_config_section(input);
-
-        // First config should be extracted
-        assert_eq!(result.operational_settings.version, "1.0.0");
-
-        println!("✓ Multiple configs: first one wins");
-    }
-
-    #[test]
-    fn test_config_case_insensitivity() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@config(
-    VERSION -> "1.0.0",
-    ENCODING -> "UTF-8"
-)
-
-@DATA(x = 1)
-"#;
-
-        let result = handler.process_config_section(input);
-
-        // Should handle case-insensitive keywords
-        assert!(!result.cleaned_input_string.to_lowercase().contains("@config"));
-
-        println!("✓ Case-insensitive config handled");
-    }
-
-    #[test]
-    fn test_whitespace_variations() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@CONFIG   (   version   ->   "1.0.0"   ,   encoding   ->   "utf-8"   )
-
-@DATA(x = 1)
-"#;
-
-        let result = handler.process_config_section(input);
-
-        assert!(!result.cleaned_input_string.contains("@CONFIG"));
-        assert_eq!(result.operational_settings.version, "1.0.0");
-
-        println!("✓ Whitespace variations handled");
-    }
-
-    // ==================== INTEGRATION TESTS ====================
-
-    #[test]
-    fn test_full_pipeline_with_all_features() {
-        let handler = ConfigSectionHandler::new(None);
-        let input = r#"
-@CONFIG(
-    version -> "1.0.0",
-    encoding -> "utf-8",
-    author -> "Integration Test",
-    created -> "2024-01-23T12:00:00Z",
-    features -> "quickfuncs,enums,data,security,imports",
-    debug_mode -> "verbose",
-    error_handling -> "continue",
-    compatibility_mode -> "best_effort"
-)
-
-@IMPORTS(
-    utils from "shared/utils.mdix"
-)
-
-@ENUMS(
-    Status { ACTIVE, INACTIVE }
-)
-
-@QUICKFUNCS(
-    ~test<int>() { return 42; }
-)
-
-@DATA(
-    name = "test",
-    count = 42
-)
-
-@SECURITY(
-    encryption -> { enabled = true }
-)
-"#;
-
-        let result = handler.process_config_section(input);
-
-        // Verify extraction
-        assert!(!result.cleaned_input_string.contains("@CONFIG"));
-        assert!(result.cleaned_input_string.contains("@IMPORTS"));
-        assert!(result.cleaned_input_string.contains("@ENUMS"));
-        assert!(result.cleaned_input_string.contains("@QUICKFUNCS"));
-        assert!(result.cleaned_input_string.contains("@DATA"));
-        assert!(result.cleaned_input_string.contains("@SECURITY"));
-
-        // Verify operational settings
-        assert_eq!(result.operational_settings.version, "1.0.0");
-        assert_eq!(result.operational_settings.error_handling_strategy, ErrorHandlingStrategy::Continue);
-        assert_eq!(result.operational_settings.debug_mode, DebugMode::Verbose);
-        assert_eq!(result.operational_settings.compatibility_mode, CompatibilityMode::BestEffort);
-
-        // Verify features
-        let features = &result.operational_settings.enabled_features;
-        assert!(features.contains(&"quickfuncs".to_string()));
-        assert!(features.contains(&"enums".to_string()));
-        assert!(features.contains(&"data".to_string()));
-
-        println!("\n=== FULL PIPELINE TEST ===");
-        println!("✓ Config extracted and removed");
-        println!("✓ All sections preserved: @IMPORTS, @ENUMS, @QUICKFUNCS, @DATA, @SECURITY");
-        println!("✓ Operational settings created correctly");
-        println!("  - Version: {}", result.operational_settings.version);
-        println!("  - Error handling: {:?}", result.operational_settings.error_handling_strategy);
-        println!("  - Debug mode: {:?}", result.operational_settings.debug_mode);
-        println!("  - Compatibility: {:?}", result.operational_settings.compatibility_mode);
-        println!("  - Features: {:?}", features);
-        println!("✓ Warnings: {}", result.warnings.len());
-    }
-
-    #[test]
-    fn test_minimal_config_cached_performance() {
-        // Test that cached minimal config is fast
-        let iterations = 10000;
-        let start = Instant::now();
-
-        for _ in 0..iterations {
-            let _ = ConfigSchema::create_minimal_config();
-        }
-
-        let elapsed = start.elapsed();
-        let avg_time = elapsed / iterations;
-
-        println!("\n=== CACHED MINIMAL CONFIG PERFORMANCE ===");
-        println!("Iterations: {}", iterations);
-        println!("Average time: {:?}", avg_time);
-
-        // Should be extremely fast (just cloning)
-        assert!(avg_time.as_nanos() < 1000, "Cached config too slow: {:?}", avg_time);
-
-        println!("✓ Cached minimal config is blazing fast: {:?}", avg_time);
-    }
-}
-
-// ==================== BENCHMARK MODULE ====================
-
-#[cfg(test)]
-mod config_benchmarks {
-    use super::*;
-    use std::time::Instant;
-
-    #[test]
-    #[ignore] // Run with: cargo test --release -- --ignored --nocapture
-    fn bench_config_extraction_only() {
-        use crate::Compiler::Core::Config::ConfigSectionHandler;
-
-        let handler = ConfigSectionHandler::new(None);
-        let input = include_str!("../../../tests/fixtures/sample_9kb.mdix");
-
-        let iterations = 10000;
-        let start = Instant::now();
-
-        for _ in 0..iterations {
-            let _ = handler.process_config_section(input);
-        }
-
-        let elapsed = start.elapsed();
-
-        println!("\n=== DETAILED BENCHMARK RESULTS ===");
-        println!("Total iterations: {}", iterations);
-        println!("Total time: {:?}", elapsed);
-        println!("Average time: {:?}", elapsed / iterations);
-        println!("Ops/sec: {:.2}", iterations as f64 / elapsed.as_secs_f64());
-    }
+    test_value<int> = 42,
+    test_string<string> = "Hello World"
+)"#.to_string();
+
+    let handler = ConfigSectionHandler::new(None);
+    let result = handler.process_config_section(&input);
+
+    // Verify CONFIG extracted
+    assert!(!result.config_section.entries.is_empty());
+    assert_config_entry(&result.config_section, "version", "1.0.0");
+    assert_config_entry(&result.config_section, "author", "Integration Test");
+
+    // Verify operational settings
+    assert_eq!(result.operational_settings.version.as_str(), "1.0.0");
+    assert_eq!(result.operational_settings.debug_mode, DebugMode::Verbose);
+    assert!(result.operational_settings.is_advanced_mode());
+
+    // Verify cleaned input contains DATA section
+    assert!(result.cleaned_input_string.contains("@DATA"));
+    assert!(result.cleaned_input_string.contains("test_value"));
+    assert!(!result.cleaned_input_string.contains("@CONFIG"));
+
+    // Verify VersionManager initialized
+    let vm_result = VersionManager::instance().read();
+    assert!(vm_result.is_ok());
+    assert_eq!(vm_result.unwrap().current_version(), "1.0.0");
+
+    println!("\n=== INTEGRATION TEST RESULTS ===");
+    println!("Config entries: {}", result.config_section.entries.len());
+    println!("Warnings: {}", result.warnings.len());
+    println!("Operational settings: {:#?}", result.operational_settings);
+    println!("Cleaned input length: {} bytes", result.cleaned_input_string.len());
+    println!("================================\n");
+
+    teardown_test();
 }

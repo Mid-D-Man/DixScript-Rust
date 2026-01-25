@@ -18,7 +18,7 @@ pub struct DixValue {
 
 /// Internal value storage (uses Box for large types to keep DixValue small)
 #[derive(Debug, Clone, PartialEq)]
-enum ValueData {
+pub(crate) enum ValueData {
     Int(i32),
     Float(f32),
     Double(f64),

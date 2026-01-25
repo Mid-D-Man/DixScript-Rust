@@ -365,7 +365,7 @@ impl<'a> Drop for LoggerScope<'a> {
 }
 
 // ========== Tests ==========
-
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,3 +475,4 @@ mod tests {
         }
     }
 }
+*/

@@ -53,7 +53,7 @@ impl<'a> EnumsSectionParser<'a> {
             operational_settings,
             error_manager,
             position: 0,
-            last_position: usize::MAX, // Rust equivalent of -1 for unsigned
+            last_position: usize::MAX,
             stuck_count: 0,
             iteration_count: 0,
             has_encountered_errors: false,
@@ -185,10 +185,12 @@ impl<'a> EnumsSectionParser<'a> {
 
         // Expect opening brace
         if !self.match_and_consume_symbol('{') {
+            let message = format!("Expected '{{' after enum name '{}'", enum_name);
+            let current = self.current().clone();
             self.handle_parse_error(
                 ParseErrorType::MissingToken,
-                &format!("Expected '{{' after enum name '{}'", enum_name),
-                self.current(),
+                &message,
+                &current,
             );
 
             if self.should_halt_section() {
@@ -252,24 +254,28 @@ impl<'a> EnumsSectionParser<'a> {
                 if self.current().token_type.is_identifier() {
                     if let Some(next_token) = self.peek() {
                         if matches!(next_token.token_type, TokenType::Symbol('{')) {
+                            let message = format!("Missing '}}' to close enum '{}' - found start of next enum", enum_name);
+                            let current = self.current().clone();
                             self.handle_parse_error(
                                 ParseErrorType::MissingToken,
-                                &format!("Missing '}}' to close enum '{}' - found start of next enum", enum_name),
-                                self.current(),
+                                &message,
+                                &current,
                             );
                             break;
                         }
                     }
                 }
 
+                let message = format!(
+                    "Expected ',' or '}}' after field in '{}', found {}",
+                    enum_name,
+                    self.current().get_token_value()
+                );
+                let current = self.current().clone();
                 self.handle_parse_error(
                     ParseErrorType::UnexpectedToken,
-                    &format!(
-                        "Expected ',' or '}}' after field in '{}', found {}",
-                        enum_name,
-                        self.current().get_token_value()
-                    ),
-                    self.current(),
+                    &message,
+                    &current,
                 );
 
                 if self.should_halt_section() {
@@ -282,10 +288,12 @@ impl<'a> EnumsSectionParser<'a> {
 
         // Expect closing brace
         if !self.match_and_consume_symbol('}') {
+            let message = format!("Expected '}}' to close enum '{}'", enum_name);
+            let current = self.current().clone();
             self.handle_parse_error(
                 ParseErrorType::MissingToken,
-                &format!("Expected '}}' to close enum '{}'", enum_name),
-                self.current(),
+                &message,
+                &current,
             );
 
             if self.should_halt_section() {
@@ -328,10 +336,12 @@ impl<'a> EnumsSectionParser<'a> {
                 Some(EnumField::new(field_name, Some(value), field_start_pos))
             }
             None => {
+                let message = format!("Expected integer value after '=' in enum field '{}'", field_name);
+                let current = self.current().clone();
                 self.handle_parse_error(
                     ParseErrorType::UnexpectedToken,
-                    &format!("Expected integer value after '=' in enum field '{}'", field_name),
-                    self.current(),
+                    &message,
+                    &current,
                 );
 
                 if self.should_halt_section() {
@@ -360,19 +370,22 @@ impl<'a> EnumsSectionParser<'a> {
                     self.log_verbose(&format!("Accepted keyword '{}' as enum name", name));
                     Some(name)
                 } else {
+                    let message = format!("Cannot use language keyword '{}' as enum name", keyword);
+                    let current = self.current().clone();
                     self.handle_parse_error(
                         ParseErrorType::UnexpectedToken,
-                        &format!("Cannot use language keyword '{}' as enum name", keyword),
-                        self.current(),
+                        &message,
+                        &current,
                     );
                     None
                 }
             }
             _ => {
+                let current = self.current().clone();
                 self.handle_parse_error(
                     ParseErrorType::UnexpectedToken,
                     "Expected enum name identifier",
-                    self.current(),
+                    &current,
                 );
                 None
             }
@@ -393,19 +406,22 @@ impl<'a> EnumsSectionParser<'a> {
                     self.log_verbose(&format!("Accepted keyword '{}' as field name", name));
                     Some(name)
                 } else {
+                    let message = format!("Cannot use language keyword '{}' as field name", keyword);
+                    let current = self.current().clone();
                     self.handle_parse_error(
                         ParseErrorType::UnexpectedToken,
-                        &format!("Cannot use language keyword '{}' as field name", keyword),
-                        self.current(),
+                        &message,
+                        &current,
                     );
                     None
                 }
             }
             _ => {
+                let current = self.current().clone();
                 self.handle_parse_error(
                     ParseErrorType::UnexpectedToken,
                     "Expected enum field name identifier",
-                    self.current(),
+                    &current,
                 );
                 None
             }
@@ -444,7 +460,7 @@ impl<'a> EnumsSectionParser<'a> {
             message.to_string(),
             token.line,
             token.column,
-            Some(ParseErrorType::generate_suggestion(error_type, token, None)),
+            None, // No suggestion generation
             source_line,
         );
 
@@ -556,7 +572,6 @@ impl<'a> EnumsSectionParser<'a> {
     #[inline]
     fn current(&self) -> &Token {
         self.tokens.get(self.position).unwrap_or_else(|| {
-            // Return a dummy EOF token if we're past the end
             static EOF_TOKEN: Token = Token {
                 token_type: TokenType::EndOfFile,
                 line: 1,
@@ -600,7 +615,6 @@ impl<'a> EnumsSectionParser<'a> {
     }
 
     fn get_source_line(&self, token: &Token) -> Option<String> {
-        // Get all tokens on same line
         let line_tokens: Vec<&Token> = self.tokens
             .iter()
             .filter(|t| t.line == token.line)
@@ -610,12 +624,10 @@ impl<'a> EnumsSectionParser<'a> {
             return None;
         }
 
-        // Build source line
         let mut source_line = String::new();
         let mut current_column = 0;
 
         for t in line_tokens {
-            // Add spaces to reach token column
             while current_column < t.column {
                 source_line.push(' ');
                 current_column += 1;
@@ -683,7 +695,7 @@ impl<'a> EnumsSectionParser<'a> {
     // ==================== LOGGING ====================
 
     fn log_debug(&self, message: &str) {
-        if self.operational_settings.debug_mode >= DebugMode::Regular {
+        if self.operational_settings.debug_mode != DebugMode::Off {
             self.error_manager.log_debug(message);
         }
     }

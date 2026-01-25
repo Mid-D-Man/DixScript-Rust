@@ -28,7 +28,29 @@ pub struct EnumsSectionParser<'a> {
 }
 
 // Constants for safety limits
-const MAX_ITERATIONS: usize = 1000;
+const MAX_ITERATIONS: usize = 10000; //Create dynamic max iterations with absolute max, so it scales with token count
+/*
+something like // At the top of the file
+const MAX_ITERATIONS_PER_TOKEN: usize = 3;
+const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
+const MAX_STUCK_COUNT: usize = 3;
+
+// In should_terminate_loop method
+fn should_terminate_loop(&self) -> bool {
+    let dynamic_limit = self.tokens.len() * MAX_ITERATIONS_PER_TOKEN;
+    let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
+
+    if self.iteration_count >= max_iterations {
+        self.error_manager.log_error(&format!(
+            "Maximum iterations ({}) exceeded - possible infinite loop detected",
+            max_iterations
+        ));
+        return true;
+    }
+
+    false
+}
+ */
 const MAX_STUCK_COUNT: usize = 3;
 
 impl<'a> EnumsSectionParser<'a> {

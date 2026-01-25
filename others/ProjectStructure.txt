@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Sun Jan 25 10:12:18 UTC 2026
+Generated: Sun Jan 25 13:06:39 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: b2d88021a873ed583a8230c0bd73d6ccf6137e72
+Commit: 8ed7aab478e287540d1e1934b1e0435a39e1310e
 Branch: master
 ==================================
 
@@ -60,6 +60,7 @@ src/Compiler/Core/Config/mod.rs
 src/Compiler/Core/Config/operational_settings.rs
 src/Compiler/Core/SectionAnalyzers/mod.rs
 src/Compiler/Core/SectionEnhancers/mod.rs
+src/Compiler/Core/SectionParsers/enums_section_parser.rs
 src/Compiler/Core/SectionParsers/mod.rs
 src/Compiler/Core/Tokenizer/lexer.rs
 src/Compiler/Core/Tokenizer/mod.rs
@@ -109,10 +110,12 @@ src/ErrorManager/diagnostic_dumper.rs
 src/ErrorManager/error_manager.rs
 src/ErrorManager/mod.rs
 src/Runtime/mod.rs
+src/Utilities/ast_debug_printer.rs
 src/Utilities/keyword_definitions.rs
 src/Utilities/mid_helper_functions.rs
 src/Utilities/mid_logger.rs
 src/Utilities/mod.rs
+src/Utilities/parser_collection_helper.rs
 src/Utilities/utilities.rs
 src/lib.rs
 
@@ -127,7 +130,8 @@ tests/unit/mod.rs
 
 Benchmark Files:
 ===============
-benches/lexer_benchmark.rs
+benches/lexer_throughput.rs
+benches/simple_bench.rs
 benches/throughput_benchmark.rs
 
 Configuration Files:
@@ -138,6 +142,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 108
+Source: 111
 Tests: 6
-Benches: 2
+Benches: 3

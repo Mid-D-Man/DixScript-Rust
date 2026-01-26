@@ -1931,69 +1931,93 @@ impl<'a> DataSectionParser<'a> {
 
     /// Parse array item - handles literals, objects, local functions, AND imported functions
     fn parse_array_item(&mut self) -> Option<Value> {
-        self.log_verbose(&format!("=== ParseArrayItem at position {} ===", self.position));
+    self.log_verbose(&format!("=== ParseArrayItem at position {} ===", self.position));
 
-        let item_pos = Position::from_token(self.current());
+    let item_pos = Position::from_token(self.current());
 
-        // Check for function calls (both local and imported)
-        if let TokenType::Identifier(func_id) = &self.current().token_type {
-            let function_name = func_id.clone();
+    // Check for function calls (both local and imported)
+    if let TokenType::Identifier(func_id) = &self.current().token_type {
+        let function_name = func_id.clone();
 
-            // Analyze the pattern
-            let pattern = IdentifierPatternAnalyzer::analyze_data_pattern(
-                &function_name,
-                item_pos,
-                self.tokens,
-                self.position,
-                Some(&self.error_manager),
-            );
+        // Analyze the pattern
+        let pattern = IdentifierPatternAnalyzer::analyze_data_pattern(
+            &function_name,
+            item_pos,
+            self.tokens,
+            self.position,
+            Some(&self.error_manager),
+        );
 
-            if pattern.pattern_type == IdentifierPatternType::LocalFunctionCall {
-                self.log_verbose(&format!(">>> Local function call in array: {}()", function_name));
-                // Advance past identifier to '('
-                self.advance();
-                let func_call = self.parse_quick_func_call(&function_name, item_pos, false);
-                if func_call.is_none() && self.should_halt_section() {
-                    return None;
-                }
-                return func_call;
-            }
-
-            if pattern.pattern_type == IdentifierPatternType::ImportedFunctionCall {
-                self.log_verbose(&format!(">>> Imported function call in array: {}.{}()", function_name, pattern.second_part.as_ref().unwrap()));
-
-                // Consume tokens: identifier, dot, function name
-                self.advance(); // namespace
-                self.advance(); // dot
-                let func_name = pattern.second_part.unwrap();
-                self.advance(); // function name
-
-                // Parse the imported function call
-                let imported_call = self.parse_imported_function_call(&function_name, &func_name, item_pos);
-                if imported_call.is_none() && self.should_halt_section() {
-                    return None;
-                }
-                return imported_call;
-            }
-        }
-
-        // Try object literal first
-        if self.is_current_symbol('{') {
-            let obj_literal = self.parse_object_literal();
-            if obj_literal.is_none() && self.should_halt_section() {
+        if pattern.pattern_type == IdentifierPatternType::LocalFunctionCall {
+            self.log_verbose(&format!(">>> Local function call in array: {}()", function_name));
+            self.advance();
+            let func_call = self.parse_quick_func_call(&function_name, item_pos, false);
+            if func_call.is_none() && self.should_halt_section() {
                 return None;
             }
-            return obj_literal;
+            return func_call;
         }
 
-        // Otherwise parse as general property value
-        let value = self.parse_property_value();
-        if value.is_some() {
-            return value;
+        if pattern.pattern_type == IdentifierPatternType::ImportedFunctionCall {
+            self.log_verbose(&format!(">>> Imported function call in array: {}.{}()", 
+                function_name, pattern.second_part.as_ref().unwrap()));
+
+            self.advance();
+            self.advance();
+            let func_name = pattern.second_part.unwrap();
+            self.advance();
+
+            let imported_call = self.parse_imported_function_call(&function_name, &func_name, item_pos);
+            if imported_call.is_none() && self.should_halt_section() {
+                return None;
+            }
+            return imported_call;
         }
 
-        None
+        // For simple identifiers (variable references), 
+        // create Identifier value directly WITHOUT expecting '='
+        if pattern.pattern_type == IdentifierPatternType::SimpleIdentifier {
+            self.log_verbose(&format!(">>> Simple identifier in array: {}", function_name));
+            self.advance();
+            return Some(Value::Identifier {
+                value: function_name,
+                position: item_pos,
+            });
+        }
+
+        // Handle enum access
+        if pattern.pattern_type == IdentifierPatternType::LocalEnumAccess {
+            self.log_verbose(&format!(">>> Enum access in array: {}.{}", 
+                function_name, pattern.second_part.as_ref().unwrap()));
+            self.advance(); // identifier
+            self.advance(); // dot
+            let enum_value = pattern.second_part.unwrap();
+            self.advance(); // value
+            return Some(Value::EnumValue {
+                enum_name: function_name,
+                value: enum_value,
+                position: item_pos,
+            });
+        }
     }
+
+    // For object literals
+    if self.is_current_symbol('{') {
+        let obj_literal = self.parse_object_literal();
+        if obj_literal.is_none() && self.should_halt_section() {
+            return None;
+        }
+        return obj_literal;
+    }
+
+    // For all other value types (primitives, arrays, etc.)
+    let value = self.parse_property_value();
+    if value.is_some() {
+        return value;
+    }
+
+    None
+        }
 
     //==================== OBJECT LITERAL PARSING (WITH NESTING DEPTH TRACKING) ====================
 

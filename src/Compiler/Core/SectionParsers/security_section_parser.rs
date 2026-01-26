@@ -1,20 +1,18 @@
-// src/Compiler/Core/SectionParsers/enums_section_parser.rs
+// src/Compiler/Core/SectionParsers/security_section_parser.rs
 
-use crate::Compiler::AST::{EnumsSection, EnumDeclaration, EnumField, Position};
+use crate::Compiler::AST::{SecuritySection, SecurityEntry, SecurityField, Position, Value};
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::ErrorManager::{ErrorManager, ParseErrorType};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
-use crate::Utilities::{Keywords, estimate_enum_fields_count};
 
-/// Enums Section Parser v1.0.1 - Dynamic Max Iterations
+/// Security Section Parser v1.0.0 - Section-Scoped Error Handling with Dynamic Iterations
 ///
-/// EBNF: @ENUMS( EnumDeclaration+ )
-/// EnumDeclaration ::= Identifier "{" EnumFieldList "}"
-/// EnumFieldList ::= EnumField ("," EnumField)*
-/// EnumField ::= Identifier ("=" Integer)?
+/// EBNF: @SECURITY( SecurityEntry+ )
+/// SecurityEntry ::= SecurityBlockKey "->" "{" SecurityFieldList? "}"
+/// SecurityFieldList ::= SecurityField ("," SecurityField)*
 ///
-/// Note: NO commas between enum declarations, only between fields
-pub struct EnumsSectionParser<'a> {
+/// Note: SecurityEntry blocks are NOT comma-separated (unlike fields inside them)
+pub struct SecuritySectionParser<'a> {
     tokens: &'a [Token],
     operational_settings: &'a OperationalSettings,
     error_manager: ErrorManager,
@@ -31,9 +29,13 @@ pub struct EnumsSectionParser<'a> {
 const MAX_ITERATIONS_PER_TOKEN: usize = 3;
 const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
 const MAX_STUCK_COUNT: usize = 3;
+const PROGRESS_CHECK_INTERVAL: usize = 100;
 
-impl<'a> EnumsSectionParser<'a> {
-    /// Create a new enums section parser
+// Known security block keys
+const VALID_BLOCK_KEYS: &[&str] = &["encryption", "validation", "keystore", "override", "metadata"];
+
+impl<'a> SecuritySectionParser<'a> {
+    /// Create a new security section parser
     pub fn new(
         tokens: &'a [Token],
         operational_settings: &'a OperationalSettings,
@@ -41,7 +43,7 @@ impl<'a> EnumsSectionParser<'a> {
         let error_manager = ErrorManager::get_shared_instance();
 
         error_manager.log_debug(&format!(
-            "Initializing ENUMS section parser v1.0.1 with {} tokens",
+            "Initializing SECURITY section parser v1.0.0 with {} tokens",
             tokens.len()
         ));
         error_manager.log_debug(&format!(
@@ -57,7 +59,7 @@ impl<'a> EnumsSectionParser<'a> {
             max_iterations, dynamic_limit, ABSOLUTE_MAX_ITERATIONS
         ));
 
-        EnumsSectionParser {
+        SecuritySectionParser {
             tokens,
             operational_settings,
             error_manager,
@@ -69,9 +71,9 @@ impl<'a> EnumsSectionParser<'a> {
         }
     }
 
-    /// Parse the ENUMS section
-    pub fn parse_section(&mut self) -> Option<EnumsSection> {
-        self.log_debug("Starting ENUMS section parse");
+    /// Parse the SECURITY section
+    pub fn parse_section(&mut self) -> Option<SecuritySection> {
+        self.log_debug("Starting SECURITY section parse");
 
         let section_start_token = self.current();
         let section_start_pos = Position::from_token(&section_start_token);
@@ -79,16 +81,16 @@ impl<'a> EnumsSectionParser<'a> {
         // Reset parse state
         self.reset_parse_state();
 
-        // Estimate capacity for enum declarations
-        let estimated_enums = usize::max(2, self.tokens.len() / 20);
-        let mut enum_declarations = Vec::with_capacity(estimated_enums);
+        // Estimate capacity for security entries (typically 3-5 entries)
+        let estimated_entries = usize::max(3, self.tokens.len() / 20);
+        let mut security_entries = Vec::with_capacity(estimated_entries);
 
         // Expect opening parenthesis
         if !self.match_and_consume_symbol('(') {
             let current = self.current().clone();
             self.handle_parse_error(
                 ParseErrorType::MissingToken,
-                "Expected '(' to start ENUMS section",
+                "Expected '(' to start SECURITY section",
                 &current,
             );
 
@@ -102,39 +104,34 @@ impl<'a> EnumsSectionParser<'a> {
             }
         }
 
-        // Parse enum declarations
+        // Parse security entries
         while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
-            self.track_progress();
+            if self.iteration_count % PROGRESS_CHECK_INTERVAL == 0 {
+                self.track_progress();
 
-            if self.is_stuck() {
-                self.error_manager.log_Warning("Parser stuck in ENUMS section");
-                if !self.recover_from_stuck() {
-                    break;
+                if self.is_stuck() {
+                    self.error_manager.log_Warning("Parser stuck in SECURITY section");
+                    if !self.recover_from_stuck() {
+                        break;
+                    }
+                    continue;
                 }
-                continue;
             }
 
-            // Check for invalid comma between enum declarations
+            self.iteration_count += 1;
+
+            // Check for invalid comma between entries
             if self.is_current_symbol(',') {
-                let current = self.current().clone();
-                self.handle_parse_error(
-                    ParseErrorType::SectionSyntaxError,
-                    "Commas are not allowed between enum declarations",
-                    &current,
-                );
+                self.log_debug("WARNING: Found unexpected comma between security entries - skipping");
                 self.advance();
                 continue;
             }
 
-            // Parse enum declaration
-            match self.parse_enum_declaration() {
-                Some(enum_decl) => {
-                    self.log_debug(&format!(
-                        "Parsed enum: {} with {} fields",
-                        enum_decl.name,
-                        enum_decl.fields.len()
-                    ));
-                    enum_declarations.push(enum_decl);
+            // Parse security entry
+            match self.parse_security_entry() {
+                Some(entry) => {
+                    self.log_verbose(&format!("Successfully parsed security entry: {}", entry.block_key));
+                    security_entries.push(entry);
                 }
                 None => {
                     if self.should_halt_section() {
@@ -142,7 +139,7 @@ impl<'a> EnumsSectionParser<'a> {
                     }
 
                     if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Recover {
-                        if !self.attempt_recovery_to_next_enum() {
+                        if !self.attempt_recovery_to_next_entry() {
                             self.ensure_progress();
                         }
                     } else {
@@ -157,7 +154,7 @@ impl<'a> EnumsSectionParser<'a> {
             let current = self.current().clone();
             self.handle_parse_error(
                 ParseErrorType::MissingToken,
-                "Expected ')' to close ENUMS section",
+                "Expected ')' to close SECURITY section",
                 &current,
             );
 
@@ -166,38 +163,61 @@ impl<'a> EnumsSectionParser<'a> {
             }
         }
 
-        let result = EnumsSection::new(enum_declarations, section_start_pos);
+        let result = SecuritySection::new(security_entries, section_start_pos);
 
         if self.has_encountered_errors {
             self.error_manager.log_Warning(&format!(
-                "ENUMS section parsed with errors ({} enums recovered)",
-                result.enums.len()
+                "SECURITY section parsed with errors ({} entries recovered)",
+                result.entries.len()
             ));
         } else {
             self.log_debug(&format!(
-                "ENUMS section parsed successfully with {} enum declarations",
-                result.enums.len()
+                "SECURITY section parsed successfully with {} security entries",
+                result.entries.len()
             ));
         }
 
         Some(result)
     }
 
-    // ==================== ENUM DECLARATION PARSING ====================
+    // ==================== SECURITY ENTRY PARSING ====================
 
-    fn parse_enum_declaration(&mut self) -> Option<EnumDeclaration> {
-        let enum_start_token = self.current();
-        let enum_start_pos = Position::from_token(&enum_start_token);
+    fn parse_security_entry(&mut self) -> Option<SecurityEntry> {
+        let entry_start_token = self.current();
+        let entry_start_pos = Position::from_token(&entry_start_token);
 
-        self.log_verbose("Parsing enum declaration");
+        self.log_verbose("Parsing security entry");
 
-        // Parse enum name
-        let enum_name = self.parse_enum_name()?;
-        self.log_verbose(&format!("Parsed enum name: {}", enum_name));
+        // Parse security block key
+        let block_key = self.parse_security_block_key()?;
+        self.log_verbose(&format!("Parsed security block key: {}", block_key));
+
+        // Expect arrow operator (->)
+        if !self.match_arrow() {
+            let message = format!("Expected '->' after security block key '{}'", block_key);
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &message,
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+
+            if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Recover {
+                if !self.attempt_recovery_to_arrow() {
+                    return None;
+                }
+            } else {
+                return None;
+            }
+        }
 
         // Expect opening brace
         if !self.match_and_consume_symbol('{') {
-            let message = format!("Expected '{{' after enum name '{}'", enum_name);
+            let message = format!("Expected '{{' after '->' in security entry '{}'", block_key);
             let current = self.current().clone();
             self.handle_parse_error(
                 ParseErrorType::MissingToken,
@@ -218,33 +238,30 @@ impl<'a> EnumsSectionParser<'a> {
             }
         }
 
-        // Parse enum fields
-        let estimated_fields = estimate_enum_fields_count(self.tokens.len() - self.position);
-        let mut enum_fields = Vec::with_capacity(estimated_fields);
-
-        let mut expecting_field = true;
+        // Parse security fields
+        let estimated_fields = usize::max(4, self.tokens.len() / 50);
+        let mut fields = Vec::with_capacity(estimated_fields);
 
         while !self.is_at_end() && !self.is_current_symbol('}') && !self.should_terminate_loop() {
-            self.track_progress();
+            if self.iteration_count % PROGRESS_CHECK_INTERVAL == 0 {
+                self.track_progress();
 
-            if self.is_stuck() {
-                self.error_manager.log_Warning(&format!("Parser stuck in enum '{}' fields", enum_name));
-                if !self.recover_from_stuck() {
-                    break;
+                if self.is_stuck() {
+                    self.error_manager.log_Warning(&format!("Parser stuck in security block '{}' fields", block_key));
+                    if !self.recover_from_stuck() {
+                        break;
+                    }
+                    continue;
                 }
-                continue;
             }
 
+            self.iteration_count += 1;
+
             // Parse field
-            match self.parse_enum_field() {
+            match self.parse_security_field() {
                 Some(field) => {
-                    self.log_verbose(&format!(
-                        "  Parsed field: {}{}",
-                        field.name,
-                        field.value.map(|v| format!(" = {}", v)).unwrap_or_default()
-                    ));
-                    enum_fields.push(field);
-                    expecting_field = false;
+                    self.log_verbose(&format!("  Parsed field: {} = {}", field.key, field.value));
+                    fields.push(field);
                 }
                 None => {
                     if self.should_halt_section() {
@@ -253,34 +270,17 @@ impl<'a> EnumsSectionParser<'a> {
                 }
             }
 
-            // Handle comma separator
+            // Handle comma separation
             if self.is_current_symbol(',') {
                 self.advance();
                 self.log_verbose("  Consumed comma separator between fields");
-                expecting_field = true;
             } else if self.is_current_symbol('}') {
                 self.log_verbose("  Found closing brace, ending fields");
                 break;
-            } else if !self.is_at_end() && !expecting_field {
-                // Check if next token looks like another enum declaration
-                if self.current().token_type.is_identifier() {
-                    if let Some(next_token) = self.peek() {
-                        if matches!(next_token.token_type, TokenType::Symbol('{')) {
-                            let message = format!("Missing '}}' to close enum '{}' - found start of next enum", enum_name);
-                            let current = self.current().clone();
-                            self.handle_parse_error(
-                                ParseErrorType::MissingToken,
-                                &message,
-                                &current,
-                            );
-                            break;
-                        }
-                    }
-                }
-
+            } else if !self.is_at_end() {
                 let message = format!(
                     "Expected ',' or '}}' after field in '{}', found {}",
-                    enum_name,
+                    block_key,
                     self.current().get_token_value()
                 );
                 let current = self.current().clone();
@@ -294,13 +294,19 @@ impl<'a> EnumsSectionParser<'a> {
                     return None;
                 }
 
-                self.ensure_progress();
+                if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Recover {
+                    if !self.attempt_recovery_in_fields() {
+                        self.ensure_progress();
+                    }
+                } else {
+                    self.ensure_progress();
+                }
             }
         }
 
         // Expect closing brace
         if !self.match_and_consume_symbol('}') {
-            let message = format!("Expected '}}' to close enum '{}'", enum_name);
+            let message = format!("Expected '}}' to close security block '{}'", block_key);
             let current = self.current().clone();
             self.handle_parse_error(
                 ParseErrorType::MissingToken,
@@ -313,42 +319,54 @@ impl<'a> EnumsSectionParser<'a> {
             }
         }
 
-        let enum_declaration = EnumDeclaration::new(enum_name, enum_fields, enum_start_pos);
+        let security_entry = SecurityEntry::new(block_key, fields, entry_start_pos);
         self.log_verbose(&format!(
-            "Created enum AST node: {} with {} fields",
-            enum_declaration.name,
-            enum_declaration.fields.len()
+            "Created security entry AST node: {} with {} fields",
+            security_entry.block_key,
+            security_entry.fields.len()
         ));
 
-        Some(enum_declaration)
+        Some(security_entry)
     }
 
-    fn parse_enum_field(&mut self) -> Option<EnumField> {
+    fn parse_security_field(&mut self) -> Option<SecurityField> {
         let field_start_token = self.current();
         let field_start_pos = Position::from_token(&field_start_token);
 
-        self.log_verbose("Parsing enum field");
+        self.log_verbose("Parsing security field");
 
-        // Parse field name
-        let field_name = self.parse_field_name()?;
-        self.log_verbose(&format!("    Field name: {}", field_name));
+        // Parse field key
+        let key = self.parse_field_key()?;
+        self.log_verbose(&format!("    Field key: {}", key));
 
-        // Check for value assignment
-        if !self.is_current_symbol('=') {
-            return Some(EnumField::new(field_name, None, field_start_pos));
+        // Expect equals sign
+        if !self.match_and_consume_symbol('=') {
+            let message = format!("Expected '=' after security field key '{}'", key);
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &message,
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+
+            if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Recover {
+                if !self.attempt_recovery_to_equals() {
+                    return None;
+                }
+            } else {
+                return None;
+            }
         }
 
-        self.advance();
-        self.log_verbose("    Found '=' for value assignment");
-
         // Parse field value
-        match self.parse_field_value() {
-            Some(value) => {
-                self.log_verbose(&format!("    Assigned value: {}", value));
-                Some(EnumField::new(field_name, Some(value), field_start_pos))
-            }
+        let value = match self.parse_security_value() {
+            Some(v) => v,
             None => {
-                let message = format!("Expected integer value after '=' in enum field '{}'", field_name);
+                let message = format!("Expected value after '=' in security field '{}'", key);
                 let current = self.current().clone();
                 self.handle_parse_error(
                     ParseErrorType::UnexpectedToken,
@@ -357,45 +375,42 @@ impl<'a> EnumsSectionParser<'a> {
                 );
 
                 if self.should_halt_section() {
-                    None
-                } else {
-                    Some(EnumField::new(field_name, None, field_start_pos))
+                    return None;
+                }
+
+                // Create error value as placeholder
+                Value::Error {
+                    message: format!("Missing value for key '{}'", key),
+                    position: Position::from_token(&current),
                 }
             }
-        }
+        };
+
+        let field = SecurityField::new(key, value, field_start_pos);
+        self.log_verbose(&format!("Created security field AST node: {} = {}", field.key, field.value));
+
+        Some(field)
     }
 
     // ==================== IDENTIFIER AND VALUE PARSING ====================
 
-    fn parse_enum_name(&mut self) -> Option<String> {
+    fn parse_security_block_key(&mut self) -> Option<String> {
         match &self.current().token_type {
             TokenType::Identifier(id) => {
-                let name = id.clone();
+                let key = id.clone();
                 self.advance();
-                Some(name)
+                Some(key)
             }
             TokenType::Keyword(keyword) => {
-                if Keywords::can_be_identifier_in_context(keyword, "ENUMS") {
-                    let name = keyword.clone();
-                    self.advance();
-                    self.log_verbose(&format!("Accepted keyword '{}' as enum name", name));
-                    Some(name)
-                } else {
-                    let message = format!("Cannot use language keyword '{}' as enum name", keyword);
-                    let current = self.current().clone();
-                    self.handle_parse_error(
-                        ParseErrorType::UnexpectedToken,
-                        &message,
-                        &current,
-                    );
-                    None
-                }
+                let key = keyword.clone();
+                self.advance();
+                Some(key)
             }
             _ => {
                 let current = self.current().clone();
                 self.handle_parse_error(
                     ParseErrorType::UnexpectedToken,
-                    "Expected enum name identifier",
+                    "Expected security block key (encryption, validation, keystore, override, metadata)",
                     &current,
                 );
                 None
@@ -403,35 +418,23 @@ impl<'a> EnumsSectionParser<'a> {
         }
     }
 
-    fn parse_field_name(&mut self) -> Option<String> {
+    fn parse_field_key(&mut self) -> Option<String> {
         match &self.current().token_type {
             TokenType::Identifier(id) => {
-                let name = id.clone();
+                let key = id.clone();
                 self.advance();
-                Some(name)
+                Some(key)
             }
             TokenType::Keyword(keyword) => {
-                if Keywords::can_be_identifier_in_context(keyword, "ENUMS") {
-                    let name = keyword.clone();
-                    self.advance();
-                    self.log_verbose(&format!("Accepted keyword '{}' as field name", name));
-                    Some(name)
-                } else {
-                    let message = format!("Cannot use language keyword '{}' as field name", keyword);
-                    let current = self.current().clone();
-                    self.handle_parse_error(
-                        ParseErrorType::UnexpectedToken,
-                        &message,
-                        &current,
-                    );
-                    None
-                }
+                let key = keyword.clone();
+                self.advance();
+                Some(key)
             }
             _ => {
                 let current = self.current().clone();
                 self.handle_parse_error(
                     ParseErrorType::UnexpectedToken,
-                    "Expected enum field name identifier",
+                    "Expected security field key identifier",
                     &current,
                 );
                 None
@@ -439,23 +442,99 @@ impl<'a> EnumsSectionParser<'a> {
         }
     }
 
-    fn parse_field_value(&mut self) -> Option<i32> {
-        match &self.current().token_type {
-            TokenType::Integer(value) => {
-                let val = *value;
-                self.advance();
-                Some(val)
-            }
-            TokenType::Identifier(id) => {
-                if let Ok(value) = id.parse::<i32>() {
-                    self.advance();
-                    Some(value)
-                } else {
-                    None
-                }
-            }
+    fn parse_security_value(&mut self) -> Option<Value> {
+        let token = self.current();
+        let value_position = Position::from_token(&token);
+
+        let value = match &token.token_type {
+            TokenType::Integer(i) => Some(Value::Integer {
+                value: *i,
+                position: value_position,
+            }),
+            TokenType::String(s) => Some(Value::String {
+                value: s.clone(),
+                position: value_position,
+            }),
+            TokenType::StringSingle(ss) => Some(Value::String {
+                value: ss.clone(),
+                position: value_position,
+            }),
+            TokenType::Bool(b) => Some(Value::Boolean {
+                value: *b,
+                position: value_position,
+            }),
+            TokenType::HexLiteral(hl) => Some(Value::Integer {
+                value: *hl,
+                position: value_position,
+            }),
+            // FIX: Use .as_str() for String comparisons
+            TokenType::Keyword(k) if k.as_str() == "true" => Some(Value::Boolean {
+                value: true,
+                position: value_position,
+            }),
+            TokenType::Keyword(k) if k.as_str() == "false" => Some(Value::Boolean {
+                value: false,
+                position: value_position,
+            }),
+            TokenType::Keyword(k) if k.as_str() == "auto" => Some(Value::String {
+                value: "auto".to_string(),
+                position: value_position,
+            }),
+            TokenType::Identifier(id) if id.as_str() == "true" => Some(Value::Boolean {
+                value: true,
+                position: value_position,
+            }),
+            TokenType::Identifier(id) if id.as_str() == "false" => Some(Value::Boolean {
+                value: false,
+                position: value_position,
+            }),
+            TokenType::Identifier(id) if id.as_str() == "auto" => Some(Value::String {
+                value: "auto".to_string(),
+                position: value_position,
+            }),
             _ => None,
+        };
+
+        if value.is_some() {
+            self.advance();
+            if let Some(ref v) = value {
+                self.log_verbose(&format!("Parsed security value: {}", v));
+            }
         }
+
+        value
+    }
+
+    fn match_arrow(&mut self) -> bool {
+        // Try MultiCharSymbol "->"
+        if let TokenType::MultiCharSymbol(ms) = &self.current().token_type {
+            if ms.as_str() == "->" {  // FIX: Use .as_str()
+                self.advance();
+                self.log_verbose("Consumed arrow operator '->'");
+                return true;
+            }
+        }
+
+        // Try SwitchCase token (alternative representation)
+        if matches!(self.current().token_type, TokenType::SwitchCase) {
+            self.advance();
+            self.log_verbose("Consumed arrow operator '->' (SwitchCase token)");
+            return true;
+        }
+
+        // Try two separate symbols: '-' and '>'
+        if let TokenType::Symbol('-') = self.current().token_type {
+            if self.position + 1 < self.tokens.len() {
+                if let TokenType::Symbol('>') = self.tokens[self.position + 1].token_type {
+                    self.advance();
+                    self.advance();
+                    self.log_verbose("Consumed arrow operator '->' (two symbols)");
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     // ==================== ERROR HANDLING ====================
@@ -486,13 +565,13 @@ impl<'a> EnumsSectionParser<'a> {
             && self.has_encountered_errors
     }
 
-    fn handle_section_failure(&self, start_pos: Position) -> Option<EnumsSection> {
+    fn handle_section_failure(&self, start_pos: Position) -> Option<SecuritySection> {
         if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt {
-            self.error_manager.log_error("ENUMS section parsing halted due to errors");
+            self.error_manager.log_error("SECURITY section parsing halted due to errors");
             None
         } else {
-            self.error_manager.log_Warning("ENUMS section parsing completed with errors - returning empty section");
-            Some(EnumsSection::new(Vec::new(), start_pos))
+            self.error_manager.log_Warning("SECURITY section parsing completed with errors - returning empty section");
+            Some(SecuritySection::new(Vec::new(), start_pos))
         }
     }
 
@@ -544,12 +623,57 @@ impl<'a> EnumsSectionParser<'a> {
         false
     }
 
-    fn attempt_recovery_to_next_enum(&mut self) -> bool {
+    fn attempt_recovery_to_arrow(&mut self) -> bool {
         if self.operational_settings.error_handling_strategy != ErrorHandlingStrategy::Recover {
             return false;
         }
 
-        self.log_debug("RECOVER: Attempting to find next enum declaration");
+        self.log_debug("RECOVER: Attempting to find arrow operator");
+
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: usize = 10;
+
+        while !self.is_at_end() && attempts < MAX_ATTEMPTS {
+            if self.match_arrow() {
+                self.log_debug("RECOVER: Found arrow operator");
+                return true;
+            }
+            self.advance();
+            attempts += 1;
+        }
+
+        false
+    }
+
+    fn attempt_recovery_to_equals(&mut self) -> bool {
+        if self.operational_settings.error_handling_strategy != ErrorHandlingStrategy::Recover {
+            return false;
+        }
+
+        self.log_debug("RECOVER: Attempting to find equals sign");
+
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: usize = 10;
+
+        while !self.is_at_end() && attempts < MAX_ATTEMPTS {
+            if self.is_current_symbol('=') {
+                self.advance();
+                self.log_debug("RECOVER: Found equals sign");
+                return true;
+            }
+            self.advance();
+            attempts += 1;
+        }
+
+        false
+    }
+
+    fn attempt_recovery_to_next_entry(&mut self) -> bool {
+        if self.operational_settings.error_handling_strategy != ErrorHandlingStrategy::Recover {
+            return false;
+        }
+
+        self.log_debug("RECOVER: Attempting to find next security entry");
 
         let mut recovery_attempts = 0;
         const MAX_RECOVERY_ATTEMPTS: usize = 50;
@@ -560,13 +684,27 @@ impl<'a> EnumsSectionParser<'a> {
                 return true;
             }
 
-            if self.current().token_type.is_identifier() {
-                if let Some(next) = self.peek() {
-                    if matches!(next.token_type, TokenType::Symbol('{')) {
-                        self.log_debug("RECOVER: Found next enum declaration");
-                        return true;
-                    }
-                }
+            self.advance();
+            recovery_attempts += 1;
+        }
+
+        false
+    }
+
+    fn attempt_recovery_in_fields(&mut self) -> bool {
+        if self.operational_settings.error_handling_strategy != ErrorHandlingStrategy::Recover {
+            return false;
+        }
+
+        self.log_debug("RECOVER: Attempting to find next field or end of block");
+
+        let mut recovery_attempts = 0;
+        const MAX_RECOVERY_ATTEMPTS: usize = 50;
+
+        while !self.is_at_end() && recovery_attempts < MAX_RECOVERY_ATTEMPTS {
+            if self.is_current_symbol(',') || self.is_current_symbol('}') {
+                self.log_debug(&format!("RECOVER: Found recovery point at {}", self.current().get_token_value()));
+                return true;
             }
 
             self.advance();
@@ -589,11 +727,6 @@ impl<'a> EnumsSectionParser<'a> {
             };
             &EOF_TOKEN
         })
-    }
-
-    #[inline]
-    fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.position + 1)
     }
 
     #[inline]
@@ -660,8 +793,6 @@ impl<'a> EnumsSectionParser<'a> {
     }
 
     fn track_progress(&mut self) {
-        self.iteration_count += 1;
-
         if self.position == self.last_position {
             self.stuck_count += 1;
         } else {
@@ -719,16 +850,5 @@ impl<'a> EnumsSectionParser<'a> {
         if self.operational_settings.debug_mode == DebugMode::Verbose {
             self.error_manager.log_info(message);
         }
-    }
-}
-
-// Helper trait extension for TokenType
-trait TokenTypeExt {
-    fn is_identifier(&self) -> bool;
-}
-
-impl TokenTypeExt for TokenType {
-    fn is_identifier(&self) -> bool {
-        matches!(self, TokenType::Identifier(_))
     }
 }

@@ -1,0 +1,2931 @@
+// src/Compiler/Core/SectionParsers/data_section_parser.rs
+
+use crate::Compiler::AST::{
+    DataSection, DataEntry, TablePath, PropertyAssignment, Position,
+    Value, ObjectProperty, Expression, DataType,
+};
+use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
+use crate::Compiler::Core::Tokenizer::{Token, TokenType};
+use crate::Compiler::Utilities::{
+    IdentifierPatternAnalyzer, IdentifierPattern, IdentifierPatternType
+};
+use crate::ErrorManager::{ErrorManager, ParseErrorType};
+use crate::Utilities::{estimate_properties_count, estimate_array_items_count};
+
+/// Data Section Parser v1.0.0 - ULTRA-OPTIMIZED
+///
+/// TIER SYSTEM (TOML-inspired):
+/// - TIER 1 (Flat Properties): property = value (comma-separated)
+/// - TIER 2 (Grouped Data): table.path: ... OR array.path:: ... (NO commas between groups)
+///
+/// OPTIMIZATIONS APPLIED:
+/// - Increased nesting limits to match JSON (64 levels for objects, 10 for function calls)
+/// - Uses ErrorManager exclusively (no MID_Logger)
+/// - Enhanced error messages with context
+/// - Zero-allocation parsing paths where possible
+/// - Position tracking on ALL AST nodes
+/// - Pre-allocated collections using parser_collection_helper
+///
+/// OBJECT LITERAL SYNTAX:
+/// - DATA section: Always uses '=' for assignments: { host = "localhost", port = 3306 }
+/// - Type annotations supported: { port<int> = 3306 }
+/// - Nested objects allowed up to 64 levels
+///
+/// FUNCTION CALL NESTING:
+/// - Supports up to 10 nested function calls
+/// - Example: func1(func2(func3(...func10(value)...)))
+pub struct DataSectionParser<'a> {
+    //==================== FIELDS ====================
+    tokens: &'a [Token],
+    operational_settings: &'a OperationalSettings,
+    error_manager: ErrorManager,
+
+    position: usize,
+
+    // Parse state tracking for infinite loop prevention
+    last_position: usize,
+    stuck_count: usize,
+    iteration_count: usize,
+
+    // Data section parsing state
+    has_seen_grouped_data: bool,
+
+    // Nesting depth tracking
+    current_object_nesting_depth: usize,
+    current_function_call_depth: usize,
+}
+
+//==================== CONSTANTS AND CONFIGURATION ====================
+
+// Nesting limits same as JSON
+const MAX_OBJECT_NESTING_DEPTH: usize = 64;
+const MAX_FUNCTION_CALL_DEPTH: usize = 10;
+
+// Loop safety limits
+const MAX_ITERATIONS_PER_TOKEN: usize = 3;
+const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
+const MAX_STUCK_COUNT: usize = 3;
+
+impl<'a> DataSectionParser<'a> {
+    //==================== CONSTRUCTOR ====================
+
+    /// Create a new DataSectionParser
+    pub fn new(
+        tokens: &'a [Token],
+        operational_settings: &'a OperationalSettings,
+    ) -> Self {
+        let error_manager = ErrorManager::get_shared_instance();
+
+        error_manager.log_debug(&format!(
+            "Initializing DATA section parser v1.0.0 with {} tokens",
+            tokens.len()
+        ));
+        error_manager.log_debug(&format!(
+            "Error strategy: {:?}",
+            operational_settings.error_handling_strategy
+        ));
+
+        // Calculate dynamic max iterations
+        let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
+        let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
+        error_manager.log_debug(&format!(
+            "Dynamic max iterations: {} (token-based: {}, absolute cap: {})",
+            max_iterations, dynamic_limit, ABSOLUTE_MAX_ITERATIONS
+        ));
+
+        DataSectionParser {
+            tokens,
+            operational_settings,
+            error_manager,
+            position: 0,
+            last_position: usize::MAX,
+            stuck_count: 0,
+            iteration_count: 0,
+            has_seen_grouped_data: false,
+            current_object_nesting_depth: 0,
+            current_function_call_depth: 0,
+        }
+    }
+
+    //==================== MAIN PARSING METHOD ====================
+
+    /// Parse the DATA section
+    pub fn parse_section(&mut self) -> Option<DataSection> {
+        self.log_debug("Starting DATA section parse");
+
+        let section_start_pos = Position::from_token(self.current());
+
+        // Reset parse state
+        self.reset_parse_state();
+
+        // OPTIMIZATION: Use parser_collection_helper for pre-allocated collection
+        let estimated_entries = estimate_properties_count(self.tokens.len());
+        let mut data_entries = Vec::with_capacity(estimated_entries);
+
+        // Expect opening parenthesis
+        if !self.match_and_consume_symbol('(') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected '(' to start DATA section",
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return self.handle_section_failure(section_start_pos);
+            }
+        }
+
+        // Parse data entries
+        while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
+            self.track_progress();
+
+            if self.is_stuck() {
+                self.log_debug("Parser stuck in DATA section, attempting recovery");
+                if !self.recover_from_stuck() {
+                    break;
+                }
+                continue;
+            }
+
+            match self.parse_data_entry() {
+                Some(entry) => {
+                    data_entries.push(entry);
+                    self.log_verbose(&format!("Successfully parsed data entry"));
+                }
+                None => {
+                    // CRITICAL: Check HALT propagation
+                    if self.should_halt_section() {
+                        self.log_debug("HALT detected - terminating DATA section parsing");
+                        return self.handle_section_failure(section_start_pos);
+                    }
+
+                    // Recovery
+                    if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Recover {
+                        if !self.attempt_recovery() {
+                            self.ensure_progress();
+                        }
+                    } else {
+                        self.ensure_progress();
+                    }
+                }
+            }
+
+            // Handle comma separation
+            if !self.handle_data_entry_comma_separation() {
+                if self.should_halt_section() {
+                    return self.handle_section_failure(section_start_pos);
+                }
+            }
+        }
+
+        // Expect closing parenthesis
+        if !self.match_and_consume_symbol(')') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected ')' to close DATA section",
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return self.handle_section_failure(section_start_pos);
+            }
+        }
+
+        let result = DataSection::new(data_entries, section_start_pos);
+        self.log_debug(&format!(
+            "DATA section parsed successfully with {} entries",
+            result.entries.len()
+        ));
+
+        Some(result)
+    }
+
+    //==================== STATE MANAGEMENT ====================
+
+    fn reset_parse_state(&mut self) {
+        self.last_position = usize::MAX;
+        self.stuck_count = 0;
+        self.iteration_count = 0;
+        self.has_seen_grouped_data = false;
+        self.current_object_nesting_depth = 0;
+        self.current_function_call_depth = 0;
+        self.log_verbose("Parse state reset");
+    }
+
+    fn track_progress(&mut self) {
+        self.iteration_count += 1;
+
+        if self.position == self.last_position {
+            self.stuck_count += 1;
+            self.log_debug(&format!(
+                "Position unchanged: {}, stuck count: {}",
+                self.position, self.stuck_count
+            ));
+        } else {
+            self.stuck_count = 0;
+        }
+
+        self.last_position = self.position;
+    }
+
+    fn is_stuck(&self) -> bool {
+        self.stuck_count >= MAX_STUCK_COUNT
+    }
+
+    fn should_terminate_loop(&self) -> bool {
+        let dynamic_limit = self.tokens.len() * MAX_ITERATIONS_PER_TOKEN;
+        let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
+
+        if self.iteration_count >= max_iterations {
+            self.error_manager.log_error(&format!(
+                "Maximum iterations ({}) exceeded - emergency loop termination (token-based: {}, absolute cap: {})",
+                max_iterations, dynamic_limit, ABSOLUTE_MAX_ITERATIONS
+            ));
+            return true;
+        }
+
+        false
+    }
+
+    fn recover_from_stuck(&mut self) -> bool {
+        if self.is_at_end() {
+            self.log_debug("Cannot recover from stuck state - at end of tokens");
+            return false;
+        }
+
+        self.log_debug(&format!("Forcing advancement from stuck position {}", self.position));
+        self.advance();
+        self.stuck_count = 0;
+        true
+    }
+
+    fn ensure_progress(&mut self) {
+        if !self.is_at_end() {
+            self.log_debug(&format!("Ensuring progress by advancing from position {}", self.position));
+            self.advance();
+        } else {
+            self.log_debug("Cannot ensure progress - at end of tokens");
+        }
+    }
+
+    fn attempt_recovery(&mut self) -> bool {
+        self.log_debug("Attempting recovery through synchronization");
+
+        let mut recovery_attempts = 0;
+        const MAX_RECOVERY_ATTEMPTS: usize = 50;
+
+        while !self.is_at_end() && recovery_attempts < MAX_RECOVERY_ATTEMPTS {
+            if self.is_current_symbol(',') || self.is_current_symbol(')') || self.is_next_data_entry() {
+                self.log_debug(&format!("Found recovery point at token: {}", self.current().get_token_value()));
+                return true;
+            }
+
+            self.advance();
+            recovery_attempts += 1;
+        }
+
+        self.log_debug(&format!("Recovery completed after {} attempts", recovery_attempts));
+        !self.is_at_end()
+    }
+
+    //==================== DATA ENTRY TYPE DETERMINATION ====================
+
+    fn parse_data_entry(&mut self) -> Option<DataEntry> {
+        self.log_verbose("Parsing data entry");
+
+        let entry_type = self.determine_data_entry_type();
+        self.log_verbose(&format!("Determined data entry type: {:?}", entry_type));
+
+        match entry_type {
+            DataEntryType::SimpleProperty => self.parse_simple_property(),
+            DataEntryType::TableProperty => {
+                self.has_seen_grouped_data = true;
+                self.parse_table_property()
+            }
+            DataEntryType::GroupArray => {
+                self.has_seen_grouped_data = true;
+                self.parse_group_array()
+            }
+            DataEntryType::ObjectProperty => self.parse_data_entry_object_property(),
+            DataEntryType::Unknown => {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Unable to determine data entry type from token: {:?}", current.token_type),
+                    &current,
+                );
+                None
+            }
+        }
+    }
+
+    fn determine_data_entry_type(&self) -> DataEntryType {
+        self.log_verbose("Determining data entry type");
+
+        if self.is_at_end() {
+            return DataEntryType::Unknown;
+        }
+
+        let current_token = self.current();
+
+        // Accept both Identifier and Keyword as valid property names
+        let identifier_value = match &current_token.token_type {
+            TokenType::Identifier(id) => Some(id.as_str()),
+            TokenType::Keyword(kw) => Some(kw.as_str()),
+            _ => None,
+        };
+
+        if let Some(_id) = identifier_value {
+            let mut look_ahead = 1;
+
+            // Skip optional type annotation <type>
+            if let Some(token) = self.peek_ahead(look_ahead) {
+                if let TokenType::Symbol('<') = token.token_type {
+                    look_ahead += 1;
+                    while let Some(token) = self.peek_ahead(look_ahead) {
+                        if let TokenType::Symbol('>') = token.token_type {
+                            look_ahead += 1;
+                            break;
+                        }
+                        look_ahead += 1;
+                    }
+                }
+            }
+
+            let next_token = self.peek_ahead(look_ahead);
+            if next_token.is_none() {
+                return DataEntryType::Unknown;
+            }
+
+            let next = next_token.unwrap();
+
+            // CRITICAL: Check for DoubleColon token FIRST
+            if matches!(next.token_type, TokenType::DoubleColon) {
+                self.log_verbose("Detected group array via DoubleColon token");
+                return DataEntryType::GroupArray;
+            }
+
+            if let TokenType::Symbol(sym) = next.token_type {
+                return match sym {
+                    '=' => self.determine_simple_or_object_property(look_ahead + 1),
+                    '.' => self.determine_table_or_group_property(look_ahead + 1),
+                    ':' => {
+                        // Check if it's :: (group array)
+                        if let Some(after_colon) = self.peek_ahead(look_ahead + 1) {
+                            if let TokenType::Symbol(':') = after_colon.token_type {
+                                DataEntryType::GroupArray
+                            } else {
+                                DataEntryType::TableProperty
+                            }
+                        } else {
+                            DataEntryType::TableProperty
+                        }
+                    }
+                    _ => DataEntryType::Unknown,
+                };
+            }
+        }
+
+        self.log_verbose("Could not determine entry type, defaulting to Unknown");
+        DataEntryType::Unknown
+    }
+
+    fn determine_simple_or_object_property(&self, value_position: usize) -> DataEntryType {
+        if let Some(value_token) = self.peek_ahead(value_position) {
+            if let TokenType::Symbol('{') = value_token.token_type {
+                return DataEntryType::ObjectProperty;
+            }
+        }
+        DataEntryType::SimpleProperty
+    }
+
+    fn determine_table_or_group_property(&self, start_pos: usize) -> DataEntryType {
+        let mut pos = start_pos;
+        while let Some(token) = self.peek_ahead(pos) {
+            if let TokenType::Symbol(':') = token.token_type {
+                // Check for ::
+                if let Some(next) = self.peek_ahead(pos + 1) {
+                    if let TokenType::Symbol(':') = next.token_type {
+                        return DataEntryType::GroupArray;
+                    }
+                }
+                return DataEntryType::TableProperty;
+            }
+
+            if matches!(token.token_type, TokenType::DoubleColon) {
+                return DataEntryType::GroupArray;
+            }
+
+            pos += 1;
+        }
+
+        DataEntryType::Unknown
+    }
+
+    //==================== SIMPLE PROPERTY PARSING ====================
+
+    fn parse_simple_property(&mut self) -> Option<DataEntry> {
+        self.log_verbose("Parsing simple property");
+
+        let start_pos = Position::from_token(self.current());
+
+        // CRITICAL: Check tier violation FIRST
+        if self.has_seen_grouped_data {
+            let attempted_property_name = match &self.current().token_type {
+                TokenType::Identifier(id) => id.clone(),
+                TokenType::Keyword(kw) => kw.clone(),
+                _ => "unknown".to_string(),
+            };
+
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::SectionSyntaxError,
+                &format!(
+                    "❌ TWO-TIER VIOLATION: Flat property '{}' cannot appear after grouped data.\n\
+                    \n\
+                    DixScript uses a two-tier system (inspired by TOML):\n\
+                    \n\
+                    TIER 1 (Flat Properties): property = value\n\
+                    TIER 2 (Grouped Data):    table.path: ... OR array.path:: ...\n\
+                    \n\
+                    ✅ CORRECT ORDER:\n\
+                       @DATA(\n\
+                         flat1 = \"value\",     // Tier 1 starts\n\
+                         flat2 = 42,            // Tier 1 continues\n\
+                         \n\
+                         table.prop: x = 1     // Tier 2 starts here\n\
+                         array:: item1, item2  // Tier 2 continues\n\
+                       )\n\
+                    \n\
+                    ❌ WRONG (Your Code):\n\
+                       @DATA(\n\
+                         table.prop: x = 1     // Tier 2 started\n\
+                         {} = ...   // ❌ Can't go back to Tier 1!\n\
+                       )\n\
+                    \n\
+                    💡 FIX: Move '{}' BEFORE any table properties or group arrays.",
+                    attempted_property_name, attempted_property_name, attempted_property_name
+                ),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+
+            // For recovery: skip this property
+            self.log_debug(&format!("Skipping illegal flat property '{}' after grouped data", attempted_property_name));
+            self.advance();
+            return None;
+        }
+
+        let property_name = self.parse_property_name()?;
+        self.log_verbose(&format!("Parsed simple property name: {}", property_name));
+
+        let data_type = self.parse_optional_type_annotation();
+        if data_type.is_some() {
+            self.log_verbose(&format!("Parsed type annotation: {:?}", data_type));
+        }
+
+        // Only support = operator
+        if !self.match_and_consume_symbol('=') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected '=' after property name '{}'", property_name),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        let value = match self.parse_property_value() {
+            Some(v) => v,
+            None => {
+                // CRITICAL: Check HALT propagation
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Expected property value after '=' in property '{}'", property_name),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                Value::Null { position: start_pos }
+            }
+        };
+
+        let simple_property = DataEntry::SimpleProperty {
+            name: property_name.clone(),
+            data_type,
+            value,
+            position: start_pos,
+        };
+
+        self.log_verbose(&format!("Created simple property AST node: {}", property_name));
+        Some(simple_property)
+    }
+
+    //==================== TABLE PROPERTY PARSING ====================
+
+    fn parse_table_property(&mut self) -> Option<DataEntry> {
+        self.log_verbose("Parsing table property");
+
+        let start_pos = Position::from_token(self.current());
+
+        let table_path = self.parse_table_path()?;
+
+        if !self.match_and_consume_symbol(':') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected ':' after table path '{}'", table_path),
+                &current,
+            );
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        // OPTIMIZATION: Use parser_collection_helper for pre-allocated collection
+        let estimated_props = estimate_properties_count(self.tokens.len());
+        let mut properties = Vec::with_capacity(estimated_props);
+
+        // Keep parsing until we hit something that ISN'T a property assignment
+        while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
+            self.track_progress();
+            if self.is_stuck() {
+                if !self.recover_from_stuck() {
+                    break;
+                }
+                continue;
+            }
+
+            // Check if next token starts a NEW data entry
+            if self.is_start_of_new_data_entry() {
+                self.log_verbose("Detected start of new data entry - ending table property");
+                break;
+            }
+
+            let assignment = self.parse_property_assignment();
+            if assignment.is_none() && self.should_halt_section() {
+                return None;
+            }
+
+            if let Some(assign) = assignment {
+                properties.push(assign);
+            }
+
+            // Comma is now OPTIONAL between property assignments
+            if self.is_current_symbol(',') {
+                self.advance();
+                self.log_verbose("Consumed optional comma separator within table property");
+            } else if self.is_current_symbol(')') || self.is_start_of_new_data_entry() {
+                self.log_verbose("No comma found - ending table property parsing");
+                break;
+            } else if !self.is_at_end() {
+                // FIXED: Check if next looks like a property assignment (with optional type annotation)
+                let next_token = self.current();
+                if matches!(next_token.token_type, TokenType::Identifier(_) | TokenType::Keyword(_)) {
+                    // Peek ahead to see if this is property = value pattern
+                    let mut look_ahead = 1;
+                    let mut after_ident = self.peek_ahead(look_ahead);
+
+                    // Skip optional type annotation <type>
+                    if let Some(token) = after_ident {
+                        if let TokenType::Symbol('<') = token.token_type {
+                            self.log_verbose("Detected type annotation - skipping to find '=' operator");
+                            look_ahead += 1;
+
+                            // Skip until we find closing '>'
+                            while let Some(token) = self.peek_ahead(look_ahead) {
+                                if let TokenType::Symbol('>') = token.token_type {
+                                    look_ahead += 1;
+                                    self.log_verbose(&format!("Found closing '>' at lookAhead position {}", look_ahead));
+                                    break;
+                                }
+                                look_ahead += 1;
+                            }
+
+                            after_ident = self.peek_ahead(look_ahead);
+                        }
+                    }
+
+                    // Check if we found '=' operator
+                    if let Some(token) = after_ident {
+                        if let TokenType::Symbol('=') = token.token_type {
+                            self.log_verbose("Next property detected without comma (with optional type annotation) - continuing");
+                            continue;
+                        }
+                    }
+
+                    // Not a property assignment pattern - we're done
+                    self.log_verbose("Token after identifier is not '=' operator - ending table property");
+                    break;
+                }
+
+                // Not a property, not a known terminator - we're done
+                self.log_verbose("No more properties detected - ending table property");
+                break;
+            }
+        }
+
+        Some(DataEntry::TableProperty {
+            path: table_path,
+            properties,
+            position: start_pos,
+        })
+    }
+
+    //==================== GROUP ARRAY PARSING ====================
+
+    fn parse_group_array(&mut self) -> Option<DataEntry> {
+        self.log_verbose("Parsing group array");
+
+        let start_pos = Position::from_token(self.current());
+
+        let table_path = self.parse_table_path()?;
+        self.log_verbose(&format!("Parsed group array path: {}", table_path));
+
+        if !self.consume_double_colon() {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected '::' after table path '{}' for group array", table_path),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        // OPTIMIZATION: Use parser_collection_helper for pre-allocated collection
+        let estimated_items = estimate_array_items_count(self.tokens.len());
+        let mut items = Vec::with_capacity(estimated_items);
+
+        // Parse array items
+        while !self.is_at_end() && !self.should_terminate_loop() {
+            self.track_progress();
+
+            if self.is_stuck() {
+                self.log_debug("Parser stuck in group array items, attempting recovery");
+                if !self.recover_from_stuck() {
+                    break;
+                }
+                continue;
+            }
+
+            // Check for closing paren FIRST
+            if self.is_current_symbol(')') {
+                self.log_verbose("Found closing ')' - ending group array parsing");
+                break;
+            }
+
+            // Check for NEXT grouped data entry START
+            if self.is_start_of_new_grouped_data_entry() {
+                self.log_verbose("Detected next grouped data entry - ending group array");
+                break;
+            }
+
+            // Parse array item
+            let item = self.parse_array_item();
+
+            // CRITICAL: Check HALT propagation
+            if item.is_none() && self.should_halt_section() {
+                return None;
+            }
+
+            if let Some(value) = item {
+                items.push(value);
+                self.log_verbose("Parsed array item");
+            } else {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Failed to parse item in group array. Expected value or object, found: {}", current.get_token_value()),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                // Skip to next comma or end
+                while !self.is_at_end() && !self.is_current_symbol(',') && !self.is_current_symbol(')') && !self.is_start_of_new_grouped_data_entry() {
+                    self.advance();
+                }
+            }
+
+            // Comma is now OPTIONAL between array items
+            if self.is_current_symbol(',') {
+                self.advance();
+                self.log_verbose("Consumed optional comma separator within group array");
+
+                // After comma, check what comes next
+                if self.is_current_symbol(')') {
+                    let current = self.current().clone();
+                    self.handle_parse_error(
+                        ParseErrorType::SectionSyntaxError,
+                        "❌ TRAILING COMMA: Found comma before ')' in group array.\nRemove the trailing comma.",
+                        &current,
+                    );
+
+                    if self.should_halt_section() {
+                        return None;
+                    }
+                    break;
+                }
+
+                if self.is_start_of_new_grouped_data_entry() {
+                    let current = self.current().clone();
+                    self.handle_parse_error(
+                        ParseErrorType::SectionSyntaxError,
+                        "❌ TRAILING COMMA: Found comma before next data entry.\nRemove the trailing comma after the last array item.",
+                        &current,
+                    );
+
+                    if self.should_halt_section() {
+                        return None;
+                    }
+                    break;
+                }
+            } else if self.is_current_symbol(')') || self.is_start_of_new_grouped_data_entry() {
+                self.log_verbose("No comma after item - group array items complete");
+                break;
+            } else if !self.is_at_end() {
+                // Check if next token looks like another array item
+                let next_token = self.current();
+
+                // If it's a primitive value type, it's another item
+                if matches!(
+                    next_token.token_type,
+                    TokenType::Integer(_) | TokenType::Float(_) | TokenType::Double(_) |
+                    TokenType::String(_) | TokenType::StringSingle(_) | TokenType::Bool(_) |
+                    TokenType::HexColor(_) | TokenType::Date(_) | TokenType::Timestamp(_)
+                ) {
+                    self.log_verbose("Next primitive value detected without comma - continuing");
+                    continue;
+                }
+
+                // If it's object or array literal start
+                if self.is_current_symbol('{') || self.is_current_symbol('[') {
+                    self.log_verbose("Next object/array literal detected without comma - continuing");
+                    continue;
+                }
+
+                // If it's a prefixed constructor
+                if matches!(
+                    next_token.token_type,
+                    TokenType::BlobConstructor(_) | TokenType::TupleConstructor(_) | TokenType::RegexConstructor(_)
+                ) {
+                    self.log_verbose("Next prefixed constructor detected without comma - continuing");
+                    continue;
+                }
+
+                // If it's an identifier (could be function call, enum, or variable reference)
+                if matches!(next_token.token_type, TokenType::Identifier(_)) {
+                    self.log_verbose("Next identifier detected without comma - continuing");
+                    continue;
+                }
+
+                // Unexpected token
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Expected array item, ',', or ')' in group array, found: {}", current.get_token_value()),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                // Recovery: skip to next comma or end
+                while !self.is_at_end() && !self.is_current_symbol(',') && !self.is_current_symbol(')') && !self.is_start_of_new_grouped_data_entry() {
+                    self.advance();
+                }
+            }
+        }
+
+        let group_array = DataEntry::GroupArray {
+            path: table_path,
+            items,
+            position: start_pos,
+        };
+
+        self.log_verbose(&format!("Created group array AST node with {} items", group_array.items.len()));
+        Some(group_array)
+    }
+
+    //==================== OBJECT PROPERTY PARSING ====================
+
+    fn parse_data_entry_object_property(&mut self) -> Option<DataEntry> {
+        self.log_verbose("Parsing object property");
+
+        let start_pos = Position::from_token(self.current());
+
+        let property_name = self.parse_property_name()?;
+        self.log_verbose(&format!("Parsed object property name: {}", property_name));
+
+        let data_type = self.parse_optional_type_annotation();
+        if data_type.is_some() {
+            self.log_verbose(&format!("Parsed object type annotation: {:?}", data_type));
+        }
+
+        if !self.match_and_consume_symbol('=') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected '=' after object property name '{}'", property_name),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        let object_literal = match self.parse_object_literal() {
+            Some(obj) => obj,
+            None => {
+                // CRITICAL: Check HALT propagation
+                if self.should_halt_section() {
+                    self.log_debug("HALT detected during object literal parsing");
+                    return None;
+                }
+
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Expected object literal after '=' in object property '{}'", property_name),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                Value::Object {
+                    properties: Vec::new(),
+                    position: start_pos,
+                }
+            }
+        };
+
+        let object_property = DataEntry::ObjectProperty {
+            name: property_name.clone(),
+            data_type,
+            object: Box::new(object_literal),
+            position: start_pos,
+        };
+
+        self.log_verbose(&format!("Created object property AST node: {}", property_name));
+        Some(object_property)
+    }
+
+    //==================== PROPERTY VALUE PARSING ====================
+
+    fn parse_property_value(&mut self) -> Option<Value> {
+        self.log_verbose("Parsing property value");
+
+        let current_token = self.current();
+        let value_pos = Position::from_token(current_token);
+
+        // OPTIMIZATION: Fast-path for 80% of simple literal cases
+        let result = match &current_token.token_type {
+            // Fast-path: Primitive numeric types (most common)
+            TokenType::Integer(i) => {
+                let val = *i;
+                self.advance();
+                Some(Value::Integer { value: val, position: value_pos })
+            }
+            TokenType::Float(f) => {
+                let val = *f;
+                self.advance();
+                Some(Value::Float { value: val, position: value_pos })
+            }
+            TokenType::Double(d) => {
+                let val = *d;
+                self.advance();
+                Some(Value::Double { value: val, position: value_pos })
+            }
+            TokenType::ScientificNotation(sn) => {
+                let val = *sn;
+                self.advance();
+                Some(Value::ScientificNotation { value: val, position: value_pos })
+            }
+
+            // Fast-path: String types
+            TokenType::String(s) => {
+                let val = s.clone();
+                self.advance();
+                Some(Value::String { value: val, position: value_pos })
+            }
+            TokenType::StringSingle(ss) => {
+                let val = ss.clone();
+                self.advance();
+                Some(Value::String { value: val, position: value_pos })
+            }
+
+            // Fast-path: Boolean
+            TokenType::Bool(b) => {
+                let val = *b;
+                self.advance();
+                Some(Value::Boolean { value: val, position: value_pos })
+            }
+
+            // Fast-path: Special data types
+            TokenType::HexColor(hc) => {
+                let val = hc.clone();
+                self.advance();
+                Some(Value::HexColor { value: val, position: value_pos })
+            }
+            TokenType::Date(d) => {
+                let val = d.clone();
+                self.advance();
+                Some(Value::Date { value: val, position: value_pos })
+            }
+            TokenType::Timestamp(ts) => {
+                let val = ts.clone();
+                self.advance();
+                Some(Value::Timestamp { value: val, position: value_pos })
+            }
+
+            // Complex cases - fallthrough to original logic
+            _ => self.parse_complex_property_value(current_token, value_pos),
+        };
+
+        result
+    }
+
+    fn parse_complex_property_value(&mut self, current_token: &Token, pos: Position) -> Option<Value> {
+        // Keyword boolean (true/false/null)
+        if let TokenType::Keyword(keyword) = &current_token.token_type {
+            if keyword == "null" {
+                self.advance();
+                return Some(Value::Null { position: pos });
+            }
+
+            if keyword == "true" || keyword == "false" {
+                let val = keyword == "true";
+                self.advance();
+                return Some(Value::Boolean { value: val, position: pos });
+            }
+        }
+
+        // Prefixed constructors (blob, tuple, regex)
+        if let TokenType::BlobConstructor(_) = current_token.token_type {
+            self.advance();
+            return self.parse_blob_constructor(pos);
+        }
+
+        if let TokenType::TupleConstructor(_) = current_token.token_type {
+            self.advance();
+            return self.parse_tuple_constructor(pos);
+        }
+
+        if let TokenType::RegexConstructor(_) = current_token.token_type {
+            self.advance();
+            return self.parse_regex_constructor(pos);
+        }
+
+        // Complex structures
+        if self.is_current_symbol('[') {
+            let array_literal = self.parse_array_literal();
+            if array_literal.is_none() && self.should_halt_section() {
+                return None;
+            }
+            return array_literal;
+        }
+
+        if self.is_current_symbol('{') {
+            let obj_literal = self.parse_object_literal();
+            if obj_literal.is_none() && self.should_halt_section() {
+                return None;
+            }
+            return obj_literal;
+        }
+
+        // Identifiers (variables, enums, functions)
+        if let TokenType::Identifier(id) = &current_token.token_type {
+            let identifier_name = id.clone();
+            // DO NOT advance here - ParseIdentifierValue will handle it
+            return self.parse_identifier_value(&identifier_name, pos);
+        }
+
+        self.log_debug(&format!("Unknown property value type: {:?}", current_token.token_type));
+        None
+    }
+
+    //==================== IDENTIFIER VALUE PARSING (WITH IMPORTS SUPPORT) ====================
+
+    /// Parse identifier value - UPDATED for imports support
+    /// Handles: local identifiers, local/imported function calls, local/imported enum access
+    /// CRITICAL: Called with position AT the identifier token, not past it
+    fn parse_identifier_value(&mut self, identifier: &str, pos: Position) -> Option<Value> {
+        self.log_verbose(&format!("=== ParseIdentifierValue: '{}' ===", identifier));
+        self.log_verbose(&format!("Current position: {}, Current token: {}", self.position, self.current().get_token_value()));
+
+        // CRITICAL: Analyze pattern FIRST, while still at identifier token
+        let pattern = IdentifierPatternAnalyzer::analyze_data_pattern(
+            identifier,
+            pos,
+            self.tokens,
+            self.position,
+            Some(&self.error_manager),
+        );
+
+        self.log_verbose(&format!("Pattern detected: {:?}", pattern.pattern_type));
+
+        // Now consume the identifier
+        self.advance();
+        self.log_verbose(&format!("After consuming identifier - Position: {}, Token: {}", self.position, self.current().get_token_value()));
+
+        match pattern.pattern_type {
+            IdentifierPatternType::LocalFunctionCall => {
+                self.log_verbose(&format!("Detected local function call: {}()", identifier));
+                // Current position is at '(' after advancing
+                self.parse_quick_func_call(identifier, pos, false)
+            }
+
+            IdentifierPatternType::LocalEnumAccess => {
+                self.log_verbose(&format!("Detected local enum access: {}.{}", identifier, pattern.second_part.as_ref().unwrap()));
+                self.advance(); // Consume dot
+                self.advance(); // Consume enum value
+                Some(Value::EnumValue {
+                    enum_name: identifier.to_string(),
+                    value: pattern.second_part.unwrap(),
+                    position: pos,
+                })
+            }
+
+            IdentifierPatternType::ImportedFunctionCall => {
+                self.log_verbose(&format!("Detected imported function call: {}.{}()", identifier, pattern.second_part.as_ref().unwrap()));
+                self.advance(); // Consume dot
+                let func_name = pattern.second_part.unwrap();
+                self.advance(); // Consume function name
+                // Now at '('
+                self.parse_imported_function_call(identifier, &func_name, pos)
+            }
+
+            IdentifierPatternType::ImportedEnumAccess => {
+                self.log_verbose(&format!("Detected imported enum access: {}.{}.{}", identifier, pattern.second_part.as_ref().unwrap(), pattern.third_part.as_ref().unwrap()));
+                self.advance(); // Consume first dot
+                self.advance(); // Consume enum name
+                self.advance(); // Consume second dot
+                let enum_value = pattern.third_part.unwrap();
+                self.advance(); // Consume enum value
+                Some(Value::EnumValue {
+                    enum_name: format!("{}.{}", identifier, pattern.second_part.unwrap()),
+                    value: enum_value,
+                    position: pos,
+                })
+            }
+
+            IdentifierPatternType::TableOrGroupSyntax => {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::SectionSyntaxError,
+                    &format!("Table/group array syntax '{}:' or '{}::' is not allowed as a value", identifier, identifier),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                Some(Value::Error {
+                    message: "Invalid table syntax in value context".to_string(),
+                    position: pos,
+                })
+            }
+
+            IdentifierPatternType::SimpleIdentifier | _ => {
+                self.log_verbose(&format!("Simple identifier reference: {}", identifier));
+                Some(Value::Identifier {
+                    value: identifier.to_string(),
+                    position: pos,
+                })
+            }
+        }
+    }
+
+    //==================== FUNCTION CALL PARSING (VALUE CONTEXT) ====================
+
+    fn parse_quick_func_call(&mut self, function_name: &str, pos: Position, _is_accumulative: bool) -> Option<Value> {
+        // OPTIMIZATION: Track function call depth
+        self.current_function_call_depth += 1;
+
+        if self.current_function_call_depth > MAX_FUNCTION_CALL_DEPTH {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::SectionSyntaxError,
+                &format!("Maximum function call nesting depth exceeded ({}). Function: {}", MAX_FUNCTION_CALL_DEPTH, function_name),
+                &current,
+            );
+
+            self.current_function_call_depth -= 1;
+            return None;
+        }
+
+        self.log_verbose(&format!(">>> Parsing QuickFunc call (Value context): {}", function_name));
+        self.log_verbose(&format!("Function call depth: {}/{}", self.current_function_call_depth, MAX_FUNCTION_CALL_DEPTH));
+
+        if !self.match_and_consume_symbol('(') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected '(' after function name '{}'", function_name),
+                &current,
+            );
+
+            self.current_function_call_depth -= 1;
+            if self.should_halt_section() {
+                return None;
+            }
+            return None;
+        }
+
+        self.log_verbose(&format!("Consumed opening '(' for {}", function_name));
+
+        // OPTIMIZATION: Use parser_collection_helper
+        let estimated_args = estimate_array_items_count(self.tokens.len());
+        let mut arguments = Vec::with_capacity(estimated_args);
+
+        // Parse function arguments
+        while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
+            self.track_progress();
+
+            if self.is_stuck() {
+                self.log_debug(&format!("Parser stuck in function arguments for '{}'", function_name));
+                if !self.recover_from_stuck() {
+                    break;
+                }
+                continue;
+            }
+
+            self.log_verbose(&format!("--- Parsing argument for {} (Value context) ---", function_name));
+
+            let argument = self.parse_argument_expression();
+
+            // CRITICAL: Check HALT propagation
+            if argument.is_none() && self.should_halt_section() {
+                self.log_debug(&format!("HALT detected while parsing QuickFunc call '{}'", function_name));
+                self.current_function_call_depth -= 1;
+                return None;
+            }
+
+            if let Some(arg) = argument {
+                arguments.push(arg);
+                self.log_verbose("Successfully parsed argument");
+            } else {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Failed to parse argument in QuickFunc call '{}'", function_name),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    self.current_function_call_depth -= 1;
+                    return None;
+                }
+
+                // Skip to next comma or closing paren for recovery
+                while !self.is_at_end() && !self.is_current_symbol(',') && !self.is_current_symbol(')') {
+                    self.advance();
+                }
+            }
+
+            // Handle comma separator
+            if self.is_current_symbol(',') {
+                self.advance();
+                self.log_verbose(&format!("Consumed comma separator in {}", function_name));
+            } else if self.is_current_symbol(')') {
+                self.log_verbose(&format!("Found closing paren - end of arguments for {}", function_name));
+                break;
+            } else if !self.is_at_end() {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Expected ',' or ')' in function arguments for '{}', found {}", function_name, current.get_token_value()),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    self.current_function_call_depth -= 1;
+                    return None;
+                }
+
+                self.ensure_progress();
+            }
+        }
+
+        // Expect closing parenthesis
+        if !self.match_and_consume_symbol(')') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected ')' to close function call '{}'", function_name),
+                &current,
+            );
+
+            self.current_function_call_depth -= 1;
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        self.current_function_call_depth -= 1;
+
+        self.log_verbose(&format!("<<< Successfully parsed QuickFunc call: {} with {} arguments", function_name, arguments.len()));
+
+        Some(Value::QuickFuncCall {
+            function_name: function_name.to_string(),
+            arguments,
+            position: pos,
+        })
+    }
+
+    /// Parse imported function call: namespace.function(args)
+    /// Current position: at '(' after function name
+    fn parse_imported_function_call(&mut self, namespace_name: &str, function_name: &str, pos: Position) -> Option<Value> {
+        let qualified_name = format!("{}.{}", namespace_name, function_name);
+        self.log_verbose(&format!(">>> Parsing imported function call: {}()", qualified_name));
+
+        // Track function call depth
+        self.current_function_call_depth += 1;
+
+        if self.current_function_call_depth > MAX_FUNCTION_CALL_DEPTH {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::SectionSyntaxError,
+                &format!("Maximum function call nesting depth exceeded ({}). Function: {}", MAX_FUNCTION_CALL_DEPTH, qualified_name),
+                &current,
+            );
+
+            self.current_function_call_depth -= 1;
+            return None;
+        }
+
+        // Expect opening parenthesis
+        if !self.match_and_consume_symbol('(') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected '(' after imported function name '{}'", qualified_name),
+                &current,
+            );
+
+            self.current_function_call_depth -= 1;
+            if self.should_halt_section() {
+                return None;
+            }
+            return None;
+        }
+
+        self.log_verbose(&format!("Consumed opening '(' for {}", qualified_name));
+
+        // Parse function arguments
+        let estimated_args = estimate_array_items_count(self.tokens.len());
+        let mut arguments = Vec::with_capacity(estimated_args);
+
+        while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
+            self.track_progress();
+
+            if self.is_stuck() {
+                self.log_debug(&format!("Parser stuck in imported function arguments for '{}'", qualified_name));
+                if !self.recover_from_stuck() {
+                    break;
+                }
+                continue;
+            }
+
+            let argument = self.parse_argument_expression();
+
+            // Check HALT propagation
+            if argument.is_none() && self.should_halt_section() {
+                self.log_debug(&format!("HALT detected while parsing imported function '{}'", qualified_name));
+                self.current_function_call_depth -= 1;
+                return None;
+            }
+
+            if let Some(arg) = argument {
+                arguments.push(arg);
+            } else {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Failed to parse argument in imported function call '{}'", qualified_name),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    self.current_function_call_depth -= 1;
+                    return None;
+                }
+
+                // Skip to next comma or closing paren
+                while !self.is_at_end() && !self.is_current_symbol(',') && !self.is_current_symbol(')') {
+                    self.advance();
+                }
+            }
+
+            // Handle comma separator
+            if self.is_current_symbol(',') {
+                self.advance();
+            } else if self.is_current_symbol(')') {
+                break;
+            } else if !self.is_at_end() {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Expected ',' or ')' in function arguments for '{}'", qualified_name),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    self.current_function_call_depth -= 1;
+                    return None;
+                }
+
+                self.ensure_progress();
+            }
+        }
+
+        // Expect closing parenthesis
+        if !self.match_and_consume_symbol(')') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected ')' to close imported function call '{}'", qualified_name),
+                &current,
+            );
+
+            self.current_function_call_depth -= 1;
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        self.current_function_call_depth -= 1;
+
+        self.log_verbose(&format!("<<< Successfully parsed imported function call: {} with {} arguments", qualified_name, arguments.len()));
+
+        // Return as QuickFuncCall with qualified name
+        Some(Value::QuickFuncCall {
+            function_name: qualified_name,
+            arguments,
+            position: pos,
+        })
+    }
+
+    //==================== ARGUMENT EXPRESSION PARSING (FULL NESTING SUPPORT) ====================
+
+    /// Parse ANY expression that can appear as a function argument
+    /// Supports: literals, identifiers, enum access, nested function calls, AND complex values
+    fn parse_argument_expression(&mut self) -> Option<Expression> {
+        self.log_verbose(&format!("=== ParseArgumentExpression at position {} ===", self.position));
+
+        let current_token = self.current();
+        let expr_pos = Position::from_token(current_token);
+
+        //==================== PRIMITIVE LITERALS ====================
+
+        if let TokenType::Integer(i) = current_token.token_type {
+            let val = i;
+            self.advance();
+            return Some(Expression::Value {
+                value: Value::Integer { value: val, position: expr_pos },
+                position: expr_pos,
+            });
+        }
+
+        if let TokenType::Float(f) = current_token.token_type {
+            let val = f;
+            self.advance();
+            return Some(Expression::Value {
+                value: Value::Float { value: val, position: expr_pos },
+                position: expr_pos,
+            });
+        }
+
+        if let TokenType::Double(d) = current_token.token_type {
+            let val = d;
+            self.advance();
+            return Some(Expression::Value {
+                value: Value::Double { value: val, position: expr_pos },
+                position: expr_pos,
+            });
+        }
+
+        if let TokenType::String(s) = &current_token.token_type {
+            let val = s.clone();
+            self.advance();
+            return Some(Expression::Value {
+                value: Value::String { value: val, position: expr_pos },
+                position: expr_pos,
+            });
+        }
+
+        if let TokenType::Bool(b) = current_token.token_type {
+            let val = b;
+            self.advance();
+            return Some(Expression::Value {
+                value: Value::Boolean { value: val, position: expr_pos },
+                position: expr_pos,
+            });
+        }
+
+        // Keyword boolean (true/false/null)
+        if let TokenType::Keyword(kw) = &current_token.token_type {
+            if kw == "true" || kw == "false" {
+                let val = kw == "true";
+                self.advance();
+                return Some(Expression::Value {
+                    value: Value::Boolean { value: val, position: expr_pos },
+                    position: expr_pos,
+                });
+            }
+
+            if kw == "null" {
+                self.advance();
+                return Some(Expression::Value {
+                    value: Value::Null { position: expr_pos },
+                    position: expr_pos,
+                });
+            }
+        }
+
+        //==================== DATE AND TIMESTAMP LITERALS ====================
+
+        if let TokenType::Date(d) = &current_token.token_type {
+            let val = d.clone();
+            self.advance();
+            return Some(Expression::Value {
+                value: Value::Date { value: val, position: expr_pos },
+                position: expr_pos,
+            });
+        }
+
+        if let TokenType::Timestamp(ts) = &current_token.token_type {
+            let val = ts.clone();
+            self.advance();
+            return Some(Expression::Value {
+                value: Value::Timestamp { value: val, position: expr_pos },
+                position: expr_pos,
+            });
+        }
+
+        //==================== HEX COLOR ====================
+
+        if let TokenType::HexColor(hc) = &current_token.token_type {
+            let val = hc.clone();
+            self.advance();
+            return Some(Expression::Value {
+                value: Value::HexColor { value: val, position: expr_pos },
+                position: expr_pos,
+            });
+        }
+
+        //==================== SCIENTIFIC NOTATION ====================
+
+        if let TokenType::ScientificNotation(sn) = current_token.token_type {
+            let val = sn;
+            self.advance();
+            return Some(Expression::Value {
+                value: Value::ScientificNotation { value: val, position: expr_pos },
+                position: expr_pos,
+            });
+        }
+
+        //==================== PREFIXED CONSTRUCTORS ====================
+
+        if matches!(current_token.token_type, TokenType::BlobConstructor(_)) {
+            self.advance();
+            let blob_value = self.parse_blob_constructor(expr_pos);
+            if blob_value.is_none() && self.should_halt_section() {
+                return None;
+            }
+            let val = blob_value.unwrap_or(Value::Null { position: expr_pos });
+            return Some(Expression::Value { value: val, position: expr_pos });
+        }
+
+        if matches!(current_token.token_type, TokenType::TupleConstructor(_)) {
+            self.advance();
+            let tuple_value = self.parse_tuple_constructor(expr_pos);
+            if tuple_value.is_none() && self.should_halt_section() {
+                return None;
+            }
+            let val = tuple_value.unwrap_or(Value::Null { position: expr_pos });
+            return Some(Expression::Value { value: val, position: expr_pos });
+        }
+
+        if matches!(current_token.token_type, TokenType::RegexConstructor(_)) {
+            self.advance();
+            let regex_value = self.parse_regex_constructor(expr_pos);
+            if regex_value.is_none() && self.should_halt_section() {
+                return None;
+            }
+            let val = regex_value.unwrap_or(Value::Null { position: expr_pos });
+            return Some(Expression::Value { value: val, position: expr_pos });
+        }
+
+        //==================== ARRAY LITERAL ====================
+
+        if self.is_current_symbol('[') {
+            let array_literal = self.parse_array_literal();
+            if array_literal.is_none() && self.should_halt_section() {
+                return None;
+            }
+
+            if let Some(arr) = array_literal {
+                return Some(Expression::Value { value: arr, position: expr_pos });
+            } else {
+                return Some(Expression::Value {
+                    value: Value::Array { values: Vec::new(), position: expr_pos },
+                    position: expr_pos,
+                });
+            }
+        }
+
+        //==================== OBJECT LITERAL ====================
+
+        if self.is_current_symbol('{') {
+            let obj_literal = self.parse_object_literal();
+            if obj_literal.is_none() && self.should_halt_section() {
+                return None;
+            }
+
+            if let Some(obj) = obj_literal {
+                return Some(Expression::Value { value: obj, position: expr_pos });
+            } else {
+                return Some(Expression::Value {
+                    value: Value::Object { properties: Vec::new(), position: expr_pos },
+                    position: expr_pos,
+                });
+            }
+        }
+
+        //==================== PARENTHESIZED EXPRESSION ====================
+
+        if let TokenType::Symbol('(') = current_token.token_type {
+            self.advance(); // Consume '('
+
+            let inner_expr = self.parse_argument_expression(); // RECURSIVE!
+
+            if inner_expr.is_none() && self.should_halt_section() {
+                return None;
+            }
+
+            if !self.match_and_consume_symbol(')') {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::MissingToken,
+                    "Expected ')' to close parenthesized expression",
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+            }
+
+            return inner_expr;
+        }
+
+        //==================== IDENTIFIER (MOST COMPLEX - UPDATED FOR IMPORTS) ====================
+
+        if let TokenType::Identifier(id) = &current_token.token_type {
+            let identifier_name = id.clone();
+
+            // Analyze the pattern
+            let pattern = IdentifierPatternAnalyzer::analyze_data_pattern(
+                &identifier_name,
+                expr_pos,
+                self.tokens,
+                self.position,
+                Some(&self.error_manager),
+            );
+
+            // Consume the identifier
+            self.advance();
+
+            match pattern.pattern_type {
+                IdentifierPatternType::LocalFunctionCall => {
+                    return self.parse_function_call_expression(&identifier_name, expr_pos);
+                }
+
+                IdentifierPatternType::LocalEnumAccess => {
+                    self.advance(); // Consume dot
+                    self.advance(); // Consume enum value
+                    return Some(Expression::EnumAccess {
+                        namespace_name: None,
+                        enum_name: identifier_name,
+                        value: pattern.second_part.unwrap(),
+                        position: expr_pos,
+                    });
+                }
+
+                IdentifierPatternType::ImportedFunctionCall => {
+                    self.advance(); // Consume dot
+                    let func_name = pattern.second_part.unwrap();
+                    self.advance(); // Consume function name
+                    return self.parse_imported_function_call_expression(&identifier_name, &func_name, expr_pos);
+                }
+
+                IdentifierPatternType::ImportedEnumAccess => {
+                    self.advance(); // Consume first dot
+                    let enum_name = pattern.second_part.unwrap();
+                    self.advance(); // Consume enum name
+                    self.advance(); // Consume second dot
+                    let enum_value = pattern.third_part.unwrap();
+                    self.advance(); // Consume enum value
+                    return Some(Expression::EnumAccess {
+                        namespace_name: Some(identifier_name),
+                        enum_name,
+                        value: enum_value,
+                        position: expr_pos,
+                    });
+                }
+
+                IdentifierPatternType::SimpleIdentifier | _ => {
+                    return Some(Expression::Identifier {
+                        name: identifier_name,
+                        position: expr_pos,
+                    });
+                }
+            }
+        }
+
+        //==================== ARITHMETIC OPERATORS - NOT ALLOWED ====================
+
+        if let TokenType::ArithmeticOp(op) = &current_token.token_type {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::SectionSyntaxError,
+                &format!("Arithmetic operations ('{}') are NOT allowed in DATA section", op),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+
+            self.advance();
+            return Some(Expression::Value {
+                value: Value::Error {
+                    message: format!("Illegal arithmetic operator: {}", op),
+                    position: expr_pos,
+                },
+                position: expr_pos,
+            });
+        }
+
+        self.log_debug(&format!("Unknown argument expression type: {:?}", current_token.token_type));
+        None
+    }
+
+    //==================== FUNCTION CALL EXPRESSION PARSING ====================
+
+    fn parse_function_call_expression(&mut self, function_name: &str, pos: Position) -> Option<Expression> {
+        self.log_verbose(&format!("ParseFunctionCallExpression: {}", function_name));
+
+        // Expect opening parenthesis
+        if !self.is_current_symbol('(') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected '(' after function name '{}'", function_name),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+
+            return Some(Expression::Identifier {
+                name: function_name.to_string(),
+                position: pos,
+            });
+        }
+
+        self.advance(); // Consume opening paren
+
+        let estimated_args = estimate_array_items_count(self.tokens.len());
+        let mut arguments = Vec::with_capacity(estimated_args);
+
+        // Parse function arguments
+        while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
+            self.track_progress();
+
+            if self.is_stuck() {
+                if !self.recover_from_stuck() {
+                    break;
+                }
+                continue;
+            }
+
+            let argument = self.parse_argument_expression();
+
+            if argument.is_none() && self.should_halt_section() {
+                return None;
+            }
+
+            if let Some(arg) = argument {
+                arguments.push(arg);
+            } else {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Failed to parse argument in function call '{}'", function_name),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                // Recovery: skip to comma or closing paren
+                while !self.is_at_end() && !self.is_current_symbol(',') && !self.is_current_symbol(')') {
+                    self.advance();
+                }
+            }
+
+            // Handle comma separator
+            if self.is_current_symbol(',') {
+                self.advance();
+            } else if self.is_current_symbol(')') {
+                break;
+            } else if !self.is_at_end() {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Expected ',' or ')' in function arguments for '{}'", function_name),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                self.ensure_progress();
+            }
+        }
+
+        // Expect closing parenthesis
+        if !self.is_current_symbol(')') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected ')' to close function call '{}'", function_name),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+        } else {
+            self.advance(); // Consume closing paren
+        }
+
+        Some(Expression::QuickFuncCall {
+            name: function_name.to_string(),
+            arguments,
+            position: pos,
+        })
+    }
+
+    fn parse_imported_function_call_expression(&mut self, namespace_name: &str, function_name: &str, pos: Position) -> Option<Expression> {
+        let qualified_name = format!("{}.{}", namespace_name, function_name);
+        self.log_verbose(&format!("ParseImportedFunctionCallExpression: {}", qualified_name));
+
+        // Expect opening parenthesis
+        if !self.is_current_symbol('(') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected '(' after imported function name '{}'", qualified_name),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+
+            return Some(Expression::Identifier {
+                name: qualified_name,
+                position: pos,
+            });
+        }
+
+        self.advance(); // Consume opening paren
+
+        let estimated_args = estimate_array_items_count(self.tokens.len());
+        let mut arguments = Vec::with_capacity(estimated_args);
+
+        // Parse function arguments
+        while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
+            self.track_progress();
+
+            if self.is_stuck() {
+                if !self.recover_from_stuck() {
+                    break;
+                }
+                continue;
+            }
+
+            let argument = self.parse_argument_expression();
+
+            if argument.is_none() && self.should_halt_section() {
+                return None;
+            }
+
+            if let Some(arg) = argument {
+                arguments.push(arg);
+            } else {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Failed to parse argument in imported function '{}'", qualified_name),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                while !self.is_at_end() && !self.is_current_symbol(',') && !self.is_current_symbol(')') {
+                    self.advance();
+                }
+            }
+
+            // Handle comma separator
+            if self.is_current_symbol(',') {
+                self.advance();
+            } else if self.is_current_symbol(')') {
+                break;
+            } else if !self.is_at_end() {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Expected ',' or ')' in arguments for '{}'", qualified_name),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                self.ensure_progress();
+            }
+        }
+
+        // Expect closing parenthesis
+        if !self.is_current_symbol(')') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected ')' to close imported function '{}'", qualified_name),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+        } else {
+            self.advance();
+        }
+
+        Some(Expression::ImportedFunctionCall {
+            namespace_name: namespace_name.to_string(),
+            function_name: function_name.to_string(),
+            arguments,
+            position: pos,
+        })
+    }
+
+    //==================== ARRAY ITEM PARSING ====================
+
+    /// Parse array item - handles literals, objects, local functions, AND imported functions
+    fn parse_array_item(&mut self) -> Option<Value> {
+        self.log_verbose(&format!("=== ParseArrayItem at position {} ===", self.position));
+
+        let item_pos = Position::from_token(self.current());
+
+        // Check for function calls (both local and imported)
+        if let TokenType::Identifier(func_id) = &self.current().token_type {
+            let function_name = func_id.clone();
+
+            // Analyze the pattern
+            let pattern = IdentifierPatternAnalyzer::analyze_data_pattern(
+                &function_name,
+                item_pos,
+                self.tokens,
+                self.position,
+                Some(&self.error_manager),
+            );
+
+            if pattern.pattern_type == IdentifierPatternType::LocalFunctionCall {
+                self.log_verbose(&format!(">>> Local function call in array: {}()", function_name));
+                // Advance past identifier to '('
+                self.advance();
+                let func_call = self.parse_quick_func_call(&function_name, item_pos, false);
+                if func_call.is_none() && self.should_halt_section() {
+                    return None;
+                }
+                return func_call;
+            }
+
+            if pattern.pattern_type == IdentifierPatternType::ImportedFunctionCall {
+                self.log_verbose(&format!(">>> Imported function call in array: {}.{}()", function_name, pattern.second_part.as_ref().unwrap()));
+
+                // Consume tokens: identifier, dot, function name
+                self.advance(); // namespace
+                self.advance(); // dot
+                let func_name = pattern.second_part.unwrap();
+                self.advance(); // function name
+
+                // Parse the imported function call
+                let imported_call = self.parse_imported_function_call(&function_name, &func_name, item_pos);
+                if imported_call.is_none() && self.should_halt_section() {
+                    return None;
+                }
+                return imported_call;
+            }
+        }
+
+        // Try object literal first
+        if self.is_current_symbol('{') {
+            let obj_literal = self.parse_object_literal();
+            if obj_literal.is_none() && self.should_halt_section() {
+                return None;
+            }
+            return obj_literal;
+        }
+
+        // Otherwise parse as general property value
+        let value = self.parse_property_value();
+        if value.is_some() {
+            return value;
+        }
+
+        None
+    }
+
+    //==================== OBJECT LITERAL PARSING (WITH NESTING DEPTH TRACKING) ====================
+
+    /// Parse object literal with '=' syntax for DATA section
+    /// OPTIMIZATION: Tracks nesting depth to prevent stack overflow (max 64 levels)
+    fn parse_object_literal(&mut self) -> Option<Value> {
+        // OPTIMIZATION: Track object nesting depth
+        self.current_object_nesting_depth += 1;
+
+        let obj_pos = Position::from_token(self.current());
+
+        if self.current_object_nesting_depth > MAX_OBJECT_NESTING_DEPTH {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::SectionSyntaxError,
+                &format!("Maximum object nesting depth exceeded ({}). Consider flattening your data structure.", MAX_OBJECT_NESTING_DEPTH),
+                &current,
+            );
+
+            self.current_object_nesting_depth -= 1;
+            return None;
+        }
+
+        self.log_verbose(&format!("Parsing object literal - Depth: {}/{}", self.current_object_nesting_depth, MAX_OBJECT_NESTING_DEPTH));
+
+        if !self.match_and_consume_symbol('{') {
+            self.current_object_nesting_depth -= 1;
+            return None;
+        }
+
+        // OPTIMIZATION: Use parser_collection_helper
+        let estimated_props = estimate_properties_count(self.tokens.len());
+        let mut object_properties = Vec::with_capacity(estimated_props);
+
+        while !self.is_at_end() && !self.is_current_symbol('}') && !self.should_terminate_loop() {
+            self.track_progress();
+
+            if self.is_stuck() {
+                if !self.recover_from_stuck() {
+                    break;
+                }
+                continue;
+            }
+
+            let object_property = self.parse_object_property();
+
+            // CRITICAL: Check HALT propagation immediately
+            if object_property.is_none() && self.should_halt_section() {
+                self.current_object_nesting_depth -= 1;
+                return None;
+            }
+
+            if let Some(prop) = object_property {
+                object_properties.push(prop);
+            }
+
+            if self.is_current_symbol(',') {
+                self.advance();
+            } else if self.is_current_symbol('}') {
+                break;
+            } else if !self.is_at_end() {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    "Expected ',' or '}' in object literal",
+                    &current,
+                );
+
+                // CRITICAL: Propagate HALT immediately
+                if self.should_halt_section() {
+                    self.current_object_nesting_depth -= 1;
+                    return None;
+                }
+
+                self.ensure_progress();
+            }
+        }
+
+        if !self.match_and_consume_symbol('}') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected '}' to close object literal",
+                &current,
+            );
+
+            // CRITICAL: Propagate HALT immediately
+            if self.should_halt_section() {
+                self.current_object_nesting_depth -= 1;
+                return None;
+            }
+        }
+
+        self.current_object_nesting_depth -= 1;
+
+        let result = Value::Object {
+            properties: object_properties,
+            position: obj_pos,
+        };
+        self.log_verbose("Successfully parsed object literal");
+        Some(result)
+    }
+
+    /// Parse object property with '=' syntax (not ':')
+    fn parse_object_property(&mut self) -> Option<ObjectProperty> {
+        self.log_verbose("Parsing object property (expecting '=' syntax)");
+
+        let prop_pos = Position::from_token(self.current());
+
+        let property_key = self.parse_property_name()?;
+
+        // CRITICAL: Check for nested group array syntax (::)
+        if matches!(self.current().token_type, TokenType::DoubleColon) {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::SectionSyntaxError,
+                &format!(
+                    "❌ NESTED GROUP ARRAY: Property '{}' uses group array syntax '::' inside an object.\n\
+                    Group arrays (::) can only be used at the top level of DATA section, not inside objects.\n\
+                    \n\
+                    ❌ WRONG:\n\
+                       {{ {}:: item1, item2 }}  // Can't use :: inside objects\n\
+                    \n\
+                    ✅ CORRECT:\n\
+                       {{ {} = [item1, item2] }}  // Use arrays inside objects\n\
+                    \n\
+                    OR move to top level:\n\
+                       path.{}:: item1, item2  // Top-level group array",
+                    property_key, property_key, property_key, property_key
+                ),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+
+            // Recovery: skip to next comma or closing brace
+            while !self.is_at_end() && !self.is_current_symbol(',') && !self.is_current_symbol('}') {
+                self.advance();
+            }
+
+            return None;
+        }
+
+        // Check for single colon (wrong syntax)
+        if self.is_current_symbol(':') {
+            if let Some(next) = self.peek_ahead(1) {
+                if !matches!(next.token_type, TokenType::Symbol(':')) {
+                    let current = self.current().clone();
+                    self.handle_parse_error(
+                        ParseErrorType::SectionSyntaxError,
+                        &format!(
+                            "❌ WRONG SYNTAX: Property '{}' uses ':' but DATA section requires '='.\n\
+                            \n\
+                            In DATA section, object properties ALWAYS use '=' for assignment.\n\
+                            \n\
+                            ❌ WRONG:\n\
+                               {{ {}: value }}  // ':' is for other languages (JSON, TOML)\n\
+                            \n\
+                            ✅ CORRECT:\n\
+                               {{ {} = value }}  // DixScript uses '='",
+                            property_key, property_key, property_key
+                        ),
+                        &current,
+                    );
+
+                    if self.should_halt_section() {
+                        return None;
+                    }
+
+                    return None;
+                }
+            }
+        }
+
+        // CORRECT SYNTAX: Expect '='
+        if !self.match_and_consume_symbol('=') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected '=' after property key '{}' in object literal (DATA section uses '=' not ':')", property_key),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+
+            return None;
+        }
+
+        // Parse property value
+        let property_value = match self.parse_property_value() {
+            Some(v) => v,
+            None => {
+                // CRITICAL: Check HALT propagation
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Expected property value after '=' for key '{}'", property_key),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                Value::Null { position: prop_pos }
+            }
+        };
+
+        let result = ObjectProperty::new(property_key.clone(), property_value, prop_pos);
+        self.log_verbose(&format!("Successfully parsed object property: {}", property_key));
+        Some(result)
+    }
+
+    //==================== ARRAY LITERAL PARSING ====================
+
+    fn parse_array_literal(&mut self) -> Option<Value> {
+        self.log_verbose("Parsing array literal");
+
+        let array_pos = Position::from_token(self.current());
+
+        if !self.match_and_consume_symbol('[') {
+            return None;
+        }
+
+        // OPTIMIZATION: Use parser_collection_helper
+        let estimated_items = estimate_array_items_count(self.tokens.len());
+        let mut array_values = Vec::with_capacity(estimated_items);
+
+        while !self.is_at_end() && !self.is_current_symbol(']') && !self.should_terminate_loop() {
+            self.track_progress();
+
+            if self.is_stuck() {
+                if !self.recover_from_stuck() {
+                    break;
+                }
+                continue;
+            }
+
+            let array_value = self.parse_property_value();
+
+            // CRITICAL: Check HALT propagation
+            if array_value.is_none() && self.should_halt_section() {
+                return None;
+            }
+
+            if let Some(val) = array_value {
+                array_values.push(val);
+            } else {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    "Failed to parse array value",
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                // Skip to next comma or closing bracket
+                while !self.is_at_end() && !self.is_current_symbol(',') && !self.is_current_symbol(']') {
+                    self.advance();
+                }
+            }
+
+            if self.is_current_symbol(',') {
+                self.advance();
+            } else if self.is_current_symbol(']') {
+                break;
+            } else if !self.is_at_end() {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    "Expected ',' or ']' in array literal",
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                self.ensure_progress();
+            }
+        }
+
+        if !self.match_and_consume_symbol(']') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected ']' to close array literal",
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        self.log_verbose("Successfully parsed array literal");
+        Some(Value::Array {
+            values: array_values,
+            position: array_pos,
+        })
+    }
+
+    //==================== PREFIXED CONSTRUCTOR PARSING ====================
+
+    fn parse_blob_constructor(&mut self, pos: Position) -> Option<Value> {
+        self.log_verbose("Parsing blob constructor");
+
+        if !self.match_and_consume_symbol('(') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected '(' after 'b:'",
+                &current,
+            );
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        let value = if let TokenType::String(s) = &self.current().token_type {
+            let val = s.clone();
+            let str_pos = Position::from_token(self.current());
+            self.advance();
+            Value::String { value: val, position: str_pos }
+        } else {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::UnexpectedToken,
+                "Expected string value in blob constructor",
+                &current,
+            );
+            if self.should_halt_section() {
+                return None;
+            }
+            Value::String { value: String::new(), position: pos }
+        };
+
+        if !self.match_and_consume_symbol(')') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected ')' to close blob constructor",
+                &current,
+            );
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        Some(Value::PrefixedConstructor {
+            prefix: "b".to_string(),
+            arguments: vec![value],
+            position: pos,
+        })
+    }
+
+    fn parse_tuple_constructor(&mut self, pos: Position) -> Option<Value> {
+        self.log_verbose("Parsing tuple constructor");
+
+        if !self.match_and_consume_symbol('(') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected '(' after 't:'",
+                &current,
+            );
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        let mut values = Vec::new();
+
+        while !self.is_at_end() && !self.is_current_symbol(')') && values.len() < 4 {
+            self.track_progress();
+
+            if self.is_stuck() {
+                if !self.recover_from_stuck() {
+                    break;
+                }
+                continue;
+            }
+
+            let value = self.parse_property_value();
+
+            if value.is_none() && self.should_halt_section() {
+                return None;
+            }
+
+            if let Some(val) = value {
+                values.push(val);
+            }
+
+            if self.is_current_symbol(',') {
+                self.advance();
+            } else if self.is_current_symbol(')') {
+                break;
+            } else if !self.is_at_end() {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    "Expected ',' or ')' in tuple constructor",
+                    &current,
+                );
+                if self.should_halt_section() {
+                    return None;
+                }
+                self.ensure_progress();
+            }
+        }
+
+        if values.len() > 4 {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::SectionSyntaxError,
+                "Tuple can have maximum 4 elements",
+                &current,
+            );
+        }
+
+        if !self.match_and_consume_symbol(')') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected ')' to close tuple constructor",
+                &current,
+            );
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        Some(Value::PrefixedConstructor {
+            prefix: "t".to_string(),
+            arguments: values,
+            position: pos,
+        })
+    }
+
+    fn parse_regex_constructor(&mut self, pos: Position) -> Option<Value> {
+        self.log_verbose("Parsing regex constructor");
+
+        if !self.match_and_consume_symbol('(') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected '(' after 'r:'",
+                &current,
+            );
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        let pattern = if let TokenType::String(s) = &self.current().token_type {
+            let val = s.clone();
+            let str_pos = Position::from_token(self.current());
+            self.advance();
+            Value::String { value: val, position: str_pos }
+        } else {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::UnexpectedToken,
+                "Expected string value in regex constructor",
+                &current,
+            );
+            if self.should_halt_section() {
+                return None;
+            }
+            Value::String { value: String::new(), position: pos }
+        };
+
+        if !self.match_and_consume_symbol(')') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected ')' to close regex constructor",
+                &current,
+            );
+            if self.should_halt_section() {
+                return None;
+            }
+        }
+
+        Some(Value::PrefixedConstructor {
+            prefix: "r".to_string(),
+            arguments: vec![pattern],
+            position: pos,
+        })
+    }
+
+    //==================== HELPER PARSING METHODS ====================
+
+    fn parse_property_name(&mut self) -> Option<String> {
+        match &self.current().token_type {
+            TokenType::Identifier(id) => {
+                let name = id.clone();
+                self.advance();
+                Some(name)
+            }
+            TokenType::Keyword(keyword) => {
+                let name = keyword.clone();
+                self.advance();
+                Some(name)
+            }
+            _ => {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    "Expected property name identifier",
+                    &current,
+                );
+                None
+            }
+        }
+    }
+
+    fn parse_optional_type_annotation(&mut self) -> Option<DataType> {
+        if !self.is_current_symbol('<') {
+            return None;
+        }
+
+        self.advance();
+
+        let data_type = self.parse_data_type();
+        if data_type.is_none() {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::UnexpectedToken,
+                "Expected data type in type annotation",
+                &current,
+            );
+        }
+
+        if !self.match_and_consume_symbol('>') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected '>' to close type annotation",
+                &current,
+            );
+        }
+
+        data_type
+    }
+
+    fn parse_data_type(&mut self) -> Option<DataType> {
+        if let TokenType::Keyword(keyword) = &self.current().token_type {
+            let data_type = match keyword.as_str() {
+                "int" => Some(DataType::Int),
+                "float" => Some(DataType::Float),
+                "double" => Some(DataType::Double),
+                "string" => Some(DataType::String),
+                "bool" => Some(DataType::Bool),
+                "array" => Some(DataType::Array),
+                "tuple" => Some(DataType::Tuple),
+                "hex" => Some(DataType::Hex),
+                "blob" => Some(DataType::Blob),
+                "regex" => Some(DataType::Regex),
+                "object" => Some(DataType::Object),
+                "timestamp" => Some(DataType::Timestamp),
+                "date" => Some(DataType::Date),
+                "enum" => Some(DataType::Enum),
+                _ => None,
+            };
+
+            if data_type.is_some() {
+                self.advance();
+            }
+
+            data_type
+        } else {
+            None
+        }
+    }
+
+    fn parse_table_path(&mut self) -> Option<TablePath> {
+        let mut segments = Vec::new();
+
+        let first_segment = self.parse_property_name()?;
+        segments.push(first_segment);
+
+        while self.is_current_symbol('.') {
+            self.advance();
+
+            let segment = match self.parse_property_name() {
+                Some(s) => s,
+                None => {
+                    let current = self.current().clone();
+                    self.handle_parse_error(
+                        ParseErrorType::UnexpectedToken,
+                        "Expected identifier after '.' in table path",
+                        &current,
+                    );
+                    break;
+                }
+            };
+
+            segments.push(segment);
+        }
+
+        Some(TablePath::new(segments))
+    }
+
+    fn parse_property_assignment(&mut self) -> Option<PropertyAssignment> {
+        self.log_verbose("=== ParsePropertyAssignment START ===");
+
+        let assign_pos = Position::from_token(self.current());
+
+        let assignment_name = self.parse_property_name()?;
+        self.log_verbose(&format!("Parsed assignment name: {}", assignment_name));
+
+        let data_type = self.parse_optional_type_annotation();
+        if data_type.is_some() {
+            self.log_verbose(&format!("Parsed type annotation: {:?}", data_type));
+        }
+
+        // Only support = operator
+        if !self.match_and_consume_symbol('=') {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                &format!("Expected '=' after assignment name '{}'", assignment_name),
+                &current,
+            );
+
+            if self.should_halt_section() {
+                return None;
+            }
+
+            return None;
+        }
+
+        self.log_verbose("Found regular assignment operator (=)");
+
+        let value = match self.parse_property_value() {
+            Some(v) => v,
+            None => {
+                // CRITICAL: Check HALT propagation
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Expected value after '=' in assignment '{}'", assignment_name),
+                    &current,
+                );
+
+                if self.should_halt_section() {
+                    return None;
+                }
+
+                Value::Null { position: assign_pos }
+            }
+        };
+
+        self.log_verbose(&format!("=== ParsePropertyAssignment END: {} = {} ===", assignment_name, value));
+        Some(PropertyAssignment::new(assignment_name, data_type, value, assign_pos))
+    }
+
+    fn handle_data_entry_comma_separation(&mut self) -> bool {
+        self.log_verbose("Handling data entry separation");
+
+        // Comma is now OPTIONAL between all data entries
+        if self.is_current_symbol(',') {
+            self.advance();
+            self.log_verbose("Consumed optional comma separator between data entries");
+            return true;
+        }
+
+        // Check for closing parenthesis (end of DATA section)
+        if self.is_current_symbol(')') {
+            self.log_verbose("Found closing parenthesis, ending DATA entries");
+            return true;
+        }
+
+        // Check if next token starts a new data entry
+        if self.is_next_data_entry() {
+            self.log_verbose("No comma found - moving to next data entry (comma optional)");
+            return true;
+        }
+
+        // If we're at end of tokens
+        if self.is_at_end() {
+            return true;
+        }
+
+        // Unexpected token - error
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::UnexpectedToken,
+            &format!("Unexpected token in DATA section: {:?}", current.token_type),
+            &current,
+        );
+
+        if self.should_halt_section() {
+            return false;
+        }
+
+        self.ensure_progress();
+        true
+    }
+
+    fn is_next_data_entry(&self) -> bool {
+        let current_token = self.current();
+
+        if matches!(current_token.token_type, TokenType::Identifier(_)) {
+            return true;
+        }
+
+        if let TokenType::Keyword(k) = &current_token.token_type {
+            if !k.starts_with('@') {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn is_start_of_new_data_entry(&self) -> bool {
+        if !matches!(self.current().token_type, TokenType::Identifier(_)) {
+            return false;
+        }
+
+        if let Some(next) = self.peek_ahead(1) {
+            if let TokenType::Symbol(sym) = next.token_type {
+                // identifier. -> could be table path
+                // identifier: -> table property without path
+                // identifier:: -> group array (but unlikely at this depth)
+                return sym == '.' || sym == ':';
+            }
+        }
+
+        false
+    }
+
+    fn is_start_of_new_grouped_data_entry(&self) -> bool {
+        if !matches!(self.current().token_type, TokenType::Identifier(_)) {
+            return false;
+        }
+
+        // Look ahead for dot-separated path followed by : or ::
+        let mut look_ahead = 1;
+
+        while let Some(token) = self.peek_ahead(look_ahead) {
+            // Found opening paren - function call, not grouped data
+            if let TokenType::Symbol('(') = token.token_type {
+                return false;
+            }
+
+            // Found colon - table property or group array
+            if let TokenType::Symbol(':') = token.token_type {
+                return true;
+            }
+
+            if matches!(token.token_type, TokenType::DoubleColon) {
+                return true;
+            }
+
+            // Found dot - continue scanning path
+            if let TokenType::Symbol('.') = token.token_type {
+                look_ahead += 1;
+                if let Some(next_token) = self.peek_ahead(look_ahead) {
+                    if matches!(next_token.token_type, TokenType::Identifier(_)) {
+                        look_ahead += 1;
+                        continue;
+                    }
+                }
+                return false;
+            }
+
+            // Hit something else - not grouped data
+            return false;
+        }
+
+        false
+    }
+
+    fn consume_double_colon(&mut self) -> bool {
+        if matches!(self.current().token_type, TokenType::DoubleColon) {
+            self.advance();
+            return true;
+        }
+
+        if self.is_current_symbol(':') {
+            if let Some(next) = self.peek_ahead(1) {
+                if let TokenType::Symbol(':') = next.token_type {
+                    self.advance();
+                    self.advance();
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn peek_ahead(&self, offset: usize) -> Option<&Token> {
+        let target_position = self.position.checked_add(offset)?;
+        self.tokens.get(target_position)
+    }
+
+    //==================== CORE TOKEN NAVIGATION ====================
+
+    #[inline]
+    fn current(&self) -> &Token {
+        self.tokens.get(self.position).unwrap_or_else(|| {
+            static EOF_TOKEN: Token = Token {
+                token_type: TokenType::EndOfFile,
+                line: 1,
+                column: 1,
+                section: None,
+            };
+            &EOF_TOKEN
+        })
+    }
+
+    #[inline]
+    fn is_at_end(&self) -> bool {
+        self.position >= self.tokens.len() || matches!(self.current().token_type, TokenType::EndOfFile)
+    }
+
+    #[inline]
+    fn advance(&mut self) {
+        if self.position < self.tokens.len() {
+            self.position += 1;
+        }
+    }
+
+    #[inline]
+    fn is_current_symbol(&self, symbol: char) -> bool {
+        matches!(&self.current().token_type, TokenType::Symbol(s) if *s == symbol)
+    }
+
+    #[inline]
+    fn match_and_consume_symbol(&mut self, symbol: char) -> bool {
+        if self.is_current_symbol(symbol) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    //==================== ERROR HANDLING ====================
+
+    fn handle_parse_error(&mut self, error_type: ParseErrorType, message: &str, token: &Token) {
+        let source_line = self.get_source_line(token);
+
+        self.error_manager.add_parse_error(
+            error_type,
+            message.to_string(),
+            token.line,
+            token.column,
+            None,
+            source_line,
+        );
+
+        self.log_debug(&format!(
+            "Error strategy: {:?} - {}",
+            self.operational_settings.error_handling_strategy,
+            message
+        ));
+    }
+
+    fn should_halt_section(&self) -> bool {
+        self.error_manager.should_terminate_parsing()
+    }
+
+    fn handle_section_failure(&self, start_pos: Position) -> Option<DataSection> {
+        if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt {
+            self.error_manager.log_error("DATA section parsing halted due to errors");
+            None
+        } else {
+            self.error_manager.log_warning("DATA section parsing completed with errors - returning empty section");
+            Some(DataSection::new(Vec::new(), start_pos))
+        }
+    }
+
+    fn get_source_line(&self, token: &Token) -> Option<String> {
+        let line_tokens: Vec<&Token> = self.tokens
+            .iter()
+            .filter(|t| t.line == token.line)
+            .collect();
+
+        if line_tokens.is_empty() {
+            return None;
+        }
+
+        let mut source_line = String::new();
+        let mut current_column = 0;
+
+        for t in line_tokens {
+            while current_column < t.column {
+                source_line.push(' ');
+                current_column += 1;
+            }
+
+            let token_value = t.get_token_value();
+            source_line.push_str(&token_value);
+            current_column += token_value.len();
+        }
+
+        Some(source_line)
+    }
+
+    //==================== LOGGING METHODS ====================
+
+    fn log_debug(&self, message: &str) {
+        if self.operational_settings.debug_mode != DebugMode::Off {
+            self.error_manager.log_debug(message);
+        }
+    }
+
+    fn log_verbose(&self, message: &str) {
+        if self.operational_settings.debug_mode == DebugMode::Verbose {
+            self.error_manager.log_info(message);
+        }
+    }
+}
+
+
+//==================== DATA ENTRY TYPE ENUM ====================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DataEntryType {
+    Unknown,
+    SimpleProperty,
+    TableProperty,
+    GroupArray,
+    ObjectProperty,
+}

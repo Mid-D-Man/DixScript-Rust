@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Mon Jan 26 02:45:27 UTC 2026
+Generated: Mon Jan 26 05:36:52 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 806488437b8cc62bd8fad13d3ccb9bc32935b1ee
+Commit: 248de73f871d13443ff6d3c46c88f05b901fde85
 Branch: master
 ==================================
 
@@ -62,6 +62,7 @@ src/Compiler/Core/SectionAnalyzers/mod.rs
 src/Compiler/Core/SectionEnhancers/mod.rs
 src/Compiler/Core/SectionParsers/dlm_section_parser.rs
 src/Compiler/Core/SectionParsers/enums_section_parser.rs
+src/Compiler/Core/SectionParsers/imports_section_parser.rs
 src/Compiler/Core/SectionParsers/mod.rs
 src/Compiler/Core/SectionParsers/security_section_parser.rs
 src/Compiler/Core/Tokenizer/lexer.rs
@@ -76,6 +77,7 @@ src/Compiler/DLM/KeyManagement/mod.rs
 src/Compiler/DLM/mod.rs
 src/Compiler/Extensions/mod.rs
 src/Compiler/Extensions/type_system_manager.rs
+src/Compiler/Utilities/identifier_pattern_analyzer.rs
 src/Compiler/Utilities/mod.rs
 src/Compiler/VersionControl/compatibility_result.rs
 src/Compiler/VersionControl/forward_compatibility_manager.rs
@@ -128,6 +130,7 @@ tests/builtins_tests.rs
 tests/config_tests.rs
 tests/dlm_parser_tests.rs
 tests/enums_parser_tests.rs
+tests/imports_parser_tests.rs
 tests/integration/mod.rs
 tests/security_parser_tests.rs
 tests/tokenizer_tests.rs
@@ -147,6 +150,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 113
-Tests: 9
+Source: 115
+Tests: 10
 Benches: 3

@@ -303,7 +303,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
             let token = self.current().clone();
 
             let scope_path = if let TokenType::Keyword(kw) = &token.token_type {
-                if kw == "global" {
+                if kw.as_str() == "global" {
                     self.advance();
                     Some("global".to_string())
                 } else if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") {
@@ -389,10 +389,10 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 TokenType::Keyword(kw)
                 if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
                     {
-                        let name = kw.clone();
+                        let name = kw.clone();  // FIX: Clone before advancing
                         self.advance();
                         self.log_verbose(&format!("Accepted keyword '{}' as parameter name",
-                                                  kw));
+                                                  name));
                         Some(name)
                     }
                 _ => {
@@ -546,7 +546,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
         // Return statement
         if let TokenType::Keyword(kw) = &token.token_type {
-            if kw == "return" {
+            if kw.as_str() == "return" {
                 self.advance();
                 self.skip_whitespace();
 
@@ -571,22 +571,22 @@ impl<'a> QuickFuncsSectionParser<'a> {
             }
 
             // If statement
-            if kw == "if" {
+            if kw.as_str() == "if" {
                 return self.parse_if_statement();
             }
 
             // Switch statement
-            if kw == "chk" {
+            if kw.as_str() == "chk" {
                 return self.parse_switch_statement();
             }
 
             // Log statement
-            if kw == "log" {
+            if kw.as_str() == "log" {
                 return self.parse_log_statement(statement_position);
             }
 
             // Let declaration
-            if kw == "let" {
+            if kw.as_str() == "let" {
                 return Some(self.parse_variable_declaration(
                     DeclarationType::Let,
                     statement_position
@@ -594,7 +594,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
             }
 
             // Const declaration
-            if kw == "const" {
+            if kw.as_str() == "const" {
                 return Some(self.parse_variable_declaration(
                     DeclarationType::Const,
                     statement_position
@@ -766,7 +766,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
         // Check for 'mut' modifier
         let is_mutable = if decl_type == DeclarationType::Let {
             if let TokenType::Keyword(kw) = &self.current().token_type {
-                if kw == "mut" {
+                if kw.as_str() == "mut" {
                     self.advance();
                     self.skip_whitespace();
                     self.log_verbose("Parsed 'mut' modifier");
@@ -780,7 +780,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
         } else {
             // Check for invalid mut on const
             if let TokenType::Keyword(kw) = &self.current().token_type {
-                if kw == "mut" {
+                if kw.as_str() == "mut" {
                     self.error_manager.add_parse_error(
                         ParseErrorType::InvalidOperation,
                         "'const' declarations cannot be mutable - remove 'mut' or use 'let'".to_string(),
@@ -806,9 +806,9 @@ impl<'a> QuickFuncsSectionParser<'a> {
             TokenType::Keyword(kw)
             if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
                 {
-                    let name = kw.clone();
+                    let name = kw.clone();  // FIX: Clone before advancing
                     self.advance();
-                    self.log_verbose(&format!("Accepted keyword '{}' as variable name", kw));
+                    self.log_verbose(&format!("Accepted keyword '{}' as variable name", name));
                     Some(name)
                 }
             _ => {
@@ -903,7 +903,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
         // Check for single-line syntax
         let is_single_line = if let TokenType::Keyword(kw) = &self.current().token_type {
-            kw == "then"
+            kw.as_str() == "then"
         } else {
             false
         };
@@ -943,7 +943,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
         while !self.is_at_end() {
             if let TokenType::Keyword(kw) = &self.current().token_type {
-                if kw != "elif" {
+                if kw.as_str() != "elif" {  // FIX: Use .as_str()
                     break;
                 }
             } else {
@@ -989,7 +989,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
         let mut final_else_branch = None;
         if !self.is_at_end() {
             if let TokenType::Keyword(kw) = &self.current().token_type {
-                if kw == "else" {
+                if kw.as_str() == "else" {
                     self.advance();
                     self.skip_whitespace();
 
@@ -1013,22 +1013,16 @@ impl<'a> QuickFuncsSectionParser<'a> {
         let mut current_else_branch = final_else_branch;
 
         for elif in elif_chain.into_iter().rev() {
-            let elif_with_else = QuickFuncStatement::If {
-                condition: match elif {
-                    QuickFuncStatement::If { condition, .. } => condition,
-                    _ => unreachable!(),
-                },
-                then_branch: match elif {
-                    QuickFuncStatement::If { then_branch, .. } => then_branch,
-                    _ => unreachable!(),
-                },
-                else_branch: current_else_branch,
-                position: match elif {
-                    QuickFuncStatement::If { position, .. } => position,
-                    _ => unreachable!(),
-                },
-            };
-            current_else_branch = Some(vec![elif_with_else]);
+            // FIX: Destructure once instead of multiple pattern matches
+            if let QuickFuncStatement::If { condition, then_branch, position, .. } = elif {
+                let elif_with_else = QuickFuncStatement::If {
+                    condition,
+                    then_branch,
+                    else_branch: current_else_branch,
+                    position,
+                };
+                current_else_branch = Some(vec![elif_with_else]);
+            }
         }
 
         Some(QuickFuncStatement::If {
@@ -1102,7 +1096,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
             // Check for miss (default case)
             if let TokenType::Keyword(kw) = &self.current().token_type {
-                if kw == "miss" {
+                if kw.as_str() == "miss" {
                     self.advance();
                     self.skip_whitespace();
 
@@ -1155,7 +1149,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
         // Check for 'then' keyword
         if let TokenType::Keyword(kw) = &self.current().token_type {
-            if kw == "then" {
+            if kw.as_str() == "then" {
                 self.advance();
                 self.skip_whitespace();
 
@@ -1295,7 +1289,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 })
             }
             TokenType::BitwiseOp(op) => {
-                if op.ends_with('=') || op == "~?" {
+                if op.ends_with('=') || op.as_str() == "~?" {
                     return None;
                 }
                 OPERATOR_PRECEDENCE.get(op.as_str()).map(|&(prec, ra)| {
@@ -1395,13 +1389,13 @@ impl<'a> QuickFuncsSectionParser<'a> {
             TokenType::Symbol(sym) if VALID_UNARY_OPERATORS.contains(&sym.to_string().as_str()) => {
                 Some(sym.to_string())
             }
-            TokenType::ArithmeticOp(op) if op == "+" || op == "-" => {
+            TokenType::ArithmeticOp(op) if op.as_str() == "+" || op.as_str() == "-" => {
                 Some(op.clone())
             }
             TokenType::Keyword(kw) if VALID_UNARY_OPERATORS.contains(&kw.as_str()) => {
                 Some(kw.clone())
             }
-            TokenType::BitwiseOp(op) if op == "~?" => {
+            TokenType::BitwiseOp(op) if op.as_str() == "~?" => {
                 Some(op.clone())
             }
             _ => None,
@@ -1452,9 +1446,9 @@ impl<'a> QuickFuncsSectionParser<'a> {
                     TokenType::Keyword(kw)
                     if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
                         {
-                            let name = kw.clone();
+                            let name = kw.clone();  // FIX: Clone before advancing
                             self.advance();
-                            self.log_verbose(&format!("Accepted keyword '{}' as member name after '.'", kw));
+                            self.log_verbose(&format!("Accepted keyword '{}' as member name after '.'", name));
                             Some(name)
                         }
                     _ => {
@@ -1730,7 +1724,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 self.advance();
                 Value::Boolean { value: val, position: value_position }
             }
-            TokenType::Keyword(kw) if kw == "null" => {
+            TokenType::Keyword(kw) if kw.as_str() == "null" => {
                 self.advance();
                 Value::Null { position: value_position }
             }
@@ -2375,13 +2369,16 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
         let body = self.parse_lambda_body();
 
+        // FIX: Get length before move
+        let param_count = parameters.len();
+
         let lambda_value = Value::Lambda {
             parameters,
             body: Box::new(body),
             position: lambda_position,
         };
 
-        self.log_verbose(&format!("Parsed lambda with {} parameters", parameters.len()));
+        self.log_verbose(&format!("Parsed lambda with {} parameters", param_count));
 
         Expression::Value {
             value: lambda_value,
@@ -2494,9 +2491,10 @@ impl<'a> QuickFuncsSectionParser<'a> {
             }
 
             if let Some(stmt) = self.parse_statement() {
+                // FIX: Get type name before move
+                let type_name = std::any::type_name_of_val(&stmt);
                 statements.push(stmt);
-                self.log_verbose(&format!("Lambda block: parsed {}",
-                                          std::any::type_name_of_val(&stmt)));
+                self.log_verbose(&format!("Lambda block: parsed {}", type_name));
             }
 
             self.skip_whitespace();
@@ -2640,7 +2638,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
     fn match_arrow(&mut self) -> bool {
         if let TokenType::MultiCharSymbol(ms) = &self.current().token_type {
-            if ms == "->" {
+            if ms.as_str() == "->" {
                 self.advance();
                 return true;
             }
@@ -2666,7 +2664,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
     fn check_arrow(&self) -> bool {
         if let TokenType::MultiCharSymbol(ms) = &self.current().token_type {
-            return ms == "=>";
+            return ms.as_str() == "=>";
         }
 
         if matches!(self.current().token_type, TokenType::Arrow) {

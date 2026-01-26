@@ -770,11 +770,11 @@ impl<'a> DataSectionParser<'a> {
 
                 // If it's a primitive value type, it's another item
                 if matches!(
-                    next_token.token_type,
-                    TokenType::Integer(_) | TokenType::Float(_) | TokenType::Double(_) |
-                    TokenType::String(_) | TokenType::StringSingle(_) | TokenType::Bool(_) |
-                    TokenType::HexColor(_) | TokenType::Date(_) | TokenType::Timestamp(_)
-                ) {
+                next_token.token_type,
+                TokenType::Integer(_) | TokenType::Float(_) | TokenType::Double(_) |
+                TokenType::String(_) | TokenType::StringSingle(_) | TokenType::Bool(_) |
+                TokenType::HexColor(_) | TokenType::Date(_) | TokenType::Timestamp(_)
+            ) {
                     self.log_verbose("Next primitive value detected without comma - continuing");
                     continue;
                 }
@@ -787,9 +787,9 @@ impl<'a> DataSectionParser<'a> {
 
                 // If it's a prefixed constructor
                 if matches!(
-                    next_token.token_type,
-                    TokenType::BlobConstructor(_) | TokenType::TupleConstructor(_) | TokenType::RegexConstructor(_)
-                ) {
+                next_token.token_type,
+                TokenType::BlobConstructor(_) | TokenType::TupleConstructor(_) | TokenType::RegexConstructor(_)
+            ) {
                     self.log_verbose("Next prefixed constructor detected without comma - continuing");
                     continue;
                 }
@@ -819,13 +819,16 @@ impl<'a> DataSectionParser<'a> {
             }
         }
 
+        // FIX: Get item count before creating the entry
+        let item_count = items.len();
+
         let group_array = DataEntry::GroupArray {
             path: table_path,
             items,
             position: start_pos,
         };
 
-        self.log_verbose(&format!("Created group array AST node with {} items", group_array.items.len()));
+        self.log_verbose(&format!("Created group array AST node with {} items", item_count));
         Some(group_array)
     }
 
@@ -963,8 +966,12 @@ impl<'a> DataSectionParser<'a> {
                 Some(Value::Timestamp { value: val, position: value_pos })
             }
 
-            // Complex cases - fallthrough to original logic
-            _ => self.parse_complex_property_value(current_token, value_pos),
+            // Complex cases - need to clone token to avoid borrow issues
+            _ => {
+                // FIX: Clone the token to avoid borrow conflict
+                let token_clone = current_token.clone();
+                self.parse_complex_property_value(&token_clone, value_pos)
+            }
         };
 
         result
@@ -973,13 +980,13 @@ impl<'a> DataSectionParser<'a> {
     fn parse_complex_property_value(&mut self, current_token: &Token, pos: Position) -> Option<Value> {
         // Keyword boolean (true/false/null)
         if let TokenType::Keyword(keyword) = &current_token.token_type {
-            if keyword == "null" {
+            if keyword.as_str() == "null" {
                 self.advance();
                 return Some(Value::Null { position: pos });
             }
 
-            if keyword == "true" || keyword == "false" {
-                let val = keyword == "true";
+            if keyword.as_str() == "true" || keyword.as_str() == "false" {
+                let val = keyword.as_str() == "true";
                 self.advance();
                 return Some(Value::Boolean { value: val, position: pos });
             }
@@ -1451,8 +1458,8 @@ impl<'a> DataSectionParser<'a> {
 
         // Keyword boolean (true/false/null)
         if let TokenType::Keyword(kw) = &current_token.token_type {
-            if kw == "true" || kw == "false" {
-                let val = kw == "true";
+            if kw.as_str() == "true" || kw.as_str() == "false" {
+                let val = kw.as_str() == "true";
                 self.advance();
                 return Some(Expression::Value {
                     value: Value::Boolean { value: val, position: expr_pos },
@@ -1460,7 +1467,7 @@ impl<'a> DataSectionParser<'a> {
                 });
             }
 
-            if kw == "null" {
+            if kw.as_str() == "null" {
                 self.advance();
                 return Some(Expression::Value {
                     value: Value::Null { position: expr_pos },
@@ -1673,11 +1680,14 @@ impl<'a> DataSectionParser<'a> {
         //==================== ARITHMETIC OPERATORS - NOT ALLOWED ====================
 
         if let TokenType::ArithmeticOp(op) = &current_token.token_type {
-            let current = self.current().clone();
+            // FIX: Clone the operator string and token to avoid borrow issues
+            let op_clone = op.clone();
+            let current_clone = current_token.clone();
+
             self.handle_parse_error(
                 ParseErrorType::SectionSyntaxError,
-                &format!("Arithmetic operations ('{}') are NOT allowed in DATA section", op),
-                &current,
+                &format!("Arithmetic operations ('{}') are NOT allowed in DATA section", op_clone),
+                &current_clone,
             );
 
             if self.should_halt_section() {
@@ -1687,7 +1697,7 @@ impl<'a> DataSectionParser<'a> {
             self.advance();
             return Some(Expression::Value {
                 value: Value::Error {
-                    message: format!("Illegal arithmetic operator: {}", op),
+                    message: format!("Illegal arithmetic operator: {}", op_clone),
                     position: expr_pos,
                 },
                 position: expr_pos,
@@ -2871,7 +2881,7 @@ impl<'a> DataSectionParser<'a> {
             self.error_manager.log_error("DATA section parsing halted due to errors");
             None
         } else {
-            self.error_manager.log_warning("DATA section parsing completed with errors - returning empty section");
+            self.error_manager.log_Warning("DATA section parsing completed with errors - returning empty section");
             Some(DataSection::new(Vec::new(), start_pos))
         }
     }

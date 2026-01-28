@@ -1,5 +1,5 @@
 // src/Compiler/Utilities/identifier_pattern_analyzer.rs
-// FIXED VERSION - Replace the entire file
+//  v1.0.0 - Resolved all ownership and borrowing issues
 
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::AST::Position;
@@ -229,9 +229,9 @@ impl IdentifierPatternAnalyzer {
 
         let second_token = after_dot.unwrap();
 
-        // FIXED: Get second_id as owned String immediately
+        // Extract second identifier value
         let second_id = match &second_token.token_type {
-            TokenType::Identifier(id) => id.clone(), // Clone immediately
+            TokenType::Identifier(id) => id.as_str(),
             _ => {
                 return IdentifierPattern::new(
                     IdentifierPatternType::SimpleIdentifier,
@@ -255,7 +255,7 @@ impl IdentifierPatternAnalyzer {
                         return IdentifierPattern::with_second(
                             IdentifierPatternType::StaticMethodCall,
                             first_identifier.to_string(),
-                            second_id,
+                            second_id.to_string(),
                             position,
                         );
                     }
@@ -275,7 +275,7 @@ impl IdentifierPatternAnalyzer {
                         return IdentifierPattern::with_second(
                             IdentifierPatternType::ImportedFunctionCall,
                             first_identifier.to_string(),
-                            second_id,
+                            second_id.to_string(),
                             position,
                         );
                     }
@@ -289,9 +289,8 @@ impl IdentifierPatternAnalyzer {
                 if *sym == '.' {
                     let third_part = Self::peek_ahead(tokens, current_position, 4);
                     if let Some(third_token) = third_part {
-                        // FIXED: Get third_id as owned String immediately
                         if let TokenType::Identifier(id) = &third_token.token_type {
-                            let third_id = id.clone(); // Clone immediately
+                            let third_id = id.as_str();
                             let after_third = Self::peek_ahead(tokens, current_position, 5);
 
                             // Make sure it's NOT followed by '('
@@ -310,8 +309,8 @@ impl IdentifierPatternAnalyzer {
                                 return IdentifierPattern::with_third(
                                     IdentifierPatternType::ImportedEnumAccess,
                                     first_identifier.to_string(),
-                                    second_id,
-                                    third_id,
+                                    second_id.to_string(),
+                                    third_id.to_string(),
                                     position,
                                 );
                             }
@@ -334,7 +333,7 @@ impl IdentifierPatternAnalyzer {
             return IdentifierPattern::with_second(
                 IdentifierPatternType::LocalEnumAccess,
                 first_identifier.to_string(),
-                second_id,
+                second_id.to_string(),
                 position,
             );
         }
@@ -365,9 +364,9 @@ impl IdentifierPatternAnalyzer {
 
         let second_token = after_dot.unwrap();
 
-        // FIXED: Get second_id as owned String immediately
+        // Extract second identifier value
         let second_id = match &second_token.token_type {
-            TokenType::Identifier(id) => id.clone(), // Clone immediately
+            TokenType::Identifier(id) => id.as_str(),
             _ => {
                 return IdentifierPattern::new(
                     IdentifierPatternType::SimpleIdentifier,
@@ -390,7 +389,7 @@ impl IdentifierPatternAnalyzer {
                     return IdentifierPattern::with_second(
                         IdentifierPatternType::ImportedFunctionCall,
                         first_identifier.to_string(),
-                        second_id,
+                        second_id.to_string(),
                         position,
                     );
                 }
@@ -403,19 +402,20 @@ impl IdentifierPatternAnalyzer {
                 if *sym == '.' {
                     let third_part = Self::peek_ahead(tokens, current_position, 4);
                     if let Some(third_token) = third_part {
-                        // FIXED: Get third_id as owned String immediately
                         if let TokenType::Identifier(id) = &third_token.token_type {
-                            let third_id = id.clone(); // Clone immediately
+                            let third_id = id.as_str();
                             let after_third = Self::peek_ahead(tokens, current_position, 5);
 
                             // Not followed by ( or : or ::
-                            let is_enum = after_third.map_or(true, |t| {
-                                match &t.token_type {
+                            // Handles: comma, newline, identifier, or end of tokens
+                            let is_enum = match after_third {
+                                None => true,
+                                Some(t) => match &t.token_type {
                                     TokenType::Symbol(s) => *s != '(' && *s != ':',
                                     TokenType::DoubleColon => false,
-                                    _ => true,
+                                    _ => true, // comma, newline, identifier, etc.
                                 }
-                            });
+                            };
 
                             if is_enum {
                                 Self::log_debug(
@@ -428,8 +428,8 @@ impl IdentifierPatternAnalyzer {
                                 return IdentifierPattern::with_third(
                                     IdentifierPatternType::ImportedEnumAccess,
                                     first_identifier.to_string(),
-                                    second_id,
-                                    third_id,
+                                    second_id.to_string(),
+                                    third_id.to_string(),
                                     position,
                                 );
                             }
@@ -440,15 +440,19 @@ impl IdentifierPatternAnalyzer {
         }
 
         // Check for local enum: Enum.VALUE
-        let is_not_call_or_table = after_second.map_or(true, |t| {
-            match &t.token_type {
-                TokenType::Symbol(s) => *s != '(' && *s != ':',
-                TokenType::DoubleColon => false,
-                _ => true,
+        // FIXED: Correctly detect when NOT followed by '(' or ':' or '::'
+        // Handles: enum followed by comma, newline, identifier, or end of tokens
+        // IMPORTANT: Must explicitly check for DoubleColon to avoid misclassifying table syntax
+        let is_local_enum = match after_second {
+            None => true, // Nothing after = local enum
+            Some(t) => match &t.token_type {
+                TokenType::Symbol(s) => *s != '(' && *s != ':', // Symbol but not call or table
+                TokenType::DoubleColon => false, // Explicitly not enum (table syntax)
+                _ => true, // Non-symbol (comma, newline, identifier) = local enum
             }
-        });
+        };
 
-        if is_not_call_or_table {
+        if is_local_enum {
             Self::log_debug(
                 error_manager,
                 &format!("Pattern: {}.{} - Local Enum", first_identifier, second_id),
@@ -456,12 +460,12 @@ impl IdentifierPatternAnalyzer {
             return IdentifierPattern::with_second(
                 IdentifierPatternType::LocalEnumAccess,
                 first_identifier.to_string(),
-                second_id,
+                second_id.to_string(),
                 position,
             );
         }
 
-        // Check for table syntax: identifier: or identifier::
+        // Check for table syntax: identifier.property: or identifier.property::
         if let Some(token) = after_second {
             if let TokenType::Symbol(sym) = &token.token_type {
                 if *sym == ':' {
@@ -472,7 +476,7 @@ impl IdentifierPatternAnalyzer {
                     return IdentifierPattern::with_second(
                         IdentifierPatternType::TableOrGroupSyntax,
                         first_identifier.to_string(),
-                        second_id,
+                        second_id.to_string(),
                         position,
                     );
                 }
@@ -486,12 +490,13 @@ impl IdentifierPatternAnalyzer {
                 return IdentifierPattern::with_second(
                     IdentifierPatternType::TableOrGroupSyntax,
                     first_identifier.to_string(),
-                    second_id,
+                    second_id.to_string(),
                     position,
                 );
             }
         }
 
+        // Fallback: simple identifier
         IdentifierPattern::new(
             IdentifierPatternType::SimpleIdentifier,
             first_identifier.to_string(),

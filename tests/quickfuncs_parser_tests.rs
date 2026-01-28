@@ -158,9 +158,9 @@ fn test_function_with_scope() {
     assert_eq!(section.functions.len(), 1);
     
     let func = &section.functions[0];
-    assert!(func.scope.is_some());
-    if let Some(scopes) = &func.scope {
-        assert_eq!(scopes[0], "users.profile");
+    assert!(func.scope_list.is_some());
+    if let Some(scopes) = &func.scope_list {
+        assert_eq!(scopes[0].as_str(), "users.profile");
     }
 }
 
@@ -177,7 +177,7 @@ fn test_function_multiple_scopes() {
     let section = parse_quickfuncs_default(input).expect("Failed to parse");
     let func = &section.functions[0];
     
-    if let Some(scopes) = &func.scope {
+    if let Some(scopes) = &func.scope_list {
         assert_eq!(scopes.len(), 2);
     }
 }

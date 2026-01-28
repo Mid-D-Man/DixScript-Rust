@@ -33,6 +33,7 @@ pub mod statements;
 pub mod quickfuncs;
 pub mod root;
 pub mod helpers;
+pub mod Visitors;
 
 // Re-exports for convenience
 pub use position::Position;
@@ -54,3 +55,4 @@ pub use root::DixScript;
 
 // Optional: Re-export helpers if you want them available at module level
 pub use helpers::*;
+pub use Visitors::*;

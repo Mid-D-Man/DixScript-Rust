@@ -9,29 +9,11 @@ use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 use std::time::Instant;
 
 // ==================== PERFORMANCE BASELINES ====================
-// QuickFunctions is MOST complex parser - expressions, statements, control flow
-// Hand-written Pratt parser with operator precedence
-// LALRPOP: ~5-10x faster for pure parsing (generated code)
-// Trade-off: Better error recovery & flexible expression parsing
-
-const BASELINE_SMALL_INPUT_MS: u128 = 15;   // vs DATA: 10ms, SECURITY: 5ms
-const BASELINE_MEDIUM_INPUT_MS: u128 = 150; // vs DATA: 100ms, SECURITY: 50ms
-const BASELINE_LARGE_INPUT_MS: u128 = 1500; // vs DATA: 1000ms, SECURITY: 500ms
-const BASELINE_FUNCTIONS_PER_SEC: f64 = 200.0; // vs DATA entries: 500, SECURITY: 1000
-const BASELINE_TOKENS_PER_SEC: f64 = 3000.0;   // vs DATA: 5000, SECURITY: 10000
-
-// THROUGHPUT CLARIFICATION:
-// If you're seeing 1M tokens/sec, that's likely a calculation error!
-// Expected throughput for hand-written parsers:
-// - Debug mode: 1,000-5,000 tokens/sec
-// - Release mode: 10,000-50,000 tokens/sec
-// - LALRPOP (generated): 50,000-500,000 tokens/sec
-//
-// 1M tokens/sec would require:
-// - Zero-copy parsing
-// - SIMD operations
-// - Highly optimized compiled parser
-// - No error checking or recovery
+const BASELINE_SMALL_INPUT_MS: u128 = 15;
+const BASELINE_MEDIUM_INPUT_MS: u128 = 150;
+const BASELINE_LARGE_INPUT_MS: u128 = 1500;
+const BASELINE_FUNCTIONS_PER_SEC: f64 = 200.0;
+const BASELINE_TOKENS_PER_SEC: f64 = 3000.0;
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -42,26 +24,42 @@ fn tokenize_input(input: &str) -> Vec<Token> {
 }
 
 fn extract_quickfuncs_section_tokens(tokens: &[Token]) -> Vec<Token> {
-    let start_pos = tokens.iter()
+    // Find @QUICKFUNCS token
+    let section_start = tokens.iter()
         .position(|t| matches!(t.token_type, TokenType::SectionQuickFuncs))
         .expect("No @QUICKFUNCS section found");
 
-    let paren_start = tokens[start_pos + 1..].iter()
-        .position(|t| matches!(t.token_type, TokenType::Symbol('(')))
-        .expect("No opening ( found");
+    // Skip @QUICKFUNCS and any whitespace, find the opening (
+    let mut search_pos = section_start + 1;
+    while search_pos < tokens.len() {
+        let token_value = tokens[search_pos].get_token_value();
+        if token_value.trim().is_empty() || matches!(tokens[search_pos].token_type, TokenType::Comment(_)) {
+            search_pos += 1;
+            continue;
+        }
+        if matches!(tokens[search_pos].token_type, TokenType::Symbol('(')) {
+            break;
+        }
+        search_pos += 1;
+    }
 
-    let actual_start = start_pos + 1 + paren_start;
+    if search_pos >= tokens.len() {
+        panic!("No opening parenthesis found after @QUICKFUNCS");
+    }
 
+    let paren_start = search_pos;
+
+    // Find matching closing parenthesis
     let mut depth = 0;
-    let mut end_pos = actual_start;
+    let mut paren_end = paren_start;
 
-    for (i, token) in tokens[actual_start..].iter().enumerate() {
+    for (idx, token) in tokens[paren_start..].iter().enumerate() {
         match &token.token_type {
             TokenType::Symbol('(') => depth += 1,
             TokenType::Symbol(')') => {
                 depth -= 1;
                 if depth == 0 {
-                    end_pos = actual_start + i;
+                    paren_end = paren_start + idx;
                     break;
                 }
             }
@@ -69,8 +67,14 @@ fn extract_quickfuncs_section_tokens(tokens: &[Token]) -> Vec<Token> {
         }
     }
 
-    let mut section_tokens = tokens[actual_start..=end_pos].to_vec();
+    if depth != 0 {
+        panic!("Unmatched parentheses in @QUICKFUNCS section");
+    }
+
+    // Extract tokens from opening ( to closing ) inclusive, then add EOF
+    let mut section_tokens = tokens[paren_start..=paren_end].to_vec();
     section_tokens.push(Token::eof(1, 1));
+
     section_tokens
 }
 
@@ -82,7 +86,15 @@ fn parse_quickfuncs_with_settings(input: &str, settings: OperationalSettings) ->
     let section_tokens = extract_quickfuncs_section_tokens(&tokens);
 
     let mut parser = QuickFuncsSectionParser::new(&section_tokens, &settings);
-    parser.parse_section()
+    let result = parser.parse_section();
+
+    if error_manager.has_errors() {
+        eprintln!("\n=== PARSE ERRORS ===");
+        eprintln!("{}", error_manager.generate_error_report());
+        eprintln!("===================\n");
+    }
+
+    result
 }
 
 fn parse_quickfuncs_default(input: &str) -> Option<QuickFuncsSection> {
@@ -129,11 +141,11 @@ fn test_multiple_functions() {
             ~add<int> => global(a<int>, b<int>) {
                 return a + b;
             }
-            
+
             ~multiply<int> => global(x<int>, y<int>) {
                 return x * y;
             }
-            
+
             ~greet<string> => global(name<string>) {
                 return "Hello, " + name;
             }
@@ -156,7 +168,7 @@ fn test_function_with_scope() {
 
     let section = parse_quickfuncs_default(input).expect("Failed to parse");
     assert_eq!(section.functions.len(), 1);
-    
+
     let func = &section.functions[0];
     assert!(func.scope_list.is_some());
     if let Some(scopes) = &func.scope_list {
@@ -176,7 +188,7 @@ fn test_function_multiple_scopes() {
 
     let section = parse_quickfuncs_default(input).expect("Failed to parse");
     let func = &section.functions[0];
-    
+
     if let Some(scopes) = &func.scope_list {
         assert_eq!(scopes.len(), 2);
     }
@@ -247,7 +259,7 @@ fn test_variable_declaration_let() {
 
     let section = parse_quickfuncs_default(input).expect("Failed to parse");
     assert_eq!(section.functions[0].body.len(), 2);
-    
+
     match &section.functions[0].body[0] {
         QuickFuncStatement::VariableDeclaration { .. } => {},
         _ => panic!("Expected VariableDeclaration"),
@@ -327,7 +339,6 @@ fn test_arithmetic_assignment() {
     "#;
 
     let section = parse_quickfuncs_default(input).expect("Failed to parse");
-    // let + 4 arithmetic assignments + return = 6
     assert_eq!(section.functions[0].body.len(), 6);
 }
 
@@ -455,7 +466,7 @@ fn test_arithmetic_expressions() {
     "#;
 
     let section = parse_quickfuncs_default(input).expect("Failed to parse");
-    assert_eq!(section.functions[0].body.len(), 7); // 6 lets + 1 return
+    assert_eq!(section.functions[0].body.len(), 7);
 }
 
 #[test]
@@ -533,7 +544,7 @@ fn test_function_call_expression() {
             ~helper<int> => global() {
                 return 42;
             }
-            
+
             ~test<int> => global() {
                 let result = helper();
                 return result;
@@ -730,9 +741,9 @@ fn test_missing_function_name() {
         )
     "#;
 
-    let section = parse_quickfuncs_default(input);
+    let _section = parse_quickfuncs_default(input);
     let error_manager = ErrorManager::get_shared_instance();
-    
+
     assert!(error_manager.has_errors());
 }
 
@@ -744,9 +755,9 @@ fn test_missing_function_body() {
         )
     "#;
 
-    let section = parse_quickfuncs_default(input);
+    let _section = parse_quickfuncs_default(input);
     let error_manager = ErrorManager::get_shared_instance();
-    
+
     assert!(error_manager.has_errors());
 }
 
@@ -760,9 +771,9 @@ fn test_invalid_return_type() {
         )
     "#;
 
-    let section = parse_quickfuncs_default(input);
+    let _section = parse_quickfuncs_default(input);
     let error_manager = ErrorManager::get_shared_instance();
-    
+
     assert!(error_manager.has_errors());
 }
 
@@ -775,9 +786,9 @@ fn test_unclosed_brace() {
         )
     "#;
 
-    let section = parse_quickfuncs_default(input);
+    let _section = parse_quickfuncs_default(input);
     let error_manager = ErrorManager::get_shared_instance();
-    
+
     assert!(error_manager.has_errors());
 }
 
@@ -792,9 +803,9 @@ fn test_const_mut_error() {
         )
     "#;
 
-    let section = parse_quickfuncs_default(input);
+    let _section = parse_quickfuncs_default(input);
     let error_manager = ErrorManager::get_shared_instance();
-    
+
     assert!(error_manager.has_errors());
 }
 
@@ -805,16 +816,16 @@ fn test_halt_strategy_stops() {
             ~test1<int> => global() {
                 INVALID SYNTAX
             }
-            
+
             ~test2<int> => global() {
                 return 42;
             }
         )
     "#;
 
-    let section = parse_quickfuncs_halt_on_error(input);
+    let _section = parse_quickfuncs_halt_on_error(input);
     let error_manager = ErrorManager::get_shared_instance();
-    
+
     assert!(error_manager.has_errors());
 }
 
@@ -825,7 +836,7 @@ fn test_recover_strategy_continues() {
             ~test1<int> => global() {
                 INVALID
             }
-            
+
             ~test2<int> => global() {
                 return 42;
             }
@@ -834,9 +845,9 @@ fn test_recover_strategy_continues() {
 
     let section = parse_quickfuncs_recover(input);
     let error_manager = ErrorManager::get_shared_instance();
-    
+
     assert!(error_manager.has_errors());
-    
+
     if let Some(s) = section {
         println!("Recovered {} functions", s.functions.len());
     }
@@ -879,7 +890,6 @@ fn test_parse_speed_small_input() {
 
 #[test]
 fn test_parse_speed_medium_input() {
-    // 20 functions with moderate complexity
     let mut input = String::from("@QUICKFUNCS(\n");
     for i in 0..20 {
         input.push_str(&format!(
@@ -935,7 +945,6 @@ fn test_parse_speed_medium_input() {
 
 #[test]
 fn test_parse_speed_large_input() {
-    // 50 functions with complex logic
     let mut input = String::from("@QUICKFUNCS(\n");
     for i in 0..50 {
         input.push_str(&format!(
@@ -944,7 +953,7 @@ fn test_parse_speed_large_input() {
                 let x = val * 2;
                 let y = x + 10;
                 let z = y / 2;
-                
+
                 if: z > 50 {{
                     return z - 10;
                 }}
@@ -1022,12 +1031,6 @@ fn test_parse_throughput() {
     println!("Baseline: > {} tokens/sec", BASELINE_TOKENS_PER_SEC);
     println!("Actual: {:.0} tokens/sec", tokens_per_sec);
     println!("Status: {}", if tokens_per_sec > BASELINE_TOKENS_PER_SEC { "✅ PASS" } else { "❌ FAIL" });
-    println!("\n⚠️  THROUGHPUT CLARIFICATION:");
-    println!("If you see ~1M tokens/sec, that's likely wrong!");
-    println!("Expected for hand-written parsers:");
-    println!("  Debug:   1,000-5,000 tokens/sec");
-    println!("  Release: 10,000-50,000 tokens/sec");
-    println!("  LALRPOP: 50,000-500,000 tokens/sec");
     println!("=======================================\n");
 
     assert!(
@@ -1042,7 +1045,6 @@ fn test_parse_throughput() {
 #[test]
 #[ignore]
 fn test_release_mode_performance() {
-    // Very large input - run in release mode only
     let mut input = String::from("@QUICKFUNCS(\n");
     for i in 0..200 {
         input.push_str(&format!(
@@ -1115,7 +1117,6 @@ fn test_no_memory_leaks_repeated_parsing() {
         )
     "#;
 
-    // Parse 1000 times
     for _ in 0..1000 {
         let _ = parse_quickfuncs_default(input);
     }
@@ -1209,37 +1210,3 @@ fn test_complex_expression_parsing() {
     let section = parse_quickfuncs_default(input).expect("Failed to parse");
     assert_eq!(section.functions[0].body.len(), 2);
 }
-
-// ==================== BASELINE COMPARISON ====================
-
-#[test]
-#[ignore]
-fn baseline_comparison_info() {
-    println!("\n=== DIXSCRIPT QUICKFUNCS PARSER BASELINE ===");
-    println!("Small input (1 function): < 15ms");
-    println!("Medium input (20 functions): < 150ms");
-    println!("Large input (50 functions): < 1500ms");
-    println!("Throughput: > 3,000 tokens/sec");
-    println!("Release mode: > 500 functions/sec");
-    println!("\nParser Complexity:");
-    println!("- Pratt expression parser");
-    println!("- Operator precedence table");
-    println!("- Control flow (if/elif/else/switch)");
-    println!("- Variable declarations (let/const/mut)");
-    println!("- Lambda expressions");
-    println!("- QualifiedIdentifier resolution");
-    println!("\nComparison to LALRPOP:");
-    println!("- LALRPOP: ~5-10x faster (generated LR parser)");
-    println!("- Benefits of hand-written:");
-    println!("  * Better error messages for expressions");
-    println!("  * Flexible operator precedence");
-    println!("  * Custom recovery for statements");
-    println!("  * Runtime scope validation");
-    println!("\n⚠️  THROUGHPUT REALITY CHECK:");
-    println!("If you're seeing 1M tokens/sec, check calculation!");
-    println!("  Debug mode:   1,000-5,000 tokens/sec ✓");
-    println!("  Release mode: 10,000-50,000 tokens/sec ✓");
-    println!("  LALRPOP:      50,000-500,000 tokens/sec ✓");
-    println!("  1M+:          Impossible without SIMD/zero-copy ✗");
-    println!("============================================\n");
-  }

@@ -241,7 +241,7 @@ impl<'a> TypeInferenceVisitor<'a> {
 
     /// Infer type from function call value
     fn infer_function_call_type(&self, function_name: &str) -> Option<DataType> {
-        if let Some(func_sig) = self.symbol_table.get_function(function_name) {
+        if let Some(func_sig) = self.symbol_table.try_get_function(function_name) {
             return func_sig.return_type;
         }
         None
@@ -258,7 +258,7 @@ impl<'a> TypeInferenceVisitor<'a> {
 
     /// Infer type from QuickFunc call expression
     fn infer_quick_func_call_type(&self, name: &str) -> Option<DataType> {
-        if let Some(func_sig) = self.symbol_table.get_function(name) {
+        if let Some(func_sig) = self.symbol_table.try_get_function(name) {
             return func_sig.return_type;
         }
         None
@@ -325,6 +325,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             DixType::Date => Some(DataType::Date),
             DixType::Timestamp => Some(DataType::Timestamp),
             DixType::Enum => Some(DataType::Enum),
+            DixType::Any  => Some(DataType::Any),
             DixType::Void | DixType::Null => None,
         }
     }

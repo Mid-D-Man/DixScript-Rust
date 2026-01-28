@@ -2,7 +2,7 @@
 
 use crate::Compiler::AST::{EnumsSection, EnumDeclaration, EnumField, Position};
 use crate::Compiler::Utilities::SymbolTable;
-use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
+use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::ErrorManager::{ErrorManager, SemanticErrorType};
 use std::collections::{HashMap, HashSet};
 
@@ -88,83 +88,65 @@ impl<'a> EnumsSectionAnalyzer<'a> {
         let mut result = SectionAnalysisResult::new("ENUMS");
         let enum_count = section.enums.len();
 
-        self.error_manager.create_scope("ENUMS Section Analysis");
-
-        if self.error_manager.is_info_enabled() {
-            self.error_manager.log_info(&format!(
-                "Analyzing ENUMS section with {} enum definitions",
-                enum_count
-            ));
-        }
+        self.log_info(&format!(
+            "Analyzing ENUMS section with {} enum definitions",
+            enum_count
+        ));
 
         // Check version support
         if !self.check_version_support(&mut result) {
-            self.error_manager.exit_scope();
             return result;
         }
 
         // Phase 1: Check for duplicate enum names globally
-        if self.error_manager.is_debug_enabled() {
-            self.error_manager.log_debug("Phase 1: Checking for duplicate enum names");
-        }
+        self.log_debug("Phase 1: Checking for duplicate enum names");
 
         let duplicate_enums = self.check_duplicate_enums(&section.enums, &mut result);
 
         if self.should_halt(&result) {
-            self.error_manager.exit_scope();
             return result;
         }
 
         // Phase 2: Validate each enum declaration
-        if self.error_manager.is_debug_enabled() {
-            self.error_manager.log_debug("Phase 2: Validating individual enum declarations");
-        }
+        self.log_debug("Phase 2: Validating individual enum declarations");
 
         for enum_decl in &section.enums {
             // Skip validation of duplicate enums (already reported)
             if duplicate_enums.contains(&enum_decl.name.to_lowercase()) {
-                if self.error_manager.is_warning_enabled() {
-                    self.error_manager.log_warning(&format!(
-                        "Skipping validation of duplicate enum '{}'",
-                        enum_decl.name
-                    ));
-                }
+                self.log_warning(&format!(
+                    "Skipping validation of duplicate enum '{}'",
+                    enum_decl.name
+                ));
                 continue;
             }
 
             self.validate_enum_declaration(enum_decl, &mut result);
 
             if self.should_halt(&result) {
-                self.error_manager.exit_scope();
                 return result;
             }
         }
 
         // Phase 3: Populate symbol table with valid enums
-        if self.error_manager.is_debug_enabled() {
-            self.error_manager.log_debug("Phase 3: Populating symbol table with enum definitions");
-        }
+        self.log_debug("Phase 3: Populating symbol table with enum definitions");
 
         self.populate_symbol_table(section, symbol_table, &duplicate_enums, &mut result);
 
         // Determine overall success
         result.is_success = result.errors.is_empty();
 
-        if self.error_manager.is_info_enabled() {
-            let status = if result.is_success { "SUCCESS" } else { "FAILURE" };
-            self.error_manager.log_info(&format!("ENUMS analysis complete: {}", status));
-            self.error_manager.log_info(&format!(
-                "  Enums validated: {}",
-                enum_count - duplicate_enums.len()
-            ));
-            self.error_manager.log_info(&format!(
-                "  Errors: {}, Warnings: {}",
-                result.errors.len(),
-                result.warnings.len()
-            ));
-        }
+        let status = if result.is_success { "SUCCESS" } else { "FAILURE" };
+        self.log_info(&format!("ENUMS analysis complete: {}", status));
+        self.log_info(&format!(
+            "  Enums validated: {}",
+            enum_count - duplicate_enums.len()
+        ));
+        self.log_info(&format!(
+            "  Errors: {}, Warnings: {}",
+            result.errors.len(),
+            result.warnings.len()
+        ));
 
-        self.error_manager.exit_scope();
         result
     }
 
@@ -173,9 +155,9 @@ impl<'a> EnumsSectionAnalyzer<'a> {
     /// Check if ENUMS section is supported in current version
     fn check_version_support(&mut self, result: &mut SectionAnalysisResult) -> bool {
         use crate::Compiler::VersionControl::VersionConstraints;
-        
+
         let constraints = VersionConstraints::new();
-        
+
         if !constraints.is_valid_section_type("ENUMS") {
             self.add_error(
                 result,
@@ -230,9 +212,7 @@ impl<'a> EnumsSectionAnalyzer<'a> {
         enum_decl: &EnumDeclaration,
         result: &mut SectionAnalysisResult,
     ) {
-        if self.error_manager.is_debug_enabled() {
-            self.error_manager.log_debug(&format!("Validating enum: {}", enum_decl.name));
-        }
+        self.log_debug(&format!("Validating enum: {}", enum_decl.name));
 
         // Check enum name is valid identifier
         if !Self::is_valid_identifier(&enum_decl.name) {
@@ -259,28 +239,22 @@ impl<'a> EnumsSectionAnalyzer<'a> {
         }
 
         // Phase 2a: Check for duplicate field names
-        if self.error_manager.is_debug_enabled() {
-            self.error_manager.log_debug(&format!(
-                "  Checking for duplicate field names in enum '{}'",
-                enum_decl.name
-            ));
-        }
+        self.log_debug(&format!(
+            "  Checking for duplicate field names in enum '{}'",
+            enum_decl.name
+        ));
 
         let duplicate_field_names = self.check_duplicate_fields(&enum_decl.fields, enum_decl, result);
 
         // Phase 2b: Check for duplicate field values and validate field names
-        if self.error_manager.is_debug_enabled() {
-            self.error_manager.log_debug(&format!(
-                "  Checking for duplicate field values and validating field names in enum '{}'",
-                enum_decl.name
-            ));
-        }
+        self.log_debug(&format!(
+            "  Checking for duplicate field values and validating field names in enum '{}'",
+            enum_decl.name
+        ));
 
         self.validate_field_values(&enum_decl.fields, &duplicate_field_names, enum_decl, result);
 
-        if self.error_manager.is_debug_enabled() {
-            self.error_manager.log_debug(&format!("Enum '{}' validation complete", enum_decl.name));
-        }
+        self.log_debug(&format!("Enum '{}' validation complete", enum_decl.name));
     }
 
     /// Check for duplicate field names within an enum
@@ -336,12 +310,10 @@ impl<'a> EnumsSectionAnalyzer<'a> {
 
             // Skip validation of duplicate field names (already reported)
             if duplicate_field_names.contains(&name_lower) {
-                if self.error_manager.is_warning_enabled() {
-                    self.error_manager.log_warning(&format!(
-                        "    Skipping validation of duplicate field '{}' in enum '{}'",
-                        field.name, enum_decl.name
-                    ));
-                }
+                self.log_warning(&format!(
+                    "    Skipping validation of duplicate field '{}' in enum '{}'",
+                    field.name, enum_decl.name
+                ));
                 implicit_value += 1;
                 continue;
             }
@@ -367,13 +339,12 @@ impl<'a> EnumsSectionAnalyzer<'a> {
             // Determine actual field value
             let actual_value = field.value.unwrap_or(implicit_value);
 
-            if self.error_manager.is_debug_enabled() {
-                let value_type = if field.value.is_some() { "explicit" } else { "implicit" };
-                self.error_manager.log_debug(&format!(
-                    "    Field '{}' has {} value: {}",
-                    field.name, value_type, actual_value
-                ));
-            }
+            self.log_debug(&format!(
+                "    Field '{}' has {} value: {}",
+                field.name,
+                if field.value.is_some() { "explicit" } else { "implicit" },
+                actual_value
+            ));
 
             // Check for duplicate values
             if let Some(conflicting_field) = seen_field_values.get(&actual_value) {
@@ -418,12 +389,10 @@ impl<'a> EnumsSectionAnalyzer<'a> {
 
             // Skip duplicate enums
             if duplicate_enums.contains(&name_lower) {
-                if self.error_manager.is_debug_enabled() {
-                    self.error_manager.log_debug(&format!(
-                        "Skipping duplicate enum '{}' for symbol table",
-                        enum_decl.name
-                    ));
-                }
+                self.log_debug(&format!(
+                    "Skipping duplicate enum '{}' for symbol table",
+                    enum_decl.name
+                ));
                 skip_count += 1;
                 continue;
             }
@@ -432,12 +401,10 @@ impl<'a> EnumsSectionAnalyzer<'a> {
             let valid_fields = Self::count_valid_fields(&enum_decl.fields);
 
             if valid_fields == 0 {
-                if self.error_manager.is_warning_enabled() {
-                    self.error_manager.log_warning(&format!(
-                        "Skipping enum '{}' - no valid fields to register",
-                        enum_decl.name
-                    ));
-                }
+                self.log_warning(&format!(
+                    "Skipping enum '{}' - no valid fields to register",
+                    enum_decl.name
+                ));
                 skip_count += 1;
                 continue;
             }
@@ -456,33 +423,27 @@ impl<'a> EnumsSectionAnalyzer<'a> {
                 field_mapping.insert(field.name.clone(), actual_value);
                 implicit_value = actual_value + 1;
 
-                if self.error_manager.is_debug_enabled() {
-                    self.error_manager.log_debug(&format!(
-                        "  Mapped field '{}.{}' = {}",
-                        enum_decl.name, field.name, actual_value
-                    ));
-                }
+                self.log_debug(&format!(
+                    "  Mapped field '{}.{}' = {}",
+                    enum_decl.name, field.name, actual_value
+                ));
             }
 
             // Add to symbol table
             symbol_table.add_enum(enum_decl.name.clone(), field_mapping.clone());
             success_count += 1;
 
-            if self.error_manager.is_info_enabled() {
-                self.error_manager.log_info(&format!(
-                    "Added enum '{}' to symbol table with {} fields",
-                    enum_decl.name,
-                    field_mapping.len()
-                ));
-            }
-        }
-
-        if self.error_manager.is_info_enabled() {
-            self.error_manager.log_info(&format!(
-                "Populated symbol table with {} enums ({} skipped)",
-                success_count, skip_count
+            self.log_info(&format!(
+                "Added enum '{}' to symbol table with {} fields",
+                enum_decl.name,
+                field_mapping.len()
             ));
         }
+
+        self.log_info(&format!(
+            "Populated symbol table with {} enums ({} skipped)",
+            success_count, skip_count
+        ));
     }
 
     // ==================== HELPER METHODS ====================
@@ -521,6 +482,25 @@ impl<'a> EnumsSectionAnalyzer<'a> {
             && self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt
     }
 
+    // ==================== LOGGING HELPERS ====================
+
+    #[inline]
+    fn log_debug(&self, message: &str) {
+        if self.operational_settings.debug_mode != DebugMode::Off {
+            self.error_manager.log_debug(message);
+        }
+    }
+
+    #[inline]
+    fn log_info(&self, message: &str) {
+        self.error_manager.log_info(message);
+    }
+
+    #[inline]
+    fn log_warning(&self, message: &str) {
+        self.error_manager.log_Warning(message);
+    }
+
     // ==================== ERROR/WARNING HELPERS ====================
 
     fn add_error(
@@ -543,15 +523,17 @@ impl<'a> EnumsSectionAnalyzer<'a> {
 
         result.errors.push(error.clone());
 
-        // Also add to ErrorManager
-        let line = position.map(|p| p.line as i32).unwrap_or(0);
-        let column = position.map(|p| p.column as i32).unwrap_or(0);
+        // Convert position to line/column for ErrorManager
+        let (line, column) = position
+            .map(|p| (p.line as i32, p.column as i32))
+            .unwrap_or((0, 0));
 
+        // Add to ErrorManager
         self.error_manager.add_semantic_error(
             SemanticErrorType::DuplicateDefinition,
             message.to_string(),
-            Some(line),
-            Some(column),
+            line,
+            column,
             Some("ENUMS".to_string()),
             Some(suggestion.to_string()),
         );
@@ -572,9 +554,6 @@ impl<'a> EnumsSectionAnalyzer<'a> {
         };
 
         result.warnings.push(warning);
-
-        if self.error_manager.is_warning_enabled() {
-            self.error_manager.log_warning(message);
-        }
+        self.log_warning(message);
     }
-  }
+}

@@ -10,12 +10,12 @@
 //! - Array item properties: DATA.array[0].property
 //!
 //! ## Examples:
-//! ```
+//!
 //! DATA.simple_host
 //! DATA.server.config.host
 //! DATA.inventory.items[0]
 //! DATA.inventory.items[0].name
-//! ```
+//! 
 
 const ROOT: &str = "DATA";
 
@@ -29,13 +29,13 @@ impl PathBuilder {
     /// Automatically handles array notation (segments starting with '[')
     ///
     /// # Examples
-    /// ```
+    /// 
     /// let path = PathBuilder::build(&["server", "host"]);
     /// // Returns: "DATA.server.host"
     ///
     /// let path = PathBuilder::build(&["items", "[0]", "name"]);
     /// // Returns: "DATA.items[0].name"
-    /// ```
+    /// 
     pub fn build(segments: &[&str]) -> String {
         if segments.is_empty() {
             return ROOT.to_string();
@@ -64,10 +64,10 @@ impl PathBuilder {
     /// Build path from a base path and additional segments
     ///
     /// # Examples
-    /// ```
+    /// 
     /// let path = PathBuilder::build_from("DATA.server", &["config", "host"]);
     /// // Returns: "DATA.server.config.host"
-    /// ```
+    /// 
     pub fn build_from(base_path: &str, segments: &[&str]) -> String {
         if base_path.is_empty() {
             return Self::build(segments);
@@ -98,13 +98,13 @@ impl PathBuilder {
     /// Build path from current scope tracker state
     ///
     /// # Examples
-    /// ```
+    /// 
     /// let path = PathBuilder::build_from_scope("DATA", "server");
     /// // Returns: "DATA.server"
     ///
     /// let path = PathBuilder::build_from_scope("DATA.server", "host");
     /// // Returns: "DATA.server.host"
-    /// ```
+    /// 
     pub fn build_from_scope(current_path: &str, property: &str) -> String {
         if current_path == ROOT {
             Self::build(&[property])
@@ -118,10 +118,10 @@ impl PathBuilder {
     /// Build array item path
     ///
     /// # Examples
-    /// ```
+    /// 
     /// let path = PathBuilder::build_array_item("DATA.inventory.items", 0);
     /// // Returns: "DATA.inventory.items[0]"
-    /// ```
+    /// 
     pub fn build_array_item(array_path: &str, index: usize) -> String {
         format!("{}[{}]", array_path, index)
     }
@@ -129,10 +129,10 @@ impl PathBuilder {
     /// Build array item property path
     ///
     /// # Examples
-    /// ```
+    /// 
     /// let path = PathBuilder::build_array_item_property("DATA.inventory.items", 0, "name");
     /// // Returns: "DATA.inventory.items[0].name"
-    /// ```
+    /// 
     pub fn build_array_item_property(array_path: &str, index: usize, property: &str) -> String {
         Self::build_from(&Self::build_array_item(array_path, index), &[property])
     }
@@ -142,13 +142,13 @@ impl PathBuilder {
     /// Remove "DATA." prefix if present
     ///
     /// # Examples
-    /// ```
+    /// 
     /// let stripped = PathBuilder::strip_root("DATA.server.host");
     /// // Returns: "server.host"
     ///
     /// let stripped = PathBuilder::strip_root("DATA");
     /// // Returns: ""
-    /// ```
+    /// 
     pub fn strip_root(path: &str) -> String {
         if path.starts_with(ROOT) {
             if path.len() == ROOT.len() {
@@ -166,13 +166,13 @@ impl PathBuilder {
     /// Ensure path has "DATA." prefix
     ///
     /// # Examples
-    /// ```
+    /// 
     /// let path = PathBuilder::ensure_root("server.host");
     /// // Returns: "DATA.server.host"
     ///
     /// let path = PathBuilder::ensure_root("DATA.server.host");
     /// // Returns: "DATA.server.host" (unchanged)
-    /// ```
+    /// 
     pub fn ensure_root(path: &str) -> String {
         if path.is_empty() {
             ROOT.to_string()
@@ -186,13 +186,13 @@ impl PathBuilder {
     /// Get the last segment of a path
     ///
     /// # Examples
-    /// ```
+    /// 
     /// let segment = PathBuilder::get_last_segment("DATA.server.config.host");
     /// // Returns: "host"
     ///
     /// let segment = PathBuilder::get_last_segment("DATA.items[0]");
     /// // Returns: "[0]"
-    /// ```
+    /// 
     pub fn get_last_segment(path: &str) -> String {
         if path.is_empty() {
             return String::new();
@@ -216,7 +216,7 @@ impl PathBuilder {
     /// Get parent path by removing last segment
     ///
     /// # Examples
-    /// ```
+    /// 
     /// let parent = PathBuilder::get_parent("DATA.server.config.host");
     /// // Returns: "DATA.server.config"
     ///
@@ -225,7 +225,7 @@ impl PathBuilder {
     ///
     /// let parent = PathBuilder::get_parent("DATA");
     /// // Returns: "DATA"
-    /// ```
+    /// 
     pub fn get_parent(path: &str) -> String {
         if path.is_empty() || path == ROOT {
             return ROOT.to_string();
@@ -248,13 +248,13 @@ impl PathBuilder {
     /// Split path into segments (excluding ROOT)
     ///
     /// # Examples
-    /// ```
+    /// 
     /// let segments = PathBuilder::get_segments("DATA.server.config.host");
     /// // Returns: ["server", "config", "host"]
     ///
     /// let segments = PathBuilder::get_segments("DATA.items[0].name");
     /// // Returns: ["items", "[0]", "name"]
-    /// ```
+    /// 
     pub fn get_segments(path: &str) -> Vec<String> {
         let stripped = Self::strip_root(path);
         
@@ -312,10 +312,10 @@ impl PathBuilder {
     /// Check if path represents an array index
     ///
     /// # Examples
-    /// ```
+    /// 
     /// assert!(PathBuilder::is_array_index("DATA.items[0]"));
     /// assert!(!PathBuilder::is_array_index("DATA.items"));
-    /// ```
+    /// 
     pub fn is_array_index(path: &str) -> bool {
         path.contains('[') && path.ends_with(']')
     }
@@ -323,13 +323,13 @@ impl PathBuilder {
     /// Extract table path from property path
     ///
     /// # Examples
-    /// ```
+    /// 
     /// let table = PathBuilder::get_table_path("DATA.server.config.host");
     /// // Returns: "DATA.server.config"
     ///
     /// let table = PathBuilder::get_table_path("DATA.simple");
     /// // Returns: "DATA"
-    /// ```
+    /// 
     pub fn get_table_path(property_path: &str) -> String {
         let segments = Self::get_segments(property_path);
         

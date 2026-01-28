@@ -567,7 +567,7 @@ mod tests {
             .unwrap();
         
         if let Value::String { value, .. } = &algorithm_field.value {
-            assert_eq!(value, "aes128-gcm");
+            assert_eq!(value.to_string(), "aes128-gcm");
         } else {
             panic!("Algorithm should be a string");
         }

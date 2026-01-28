@@ -388,7 +388,7 @@ impl GeneralParser {
         }
         
         if !found_open {
-            self.error_manager.log_warning(&format!("No opening paren for {}, adding synthetic", section_name));
+            self.error_manager.log_Warning(&format!("No opening paren for {}, adding synthetic", section_name));
             let synthetic = Token::new(
                 TokenType::Symbol('('),
                 self.current().line,
@@ -405,7 +405,7 @@ impl GeneralParser {
             
             // Check if we hit next section
             if paren_depth == 1 && self.is_next_section(&token) {
-                self.error_manager.log_warning(&format!("Hit next section in {}, adding synthetic )", section_name));
+                self.error_manager.log_Warning(&format!("Hit next section in {}, adding synthetic )", section_name));
                 let synthetic = Token::new(
                     TokenType::Symbol(')'),
                     token.line,
@@ -476,7 +476,7 @@ impl GeneralParser {
                 script.dlm.as_ref(),
             ));
         } else {
-            self.error_manager.log_warning("@SECURITY missing but DEncryptor present - auto-generating");
+            self.error_manager.log_Warning("@SECURITY missing but DEncryptor present - auto-generating");
             script.security = Some(SecurityUtilities::ensure_valid_security_section(
                 None,
                 script.dlm.as_ref(),

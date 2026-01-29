@@ -45,8 +45,10 @@ regex = "1.10"
 itertools = "0.13"
 # Lazy static for something i dont know
 lazy_static = "1.4"
-#
+#Fo concureb=ncy
 rayon = "1.8"
+unicase = "2.7"
+rustc-hash = "2.0"
 [dev-dependencies]
 # Benchmarking framework
 criterion = { version = "0.5", features = ["html_reports"] }

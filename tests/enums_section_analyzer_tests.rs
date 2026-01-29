@@ -380,7 +380,7 @@ fn test_recover_strategy() {
     settings.error_handling_strategy = ErrorHandlingStrategy::Recover;
 
     let section = create_test_section(vec![
-        create_test_enum("Invalid123", vec![("FIELD", Some(1))]), // Invalid name
+        create_test_enum("123Invalid", vec![("FIELD", Some(1))]), // FIX: starts with number
         create_test_enum("Valid", vec![("FIELD", Some(1))]),
     ]);
 

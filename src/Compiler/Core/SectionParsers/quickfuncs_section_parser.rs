@@ -389,10 +389,9 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 TokenType::Keyword(kw)
                 if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
                     {
-                        let name = kw.clone();  // FIX: Clone before advancing
+                        let name = kw.clone();
                         self.advance();
-                        self.log_verbose(&format!("Accepted keyword '{}' as parameter name",
-                                                  name));
+                        self.log_verbose(&format!("Accepted keyword '{}' as parameter name", name));
                         Some(name)
                     }
                 _ => {
@@ -418,14 +417,77 @@ impl<'a> QuickFuncsSectionParser<'a> {
             let mut param_type: Option<DataType> = None;
             let mut default_value: Option<Expression> = None;
 
-            // Parse type annotation
+            // Parse type annotation INLINE (to handle default values inside <...>)
             if self.check_symbol('<') {
-                param_type = self.parse_type_annotation();
+                self.log_verbose(&format!("Parsing type annotation for parameter '{}'", param_name));
+                self.advance();  // consume '<'
                 self.skip_whitespace();
+
+                let type_token = self.current().clone();
+
+                // Parse the type keyword
+                param_type = match &type_token.token_type {
+                    TokenType::Keyword(kw) | TokenType::Identifier(kw) => {
+                        match kw.to_lowercase().as_str() {
+                            "int" => Some(DataType::Int),
+                            "float" => Some(DataType::Float),
+                            "double" => Some(DataType::Double),
+                            "string" => Some(DataType::String),
+                            "bool" => Some(DataType::Bool),
+                            "array" => Some(DataType::Array),
+                            "object" => Some(DataType::Object),
+                            "tuple" => Some(DataType::Tuple),
+                            "hex" => Some(DataType::Hex),
+                            "blob" => Some(DataType::Blob),
+                            "regex" => Some(DataType::Regex),
+                            "date" => Some(DataType::Date),
+                            "timestamp" => Some(DataType::Timestamp),
+                            "enum" => Some(DataType::Enum),
+                            "any" => Some(DataType::Any),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+
+                if param_type.is_some() {
+                    self.log_verbose(&format!("Found type: {:?}", param_type));
+                    self.advance();  // consume type keyword
+                    self.skip_whitespace();
+                } else {
+                    self.error_manager.add_parse_error(
+                        ParseErrorType::InvalidType,
+                        format!("Invalid parameter type: {}", type_token.get_token_value()),
+                        type_token.line,
+                        type_token.column,
+                        None,
+                        self.get_source_line(&type_token),
+                    );
+                    self.advance();  // skip invalid token
+                    self.skip_whitespace();
+                }
+
+                // CHECK FOR '=' BEFORE THE CLOSING '>' (default value inside type annotation)
+                if self.check_symbol('=') {
+                    self.log_verbose("Found '=' inside type annotation for default value");
+                    self.advance();
+                    self.skip_whitespace();
+                    default_value = Some(self.parse_expression(0));
+                    self.skip_whitespace();
+                }
+
+                // Expect closing '>'
+                if !self.expect_symbol('>') {
+                    self.log_verbose("Missing '>' after type annotation");
+                    break;
+                }
             }
 
-            // Parse default value
-            if self.check_symbol('=') {
+            self.skip_whitespace();
+
+            // ALSO check for '=' OUTSIDE the type annotation (default value after type)
+            if self.check_symbol('=') && default_value.is_none() {
+                self.log_verbose(&format!("Found '=' outside type annotation for parameter '{}'", param_name));
                 self.advance();
                 self.skip_whitespace();
                 default_value = Some(self.parse_expression(0));
@@ -433,10 +495,17 @@ impl<'a> QuickFuncsSectionParser<'a> {
             }
 
             parameters.push(QuickFuncParam::new(
+                param_name.clone(),
+                param_type,
+                default_value.clone(),
+                param_position,
+            ));
+
+            self.log_verbose(&format!(
+                "Added parameter: {} <{:?}> = {:?}",
                 param_name,
                 param_type,
-                default_value,
-                param_position,
+                default_value.as_ref().map(|_| "expression")
             ));
 
             if self.check_symbol(',') {
@@ -450,6 +519,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
             return parameters;
         }
 
+        self.log_verbose(&format!("Parsed {} parameters total", parameters.len()));
         parameters
     }
 
@@ -2545,12 +2615,12 @@ impl<'a> QuickFuncsSectionParser<'a> {
                     "bool" => Some(DataType::Bool),
                     "array" => Some(DataType::Array),
                     "object" => Some(DataType::Object),
-                    "date" => Some(DataType::Date),
-                    "timestamp" => Some(DataType::Timestamp),
                     "tuple" => Some(DataType::Tuple),
                     "hex" => Some(DataType::Hex),
                     "blob" => Some(DataType::Blob),
                     "regex" => Some(DataType::Regex),
+                    "date" => Some(DataType::Date),
+                    "timestamp" => Some(DataType::Timestamp),
                     "enum" => Some(DataType::Enum),
                     "any" => Some(DataType::Any),
                     _ => None,
@@ -2575,8 +2645,33 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
         self.skip_whitespace();
 
-        if !self.expect_symbol('>') {
-            return None;
+        // Don't return early on error - try to recover
+        if !self.check_symbol('>') {
+            self.error_manager.add_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected '>' to close type annotation".to_string(),
+                self.current().line,
+                self.current().column,
+                None,
+                self.get_source_line(self.current()),
+            );
+
+            // Try to find the '>' and consume it for error recovery
+            let mut depth = 1;
+            while !self.is_at_end() && depth > 0 {
+                if self.check_symbol('<') {
+                    depth += 1;
+                } else if self.check_symbol('>') {
+                    depth -= 1;
+                    if depth == 0 {
+                        self.advance(); // Consume the '>'
+                        break;
+                    }
+                }
+                self.advance();
+            }
+        } else {
+            self.advance(); // Consume the '>'
         }
 
         if data_type.is_some() {

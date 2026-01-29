@@ -1210,3 +1210,202 @@ fn test_complex_expression_parsing() {
     let section = parse_quickfuncs_default(input).expect("Failed to parse");
     assert_eq!(section.functions[0].body.len(), 2);
 }
+
+#[test]
+fn test_debug_parse_steps() {
+    use dixscript::Compiler::Core::Tokenizer::Tokenizer;
+
+    let input = r#"
+        @QUICKFUNCS(
+            ~test<int> => global() {
+                let x = 5;
+                return x;
+            }
+        )
+    "#;
+
+    println!("\n========================================");
+    println!("DEBUG: PARSING STEPS");
+    println!("========================================\n");
+
+    // Step 1: Tokenize
+    println!("STEP 1: Tokenizing input...");
+    let tokenizer = Tokenizer::new(input.to_string());
+    let result = tokenizer.tokenize();
+
+    println!("Total tokens: {}", result.tokens.len());
+    println!("\nAll tokens:");
+    for (i, token) in result.tokens.iter().enumerate() {
+        println!("  [{:3}] L{:2}:C{:2} {:?}",
+                 i,
+                 token.line,
+                 token.column,
+                 token.token_type
+        );
+    }
+
+    // Step 2: Extract QUICKFUNCS section
+    println!("\nSTEP 2: Extracting QUICKFUNCS section...");
+    let section_tokens = extract_quickfuncs_section_tokens(&result.tokens);
+
+    println!("Section tokens: {}", section_tokens.len());
+    println!("\nSection tokens breakdown:");
+    for (i, token) in section_tokens.iter().enumerate() {
+        println!("  [{:3}] L{:2}:C{:2} {:?}",
+                 i,
+                 token.line,
+                 token.column,
+                 token.token_type
+        );
+    }
+
+    // Step 3: Parse with verbose logging
+    println!("\nSTEP 3: Parsing with verbose logging...");
+
+    let mut settings = OperationalSettings::default();
+    settings.debug_mode = DebugMode::Verbose;
+
+    let error_manager = ErrorManager::get_shared_instance();
+    error_manager.clear_errors();
+
+    let mut parser = QuickFuncsSectionParser::new(&section_tokens, &settings);
+
+    println!("\nStarting parse...\n");
+    let section = parser.parse_section();
+
+    println!("\nSTEP 4: Results");
+    println!("========================================");
+
+    if let Some(s) = section {
+        println!("✅ Parse successful!");
+        println!("Functions parsed: {}", s.functions.len());
+
+        for (i, func) in s.functions.iter().enumerate() {
+            println!("\nFunction {}:", i);
+            println!("  Name: {}", func.name);
+            println!("  Return type: {:?}", func.return_type);
+            println!("  Scope: {:?}", func.scope_list);
+            println!("  Parameters: {}", func.parameters.len());
+            for (j, param) in func.parameters.iter().enumerate() {
+                println!("    [{}] {} <{:?}> = {:?}",
+                         j,
+                         param.name,
+                         param.data_type,
+                         param.default_value.as_ref().map(|_| "expression")
+                );
+            }
+            println!("  Statements: {}", func.body.len());
+            for (j, stmt) in func.body.iter().enumerate() {
+                println!("    [{}] {:?}", j, stmt);
+            }
+        }
+    } else {
+        println!("❌ Parse failed!");
+    }
+
+    if error_manager.has_errors() {
+        println!("\n⚠️  ERRORS DETECTED:");
+        println!("{}", error_manager.generate_error_report());
+    } else {
+        println!("\n✅ No errors");
+    }
+
+    println!("\n========================================");
+}
+
+#[test]
+fn test_debug_parse_with_params() {
+    let input = r#"
+        @QUICKFUNCS(
+            ~greet<string> => global(name<string>, age<int> = 18) {
+                return "Hello " + name;
+            }
+        )
+    "#;
+
+    println!("\n========================================");
+    println!("DEBUG: PARSING WITH PARAMETERS");
+    println!("========================================\n");
+
+    let mut settings = OperationalSettings::default();
+    settings.debug_mode = DebugMode::Verbose;
+
+    let error_manager = ErrorManager::get_shared_instance();
+    error_manager.clear_errors();
+
+    let tokens = tokenize_input(input);
+    let section_tokens = extract_quickfuncs_section_tokens(&tokens);
+
+    println!("Section tokens:");
+    for (i, token) in section_tokens.iter().enumerate() {
+        println!("  [{:3}] {:?}", i, token.token_type);
+    }
+
+    let mut parser = QuickFuncsSectionParser::new(&section_tokens, &settings);
+    let section = parser.parse_section();
+
+    if let Some(s) = section {
+        println!("\n✅ Parsed successfully");
+        println!("Function: {}", s.functions[0].name);
+        println!("Parameters:");
+        for param in &s.functions[0].parameters {
+            println!("  - {} <{:?}> = {:?}",
+                     param.name,
+                     param.data_type,
+                     param.default_value.as_ref().map(|_| "has default")
+            );
+        }
+    } else {
+        println!("\n❌ Parse failed");
+    }
+
+    if error_manager.has_errors() {
+        println!("\n{}", error_manager.generate_error_report());
+    }
+}
+
+#[test]
+fn test_debug_minimal_function() {
+    let input = r#"@QUICKFUNCS(~test<int> => global() { return 42; })"#;
+
+    println!("\n========================================");
+    println!("DEBUG: MINIMAL FUNCTION (ONE LINE)");
+    println!("========================================\n");
+
+    let mut settings = OperationalSettings::default();
+    settings.debug_mode = DebugMode::Verbose;
+
+    let error_manager = ErrorManager::get_shared_instance();
+    error_manager.clear_errors();
+
+    let tokens = tokenize_input(input);
+
+    println!("All tokens:");
+    for (i, token) in tokens.iter().enumerate() {
+        println!("  [{:3}] {:?} = '{}'",
+                 i,
+                 token.token_type,
+                 token.get_token_value()
+        );
+    }
+
+    let section_tokens = extract_quickfuncs_section_tokens(&tokens);
+
+    println!("\nSection tokens ({}):", section_tokens.len());
+    for (i, token) in section_tokens.iter().enumerate() {
+        println!("  [{:3}] {:?}", i, token.token_type);
+    }
+
+    let mut parser = QuickFuncsSectionParser::new(&section_tokens, &settings);
+    let section = parser.parse_section();
+
+    if let Some(s) = section {
+        println!("\n✅ Success: {} functions", s.functions.len());
+    } else {
+        println!("\n❌ Failed");
+    }
+
+    if error_manager.has_errors() {
+        println!("\n{}", error_manager.generate_error_report());
+    }
+}

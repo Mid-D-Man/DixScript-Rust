@@ -454,13 +454,13 @@ fn test_arithmetic_expressions() {
     let input = r#"
         @QUICKFUNCS(
             ~test<int> => global(a<int>, b<int>) {
-                let sum = a + b;
-                let diff = a - b;
-                let prod = a * b;
-                let quot = a / b;
-                let rem = a % b;
-                let pow = a ** b;
-                return sum;
+                let sum = a + b
+                let diff = a - b
+                let prod = a * b
+                let quot = a / b
+                let rem = a % b
+                let pow = a ** b
+                return sum
             }
         )
     "#;
@@ -527,7 +527,7 @@ fn test_unary_expressions() {
             ~test<int> => global(x<int>, flag<bool>) {
                 let neg = -x;
                 let pos = +x;
-                let not = !flag;
+                let not = !flag;//not is keyword
                 return neg;
             }
         )

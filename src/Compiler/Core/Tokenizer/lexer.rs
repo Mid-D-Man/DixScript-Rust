@@ -477,7 +477,7 @@ impl Tokenizer {
 
         let current = state.peek(&self.input);
 
-        // Comments
+        // 1. Comments (highest priority - consumes rest of line/block)
         if current == '/' {
             let next = state.peek_next(&self.input);
             if next == '/' {
@@ -488,19 +488,19 @@ impl Tokenizer {
             }
         }
 
-        // Section keywords
+        // 2. Section keywords (@CONFIG, @DATA, etc.)
         if current == '@' {
             if let Some(section_token) = self.try_scan_section_keyword(state) {
                 return Ok(Some(section_token));
             }
         }
 
-        // Strings (SIMD optimized)
+        // 3. String literals (quoted content)
         if current == '"' || current == '\'' {
             return self.scan_string_literal(state);
         }
 
-        // Interpolated strings (advanced sections only)
+        // 4. Interpolated strings (advanced sections only)
         if current == '$' && self.is_advanced_section() {
             let next = state.peek_next(&self.input);
             if next == '"' || next == '\'' {
@@ -508,7 +508,7 @@ impl Tokenizer {
             }
         }
 
-        // Hex literals
+        // 5. Hex literals (0x...)
         if current == '0' {
             let next = state.peek_next(&self.input);
             if next == 'x' || next == 'X' {
@@ -516,32 +516,38 @@ impl Tokenizer {
             }
         }
 
-        // Numbers
+        // 6. Numeric literals (including negative numbers)
         if current.is_ascii_digit() || (current == '-' && state.peek_next(&self.input).is_ascii_digit()) {
             return self.scan_numeric_literal(state);
         }
 
-        // Hex colors
+        // 7. Hex colors (#RGB, #RRGGBB, etc.)
         if current == '#' {
             return Ok(Some(self.scan_hex_color(state)));
         }
 
-        // Multi-char operators
+        // 8. Multi-character operators (BEFORE single chars)
+        // This is where <=, >=, ==, !=, etc. get recognized
         if let Some(multi_char_op) = self.try_scan_multi_char_operator(state) {
             return Ok(Some(multi_char_op));
         }
 
-        // Prefixed constructors (b:, t:, r:)
-        if current.is_ascii_alphabetic() && state.peek_next(&self.input) == ':' && self.is_valid_prefixed_constructor(state) {
+        // 9. Prefixed constructors (b:, t:, r:)
+        if current.is_ascii_alphabetic()
+            && state.peek_next(&self.input) == ':'
+            && self.is_valid_prefixed_constructor(state)
+        {
             return Ok(Some(self.scan_prefixed_constructor(state)));
         }
 
-        // Identifiers and keywords (perfect hash lookup)
+        // 10. Identifiers and keywords (perfect hash lookup)
         if current.is_ascii_alphabetic() || current == '_' {
             return Ok(Some(self.scan_identifier_or_keyword(state)));
         }
 
-        // Single characters
+        // 11. Single characters (LAST - includes < and > as Symbol)
+        // By this point, multi-char operators have been consumed
+        // So a standalone < or > becomes Symbol, not ComparisonOp
         self.scan_single_character(state)
     }
 
@@ -1186,7 +1192,7 @@ impl Tokenizer {
 
         let next = state.peek_next(&self.input);
 
-        // Check for three-character operators
+        // Check for three-character operators FIRST (highest precedence)
         if state.position + 2 < state.input_length {
             let third = state.peek_at(&self.input, 2);
 
@@ -1206,34 +1212,47 @@ impl Tokenizer {
             }
         }
 
-        // Check for two-character operators
+        // Check for two-character operators (medium precedence)
+        // CRITICAL: <= and >= are ComparisonOp, but << and >> are BitwiseOp
         let two_char = match (current, next) {
+            // Arrow and scope operators (structural)
             ('=', '>') => Some(TokenType::Arrow),
             (':', ':') => Some(TokenType::DoubleColon),
             ('-', '>') => Some(TokenType::SwitchCase),
+
+            // Arithmetic operators
             ('*', '*') => Some(TokenType::ArithmeticOp("**".to_string())),
-            ('<', '<') => Some(TokenType::BitwiseOp("<<".to_string())),
-            ('>', '>') => Some(TokenType::BitwiseOp(">>".to_string())),
-            ('~', '?') => Some(TokenType::BitwiseOp("~?".to_string())),
             ('%', '%') => Some(TokenType::ArithmeticOp("%%".to_string())),
             ('%', '&') => Some(TokenType::ArithmeticOp("%&".to_string())),
             ('&', '%') => Some(TokenType::ArithmeticOp("&%".to_string())),
-            ('=', '=') => Some(TokenType::ComparisonOp("==".to_string())),
-            ('!', '=') => Some(TokenType::ComparisonOp("!=".to_string())),
-            ('<', '=') => Some(TokenType::ComparisonOp("<=".to_string())),
-            ('>', '=') => Some(TokenType::ComparisonOp(">=".to_string())),
-            ('&', '&') => Some(TokenType::LogicalOp("&&".to_string())),
-            ('|', '|') => Some(TokenType::LogicalOp("||".to_string())),
             ('+', '+') => Some(TokenType::ArithmeticOp("++".to_string())),
             ('-', '-') => Some(TokenType::ArithmeticOp("--".to_string())),
+
+            // Arithmetic assignment operators
             ('+', '=') => Some(TokenType::ArithmeticAssignOp("+=".to_string())),
             ('-', '=') => Some(TokenType::ArithmeticAssignOp("-=".to_string())),
             ('*', '=') => Some(TokenType::ArithmeticAssignOp("*=".to_string())),
             ('/', '=') => Some(TokenType::ArithmeticAssignOp("/=".to_string())),
             ('%', '=') => Some(TokenType::ArithmeticAssignOp("%=".to_string())),
+
+            // Comparison operators (CRITICAL: these combine with < and >)
+            ('=', '=') => Some(TokenType::ComparisonOp("==".to_string())),
+            ('!', '=') => Some(TokenType::ComparisonOp("!=".to_string())),
+            ('<', '=') => Some(TokenType::ComparisonOp("<=".to_string())), //  Multi-char
+            ('>', '=') => Some(TokenType::ComparisonOp(">=".to_string())), //  Multi-char
+
+            // Logical operators
+            ('&', '&') => Some(TokenType::LogicalOp("&&".to_string())),
+            ('|', '|') => Some(TokenType::LogicalOp("||".to_string())),
+
+            // Bitwise operators
+            ('<', '<') => Some(TokenType::BitwiseOp("<<".to_string())), // Bit shift left
+            ('>', '>') => Some(TokenType::BitwiseOp(">>".to_string())), // Bit shift right
+            ('~', '?') => Some(TokenType::BitwiseOp("~?".to_string())),
             ('&', '=') => Some(TokenType::BitwiseOp("&=".to_string())),
             ('|', '=') => Some(TokenType::BitwiseOp("|=".to_string())),
             ('^', '=') => Some(TokenType::BitwiseOp("^=".to_string())),
+
             _ => None,
         };
 
@@ -1243,6 +1262,8 @@ impl Tokenizer {
             return Some(Token::new(tt, start_line, start_column, self.current_section.clone()));
         }
 
+        // No multi-char operator found
+        // Single < and > will be handled by scan_single_character as Symbol
         None
     }
 }
@@ -1339,28 +1360,30 @@ impl Tokenizer {
         let start_line = state.line;
         let symbol = state.advance(&self.input);
 
-        // Special operators
+        // CRITICAL: Match C# behavior - most symbols are just Symbol(char)
+        // Only specific operators get special treatment
         let token_type = match symbol {
-            // Comparison operators
-            '<' => TokenType::ComparisonOp("<".to_string()),
-            '>' => TokenType::ComparisonOp(">".to_string()),
-            '=' => TokenType::Symbol('='),
-            '!' => TokenType::Symbol('!'),
-
-            // Arithmetic operators
+            // Arithmetic operators that are ALWAYS operators (even alone)
             '+' => TokenType::ArithmeticOp("+".to_string()),
-            '-' => TokenType::ArithmeticOp("-".to_string()),
+            '-' => TokenType::ArithmeticOp("-".to_string()), // Note: minus/negative handled in numeric scan
             '*' => TokenType::ArithmeticOp("*".to_string()),
             '/' => TokenType::ArithmeticOp("/".to_string()),
             '%' => TokenType::ArithmeticOp("%".to_string()),
 
-            // Bitwise operators
+            // Bitwise operators that are ALWAYS operators (even alone)
             '^' => TokenType::BitwiseOp("^".to_string()),
             '&' => TokenType::BitwiseOp("&".to_string()),
             '|' => TokenType::BitwiseOp("|".to_string()),
 
-            // Everything else is a symbol
+            // IMPORTANT: < and > are SYMBOLS when alone (type annotations, generics)
+            // They only become ComparisonOp when part of <=, >=, ==, etc.
+            // The multi-char scanner handles those cases
+            '<' | '>' | '=' | '!' => TokenType::Symbol(symbol),
+
+            // Everything else that's printable and not whitespace is a Symbol
             _ if !symbol.is_control() && !symbol.is_whitespace() => TokenType::Symbol(symbol),
+
+            // Invalid characters
             _ => {
                 self.error_manager.add_lexical_error(
                     LexicalErrorType::InvalidCharacter,

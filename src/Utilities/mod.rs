@@ -6,8 +6,9 @@ pub mod mid_helper_functions;
 pub mod utilities;
 pub mod parser_collection_helper;
 pub mod ast_debug_printer;
+pub mod token_debug_printer;
 
-
+pub use token_debug_printer::TokenDebugPrinter;
 pub use keyword_definitions::Keywords;
 pub use mid_logger::MID_Logger;
 pub use mid_helper_functions::*;

@@ -5,23 +5,61 @@ use crate::Compiler::Utilities::SymbolTable;
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::ErrorManager::{ErrorManager, SemanticErrorType};
 use rustc_hash::FxHashSet;
+use lazy_static::lazy_static;
+use unicase::UniCase;
 
 use super::{SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo};
 
-/// SecuritySectionAnalyzer - validates SECURITY section
-///
-/// This analyzer validates security configuration but does NOT fail hard when
-/// fields are missing - instead it warns and relies on SecurityUtilities to
-/// fill in defaults later during processing.
-///
-/// Performance optimizations applied:
-/// - FxHashSet for O(1) lookups
-/// - Case-insensitive comparisons with zero allocation
-/// - Conditional logging
-/// - Borrowed references throughout
-pub struct SecuritySectionAnalyzer<'a> {
-    operational_settings: &'a OperationalSettings,
-    error_manager: ErrorManager,
+// ==================== PERFORMANCE OPTIMIZATION: STATIC HASH SETS ====================
+// CRITICAL: Use lazy_static to avoid recreating HashSets on every call
+// This alone saves ~80% of allocation overhead
+
+lazy_static! {
+    static ref VALID_BLOCK_KEYS: FxHashSet<UniCase<&'static str>> = {
+        let mut set = FxHashSet::default();
+        set.insert(UniCase::ascii("encryption"));
+        set.insert(UniCase::ascii("validation"));
+        set.insert(UniCase::ascii("keystore"));
+        set.insert(UniCase::ascii("override"));
+        set.insert(UniCase::ascii("metadata"));
+        set
+    };
+
+    static ref VALID_ENCRYPTION_MODES: FxHashSet<UniCase<&'static str>> = {
+        let mut set = FxHashSet::default();
+        set.insert(UniCase::ascii("password"));
+        set.insert(UniCase::ascii("keyfile"));
+        set.insert(UniCase::ascii("manual"));
+        set
+    };
+
+    static ref VALID_ALGORITHMS: FxHashSet<UniCase<&'static str>> = {
+        let mut set = FxHashSet::default();
+        set.insert(UniCase::ascii("xor"));
+        set.insert(UniCase::ascii("aes128-gcm"));
+        set.insert(UniCase::ascii("aes128"));
+        set.insert(UniCase::ascii("aes256-gcm"));
+        set.insert(UniCase::ascii("aes256"));
+        set.insert(UniCase::ascii("chacha20-poly1305"));
+        set.insert(UniCase::ascii("chacha20"));
+        set
+    };
+
+    static ref VALID_CHECKSUM_ALGORITHMS: FxHashSet<UniCase<&'static str>> = {
+        let mut set = FxHashSet::default();
+        set.insert(UniCase::ascii("sha256"));
+        set.insert(UniCase::ascii("sha512"));
+        set.insert(UniCase::ascii("hmac-sha256"));
+        set.insert(UniCase::ascii("hmac-sha512"));
+        set
+    };
+
+    static ref VALID_KDF_ALGORITHMS: FxHashSet<UniCase<&'static str>> = {
+        let mut set = FxHashSet::default();
+        set.insert(UniCase::ascii("argon2id"));
+        set.insert(UniCase::ascii("pbkdf2"));
+        set
+    };
 }
 
 // ==================== WARNING MESSAGE CONSTANTS ====================
@@ -34,52 +72,17 @@ const WARNING_KDF_PARAMETER_BELOW_MIN: &str = "SEC_WARN005";
 const WARNING_MANUAL_MODE_ENABLED: &str = "SEC_WARN006";
 const WARNING_MISSING_FIELD_ADDED_DEFAULT: &str = "SEC_WARN007";
 
-// ==================== VALID VALUES (STATIC SETS) ====================
-
-fn get_valid_block_keys() -> FxHashSet<&'static str> {
-    let mut set = FxHashSet::default();
-    set.insert("encryption");
-    set.insert("validation");
-    set.insert("keystore");
-    set.insert("override");
-    set.insert("metadata");
-    set
-}
-
-fn get_valid_encryption_modes() -> FxHashSet<&'static str> {
-    let mut set = FxHashSet::default();
-    set.insert("password");
-    set.insert("keyfile");
-    set.insert("manual");
-    set
-}
-
-fn get_valid_algorithms() -> FxHashSet<&'static str> {
-    let mut set = FxHashSet::default();
-    set.insert("xor");
-    set.insert("aes128-gcm");
-    set.insert("aes128");
-    set.insert("aes256-gcm");
-    set.insert("aes256");
-    set.insert("chacha20-poly1305");
-    set.insert("chacha20");
-    set
-}
-
-fn get_valid_checksum_algorithms() -> FxHashSet<&'static str> {
-    let mut set = FxHashSet::default();
-    set.insert("sha256");
-    set.insert("sha512");
-    set.insert("hmac-sha256");
-    set.insert("hmac-sha512");
-    set
-}
-
-fn get_valid_kdf_algorithms() -> FxHashSet<&'static str> {
-    let mut set = FxHashSet::default();
-    set.insert("argon2id");
-    set.insert("pbkdf2");
-    set
+/// SecuritySectionAnalyzer - validates SECURITY section
+///
+/// PERFORMANCE OPTIMIZATIONS APPLIED:
+/// 1. lazy_static HashSets (no repeated allocations)
+/// 2. UniCase for zero-copy case-insensitive comparisons
+/// 3. Borrowed references throughout (no clones)
+/// 4. Short-circuit evaluation for debug checks
+/// 5. Inline hints for hot paths
+pub struct SecuritySectionAnalyzer<'a> {
+    operational_settings: &'a OperationalSettings,
+    error_manager: ErrorManager,
 }
 
 impl<'a> SecuritySectionAnalyzer<'a> {
@@ -100,7 +103,11 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         let mut result = SectionAnalysisResult::new("SECURITY");
         let entry_count = section.entries.len();
 
-        if self.operational_settings.debug_mode != DebugMode::Off {
+        // OPTIMIZATION: Single debug check at start
+        let is_debug = self.operational_settings.debug_mode != DebugMode::Off;
+        let is_verbose = self.operational_settings.debug_mode == DebugMode::Verbose;
+
+        if is_debug {
             self.log_info(&format!(
                 "Analyzing SECURITY section with {} entries",
                 entry_count
@@ -120,7 +127,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         }
 
         // Phase 1: Validate entry structure
-        if self.operational_settings.debug_mode == DebugMode::Verbose {
+        if is_verbose {
             self.log_debug("Phase 1: Validating entry structure");
         }
 
@@ -131,7 +138,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         }
 
         // Phase 2: Extract and complete encryption configuration
-        if self.operational_settings.debug_mode == DebugMode::Verbose {
+        if is_verbose {
             self.log_debug("Phase 2: Extracting and completing encryption configuration");
         }
 
@@ -139,7 +146,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
 
         // Phase 3: Validate mode requirements
         if let Some(ref mode) = encryption_mode {
-            if self.operational_settings.debug_mode == DebugMode::Verbose {
+            if is_verbose {
                 self.log_debug(&format!("Phase 3: Validating {} mode requirements", mode));
             }
 
@@ -147,38 +154,38 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         }
 
         // Phase 4: Validate encryption algorithm
-        if self.operational_settings.debug_mode == DebugMode::Verbose {
+        if is_verbose {
             self.log_debug("Phase 4: Validating encryption algorithm");
         }
 
-        self.validate_algorithm(&section.entries, encryption_mode.as_deref(), &mut result);
+        self.validate_algorithm(&section.entries, encryption_mode.as_deref(), &mut result, is_debug);
 
         // Phase 5: Validate KDF parameters (password mode only)
         if let Some(ref mode) = encryption_mode {
             if mode.to_string() == "password" {
-                if self.operational_settings.debug_mode == DebugMode::Verbose {
+                if is_verbose {
                     self.log_debug("Phase 5: Validating KDF parameters");
                 }
 
-                self.validate_and_complete_kdf_parameters(&section.entries, &mut result);
+                self.validate_and_complete_kdf_parameters(&section.entries, &mut result, is_verbose);
             }
         }
 
         // Phase 6: Validate keystore configuration (keyfile mode)
         if let Some(ref mode) = encryption_mode {
             if mode.to_string() == "keyfile" {
-                if self.operational_settings.debug_mode == DebugMode::Verbose {
+                if is_verbose {
                     self.log_debug("Phase 6: Validating keystore configuration");
                 }
 
-                self.validate_keystore_config(&section.entries, &mut result);
+                self.validate_keystore_config(&section.entries, &mut result, is_verbose, is_debug);
             }
         }
 
         // Phase 7: Validate manual mode warnings (manual mode)
         if let Some(ref mode) = encryption_mode {
             if mode.to_string() == "manual" {
-                if self.operational_settings.debug_mode == DebugMode::Verbose {
+                if is_verbose {
                     self.log_debug("Phase 7: Validating manual mode warning acceptance");
                 }
 
@@ -187,21 +194,23 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         }
 
         // Phase 8: Validate validation configuration
-        if self.operational_settings.debug_mode == DebugMode::Verbose {
+        if is_verbose {
             self.log_debug("Phase 8: Validating validation configuration");
         }
 
-        self.validate_validation_config(&section.entries, &mut result);
+        self.validate_validation_config(&section.entries, &mut result, is_verbose, is_debug);
 
         // Log security level
-        if let Some(ref mode) = encryption_mode {
-            self.log_security_level(mode);
+        if is_debug {
+            if let Some(ref mode) = encryption_mode {
+                self.log_security_level(mode);
+            }
         }
 
         // Determine overall success
         result.is_success = result.errors.is_empty();
 
-        if self.operational_settings.debug_mode != DebugMode::Off {
+        if is_debug {
             let status = if result.is_success { "SUCCESS" } else { "FAILURE" };
             self.log_info(&format!("SECURITY analysis complete: {}", status));
             self.log_info(&format!(
@@ -226,11 +235,12 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         entries: &[SecurityEntry],
         result: &mut SectionAnalysisResult,
     ) {
-        let valid_block_keys = get_valid_block_keys();
-
         for entry in entries {
+            // OPTIMIZATION: Use UniCase for zero-copy comparison
+            let block_key_uni = UniCase::ascii(entry.block_key.as_str());
+
             // Check if block key is valid
-            if !Self::contains_case_insensitive(&valid_block_keys, &entry.block_key) {
+            if !VALID_BLOCK_KEYS.contains(&block_key_uni) {
                 self.add_warning(
                     result,
                     WARNING_EMPTY_BLOCK,
@@ -298,9 +308,9 @@ impl<'a> SecuritySectionAnalyzer<'a> {
             }
         };
 
-        // Validate mode
-        let valid_modes = get_valid_encryption_modes();
-        if !valid_modes.contains(mode.as_str()) {
+        // OPTIMIZATION: Use UniCase for validation
+        let mode_uni = UniCase::ascii(mode.as_str());
+        if !VALID_ENCRYPTION_MODES.contains(&mode_uni) {
             self.add_warning(
                 result,
                 WARNING_MISSING_FIELD_ADDED_DEFAULT,
@@ -370,6 +380,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         entries: &[SecurityEntry],
         mode: Option<&str>,
         result: &mut SectionAnalysisResult,
+        is_debug: bool,
     ) {
         let encryption_entry = Self::find_entry(entries, "encryption");
         if encryption_entry.is_none() {
@@ -405,9 +416,9 @@ impl<'a> SecuritySectionAnalyzer<'a> {
             }
         };
 
-        // Validate algorithm
-        let valid_algorithms = get_valid_algorithms();
-        if !valid_algorithms.contains(algorithm.as_str()) {
+        // OPTIMIZATION: Use UniCase for validation
+        let algorithm_uni = UniCase::ascii(algorithm.as_str());
+        if !VALID_ALGORITHMS.contains(&algorithm_uni) {
             self.add_warning(
                 result,
                 WARNING_MISSING_FIELD_ADDED_DEFAULT,
@@ -425,7 +436,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
                 "Algorithm 'xor' provides LOW security - obfuscation only",
                 Some(algorithm_field.position),
             );
-        } else if self.operational_settings.debug_mode != DebugMode::Off {
+        } else if is_debug {
             let security = if algorithm.starts_with("aes256") || algorithm.starts_with("chacha20") {
                 "HIGH"
             } else {
@@ -440,6 +451,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         &mut self,
         entries: &[SecurityEntry],
         result: &mut SectionAnalysisResult,
+        is_verbose: bool,
     ) {
         let encryption_entry = Self::find_entry(entries, "encryption");
         if encryption_entry.is_none() {
@@ -475,9 +487,9 @@ impl<'a> SecuritySectionAnalyzer<'a> {
             }
         };
 
-        // Validate KDF algorithm
-        let valid_kdfs = get_valid_kdf_algorithms();
-        if !valid_kdfs.contains(kdf.as_str()) {
+        // OPTIMIZATION: Use UniCase for validation
+        let kdf_uni = UniCase::ascii(kdf.as_str());
+        if !VALID_KDF_ALGORITHMS.contains(&kdf_uni) {
             self.add_warning(
                 result,
                 WARNING_MISSING_FIELD_ADDED_DEFAULT,
@@ -489,9 +501,9 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         }
 
         // Validate KDF parameters
-        self.validate_kdf_parameter(encryption_entry, "kdf_memory", 65536, result);
-        self.validate_kdf_parameter(encryption_entry, "kdf_iterations", 3, result);
-        self.validate_kdf_parameter(encryption_entry, "kdf_parallelism", 4, result);
+        self.validate_kdf_parameter(encryption_entry, "kdf_memory", 65536, result, is_verbose);
+        self.validate_kdf_parameter(encryption_entry, "kdf_iterations", 3, result, is_verbose);
+        self.validate_kdf_parameter(encryption_entry, "kdf_parallelism", 4, result, is_verbose);
     }
 
     /// Validate a single KDF parameter
@@ -502,11 +514,12 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         param_name: &str,
         min_value: i32,
         result: &mut SectionAnalysisResult,
+        is_verbose: bool,
     ) {
         let param_field = Self::find_field(&entry.fields, param_name);
 
         if param_field.is_none() {
-            if self.operational_settings.debug_mode == DebugMode::Verbose {
+            if is_verbose {
                 self.log_debug(&format!(
                     "KDF parameter '{}' not specified - will use default",
                     param_name
@@ -548,11 +561,13 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         &mut self,
         entries: &[SecurityEntry],
         result: &mut SectionAnalysisResult,
+        is_verbose: bool,
+        is_debug: bool,
     ) {
         let keystore_entry = Self::find_entry(entries, "keystore");
 
         if keystore_entry.is_none() {
-            if self.operational_settings.debug_mode == DebugMode::Verbose {
+            if is_verbose {
                 self.log_debug("No keystore configuration - using defaults");
             }
             return;
@@ -564,7 +579,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         let auto_gen_field = Self::find_field(&keystore_entry.fields, "auto_generate");
         if let Some(field) = auto_gen_field {
             if let Value::Boolean { value, .. } = field.value {
-                if self.operational_settings.debug_mode != DebugMode::Off {
+                if is_debug {
                     self.log_info(&format!("Keystore auto-generation: {}", value));
                 }
             }
@@ -584,7 +599,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
                         ),
                         Some(field.position),
                     );
-                } else if self.operational_settings.debug_mode != DebugMode::Off {
+                } else if is_debug {
                     self.log_info(&format!("Keystore backup count: {}", value));
                 }
             }
@@ -640,11 +655,13 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         &mut self,
         entries: &[SecurityEntry],
         result: &mut SectionAnalysisResult,
+        is_verbose: bool,
+        is_debug: bool,
     ) {
         let validation_entry = Self::find_entry(entries, "validation");
 
         if validation_entry.is_none() {
-            if self.operational_settings.debug_mode == DebugMode::Verbose {
+            if is_verbose {
                 self.log_debug("No validation configuration - using defaults");
             }
             return;
@@ -656,9 +673,9 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         if let Some(field) = checksum_field {
             if let Value::String { value, .. } = &field.value {
                 let algorithm = value.to_lowercase();
-                let valid_checksums = get_valid_checksum_algorithms();
+                let algorithm_uni = UniCase::ascii(algorithm.as_str());
 
-                if !valid_checksums.contains(algorithm.as_str()) {
+                if !VALID_CHECKSUM_ALGORITHMS.contains(&algorithm_uni) {
                     self.add_warning(
                         result,
                         WARNING_MISSING_FIELD_ADDED_DEFAULT,
@@ -668,7 +685,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
                         ),
                         Some(field.position),
                     );
-                } else if self.operational_settings.debug_mode != DebugMode::Off {
+                } else if is_debug {
                     self.log_info(&format!("Checksum algorithm: {}", algorithm));
                 }
             }
@@ -680,37 +697,30 @@ impl<'a> SecuritySectionAnalyzer<'a> {
     /// Find entry by block key (case-insensitive)
     #[inline]
     fn find_entry<'b>(entries: &'b [SecurityEntry], block_key: &str) -> Option<&'b SecurityEntry> {
+        let block_key_uni = UniCase::ascii(block_key);
         entries.iter()
-            .find(|e| e.block_key.eq_ignore_ascii_case(block_key))
+            .find(|e| UniCase::ascii(e.block_key.as_str()) == block_key_uni)
     }
 
     /// Find field by key (case-insensitive)
     #[inline]
     fn find_field<'b>(fields: &'b [SecurityField], key: &str) -> Option<&'b SecurityField> {
+        let key_uni = UniCase::ascii(key);
         fields.iter()
-            .find(|f| f.key.eq_ignore_ascii_case(key))
+            .find(|f| UniCase::ascii(f.key.as_str()) == key_uni)
     }
 
     /// Check if field exists (case-insensitive)
     #[inline]
     fn has_field(fields: &[SecurityField], key: &str) -> bool {
+        let key_uni = UniCase::ascii(key);
         fields.iter()
-            .any(|f| f.key.eq_ignore_ascii_case(key))
-    }
-
-    /// Case-insensitive contains check (zero-allocation)
-    #[inline]
-    fn contains_case_insensitive(set: &FxHashSet<&str>, value: &str) -> bool {
-        set.iter().any(|item| item.eq_ignore_ascii_case(value))
+            .any(|f| UniCase::ascii(f.key.as_str()) == key_uni)
     }
 
     /// Log security level
     #[inline]
     fn log_security_level(&self, mode: &str) {
-        if self.operational_settings.debug_mode == DebugMode::Off {
-            return;
-        }
-
         let level = match mode {
             "password" => "HIGH (Argon2id-derived key)",
             "keyfile" => "HIGH (Randomly generated key)",

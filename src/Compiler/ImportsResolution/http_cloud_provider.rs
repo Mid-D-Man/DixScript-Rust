@@ -87,7 +87,7 @@ impl HttpCloudProvider {
             return;
         }
 
-        self.error_manager.log_warning(&format!(
+        self.error_manager.log_Warning(&format!(
             "⚠️  SECURITY WARNING: Using insecure HTTP for cloud import '{}'. \
              Use HTTPS for production to prevent man-in-the-middle attacks.",
             url
@@ -240,7 +240,7 @@ impl CloudStorageProvider for HttpCloudProvider {
                     }
 
                     // Log retry
-                    self.error_manager.log_warning(&format!(
+                    self.error_manager.log_Warning(&format!(
                         "Download failed (attempt {}), retrying in {:?}: {}",
                         retry_count + 1,
                         retry_delay,
@@ -252,7 +252,7 @@ impl CloudStorageProvider for HttpCloudProvider {
 
                     // Exponential backoff
                     retry_count += 1;
-                    retry_delay *= BACKOFF_MULTIPLIER;
+                    retry_delay *= BACKOFF_MULTIPLIER as u32;
                 }
             }
         }

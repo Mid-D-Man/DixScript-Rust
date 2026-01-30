@@ -54,6 +54,7 @@ rustc-hash = "2.0"
 reqwest = { version = "0.11", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
+sha2 = "0.11.0-pre.4"
 
 # URL parsing
 url = "2.5"

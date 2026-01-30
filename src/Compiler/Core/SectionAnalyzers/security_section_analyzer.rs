@@ -679,14 +679,14 @@ impl<'a> SecuritySectionAnalyzer<'a> {
 
     /// Find entry by block key (case-insensitive)
     #[inline]
-    fn find_entry(entries: &[SecurityEntry], block_key: &str) -> Option<&SecurityEntry> {
+    fn find_entry(entries: &[SecurityEntry], block_key: &str) -> Option<&'a SecurityEntry> {
         entries.iter()
             .find(|e| e.block_key.eq_ignore_ascii_case(block_key))
     }
 
     /// Find field by key (case-insensitive)
     #[inline]
-    fn find_field(fields: &[SecurityField], key: &str) -> Option<&SecurityField> {
+    fn find_field(fields: &[SecurityField], key: &str) -> Option<&'a SecurityField> {
         fields.iter()
             .find(|f| f.key.eq_ignore_ascii_case(key))
     }

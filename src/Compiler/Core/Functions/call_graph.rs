@@ -1,6 +1,7 @@
 use super::call_site::CallSite;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use crate::Compiler::AST::Position;
 
 /// Directed graph of function calls in QuickFunctions
 /// Each node is a function, each edge represents "function A calls function B"
@@ -108,7 +109,7 @@ impl CallGraph {
                 } else if recursion_stack.contains(neighbor) {
                     // CYCLE DETECTED!
                     // Find where the cycle starts in our current path
-                    if let Some(cycle_start_index) = current_path.iter().position(|n| n == neighbor) {
+                    if let Some(cycle_start_index) = current_path.iter().position(|n| n.to_string() == neighbor.to_string()) {
                         // Extract the cycle
                         let mut cycle = current_path[cycle_start_index..].to_vec();
                         

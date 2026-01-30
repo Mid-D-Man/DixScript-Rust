@@ -7,6 +7,7 @@ pub mod SectionEnhancers;
 pub mod ValueResolution;
 pub mod BinarySerialization;
 pub mod Config;
+pub mod Functions;
 mod general_parser;
 
 // Re-export Config types for easier access

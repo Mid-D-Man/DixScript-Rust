@@ -51,7 +51,7 @@ impl CycleDetectionValidator {
         let mut has_errors = false;
         
         if !cycles.is_empty() {
-            self.error_manager.log_warning(&format!(
+            self.error_manager.log_Warning(&format!(
                 "Detected {} circular dependency cycle(s)",
                 cycles.len()
             ));

@@ -37,7 +37,7 @@ impl CycleDetectionValidator {
         let call_graph = self.build_call_graph(section);
         
         // Log debug info if enabled
-        if self.operational_settings.debug_mode >= crate::Compiler::Core::DebugMode::Regular {
+        if self.operational_settings.debug_mode >= crate::Compiler::AST::DebugMode::Regular {
             self.log_debug(&call_graph.to_debug_string());
             
             let stats = call_graph.get_statistics();
@@ -73,7 +73,7 @@ impl CycleDetectionValidator {
         }
         
         // Step 5: Report statistics
-        if self.operational_settings.debug_mode >= crate::Compiler::Core::DebugMode::Regular {
+        if self.operational_settings.debug_mode >= crate::Compiler::AST::DebugMode::Regular {
             let stats = call_graph.get_statistics();
             self.error_manager.log_info(&format!(
                 "Call graph validation complete: {}",
@@ -275,7 +275,7 @@ impl CycleDetectionValidator {
     
     // Helper for debug logging (checks debug mode before formatting)
     fn log_debug(&self, message: &str) {
-        if self.operational_settings.debug_mode >= crate::Compiler::Core::DebugMode::Regular {
+        if self.operational_settings.debug_mode >= crate::Compiler::AST::DebugMode::Regular {
             self.error_manager.log_debug(&format!("[Cycle Detector] {}", message));
         }
     }

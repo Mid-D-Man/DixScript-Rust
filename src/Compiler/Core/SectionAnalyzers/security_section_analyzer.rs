@@ -155,7 +155,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
 
         // Phase 5: Validate KDF parameters (password mode only)
         if let Some(ref mode) = encryption_mode {
-            if mode == "password" {
+            if mode.to_string() == "password" {
                 if self.operational_settings.debug_mode == DebugMode::Verbose {
                     self.log_debug("Phase 5: Validating KDF parameters");
                 }
@@ -166,7 +166,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
 
         // Phase 6: Validate keystore configuration (keyfile mode)
         if let Some(ref mode) = encryption_mode {
-            if mode == "keyfile" {
+            if mode.to_string() == "keyfile" {
                 if self.operational_settings.debug_mode == DebugMode::Verbose {
                     self.log_debug("Phase 6: Validating keystore configuration");
                 }
@@ -177,7 +177,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
 
         // Phase 7: Validate manual mode warnings (manual mode)
         if let Some(ref mode) = encryption_mode {
-            if mode == "manual" {
+            if mode.to_string() == "manual" {
                 if self.operational_settings.debug_mode == DebugMode::Verbose {
                     self.log_debug("Phase 7: Validating manual mode warning acceptance");
                 }

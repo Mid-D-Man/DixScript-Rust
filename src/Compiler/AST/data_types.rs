@@ -1,3 +1,5 @@
+// src/Compiler/AST/data_types.rs
+
 /// All supported data types for DixScript
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DataType {
@@ -84,7 +86,8 @@ impl std::fmt::Display for CompatibilityMode {
 }
 
 /// Debug modes for CONFIG section
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Ordered from least verbose to most verbose
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DebugMode {
     Off,
     Regular,

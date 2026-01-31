@@ -1,3 +1,5 @@
+// src/Compiler/mod.rs
+
 //! Compiler - Lexer, Parser, Semantic Analysis, Code Generation
 
 pub mod AST;
@@ -6,4 +8,4 @@ pub mod DLM;
 pub mod Extensions;
 pub mod Utilities;
 pub mod VersionControl;
-mod ImportsResolution;
+pub mod ImportsResolution;

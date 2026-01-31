@@ -636,3 +636,783 @@ impl QuickFuncsSectionAnalyzer {
     }
 
     // ... continues in Part 2
+// ==================== FUNCTION BODY VALIDATION ====================
+
+    fn validate_function_body(
+        &mut self,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        result: &mut SectionAnalysisResult,
+    ) {
+        let body_length = func.body.len();
+
+        if body_length == 0 {
+            self.add_error(
+                result,
+                "QFUNC011",
+                "EMPTY_FUNCTION_BODY",
+                &format!(
+                    "Function '{}' has an empty body but declares return type {:?}",
+                    func.name,
+                    func.return_type.unwrap()
+                ),
+                "Add function body with return statement or remove function",
+                func.position,
+            );
+            return;
+        }
+
+        if body_length > MAX_FUNCTION_BODY_STATEMENTS {
+            self.add_error(
+                result,
+                "QFUNC012",
+                "FUNCTION_BODY_TOO_LARGE",
+                &format!(
+                    "Function '{}' has {} statements, exceeds limit of {}",
+                    func.name, body_length, MAX_FUNCTION_BODY_STATEMENTS
+                ),
+                &format!(
+                    "Reduce the function body to {} or fewer statements",
+                    MAX_FUNCTION_BODY_STATEMENTS
+                ),
+                func.position,
+            );
+            return;
+        }
+
+        let mut local_scope = LocalScopeTracker::new(&func.parameters);
+        let mut return_path_analyzer = ReturnPathAnalyzer::new(func.return_type.unwrap());
+
+        for statement in &func.body {
+            self.validate_statement(
+                statement,
+                func,
+                symbol_table,
+                &mut local_scope,
+                result,
+                0,
+                &mut return_path_analyzer,
+            );
+
+            if self.should_halt(result) {
+                return;
+            }
+        }
+
+        if !return_path_analyzer.all_paths_return() {
+            self.add_error(
+                result,
+                "QFUNC013",
+                "NOT_ALL_PATHS_RETURN",
+                &format!(
+                    "Function '{}' with return type {:?} does not return a value on all code paths",
+                    func.name,
+                    func.return_type.unwrap()
+                ),
+                "Ensure all branches (if/else, switch cases) have return statements",
+                func.position,
+            );
+        }
+
+        self.check_for_unused_variables(func, &local_scope, result);
+    }
+
+    fn validate_statement(
+        &mut self,
+        statement: &QuickFuncStatement,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &mut LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+        nesting_depth: usize,
+        return_path_analyzer: &mut ReturnPathAnalyzer,
+    ) {
+        self.validation_depth += 1;
+        if self.validation_depth > MAX_VALIDATION_DEPTH {
+            self.add_error(
+                result,
+                "QFUNC073",
+                "VALIDATION_DEPTH_EXCEEDED",
+                &format!(
+                    "Maximum validation depth ({}) exceeded in function '{}'",
+                    MAX_VALIDATION_DEPTH, func.name
+                ),
+                "This indicates a circular validation issue - please report this bug",
+                statement.position(),
+            );
+            self.validation_depth -= 1;
+            return;
+        }
+
+        if nesting_depth > MAX_NESTING_DEPTH {
+            self.add_error(
+                result,
+                "QFUNC014",
+                "NESTING_TOO_DEEP",
+                &format!(
+                    "Function '{}' has nesting depth exceeding {}",
+                    func.name, MAX_NESTING_DEPTH
+                ),
+                "Reduce nesting depth by extracting code into separate functions",
+                statement.position(),
+            );
+            self.validation_depth -= 1;
+            return;
+        }
+
+        match statement {
+            QuickFuncStatement::Return { value, .. } => {
+                self.validate_return_statement(value, func, symbol_table, local_scope, result);
+                return_path_analyzer.add_return();
+            }
+
+            QuickFuncStatement::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.validate_if_statement(
+                    condition,
+                    then_branch,
+                    else_branch.as_ref(),
+                    func,
+                    symbol_table,
+                    local_scope,
+                    result,
+                    nesting_depth,
+                    return_path_analyzer,
+                );
+            }
+
+            QuickFuncStatement::Switch {
+                expression,
+                cases,
+                default_case,
+                ..
+            } => {
+                self.validate_switch_statement(
+                    expression,
+                    cases,
+                    default_case.as_ref(),
+                    func,
+                    symbol_table,
+                    local_scope,
+                    result,
+                    nesting_depth,
+                    return_path_analyzer,
+                );
+            }
+
+            QuickFuncStatement::Assignment { variable, value, .. } => {
+                self.validate_assignment_statement(variable, value, func, symbol_table, local_scope, result);
+            }
+
+            QuickFuncStatement::ArithmeticAssignment {
+                variable,
+                operator,
+                value,
+                ..
+            } => {
+                self.validate_arithmetic_assignment_statement(
+                    variable,
+                    operator,
+                    value,
+                    func,
+                    symbol_table,
+                    local_scope,
+                    result,
+                );
+            }
+
+            QuickFuncStatement::ObjectCreation { variable, object, .. } => {
+                self.validate_object_creation_statement(variable, object, func, symbol_table, local_scope, result);
+            }
+
+            QuickFuncStatement::Log { value, .. } => {
+                self.validate_expression(value, func, symbol_table, local_scope, result);
+            }
+
+            QuickFuncStatement::ExpressionStatement { expression, .. } => {
+                self.validate_expression(expression, func, symbol_table, local_scope, result);
+            }
+
+            QuickFuncStatement::VariableDeclaration { .. } => {
+                self.validate_variable_declaration_statement(statement, func, symbol_table, local_scope, result);
+            }
+        }
+
+        self.validation_depth -= 1;
+    }
+
+    fn validate_return_statement(
+        &self,
+        value: &Expression,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        self.validate_expression(value, func, symbol_table, local_scope, result);
+
+        let local_variable_types = local_scope.get_all_variable_types();
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, Some(local_variable_types));
+
+        let return_value_type = type_inference_visitor.infer_type_from_expression(value);
+        let expected_return_type = func.return_type.unwrap();
+
+        if let Some(actual_type) = return_value_type {
+            if !Self::are_types_compatible_strict(actual_type, expected_return_type) {
+                self.add_error(
+                    result,
+                    "QFUNC015",
+                    "RETURN_TYPE_MISMATCH",
+                    &format!(
+                        "Function '{}' returns {:?} but declared return type is {:?}",
+                        func.name, actual_type, expected_return_type
+                    ),
+                    &format!(
+                        "Change return value to match {:?} or update function return type",
+                        expected_return_type
+                    ),
+                    value.position(),
+                );
+            } else if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                self.error_manager.log_debug(&format!(
+                    "    Return type {:?} matches expected {:?}",
+                    actual_type, expected_return_type
+                ));
+            }
+        } else {
+            self.add_warning(
+                result,
+                "QFUNC_WARN004",
+                &format!(
+                    "Unable to infer return type in function '{}'. Expected type: {:?}",
+                    func.name, expected_return_type
+                ),
+                "QUICKFUNCS",
+                value.position(),
+            );
+        }
+    }
+
+    fn validate_variable_declaration_statement(
+        &self,
+        statement: &QuickFuncStatement,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &mut LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        let (declaration_type, is_mutable, variable_name, data_type, value, position) = match statement {
+            QuickFuncStatement::VariableDeclaration {
+                declaration_type,
+                is_mutable,
+                variable_name,
+                data_type,
+                value,
+                position,
+            } => (declaration_type, is_mutable, variable_name, data_type, value, position),
+            _ => return,
+        };
+
+        // Validate variable name
+        if !Self::is_valid_identifier(variable_name) {
+            self.add_error(
+                result,
+                "QFUNC067",
+                "INVALID_VARIABLE_NAME",
+                &format!(
+                    "Invalid variable name '{}' in function '{}'",
+                    variable_name, func.name
+                ),
+                "Variable names must start with a letter and contain only alphanumeric characters and underscores",
+                *position,
+            );
+            return;
+        }
+
+        // Check if variable name is a data type keyword
+        if Keywords::is_data_type_keyword(variable_name) {
+            let suggestion = format!(
+                "Use a different name like 'my{}{}' or '{}Value'",
+                variable_name.chars().next().unwrap().to_uppercase(),
+                &variable_name[1..],
+                variable_name
+            );
+
+            self.add_error(
+                result,
+                "QFUNC067B",
+                "DATA_TYPE_KEYWORD_AS_VARIABLE",
+                &format!(
+                    "Variable '{}' in function '{}' cannot use data type keyword as name",
+                    variable_name, func.name
+                ),
+                &suggestion,
+                *position,
+            );
+            return;
+        }
+
+        // Check reserved keywords
+        if Keywords::is_reserved_in_context(variable_name, "QUICKFUNCS") {
+            self.add_error(
+                result,
+                "QFUNC068",
+                "RESERVED_KEYWORD_AS_VARIABLE",
+                &Keywords::get_keyword_usage_error(variable_name, "QUICKFUNCS"),
+                &format!("Choose a different name for variable '{}'", variable_name),
+                *position,
+            );
+            return;
+        }
+
+        // Check for redeclaration
+        if local_scope.has_variable(variable_name) {
+            self.add_error(
+                result,
+                "QFUNC069",
+                "VARIABLE_REDECLARATION",
+                &format!(
+                    "Variable '{}' already declared in function '{}'",
+                    variable_name, func.name
+                ),
+                "Each variable must be declared only once. Use assignment to change its value.",
+                *position,
+            );
+            return;
+        }
+
+        // Validate value expression
+        if !Self::is_valid_value_expression(value) {
+            self.add_error(
+                result,
+                "QFUNC070",
+                "INVALID_VARIABLE_VALUE",
+                &format!("Invalid expression in variable declaration for '{}'", variable_name),
+                "Variable declarations cannot contain assignment operations like +=, -=, etc.",
+                *position,
+            );
+            return;
+        }
+
+        self.validate_expression(value, func, symbol_table, local_scope, result);
+
+        // Type inference
+        let local_variable_types = local_scope.get_all_variable_types();
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, Some(local_variable_types));
+        let inferred_type = type_inference_visitor.infer_type_from_expression(value);
+
+        // Check type compatibility if both declared and inferred
+        if let (Some(declared), Some(inferred)) = (data_type, inferred_type) {
+            if !Self::are_types_compatible_strict(inferred, *declared) {
+                self.add_error(
+                    result,
+                    "QFUNC071",
+                    "VARIABLE_TYPE_MISMATCH",
+                    &format!(
+                        "Variable '{}' declared as {:?} but assigned value of type {:?}",
+                        variable_name, declared, inferred
+                    ),
+                    &format!(
+                        "Change the value to match type {:?} or remove type annotation",
+                        declared
+                    ),
+                    *position,
+                );
+            }
+        }
+
+        let is_const = matches!(declaration_type, DeclarationType::Const) || !is_mutable;
+        let effective_type = data_type.or(inferred_type);
+
+        local_scope.add_variable(variable_name.clone(), effective_type, is_const);
+
+        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            let mutability = if is_const { "immutable" } else { "mutable" };
+            let type_str = if let Some(t) = effective_type {
+                format!("{:?}", t)
+            } else {
+                "inferred".to_string()
+            };
+
+            self.error_manager.log_debug(&format!(
+                "    Declared {} variable '{}' with type {}",
+                mutability, variable_name, type_str
+            ));
+        }
+    }
+
+    fn validate_if_statement(
+        &mut self,
+        condition: &Expression,
+        then_branch: &[QuickFuncStatement],
+        else_branch: Option<&Vec<QuickFuncStatement>>,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &mut LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+        nesting_depth: usize,
+        return_path_analyzer: &mut ReturnPathAnalyzer,
+    ) {
+        self.validate_expression(condition, func, symbol_table, local_scope, result);
+
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
+        let condition_type = type_inference_visitor.infer_type_from_expression(condition);
+
+        if let Some(cond_type) = condition_type {
+            if cond_type != DataType::Bool {
+                self.add_error(
+                    result,
+                    "QFUNC016",
+                    "NON_BOOLEAN_CONDITION",
+                    &format!("If statement condition must be boolean, got {:?}", cond_type),
+                    "Use comparison operators (==, !=, >, <, etc.) to create boolean conditions",
+                    condition.position(),
+                );
+            }
+        }
+
+        let mut then_returns = ReturnPathAnalyzer::new(func.return_type.unwrap());
+        let mut else_returns = ReturnPathAnalyzer::new(func.return_type.unwrap());
+
+        for stmt in then_branch {
+            self.validate_statement(
+                stmt,
+                func,
+                symbol_table,
+                local_scope,
+                result,
+                nesting_depth + 1,
+                &mut then_returns,
+            );
+        }
+
+        if let Some(else_stmts) = else_branch {
+            for stmt in else_stmts {
+                self.validate_statement(
+                    stmt,
+                    func,
+                    symbol_table,
+                    local_scope,
+                    result,
+                    nesting_depth + 1,
+                    &mut else_returns,
+                );
+            }
+
+            if then_returns.all_paths_return() && else_returns.all_paths_return() {
+                return_path_analyzer.add_return();
+            }
+        }
+    }
+
+    fn validate_switch_statement(
+        &mut self,
+        expression: &Expression,
+        cases: &[SwitchCase],
+        default_case: Option<&SwitchCase>,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &mut LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+        nesting_depth: usize,
+        return_path_analyzer: &mut ReturnPathAnalyzer,
+    ) {
+        self.validate_expression(expression, func, symbol_table, local_scope, result);
+
+        let mut case_returns = Vec::new();
+        let has_default = default_case.is_some();
+
+        for case in cases {
+            let mut case_analyzer = ReturnPathAnalyzer::new(func.return_type.unwrap());
+
+            for stmt in &case.statements {
+                self.validate_statement(
+                    stmt,
+                    func,
+                    symbol_table,
+                    local_scope,
+                    result,
+                    nesting_depth + 1,
+                    &mut case_analyzer,
+                );
+            }
+
+            case_returns.push(case_analyzer);
+        }
+
+        let mut default_analyzer = None;
+        if let Some(default) = default_case {
+            let mut analyzer = ReturnPathAnalyzer::new(func.return_type.unwrap());
+
+            for stmt in &default.statements {
+                self.validate_statement(
+                    stmt,
+                    func,
+                    symbol_table,
+                    local_scope,
+                    result,
+                    nesting_depth + 1,
+                    &mut analyzer,
+                );
+            }
+
+            default_analyzer = Some(analyzer);
+        }
+
+        let all_cases_return = case_returns.iter().all(|r| r.all_paths_return());
+        let default_returns = has_default && default_analyzer.as_ref().unwrap().all_paths_return();
+
+        if all_cases_return && default_returns {
+            return_path_analyzer.add_return();
+        }
+    }
+
+    fn validate_assignment_statement(
+        &self,
+        variable: &str,
+        value: &Expression,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &mut LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        if !Self::is_valid_identifier(variable) {
+            self.add_error(
+                result,
+                "QFUNC017",
+                "INVALID_VARIABLE_NAME",
+                &format!(
+                    "Invalid variable name '{}' in function '{}'",
+                    variable, func.name
+                ),
+                "Variable names must start with a letter and contain only alphanumeric characters and underscores",
+                value.position(),
+            );
+            return;
+        }
+
+        if !local_scope.has_variable(variable) {
+            self.add_error(
+                result,
+                "QFUNC072",
+                "UNDECLARED_VARIABLE",
+                &format!(
+                    "Variable '{}' used before declaration in function '{}'",
+                    variable, func.name
+                ),
+                &format!(
+                    "Declare variable first: let {} = ...; or const {} = ...;",
+                    variable, variable
+                ),
+                value.position(),
+            );
+            return;
+        }
+
+        if local_scope.is_const(variable) {
+            self.add_error(
+                result,
+                "QFUNC018",
+                "CONST_REASSIGNMENT",
+                &format!(
+                    "Cannot reassign const variable '{}' in function '{}'",
+                    variable, func.name
+                ),
+                "Use 'let mut' instead of 'const' or 'let' to make variable mutable",
+                value.position(),
+            );
+            return;
+        }
+
+        self.validate_expression(value, func, symbol_table, local_scope, result);
+
+        let local_variable_types = local_scope.get_all_variable_types();
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, Some(local_variable_types));
+
+        let existing_type = local_scope.get_variable_type(variable);
+        let new_type = type_inference_visitor.infer_type_from_expression(value);
+
+        if let (Some(existing), Some(new)) = (existing_type, new_type) {
+            if !Self::are_types_compatible_strict(new, existing) {
+                self.add_error(
+                    result,
+                    "QFUNC019",
+                    "TYPE_MISMATCH_REASSIGNMENT",
+                    &format!(
+                        "Cannot assign {:?} to variable '{}' of type {:?}",
+                        new, variable, existing
+                    ),
+                    "Variable types cannot change once assigned (unless type is 'any')",
+                    value.position(),
+                );
+            }
+        } else if existing_type.is_none() {
+            if let Some(new) = new_type {
+                local_scope.update_variable_type(variable, new);
+
+                if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                    self.error_manager.log_debug(&format!(
+                        "    Inferred type {:?} for variable '{}'",
+                        new, variable
+                    ));
+                }
+            }
+        }
+    }
+
+    fn validate_arithmetic_assignment_statement(
+        &self,
+        variable: &str,
+        operator: &str,
+        value: &Expression,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        if !local_scope.has_variable(variable) {
+            self.add_error(
+                result,
+                "QFUNC020",
+                "UNDEFINED_VARIABLE",
+                &format!(
+                    "Variable '{}' used before assignment in function '{}'",
+                    variable, func.name
+                ),
+                "Declare variable before using in arithmetic assignment",
+                value.position(),
+            );
+            return;
+        }
+
+        if local_scope.is_const(variable) {
+            self.add_error(
+                result,
+                "QFUNC021",
+                "CONST_REASSIGNMENT",
+                &format!(
+                    "Cannot modify const variable '{}' with {}",
+                    variable, operator
+                ),
+                "Remove 'const' keyword to make variable mutable",
+                value.position(),
+            );
+            return;
+        }
+
+        if !VALID_ARITHMETIC_ASSIGN_OPS.contains(operator) {
+            self.add_error(
+                result,
+                "QFUNC022",
+                "INVALID_ARITHMETIC_ASSIGN_OP",
+                &format!("Invalid arithmetic assignment operator '{}'", operator),
+                "Valid operators: +=, -=, *=, /=, %=, **=, &=, |=, ^=, <<=, >>=",
+                value.position(),
+            );
+            return;
+        }
+
+        self.validate_expression(value, func, symbol_table, local_scope, result);
+
+        let var_type = local_scope.get_variable_type(variable);
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
+        let value_type = type_inference_visitor.infer_type_from_expression(value);
+
+        if let (Some(var_t), Some(val_t)) = (var_type, value_type) {
+            self.validate_arithmetic_operation(operator, var_t, val_t, &func.name, result, value.position());
+        }
+    }
+
+    fn validate_object_creation_statement(
+        &self,
+        variable: &str,
+        object: &Value,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &mut LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        if !Self::is_valid_identifier(variable) {
+            self.add_error(
+                result,
+                "QFUNC023",
+                "INVALID_VARIABLE_NAME",
+                &format!(
+                    "Invalid variable name '{}' in function '{}'",
+                    variable, func.name
+                ),
+                "Variable names must start with a letter and contain only alphanumeric characters and underscores",
+                object.position(),
+            );
+            return;
+        }
+
+        if local_scope.is_const(variable) {
+            self.add_error(
+                result,
+                "QFUNC024",
+                "CONST_REASSIGNMENT",
+                &format!(
+                    "Cannot reassign const variable '{}' in function '{}'",
+                    variable, func.name
+                ),
+                "Remove 'const' keyword to make variable mutable",
+                object.position(),
+            );
+            return;
+        }
+
+        self.validate_object_literal_keys(object, &func.name, result);
+        self.validate_value(object, func, symbol_table, local_scope, result);
+
+        if !local_scope.has_variable(variable) {
+            local_scope.add_variable(variable.to_string(), Some(DataType::Object), false);
+        }
+    }
+
+    fn check_for_unused_variables(
+        &self,
+        func: &QuickFunction,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        let collector = VariableReferenceCollector::new(&func.parameters);
+        let referenced_variables = collector.collect_from_function(func);
+
+        for var_name in local_scope.get_declared_variable_names() {
+            if !referenced_variables.contains(var_name) {
+                self.add_warning(
+                    result,
+                    "QFUNC_WARN005",
+                    &format!(
+                        "Variable '{}' declared but never used in function '{}'",
+                        var_name, func.name
+                    ),
+                    "QUICKFUNCS",
+                    func.position,
+                );
+
+                if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                    self.error_manager.log_debug(&format!(
+                        "    Unused variable detected: '{}'",
+                        var_name
+                    ));
+                }
+            }
+        }
+
+        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            let declared_count = local_scope.get_declared_variable_names().count();
+            let used_count = referenced_variables.len();
+            self.error_manager.log_debug(&format!(
+                "  Variable usage: {}/{} variables used",
+                used_count, declared_count
+            ));
+        }
+    }
+
+    // ... continues in Part 3

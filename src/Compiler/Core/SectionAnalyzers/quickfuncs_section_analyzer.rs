@@ -1416,3 +1416,7 @@ impl QuickFuncsSectionAnalyzer {
     }
 
     // ... continues in Part 3
+
+
+
+    

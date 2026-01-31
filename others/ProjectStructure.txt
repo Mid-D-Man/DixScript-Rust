@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Fri Jan 30 16:35:03 UTC 2026
+Generated: Sat Jan 31 03:16:31 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: a28a81bc339cc0ce21cdcfba7acff496c1afa322
+Commit: 9d8f4b47affddefea83fc1101b144ca5c750b89f
 Branch: master
 ==================================
 
@@ -67,9 +67,13 @@ src/Compiler/Core/Functions/cycle_detector.rs
 src/Compiler/Core/Functions/mod.rs
 src/Compiler/Core/SectionAnalyzers/dlm_section_analyzer.rs
 src/Compiler/Core/SectionAnalyzers/enums_section_analyzer.rs
+src/Compiler/Core/SectionAnalyzers/imports_section_analyzer.rs
 src/Compiler/Core/SectionAnalyzers/mod.rs
 src/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs
 src/Compiler/Core/SectionEnhancers/mod.rs
+src/Compiler/Core/SectionEnhancers/qualified_identifier_resolution.rs
+src/Compiler/Core/SectionEnhancers/qualified_identifier_resolver.rs
+src/Compiler/Core/SectionEnhancers/quickfuncs_ast_enhancer.rs
 src/Compiler/Core/SectionParsers/data_section_parser.rs
 src/Compiler/Core/SectionParsers/dlm_section_parser.rs
 src/Compiler/Core/SectionParsers/enums_section_parser.rs
@@ -81,6 +85,7 @@ src/Compiler/Core/Tokenizer/lexer.rs
 src/Compiler/Core/Tokenizer/mod.rs
 src/Compiler/Core/Tokenizer/token.rs
 src/Compiler/Core/ValueResolution/mod.rs
+src/Compiler/Core/general_ast_enhancer.rs
 src/Compiler/Core/general_parser.rs
 src/Compiler/Core/mod.rs
 src/Compiler/DLM/Auditor/mod.rs
@@ -95,6 +100,7 @@ src/Compiler/ImportsResolution/cloud_provider_factory.rs
 src/Compiler/ImportsResolution/cloud_storage_provider.rs
 src/Compiler/ImportsResolution/hash_verifier.rs
 src/Compiler/ImportsResolution/http_cloud_provider.rs
+src/Compiler/ImportsResolution/imports_resolver.rs
 src/Compiler/ImportsResolution/mod.rs
 src/Compiler/Utilities/identifier_pattern_analyzer.rs
 src/Compiler/Utilities/mod.rs
@@ -179,6 +185,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 138
+Source: 144
 Tests: 16
 Benches: 3

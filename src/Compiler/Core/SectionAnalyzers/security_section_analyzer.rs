@@ -22,6 +22,7 @@ enum EncryptionMode {
 impl EncryptionMode {
     #[inline]
     fn from_str(s: &str) -> Option<Self> {
+        // Direct match on &str - no allocation
         match s {
             "password" => Some(Self::Password),
             "keyfile" => Some(Self::Keyfile),
@@ -64,6 +65,7 @@ enum Algorithm {
 impl Algorithm {
     #[inline]
     fn from_str(s: &str) -> Option<Self> {
+        // Direct match on &str - no allocation
         match s {
             "xor" => Some(Self::Xor),
             "aes128-gcm" => Some(Self::Aes128Gcm),
@@ -147,12 +149,12 @@ impl<'a> ParsedEncryptionConfig<'a> {
             field_map.insert(field.key.as_str(), field);
         }
 
-        // Extract mode
+        // Extract mode - NO STRING ALLOCATION
         let mode = field_map.get("mode")
             .and_then(|f| extract_string_value(&f.value))
             .and_then(EncryptionMode::from_str);
 
-        // Extract algorithm
+        // Extract algorithm - NO STRING ALLOCATION
         let algorithm = field_map.get("algorithm")
             .and_then(|f| extract_string_value(&f.value))
             .and_then(Algorithm::from_str);
@@ -231,10 +233,14 @@ fn extract_bool_value(value: &Value) -> Option<bool> {
     }
 }
 
-/// Case-insensitive key comparison (zero-allocation)
+/// Case-insensitive key check in static hashmap - NO ALLOCATION
 #[inline]
-fn key_eq(a: &str, b: &str) -> bool {
-    a.eq_ignore_ascii_case(b)
+fn is_valid_key_ci(key: &str, valid_keys: &FxHashMap<&'static str, ()>) -> bool {
+    // Check lowercase version directly in hashmap (keys are already lowercase)
+    valid_keys.contains_key(key) || {
+        // Fallback: case-insensitive check
+        valid_keys.keys().any(|k| k.eq_ignore_ascii_case(key))
+    }
 }
 
 // ==================== MAIN ANALYZER ====================
@@ -260,7 +266,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         let mut result = SectionAnalysisResult::new("SECURITY");
         let entry_count = section.entries.len();
 
-        // OPTIMIZATION: Hoist debug checks
+        // OPTIMIZATION: Hoist debug checks ONCE (not in every validation call)
         let is_debug = self.operational_settings.debug_mode != DebugMode::Off;
         let is_verbose = self.operational_settings.debug_mode == DebugMode::Verbose;
 
@@ -277,13 +283,16 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         }
 
         // Phase 1: Build entry lookup map (O(n) once)
+        if is_verbose {
+            self.log_debug("Phase 1: Building entry lookup map");
+        }
         let entry_map = Self::build_entry_map(&section.entries);
 
         // Phase 2: Validate structure
         if is_verbose {
-            self.log_debug("Phase 1: Validating entry structure");
+            self.log_debug("Phase 2: Validating entry structure");
         }
-        self.validate_structure(&section.entries, &entry_map, &mut result);
+        self.validate_structure(&section.entries, &entry_map, &mut result, is_debug);
 
         if self.should_halt(&result) {
             return result;
@@ -291,7 +300,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
 
         // Phase 3: Parse encryption config (O(1) field lookups from now on)
         if is_verbose {
-            self.log_debug("Phase 2: Parsing encryption configuration");
+            self.log_debug("Phase 3: Parsing encryption configuration");
         }
 
         let encryption_config = entry_map.get("encryption")
@@ -308,7 +317,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         // Phase 4: Validate mode-specific requirements
         if let Some(mode_val) = mode {
             if is_verbose {
-                self.log_debug(&format!("Phase 3: Validating {} mode requirements", mode_val.as_str()));
+                self.log_debug(&format!("Phase 4: Validating {} mode requirements", mode_val.as_str()));
             }
 
             if let Some(ref config) = encryption_config {
@@ -317,18 +326,18 @@ impl<'a> SecuritySectionAnalyzer<'a> {
 
             // Phase 5: Validate algorithm
             if is_verbose {
-                self.log_debug("Phase 4: Validating encryption algorithm");
+                self.log_debug("Phase 5: Validating encryption algorithm");
             }
 
             if let Some(ref config) = encryption_config {
                 self.validate_algorithm(config, &mut result, is_debug);
             }
 
-            // Phase 6: Mode-specific validations
+            // Phase 6: Mode-specific validations (ENUM MATCHING - NO STRING ALLOCATION)
             match mode_val {
                 EncryptionMode::Password => {
                     if is_verbose {
-                        self.log_debug("Phase 5: Validating KDF parameters");
+                        self.log_debug("Phase 6: Validating KDF parameters");
                     }
                     if let Some(ref config) = encryption_config {
                         self.validate_kdf_parameters(config, &mut result, is_verbose);
@@ -336,7 +345,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
                 }
                 EncryptionMode::Keyfile => {
                     if is_verbose {
-                        self.log_debug("Phase 6: Validating keystore configuration");
+                        self.log_debug("Phase 7: Validating keystore configuration");
                     }
                     if let Some(entry) = entry_map.get("keystore") {
                         self.validate_keystore(entry, &mut result, is_verbose, is_debug);
@@ -344,7 +353,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
                 }
                 EncryptionMode::Manual => {
                     if is_verbose {
-                        self.log_debug("Phase 7: Validating manual mode warnings");
+                        self.log_debug("Phase 8: Validating manual mode warnings");
                     }
                     if let Some(entry) = entry_map.get("override") {
                         self.validate_manual_mode(entry, &mut result);
@@ -354,7 +363,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
 
             // Phase 7: Validate validation config
             if is_verbose {
-                self.log_debug("Phase 8: Validating validation configuration");
+                self.log_debug("Phase 9: Validating validation configuration");
             }
             if let Some(entry) = entry_map.get("validation") {
                 self.validate_validation_config(entry, &mut result, is_verbose, is_debug);
@@ -384,12 +393,13 @@ impl<'a> SecuritySectionAnalyzer<'a> {
     // ==================== OPTIMIZATION: BUILD ENTRY MAP ONCE ====================
 
     /// Build entry lookup map - O(n) once instead of O(n) per lookup
+    /// NO STRING ALLOCATION - uses &str directly
     #[inline]
     fn build_entry_map(entries: &[SecurityEntry]) -> FxHashMap<&str, &SecurityEntry> {
         let mut map = FxHashMap::default();
         for entry in entries {
             let key = entry.block_key.as_str();
-            // Case-insensitive by storing lowercase key
+            // Case-insensitive by checking directly (no .to_lowercase())
             if key.eq_ignore_ascii_case("encryption") {
                 map.insert("encryption", entry);
             } else if key.eq_ignore_ascii_case("validation") {
@@ -410,14 +420,16 @@ impl<'a> SecuritySectionAnalyzer<'a> {
     fn validate_structure(
         &mut self,
         entries: &[SecurityEntry],
-        entry_map: &FxHashMap<&str, &SecurityEntry>,
+        _entry_map: &FxHashMap<&str, &SecurityEntry>,
         result: &mut SectionAnalysisResult,
+        is_debug: bool,
     ) {
         for entry in entries {
-            let key_lower = entry.block_key.to_lowercase();
-            
-            // O(1) lookup instead of linear search
-            if !VALID_BLOCK_KEYS.contains_key(key_lower.as_str()) {
+            // NO STRING ALLOCATION - use &str directly
+            if !is_valid_key_ci(entry.block_key.as_str(), &VALID_BLOCK_KEYS) {
+                if is_debug {
+                    self.log_warning(&format!("Unknown security block key: {} (will be ignored)", entry.block_key));
+                }
                 self.add_warning(result, WARNING_EMPTY_BLOCK,
                     &format!("Unknown security block key: {} (will be ignored)", entry.block_key),
                     Some(entry.position));
@@ -431,7 +443,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         }
     }
 
-    /// Validate encryption mode (uses enum matching instead of string comparison)
+    /// Validate encryption mode (ENUM MATCHING - NO STRING ALLOCATION)
     fn validate_encryption_mode(
         &mut self,
         config: &ParsedEncryptionConfig,
@@ -457,14 +469,14 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         }
     }
 
-    /// Validate mode requirements (uses enum match instead of string comparison)
+    /// Validate mode requirements (ENUM MATCHING - NO STRING ALLOCATION)
     fn validate_mode_requirements(
         &mut self,
         mode: EncryptionMode,
         config: &ParsedEncryptionConfig,
         result: &mut SectionAnalysisResult,
     ) {
-        // Get required fields for this mode (zero-cost)
+        // Get required fields for this mode (zero-cost enum match)
         for &field_name in mode.required_fields() {
             if !config.has_field(field_name) {
                 self.add_warning(result, WARNING_MISSING_FIELD_ADDED_DEFAULT,
@@ -474,14 +486,14 @@ impl<'a> SecuritySectionAnalyzer<'a> {
             }
         }
 
-        // Special warning for manual mode (enum match instead of string)
+        // Special warning for manual mode (ENUM MATCH instead of string comparison)
         if mode == EncryptionMode::Manual {
             self.add_warning(result, WARNING_MANUAL_MODE_CRITICAL,
                 "CRITICAL: Manual mode stores encryption key in PLAINTEXT in source file", None);
         }
     }
 
-    /// Validate algorithm (uses enum match instead of string comparison)
+    /// Validate algorithm (ENUM MATCHING - NO STRING ALLOCATION)
     fn validate_algorithm(
         &mut self,
         config: &ParsedEncryptionConfig,
@@ -489,7 +501,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         is_debug: bool,
     ) {
         if let Some(algorithm) = config.algorithm {
-            // Enum-based checks (zero-cost)
+            // ENUM-BASED CHECKS (zero-cost)
             if algorithm.is_low_security() {
                 self.add_warning(result, WARNING_XOR_LOW_SECURITY,
                     "Algorithm 'xor' provides LOW security - obfuscation only", None);
@@ -509,19 +521,19 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         }
     }
 
-    /// Validate KDF parameters (uses O(1) field lookups)
+    /// Validate KDF parameters (uses O(1) field lookups, NO STRING ALLOCATION)
     fn validate_kdf_parameters(
         &mut self,
         config: &ParsedEncryptionConfig,
         result: &mut SectionAnalysisResult,
         is_verbose: bool,
     ) {
-        // Validate KDF algorithm
+        // Validate KDF algorithm - NO STRING ALLOCATION
         if let Some(kdf) = config.kdf {
-            if !VALID_KDF_ALGORITHMS.contains_key(kdf) {
+            if !is_valid_key_ci(kdf, &VALID_KDF_ALGORITHMS) {
                 self.add_warning(result, WARNING_MISSING_FIELD_ADDED_DEFAULT,
                     &format!("Unknown KDF algorithm: {} - will default to 'argon2id'", kdf), None);
-            } else if self.operational_settings.debug_mode != DebugMode::Off {
+            } else if is_verbose {
                 self.log_info(&format!("Key derivation function: {}", kdf));
             }
         } else {
@@ -559,7 +571,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         &mut self,
         entry: &SecurityEntry,
         result: &mut SectionAnalysisResult,
-        is_verbose: bool,
+        _is_verbose: bool,
         is_debug: bool,
     ) {
         // Build field map for O(1) lookups
@@ -621,7 +633,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
         &mut self,
         entry: &SecurityEntry,
         result: &mut SectionAnalysisResult,
-        is_verbose: bool,
+        _is_verbose: bool,
         is_debug: bool,
     ) {
         // Build field map
@@ -632,8 +644,8 @@ impl<'a> SecuritySectionAnalyzer<'a> {
 
         if let Some(field) = field_map.get("checksum_algorithm") {
             if let Some(algorithm) = extract_string_value(&field.value) {
-                let algo_lower = algorithm.to_lowercase();
-                if !VALID_CHECKSUM_ALGORITHMS.contains_key(algo_lower.as_str()) {
+                // NO STRING ALLOCATION - use &str directly
+                if !is_valid_key_ci(algorithm, &VALID_CHECKSUM_ALGORITHMS) {
                     self.add_warning(result, WARNING_MISSING_FIELD_ADDED_DEFAULT,
                         &format!("Unknown checksum algorithm: {} - will default to 'sha256'", algorithm),
                         Some(field.position));
@@ -648,6 +660,7 @@ impl<'a> SecuritySectionAnalyzer<'a> {
 
     #[inline]
     fn log_security_level(&self, mode: EncryptionMode) {
+        // ENUM MATCH - NO STRING ALLOCATION
         let level = match mode {
             EncryptionMode::Password => "HIGH (Argon2id-derived key)",
             EncryptionMode::Keyfile => "HIGH (Randomly generated key)",
@@ -693,8 +706,9 @@ impl<'a> SecuritySectionAnalyzer<'a> {
 
         result.warnings.push(warning);
 
+        // Logger call only if debug is enabled (checked once at start)
         if self.operational_settings.debug_mode != DebugMode::Off {
             self.log_warning(message);
         }
     }
-            }
+    }

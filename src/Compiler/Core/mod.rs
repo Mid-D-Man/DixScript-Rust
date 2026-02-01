@@ -1,4 +1,5 @@
 // src/Compiler/Core/mod.rs
+
 //! Core - Lexer, Parser, Semantic Analyzer, AST Enhancer
 
 pub mod Tokenizer;
@@ -10,7 +11,8 @@ pub mod BinarySerialization;
 pub mod Config;
 pub mod Functions;
 mod general_parser;
-mod general_ast_enhancer;  // ADD THIS
+mod general_ast_enhancer;
+mod general_semantics_analyzer;  // ADD THIS
 
 // Re-export Config types for easier access
 pub use Config::{
@@ -22,4 +24,10 @@ pub use Config::{
     DebugMode,
 };
 pub use general_parser::GeneralParser;
-pub use general_ast_enhancer::{GeneralAstEnhancer, EnhancementResult, SectionEnhancementInfo};  // ADD THIS
+pub use general_ast_enhancer::{EnhancementResult, SectionEnhancementInfo};
+pub use general_semantics_analyzer::{
+    GeneralSemanticAnalyzer,
+    SemanticAnalysisResult,
+    SemanticErrorInfo,
+    SemanticWarningInfo,
+};  // ADD THIS

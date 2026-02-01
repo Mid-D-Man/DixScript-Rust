@@ -1416,7 +1416,2065 @@ impl QuickFuncsSectionAnalyzer {
     }
 
     // ... continues in Part 3
+    // ==================== EXPRESSION VALIDATION ====================
 
+    fn validate_expression(
+        &mut self,
+        expr: &Expression,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        self.validation_depth += 1;
+        if self.validation_depth > MAX_VALIDATION_DEPTH {
+            self.add_error(
+                result,
+                "QFUNC074",
+                "EXPRESSION_DEPTH_EXCEEDED",
+                &format!(
+                    "Maximum expression depth ({}) exceeded in function '{}'",
+                    MAX_VALIDATION_DEPTH, func.name
+                ),
+                "This indicates a circular expression - please simplify your expressions",
+                expr.position(),
+            );
+            self.validation_depth -= 1;
+            return;
+        }
+
+        match expr {
+            Expression::Identifier { name, .. } => {
+                self.validate_identifier(name, &func.name, local_scope, symbol_table, result, expr.position());
+            }
+
+            Expression::QualifiedIdentifier { parts, arguments, .. } => {
+                self.validate_qualified_identifier(parts, arguments.as_ref(), func, symbol_table, local_scope, result);
+            }
+
+            Expression::QuickFuncCall { name, arguments, .. } => {
+                self.validate_quick_func_call(name, arguments, func, symbol_table, local_scope, result);
+            }
+
+            Expression::ImportedFunctionCall {
+                namespace_name,
+                function_name,
+                arguments,
+                ..
+            } => {
+                self.validate_imported_function_call(
+                    namespace_name,
+                    function_name,
+                    arguments,
+                    func,
+                    symbol_table,
+                    local_scope,
+                    result,
+                );
+            }
+
+            Expression::InstanceMethodCall {
+                instance,
+                method_name,
+                arguments,
+                ..
+            } => {
+                self.validate_instance_method_call(instance, method_name, arguments, func, symbol_table, local_scope, result);
+            }
+
+            Expression::StaticMethodCall {
+                object_name,
+                method_name,
+                arguments,
+                ..
+            } => {
+                self.validate_static_method_call(object_name, method_name, arguments, func, symbol_table, local_scope, result);
+            }
+
+            Expression::EnumAccess {
+                namespace_name,
+                enum_name,
+                value,
+                position,
+            } => {
+                self.validate_enum_access(namespace_name.as_deref(), enum_name, value, &func.name, symbol_table, result, *position);
+            }
+
+            Expression::ArithmeticOp { left, right, operator, .. } => {
+                self.validate_arithmetic_op_expression(left, right, operator, func, symbol_table, local_scope, result);
+            }
+
+            Expression::BitwiseOp { left, right, operator, .. } => {
+                self.validate_bitwise_op_expression(left, right, operator, func, symbol_table, local_scope, result);
+            }
+
+            Expression::ComparisonOp { left, right, operator, .. } => {
+                self.validate_comparison_op_expression(left, right, operator, func, symbol_table, local_scope, result);
+            }
+
+            Expression::LogicalOp { left, right, operator, .. } => {
+                self.validate_logical_op_expression(left, right, operator, func, symbol_table, local_scope, result);
+            }
+
+            Expression::UnaryOp { operand, operator, .. } => {
+                self.validate_unary_op_expression(operand, operator, func, symbol_table, local_scope, result);
+            }
+
+            Expression::Conditional {
+                condition,
+                true_value,
+                false_value,
+                ..
+            } => {
+                self.validate_conditional_expression(condition, true_value, false_value, func, symbol_table, local_scope, result);
+            }
+
+            Expression::PropertyAccess { object, .. } => {
+                self.validate_expression(object, func, symbol_table, local_scope, result);
+            }
+
+            Expression::IndexAccess { object, index, .. } => {
+                self.validate_expression(object, func, symbol_table, local_scope, result);
+                self.validate_expression(index, func, symbol_table, local_scope, result);
+            }
+
+            Expression::Value { value, .. } => {
+                self.validate_value(value, func, symbol_table, local_scope, result);
+            }
+
+            Expression::Parenthesized { expression, .. } => {
+                self.validate_expression(expression, func, symbol_table, local_scope, result);
+            }
+
+            Expression::TypeCast { expression, .. } => {
+                self.validate_expression(expression, func, symbol_table, local_scope, result);
+            }
+
+            _ => {}
+        }
+
+        self.validation_depth -= 1;
+    }
+
+    fn validate_identifier(
+        &self,
+        name: &str,
+        func_name: &str,
+        local_scope: &LocalScopeTracker,
+        symbol_table: &SymbolTable,
+        result: &mut SectionAnalysisResult,
+        position: Position,
+    ) {
+        if local_scope.has_variable(name)
+            || local_scope.has_parameter(name)
+            || symbol_table.has_enum(name)
+            || symbol_table.has_function(name)
+            || symbol_table.is_builtin_static_object(name)
+            || symbol_table.is_imported_namespace(name)
+        {
+            return;
+        }
+
+        self.add_warning(
+            result,
+            "QFUNC_WARN001",
+            &format!(
+                "Identifier '{}' not found in local scope or symbol table in function '{}'",
+                name, func_name
+            ),
+            "QUICKFUNCS",
+            position,
+        );
+    }
+
+    fn validate_qualified_identifier(
+        &self,
+        parts: &[String],
+        arguments: Option<&Vec<Expression>>,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        if parts.len() < 2 {
+            return;
+        }
+
+        let first_part = &parts[0];
+        let second_part = &parts[1];
+
+        // Check if it's a local variable/parameter (object property access)
+        if local_scope.has_variable(first_part) || local_scope.has_parameter(first_part) {
+            if let Some(args) = arguments {
+                for arg in args {
+                    self.validate_expression(arg, func, symbol_table, local_scope, result);
+                }
+            }
+            return;
+        }
+
+        // Check for local enum access
+        if parts.len() == 2 && arguments.is_none() && symbol_table.has_enum(first_part) {
+            if !symbol_table.has_enum_field(first_part, second_part) {
+                if let Some(fields) = symbol_table.try_get_enum(first_part) {
+                    let valid_values: Vec<&String> = fields.keys().collect();
+                    self.add_error(
+                        result,
+                        "QFUNC052",
+                        "ENUM_VALUE_NOT_FOUND",
+                        &format!("Enum '{}' does not have value '{}'", first_part, second_part),
+                        &format!("Valid values: {}", valid_values.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")),
+                        Position::UNKNOWN,
+                    );
+                }
+            }
+            return;
+        }
+
+        // Check for namespace access
+        if symbol_table.is_imported_namespace(first_part) {
+            self.validate_namespace_access(parts, arguments, func, symbol_table, local_scope, result);
+            return;
+        }
+
+        // Check for static object access
+        if has_static_object(first_part) {
+            self.validate_static_object_access(parts, arguments, func, symbol_table, local_scope, result);
+            return;
+        }
+
+        // Check for DATA section variable
+        if symbol_table.has_data_variable(first_part) {
+            if let Some(args) = arguments {
+                for arg in args {
+                    self.validate_expression(arg, func, symbol_table, local_scope, result);
+                }
+            }
+            return;
+        }
+
+        // Unknown - will be resolved at runtime
+        self.add_warning(
+            result,
+            "QFUNC_WARN001",
+            &format!(
+                "Identifier '{}' not found in scope - will be resolved at runtime",
+                first_part
+            ),
+            "QUICKFUNCS",
+            Position::UNKNOWN,
+        );
+
+        if let Some(args) = arguments {
+            for arg in args {
+                self.validate_expression(arg, func, symbol_table, local_scope, result);
+            }
+        }
+    }
+
+    fn validate_namespace_access(
+        &self,
+        parts: &[String],
+        arguments: Option<&Vec<Expression>>,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        let namespace_name = &parts[0];
+        let member_name = &parts[1];
+
+        if parts.len() == 2 {
+            if let Some(args) = arguments {
+                // Namespaced function call
+                let func_info = symbol_table.get_namespaced_function(namespace_name, member_name);
+                if func_info.is_none() {
+                    self.add_error(
+                        result,
+                        "QFUNC045",
+                        "IMPORTED_FUNCTION_NOT_FOUND",
+                        &format!(
+                            "Function '{}' not found in namespace '{}'",
+                            member_name, namespace_name
+                        ),
+                        "",
+                        Position::UNKNOWN,
+                    );
+                    return;
+                }
+
+                let expected_params = func_info.unwrap().signature.parameters.len();
+                let actual_params = args.len();
+
+                if actual_params != expected_params {
+                    self.add_error(
+                        result,
+                        "QFUNC046",
+                        "PARAMETER_COUNT_MISMATCH",
+                        &format!(
+                            "Function '{}.{}' expects {} parameter(s) but got {}",
+                            namespace_name, member_name, expected_params, actual_params
+                        ),
+                        "",
+                        Position::UNKNOWN,
+                    );
+                }
+
+                for arg in args {
+                    self.validate_expression(arg, func, symbol_table, local_scope, result);
+                }
+            } else {
+                // Namespaced enum reference
+                if symbol_table.get_namespaced_enum(namespace_name, member_name).is_none() {
+                    self.add_error(
+                        result,
+                        "QFUNC055",
+                        "NAMESPACE_MEMBER_NOT_FOUND",
+                        &format!(
+                            "Namespace '{}' does not have member '{}'",
+                            namespace_name, member_name
+                        ),
+                        "Check the imported file for available functions and enums",
+                        Position::UNKNOWN,
+                    );
+                }
+            }
+        } else if parts.len() == 3 {
+            // Imported enum access: namespace.enum.value
+            let enum_name = &parts[1];
+            let enum_value = &parts[2];
+
+            let enum_fields = symbol_table.get_namespaced_enum(namespace_name, enum_name);
+            if enum_fields.is_none() {
+                self.add_error(
+                    result,
+                    "QFUNC054",
+                    "IMPORTED_ENUM_NOT_FOUND",
+                    &format!(
+                        "Namespace '{}' does not have enum '{}'",
+                        namespace_name, enum_name
+                    ),
+                    "Check the imported file for available enums",
+                    Position::UNKNOWN,
+                );
+                return;
+            }
+
+            if !enum_fields.unwrap().contains_key(enum_value) {
+                let valid_values: Vec<&String> = enum_fields.unwrap().keys().collect();
+                self.add_error(
+                    result,
+                    "QFUNC056",
+                    "ENUM_VALUE_NOT_FOUND",
+                    &format!(
+                        "Enum '{}.{}' does not have value '{}'",
+                        namespace_name, enum_name, enum_value
+                    ),
+                    &format!("Valid values: {}", valid_values.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")),
+                    Position::UNKNOWN,
+                );
+            }
+        }
+    }
+
+    fn validate_static_object_access(
+        &self,
+        parts: &[String],
+        arguments: Option<&Vec<Expression>>,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        let object_name = &parts[0];
+        let method_name = &parts[1];
+
+        if let Some(args) = arguments {
+            if !has_static_method(object_name, method_name) {
+                self.add_error(
+                    result,
+                    "QFUNC050",
+                    "STATIC_METHOD_NOT_FOUND",
+                    &format!(
+                        "Static object '{}' has no method '{}'",
+                        object_name, method_name
+                    ),
+                    "",
+                    Position::UNKNOWN,
+                );
+            } else {
+                // Validate argument count (skip for variadic methods)
+                // Note: We'd need to query static_object_registry for method info
+                // For now, just validate arguments themselves
+            }
+
+            for arg in args {
+                self.validate_expression(arg, func, symbol_table, local_scope, result);
+            }
+        }
+    }
+
+    fn validate_arithmetic_op_expression(
+        &self,
+        left: &Expression,
+        right: &Expression,
+        operator: &str,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        if !VALID_ARITHMETIC_OPERATORS.contains(operator) {
+            self.add_error(
+                result,
+                "QFUNC025",
+                "INVALID_ARITHMETIC_OPERATOR",
+                &format!(
+                    "Invalid arithmetic operator '{}' in function '{}'",
+                    operator, func.name
+                ),
+                "Valid operators: +, -, *, /, %, **, %%, %&, &%",
+                left.position(),
+            );
+            return;
+        }
+
+        self.validate_expression(left, func, symbol_table, local_scope, result);
+        self.validate_expression(right, func, symbol_table, local_scope, result);
+
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
+        let left_type = type_inference_visitor.infer_type_from_expression(left);
+        let right_type = type_inference_visitor.infer_type_from_expression(right);
+
+        if let (Some(lt), Some(rt)) = (left_type, right_type) {
+            if operator == "+" {
+                if lt == DataType::String && rt == DataType::String {
+                    return;
+                }
+
+                if lt == DataType::String || rt == DataType::String {
+                    self.add_error(
+                        result,
+                        "QFUNC026",
+                        "INVALID_STRING_OPERATION",
+                        &format!(
+                            "Cannot concatenate string with {:?} in function '{}'",
+                            if lt == DataType::String { rt } else { lt },
+                            func.name
+                        ),
+                        "Use .toString() to explicitly convert to string, or use only string + string",
+                        left.position(),
+                    );
+                    return;
+                }
+            }
+
+            if !Self::is_numeric_type(lt) {
+                self.add_error(
+                    result,
+                    "QFUNC027",
+                    "NON_NUMERIC_OPERAND",
+                    &format!(
+                        "Left operand of '{}' must be numeric, got {:?} in function '{}'",
+                        operator, lt, func.name
+                    ),
+                    "Use int, float, or double types for arithmetic operations",
+                    left.position(),
+                );
+            }
+
+            if !Self::is_numeric_type(rt) {
+                self.add_error(
+                    result,
+                    "QFUNC028",
+                    "NON_NUMERIC_OPERAND",
+                    &format!(
+                        "Right operand of '{}' must be numeric, got {:?} in function '{}'",
+                        operator, rt, func.name
+                    ),
+                    "Use int, float, or double types for arithmetic operations",
+                    right.position(),
+                );
+            }
+        }
+    }
+
+    fn validate_bitwise_op_expression(
+        &self,
+        left: &Expression,
+        right: &Expression,
+        operator: &str,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        if !VALID_BITWISE_OPERATORS.contains(operator) {
+            self.add_error(
+                result,
+                "QFUNC029",
+                "INVALID_BITWISE_OPERATOR",
+                &format!(
+                    "Invalid bitwise operator '{}' in function '{}'",
+                    operator, func.name
+                ),
+                "Valid operators: &, |, ^, <<, >>",
+                left.position(),
+            );
+            return;
+        }
+
+        self.validate_expression(left, func, symbol_table, local_scope, result);
+        self.validate_expression(right, func, symbol_table, local_scope, result);
+
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
+        let left_type = type_inference_visitor.infer_type_from_expression(left);
+        let right_type = type_inference_visitor.infer_type_from_expression(right);
+
+        if let Some(lt) = left_type {
+            if lt != DataType::Int {
+                self.add_error(
+                    result,
+                    "QFUNC030",
+                    "NON_INT_BITWISE_OPERAND",
+                    &format!(
+                        "Bitwise operator '{}' requires int type, got {:?} in function '{}'",
+                        operator, lt, func.name
+                    ),
+                    "Convert to int or use arithmetic operators instead",
+                    left.position(),
+                );
+            }
+        }
+
+        if let Some(rt) = right_type {
+            if rt != DataType::Int {
+                self.add_error(
+                    result,
+                    "QFUNC031",
+                    "NON_INT_BITWISE_OPERAND",
+                    &format!(
+                        "Bitwise operator '{}' requires int type, got {:?} in function '{}'",
+                        operator, rt, func.name
+                    ),
+                    "Convert to int or use arithmetic operators instead",
+                    right.position(),
+                );
+            }
+        }
+    }
+
+    fn validate_comparison_op_expression(
+        &self,
+        left: &Expression,
+        right: &Expression,
+        operator: &str,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        if !VALID_COMPARISON_OPERATORS.contains(operator) {
+            self.add_error(
+                result,
+                "QFUNC032",
+                "INVALID_COMPARISON_OPERATOR",
+                &format!(
+                    "Invalid comparison operator '{}' in function '{}'",
+                    operator, func.name
+                ),
+                "Valid operators: ==, !=, >, <, >=, <=",
+                left.position(),
+            );
+            return;
+        }
+
+        self.validate_expression(left, func, symbol_table, local_scope, result);
+        self.validate_expression(right, func, symbol_table, local_scope, result);
+
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
+        let left_type = type_inference_visitor.infer_type_from_expression(left);
+        let right_type = type_inference_visitor.infer_type_from_expression(right);
+
+        if let (Some(lt), Some(rt)) = (left_type, right_type) {
+            if operator == "==" || operator == "!=" {
+                if !Self::are_types_comparable(lt, rt) {
+                    self.add_warning(
+                        result,
+                        "QFUNC_WARN002",
+                        &format!(
+                            "Comparing incompatible types {:?} and {:?} in function '{}'",
+                            lt, rt, func.name
+                        ),
+                        "QUICKFUNCS",
+                        left.position(),
+                    );
+                }
+                return;
+            }
+
+            if !Self::is_numeric_type(lt) || !Self::is_numeric_type(rt) {
+                self.add_error(
+                    result,
+                    "QFUNC033",
+                    "NON_NUMERIC_COMPARISON",
+                    &format!(
+                        "Comparison operator '{}' requires numeric types, got {:?} and {:?} in function '{}'",
+                        operator, lt, rt, func.name
+                    ),
+                    "Use numeric types (int, float, double) for relational comparisons",
+                    left.position(),
+                );
+            }
+        }
+    }
+
+    fn validate_logical_op_expression(
+        &self,
+        left: &Expression,
+        right: &Expression,
+        operator: &str,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        if !VALID_LOGICAL_OPERATORS.contains(operator) {
+            self.add_error(
+                result,
+                "QFUNC034",
+                "INVALID_LOGICAL_OPERATOR",
+                &format!(
+                    "Invalid logical operator '{}' in function '{}'",
+                    operator, func.name
+                ),
+                "Valid operators: &&, ||, and, or",
+                left.position(),
+            );
+            return;
+        }
+
+        self.validate_expression(left, func, symbol_table, local_scope, result);
+        self.validate_expression(right, func, symbol_table, local_scope, result);
+
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
+        let left_type = type_inference_visitor.infer_type_from_expression(left);
+        let right_type = type_inference_visitor.infer_type_from_expression(right);
+
+        if let Some(lt) = left_type {
+            if lt != DataType::Bool {
+                self.add_error(
+                    result,
+                    "QFUNC035",
+                    "NON_BOOL_LOGICAL_OPERAND",
+                    &format!(
+                        "Logical operator '{}' requires bool type, got {:?} in function '{}'",
+                        operator, lt, func.name
+                    ),
+                    "Use comparison operators to create boolean values",
+                    left.position(),
+                );
+            }
+        }
+
+        if let Some(rt) = right_type {
+            if rt != DataType::Bool {
+                self.add_error(
+                    result,
+                    "QFUNC036",
+                    "NON_BOOL_LOGICAL_OPERAND",
+                    &format!(
+                        "Logical operator '{}' requires bool type, got {:?} in function '{}'",
+                        operator, rt, func.name
+                    ),
+                    "Use comparison operators to create boolean values",
+                    right.position(),
+                );
+            }
+        }
+    }
+
+    fn validate_unary_op_expression(
+        &self,
+        operand: &Expression,
+        operator: &str,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        if !VALID_UNARY_OPERATORS.contains(operator) {
+            self.add_error(
+                result,
+                "QFUNC037",
+                "INVALID_UNARY_OPERATOR",
+                &format!(
+                    "Invalid unary operator '{}' in function '{}'",
+                    operator, func.name
+                ),
+                "Valid operators: !, not, -, +, ~?",
+                operand.position(),
+            );
+            return;
+        }
+
+        self.validate_expression(operand, func, symbol_table, local_scope, result);
+
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
+        let operand_type = type_inference_visitor.infer_type_from_expression(operand);
+
+        if let Some(ot) = operand_type {
+            if operator == "!" || operator == "not" {
+                if ot != DataType::Bool {
+                    self.add_error(
+                        result,
+                        "QFUNC038",
+                        "NON_BOOL_NOT_OPERAND",
+                        &format!(
+                            "Logical NOT requires bool type, got {:?} in function '{}'",
+                            ot, func.name
+                        ),
+                        "Use comparison to create boolean value",
+                        operand.position(),
+                    );
+                }
+            } else if operator == "~?" {
+                if ot != DataType::Int {
+                    self.add_error(
+                        result,
+                        "QFUNC039",
+                        "NON_INT_BITWISE_NOT",
+                        &format!(
+                            "Bitwise NOT (~?) requires int type, got {:?} in function '{}'",
+                            ot, func.name
+                        ),
+                        "Convert to int before using bitwise NOT",
+                        operand.position(),
+                    );
+                }
+            } else if operator == "-" || operator == "+" {
+                if !Self::is_numeric_type(ot) {
+                    self.add_error(
+                        result,
+                        "QFUNC040",
+                        "NON_NUMERIC_UNARY",
+                        &format!(
+                            "Unary '{}' requires numeric type, got {:?} in function '{}'",
+                            operator, ot, func.name
+                        ),
+                        "Use numeric types (int, float, double)",
+                        operand.position(),
+                    );
+                }
+            }
+        }
+    }
+
+    fn validate_conditional_expression(
+        &self,
+        condition: &Expression,
+        true_value: &Expression,
+        false_value: &Expression,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        self.validate_expression(condition, func, symbol_table, local_scope, result);
+
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
+        let condition_type = type_inference_visitor.infer_type_from_expression(condition);
+
+        if let Some(ct) = condition_type {
+            if ct != DataType::Bool {
+                self.add_error(
+                    result,
+                    "QFUNC041",
+                    "NON_BOOL_TERNARY_CONDITION",
+                    &format!(
+                        "Ternary condition must be bool, got {:?} in function '{}'",
+                        ct, func.name
+                    ),
+                    "Use comparison operators to create boolean condition",
+                    condition.position(),
+                );
+            }
+        }
+
+        self.validate_expression(true_value, func, symbol_table, local_scope, result);
+        self.validate_expression(false_value, func, symbol_table, local_scope, result);
+
+        let true_type = type_inference_visitor.infer_type_from_expression(true_value);
+        let false_type = type_inference_visitor.infer_type_from_expression(false_value);
+
+        if let (Some(tt), Some(ft)) = (true_type, false_type) {
+            if !Self::are_types_comparable(tt, ft) {
+                self.add_warning(
+                    result,
+                    "QFUNC_WARN003",
+                    &format!(
+                        "Ternary branches have incompatible types: {:?} and {:?} in function '{}'",
+                        tt, ft, func.name
+                    ),
+                    "QUICKFUNCS",
+                    condition.position(),
+                );
+            }
+        }
+    }
+
+    // Function call validations
+    fn validate_quick_func_call(
+        &self,
+        name: &str,
+        arguments: &[Expression],
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        // Check if it's a lambda invocation (local variable)
+        if local_scope.has_variable(name) {
+            if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                self.error_manager.log_debug(&format!(
+                    "    Lambda invocation detected: {}()",
+                    name
+                ));
+            }
+
+            for arg in arguments {
+                self.validate_expression(arg, func, symbol_table, local_scope, result);
+            }
+            return;
+        }
+
+        // Real function call
+        if !symbol_table.has_function(name) {
+            self.add_error(
+                result,
+                "QFUNC042",
+                "FUNCTION_NOT_FOUND",
+                &format!("Function '{}' is not defined in @QUICKFUNCS", name),
+                "Define function in @QUICKFUNCS section or check spelling",
+                Position::UNKNOWN,
+            );
+            return;
+        }
+
+        if let Some(func_sig) = symbol_table.try_get_function(name) {
+            let expected_param_count = func_sig.parameters.len();
+            let actual_arg_count = arguments.len();
+
+            if actual_arg_count != expected_param_count {
+                self.add_error(
+                    result,
+                    "QFUNC043",
+                    "WRONG_ARGUMENT_COUNT",
+                    &format!(
+                        "Function '{}' expects {} arguments, got {}",
+                        name, expected_param_count, actual_arg_count
+                    ),
+                    &format!("Check function signature: {}", func_sig),
+                    Position::UNKNOWN,
+                );
+            }
+        }
+
+        for arg in arguments {
+            self.validate_expression(arg, func, symbol_table, local_scope, result);
+        }
+    }
+
+    fn validate_imported_function_call(
+        &self,
+        namespace_name: &str,
+        function_name: &str,
+        arguments: &[Expression],
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            self.error_manager.log_debug(&format!(
+                "    Validating imported function: {}.{}()",
+                namespace_name, function_name
+            ));
+        }
+
+        // Check if it's actually a local variable (instance method call)
+        if local_scope.has_variable(namespace_name) {
+            if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                self.error_manager.log_debug(&format!(
+                    "    '{}' is a local variable, treating as instance method call",
+                    namespace_name
+                ));
+            }
+
+            for arg in arguments {
+                self.validate_expression(arg, func, symbol_table, local_scope, result);
+            }
+            return;
+        }
+
+        if !symbol_table.is_imported_namespace(namespace_name) {
+            self.add_error(
+                result,
+                "QFUNC044",
+                "NAMESPACE_NOT_FOUND",
+                &format!(
+                    "Namespace '{}' not found. Did you import it in @IMPORTS?",
+                    namespace_name
+                ),
+                &format!(
+                    "Add to @IMPORTS: {} from \"path/to/file.mdix\"",
+                    namespace_name
+                ),
+                Position::UNKNOWN,
+            );
+            return;
+        }
+
+        let func_info = symbol_table.get_namespaced_function(namespace_name, function_name);
+        if func_info.is_none() {
+            if let Some(ns) = symbol_table.try_get_namespace(namespace_name) {
+                let available_funcs: Vec<&String> = ns.functions.keys().collect();
+                self.add_error(
+                    result,
+                    "QFUNC045",
+                    "IMPORTED_FUNCTION_NOT_FOUND",
+                    &format!(
+                        "Function '{}' not found in namespace '{}'",
+                        function_name, namespace_name
+                    ),
+                    &format!("Available functions: {}", available_funcs.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")),
+                    Position::UNKNOWN,
+                );
+            } else {
+                self.add_error(
+                    result,
+                    "QFUNC045",
+                    "IMPORTED_FUNCTION_NOT_FOUND",
+                    &format!(
+                        "Function '{}' not found in namespace '{}'",
+                        function_name, namespace_name
+                    ),
+                    "",
+                    Position::UNKNOWN,
+                );
+            }
+            return;
+        }
+
+        let function_sig = &func_info.unwrap().signature;
+        let expected_param_count = function_sig.parameters.len();
+        let actual_param_count = arguments.len();
+
+        if actual_param_count != expected_param_count {
+            self.add_error(
+                result,
+                "QFUNC046",
+                "PARAMETER_COUNT_MISMATCH",
+                &format!(
+                    "Function '{}.{}' expects {} parameter(s) but got {}",
+                    namespace_name, function_name, expected_param_count, actual_param_count
+                ),
+                &format!("Expected: {}", function_sig),
+                Position::UNKNOWN,
+            );
+        }
+
+        for arg in arguments {
+            self.validate_expression(arg, func, symbol_table, local_scope, result);
+        }
+
+        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            self.error_manager.log_debug(&format!(
+                "    Imported function validated: {}.{}() returns {:?}",
+                namespace_name, function_name, function_sig.return_type
+            ));
+        }
+    }
+
+    fn validate_instance_method_call(
+        &self,
+        instance: &Expression,
+        method_name: &str,
+        arguments: &[Expression],
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        let chain_depth = Self::count_method_chain_depth(instance);
+        if chain_depth > MAX_METHOD_CHAIN_DEPTH {
+            self.add_error(
+                result,
+                "QFUNC066",
+                "METHOD_CHAIN_TOO_DEEP",
+                &format!(
+                    "Method chain depth ({}) exceeds maximum of {} in function '{}'",
+                    chain_depth, MAX_METHOD_CHAIN_DEPTH, func.name
+                ),
+                "Break up the method chain into intermediate variables",
+                instance.position(),
+            );
+            return;
+        }
+
+        self.validate_expression(instance, func, symbol_table, local_scope, result);
+
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
+        let instance_type = type_inference_visitor.infer_type_from_expression(instance);
+
+        if let Some(inst_type) = instance_type {
+            let dix_type = Self::convert_data_type_to_dix_type(inst_type);
+
+            if let Some(dt) = dix_type {
+                if !has_instance_method(dt, method_name) {
+                    self.add_error(
+                        result,
+                        "QFUNC047",
+                        "INSTANCE_METHOD_NOT_FOUND",
+                        &format!("Type '{:?}' has no instance method '{}'", inst_type, method_name),
+                        &format!("Type '{:?}' has no such method", inst_type),
+                        instance.position(),
+                    );
+                }
+            }
+        } else if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            self.error_manager.log_debug(&format!(
+                "    Could not infer type for instance in method call: {}()",
+                method_name
+            ));
+        }
+
+        for arg in arguments {
+            self.validate_expression(arg, func, symbol_table, local_scope, result);
+        }
+    }
+
+    fn validate_static_method_call(
+        &self,
+        object_name: &str,
+        method_name: &str,
+        arguments: &[Expression],
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        if !has_static_object(object_name) {
+            self.add_error(
+                result,
+                "QFUNC049",
+                "STATIC_OBJECT_NOT_FOUND",
+                &format!("Static object '{}' is not defined", object_name),
+                "Available static objects: Math, DateTime, Array, Random, Enum, Guid, IpAddress, Dix",
+                Position::UNKNOWN,
+            );
+        } else if !has_static_method(object_name, method_name) {
+            self.add_error(
+                result,
+                "QFUNC050",
+                "STATIC_METHOD_NOT_FOUND",
+                &format!(
+                    "Static object '{}' has no method '{}'",
+                    object_name, method_name
+                ),
+                "",
+                Position::UNKNOWN,
+            );
+        }
+
+        for arg in arguments {
+            self.validate_expression(arg, func, symbol_table, local_scope, result);
+        }
+    }
+
+    fn validate_enum_access(
+        &self,
+        namespace_name: Option<&str>,
+        enum_name: &str,
+        value: &str,
+        function_name: &str,
+        symbol_table: &SymbolTable,
+        result: &mut SectionAnalysisResult,
+        position: Position,
+    ) {
+        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            let full_name = if let Some(ns) = namespace_name {
+                format!("{}.{}.{}", ns, enum_name, value)
+            } else {
+                format!("{}.{}", enum_name, value)
+            };
+            self.error_manager.log_debug(&format!(
+                "    Validating enum access: {}",
+                full_name
+            ));
+        }
+
+        if let Some(ns) = namespace_name {
+            // Imported enum
+            let enum_fields = symbol_table.get_namespaced_enum(ns, enum_name);
+            if enum_fields.is_none() {
+                if let Some(namespace) = symbol_table.try_get_namespace(ns) {
+                    let available_enums: Vec<&String> = namespace.enums.keys().collect();
+                    let suggestion = if available_enums.is_empty() {
+                        String::new()
+                    } else {
+                        format!("Available enums: {}", available_enums.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
+                    };
+
+                    self.add_error(
+                        result,
+                        "QFUNC055",
+                        "IMPORTED_ENUM_NOT_FOUND",
+                        &format!("Enum '{}' not found in namespace '{}'", enum_name, ns),
+                        &suggestion,
+                        position,
+                    );
+                } else {
+                    self.add_error(
+                        result,
+                        "QFUNC055",
+                        "IMPORTED_ENUM_NOT_FOUND",
+                        &format!("Enum '{}' not found in namespace '{}'", enum_name, ns),
+                        "",
+                        position,
+                    );
+                }
+                return;
+            }
+
+            if !enum_fields.unwrap().contains_key(value) {
+                let valid_values: Vec<&String> = enum_fields.unwrap().keys().collect();
+                self.add_error(
+                    result,
+                    "QFUNC056",
+                    "ENUM_VALUE_NOT_FOUND",
+                    &format!(
+                        "Enum '{}.{}' does not have value '{}'",
+                        ns, enum_name, value
+                    ),
+                    &format!("Valid values: {}", valid_values.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")),
+                    position,
+                );
+            }
+        } else {
+            // Local enum
+            if !symbol_table.has_enum(enum_name) {
+                self.add_error(
+                    result,
+                    "QFUNC052",
+                    "ENUM_NOT_FOUND",
+                    &format!("Enum '{}' not defined in @ENUMS section", enum_name),
+                    "Define enum in @ENUMS section or check spelling",
+                    position,
+                );
+                return;
+            }
+
+            if !symbol_table.has_enum_field(enum_name, value) {
+                if let Some(fields) = symbol_table.try_get_enum(enum_name) {
+                    let valid_values: Vec<&String> = fields.keys().collect();
+                    self.add_error(
+                        result,
+                        "QFUNC053",
+                        "ENUM_VALUE_NOT_FOUND",
+                        &format!("Enum '{}' does not have value '{}'", enum_name, value),
+                        &format!("Valid values: {}", valid_values.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")),
+                        position,
+                    );
+                }
+            }
+        }
+    }
+
+    // ==================== VALUE VALIDATION ====================
+
+    fn validate_value(
+        &self,
+        value: &Value,
+        func: &QuickFunction,
+        symbol_table: &SymbolTable,
+        local_scope: &LocalScopeTracker,
+        result: &mut SectionAnalysisResult,
+    ) {
+        match value {
+            Value::Array { values, .. } => {
+                if values.len() > MAX_ARRAY_ELEMENTS {
+                    self.add_error(
+                        result,
+                        "QFUNC057",
+                        "ARRAY_TOO_LARGE",
+                        &format!(
+                            "Array has {} elements, exceeds limit of {}",
+                            values.len(),
+                            MAX_ARRAY_ELEMENTS
+                        ),
+                        &format!("Reduce array size to {} or fewer elements", MAX_ARRAY_ELEMENTS),
+                        value.position(),
+                    );
+                }
+
+                self.validate_array_homogeneity(values, &func.name, local_scope, symbol_table, result, value.position());
+
+                for item in values {
+                    self.validate_value(item, func, symbol_table, local_scope, result);
+                }
+            }
+
+            Value::Object { properties, .. } => {
+                self.validate_object_literal_keys(value, &func.name, result);
+
+                if properties.len() > MAX_OBJECT_PROPERTIES {
+                    self.add_error(
+                        result,
+                        "QFUNC058",
+                        "OBJECT_TOO_LARGE",
+                        &format!(
+                            "Object has {} properties, exceeds limit of {}",
+                            properties.len(),
+                            MAX_OBJECT_PROPERTIES
+                        ),
+                        &format!(
+                            "Reduce object size to {} or fewer properties",
+                            MAX_OBJECT_PROPERTIES
+                        ),
+                        value.position(),
+                    );
+                }
+
+                for prop in properties {
+                    self.validate_value(&prop.value, func, symbol_table, local_scope, result);
+                }
+            }
+
+            Value::PrefixedConstructor { prefix, arguments, .. } => {
+                if prefix.eq_ignore_ascii_case("t") && arguments.len() > MAX_TUPLE_ARGUMENTS {
+                    self.add_error(
+                        result,
+                        "QFUNC059",
+                        "TUPLE_TOO_LARGE",
+                        &format!(
+                            "Tuple has {} arguments, exceeds limit of {}",
+                            arguments.len(),
+                            MAX_TUPLE_ARGUMENTS
+                        ),
+                        &format!(
+                            "Reduce tuple size to {} or fewer arguments",
+                            MAX_TUPLE_ARGUMENTS
+                        ),
+                        value.position(),
+                    );
+                }
+
+                for arg in arguments {
+                    self.validate_value(arg, func, symbol_table, local_scope, result);
+                }
+            }
+
+            Value::InterpolatedString { expressions, .. } => {
+                for expr in expressions {
+                    self.validate_expression(expr, func, symbol_table, local_scope, result);
+                }
+            }
+
+            Value::Expression { expr, .. } => {
+                self.validate_expression(expr, func, symbol_table, local_scope, result);
+            }
+
+            Value::Lambda { .. } => {
+                // Lambda validation happens elsewhere
+            }
+
+            _ => {}
+        }
+    }
+
+    fn validate_array_homogeneity(
+        &self,
+        values: &[Value],
+        function_name: &str,
+        local_scope: &LocalScopeTracker,
+        symbol_table: &SymbolTable,
+        result: &mut SectionAnalysisResult,
+        position: Position,
+    ) {
+        if values.is_empty() {
+            return;
+        }
+
+        let local_variable_types = local_scope.get_all_variable_types();
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, Some(local_variable_types));
+
+        let first_type = type_inference_visitor.infer_type_from_value(&values[0]);
+
+        if first_type.is_none() {
+            if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                self.error_manager.log_debug(
+                    "    Cannot infer type of first array element - skipping homogeneity check"
+                );
+            }
+            return;
+        }
+
+        let first_type = first_type.unwrap();
+
+        for (i, element) in values.iter().enumerate().skip(1) {
+            let element_type = type_inference_visitor.infer_type_from_value(element);
+
+            if let Some(elem_type) = element_type {
+                if !Self::are_types_compatible_strict(elem_type, first_type) {
+                    self.add_error(
+                        result,
+                        "QFUNC077",
+                        "ARRAY_HETEROGENEOUS",
+                        &format!(
+                            "Array element {} has type {:?} but array expects {:?} (from first element)",
+                            i + 1,
+                            elem_type,
+                            first_type
+                        ),
+                        &format!(
+                            "All array elements must have the same type. Convert element to {:?} or use separate arrays",
+                            first_type
+                        ),
+                        position,
+                    );
+                }
+            } else {
+                self.add_warning(
+                    result,
+                    "QFUNC_WARN008",
+                    &format!(
+                        "Cannot infer type of array element {} in function '{}'",
+                        i + 1,
+                        function_name
+                    ),
+                    "QUICKFUNCS",
+                    position,
+                );
+            }
+        }
+
+        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            self.error_manager.log_debug(&format!(
+                "    Array homogeneity validated: all {} elements are {:?}",
+                values.len(),
+                first_type
+            ));
+        }
+    }
+
+    fn validate_object_literal_keys(
+        &self,
+        object: &Value,
+        function_name: &str,
+        result: &mut SectionAnalysisResult,
+    ) {
+        let properties = match object {
+            Value::Object { properties, .. } => properties,
+            _ => return,
+        };
+
+        if properties.is_empty() {
+            return;
+        }
+
+        let mut seen_keys = FxHashSet::default();
+        let mut duplicate_keys = FxHashSet::default();
+
+        for prop in properties {
+            if !seen_keys.insert(&prop.key) {
+                duplicate_keys.insert(&prop.key);
+
+                self.add_error(
+                    result,
+                    "QFUNC060",
+                    "DUPLICATE_OBJECT_KEY",
+                    &format!("Duplicate object key '{}' in function '{}'", prop.key, function_name),
+                    &format!(
+                        "Each key in an object must be unique. Remove or rename duplicate key '{}'",
+                        prop.key
+                    ),
+                    prop.position,
+                );
+            }
+        }
+    }
+
+    // ==================== TYPE SYSTEM METHODS ====================
+
+    #[inline]
+    fn are_types_compatible_strict(source_type: DataType, target_type: DataType) -> bool {
+        if source_type == target_type {
+            return true;
+        }
+
+        if target_type == DataType::Any || source_type == DataType::Any {
+            return true;
+        }
+
+        if Self::is_numeric_type(source_type) && Self::is_numeric_type(target_type) {
+            return true;
+        }
+
+        if (source_type == DataType::Date && target_type == DataType::Timestamp)
+            || (source_type == DataType::Timestamp && target_type == DataType::Date)
+        {
+            return true;
+        }
+
+        false
+    }
+
+    #[inline]
+    fn are_types_comparable(type1: DataType, type2: DataType) -> bool {
+        if type1 == type2 {
+            return true;
+        }
+
+        if type1 == DataType::Any || type2 == DataType::Any {
+            return true;
+        }
+
+        if Self::is_numeric_type(type1) && Self::is_numeric_type(type2) {
+            return true;
+        }
+
+        if (type1 == DataType::Date || type1 == DataType::Timestamp)
+            && (type2 == DataType::Date || type2 == DataType::Timestamp)
+        {
+            return true;
+        }
+
+        false
+    }
+
+    #[inline]
+    fn is_numeric_type(data_type: DataType) -> bool {
+        matches!(
+            data_type,
+            DataType::Int | DataType::Float | DataType::Double
+        )
+    }
+
+    fn validate_arithmetic_operation(
+        &self,
+        op: &str,
+        left_type: DataType,
+        right_type: DataType,
+        function_name: &str,
+        result: &mut SectionAnalysisResult,
+        position: Position,
+    ) {
+        if op == "+=" {
+            if left_type == DataType::String && right_type == DataType::String {
+                return;
+            }
+
+            if left_type == DataType::String || right_type == DataType::String {
+                self.add_error(
+                    result,
+                    "QFUNC061",
+                    "INVALID_STRING_CONCAT_ASSIGN",
+                    &format!(
+                        "Cannot use '+=' to concatenate string with non-string in function '{}'",
+                        function_name
+                    ),
+                    "Use only string += string, or convert to string first",
+                    position,
+                );
+                return;
+            }
+        }
+
+        if !Self::is_numeric_type(left_type) {
+            self.add_error(
+                result,
+                "QFUNC062",
+                "NON_NUMERIC_ARITHMETIC_ASSIGN",
+                &format!(
+                    "Arithmetic assignment '{}' requires numeric type, left operand is {:?}",
+                    op, left_type
+                ),
+                "Use int, float, or double types",
+                position,
+            );
+        }
+
+        if !Self::is_numeric_type(right_type) {
+            self.add_error(
+                result,
+                "QFUNC063",
+                "NON_NUMERIC_ARITHMETIC_ASSIGN",
+                &format!(
+                    "Arithmetic assignment '{}' requires numeric type, right operand is {:?}",
+                    op, right_type
+                ),
+                "Use int, float, or double types",
+                position,
+            );
+        }
+
+        if matches!(op, "&=" | "|=" | "^=" | "<<=" | ">>=") {
+            if left_type != DataType::Int {
+                self.add_error(
+                    result,
+                    "QFUNC064",
+                    "NON_INT_BITWISE_ASSIGN",
+                    &format!("Bitwise assignment '{}' requires int type, got {:?}", op, left_type),
+                    "Convert to int before using bitwise assignment",
+                    position,
+                );
+            }
+
+            if right_type != DataType::Int {
+                self.add_error(
+                    result,
+                    "QFUNC065",
+                    "NON_INT_BITWISE_ASSIGN",
+                    &format!("Bitwise assignment '{}' requires int type, got {:?}", op, right_type),
+                    "Convert to int before using bitwise assignment",
+                    position,
+                );
+            }
+        }
+    }
+
+    fn convert_data_type_to_dix_type(data_type: DataType) -> Option<DixType> {
+        match data_type {
+            DataType::Int => Some(DixType::Int),
+            DataType::Float => Some(DixType::Float),
+            DataType::Double => Some(DixType::Double),
+            DataType::String => Some(DixType::String),
+            DataType::Bool => Some(DixType::Bool),
+            DataType::Array => Some(DixType::Array),
+            DataType::Tuple => Some(DixType::Tuple),
+            DataType::Object => Some(DixType::Object),
+            DataType::Hex => Some(DixType::Hex),
+            DataType::Blob => Some(DixType::Blob),
+            DataType::Regex => Some(DixType::Regex),
+            DataType::Date => Some(DixType::Date),
+            DataType::Timestamp => Some(DixType::Timestamp),
+            DataType::Enum => Some(DixType::Enum),
+            DataType::Any | DataType::Function | DataType::Range => None,
+        }
+    }
+
+    fn count_method_chain_depth(expr: &Expression) -> usize {
+        let mut depth = 0;
+        let mut current = expr;
+
+        loop {
+            match current {
+                Expression::InstanceMethodCall { instance, .. } => {
+                    depth += 1;
+                    current = instance;
+                }
+                Expression::PropertyAccess { object, .. } => {
+                    depth += 1;
+                    current = object;
+                }
+                _ => break,
+            }
+        }
+
+        depth
+    }
+
+    // ==================== SYMBOL TABLE POPULATION ====================
+
+    fn populate_symbol_table(
+        &self,
+        section: &QuickFuncsSection,
+        symbol_table: &mut SymbolTable,
+        duplicate_functions: &FxHashSet<&String>,
+        _result: &mut SectionAnalysisResult,
+    ) {
+        let mut success_count = 0;
+        let skip_count = duplicate_functions.len();
+
+        for func in &section.functions {
+            if duplicate_functions.contains(&func.name) {
+                continue;
+            }
+
+            let parameter_info: Vec<ParameterInfo> = func
+                .parameters
+                .iter()
+                .filter(|p| Self::is_valid_identifier(&p.name))
+                .map(|p| ParameterInfo {
+                    name: p.name.clone(),
+                    param_type: p.data_type,
+                    has_default_value: p.default_value.is_some(),
+                    default_value: p.default_value.clone(),
+                })
+                .collect();
+
+            let scopes = if let Some(ref scope_list) = func.scope_list {
+                scope_list.clone()
+            } else {
+                Vec::new()
+            };
+
+            let signature = FunctionSignature {
+                name: func.name.clone(),
+                return_type: func.return_type,
+                parameters: parameter_info,
+                scopes,
+                line: func.position.line as i32,
+                column: func.position.column as i32,
+            };
+
+            symbol_table.add_function(func.name.clone(), signature);
+            success_count += 1;
+
+            if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                self.error_manager.log_debug(&format!(
+                    "    Pre-registered function '{}' in symbol table",
+                    func.name
+                ));
+            }
+        }
+
+        if self.operational_settings.debug_mode >= DebugMode::Regular {
+            self.error_manager.log_info(&format!(
+                "Symbol table populated: {} functions added, {} skipped",
+                success_count, skip_count
+            ));
+        }
+    }
+
+    // ==================== HELPER METHODS ====================
+
+    #[inline]
+    fn is_valid_identifier(name: &str) -> bool {
+        if name.is_empty() {
+            return false;
+        }
+
+        let mut chars = name.chars();
+        let first = chars.next().unwrap();
+
+        if !first.is_ascii_alphabetic() && first != '_' {
+            return false;
+        }
+
+        chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }
+
+    #[inline]
+    fn is_valid_data_path(path: &str) -> bool {
+        if path.is_empty() {
+            return false;
+        }
+
+        path.split('.').all(|segment| {
+            !segment.is_empty() && Self::is_valid_identifier(segment)
+        })
+    }
+
+    #[inline]
+    fn is_valid_value_expression(expr: &Expression) -> bool {
+        !matches!(
+            expr,
+            Expression::ArithmeticOp { .. }
+                | Expression::ComparisonOp { .. }
+                | Expression::LogicalOp { .. }
+        )
+    }
+
+    #[inline]
+    fn should_halt(&self, result: &SectionAnalysisResult) -> bool {
+        !result.errors.is_empty()
+            && matches!(
+                self.operational_settings.error_handling_strategy,
+                ErrorHandlingStrategy::Halt
+            )
+    }
+
+    // ==================== ERROR/WARNING HELPERS ====================
+
+    #[inline]
+    fn add_error(
+        &self,
+        result: &mut SectionAnalysisResult,
+        error_id: &str,
+        error_type: &str,
+        message: &str,
+        suggestion: &str,
+        position: Position,
+    ) {
+        let error = SemanticErrorInfo {
+            error_id: error_id.to_string(),
+            error_type: error_type.to_string(),
+            message: message.to_string(),
+            section_name: "QUICKFUNCS".to_string(),
+            suggestion: suggestion.to_string(),
+            position: Some(position),
+        };
+
+        result.errors.push(error.clone());
+
+        if self.operational_settings.debug_mode >= DebugMode::Regular {
+            self.error_manager.log_error(&format!(
+                "[{}] {}: {}",
+                error_id, error_type, message
+            ));
+        }
+    }
+
+    #[inline]
+    fn add_warning(
+        &self,
+        result: &mut SectionAnalysisResult,
+        warning_id: &str,
+        message: &str,
+        section_name: &str,
+        position: Position,
+    ) {
+        let warning = SemanticWarningInfo {
+            warning_id: warning_id.to_string(),
+            message: message.to_string(),
+            section_name: section_name.to_string(),
+            position: Some(position),
+        };
+
+        result.warnings.push(warning);
+
+        if self.operational_settings.debug_mode >= DebugMode::Regular {
+            self.error_manager.log_debug(&format!("[{}] {}", warning_id, message));
+        }
+    }
+}
+
+// ==================== HELPER STRUCTS ====================
+
+/// Tracks local variables and parameters in function scope
+struct LocalScopeTracker {
+    variables: FxHashMap<String, VariableInfo>,
+    parameters: FxHashSet<String>,
+}
+
+impl LocalScopeTracker {
+    fn new(func_parameters: &[QuickFuncParam]) -> Self {
+        let mut variables = FxHashMap::default();
+        let mut parameters = FxHashSet::default();
+
+        for param in func_parameters {
+            parameters.insert(param.name.clone());
+            variables.insert(
+                param.name.clone(),
+                VariableInfo {
+                    name: param.name.clone(),
+                    var_type: param.data_type,
+                    is_const: true,
+                    is_parameter: true,
+                },
+            );
+        }
+
+        LocalScopeTracker {
+            variables,
+            parameters,
+        }
+    }
+
+    fn add_variable(&mut self, name: String, var_type: Option<DataType>, is_const: bool) {
+        self.variables.insert(
+            name.clone(),
+            VariableInfo {
+                name,
+                var_type,
+                is_const,
+                is_parameter: false,
+            },
+        );
+    }
+
+    fn has_variable(&self, name: &str) -> bool {
+        self.variables.contains_key(name)
+    }
+
+    fn has_parameter(&self, name: &str) -> bool {
+        self.parameters.contains(name)
+    }
+
+    fn is_const(&self, name: &str) -> bool {
+        self.variables
+            .get(name)
+            .map(|v| v.is_const)
+            .unwrap_or(false)
+    }
+
+    fn get_variable_type(&self, name: &str) -> Option<DataType> {
+        self.variables.get(name).and_then(|v| v.var_type)
+    }
+
+    fn update_variable_type(&mut self, name: &str, var_type: DataType) {
+        if let Some(var_info) = self.variables.get_mut(name) {
+            if var_info.var_type.is_none() {
+                var_info.var_type = Some(var_type);
+            }
+        }
+    }
+
+    fn get_declared_variable_names(&self) -> impl Iterator<Item = &String> {
+        self.variables
+            .values()
+            .filter(|v| !v.is_parameter)
+            .map(|v| &v.name)
+    }
+
+    fn get_all_variable_types(&self) -> HashMap<String, Option<DataType>> {
+        self.variables
+            .iter()
+            .map(|(k, v)| (k.clone(), v.var_type))
+            .collect()
+    }
+}
+
+#[derive(Clone)]
+struct VariableInfo {
+    name: String,
+    var_type: Option<DataType>,
+    is_const: bool,
+    is_parameter: bool,
+}
+
+/// Analyzes return paths in function
+struct ReturnPathAnalyzer {
+    _expected_return_type: DataType,
+    has_unconditional_return: bool,
+}
+
+impl ReturnPathAnalyzer {
+    fn new(expected_return_type: DataType) -> Self {
+        ReturnPathAnalyzer {
+            _expected_return_type: expected_return_type,
+            has_unconditional_return: false,
+        }
+    }
+
+    fn add_return(&mut self) {
+        self.has_unconditional_return = true;
+    }
+
+    fn all_paths_return(&self) -> bool {
+        self.has_unconditional_return
+    }
+}
+
+/// Collects variable references in function
+struct VariableReferenceCollector {
+    referenced_variables: FxHashSet<String>,
+    parameters: FxHashSet<String>,
+}
+
+impl VariableReferenceCollector {
+    fn new(func_parameters: &[QuickFuncParam]) -> Self {
+        let parameters: FxHashSet<String> = func_parameters
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+
+        VariableReferenceCollector {
+            referenced_variables: FxHashSet::default(),
+            parameters,
+        }
+    }
+
+    fn collect_from_function(&mut self, func: &QuickFunction) -> FxHashSet<String> {
+        for statement in &func.body {
+            self.collect_from_statement(statement);
+        }
+        self.referenced_variables.clone()
+    }
+
+    fn collect_from_statement(&mut self, statement: &QuickFuncStatement) {
+        match statement {
+            QuickFuncStatement::Return { value, .. } => {
+                self.collect_from_expression(value);
+            }
+            QuickFuncStatement::Assignment { value, .. } => {
+                self.collect_from_expression(value);
+            }
+            QuickFuncStatement::ArithmeticAssignment { variable, value, .. } => {
+                self.add_reference(variable);
+                self.collect_from_expression(value);
+            }
+            QuickFuncStatement::VariableDeclaration { value, .. } => {
+                self.collect_from_expression(value);
+            }
+            QuickFuncStatement::ObjectCreation { object, .. } => {
+                self.collect_from_value(object);
+            }
+            QuickFuncStatement::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.collect_from_expression(condition);
+                for stmt in then_branch {
+                    self.collect_from_statement(stmt);
+                }
+                if let Some(else_stmts) = else_branch {
+                    for stmt in else_stmts {
+                        self.collect_from_statement(stmt);
+                    }
+                }
+            }
+            QuickFuncStatement::Switch {
+                expression,
+                cases,
+                default_case,
+                ..
+            } => {
+                self.collect_from_expression(expression);
+                for case in cases {
+                    for stmt in &case.statements {
+                        self.collect_from_statement(stmt);
+                    }
+                }
+                if let Some(default) = default_case {
+                    for stmt in &default.statements {
+                        self.collect_from_statement(stmt);
+                    }
+                }
+            }
+            QuickFuncStatement::Log { value, .. } => {
+                self.collect_from_expression(value);
+            }
+            QuickFuncStatement::ExpressionStatement { expression, .. } => {
+                self.collect_from_expression(expression);
+            }
+        }
+    }
+
+    fn collect_from_expression(&mut self, expr: &Expression) {
+        match expr {
+            Expression::Identifier { name, .. } => {
+                self.add_reference(name);
+            }
+            Expression::QualifiedIdentifier { parts, arguments, .. } => {
+                if let Some(first) = parts.first() {
+                    self.add_reference(first);
+                }
+                if let Some(args) = arguments {
+                    for arg in args {
+                        self.collect_from_expression(arg);
+                    }
+                }
+            }
+            Expression::ArithmeticOp { left, right, .. }
+            | Expression::ComparisonOp { left, right, .. }
+            | Expression::LogicalOp { left, right, .. }
+            | Expression::BitwiseOp { left, right, .. } => {
+                self.collect_from_expression(left);
+                self.collect_from_expression(right);
+            }
+            Expression::UnaryOp { operand, .. } => {
+                self.collect_from_expression(operand);
+            }
+            Expression::Conditional {
+                condition,
+                true_value,
+                false_value,
+                ..
+            } => {
+                self.collect_from_expression(condition);
+                self.collect_from_expression(true_value);
+                self.collect_from_expression(false_value);
+            }
+            Expression::Parenthesized { expression, .. } => {
+                self.collect_from_expression(expression);
+            }
+            Expression::PropertyAccess { object, .. } => {
+                self.collect_from_expression(object);
+            }
+            Expression::IndexAccess { object, index, .. } => {
+                self.collect_from_expression(object);
+                self.collect_from_expression(index);
+            }
+            Expression::QuickFuncCall { arguments, .. }
+            | Expression::ImportedFunctionCall { arguments, .. }
+            | Expression::StaticMethodCall { arguments, .. } => {
+                for arg in arguments {
+                    self.collect_from_expression(arg);
+                }
+            }
+            Expression::InstanceMethodCall {
+                instance, arguments, ..
+            } => {
+                self.collect_from_expression(instance);
+                for arg in arguments {
+                    self.collect_from_expression(arg);
+                }
+            }
+            Expression::Value { value, .. } => {
+                self.collect_from_value(value);
+            }
+            Expression::TypeCast { expression, .. } => {
+                self.collect_from_expression(expression);
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_from_value(&mut self, value: &Value) {
+        match value {
+            Value::Array { values, .. } | Value::NestedArray { values, .. } => {
+                for item in values {
+                    self.collect_from_value(item);
+                }
+            }
+            Value::Object { properties, .. } => {
+                for prop in properties {
+                    self.collect_from_value(&prop.value);
+                }
+            }
+            Value::PrefixedConstructor { arguments, .. } => {
+                for arg in arguments {
+                    self.collect_from_value(arg);
+                }
+            }
+            Value::InterpolatedString { expressions, .. } => {
+                for expr in expressions {
+                    self.collect_from_expression(expr);
+                }
+            }
+            Value::QuickFuncCall { arguments, .. } => {
+                for arg in arguments {
+                    self.collect_from_expression(arg);
+                }
+            }
+            Value::Expression { expr, .. } => {
+                self.collect_from_expression(expr);
+            }
+            Value::Lambda { body, .. } => {
+                self.collect_from_expression(body);
+            }
+            Value::Range { start, end, .. } => {
+                self.collect_from_value(start);
+                self.collect_from_value(end);
+            }
+            Value::Identifier { value, .. } => {
+                self.add_reference(value);
+            }
+            _ => {}
+        }
+    }
+
+    fn add_reference(&mut self, name: &str) {
+        if !self.parameters.contains(name) {
+            self.referenced_variables.insert(name.to_string());
+        }
+    }
+}
 
 
     

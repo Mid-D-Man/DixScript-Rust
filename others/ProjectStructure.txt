@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Mon Feb  2 16:40:53 UTC 2026
+Generated: Mon Feb  2 17:15:38 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 7930ae61069e0af8e97b47b0c0adf4547b98125e
+Commit: d494cc64aa2e50284a1b00258214e6390a900d4d
 Branch: master
 ==================================
 
@@ -95,6 +95,7 @@ src/Compiler/Core/ValueResolution/execution_context.rs
 src/Compiler/Core/ValueResolution/function_interpreter.rs
 src/Compiler/Core/ValueResolution/mod.rs
 src/Compiler/Core/ValueResolution/supporting_classes.rs
+src/Compiler/Core/ValueResolution/value_resolver.rs
 src/Compiler/Core/general_ast_enhancer.rs
 src/Compiler/Core/general_parser.rs
 src/Compiler/Core/general_semantics_analyzer.rs
@@ -196,6 +197,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 155
+Source: 156
 Tests: 16
 Benches: 3

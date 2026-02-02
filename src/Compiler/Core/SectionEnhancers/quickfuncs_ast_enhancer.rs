@@ -1,4 +1,7 @@
 // src/Compiler/Core/SectionEnhancers/quickfuncs_ast_enhancer.rs
+
+/*
+
 //! Enhances QuickFunctions section with compile-time completions
 //! Primary tasks:
 //! 1. Generate parameter defaults from type annotations
@@ -180,3 +183,6 @@ impl QuickFunctionsAstEnhancer {
         self.start_time.map(|t| t.elapsed()).unwrap_or_default()
     }
   }
+
+
+ */

@@ -1,5 +1,5 @@
 // src/Compiler/Core/general_semantics_analyzer.rs
-
+/*
 use crate::Compiler::AST::*;
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::Compiler::Core::SectionAnalyzers::*;
@@ -173,7 +173,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
     fn analyze_phase0_version(&mut self) -> bool {
         self.log_info("Phase 0: Performing comprehensive version compatibility check");
 
-        let version_validation = VersionConstraints::instance().validate_script(self.ast);
+        let version_validation = VersionConstraints::Instance().validate_script(self.ast);
 
         if !version_validation.is_valid {
             self.log_error_fmt(|| format!(
@@ -777,3 +777,6 @@ pub struct SemanticWarningInfo {
     pub section_name: String,
     pub position: Option<Position>,
 }
+
+
+ */

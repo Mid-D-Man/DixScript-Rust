@@ -1,7 +1,6 @@
 // tests/tokenizer_tests.rs
 
-use dixscript::Compiler::Core::Tokenizer::{Tokenizer, TokenizationResult};
-use dixscript::Utilities::{Token, TokenType};
+use dixscript::Compiler::Core::Tokenizer::{Tokenizer, TokenizationResult,Token, TokenType};
 use dixscript::ErrorManager::ErrorManager;
 use std::time::Instant;
 

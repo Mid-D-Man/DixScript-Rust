@@ -1,4 +1,6 @@
 // src/Compiler/Core/general_ast_enhancer.rs
+/*
+
 //! Central AST enhancement orchestrator for DixScript v1.0.0
 //! Routes to section-specific enhancers
 //! Runs AFTER semantic analysis, BEFORE value resolution
@@ -199,3 +201,4 @@ pub struct SectionEnhancementInfo {
     pub enhancements_applied: usize,
     pub duration: Duration,
   }
+*/

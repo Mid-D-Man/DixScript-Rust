@@ -1,4 +1,7 @@
 // src/Compiler/Core/SectionEnhancers/qualified_identifier_resolver.rs
+
+/*
+
 //! Resolves QualifiedIdentifier nodes into concrete expression types
 //! Uses resolution metadata from semantic analysis
 
@@ -537,3 +540,6 @@ impl QualifiedIdentifierResolver {
         }
     }
   }
+
+
+ */

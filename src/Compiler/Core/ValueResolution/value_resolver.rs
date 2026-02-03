@@ -782,3 +782,877 @@ impl<'a> ValueResolver<'a> {
             _ => Ok((obj.clone(), 0, 0)),
         }
                                                  }
+    // ==================== PHASE 2: INITIAL DATA CONTEXT BUILD ====================
+
+    /// Walk all DATA entries and populate data_context with resolvable literals.
+    /// This gives the interpreter access to existing field values during execution.
+    fn build_initial_data_context(&mut self) {
+        let data_section = match &self.ast.data {
+            Some(data) => data,
+            None => return,
+        };
+
+        self.error_manager.create_scope("BuildInitialDataContext");
+
+        let mut context = self.data_context.borrow_mut();
+        let mut count = 0usize;
+
+        for entry in &data_section.entries {
+            count += Self::populate_context_from_entry(entry, &mut context);
+        }
+
+        drop(context); // Release borrow before any further self use
+
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info(&format!(
+                "[Phase 4.2] Populated data_context with {} literal value(s)",
+                count
+            ));
+        }
+
+        self.error_manager.exit_scope();
+    }
+
+    /// Extract all statically-resolvable values from a single DataEntry.
+    /// Returns the number of values inserted.
+    fn populate_context_from_entry(
+        entry: &DataEntry,
+        context: &mut HashMap<String, DixValue>,
+    ) -> usize {
+        let mut count = 0usize;
+
+        match entry {
+            DataEntry::SimpleProperty { name, value, .. } => {
+                let path = PathBuilder::data_root(name);
+                if let Some(dix_val) = Self::value_to_dix_value(value) {
+                    context.insert(path, dix_val);
+                    count += 1;
+                }
+            }
+
+            DataEntry::TableProperty { path: table_path, properties, .. } => {
+                let base = PathBuilder::from_table_path(table_path);
+                for prop in properties {
+                    let full_path = PathBuilder::append(&base, &prop.name);
+                    if let Some(dix_val) = Self::value_to_dix_value(&prop.value) {
+                        context.insert(full_path, dix_val);
+                        count += 1;
+                    }
+                }
+            }
+
+            DataEntry::GroupArray { path: group_path, items, .. } => {
+                let base = PathBuilder::from_table_path(group_path);
+                for (idx, item) in items.iter().enumerate() {
+                    let indexed_path = PathBuilder::index(&base, idx);
+
+                    // For object items, flatten each property into its own key
+                    if let Value::Object { properties, .. } = item {
+                        for prop in properties {
+                            let prop_path = PathBuilder::append(&indexed_path, &prop.key);
+                            if let Some(dix_val) = Self::value_to_dix_value(&prop.value) {
+                                context.insert(prop_path, dix_val);
+                                count += 1;
+                            }
+                        }
+                    }
+
+                    // Always store the item itself (object or scalar)
+                    if let Some(dix_val) = Self::value_to_dix_value(item) {
+                        context.insert(indexed_path, dix_val);
+                        count += 1;
+                    }
+                }
+            }
+
+            DataEntry::ObjectProperty { name, object, .. } => {
+                let base = PathBuilder::data_root(name);
+
+                // Flatten nested properties
+                if let Value::Object { properties, .. } = object {
+                    for prop in properties {
+                        let prop_path = PathBuilder::append(&base, &prop.key);
+                        if let Some(dix_val) = Self::value_to_dix_value(&prop.value) {
+                            context.insert(prop_path, dix_val);
+                            count += 1;
+                        }
+                    }
+                }
+
+                // Store the top-level object itself
+                if let Some(dix_val) = Self::value_to_dix_value(object) {
+                    context.insert(base, dix_val);
+                    count += 1;
+                }
+            }
+        }
+
+        count
+    }
+
+    /// Convert an AST Value → DixValue for context population.
+    /// Returns None if the value contains unresolvable nodes (calls, unresolved identifiers).
+    fn value_to_dix_value(value: &Value) -> Option<DixValue> {
+        match value {
+            Value::Integer { value: v, .. }  => Some(DixValue::Int(*v)),
+            Value::Float   { value: v, .. }  => Some(DixValue::Float(*v)),
+            Value::Str     { value: v, .. }  => Some(DixValue::Str(v.clone())),
+            Value::Boolean { value: v, .. }  => Some(DixValue::Bool(*v)),
+            Value::Null    { .. }            => Some(DixValue::Null),
+
+            Value::Array { values, .. } => {
+                let mut dix_values = Vec::with_capacity(values.len());
+                for v in values {
+                    dix_values.push(Self::value_to_dix_value(v)?); // Bail if any element unresolvable
+                }
+                Some(DixValue::Array(dix_values))
+            }
+
+            Value::Object { properties, .. } => {
+                let mut map = HashMap::with_capacity(properties.len());
+                for prop in properties {
+                    let dv = Self::value_to_dix_value(&prop.value)?;
+                    map.insert(prop.key.clone(), dv);
+                }
+                Some(DixValue::Object(map))
+            }
+
+            // Expressions, function calls, identifiers — not statically resolvable
+            _ => None,
+        }
+    }
+
+    // ==================== PHASE 3: FUNCTION CALL DISCOVERY ====================
+
+    /// Walk the entire DATA section and collect all QuickFunction call sites.
+    /// Calls are gathered depth-first; nested calls within arguments are NOT
+    /// collected here — they surface when the outer call's args get resolved
+    /// during iterative resolution.
+    fn find_all_function_calls(&self) -> Vec<FunctionCallInfo> {
+        let data_section = match &self.ast.data {
+            Some(data) => data,
+            None => return Vec::new(),
+        };
+
+        self.error_manager.create_scope("FindAllFunctionCalls");
+
+        let mut calls: Vec<FunctionCallInfo> = Vec::new();
+
+        for (entry_idx, entry) in data_section.entries.iter().enumerate() {
+            self.collect_calls_from_entry(entry, entry_idx, &mut calls);
+        }
+
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info(&format!(
+                "[Phase 4.3] Discovered {} function call(s) in DATA section",
+                calls.len()
+            ));
+        }
+
+        self.error_manager.exit_scope();
+        calls
+    }
+
+    /// Dispatch into the correct traversal path for a single DataEntry
+    fn collect_calls_from_entry(
+        &self,
+        entry: &DataEntry,
+        entry_idx: usize,
+        calls: &mut Vec<FunctionCallInfo>,
+    ) {
+        match entry {
+            DataEntry::SimpleProperty { name, value, .. } => {
+                let path = PathBuilder::data_root(name);
+                self.collect_calls_from_value(value, &path, entry_idx, calls);
+            }
+
+            DataEntry::TableProperty { path: table_path, properties, .. } => {
+                let base = PathBuilder::from_table_path(table_path);
+                for prop in properties {
+                    let full_path = PathBuilder::append(&base, &prop.name);
+                    self.collect_calls_from_value(&prop.value, &full_path, entry_idx, calls);
+                }
+            }
+
+            DataEntry::GroupArray { path: group_path, items, .. } => {
+                let base = PathBuilder::from_table_path(group_path);
+                for (idx, item) in items.iter().enumerate() {
+                    let indexed_path = PathBuilder::index(&base, idx);
+                    match item {
+                        Value::Object { properties, .. } => {
+                            for prop in properties {
+                                let prop_path = PathBuilder::append(&indexed_path, &prop.key);
+                                self.collect_calls_from_value(&prop.value, &prop_path, entry_idx, calls);
+                            }
+                        }
+                        _ => {
+                            self.collect_calls_from_value(item, &indexed_path, entry_idx, calls);
+                        }
+                    }
+                }
+            }
+
+            DataEntry::ObjectProperty { name, object, .. } => {
+                let base = PathBuilder::data_root(name);
+                if let Value::Object { properties, .. } = object {
+                    for prop in properties {
+                        let prop_path = PathBuilder::append(&base, &prop.key);
+                        self.collect_calls_from_value(&prop.value, &prop_path, entry_idx, calls);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Recursively scan a Value for function calls.
+    /// Only top-level calls at each value site are collected; nested calls
+    /// inside arguments are deferred to iterative resolution.
+    fn collect_calls_from_value(
+        &self,
+        value: &Value,
+        path: &str,
+        entry_idx: usize,
+        calls: &mut Vec<FunctionCallInfo>,
+    ) {
+        match value {
+            Value::Expression { expr, .. } => {
+                if let Expression::FunctionCall {
+                    function_name,
+                    namespace,
+                    arguments,
+                    position: call_pos,
+                } = expr.as_ref()
+                {
+                    if self.debug_config.is_verbose {
+                        self.error_manager.log_debug(&format!(
+                            "[FindCalls] Found {}{}() at '{}'",
+                            namespace.as_ref().map(|n| format!("{}.", n)).unwrap_or_default(),
+                            function_name,
+                            path,
+                        ));
+                    }
+
+                    calls.push(FunctionCallInfo {
+                        path:          path.to_string(),
+                        function_name: function_name.clone(),
+                        namespace:     namespace.clone(),
+                        arguments:     arguments.clone(),
+                        position:      *call_pos,
+                        entry_index:   entry_idx,
+                    });
+                }
+                // Non-call expressions (arithmetic, etc.) — no nested function discovery needed here
+            }
+
+            Value::Array { values, .. } => {
+                for (idx, item) in values.iter().enumerate() {
+                    let elem_path = PathBuilder::index(path, idx);
+                    self.collect_calls_from_value(item, &elem_path, entry_idx, calls);
+                }
+            }
+
+            Value::Object { properties, .. } => {
+                for prop in properties {
+                    let prop_path = PathBuilder::append(path, &prop.key);
+                    self.collect_calls_from_value(&prop.value, &prop_path, entry_idx, calls);
+                }
+            }
+
+            Value::PrefixedConstructor { arguments, .. } => {
+                for (idx, arg) in arguments.iter().enumerate() {
+                    let arg_path = format!("{}.__ctor_arg{}", path, idx);
+                    self.collect_calls_from_value(arg, &arg_path, entry_idx, calls);
+                }
+            }
+
+            _ => {} // Literals, identifiers, enums (already resolved) — nothing to collect
+        }
+    }
+
+    // ==================== PHASE 4: ITERATIVE RESOLUTION ====================
+
+    /// Core iterative loop: execute discovered calls, replace results in AST,
+    /// update data_context, repeat until all resolved or stuck.
+    /// Returns (number_resolved, error_messages).
+    fn execute_iterative_resolution(
+        &mut self,
+        mut pending_calls: Vec<FunctionCallInfo>,
+    ) -> (usize, Vec<String>) {
+        self.error_manager.create_scope("ExecuteIterativeResolution");
+
+        let absolute_limit  = self.compute_absolute_recursion_limit();
+        let max_iterations  = (pending_calls.len() * 2) + 10; // Dynamic ceiling
+
+        let mut iteration     = 0usize;
+        let mut success_count = 0usize;
+        let mut errors: Vec<String> = Vec::new();
+
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info(&format!(
+                "[Phase 4.4] Iterative resolution START — {} call(s), max_iter={}, abs_limit={}",
+                pending_calls.len(), max_iterations, absolute_limit
+            ));
+        }
+
+        loop {
+            if pending_calls.is_empty() {
+                break;
+            }
+
+            if iteration >= max_iterations {
+                let stuck: Vec<String> = pending_calls.iter()
+                    .map(|c| format!("{}() at '{}'", c.function_name, c.path))
+                    .collect();
+
+                let err = ResolverError::CircularDependency { stuck_calls: stuck };
+                errors.push(err.to_string());
+                self.error_manager.log_error(&err.to_string());
+                break;
+            }
+
+            let mut still_pending: Vec<FunctionCallInfo> = Vec::new();
+            let mut resolved_this_round = 0usize;
+
+            for call in pending_calls {
+                // --- Guard: are all arguments currently resolvable? ---
+                if !self.are_arguments_resolvable(&call) {
+                    if self.debug_config.is_verbose {
+                        self.error_manager.log_debug(&format!(
+                            "[Iterative] Defer {}() at '{}' — arg(s) not yet resolved",
+                            call.function_name, call.path
+                        ));
+                    }
+                    still_pending.push(call);
+                    continue;
+                }
+
+                // --- Guard: scope / namespace validation ---
+                if let Err(e) = self.validate_function_scope(&call) {
+                    errors.push(e.to_string());
+                    self.error_manager.log_error(&e.to_string());
+
+                    self.resolution_history.push(ResolutionRecord {
+                        function_name:      call.function_name.clone(),
+                        path:               call.path.clone(),
+                        result:             None,
+                        arguments_snapshot: call.arguments.iter().map(|a| format!("{:?}", a)).collect(),
+                        duration:           std::time::Duration::ZERO,
+                        error:              Some(e.to_string()),
+                    });
+                    continue; // Don't abort the whole pass — keep resolving others
+                }
+
+                // --- Execute ---
+                let call_start = Instant::now();
+
+                match self.execute_single_call(&call) {
+                    Ok(dix_result) => {
+                        let elapsed = call_start.elapsed();
+
+                        if self.debug_config.is_enabled {
+                            self.error_manager.log_info(&format!(
+                                "[Phase 4.4] ✓ {}() at '{}' → {:?}  ({:.3}ms)",
+                                call.function_name, call.path, dix_result,
+                                elapsed.as_secs_f64() * 1000.0,
+                            ));
+                        }
+
+                        // DixValue → AST Value
+                        let ast_value = self.dix_value_to_ast_value(&dix_result, call.position);
+
+                        // Mutate AST in-place (O(1) Vec index write — no rebuild)
+                        self.replace_value_at_path(&call.path, ast_value);
+
+                        // Update shared data_context so subsequent calls can read this value
+                        self.data_context.borrow_mut().insert(call.path.clone(), dix_result.clone());
+
+                        // Mirror into resolved_values for final dump
+                        self.resolved_values.insert(call.path.clone(), dix_result.clone());
+
+                        // History record
+                        self.resolution_history.push(ResolutionRecord {
+                            function_name:      call.function_name.clone(),
+                            path:               call.path.clone(),
+                            result:             Some(dix_result),
+                            arguments_snapshot: call.arguments.iter().map(|a| format!("{:?}", a)).collect(),
+                            duration:           elapsed,
+                            error:              None,
+                        });
+
+                        success_count      += 1;
+                        resolved_this_round += 1;
+                    }
+
+                    Err(e) => {
+                        let err_msg = e.to_string();
+                        errors.push(err_msg.clone());
+                        self.error_manager.log_error(&err_msg);
+
+                        self.resolution_history.push(ResolutionRecord {
+                            function_name:      call.function_name.clone(),
+                            path:               call.path.clone(),
+                            result:             None,
+                            arguments_snapshot: call.arguments.iter().map(|a| format!("{:?}", a)).collect(),
+                            duration:           call_start.elapsed(),
+                            error:              Some(err_msg),
+                        });
+                    }
+                }
+            }
+
+            // --- Stall detection: if nothing moved and calls remain → circular ---
+            if resolved_this_round == 0 && !still_pending.is_empty() {
+                let stuck: Vec<String> = still_pending.iter()
+                    .map(|c| format!("{}() at '{}'", c.function_name, c.path))
+                    .collect();
+
+                let err = ResolverError::CircularDependency { stuck_calls: stuck };
+                errors.push(err.to_string());
+                self.error_manager.log_error(&err.to_string());
+                break;
+            }
+
+            pending_calls = still_pending;
+            iteration     += 1;
+        }
+
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info(&format!(
+                "[Phase 4.4] Iterative resolution DONE — {} resolved, {} error(s), {} iteration(s)",
+                success_count, errors.len(), iteration
+            ));
+        }
+
+        self.error_manager.exit_scope();
+        (success_count, errors)
+    }
+
+    // ==================== RECURSION LIMIT ====================
+
+    /// Compute the absolute recursion ceiling.
+    /// Base of 64 — scales linearly with DATA entry count and QuickFunction count,
+    /// hard-capped at 1024 to prevent runaway nested execution.
+    fn compute_absolute_recursion_limit(&self) -> usize {
+        const BASE: usize  = 64;
+        const CAP:  usize  = 1024;
+
+        let entry_count = self.ast.data
+            .as_ref()
+            .map(|d| d.entries.len())
+            .unwrap_or(0);
+
+        let fn_count = self.ast.quick_functions
+            .as_ref()
+            .map(|qf| qf.functions.len())
+            .unwrap_or(0);
+
+        (BASE + entry_count * 2 + fn_count * 4).min(CAP)
+    }
+
+    // ==================== ARGUMENT RESOLUTION GUARDS ====================
+
+    /// Returns true when every argument in the call can be turned into a DixValue
+    /// right now (literals pass always; identifiers must exist in context or constants).
+    fn are_arguments_resolvable(&self, call: &FunctionCallInfo) -> bool {
+        let context = self.data_context.borrow();
+        call.arguments.iter().all(|arg| self.is_value_resolvable(arg, &context))
+    }
+
+    /// Recursive resolvability check for a single Value
+    fn is_value_resolvable(&self, value: &Value, context: &HashMap<String, DixValue>) -> bool {
+        match value {
+            Value::Integer { .. }
+            | Value::Float   { .. }
+            | Value::Str     { .. }
+            | Value::Boolean { .. }
+            | Value::Null    { .. } => true,
+
+            Value::IdentifierValue { name, .. } => {
+                context.contains_key(name)
+                    || self.symbol_table.try_get_constant(name).is_some()
+            }
+
+            Value::Array { values, .. } => {
+                values.iter().all(|v| self.is_value_resolvable(v, context))
+            }
+
+            Value::Object { properties, .. } => {
+                properties.iter().all(|p| self.is_value_resolvable(&p.value, context))
+            }
+
+            // Expressions that are pure literals (already folded) are fine;
+            // anything else (nested call, unresolved access) blocks.
+            Value::Expression { expr, .. } => {
+                matches!(expr.as_ref(), Expression::Literal(_))
+            }
+
+            _ => false,
+        }
+    }
+
+    // ==================== SCOPE & NAMESPACE VALIDATION ====================
+
+    /// Verify that the target function exists and is reachable from the call site.
+    fn validate_function_scope(&self, call: &FunctionCallInfo) -> Result<(), ResolverError> {
+        if let Some(ns_name) = &call.namespace {
+            // ── Imported function ──
+            let namespace = self.symbol_table
+                .try_get_namespace(ns_name)
+                .ok_or_else(|| ResolverError::NamespaceNotFound {
+                    name:     ns_name.clone(),
+                    location: call.path.clone(),
+                    position: call.position,
+                })?;
+
+            if !namespace.quick_functions.contains_key(&call.function_name) {
+                return Err(ResolverError::FunctionNotInNamespace {
+                    namespace: ns_name.clone(),
+                    function:  call.function_name.clone(),
+                    location:  call.path.clone(),
+                    position:  call.position,
+                });
+            }
+
+            Ok(())
+        } else {
+            // ── Local function ──
+            let exists = self.ast.quick_functions
+                .as_ref()
+                .map(|qf| qf.functions.iter().any(|f| f.name == call.function_name))
+                .unwrap_or(false);
+
+            if !exists {
+                return Err(ResolverError::FunctionNotFound {
+                    name:     call.function_name.clone(),
+                    location: call.path.clone(),
+                    position: call.position,
+                });
+            }
+
+            Ok(())
+        }
+    }
+
+    // ==================== SINGLE-CALL EXECUTION ====================
+
+    /// Resolve arguments → locate function → hand off to interpreter → return result.
+    fn execute_single_call(&mut self, call: &FunctionCallInfo) -> Result<DixValue, ResolverError> {
+        // 1. Resolve all arguments from current context into DixValues
+        let resolved_args = self.resolve_call_arguments(&call.arguments, &call.position)?;
+
+        // 2. Locate the QuickFunction definition
+        let function = self.locate_function(call)?;
+
+        // 3. Build ExecutionContext (shares data_context with resolver)
+        let exec_context = ExecutionContext::new(
+            Rc::clone(&self.data_context),
+            &self.debug_config,
+        );
+
+        // 4. Delegate to FunctionInterpreter
+        self.interpreter
+            .execute(&function, resolved_args, exec_context, call.namespace.as_deref())
+            .map_err(|e| ResolverError::ExecutionFailed {
+                function: call.function_name.clone(),
+                location: call.path.clone(),
+                inner:    e,
+            })
+    }
+
+    /// Locate a QuickFunction — local or imported — cloning it out of the
+    /// relevant source so we hold no borrow across the interpreter call.
+    fn locate_function(&self, call: &FunctionCallInfo) -> Result<QuickFunction, ResolverError> {
+        if let Some(ns_name) = &call.namespace {
+            let ns = self.symbol_table
+                .try_get_namespace(ns_name)
+                .ok_or_else(|| ResolverError::NamespaceNotFound {
+                    name:     ns_name.clone(),
+                    location: call.path.clone(),
+                    position: call.position,
+                })?;
+
+            ns.quick_functions
+                .get(&call.function_name)
+                .cloned()
+                .ok_or_else(|| ResolverError::FunctionNotInNamespace {
+                    namespace: ns_name.clone(),
+                    function:  call.function_name.clone(),
+                    location:  call.path.clone(),
+                    position:  call.position,
+                })
+        } else {
+            self.ast.quick_functions
+                .as_ref()
+                .and_then(|qf| qf.functions.iter().find(|f| f.name == call.function_name))
+                .cloned()
+                .ok_or_else(|| ResolverError::FunctionNotFound {
+                    name:     call.function_name.clone(),
+                    location: call.path.clone(),
+                    position: call.position,
+                })
+        }
+    }
+
+    /// Turn each argument Value into a DixValue using current data_context + constants.
+    fn resolve_call_arguments(
+        &self,
+        arguments: &[Value],
+        position: &Position,
+    ) -> Result<Vec<DixValue>, ResolverError> {
+        let context = self.data_context.borrow();
+        let mut resolved = Vec::with_capacity(arguments.len());
+
+        for (idx, arg) in arguments.iter().enumerate() {
+            let dix_val = self.resolve_argument_value(arg, &context)
+                .ok_or_else(|| ResolverError::Fatal {
+                    message: format!(
+                        "Argument #{} could not be resolved at {} — value: {:?}",
+                        idx, position, arg
+                    ),
+                })?;
+            resolved.push(dix_val);
+        }
+
+        Ok(resolved)
+    }
+
+    /// Resolve a single argument Value → DixValue.
+    /// Mirrors value_to_dix_value but additionally checks data_context and constants
+    /// for IdentifierValue nodes.
+    fn resolve_argument_value(
+        &self,
+        value: &Value,
+        context: &HashMap<String, DixValue>,
+    ) -> Option<DixValue> {
+        match value {
+            Value::Integer { value: v, .. }  => Some(DixValue::Int(*v)),
+            Value::Float   { value: v, .. }  => Some(DixValue::Float(*v)),
+            Value::Str     { value: v, .. }  => Some(DixValue::Str(v.clone())),
+            Value::Boolean { value: v, .. }  => Some(DixValue::Bool(*v)),
+            Value::Null    { .. }            => Some(DixValue::Null),
+
+            Value::IdentifierValue { name, .. } => {
+                // Priority 1: data_context (already-resolved DATA fields)
+                if let Some(val) = context.get(name) {
+                    return Some(val.clone());
+                }
+                // Priority 2: symbol_table constants (CONST declarations)
+                self.symbol_table.try_get_constant(name).cloned()
+            }
+
+            Value::Array { values, .. } => {
+                let mut dix_values = Vec::with_capacity(values.len());
+                for v in values {
+                    dix_values.push(self.resolve_argument_value(v, context)?);
+                }
+                Some(DixValue::Array(dix_values))
+            }
+
+            Value::Object { properties, .. } => {
+                let mut map = HashMap::with_capacity(properties.len());
+                for prop in properties {
+                    let dv = self.resolve_argument_value(&prop.value, context)?;
+                    map.insert(prop.key.clone(), dv);
+                }
+                Some(DixValue::Object(map))
+            }
+
+            _ => None, // Unresolvable at this stage
+        }
+    }
+
+    // ==================== AST MUTATION HELPERS ====================
+
+    /// Replace the value at a dot-notation path inside the AST's DATA section.
+    /// Uses direct Vec index writes — no rebuild, no clone of the entries Vec.
+    fn replace_value_at_path(&mut self, path: &str, new_value: Value) {
+        let data_section = match &mut self.ast.data {
+            Some(data) => data,
+            None       => return,
+        };
+
+        let segments = PathBuilder::parse(path);
+        if segments.is_empty() { return; }
+
+        for entry in data_section.entries.iter_mut() {
+            if Self::entry_matches_segments(entry, &segments) {
+                Self::write_value_into_entry(entry, &segments, new_value);
+                return;
+            }
+        }
+
+        if self.debug_config.is_verbose {
+            self.error_manager.log_debug(&format!(
+                "[ReplaceValue] No entry matched path '{}'", path
+            ));
+        }
+    }
+
+    /// Does this entry's root path match the leading segments?
+    fn entry_matches_segments(entry: &DataEntry, segments: &[PathSegment]) -> bool {
+        match entry {
+            DataEntry::SimpleProperty { name, .. }
+            | DataEntry::ObjectProperty { name, .. } => {
+                segments.len() >= 2 && segments[1].name == *name
+            }
+            DataEntry::TableProperty { path: tp, .. }
+            | DataEntry::GroupArray   { path: tp, .. } => {
+                PathBuilder::table_path_matches(tp, segments)
+            }
+        }
+    }
+
+    /// Navigate into the matched entry and overwrite the target value in place.
+    fn write_value_into_entry(entry: &mut DataEntry, segments: &[PathSegment], new_value: Value) {
+        match entry {
+            DataEntry::SimpleProperty { value, .. } => {
+                *value = new_value;
+            }
+
+            DataEntry::TableProperty { properties, .. } => {
+                // Target is the last segment's name
+                if let Some(target) = segments.last() {
+                    for prop in properties.iter_mut() {
+                        if prop.name == target.name {
+                            prop.value = new_value;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            DataEntry::GroupArray { items, .. } => {
+                // Find the indexed segment, then drill into the object if needed
+                if let Some(idx_seg) = segments.iter().find(|s| s.index.is_some()) {
+                    let idx = idx_seg.index.unwrap();
+                    if idx >= items.len() { return; }
+
+                    // If last segment IS the index segment → replace entire item
+                    if segments.last().map(|s| std::ptr::eq(s, idx_seg)).unwrap_or(false) {
+                        items[idx] = new_value;
+                        return;
+                    }
+
+                    // Otherwise drill into the object at [idx]
+                    if let Value::Object { properties, .. } = &mut items[idx] {
+                        if let Some(target) = segments.last() {
+                            for prop in properties.iter_mut() {
+                                if prop.key == target.name {
+                                    prop.value = new_value;
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            DataEntry::ObjectProperty { object, .. } => {
+                if let Value::Object { properties, .. } = object {
+                    if let Some(target) = segments.last() {
+                        for prop in properties.iter_mut() {
+                            if prop.key == target.name {
+                                prop.value = new_value;
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Convert a DixValue result back into an AST Value, stamping the original
+    /// call-site Position onto every node (preserves source mapping).
+    fn dix_value_to_ast_value(&self, dix_value: &DixValue, position: Position) -> Value {
+        match dix_value {
+            DixValue::Int(v)   => Value::Integer { value: *v, position },
+            DixValue::Float(v) => Value::Float   { value: *v, position },
+            DixValue::Str(s)   => Value::Str     { value: s.clone(), position },
+            DixValue::Bool(b)  => Value::Boolean { value: *b, position },
+            DixValue::Null     => Value::Null    { position },
+
+            DixValue::Array(items) => {
+                Value::Array {
+                    values: items.iter()
+                        .map(|item| self.dix_value_to_ast_value(item, position))
+                        .collect(),
+                    position,
+                }
+            }
+
+            DixValue::Object(map) => {
+                Value::Object {
+                    properties: map.iter()
+                        .map(|(key, val)| ObjectProperty {
+                            key:      key.clone(),
+                            value:    self.dix_value_to_ast_value(val, position),
+                            position,
+                        })
+                        .collect(),
+                    position,
+                }
+            }
+
+            // Fallback: stringify unknown DixValue variants
+            _ => Value::Str { value: format!("{:?}", dix_value), position },
+        }
+    }
+
+    // ==================== DIAGNOSTIC UTILITIES ====================
+
+    /// Dump every key-value pair currently in data_context (verbose debug only)
+    fn dump_data_context(&self) {
+        let context = self.data_context.borrow();
+
+        self.error_manager.log_info("========== DATA CONTEXT DUMP ==========");
+        self.error_manager.log_info(&format!("  entries: {}", context.len()));
+
+        let mut keys: Vec<&String> = context.keys().collect();
+        keys.sort_unstable();
+
+        for key in keys {
+            if let Some(val) = context.get(key) {
+                self.error_manager.log_info(&format!("  {} = {:?}", key, val));
+            }
+        }
+        self.error_manager.log_info("========================================");
+    }
+
+    /// Log a function-call breakdown grouped by name with local/imported counts
+    fn log_function_call_breakdown(&self, calls: &[FunctionCallInfo]) {
+        let local_count    = calls.iter().filter(|c| c.namespace.is_none()).count();
+        let imported_count = calls.iter().filter(|c| c.namespace.is_some()).count();
+
+        self.error_manager.log_info(&format!(
+            "[DIAGNOSTIC] Breakdown: {} local, {} imported",
+            local_count, imported_count
+        ));
+
+        let mut by_name: HashMap<&str, usize> = HashMap::new();
+        for call in calls {
+            *by_name.entry(&call.function_name).or_insert(0) += 1;
+        }
+
+        let mut sorted: Vec<_> = by_name.iter().collect();
+        sorted.sort_unstable_by_key(|(name, _)| *name);
+
+        for (name, count) in sorted {
+            self.error_manager.log_info(&format!("    {}()  ×{}", name, count));
+        }
+    }
+
+    /// Assemble a failed ValueResolutionResult (used when an early phase aborts)
+    fn create_failed_result(&self, errors: Vec<String>) -> ValueResolutionResult {
+        ValueResolutionResult {
+            is_success:              false,
+            original_ast:            Some(self.ast.clone()),
+            resolved_ast:            None,
+            function_calls_resolved: 0,
+            errors,
+            log_statements:          self.log_statements.clone(),
+            resolution_duration:     self.start_time.elapsed(),
+            resolution_history:      self.resolution_history.clone(),
+        }
+    }
+            }

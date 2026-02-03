@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Tue Feb  3 04:24:50 UTC 2026
+Generated: Tue Feb  3 04:25:38 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: f66a908eb3420cea8d33e9352a0a71e658de0bcc
+Commit: cf9f7bcf44eac63a64e4bc533c3f18ba027d62d3
 Branch: master
 ==================================
 
@@ -63,6 +63,7 @@ src/Compiler/Core/BinarySerialization/binary_serialization_result.rs
 src/Compiler/Core/BinarySerialization/checksum_validator.rs
 src/Compiler/Core/BinarySerialization/mod.rs
 src/Compiler/Core/BinarySerialization/section_offset.rs
+src/Compiler/Core/BinarySerialization/value_decoder.rs
 src/Compiler/Core/BinarySerialization/value_encoder.rs
 src/Compiler/Core/Config/config_schema.rs
 src/Compiler/Core/Config/config_section_handler.rs
@@ -201,6 +202,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 160
+Source: 161
 Tests: 16
 Benches: 3

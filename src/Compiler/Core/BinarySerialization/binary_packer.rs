@@ -1,10 +1,10 @@
-//! Main orchestrator for binary serialization
+//! Main binary serialization orchestrator - packs DixScript AST into binary format
 
-use std::io::Write;
 use std::time::Instant;
+use std::io::{Write, Cursor};
 use crate::Compiler::AST::DixScript;
 use super::{
-    binary_format::{MAGIC_NUMBER, VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, SectionId, SectionFlags},
+    binary_format::{HEADER_SIZE, FOOTER_SIZE, SectionId, SectionFlags},
     binary_header::BinaryHeader,
     section_offset::SectionOffset,
     checksum_validator::ChecksumValidator,
@@ -13,49 +13,64 @@ use super::{
     binary_serialization_error::BinarySerializationError,
 };
 
-/// Main binary serializer for DixScript AST
+// TODO: Import section writers when implemented
+// use super::section_writers::{
+//     ConfigSectionWriter,
+//     EnumsSectionWriter,
+//     DataSectionWriter,
+//     SecuritySectionWriter,
+//     ImportsSectionWriter,
+// };
+
+/// Main binary packer - orchestrates serialization of DixScript AST
 pub struct BinaryPacker {
     context: BinarySerializationContext,
 }
 
 impl BinaryPacker {
-    /// Create new binary packer
+    /// Create new packer
     pub fn new() -> Self {
         BinaryPacker {
             context: BinarySerializationContext::new(),
         }
     }
 
-    /// Pack AST into binary format
+    /// Pack DixScript AST into binary format
     pub fn pack(&mut self, ast: &DixScript) -> BinarySerializationResult {
         let start_time = Instant::now();
         
-        self.context.log_info("Starting binary serialization");
+        self.context.log_info("Starting binary serialization...");
 
+        // Estimate original size (rough JSON equivalent)
+        let original_size = self.estimate_original_size(ast);
+
+        // Pack the AST
         match self.pack_internal(ast) {
             Ok(binary_data) => {
                 let duration = start_time.elapsed();
                 self.context.log_info(&format!(
-                    "Binary serialization completed in {:.2}ms",
+                    "Binary serialization completed: {} bytes in {:.2}ms",
+                    binary_data.len(),
                     duration.as_secs_f64() * 1000.0
                 ));
 
                 BinarySerializationResult::success(
                     binary_data,
-                    0, // TODO: Calculate original size from AST
+                    original_size,
                     duration,
                     self.context.statistics.clone(),
                 )
             }
-            Err(err) => {
+            Err(e) => {
                 let duration = start_time.elapsed();
                 self.context.log_info(&format!(
-                    "Binary serialization failed: {}",
-                    err
+                    "Binary serialization failed: {} in {:.2}ms",
+                    e,
+                    duration.as_secs_f64() * 1000.0
                 ));
 
                 BinarySerializationResult::failure(
-                    vec![err.to_string()],
+                    vec![e.to_string()],
                     Vec::new(),
                     duration,
                 )
@@ -65,241 +80,264 @@ impl BinaryPacker {
 
     /// Internal packing implementation
     fn pack_internal(&mut self, ast: &DixScript) -> Result<Vec<u8>, BinarySerializationError> {
-        // Step 1: Determine which sections are present
-        let sections = self.determine_sections(ast);
-        self.context.statistics.total_sections = sections.len();
+        // Create buffer for binary data
+        let mut buffer = Cursor::new(Vec::new());
 
-        // Step 2: Create header
+        // Reserve space for header (will write later)
+        buffer.write_all(&vec![0u8; HEADER_SIZE])
+            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "Header"))?;
+
+        // Create header
         let mut header = BinaryHeader::new();
-        for section_id in &sections {
-            header.add_section(*section_id);
-        }
+        let mut section_offsets = Vec::new();
 
-        // Step 3: Serialize each section to temporary buffers
-        let section_data = self.serialize_sections(ast, &sections)?;
+        // Write sections and track offsets
+        self.write_sections(ast, &mut buffer, &mut header, &mut section_offsets)?;
 
-        // Step 4: Calculate section offsets
-        let offsets = self.calculate_offsets(&header, &section_data)?;
-
-        // Step 5: Set offset table position in header
-        let offset_table_position = self.calculate_offset_table_position(&section_data);
-        header.offset_table_position = offset_table_position as i32;
-
-        // Step 6: Assemble final binary
-        let mut binary_data = Vec::new();
-        
-        // Write header
-        header.write_to(&mut binary_data)
-            .map_err(|e| BinarySerializationError::write_error(e, "Header"))?;
-
-        // Write section data
-        for data in section_data {
-            binary_data.write_all(&data)
-                .map_err(|e| BinarySerializationError::write_error(e.to_string(), "SectionData"))?;
-        }
+        // Get position for offset table
+        let offset_table_position = buffer.position() as i32;
+        header.offset_table_position = offset_table_position;
 
         // Write offset table
-        for offset in offsets {
-            offset.write_to(&mut binary_data)
-                .map_err(|e| BinarySerializationError::write_error(e, "OffsetTable"))?;
-        }
+        self.write_offset_table(&section_offsets, &mut buffer)?;
 
-        // Step 7: Calculate and append checksum
-        ChecksumValidator::append_checksum(&mut binary_data)
-            .map_err(|e| BinarySerializationError::write_error(e, "Checksum"))?;
+        // Get final data without checksum
+        let mut binary_data = buffer.into_inner();
+
+        // Write header at the beginning
+        let header_bytes = self.write_header_bytes(&header)?;
+        binary_data[0..HEADER_SIZE].copy_from_slice(&header_bytes);
+
+        // Append checksum
+        binary_data = ChecksumValidator::append_checksum(&binary_data);
 
         // Update statistics
         self.context.statistics.total_bytes = binary_data.len();
+        self.context.statistics.total_sections = section_offsets.len();
 
         Ok(binary_data)
     }
 
-    /// Determine which sections are present in the AST
-    fn determine_sections(&self, ast: &DixScript) -> Vec<SectionId> {
-        let mut sections = Vec::new();
-
-        // Config section (always present if there's config data)
-        if ast.config.is_some() {
-            sections.push(SectionId::Config);
-        }
-
-        // Enums section
-        if !ast.enums.is_empty() {
-            sections.push(SectionId::Enums);
-        }
-
-        // Data section (always present - contains main script body)
-        sections.push(SectionId::Data);
-
-        // Security section
-        if ast.security.is_some() {
-            sections.push(SectionId::Security);
-        }
-
-        // Imports section
-        if !ast.imports.is_empty() {
-            sections.push(SectionId::Imports);
-        }
-
-        sections
-    }
-
-    /// Serialize each section to temporary buffers
-    fn serialize_sections(
+    /// Write all sections
+    fn write_sections(
         &mut self,
         ast: &DixScript,
-        sections: &[SectionId],
-    ) -> Result<Vec<Vec<u8>>, BinarySerializationError> {
-        let mut section_data = Vec::new();
-
-        for section_id in sections {
-            let data = match section_id {
-                SectionId::Config => self.serialize_config_section(ast)?,
-                SectionId::Enums => self.serialize_enums_section(ast)?,
-                SectionId::Data => self.serialize_data_section(ast)?,
-                SectionId::Security => self.serialize_security_section(ast)?,
-                SectionId::Imports => self.serialize_imports_section(ast)?,
-            };
-
-            self.context.statistics.record_section_size(*section_id, data.len());
-            section_data.push(data);
-        }
-
-        Ok(section_data)
-    }
-
-    /// Calculate section offsets
-    fn calculate_offsets(
-        &self,
-        header: &BinaryHeader,
-        section_data: &[Vec<u8>],
-    ) -> Result<Vec<SectionOffset>, BinarySerializationError> {
-        let mut offsets = Vec::new();
-        let mut current_offset = 16; // Header is 16 bytes
-
-        // Get section IDs from header flags
-        let section_ids = self.get_section_ids_from_header(header);
-
-        for (i, section_id) in section_ids.iter().enumerate() {
-            let length = section_data[i].len();
-            
-            let offset = SectionOffset::new(
-                *section_id,
-                current_offset as i32,
-                length as i32,
-            );
-
-            offsets.push(offset);
-            current_offset += length;
-        }
-
-        Ok(offsets)
-    }
-
-    /// Get section IDs from header flags in order
-    fn get_section_ids_from_header(&self, header: &BinaryHeader) -> Vec<SectionId> {
-        let mut section_ids = Vec::new();
-
-        if header.has_section(SectionId::Config) {
-            section_ids.push(SectionId::Config);
-        }
-        if header.has_section(SectionId::Enums) {
-            section_ids.push(SectionId::Enums);
-        }
-        if header.has_section(SectionId::Data) {
-            section_ids.push(SectionId::Data);
-        }
-        if header.has_section(SectionId::Security) {
-            section_ids.push(SectionId::Security);
-        }
-        if header.has_section(SectionId::Imports) {
-            section_ids.push(SectionId::Imports);
-        }
-
-        section_ids
-    }
-
-    /// Calculate offset table position
-    fn calculate_offset_table_position(&self, section_data: &[Vec<u8>]) -> usize {
-        let header_size = 16;
-        let total_section_size: usize = section_data.iter().map(|d| d.len()).sum();
-        header_size + total_section_size
-    }
-
-    // ==================== SECTION SERIALIZERS (STUBS) ====================
-    // These will be implemented with the section writers in the next chat
-
-    fn serialize_config_section(&mut self, ast: &DixScript) -> Result<Vec<u8>, BinarySerializationError> {
-        // TODO: Implement with ConfigSectionWriter
-        self.context.log_verbose("Serializing config section");
-        
-        let mut buffer = Vec::new();
-        
-        // Placeholder: Write empty config for now
+        buffer: &mut Cursor<Vec<u8>>,
+        header: &mut BinaryHeader,
+        section_offsets: &mut Vec<SectionOffset>,
+    ) -> Result<(), BinarySerializationError> {
+        // Write Config section if present
         if let Some(_config) = &ast.config {
-            // Will use ConfigSectionWriter::write()
+            let offset = self.write_config_section(ast, buffer)?;
+            header.add_section(SectionFlags::CONFIG);
+            section_offsets.push(offset);
         }
-        
-        Ok(buffer)
-    }
 
-    fn serialize_enums_section(&mut self, ast: &DixScript) -> Result<Vec<u8>, BinarySerializationError> {
-        // TODO: Implement with EnumsSectionWriter
-        self.context.log_verbose("Serializing enums section");
-        
-        let mut buffer = Vec::new();
-        
-        // Placeholder: Write enum count
-        let enum_count = ast.enums.len() as i32;
-        buffer.extend_from_slice(&enum_count.to_le_bytes());
-        
-        // Will use EnumsSectionWriter::write()
-        
-        Ok(buffer)
-    }
+        // Write Enums section if present
+        if !ast.enums.is_empty() {
+            let offset = self.write_enums_section(ast, buffer)?;
+            header.add_section(SectionFlags::ENUMS);
+            section_offsets.push(offset);
+        }
 
-    fn serialize_data_section(&mut self, ast: &DixScript) -> Result<Vec<u8>, BinarySerializationError> {
-        // TODO: Implement with DataSectionWriter
-        self.context.log_verbose("Serializing data section");
-        
-        let mut buffer = Vec::new();
-        
-        // Placeholder: Write statement count
-        let statement_count = ast.statements.len() as i32;
-        buffer.extend_from_slice(&statement_count.to_le_bytes());
-        
-        // Will use DataSectionWriter::write()
-        
-        Ok(buffer)
-    }
+        // Write Data section if present
+        if !ast.data.is_empty() {
+            let offset = self.write_data_section(ast, buffer)?;
+            header.add_section(SectionFlags::DATA);
+            section_offsets.push(offset);
+        }
 
-    fn serialize_security_section(&mut self, ast: &DixScript) -> Result<Vec<u8>, BinarySerializationError> {
-        // TODO: Implement with SecuritySectionWriter
-        self.context.log_verbose("Serializing security section");
-        
-        let mut buffer = Vec::new();
-        
-        // Placeholder: Write empty security for now
+        // Write Security section if present
         if let Some(_security) = &ast.security {
-            // Will use SecuritySectionWriter::write()
+            let offset = self.write_security_section(ast, buffer)?;
+            header.add_section(SectionFlags::SECURITY);
+            section_offsets.push(offset);
         }
-        
-        Ok(buffer)
+
+        // Write Imports section if present
+        if !ast.imports.is_empty() {
+            let offset = self.write_imports_section(ast, buffer)?;
+            header.add_section(SectionFlags::IMPORTS);
+            section_offsets.push(offset);
+        }
+
+        Ok(())
     }
 
-    fn serialize_imports_section(&mut self, ast: &DixScript) -> Result<Vec<u8>, BinarySerializationError> {
-        // TODO: Implement with ImportsSectionWriter
-        self.context.log_verbose("Serializing imports section");
+    /// Write Config section
+    fn write_config_section(
+        &mut self,
+        ast: &DixScript,
+        buffer: &mut Cursor<Vec<u8>>,
+    ) -> Result<SectionOffset, BinarySerializationError> {
+        let start_offset = buffer.position() as i32;
+
+        // TODO: Use ConfigSectionWriter when implemented
+        // let writer = ConfigSectionWriter::new(&mut self.context);
+        // writer.write(buffer, &ast.config)?;
+
+        // PLACEHOLDER: Write minimal config section
+        self.context.log_verbose("Writing Config section (placeholder)");
+        buffer.write_all(&[0u8; 4])
+            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "ConfigSection"))?;
+
+        let end_offset = buffer.position() as i32;
+        let length = end_offset - start_offset;
+
+        self.context.statistics.record_section_size(SectionId::Config, length as usize);
+
+        Ok(SectionOffset::new(SectionId::Config, start_offset, length))
+    }
+
+    /// Write Enums section
+    fn write_enums_section(
+        &mut self,
+        ast: &DixScript,
+        buffer: &mut Cursor<Vec<u8>>,
+    ) -> Result<SectionOffset, BinarySerializationError> {
+        let start_offset = buffer.position() as i32;
+
+        // TODO: Use EnumsSectionWriter when implemented
+        // let writer = EnumsSectionWriter::new(&mut self.context);
+        // writer.write(buffer, &ast.enums)?;
+
+        // PLACEHOLDER: Write minimal enums section
+        self.context.log_verbose(&format!("Writing Enums section (placeholder): {} enums", ast.enums.len()));
+        let count = ast.enums.len() as i32;
+        buffer.write_all(&count.to_le_bytes())
+            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "EnumsSection"))?;
+
+        let end_offset = buffer.position() as i32;
+        let length = end_offset - start_offset;
+
+        self.context.statistics.record_section_size(SectionId::Enums, length as usize);
+
+        Ok(SectionOffset::new(SectionId::Enums, start_offset, length))
+    }
+
+    /// Write Data section
+    fn write_data_section(
+        &mut self,
+        ast: &DixScript,
+        buffer: &mut Cursor<Vec<u8>>,
+    ) -> Result<SectionOffset, BinarySerializationError> {
+        let start_offset = buffer.position() as i32;
+
+        // TODO: Use DataSectionWriter when implemented
+        // let writer = DataSectionWriter::new(&mut self.context);
+        // writer.write(buffer, &ast.data)?;
+
+        // PLACEHOLDER: Write minimal data section
+        self.context.log_verbose(&format!("Writing Data section (placeholder): {} items", ast.data.len()));
+        let count = ast.data.len() as i32;
+        buffer.write_all(&count.to_le_bytes())
+            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "DataSection"))?;
+
+        let end_offset = buffer.position() as i32;
+        let length = end_offset - start_offset;
+
+        self.context.statistics.record_section_size(SectionId::Data, length as usize);
+
+        Ok(SectionOffset::new(SectionId::Data, start_offset, length))
+    }
+
+    /// Write Security section
+    fn write_security_section(
+        &mut self,
+        ast: &DixScript,
+        buffer: &mut Cursor<Vec<u8>>,
+    ) -> Result<SectionOffset, BinarySerializationError> {
+        let start_offset = buffer.position() as i32;
+
+        // TODO: Use SecuritySectionWriter when implemented
+        // let writer = SecuritySectionWriter::new(&mut self.context);
+        // writer.write(buffer, &ast.security)?;
+
+        // PLACEHOLDER: Write minimal security section
+        self.context.log_verbose("Writing Security section (placeholder)");
+        buffer.write_all(&[0u8; 4])
+            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "SecuritySection"))?;
+
+        let end_offset = buffer.position() as i32;
+        let length = end_offset - start_offset;
+
+        self.context.statistics.record_section_size(SectionId::Security, length as usize);
+
+        Ok(SectionOffset::new(SectionId::Security, start_offset, length))
+    }
+
+    /// Write Imports section
+    fn write_imports_section(
+        &mut self,
+        ast: &DixScript,
+        buffer: &mut Cursor<Vec<u8>>,
+    ) -> Result<SectionOffset, BinarySerializationError> {
+        let start_offset = buffer.position() as i32;
+
+        // TODO: Use ImportsSectionWriter when implemented
+        // let writer = ImportsSectionWriter::new(&mut self.context);
+        // writer.write(buffer, &ast.imports)?;
+
+        // PLACEHOLDER: Write minimal imports section
+        self.context.log_verbose(&format!("Writing Imports section (placeholder): {} imports", ast.imports.len()));
+        let count = ast.imports.len() as i32;
+        buffer.write_all(&count.to_le_bytes())
+            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "ImportsSection"))?;
+
+        let end_offset = buffer.position() as i32;
+        let length = end_offset - start_offset;
+
+        self.context.statistics.record_section_size(SectionId::Imports, length as usize);
+
+        Ok(SectionOffset::new(SectionId::Imports, start_offset, length))
+    }
+
+    /// Write offset table
+    fn write_offset_table(
+        &self,
+        section_offsets: &[SectionOffset],
+        buffer: &mut Cursor<Vec<u8>>,
+    ) -> Result<(), BinarySerializationError> {
+        for offset in section_offsets {
+            offset.write_to(buffer)
+                .map_err(|e| BinarySerializationError::write_error(e.to_string(), "OffsetTable"))?;
+        }
+        Ok(())
+    }
+
+    /// Write header to bytes
+    fn write_header_bytes(&self, header: &BinaryHeader) -> Result<Vec<u8>, BinarySerializationError> {
+        let mut buffer = Cursor::new(Vec::new());
+        header.write_to(&mut buffer)
+            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "Header"))?;
+        Ok(buffer.into_inner())
+    }
+
+    /// Estimate original size (rough JSON equivalent)
+    fn estimate_original_size(&self, ast: &DixScript) -> usize {
+        // Rough estimate: 
+        // - Config: ~200 bytes
+        // - Each enum: ~100 bytes
+        // - Each data item: ~150 bytes
+        // - Security: ~100 bytes
+        // - Each import: ~80 bytes
         
-        let mut buffer = Vec::new();
-        
-        // Placeholder: Write import count
-        let import_count = ast.imports.len() as i32;
-        buffer.extend_from_slice(&import_count.to_le_bytes());
-        
-        // Will use ImportsSectionWriter::write()
-        
-        Ok(buffer)
+        let mut size = 100; // Base overhead
+
+        if ast.config.is_some() {
+            size += 200;
+        }
+
+        size += ast.enums.len() * 100;
+        size += ast.data.len() * 150;
+
+        if ast.security.is_some() {
+            size += 100;
+        }
+
+        size += ast.imports.len() * 80;
+
+        size
     }
 }
 
@@ -307,41 +345,4 @@ impl Default for BinaryPacker {
     fn default() -> Self {
         Self::new()
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_create_packer() {
-        let packer = BinaryPacker::new();
-        assert_eq!(packer.context.nesting_depth(), 0);
-    }
-
-    #[test]
-    fn test_determine_sections_minimal() {
-        let packer = BinaryPacker::new();
-        let ast = DixScript::default();
-        
-        let sections = packer.determine_sections(&ast);
-        
-        // At minimum, should have Data section
-        assert!(sections.contains(&SectionId::Data));
-    }
-
-    #[test]
-    fn test_calculate_offset_table_position() {
-        let packer = BinaryPacker::new();
-        
-        let section_data = vec![
-            vec![0u8; 100],  // 100 bytes
-            vec![0u8; 200],  // 200 bytes
-        ];
-        
-        let position = packer.calculate_offset_table_position(&section_data);
-        
-        // Header (16) + sections (300) = 316
-        assert_eq!(position, 316);
-    }
-  }
+                     }

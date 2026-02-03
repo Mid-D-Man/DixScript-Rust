@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Tue Feb  3 14:07:05 UTC 2026
+Generated: Tue Feb  3 17:41:06 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 5b8d8d89578cc90016aa9164f8bd00e713bbd0fe
+Commit: f23c5b8f9a2415e62abd00fcd5ed816ca89da272
 Branch: master
 ==================================
 
@@ -117,10 +117,24 @@ src/Compiler/Core/general_ast_enhancer.rs
 src/Compiler/Core/general_parser.rs
 src/Compiler/Core/general_semantics_analyzer.rs
 src/Compiler/Core/mod.rs
+src/Compiler/DLM/Auditor/auditor_trait.rs
+src/Compiler/DLM/Auditor/diy_auditor.rs
+src/Compiler/DLM/Auditor/enhanced_auditor.rs
 src/Compiler/DLM/Auditor/mod.rs
+src/Compiler/DLM/Compressor/bzip2_compressor.rs
+src/Compiler/DLM/Compressor/compressor_trait.rs
+src/Compiler/DLM/Compressor/gzip_compressor.rs
+src/Compiler/DLM/Compressor/lzma_compressor.rs
 src/Compiler/DLM/Compressor/mod.rs
+src/Compiler/DLM/Encryptor/aes128_encryptor.rs
+src/Compiler/DLM/Encryptor/aes256_encryptor.rs
+src/Compiler/DLM/Encryptor/argon2_kdf.rs
+src/Compiler/DLM/Encryptor/chacha20_encryptor.rs
+src/Compiler/DLM/Encryptor/encryptor_trait.rs
 src/Compiler/DLM/Encryptor/mod.rs
+src/Compiler/DLM/Encryptor/xor_encryptor.rs
 src/Compiler/DLM/KeyManagement/mod.rs
+src/Compiler/DLM/dlm_module_base.rs
 src/Compiler/DLM/mod.rs
 src/Compiler/Extensions/mod.rs
 src/Compiler/Extensions/type_system_manager.rs
@@ -214,6 +228,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 173
+Source: 187
 Tests: 16
 Benches: 3

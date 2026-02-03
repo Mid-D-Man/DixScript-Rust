@@ -1681,3 +1681,676 @@ impl<'a> ValueResolver<'a> {
             resolution_history:      self.resolution_history.clone(),
         }
                 }
+// ==================== PHASE 5: IDENTIFIER RESOLUTION ====================
+
+    /// Final cleanup pass.  Every `IdentifierValue` still sitting in the AST
+    /// is looked up in `data_context` and replaced with its concrete Value.
+    ///
+    /// ### Why iterative?
+    /// Consider declaration order:
+    /// ```text
+    /// DATA.c = DATA.b      // IdentifierValue → "DATA.b"
+    /// DATA.b = DATA.a      // IdentifierValue → "DATA.a"
+    /// DATA.a = 42          // literal, already in context from Phase 2
+    /// ```
+    /// Pass 1 resolves `DATA.b` (its dep `DATA.a` is in context), but `DATA.c`
+    /// is skipped because `DATA.b` wasn't in context *at the start* of the
+    /// pass.  Pass 2 picks up `DATA.c`.  Maximum chain depth equals the number
+    /// of entries, so 64 passes is a generous ceiling.
+    ///
+    /// Identifiers that never resolve (not in context after zero-progress)
+    /// are runtime / external references — left untouched, not an error.
+    fn resolve_remaining_identifiers(&mut self) {
+        self.error_manager.create_scope("ResolveRemainingIdentifiers");
+
+        let max_passes      = 64usize;
+        let mut total_resolved = 0usize;
+        let mut final_skipped  = 0usize;
+
+        for pass in 1..=max_passes {
+            // ── scoped borrow: read AST + context, produce candidate replacements ──
+            let (new_entries, resolved_count, skipped_count, newly_resolved) = {
+                let data = self.ast.data.as_ref().unwrap();
+                let ctx  = self.data_context.borrow();
+
+                let mut newly_resolved: Vec<(String, DixValue)> = Vec::new();
+                let mut resolved_count = 0usize;
+                let mut skipped_count  = 0usize;
+                let mut new_entries    = Vec::with_capacity(data.entries.len());
+
+                for entry in &data.entries {
+                    let (new_entry, res, skip) = Self::resolve_identifiers_in_entry(
+                        entry, &ctx, &mut newly_resolved,
+                    );
+                    new_entries.push(new_entry);
+                    resolved_count += res;
+                    skipped_count  += skip;
+                }
+
+                (new_entries, resolved_count, skipped_count, newly_resolved)
+            }; // ← ctx / data borrows dropped — safe to mutate below
+
+            // ── write back only if the pass actually changed something ──
+            if resolved_count > 0 {
+                let position = self.ast.data.as_ref().unwrap().position;
+                self.ast.data = Some(DataSection {
+                    entries:  new_entries,
+                    position,
+                });
+
+                // Pump newly-resolved leaves into the shared context so the
+                // *next* pass (and any other Rc holder) sees them immediately.
+                {
+                    let mut ctx = self.data_context.borrow_mut();
+                    for (path, dix) in newly_resolved {
+                        ctx.insert(path, dix);
+                    }
+                }
+            }
+
+            total_resolved += resolved_count;
+            final_skipped   = skipped_count; // only last pass's count matters
+
+            if self.debug_config.is_verbose {
+                self.error_manager.log_debug(&format!(
+                    "[Phase 5, pass {}] resolved {}, {} still pending",
+                    pass, resolved_count, skipped_count
+                ));
+            }
+
+            // Zero progress → remaining identifiers are external / runtime.
+            if resolved_count == 0 {
+                break;
+            }
+        }
+
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info(&format!(
+                "✓ Identifier resolution: {} resolved, {} left (external/runtime)",
+                total_resolved, final_skipped
+            ));
+        }
+
+        self.error_manager.exit_scope();
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Phase 5 helpers — all `Self::` (no &self) so they work inside the
+    // scoped borrow block above without fighting the borrow checker.
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// Walk one DataEntry, resolve every IdentifierValue leaf that exists in
+    /// `ctx`.  Returns `(rebuilt entry, resolved count, skipped count)`.
+    /// `newly_resolved` accumulates `(write-path, DixValue)` pairs so the
+    /// caller can push them into the shared context after the borrow drops.
+    fn resolve_identifiers_in_entry(
+        entry:          &DataEntry,
+        ctx:            &HashMap<String, DixValue>,
+        newly_resolved: &mut Vec<(String, DixValue)>,
+    ) -> (DataEntry, usize, usize) {
+        match entry {
+            DataEntry::SimpleProperty { name, data_type, value, position } => {
+                let base = PathBuilder::new("DATA").push(name).build();
+                let (new_value, res, skip) =
+                    Self::resolve_identifiers_in_value(value, &base, ctx, newly_resolved);
+
+                if res > 0 {
+                    (DataEntry::SimpleProperty {
+                        name:      name.clone(),
+                        data_type: *data_type,
+                        value:     new_value,
+                        position:  *position,
+                    }, res, skip)
+                } else {
+                    (entry.clone(), 0, skip)
+                }
+            }
+
+            DataEntry::TableProperty { path: table_path, properties, position } => {
+                let base        = PathBuilder::from_table_path(table_path);
+                let mut new_props   = Vec::with_capacity(properties.len());
+                let mut total_res   = 0usize;
+                let mut total_skip  = 0usize;
+                let mut any_changed = false;
+
+                for prop in properties {
+                    let full = base.push(&prop.name).build();
+                    let (new_value, res, skip) =
+                        Self::resolve_identifiers_in_value(&prop.value, &full, ctx, newly_resolved);
+                    total_res  += res;
+                    total_skip += skip;
+
+                    if res > 0 {
+                        new_props.push(PropertyAssignment {
+                            name:      prop.name.clone(),
+                            data_type: prop.data_type,
+                            value:     new_value,
+                            position:  prop.position,
+                        });
+                        any_changed = true;
+                    } else {
+                        new_props.push(prop.clone());
+                    }
+                }
+
+                if any_changed {
+                    (DataEntry::TableProperty {
+                        path:       table_path.clone(),
+                        properties: new_props,
+                        position:   *position,
+                    }, total_res, total_skip)
+                } else {
+                    (entry.clone(), 0, total_skip)
+                }
+            }
+
+            DataEntry::GroupArray { path: group_path, items, position } => {
+                let base        = PathBuilder::from_table_path(group_path);
+                let mut new_items   = Vec::with_capacity(items.len());
+                let mut total_res   = 0usize;
+                let mut total_skip  = 0usize;
+                let mut any_changed = false;
+
+                for (i, item) in items.iter().enumerate() {
+                    let indexed = base.index(i).build();
+                    let (new_value, res, skip) =
+                        Self::resolve_identifiers_in_value(item, &indexed, ctx, newly_resolved);
+                    total_res  += res;
+                    total_skip += skip;
+
+                    if res > 0 {
+                        new_items.push(new_value);
+                        any_changed = true;
+                    } else {
+                        new_items.push(item.clone());
+                    }
+                }
+
+                if any_changed {
+                    (DataEntry::GroupArray {
+                        path:     group_path.clone(),
+                        items:    new_items,
+                        position: *position,
+                    }, total_res, total_skip)
+                } else {
+                    (entry.clone(), 0, total_skip)
+                }
+            }
+
+            DataEntry::ObjectProperty { name, data_type, object, position } => {
+                let base = PathBuilder::new("DATA").push(name).build();
+                let (new_obj, res, skip) =
+                    Self::resolve_identifiers_in_value(object, &base, ctx, newly_resolved);
+
+                if res > 0 {
+                    (DataEntry::ObjectProperty {
+                        name:      name.clone(),
+                        data_type: *data_type,
+                        object:    new_obj,
+                        position:  *position,
+                    }, res, skip)
+                } else {
+                    (entry.clone(), 0, skip)
+                }
+            }
+        }
+    }
+
+    /// Recursively walk a Value tree.  `path` is threaded through and
+    /// extended at every container boundary so that `newly_resolved` records
+    /// the *write* path (where the value lives in DATA), not the *read*
+    /// path (what the identifier points to — that's inside the variant).
+    ///
+    /// Returns `(replacement value, resolved count, skipped count)`.
+    fn resolve_identifiers_in_value(
+        value:          &Value,
+        path:           &str,
+        ctx:            &HashMap<String, DixValue>,
+        newly_resolved: &mut Vec<(String, DixValue)>,
+    ) -> (Value, usize, usize) {
+        match value {
+            // ── the target variant ─────────────────────────────────────────
+            Value::IdentifierValue { path: id_path, position } => {
+                match ctx.get(id_path.as_str()) {
+                    Some(dix) => {
+                        let new_val = Self::convert_dix_value_to_value(dix, *position);
+                        // Record: "path now holds this value"
+                        newly_resolved.push((path.to_string(), dix.clone()));
+                        (new_val, 1, 0)
+                    }
+                    None => {
+                        // Not in context yet — could be a forward ref (next
+                        // pass) or a true external ref (will stay skipped).
+                        (value.clone(), 0, 1)
+                    }
+                }
+            }
+
+            // ── containers: recurse, extend path ───────────────────────────
+            Value::Array { values, position } => {
+                let mut new_values  = Vec::with_capacity(values.len());
+                let mut total_res   = 0usize;
+                let mut total_skip  = 0usize;
+                let mut any_changed = false;
+
+                for (i, item) in values.iter().enumerate() {
+                    let indexed = format!("{}[{}]", path, i);
+                    let (nv, res, skip) =
+                        Self::resolve_identifiers_in_value(item, &indexed, ctx, newly_resolved);
+                    total_res  += res;
+                    total_skip += skip;
+                    if res > 0 { any_changed = true; }
+                    new_values.push(if res > 0 { nv } else { item.clone() });
+                }
+
+                if any_changed {
+                    (Value::Array { values: new_values, position: *position }, total_res, total_skip)
+                } else {
+                    (value.clone(), 0, total_skip)
+                }
+            }
+
+            Value::Object { properties, position } => {
+                let mut new_props   = Vec::with_capacity(properties.len());
+                let mut total_res   = 0usize;
+                let mut total_skip  = 0usize;
+                let mut any_changed = false;
+
+                for prop in properties {
+                    let child = format!("{}.{}", path, prop.key);
+                    let (nv, res, skip) =
+                        Self::resolve_identifiers_in_value(&prop.value, &child, ctx, newly_resolved);
+                    total_res  += res;
+                    total_skip += skip;
+
+                    if res > 0 {
+                        new_props.push(ObjectProperty {
+                            key:      prop.key.clone(),
+                            value:    nv,
+                            position: prop.position,
+                        });
+                        any_changed = true;
+                    } else {
+                        new_props.push(prop.clone());
+                    }
+                }
+
+                if any_changed {
+                    (Value::Object { properties: new_props, position: *position }, total_res, total_skip)
+                } else {
+                    (value.clone(), 0, total_skip)
+                }
+            }
+
+            Value::PrefixedConstructor { prefix, arguments, position } => {
+                let mut new_args    = Vec::with_capacity(arguments.len());
+                let mut total_res   = 0usize;
+                let mut total_skip  = 0usize;
+                let mut any_changed = false;
+
+                for (i, arg) in arguments.iter().enumerate() {
+                    let arg_path = format!("{}.__arg{}", path, i);
+                    let (nv, res, skip) =
+                        Self::resolve_identifiers_in_value(arg, &arg_path, ctx, newly_resolved);
+                    total_res  += res;
+                    total_skip += skip;
+                    if res > 0 { any_changed = true; }
+                    new_args.push(if res > 0 { nv } else { arg.clone() });
+                }
+
+                if any_changed {
+                    (Value::PrefixedConstructor {
+                        prefix:    prefix.clone(),
+                        arguments: new_args,
+                        position:  *position,
+                    }, total_res, total_skip)
+                } else {
+                    (value.clone(), 0, total_skip)
+                }
+            }
+
+            // ── leaves / expressions ───────────────────────────────────────
+            // Literals → nothing to do.
+            // Expression nodes that survived Phase 4 (e.g. pure arithmetic
+            // without calls) are left as-is; the runtime evaluates them.
+            _ => (value.clone(), 0, 0),
+        }
+    }
+
+    // ==================== LOG COLLECTION ====================
+
+    /// Drain any log lines the interpreter accumulated during its last
+    /// execute() call and append them to our own log buffer.  Call once
+    /// after every successful or failed interpreter dispatch in Phase 4.
+    ///
+    /// Assumes `FunctionInterpreter` exposes:
+    ///   `pub fn take_logs(&mut self) -> Vec<String>`
+    /// If your interpreter uses a different drain API (e.g. an inner
+    /// LogSink), wire it here.
+    fn collect_interpreter_logs(&mut self) {
+        self.log_statements.extend(self.interpreter.take_logs());
+    }
+
+    // ==================== RESOLUTION DUMP ====================
+
+    /// Produce a full post-mortem report string.  Includes every record in
+    /// `resolution_history` (ordered by iteration + execution order) and the
+    /// final snapshot of `data_context`.  Used by the debug pipeline and can
+    /// be written to a `.dump` file during CI regression runs.
+    fn format_resolution_dump(&self) -> String {
+        let elapsed_ms = self.start_time.elapsed().as_secs_f64() * 1000.0;
+
+        let mut out = String::with_capacity(4096); // avoid reallocations for typical files
+
+        out.push_str("╔══════════════════════════════════════════════╗\n");
+        out.push_str("║          VALUE RESOLUTION DUMP               ║\n");
+        out.push_str("╚══════════════════════════════════════════════╝\n\n");
+
+        out.push_str(&format!("  Total duration : {:.3} ms\n", elapsed_ms));
+        out.push_str(&format!("  History entries: {}\n", self.resolution_history.len()));
+        out.push_str(&format!("  Resolved values: {}\n", self.resolved_values.len()));
+        out.push_str(&format!("  Log lines      : {}\n\n", self.log_statements.len()));
+
+        // ── per-record history ─────────────────────────────────────────────
+        out.push_str("── Resolution History ─────────────────────────────────\n");
+
+        for (i, rec) in self.resolution_history.iter().enumerate() {
+            let status = if rec.error.is_some() { "✗" } else { "✓" };
+            out.push_str(&format!(
+                "  [{}] {} iter={:>3}  fn={}  path={}\n",
+                i, status, rec.iteration, rec.function_name, rec.path
+            ));
+
+            match (&rec.result, &rec.error) {
+                (Some(val), _) => {
+                    out.push_str(&format!(
+                        "         → {:?}  ({:.3} ms)\n",
+                        val,
+                        rec.duration.as_secs_f64() * 1000.0
+                    ));
+                }
+                (_, Some(err)) => {
+                    out.push_str(&format!(
+                        "         ✗ {}  ({:.3} ms)\n",
+                        err,
+                        rec.duration.as_secs_f64() * 1000.0
+                    ));
+                }
+                _ => {
+                    out.push_str("         ? (no result / no error recorded)\n");
+                }
+            }
+        }
+
+        // ── final data_context snapshot (sorted) ───────────────────────────
+        out.push_str("\n── Final data_context ─────────────────────────────────\n");
+        {
+            let ctx  = self.data_context.borrow();
+            let mut keys: Vec<&String> = ctx.keys().collect();
+            keys.sort_unstable();
+
+            for key in &keys {
+                out.push_str(&format!("  {} = {:?}\n", key, ctx[*key]));
+            }
+            out.push_str(&format!("\n  ({} total keys)\n", keys.len()));
+        }
+
+        // ── interpreter logs ───────────────────────────────────────────────
+        if !self.log_statements.is_empty() {
+            out.push_str("\n── Interpreter Logs ───────────────────────────────────\n");
+            for line in &self.log_statements {
+                out.push_str(&format!("  {}\n", line));
+            }
+        }
+
+        out
+    }
+}   // ← end of impl<'a> ValueResolver<'a>
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// PATCH — apply to resolve() from Response 1
+// ════════════════════════════════════════════════════════════════════════════
+// In the `resolve()` method, the block that fires when
+// `function_calls.is_empty()` returns BEFORE Phase 5 runs.
+// Identifiers that reference sibling literals (DATA.b = DATA.a)
+// are never replaced.
+//
+// Replace the existing block:
+//
+//     if function_calls.is_empty() {
+//         ...
+//         return ValueResolutionResult { ... };
+//     }
+//
+// with the version below.  The only addition is the call to
+// self.resolve_remaining_identifiers() before the return.
+// ════════════════════════════════════════════════════════════════════════════
+
+/*
+        if function_calls.is_empty() {
+            if self.debug_config.is_enabled {
+                self.error_manager.log_warning(
+                    "[DIAGNOSTIC] No function calls found in DATA section — skipping Phase 4"
+                );
+            }
+
+            // Phase 5 still runs: identifiers may reference sibling literals
+            self.resolve_remaining_identifiers();
+
+            self.error_manager.exit_scope();
+
+            return ValueResolutionResult {
+                is_success:              true,
+                original_ast:            Some(self.ast.clone()),
+                resolved_ast:            Some(self.ast),
+                function_calls_resolved: 0,
+                errors:                  Vec::new(),
+                log_statements:          self.log_statements,
+                resolution_duration:     self.start_time.elapsed(),
+                resolution_history:      self.resolution_history,
+            };
+        }
+*/
+
+// ════════════════════════════════════════════════════════════════════════════
+// INTEGRATION NOTE — collect_interpreter_logs
+// ════════════════════════════════════════════════════════════════════════════
+// In execute_iterative_resolution() (Response 2), add a call to
+//     self.collect_interpreter_logs();
+// immediately after each interpreter dispatch — both the Ok and Err arms,
+// before the outcome match continues.  That is, right after:
+//
+//     let result = match &pending[i].namespace { … };
+//
+// and before:
+//
+//     let call_duration = call_start.elapsed();
+//
+// insert:
+//
+//     self.collect_interpreter_logs();
+//
+// This keeps logs ordered by execution sequence.  If your interpreter
+// already writes directly to ErrorManager instead of buffering, this call
+// is a no-op and can be removed.
+// ════════════════════════════════════════════════════════════════════════════
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Compiler::AST::Position;
+
+    // Helper: a dummy Position for test values
+    const TEST_POS: Position = Position { line: 1, column: 1, offset: 0 };
+
+    // ── try_value_to_dix ─────────────────────────────────────────────────
+    // Verifies that every literal variant round-trips cleanly and that
+    // non-literal variants correctly return None.
+
+    #[test]
+    fn test_try_value_to_dix_integer() {
+        let v = Value::Integer { value: 42, position: TEST_POS };
+        assert_eq!(ValueResolver::<'_>::try_value_to_dix(&v), Some(DixValue::Int(42)));
+    }
+
+    #[test]
+    fn test_try_value_to_dix_string() {
+        let v = Value::String { value: "hello".to_string(), position: TEST_POS };
+        assert_eq!(
+            ValueResolver::<'_>::try_value_to_dix(&v),
+            Some(DixValue::String("hello".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_try_value_to_dix_nested_array() {
+        let v = Value::Array {
+            values: vec![
+                Value::Integer { value: 1, position: TEST_POS },
+                Value::Integer { value: 2, position: TEST_POS },
+            ],
+            position: TEST_POS,
+        };
+        assert_eq!(
+            ValueResolver::<'_>::try_value_to_dix(&v),
+            Some(DixValue::Array(vec![DixValue::Int(1), DixValue::Int(2)]))
+        );
+    }
+
+    #[test]
+    fn test_try_value_to_dix_array_with_identifier_returns_none() {
+        // An array containing an unresolved identifier → whole array is None
+        let v = Value::Array {
+            values: vec![
+                Value::Integer      { value: 1, position: TEST_POS },
+                Value::IdentifierValue { path: "DATA.x".to_string(), position: TEST_POS },
+            ],
+            position: TEST_POS,
+        };
+        assert!(ValueResolver::<'_>::try_value_to_dix(&v).is_none());
+    }
+
+    #[test]
+    fn test_try_value_to_dix_expression_returns_none() {
+        // Expression nodes are never plain literals
+        let v = Value::Expression {
+            expr: Box::new(Expression::FunctionCall {
+                name:      "foo".to_string(),
+                arguments: vec![],
+                namespace: None,
+                position:  TEST_POS,
+            }),
+            position: TEST_POS,
+        };
+        assert!(ValueResolver::<'_>::try_value_to_dix(&v).is_none());
+    }
+
+    // ── value_has_unresolved_ref ─────────────────────────────────────────
+    // Ensures dependency detection works for flat and nested cases.
+
+    #[test]
+    fn test_has_unresolved_ref_literal_is_false() {
+        let ctx: HashMap<String, DixValue> = HashMap::new();
+        let v = Value::Integer { value: 99, position: TEST_POS };
+        assert!(!ValueResolver::<'_>::value_has_unresolved_ref(&v, &ctx));
+    }
+
+    #[test]
+    fn test_has_unresolved_ref_missing_identifier_is_true() {
+        let ctx: HashMap<String, DixValue> = HashMap::new(); // empty
+        let v = Value::IdentifierValue {
+            path:     "DATA.missing".to_string(),
+            position: TEST_POS,
+        };
+        assert!(ValueResolver::<'_>::value_has_unresolved_ref(&v, &ctx));
+    }
+
+    #[test]
+    fn test_has_unresolved_ref_present_identifier_is_false() {
+        let mut ctx = HashMap::new();
+        ctx.insert("DATA.x".to_string(), DixValue::Int(5));
+
+        let v = Value::IdentifierValue {
+            path:     "DATA.x".to_string(),
+            position: TEST_POS,
+        };
+        assert!(!ValueResolver::<'_>::value_has_unresolved_ref(&v, &ctx));
+    }
+
+    #[test]
+    fn test_has_unresolved_ref_nested_in_object() {
+        let mut ctx = HashMap::new();
+        ctx.insert("DATA.a".to_string(), DixValue::Int(1));
+        // DATA.b intentionally missing
+
+        let v = Value::Object {
+            properties: vec![
+                ObjectProperty {
+                    key:      "first".to_string(),
+                    value:    Value::IdentifierValue { path: "DATA.a".to_string(), position: TEST_POS },
+                    position: TEST_POS,
+                },
+                ObjectProperty {
+                    key:      "second".to_string(),
+                    value:    Value::IdentifierValue { path: "DATA.b".to_string(), position: TEST_POS },
+                    position: TEST_POS,
+                },
+            ],
+            position: TEST_POS,
+        };
+        // At least one child (DATA.b) is unresolved
+        assert!(ValueResolver::<'_>::value_has_unresolved_ref(&v, &ctx));
+    }
+
+    #[test]
+    fn test_has_unresolved_ref_function_call_expression_is_true() {
+        let ctx: HashMap<String, DixValue> = HashMap::new();
+        let v = Value::Expression {
+            expr: Box::new(Expression::FunctionCall {
+                name:      "calc".to_string(),
+                arguments: vec![],
+                namespace: None,
+                position:  TEST_POS,
+            }),
+            position: TEST_POS,
+        };
+        // A nested function call is always "unresolved" from the argument
+        // resolution perspective — it will be discovered as its own
+        // FunctionCallInfo.
+        assert!(ValueResolver::<'_>::value_has_unresolved_ref(&v, &ctx));
+    }
+
+    // ── convert_dix_value_to_value ────────────────────────────────────────
+    // Round-trip: DixValue → Value → try_value_to_dix → DixValue
+
+    #[test]
+    fn test_convert_dix_roundtrip_scalar() {
+        let original = DixValue::Float(3.14);
+        let value    = ValueResolver::<'_>::convert_dix_value_to_value(&original, TEST_POS);
+        let back     = ValueResolver::<'_>::try_value_to_dix(&value);
+        assert_eq!(back, Some(original));
+    }
+
+    #[test]
+    fn test_convert_dix_roundtrip_nested_object() {
+        let mut inner = HashMap::new();
+        inner.insert("x".to_string(), DixValue::Int(1));
+        inner.insert("y".to_string(), DixValue::String("hi".to_string()));
+        let original = DixValue::Object(inner);
+
+        let value = ValueResolver::<'_>::convert_dix_value_to_value(&original, TEST_POS);
+        let back  = ValueResolver::<'_>::try_value_to_dix(&value);
+
+        assert_eq!(back, Some(original));
+    }
+
+    #[test]
+    fn test_convert_dix_roundtrip_null() {
+        let original = DixValue::Null;
+        let value    = ValueResolver::<'_>::convert_dix_value_to_value(&original, TEST_POS);
+        let back     = ValueResolver::<'_>::try_value_to_dix(&value);
+        assert_eq!(back, Some(original));
+    }
+        }

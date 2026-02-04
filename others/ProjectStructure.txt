@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Wed Feb  4 09:41:17 UTC 2026
+Generated: Wed Feb  4 09:42:39 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 30033dde68af9d1a0850331c26d5be2de789d9d2
+Commit: 7e3301b0ee1f6e79c08598a157abdfb708f52700
 Branch: master
 ==================================
 
@@ -134,6 +134,7 @@ src/Compiler/DLM/Encryptor/encryptor_trait.rs
 src/Compiler/DLM/Encryptor/mod.rs
 src/Compiler/DLM/Encryptor/xor_encryptor.rs
 src/Compiler/DLM/KeyManagement/argon2_kdf.rs
+src/Compiler/DLM/KeyManagement/key_file_data.rs
 src/Compiler/DLM/KeyManagement/mod.rs
 src/Compiler/DLM/dlm_module_base.rs
 src/Compiler/DLM/mod.rs
@@ -229,6 +230,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 188
+Source: 189
 Tests: 16
 Benches: 3

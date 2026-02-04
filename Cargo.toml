@@ -21,6 +21,7 @@ rand = "0.8"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 # Date and time handling for error timestamps
 chrono = "0.4"
+bitflags = "2.4"        # NEW: For section flags
 
 # JSON serialization for error reporting
 serde = { version = "1.0", features = ["derive"] }

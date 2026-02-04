@@ -1,2 +1,9 @@
 //! Key management - Encryption key handling
-// TODO: Implement Argon2KDF, KeyFileManager, KeyFileData
+
+mod argon2_kdf;
+mod key_file_data;
+mod key_file_manager;
+
+pub use argon2_kdf::Argon2KDF;
+pub use key_file_data::*;
+pub use key_file_manager::KeyFileManager;

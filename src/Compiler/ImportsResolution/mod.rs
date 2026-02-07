@@ -27,6 +27,6 @@ pub mod imports_resolver;
 pub use cloud_storage_provider::{CloudStorageProvider, CloudStorageError};
 pub use cloud_file_cache::{CloudFileCache, CacheStatistics};
 pub use cloud_provider_factory::CloudProviderFactory;
-//pub use hash_verifier::{HashVerifier, HashVerificationException};
+pub use hash_verifier::{HashVerifier, HashVerificationException};
 pub use http_cloud_provider::HttpCloudProvider;
-//pub use imports_resolver::{ImportsResolver, ImportResolutionStats};
+pub use imports_resolver::{ImportsResolver, ImportResolutionStats};

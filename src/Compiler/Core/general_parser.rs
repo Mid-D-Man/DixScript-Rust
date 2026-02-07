@@ -45,7 +45,7 @@ impl GeneralParser {
     ) -> Result<Self, ParseException> {
         let error_manager = ErrorManager::get_shared_instance();
 
-        error_manager.log_info("Initializing GeneralParser v1.0.1 (Fixed Ownership Issues)");
+        error_manager.log_info("Initializing GeneralParser v1.0.0");
         error_manager.log_info(&format!("Error Strategy: {:?}", operational_settings.error_handling_strategy));
         error_manager.log_info(&format!("Compatibility Mode: {:?}", operational_settings.compatibility_mode));
         error_manager.log_info(&format!("Debug Mode: {:?}", operational_settings.debug_mode));
@@ -545,23 +545,4 @@ enum ParsedSection {
     QuickFuncs(Option<QuickFuncsSection>),
     Data(Option<DataSection>),
     Security(Option<SecuritySection>),
-}
-
-// ==================== TESTS ====================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_concurrent_vs_sequential() {
-        // Test that both modes produce same results
-        // TODO: Add comprehensive tests
-    }
-
-    #[test]
-    fn test_section_independence() {
-        // Verify sections don't interfere when parsed concurrently
-        // TODO: Add test
-    }
 }

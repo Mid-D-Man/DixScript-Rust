@@ -1,5 +1,5 @@
 // src/Compiler/Core/general_ast_enhancer.rs
-/*
+
 
 //! Central AST enhancement orchestrator for DixScript v1.0.0
 //! Routes to section-specific enhancers
@@ -118,7 +118,7 @@ impl GeneralAstEnhancer {
         
         let mut enhancer = QuickFunctionsAstEnhancer::new(self.operational_settings.clone());
         
-        // ⭐ Get QuickFunctions analysis result (if available)
+        //  Get QuickFunctions analysis result (if available)
         let quickfuncs_analysis = analysis_result
             .and_then(|ar| ar.section_results.get("QUICKFUNCS"));
         
@@ -201,4 +201,3 @@ pub struct SectionEnhancementInfo {
     pub enhancements_applied: usize,
     pub duration: Duration,
   }
-*/

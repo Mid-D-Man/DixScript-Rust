@@ -1,5 +1,5 @@
 // src/Compiler/Core/general_semantics_analyzer.rs
-/*
+
 use crate::Compiler::AST::*;
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::Compiler::Core::SectionAnalyzers::*;
@@ -779,4 +779,3 @@ pub struct SemanticWarningInfo {
 }
 
 
- */

@@ -1,0 +1,398 @@
+(* DixScript Extended BNF Grammar v1.0.0 - Optional Commas Update *)
+(* MidMans Data Interchange Extension Script *)
+(* File Extension: .mdix *)
+
+(* ============================================================ *)
+(* MAIN STRUCTURE *)
+(* ============================================================ *)
+
+DixScript        ::= ConfigSection? ImportsSection? DLMSection? EnumSection?
+                     QuickFuncsSection? DataSection? SecuritySection?
+
+(* ============================================================ *)
+(* COMMENT SYNTAX *)
+(* ============================================================ *)
+
+Comment           ::= SingleLineComment | MultiLineComment
+SingleLineComment ::= "//" CommentText LineTerminator
+MultiLineComment  ::= "/*" MultiLineCommentText "*/"
+CommentText       ::= (Character - LineTerminator)*
+MultiLineCommentText ::= (Character - "*/")*
+LineTerminator    ::= "\n" | "\r\n" | "\r"
+
+(* ============================================================ *)
+(* @CONFIG SECTION *)
+(* ============================================================ *)
+
+ConfigSection    ::= "@CONFIG(" ConfigEntry (","? ConfigEntry)* ")"
+ConfigEntry      ::= ConfigKey "->" ConfigValue
+ConfigKey        ::= "version" | "encoding" | "author" | "created" | "features"
+                    | "debug_mode" | "error_handling" | "compatibility_mode"
+                    | Identifier
+ConfigValue      ::= StringLiteral | Integer | Float | Boolean | Date | Timestamp
+                    | FeatureValue | DebugValue | ErrorHandlingValue
+                    | CompatibilityValue
+
+FeatureValue     ::= "\"basic\"" | "\"advanced\"" | SectionList
+SectionList      ::= "\"" SectionName (","? SectionName)* "\""
+SectionName      ::= "quickfuncs" | "enums" | "dlm" | "data"
+
+DebugValue       ::= "\"off\"" | "\"regular\"" | "\"verbose\""
+ErrorHandlingValue ::= "\"halt\"" | "\"continue\"" | "\"recover\""
+CompatibilityValue ::= "\"strict\"" | "\"best_effort\"" | "\"permissive\""
+
+(* ============================================================ *)
+(* @IMPORTS SECTION *)
+(* ============================================================ *)
+
+ImportsSection   ::= "@IMPORTS(" ImportDeclaration (","? ImportDeclaration)* ")"
+
+ImportDeclaration ::= Identifier ImportSource VerifyClause?
+
+ImportSource     ::= "from" StringLiteral
+                    | "from_cloud" StringLiteral
+
+VerifyClause     ::= "verify" StringLiteral
+
+(* ============================================================ *)
+(* @DLM SECTION - Data Lifecycle Modules *)
+(* ============================================================ *)
+
+DLMSection       ::= "@DLM(" DLMList? ")"
+DLMList          ::= DLMModule (","? DLMModule)*
+DLMModule        ::= ModuleType ("." ModuleSubtype)?
+
+ModuleType       ::= "DCompressor" | "DAuditor" | "DEncryptor"
+ModuleSubtype    ::= "gzip" | "bzip2" | "lzma"
+                    | "diy" | "enhanced"
+                    | "xor" | "aes128" | "aes256" | "chacha20"
+
+(* ============================================================ *)
+(* @ENUMS SECTION *)
+(* ============================================================ *)
+
+EnumSection      ::= "@ENUMS(" EnumDeclaration+ ")"
+EnumDeclaration  ::= Identifier "{" EnumFieldList "}"
+EnumFieldList    ::= EnumField (","? EnumField)*
+EnumField        ::= Identifier ("=" Integer)?
+
+(* ============================================================ *)
+(* @QUICKFUNCS SECTION *)
+(* ============================================================ *)
+
+QuickFuncsSection ::= "@QUICKFUNCS(" QuickFunc* ")"
+QuickFunc        ::= "~" Identifier TypeAnnotation ScopeDeclaration
+                     FunctionSignature FunctionBody
+
+TypeAnnotation   ::= "<" DataType ">"
+ScopeDeclaration ::= "=>" ScopeTarget ("," ScopeTarget)*
+ScopeTarget      ::= "global" | QualifiedIdentifier
+FunctionSignature ::= "(" ParameterList? ")"
+ParameterList    ::= Parameter ("," Parameter)*
+Parameter        ::= Identifier TypeAnnotation? ("=" DefaultValue)?
+DefaultValue     ::= Literal
+
+FunctionBody     ::= "{" Statement* ReturnStatement "}"
+
+(* ============================================================ *)
+(* @DATA SECTION - Two-Tier Ordering System (COMMAS OPTIONAL) *)
+(* ============================================================ *)
+
+DataSection      ::= "@DATA(" DataContent ")"
+
+DataContent      ::= FlatPropertiesOnly
+                    | GroupedDataOnly
+                    | FlatPropertiesThenGroupedData
+
+(* UPDATED: Commas now optional between entries *)
+FlatPropertiesOnly ::= SimpleProperty (","? SimpleProperty)*
+GroupedDataOnly    ::= GroupedEntry (","? GroupedEntry)*
+FlatPropertiesThenGroupedData ::= SimpleProperty (","? SimpleProperty)* GroupedEntry (","? GroupedEntry)*
+
+GroupedEntry     ::= TableProperty | GroupArray
+
+SimpleProperty   ::= Identifier TypeAnnotation? "=" PropertyValue
+
+(* UPDATED: Commas optional between property assignments *)
+TableProperty    ::= TablePath ":" PropertyAssignment (","? PropertyAssignment)*
+
+(* UPDATED: Commas optional between array items *)
+GroupArray       ::= TablePath "::" ArrayItem (","? ArrayItem)*
+
+TablePath        ::= Identifier ("." Identifier)*
+PropertyAssignment ::= Identifier TypeAnnotation? "=" PropertyValue
+ArrayItem        ::= PropertyValue | ObjectLiteral
+
+PropertyValue    ::= Value
+                    | QuickFuncCall
+                    | ImportedFunctionCall
+
+QuickFuncCall    ::= Identifier "(" FunctionArgs? ")"
+
+ImportedFunctionCall ::= NamespaceName "." FunctionName "(" FunctionArgs? ")"
+
+(* ============================================================ *)
+(* @SECURITY SECTION *)
+(* ============================================================ *)
+
+SecuritySection  ::= "@SECURITY(" SecurityEntry (","? SecurityEntry)* ")"
+SecurityEntry    ::= SecurityBlockKey "->" "{" SecurityFieldList? "}"
+SecurityBlockKey ::= "encryption" | "validation" | "keystore" | "override" | "metadata"
+SecurityFieldList ::= SecurityField ("," SecurityField)*
+SecurityField    ::= Identifier "=" SecurityValue
+SecurityValue    ::= StringLiteral | Integer | Boolean | "auto" | HexLiteral
+
+(* ============================================================ *)
+(* STATEMENTS - WITH VARIABLE DECLARATION *)
+(* ============================================================ *)
+
+Statement        ::= IfStatement | SwitchStatement
+                    | VariableDeclaration | AssignmentStatement
+                    | ArithmeticAssignmentStatement
+                    | LogStatement | ExpressionStatement
+
+ExpressionStatement ::= Expression ";"
+
+VariableDeclaration ::= DeclarationKeyword Identifier TypeAnnotation? "=" Expression ";"
+
+DeclarationKeyword ::= "let" | "const" | "let" "mut"
+
+AssignmentStatement ::= Identifier "=" Expression ";"
+ArithmeticAssignmentStatement ::= Identifier ArithmeticAssignOp Expression ";"
+ArithmeticAssignOp ::= "+=" | "-=" | "*=" | "/=" | "%="
+
+IfStatement      ::= "if:" Expression "{" Statement* "}"
+                     ("elif:" Expression "{" Statement* "}")*
+                     ("else" "{" Statement* "}")?
+
+SwitchStatement  ::= "chk:" Expression "{" SwitchCase* DefaultCase? "}"
+SwitchCase       ::= "->" (QualifiedIdentifier | Literal) "{" Statement* "}"
+DefaultCase      ::= "->" "miss" "{" Statement* "}"
+
+ReturnStatement  ::= "return" Expression ";"
+LogStatement     ::= "log:" Expression ";"
+
+(* ============================================================ *)
+(* EXPRESSIONS *)
+(* ============================================================ *)
+
+Expression       ::= ConditionalExpression
+
+ConditionalExpression ::= LogicalOrExpression
+                         ("?" Expression ":" ConditionalExpression)?
+
+LogicalOrExpression ::= LogicalAndExpression
+                       ("||" LogicalAndExpression | "or" LogicalAndExpression)*
+
+LogicalAndExpression ::= EqualityExpression
+                        ("&&" EqualityExpression | "and" EqualityExpression)*
+
+EqualityExpression ::= RelationalExpression (("==" | "!=") RelationalExpression)*
+
+RelationalExpression ::= AdditiveExpression
+                        ((">" | "<" | ">=" | "<=") AdditiveExpression)*
+
+AdditiveExpression ::= MultiplicativeExpression
+                      (("+" | "-") MultiplicativeExpression)*
+
+MultiplicativeExpression ::= ExponentialExpression
+                            (("*" | "/" | "%") ExponentialExpression)*
+
+ExponentialExpression ::= UnaryExpression ("^" UnaryExpression)*
+
+UnaryExpression  ::= ("!" | "not" | "-" | "+") UnaryExpression
+                    | PostfixExpression
+
+PostfixExpression ::= PrimaryExpression PostfixSuffix*
+
+PostfixSuffix    ::= PropertyAccess
+                    | ArrayAccess
+                    | MethodCall
+                    | FunctionCall
+
+(* ============================================================ *)
+(* PRIMARY EXPRESSIONS *)
+(* ============================================================ *)
+
+PrimaryExpression ::= Literal
+                    | Identifier
+                    | "(" Expression ")"
+                    | ArrayLiteral
+                    | ObjectLiteral
+                    | PrefixedConstructor
+                    | StaticFunctionCall
+                    | DixFunctionCall
+                    | ImportedFunctionCall
+                    | ConfigAccess
+                    | EnumAccess
+                    | ImportedEnumAccess
+
+(* ============================================================ *)
+(* REGISTRY-BASED FUNCTION CALLS *)
+(* ============================================================ *)
+
+StaticFunctionCall ::= StaticObjectName "." MethodName "(" FunctionArgs? ")"
+StaticObjectName   ::= Identifier
+MethodName         ::= Identifier
+
+MethodCall       ::= "." Identifier "(" FunctionArgs? ")"
+
+DixFunctionCall  ::= "Dix" "." DixMethodName "(" FunctionArgs? ")"
+DixMethodName    ::= "logEvent" | "getSystemInfo" | "validateConfig"
+
+ImportedFunctionCall ::= NamespaceName "." FunctionName "(" FunctionArgs? ")"
+NamespaceName    ::= Identifier
+FunctionName     ::= Identifier
+
+(* REQUIRED: Commas in function arguments *)
+FunctionCall     ::= "(" FunctionArgs? ")"
+FunctionArgs     ::= Expression ("," Expression)*
+
+(* ============================================================ *)
+(* ACCESS EXPRESSIONS *)
+(* ============================================================ *)
+
+PropertyAccess   ::= "." Identifier
+ArrayAccess      ::= "[" Expression "]"
+ConfigAccess     ::= "config" "." Identifier
+
+EnumAccess       ::= Identifier "." Identifier
+
+ImportedEnumAccess ::= NamespaceName "." EnumName "." EnumValue
+EnumName         ::= Identifier
+EnumValue        ::= Identifier
+
+(* ============================================================ *)
+(* LITERALS AND VALUES *)
+(* ============================================================ *)
+
+Literal          ::= Primitive | ArrayLiteral | ObjectLiteral | HexColor
+                    | Date | Timestamp | PrefixedConstructor | Null
+
+Primitive        ::= Integer | Float | Double | ScientificNotation | HexLiteral
+                    | Boolean | StringLiteral
+
+(* REQUIRED: Commas in array literals *)
+ArrayLiteral     ::= "[" ArrayElements? "]"
+ArrayElements    ::= Expression ("," Expression)*
+
+(* REQUIRED: Commas in object literals *)
+ObjectLiteral    ::= "{" ObjectProperties? "}"
+ObjectProperties ::= ObjectProperty ("," ObjectProperty)*
+ObjectProperty   ::= Identifier TypeAnnotation? "=" PropertyValue
+
+PrefixedConstructor ::= BlobConstructor | TupleConstructor | RegexConstructor
+
+BlobConstructor  ::= "b:" "(" StringLiteral ")"
+
+(* REQUIRED: Commas in tuple constructors *)
+TupleConstructor ::= "t:" "(" TupleArguments? ")"
+TupleArguments   ::= Expression ("," Expression){0,5}
+
+RegexConstructor ::= "r:" "(" StringLiteral ")"
+
+QualifiedIdentifier ::= Identifier ("." Identifier)*
+
+(* ============================================================ *)
+(* STRING LITERALS *)
+(* ============================================================ *)
+
+StringLiteral    ::= DoubleQuotedString | SingleQuotedString | InterpolatedString
+
+DoubleQuotedString ::= '"' DoubleQuotedChar* '"'
+SingleQuotedString ::= "'" SingleQuotedChar* "'"
+
+InterpolatedString ::= '$"' InterpolatedContent* '"'
+InterpolatedContent ::= InterpolatedChar | InterpolationExpression
+InterpolationExpression ::= "{" Expression "}"
+
+DoubleQuotedChar ::= (Character - '"') | EscapeSequence
+SingleQuotedChar ::= (Character - "'") | EscapeSequence
+InterpolatedChar ::= (Character - ('"' | '{')) | EscapeSequence
+
+(* ============================================================ *)
+(* PRIMITIVE TYPES *)
+(* ============================================================ *)
+
+Integer          ::= "-"? Digit+
+Float            ::= "-"? Digit+ "." Digit* ("f" | "F")
+                    | "-"? Digit+ ("f" | "F")
+Double           ::= "-"? Digit+ "." Digit*
+                    | "-"? Digit+ ("." Digit*)? ("e" | "E") ("+" | "-")? Digit+
+ScientificNotation ::= "-"? Digit+ ("." Digit*)? ("e" | "E") ("+" | "-")? Digit+ ("f" | "F")?
+HexLiteral       ::= "0x" HexDigit+
+
+Boolean          ::= "true" | "false"
+Null             ::= "null"
+
+HexColor         ::= "#" (HexDigit){3,8}
+Date             ::= DateFormat
+Timestamp        ::= TimestampFormat
+
+Value            ::= Literal | ArrayLiteral | ObjectLiteral
+
+DataType         ::= "int" | "float" | "double" | "string" | "bool" | "array"
+                    | "tuple" | "hex" | "blob" | "regex" | "object"
+                    | "timestamp" | "date" | "enum"
+
+(* ============================================================ *)
+(* IDENTIFIERS AND BASIC ELEMENTS *)
+(* ============================================================ *)
+
+Identifier       ::= Letter (Letter | Digit | "_")*
+
+Digit            ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+HexDigit         ::= Digit | "a" | "b" | "c" | "d" | "e" | "f"
+                    | "A" | "B" | "C" | "D" | "E" | "F"
+Letter           ::= [a-zA-Z]
+Character        ::= Letter | Digit | Symbol | " " | EscapeSequence
+Symbol           ::= [+\-*/<>=!@#$%^&()\[\]{};:,.\?/\\|`~_]
+EscapeSequence   ::= "\" ("n" | "t" | "r" | "\" | '"' | "'" | "{" | "}" | "0")
+
+DateFormat       ::= Digit{4} "-" Digit{2} "-" Digit{2}
+TimestampFormat  ::= DateFormat "T" Digit{2} ":" Digit{2} ":" Digit{2}
+                     ("." Digit{3})? ("Z" | TimeZoneOffset)?
+TimeZoneOffset   ::= ("+" | "-") Digit{2} ":" Digit{2}
+
+(* ============================================================ *)
+(* KEYWORDS *)
+(* ============================================================ *)
+
+Keywords         ::= "if:" | "elif:" | "else" | "chk:" | "then" | "return"
+                    | "log:" | "miss" | "global"
+                    | "and" | "or" | "not" | "true" | "false" | "null"
+                    | "from" | "from_cloud" | "verify"
+                    | "let" | "const" | "mut"
+
+(* ============================================================ *)
+(* COMMA USAGE SUMMARY *)
+(* ============================================================ *)
+
+(*
+COMMA RULES IN DIXSCRIPT v1.0.0:
+=================================
+
+OPTIONAL COMMAS (between entries):
+- Between flat properties in DATA section
+- Between table property declarations
+- Between group array declarations
+- Between property assignments within table properties
+- Between array items within group arrays
+- Between CONFIG entries
+- Between ENUM declarations
+- Between IMPORT declarations
+- Between DLM modules
+- Between SECURITY entries
+
+REQUIRED COMMAS (within collections):
+- Function call parameters: func(a, b, c)
+- Array literals: [1, 2, 3]
+- Object literal properties: { x = 1, y = 2 }
+- Tuple elements: t:(1, 2, 3)
+- SECURITY field lists: { field1 = val, field2 = val }
+
+RECOMMENDATION:
+- Use commas for horizontal arrangements (same line)
+- Omit commas for vertical arrangements (different lines)
+- Formatters can enforce consistent style
+*)

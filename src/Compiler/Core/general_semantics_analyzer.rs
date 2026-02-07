@@ -4,7 +4,7 @@ use crate::Compiler::AST::*;
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::Compiler::Core::SectionAnalyzers::*;
 use crate::Compiler::Utilities::SymbolTable;
-use crate::Compiler::VersionControl::{VersionManager, VersionConstraints};
+use crate::Compiler::VersionControl::{VersionConstraints, ValidationResult};
 use crate::Compiler::ImportsResolution::ImportsResolver;
 use crate::ErrorManager::{ErrorManager, SemanticErrorType};
 use crate::Builtins::Static::EnumObject;
@@ -13,16 +13,15 @@ use std::time::{Duration, Instant};
 
 /// Central semantic analysis orchestrator for DixScript v1.0.0
 ///
-/// ANALYSIS PHASES:
-/// - Phase 0:    Version Validation
-/// - Phase 0.25: IMPORTS Semantic Analysis (validates before resolution)
-/// - Phase 0.5:  Imports Resolution (CRITICAL)
-/// - Phase 1:    Foundation (ENUMS)
-/// - Phase 2:    Functions (QUICKFUNCS)
-/// - Phase 3:    Independent (DLM)
-/// - Phase 4:    Data-Driven (DATA)
-/// - Phase 5:    Generatable (SECURITY)
-/// - Phase 4.5:  AST Enhancement (parameter defaults)
+/// ANALYSIS PHASES (RENUMBERED):
+/// - Phase 1: Version Validation
+/// - Phase 2: IMPORTS Semantic Analysis (validates import declarations)
+/// - Phase 3: Imports Resolution (CRITICAL - parses and resolves imports)
+/// - Phase 4: Foundation (ENUMS)
+/// - Phase 5: Functions (QUICKFUNCS)
+/// - Phase 6: Independent (DLM)
+/// - Phase 7: Data-Driven (DATA)
+/// - Phase 8: Generatable (SECURITY)
 pub struct GeneralSemanticAnalyzer<'a> {
     // References to input data (borrowed, not owned)
     ast: &'a DixScript,
@@ -88,9 +87,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
     ///
     /// Returns `SemanticAnalysisResult` with errors, warnings, and enhanced AST
     pub fn analyze(mut self) -> SemanticAnalysisResult {
-        self.error_manager.create_scope("General Semantic Analysis");
-
-        self.log_info("Starting semantic analysis v1.0.0");
+        self.log_info("=== Starting General Semantic Analysis v1.0.0 ===");
         self.log_info_fmt(|| format!(
             "Error Handling Strategy: {:?}",
             self.operational_settings.error_handling_strategy
@@ -108,21 +105,28 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.initialize_builtin_registries();
 
         if !self.skip_validation {
-            // PHASE 0: VERSION VALIDATION
-            if !self.analyze_phase0_version() {
+            // PHASE 1: VERSION VALIDATION
+            if !self.analyze_phase1_version() {
                 return self.finalize_result();
             }
         }
 
-        // PHASE 0.5: IMPORTS RESOLUTION (no separate semantic phase needed)
-        if !self.analyze_phase0_5_imports_resolution() {
+        // PHASE 2: IMPORTS SEMANTIC ANALYSIS (validate declarations)
+        if !self.analyze_phase2_imports_semantic() {
             if self.should_terminate() {
                 return self.finalize_result();
             }
         }
 
-        // PHASE 1: FOUNDATION (ENUMS)
-        if !self.analyze_phase1_foundation() {
+        // PHASE 3: IMPORTS RESOLUTION (parse and resolve)
+        if !self.analyze_phase3_imports_resolution() {
+            if self.should_terminate() {
+                return self.finalize_result();
+            }
+        }
+
+        // PHASE 4: FOUNDATION (ENUMS)
+        if !self.analyze_phase4_foundation() {
             if self.should_terminate() {
                 return self.finalize_result();
             }
@@ -131,25 +135,25 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         // Register enums with builtin system
         self.register_enums_with_builtin_system();
 
-        // PHASE 2: FUNCTIONS (QUICKFUNCS)
-        if !self.analyze_phase2_functions() {
+        // PHASE 5: FUNCTIONS (QUICKFUNCS)
+        if !self.analyze_phase5_functions() {
             if self.should_terminate() {
                 return self.finalize_result();
             }
         }
 
-        // PHASE 3: INDEPENDENT (DLM)
-        self.analyze_phase3_independent();
+        // PHASE 6: INDEPENDENT (DLM)
+        self.analyze_phase6_independent();
 
-        // PHASE 4: DATA-DRIVEN (DATA)
-        if !self.analyze_phase4_data_driven() {
+        // PHASE 7: DATA-DRIVEN (DATA)
+        if !self.analyze_phase7_data_driven() {
             if self.should_terminate() {
                 return self.finalize_result();
             }
         }
 
-        // PHASE 5: GENERATABLE (SECURITY)
-        self.analyze_phase5_generated();
+        // PHASE 8: GENERATABLE (SECURITY)
+        self.analyze_phase8_generated();
 
         self.log_info_fmt(|| format!(
             "Semantic analysis complete. Success: {}",
@@ -165,15 +169,17 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.finalize_result()
     }
 
-    // ==================== PHASE 0: VERSION VALIDATION ====================
+    // ==================== PHASE 1: VERSION VALIDATION ====================
 
-    /// Phase 0: Comprehensive version compatibility check
+    /// Phase 1: Comprehensive version compatibility check
     ///
     /// Returns `false` if validation fails and should halt
-    fn analyze_phase0_version(&mut self) -> bool {
-        self.log_info("Phase 0: Performing comprehensive version compatibility check");
+    fn analyze_phase1_version(&mut self) -> bool {
+        self.log_info("Phase 1: Performing comprehensive version compatibility check");
 
-        let version_validation = VersionConstraints::Instance().validate_script(self.ast);
+        // Create VersionConstraints instance (no singleton in Rust version)
+        let version_constraints = VersionConstraints::new();
+        let version_validation = version_constraints.validate_script(self.ast);
 
         if !version_validation.is_valid {
             self.log_error_fmt(|| format!(
@@ -200,34 +206,29 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         } else {
             self.log_info_fmt(|| format!(
                 "Version validation passed (Script v{})",
-                version_validation.detected_version
+                version_validation.detected_version.as_ref().unwrap_or(&"1.0.0".to_string())
             ));
         }
 
         true
     }
 
-    // ==================== PHASE 0.5: IMPORTS RESOLUTION ====================
+    // ==================== PHASE 2: IMPORTS SEMANTIC ANALYSIS ====================
 
-    /// Phase 0.5: Resolve imports and populate symbol table
+    /// Phase 2: IMPORTS Semantic Analysis
+    /// Validates import declarations BEFORE attempting to parse/resolve them
     ///
-    /// Returns `false` if resolution fails and should halt
-    fn analyze_phase0_5_imports_resolution(&mut self) -> bool {
-        // Skip if this is an imported file (parent is resolving)
-        if self.operational_settings.skip_imports_resolution {
-            self.log_debug("Skipping imports resolution (imported file - parent is resolving)");
-            return true;
-        }
-
+    /// Returns `false` if validation fails and should halt
+    fn analyze_phase2_imports_semantic(&mut self) -> bool {
         let imports = match &self.ast.imports {
             Some(section) if !section.imports.is_empty() => section,
             _ => {
-                self.log_info("No imports section - skipping import resolution");
+                self.log_info("No imports section - skipping imports semantic analysis");
                 return true;
             }
         };
 
-        self.log_info_fmt(|| format!("Phase 0.5: Resolving {} imports", imports.imports.len()));
+        self.log_info("Phase 2: Analyzing IMPORTS section semantically");
 
         // Check if imports feature is enabled
         if !self.operational_settings.is_feature_enabled("imports")
@@ -249,7 +250,56 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         }
 
-        self.error_manager.create_scope("Imports Resolution Phase");
+        // TODO: Create ImportsSectionAnalyzer when ported
+        self.log_debug("ImportsSectionAnalyzer not yet ported - skipping semantic validation");
+        self.log_info("Phase 2 complete");
+
+        true
+    }
+
+    // ==================== PHASE 3: IMPORTS RESOLUTION ====================
+
+    /// Phase 3: Resolve imports and populate symbol table
+    ///
+    /// Returns `false` if resolution fails and should halt
+    fn analyze_phase3_imports_resolution(&mut self) -> bool {
+        // Skip if this is an imported file (parent is resolving)
+        if self.operational_settings.skip_imports_resolution {
+            self.log_debug("Skipping imports resolution (imported file - parent is resolving)");
+            return true;
+        }
+
+        let imports = match &self.ast.imports {
+            Some(section) if !section.imports.is_empty() => section,
+            _ => {
+                self.log_info("No imports section - skipping import resolution");
+                return true;
+            }
+        };
+
+        self.log_info_fmt(|| format!("Phase 3: Resolving {} imports", imports.imports.len()));
+
+        // Check if imports feature is enabled
+        if !self.operational_settings.is_feature_enabled("imports")
+            && !self.operational_settings.is_advanced_mode() {
+            self.log_error("IMPORTS section found but imports feature not enabled");
+
+            self.analysis_result.errors.push(SemanticErrorInfo {
+                error_id: "SEM_FEATURE".to_string(),
+                error_type: "FeatureNotEnabled".to_string(),
+                message: "IMPORTS section requires 'imports' feature or advanced mode to be enabled".to_string(),
+                section_name: "IMPORTS".to_string(),
+                suggestion: "Add 'imports' to features list or enable advanced mode in CONFIG".to_string(),
+                position: None,
+            });
+
+            if self.should_terminate() {
+                self.analysis_result.is_success = false;
+                return false;
+            }
+        }
+
+        self.log_debug("Starting imports resolution phase");
 
         // NOTE: ImportsResolver handles ALL parsing internally - we just pass empty map
         // The resolver will parse files on-demand during resolution
@@ -292,7 +342,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
             if self.should_terminate() {
                 self.analysis_result.is_success = false;
-                self.error_manager.exit_scope();
                 return false;
             }
         } else {
@@ -300,19 +349,17 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             self.log_info_fmt(|| format!("Imports resolved successfully: {}", stats));
         }
 
-        self.error_manager.exit_scope();
+        self.log_info("Phase 3 complete");
         true
     }
 
-    // ==================== PHASE 1: FOUNDATION (ENUMS) ====================
+    // ==================== PHASE 4: FOUNDATION (ENUMS) ====================
 
-    /// Phase 1: Analyze foundational sections (ENUMS)
+    /// Phase 4: Analyze foundational sections (ENUMS)
     ///
     /// Returns `false` if analysis fails and should halt
-    fn analyze_phase1_foundation(&mut self) -> bool {
-        self.error_manager.create_scope("Phase 1: Foundation (ENUMS)");
-
-        self.log_info("Phase 1: Analyzing foundational sections");
+    fn analyze_phase4_foundation(&mut self) -> bool {
+        self.log_info("Phase 4: Analyzing foundational sections");
         self.log_info("CONFIG already processed by ConfigSectionHandler - skipping validation");
 
         // ENUMS Section
@@ -332,7 +379,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
                 });
 
                 if self.should_terminate() {
-                    self.error_manager.exit_scope();
                     return false;
                 }
             } else {
@@ -354,7 +400,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
                     ));
 
                     if self.should_terminate() {
-                        self.error_manager.exit_scope();
                         return false;
                     }
                 }
@@ -363,20 +408,17 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             self.log_info("ENUMS section not present - skipping analyzer");
         }
 
-        self.log_info("Phase 1 complete");
-        self.error_manager.exit_scope();
+        self.log_info("Phase 4 complete");
         true
     }
 
-    // ==================== PHASE 2: FUNCTIONS (QUICKFUNCS) ====================
+    // ==================== PHASE 5: FUNCTIONS (QUICKFUNCS) ====================
 
-    /// Phase 2: Analyze function definitions
+    /// Phase 5: Analyze function definitions
     ///
     /// Returns `false` if analysis fails and should halt
-    fn analyze_phase2_functions(&mut self) -> bool {
-        self.error_manager.create_scope("Phase 2: Functions (QUICKFUNCS)");
-
-        self.log_info("Phase 2: Analyzing function definitions");
+    fn analyze_phase5_functions(&mut self) -> bool {
+        self.log_info("Phase 5: Analyzing function definitions");
 
         if let Some(ref _quickfuncs) = self.ast.quick_functions {
             // Check if quickfuncs feature is enabled
@@ -394,7 +436,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
                 });
 
                 if self.should_terminate() {
-                    self.error_manager.exit_scope();
                     return false;
                 }
             } else {
@@ -407,18 +448,15 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             self.log_info("QUICKFUNCS section not present - skipping analyzer");
         }
 
-        self.log_info("Phase 2 complete");
-        self.error_manager.exit_scope();
+        self.log_info("Phase 5 complete");
         true
     }
 
-    // ==================== PHASE 3: INDEPENDENT (DLM) ====================
+    // ==================== PHASE 6: INDEPENDENT (DLM) ====================
 
-    /// Phase 3: Analyze independent sections
-    fn analyze_phase3_independent(&mut self) {
-        self.error_manager.create_scope("Phase 3: Independent Sections (DLM)");
-
-        self.log_info("Phase 3: Analyzing independent sections");
+    /// Phase 6: Analyze independent sections
+    fn analyze_phase6_independent(&mut self) {
+        self.log_info("Phase 6: Analyzing independent sections");
 
         if let Some(ref dlm) = self.ast.dlm {
             self.log_debug("Analyzing DLM section");
@@ -435,19 +473,16 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             self.log_debug("DLM section not present - skipping analyzer");
         }
 
-        self.log_info("Phase 3 complete");
-        self.error_manager.exit_scope();
+        self.log_info("Phase 6 complete");
     }
 
-    // ==================== PHASE 4: DATA-DRIVEN (DATA) ====================
+    // ==================== PHASE 7: DATA-DRIVEN (DATA) ====================
 
-    /// Phase 4: Analyze data section
+    /// Phase 7: Analyze data section
     ///
     /// Returns `false` if analysis fails and should halt
-    fn analyze_phase4_data_driven(&mut self) -> bool {
-        self.error_manager.create_scope("Phase 4: Data-Driven (DATA)");
-
-        self.log_info("Phase 4: Analyzing data section");
+    fn analyze_phase7_data_driven(&mut self) -> bool {
+        self.log_info("Phase 7: Analyzing data section");
 
         if let Some(ref _data) = self.ast.data {
             self.log_debug("Analyzing DATA section");
@@ -458,18 +493,15 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             self.log_warning("DATA section not present - unusual for a data interchange format");
         }
 
-        self.log_info("Phase 4 complete");
-        self.error_manager.exit_scope();
+        self.log_info("Phase 7 complete");
         true
     }
 
-    // ==================== PHASE 5: GENERATED (SECURITY) ====================
+    // ==================== PHASE 8: GENERATED (SECURITY) ====================
 
-    /// Phase 5: Analyze compiler-generated sections
-    fn analyze_phase5_generated(&mut self) {
-        self.error_manager.create_scope("Phase 5: Generated Sections (SECURITY)");
-
-        self.log_info("Phase 5: Analyzing compiler-generated sections");
+    /// Phase 8: Analyze compiler-generated sections
+    fn analyze_phase8_generated(&mut self) {
+        self.log_info("Phase 8: Analyzing compiler-generated sections");
 
         // Check if SECURITY is required
         let requires_security = self.ast.dlm.as_ref()
@@ -504,17 +536,16 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             self.log_debug("SECURITY section not present - skipping analyzer (not required)");
         }
 
-        self.log_info("Phase 5 complete");
-        self.error_manager.exit_scope();
+        self.log_info("Phase 8 complete");
     }
 
     // ==================== ENUM REGISTRATION ====================
 
     /// CRITICAL: Bridge SymbolTable enums to EnumObject builtin registry
     ///
-    /// Must be called after ENUMS analysis (Phase 1) but before value resolution (Phase 4)
+    /// Must be called after ENUMS analysis (Phase 4) but before value resolution (Phase 7)
     fn register_enums_with_builtin_system(&mut self) {
-        self.error_manager.create_scope("RegisterEnumsWithBuiltinSystem");
+        self.log_info("Registering enums with builtin system");
 
         // Clear any previous registrations
         EnumObject::clear_enums();
@@ -559,8 +590,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             "  EnumObject registry now has: {}",
             registered_enums.join(", ")
         ));
-
-        self.error_manager.exit_scope();
     }
 
     // ==================== HELPER METHODS ====================
@@ -627,8 +656,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             "Analysis duration: {:.2}ms",
             self.analysis_result.analysis_duration.as_secs_f64() * 1000.0
         ));
-
-        self.error_manager.exit_scope();
 
         self.analysis_result
     }
@@ -776,6 +803,4 @@ pub struct SemanticWarningInfo {
     pub message: String,
     pub section_name: String,
     pub position: Option<Position>,
-}
-
-
+            }

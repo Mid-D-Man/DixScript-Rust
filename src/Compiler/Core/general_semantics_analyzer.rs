@@ -1,13 +1,20 @@
 // src/Compiler/Core/general_semantics_analyzer.rs
 
 use crate::Compiler::AST::*;
-use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
+use crate::Compiler::Core::{
+    OperationalSettings,
+    ErrorHandlingStrategy,
+    DebugMode,
+    SemanticAnalysisResult,
+    SemanticErrorInfo,
+    SemanticWarningInfo,
+};
 use crate::Compiler::Core::SectionAnalyzers::*;
 use crate::Compiler::Utilities::SymbolTable;
 use crate::Compiler::VersionControl::{VersionConstraints, ValidationResult};
 use crate::Compiler::ImportsResolution::ImportsResolver;
 use crate::ErrorManager::{ErrorManager, SemanticErrorType};
-use crate::Builtins::Static::EnumObject;
+use crate::Builtins::Static::enum_object;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -22,6 +29,8 @@ use std::time::{Duration, Instant};
 /// - Phase 6: Independent (DLM)
 /// - Phase 7: Data-Driven (DATA)
 /// - Phase 8: Generatable (SECURITY)
+///
+/// NOTE: AST Enhancement is a separate phase run by the main compiler flow
 pub struct GeneralSemanticAnalyzer<'a> {
     // References to input data (borrowed, not owned)
     ast: &'a DixScript,
@@ -85,9 +94,10 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
     /// Main analysis entry point
     ///
-    /// Returns `SemanticAnalysisResult` with errors, warnings, and enhanced AST
+    /// Returns SemanticAnalysisResult with errors, warnings, and populated symbol table.
+    /// NOTE: AST enhancement is NOT performed here - it's a separate phase.
     pub fn analyze(mut self) -> SemanticAnalysisResult {
-        self.log_info("=== Starting General Semantic Analysis v1.0.0 ===");
+        self.log_info("Starting General Semantic Analysis v1.0.0");
         self.log_info_fmt(|| format!(
             "Error Handling Strategy: {:?}",
             self.operational_settings.error_handling_strategy
@@ -173,11 +183,10 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
     /// Phase 1: Comprehensive version compatibility check
     ///
-    /// Returns `false` if validation fails and should halt
+    /// Returns false if validation fails and should halt
     fn analyze_phase1_version(&mut self) -> bool {
         self.log_info("Phase 1: Performing comprehensive version compatibility check");
 
-        // Create VersionConstraints instance (no singleton in Rust version)
         let version_constraints = VersionConstraints::new();
         let version_validation = version_constraints.validate_script(self.ast);
 
@@ -218,7 +227,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
     /// Phase 2: IMPORTS Semantic Analysis
     /// Validates import declarations BEFORE attempting to parse/resolve them
     ///
-    /// Returns `false` if validation fails and should halt
+    /// Returns false if validation fails and should halt
     fn analyze_phase2_imports_semantic(&mut self) -> bool {
         let imports = match &self.ast.imports {
             Some(section) if !section.imports.is_empty() => section,
@@ -261,7 +270,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
     /// Phase 3: Resolve imports and populate symbol table
     ///
-    /// Returns `false` if resolution fails and should halt
+    /// Returns false if resolution fails and should halt
     fn analyze_phase3_imports_resolution(&mut self) -> bool {
         // Skip if this is an imported file (parent is resolving)
         if self.operational_settings.skip_imports_resolution {
@@ -305,8 +314,10 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         // The resolver will parse files on-demand during resolution
         let parsed_imports = HashMap::new();
 
+        // CRITICAL: Pass mutable reference to symbol table
+        // ImportsResolver will populate it with imported namespaces
         let mut imports_resolver = ImportsResolver::new(
-            self.symbol_table.clone(),
+            &mut self.symbol_table,
             self.operational_settings.clone(),
         );
 
@@ -357,7 +368,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
     /// Phase 4: Analyze foundational sections (ENUMS)
     ///
-    /// Returns `false` if analysis fails and should halt
+    /// Returns false if analysis fails and should halt
     fn analyze_phase4_foundation(&mut self) -> bool {
         self.log_info("Phase 4: Analyzing foundational sections");
         self.log_info("CONFIG already processed by ConfigSectionHandler - skipping validation");
@@ -416,7 +427,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
     /// Phase 5: Analyze function definitions
     ///
-    /// Returns `false` if analysis fails and should halt
+    /// Returns false if analysis fails and should halt
     fn analyze_phase5_functions(&mut self) -> bool {
         self.log_info("Phase 5: Analyzing function definitions");
 
@@ -480,7 +491,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
     /// Phase 7: Analyze data section
     ///
-    /// Returns `false` if analysis fails and should halt
+    /// Returns false if analysis fails and should halt
     fn analyze_phase7_data_driven(&mut self) -> bool {
         self.log_info("Phase 7: Analyzing data section");
 
@@ -548,7 +559,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.log_info("Registering enums with builtin system");
 
         // Clear any previous registrations
-        EnumObject::clear_enums();
+        enum_object::clear_enums();
 
         let enum_count = self.symbol_table.enums.len();
         let mut registered_count = 0;
@@ -559,33 +570,23 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         ));
 
         for (enum_name, field_mapping) in &self.symbol_table.enums {
-            match EnumObject::register_enum(enum_name.clone(), field_mapping.clone()) {
-                Ok(_) => {
-                    registered_count += 1;
-                    self.log_debug_fmt(|| format!(
-                        "  ✓ Registered enum: {} ({} fields)",
-                        enum_name,
-                        field_mapping.len()
-                    ));
-                }
-                Err(e) => {
-                    self.log_error_fmt(|| format!(
-                        "  ✗ Failed to register enum '{}': {}",
-                        enum_name,
-                        e
-                    ));
-                }
-            }
+            enum_object::register_enum(enum_name.clone(), field_mapping.clone());
+            registered_count += 1;
+            self.log_debug_fmt(|| format!(
+                "  Registered enum: {} ({} fields)",
+                enum_name,
+                field_mapping.len()
+            ));
         }
 
         self.log_info_fmt(|| format!(
-            "✓ Enum registration complete: {}/{} enums registered",
+            "Enum registration complete: {}/{} enums registered",
             registered_count,
             enum_count
         ));
 
         // Verify registration
-        let registered_enums = EnumObject::get_registered_enums();
+        let registered_enums = enum_object::get_registered_enums();
         self.log_debug_fmt(|| format!(
             "  EnumObject registry now has: {}",
             registered_enums.join(", ")
@@ -662,8 +663,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
     // ==================== LOGGING HELPERS (OPTIMIZED) ====================
 
-    /// Log debug message (only if debug mode is enabled)
-    /// OPTIMIZATION: Checks `can_log_debug` before formatting string
     #[inline]
     fn log_debug(&self, message: &str) {
         if self.can_log_debug {
@@ -671,7 +670,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         }
     }
 
-    /// Log debug with lazy formatting (only formats if debug enabled)
     #[inline]
     fn log_debug_fmt<F>(&self, f: F)
     where
@@ -682,7 +680,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         }
     }
 
-    /// Log verbose message (only if verbose mode is enabled)
     #[inline]
     fn log_verbose(&self, message: &str) {
         if self.can_log_verbose {
@@ -690,7 +687,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         }
     }
 
-    /// Log verbose with lazy formatting
     #[inline]
     fn log_verbose_fmt<F>(&self, f: F)
     where
@@ -701,13 +697,11 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         }
     }
 
-    /// Log info message (always logged)
     #[inline]
     fn log_info(&self, message: &str) {
         self.error_manager.log_info(message);
     }
 
-    /// Log info with lazy formatting
     #[inline]
     fn log_info_fmt<F>(&self, f: F)
     where
@@ -716,13 +710,11 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.error_manager.log_info(&f());
     }
 
-    /// Log warning message (always logged)
     #[inline]
     fn log_warning(&self, message: &str) {
         self.error_manager.log_Warning(message);
     }
 
-    /// Log warning with lazy formatting
     #[inline]
     fn log_warning_fmt<F>(&self, f: F)
     where
@@ -731,13 +723,11 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.error_manager.log_Warning(&f());
     }
 
-    /// Log error message (always logged)
     #[inline]
     fn log_error(&self, message: &str) {
         self.error_manager.log_error(message);
     }
 
-    /// Log error with lazy formatting
     #[inline]
     fn log_error_fmt<F>(&self, f: F)
     where
@@ -746,61 +736,3 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.error_manager.log_error(&f());
     }
 }
-
-// ==================== RESULT STRUCTURES ====================
-
-/// Result of semantic analysis
-#[derive(Debug, Clone)]
-pub struct SemanticAnalysisResult {
-    pub is_success: bool,
-    pub symbol_table: Option<SymbolTable>,
-    pub enhanced_ast: Option<DixScript>,
-    pub errors: Vec<SemanticErrorInfo>,
-    pub warnings: Vec<SemanticWarningInfo>,
-    pub section_results: HashMap<String, SectionAnalysisResult>,
-    pub analysis_duration: Duration,
-    pub short_name_index: Option<HashMap<String, Vec<String>>>,
-    pub type_index: Option<HashMap<String, DataType>>,
-}
-
-impl SemanticAnalysisResult {
-    pub fn new() -> Self {
-        SemanticAnalysisResult {
-            is_success: false,
-            symbol_table: None,
-            enhanced_ast: None,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-            section_results: HashMap::new(),
-            analysis_duration: Duration::default(),
-            short_name_index: None,
-            type_index: None,
-        }
-    }
-}
-
-impl Default for SemanticAnalysisResult {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Semantic error information
-#[derive(Debug, Clone)]
-pub struct SemanticErrorInfo {
-    pub error_id: String,
-    pub error_type: String,
-    pub message: String,
-    pub section_name: String,
-    pub suggestion: String,
-    pub position: Option<Position>,
-}
-
-/// Semantic warning information
-#[derive(Debug, Clone)]
-pub struct SemanticWarningInfo {
-    pub warning_id: String,
-    pub message: String,
-    pub section_name: String,
-    pub position: Option<Position>,
-            }

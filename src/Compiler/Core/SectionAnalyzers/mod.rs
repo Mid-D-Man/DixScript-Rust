@@ -6,39 +6,28 @@
 //! Each analyzer validates AST nodes and populates the symbol table.
 //!
 //! ## Ported Analyzers
-//! - ✅ EnumsSectionAnalyzer - COMPLETE (v1.0.0)
-//! - ✅ DlmSectionAnalyzer - COMPLETE (v1.0.0)
-//! - ✅ SecuritySectionAnalyzer - COMPLETE (v1.0.0)
+//! - EnumsSectionAnalyzer - COMPLETE (v1.0.0)
+//! - DlmSectionAnalyzer - COMPLETE (v1.0.0)
+//! - SecuritySectionAnalyzer - COMPLETE (v1.0.0)
 //!
 //! ## TODO: Analyzers to Port
-//! - ⏳ ConfigSectionAnalyzer - Simple validation, no symbol table
-//! - ⏳ ImportsSectionAnalyzer - Path resolution, hash verification
-//! - ⏳ DataSectionAnalyzer - Complex: expressions, type inference, scoping
-//! - ⏳ QuickFuncsSectionAnalyzer - Most complex: full type checking, control flow
-//!
-//! ## Porting Order (by complexity)
-//! 1. ConfigSectionAnalyzer (simplest - just validation)
-//! 2. ImportsSectionAnalyzer (medium - file I/O, hashing)
-//! 3. DataSectionAnalyzer (complex - expressions, type inference)
-//! 4. QuickFuncsSectionAnalyzer (most complex - full type system)
+//! - ConfigSectionAnalyzer - Simple validation, no symbol table
+//! - ImportsSectionAnalyzer - Path resolution, hash verification
+//! - DataSectionAnalyzer - Complex: expressions, type inference, scoping
+//! - QuickFuncsSectionAnalyzer - Most complex: full type checking, control flow
+
+use crate::Compiler::AST::Position;
 
 pub mod enums_section_analyzer;
 pub mod dlm_section_analyzer;
 pub mod security_section_analyzer;
-
-// TODO: Port these analyzers
-// pub mod config_section_analyzer;
-// pub mod imports_section_analyzer;
-// pub mod data_section_analyzer;
-// pub mod quickfuncs_section_analyzer;
 
 // Re-exports for convenience
 pub use enums_section_analyzer::EnumsSectionAnalyzer;
 pub use dlm_section_analyzer::DlmSectionAnalyzer;
 pub use security_section_analyzer::SecuritySectionAnalyzer;
 
-// Shared types used by all analyzers
-use crate::Compiler::AST::Position;
+// ==================== SHARED RESULT TYPES ====================
 
 /// Result of analyzing a section
 #[derive(Debug, Clone)]
@@ -80,15 +69,25 @@ pub struct SemanticWarningInfo {
     pub position: Option<Position>,
 }
 
-// TODO: Re-export these when ported
-// pub use config_section_analyzer::ConfigSectionAnalyzer;
-// pub use imports_section_analyzer::ImportsSectionAnalyzer;
-// pub use data_section_analyzer::DataSectionAnalyzer;
-// pub use quickfuncs_section_analyzer::QuickFuncsSectionAnalyzer;
+// ==================== HELPER FUNCTIONS ====================
 
-/// Common result type for all section analyzers
-/// All analyzers should return this type for consistency
-pub type AnalyzerResult = SectionAnalysisResult;
+/// Create a successful analysis result with no errors
+pub fn success_result(section_name: impl Into<String>) -> SectionAnalysisResult {
+    let mut result = SectionAnalysisResult::new(section_name);
+    result.is_success = true;
+    result
+}
+
+/// Create a failed analysis result with errors
+pub fn failure_result(
+    section_name: impl Into<String>,
+    errors: Vec<SemanticErrorInfo>,
+) -> SectionAnalysisResult {
+    let mut result = SectionAnalysisResult::new(section_name);
+    result.is_success = false;
+    result.errors = errors;
+    result
+}
 
 // ==================== ANALYZER TRAITS ====================
 
@@ -110,30 +109,16 @@ pub trait SectionAnalyzer {
     fn analyzer_name(&self) -> &'static str;
 }
 
-// ==================== HELPER FUNCTIONS ====================
+// ==================== COMMON RESULT TYPE ====================
 
-/// Create a successful analysis result with no errors
-pub fn success_result(section_name: impl Into<String>) -> SectionAnalysisResult {
-    let mut result = SectionAnalysisResult::new(section_name);
-    result.is_success = true;
-    result
-}
+/// Common result type for all section analyzers
+/// All analyzers should return this type for consistency
+pub type AnalyzerResult = SectionAnalysisResult;
 
-/// Create a failed analysis result with errors
-pub fn failure_result(
-    section_name: impl Into<String>,
-    errors: Vec<SemanticErrorInfo>,
-) -> SectionAnalysisResult {
-    let mut result = SectionAnalysisResult::new(section_name);
-    result.is_success = false;
-    result.errors = errors;
-    result
-}
-
-// ==================== ANALYZER COMPLEXITY NOTES ====================
+// ==================== COMPLEXITY NOTES ====================
 
 /*
-COMPLEXITY RANKING (simplest → hardest):
+COMPLEXITY RANKING (simplest to hardest):
 
 1. ConfigSectionAnalyzer (SIMPLEST)
    - Just key-value validation
@@ -141,19 +126,19 @@ COMPLEXITY RANKING (simplest → hardest):
    - No symbol table population
    - No type inference
 
-2. DlmSectionAnalyzer (SIMPLE) ✅ COMPLETE
+2. DlmSectionAnalyzer (SIMPLE) - COMPLETE
    - Module type validation
    - Subtype validation
    - Ordering checks
    - Security warnings
 
-3. SecuritySectionAnalyzer (SIMPLE-MEDIUM) ✅ COMPLETE
+3. SecuritySectionAnalyzer (SIMPLE-MEDIUM) - COMPLETE
    - Block key validation
    - Field validation per block type
    - Works with SecurityUtilities for defaults
    - No dependencies
 
-4. EnumsSectionAnalyzer (MEDIUM) ✅ COMPLETE
+4. EnumsSectionAnalyzer (MEDIUM) - COMPLETE
    - Name/field validation
    - Duplicate detection
    - Value computation
@@ -186,13 +171,14 @@ COMPLEXITY RANKING (simplest → hardest):
    - Used by: DATA
 
 PORTING STRATEGY:
-- ✅ Start with EnumsSectionAnalyzer (establish patterns)
-- ✅ Move to DlmSectionAnalyzer (validation complexity)
-- ✅ Port SecuritySectionAnalyzer (similar patterns)
-- ⏳ Port ConfigSectionAnalyzer (warm-up)
-- ⏳ Port ImportsSectionAnalyzer (file I/O, introduces dependencies)
-- ⏳ Port QuickFuncsSectionAnalyzer (complex but independent)
-- ⏳ Finally port DataSectionAnalyzer (depends on QuickFuncs)
+- COMPLETE: EnumsSectionAnalyzer (establish patterns)
+- COMPLETE: DlmSectionAnalyzer (validation complexity)
+- COMPLETE: SecuritySectionAnalyzer (similar patterns)
+- COMPLETE: Port ImportsSectionAnalyzer (file I/O, introduces dependencies)
+- COMPLETE: Port QuickFuncsSectionAnalyzer (complex but independent)
+- COMPLETE: Finally port DataSectionAnalyzer (depends on QuickFuncs)
+
+Notice no configs analyser as configs are handeld seprately
 
 TESTING STRATEGY:
 - Each analyzer has comprehensive tests
@@ -213,13 +199,13 @@ CONFIG
 IMPORTS
   └─> (recursive, may trigger full analysis of imported files)
 
-ENUMS ✅ COMPLETE
+ENUMS - COMPLETE
   └─> (no dependencies)
 
-DLM ✅ COMPLETE
+DLM - COMPLETE
   └─> (no dependencies)
 
-SECURITY ✅ COMPLETE
+SECURITY - COMPLETE
   └─> DLM (checks for encryption modules)
 
 QUICKFUNCS

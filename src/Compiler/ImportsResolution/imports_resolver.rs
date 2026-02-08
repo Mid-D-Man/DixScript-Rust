@@ -16,7 +16,7 @@ use crate::Compiler::Utilities::{SymbolTable, QuickFunctionInfo, FunctionSignatu
 use crate::ErrorManager::{ErrorManager, ImportsResolutionErrorType};
 use super::{CloudFileCache, CloudProviderFactory, HashVerifier};
 
-/// ImportsResolver v1.0.1 - WITH SEMANTIC ANALYSIS + AST ENHANCEMENT
+/// ImportsResolver v1.0.0 - WITH SEMANTIC ANALYSIS + AST ENHANCEMENT
 ///
 /// CRITICAL FIX: Imported files now go through FULL pipeline:
 /// 1. Parse → AST (with QualifiedIdentifiers)

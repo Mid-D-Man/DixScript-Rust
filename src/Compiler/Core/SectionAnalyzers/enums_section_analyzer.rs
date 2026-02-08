@@ -6,45 +6,8 @@ use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMod
 use crate::ErrorManager::{ErrorManager, SemanticErrorType};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// Result of analyzing the ENUMS section
-#[derive(Debug, Clone)]
-pub struct SectionAnalysisResult {
-    pub section_name: String,
-    pub is_success: bool,
-    pub errors: Vec<SemanticErrorInfo>,
-    pub warnings: Vec<SemanticWarningInfo>,
-}
-
-impl SectionAnalysisResult {
-    pub fn new(section_name: impl Into<String>) -> Self {
-        SectionAnalysisResult {
-            section_name: section_name.into(),
-            is_success: false,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-        }
-    }
-}
-
-/// Semantic error information
-#[derive(Debug, Clone)]
-pub struct SemanticErrorInfo {
-    pub error_id: String,
-    pub error_type: String,
-    pub message: String,
-    pub section_name: String,
-    pub suggestion: String,
-    pub position: Option<Position>,
-}
-
-/// Semantic warning information
-#[derive(Debug, Clone)]
-pub struct SemanticWarningInfo {
-    pub warning_id: String,
-    pub message: String,
-    pub section_name: String,
-    pub position: Option<Position>,
-}
+// Import shared result types from parent module
+use super::{SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo};
 
 /// EnumsSectionAnalyzer - validates ENUMS section and populates symbol table
 ///
@@ -570,4 +533,4 @@ impl<'a> EnumsSectionAnalyzer<'a> {
             self.log_warning(message);
         }
     }
-}
+                }

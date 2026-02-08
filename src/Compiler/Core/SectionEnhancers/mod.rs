@@ -8,8 +8,5 @@ pub mod quickfuncs_ast_enhancer;
 pub use qualified_identifier_resolution::{
     QualifiedIdentifierKey, QualifiedIdentifierResolution, QualifiedIdentifierType,
 };
-/*
 pub use qualified_identifier_resolver::QualifiedIdentifierResolver;
 pub use quickfuncs_ast_enhancer::QuickFunctionsAstEnhancer;
-
- */

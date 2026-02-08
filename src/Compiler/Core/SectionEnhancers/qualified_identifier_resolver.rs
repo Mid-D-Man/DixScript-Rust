@@ -1,12 +1,10 @@
 // src/Compiler/Core/SectionEnhancers/qualified_identifier_resolver.rs
 
-/*
-
 //! Resolves QualifiedIdentifier nodes into concrete expression types
 //! Uses resolution metadata from semantic analysis
 
 use crate::Compiler::AST::*;
-use crate::Compiler::Core::SectionEnhancers::qualified_identifier_resolution::{
+use crate::Compiler::Core::SectionEnhancers::{
     QualifiedIdentifierKey, QualifiedIdentifierResolution, QualifiedIdentifierType,
 };
 use crate::ErrorManager::ErrorManager;
@@ -89,7 +87,7 @@ impl QualifiedIdentifierResolver {
                 QuickFuncStatement::Switch {
                     expression: self.resolve_expression(expression),
                     cases: cases.iter().map(|case| self.resolve_switch_case(case)).collect(),
-                    default_case: default_case.as_ref().map(|case| Box::new(self.resolve_switch_case(case))),
+                    default_case: default_case.as_ref().map(|case| self.resolve_switch_case(case)),
                     position: *position,
                 }
             }
@@ -539,7 +537,4 @@ impl QualifiedIdentifierResolver {
             }
         }
     }
-  }
-
-
- */
+            }

@@ -314,11 +314,10 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         // The resolver will parse files on-demand during resolution
         let parsed_imports = HashMap::new();
 
-        // CRITICAL: Pass mutable reference to symbol table
-        // ImportsResolver will populate it with imported namespaces
+        // ✅ FIX: Pass &mut and & references (don't clone!)
         let mut imports_resolver = ImportsResolver::new(
             &mut self.symbol_table,
-            self.operational_settings.clone(),
+            self.operational_settings,  // ✅ Borrow, not clone
         );
 
         let resolve_success = tokio::runtime::Runtime::new()

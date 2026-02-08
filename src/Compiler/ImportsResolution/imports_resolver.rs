@@ -9,15 +9,23 @@ use crate::Compiler::Core::{
     ErrorHandlingStrategy,
     DebugMode,
     ConfigSectionHandler,
-    ProcessConfigResult,
 };
 use crate::Compiler::Core::Tokenizer::Tokenizer;
-use crate::Compiler::Core::GeneralParser;
+use crate::Compiler::Core::{GeneralParser, GeneralSemanticAnalyzer, GeneralAstEnhancer};
 use crate::Compiler::Utilities::{SymbolTable, QuickFunctionInfo, FunctionSignature, ParameterInfo};
 use crate::ErrorManager::{ErrorManager, ImportsResolutionErrorType};
 use super::{CloudFileCache, CloudProviderFactory, HashVerifier};
 
-/// ImportsResolver v1.0.0 - WITH CLOUD IMPORTS SUPPORT
+/// ImportsResolver v1.0.1 - WITH SEMANTIC ANALYSIS + AST ENHANCEMENT
+///
+/// CRITICAL FIX: Imported files now go through FULL pipeline:
+/// 1. Parse → AST (with QualifiedIdentifiers)
+/// 2. Semantic Analysis → Validates and builds resolution metadata
+/// 3. AST Enhancement → Transforms QualifiedIdentifiers to concrete types
+/// 4. Extract API → Store ENHANCED functions/enums in SymbolTable
+///
+/// This ensures imported QuickFunctions have concrete expression types,
+/// not ambiguous QualifiedIdentifiers that would break ValueResolver.
 ///
 /// Responsibilities:
 /// 1. Recursively resolve imports (including nested imports)
@@ -25,10 +33,12 @@ use super::{CloudFileCache, CloudProviderFactory, HashVerifier};
 /// 3. Detect circular dependencies using DFS algorithm
 /// 4. Verify file integrity with optional hash verification
 /// 5. Cache cloud files locally for performance
-/// 6. Extract ONLY global-scoped functions (scoped functions are not exported)
-/// 7. Populate SymbolTable with namespace hierarchy
-/// 8. Track local imports for scope-aware execution
-/// 9. Report errors through ErrorManager
+/// 6. ✅ NEW: Run semantic analysis on imported files
+/// 7. ✅ NEW: Run AST enhancement on imported files
+/// 8. Extract ONLY global-scoped functions (scoped functions are not exported)
+/// 9. Populate SymbolTable with namespace hierarchy
+/// 10. Track local imports for scope-aware execution
+/// 11. Report errors through ErrorManager
 ///
 /// Algorithm: Depth-First Search with visiting/visited sets
 /// - visiting: Files currently in the DFS path (cycle detection)
@@ -41,9 +51,9 @@ pub struct ImportsResolver {
     cloud_cache: CloudFileCache,
 
     // State tracking for cycle detection
-    visiting: HashSet<String>,  // Files in current DFS path
-    visited: HashSet<String>,   // Files fully processed
-    import_stack: Vec<String>,  // For error reporting
+    visiting: HashSet<String>,
+    visited: HashSet<String>,
+    import_stack: Vec<String>,
 }
 
 impl ImportsResolver {
@@ -154,9 +164,7 @@ impl ImportsResolver {
                 Some(absolute_path.to_string()),
                 Some(normalized_path.clone()),
                 Some(cycle_chain),
-                0,
-                0,
-                None,
+                0, 0, None,
             );
 
             return false;
@@ -232,10 +240,7 @@ impl ImportsResolver {
                             nested_import.alias.clone(),
                             Some(nested_import.path.clone()),
                             Some(nested_path.clone()),
-                            None,
-                            0,
-                            0,
-                            None,
+                            None, 0, 0, None,
                         );
                         return false;
                     }
@@ -295,16 +300,14 @@ impl ImportsResolver {
 
         self.log_debug(&format!(
             "Registered namespace '{}' with {} functions, {} enums, {} local imports",
-            alias,
-            functions.len(),
-            enums.len(),
-            local_imports.len()
+            alias, functions.len(), enums.len(), local_imports.len()
         ));
 
         true
     }
 
     /// Parse an imported file - SUPPORTS BOTH LOCAL AND CLOUD
+    /// ✅ NEW: Runs FULL pipeline (Parse → Semantic Analysis → AST Enhancement)
     async fn parse_imported_file(
         &mut self,
         import: &ImportDeclaration,
@@ -324,12 +327,8 @@ impl ImportsResolver {
                     import.alias.clone(),
                     Some(import.path.clone()),
                     Some(resolved_path.to_string()),
-                    None,
-                    import.position.line as i32,
-                    import.position.column as i32,
-                    None,
+                    None, 0, 0, None,
                 );
-
                 format!("Failed to read file: {}", e)
             })?
         };
@@ -346,12 +345,8 @@ impl ImportsResolver {
                         import.alias.clone(),
                         Some(import.path.clone()),
                         Some(resolved_path.to_string()),
-                        None,
-                        import.position.line as i32,
-                        import.position.column as i32,
-                        None,
+                        None, 0, 0, None,
                     );
-
                     format!("Hash verification failed: {}", e)
                 })?;
 
@@ -367,9 +362,8 @@ impl ImportsResolver {
         let config_handler = ConfigSectionHandler::new(None);
         let config_result = config_handler.process_config_section(&content);
 
-        // STEP 4: Tokenize - FIX: Tokenizer::new() takes String, not &str
+        // STEP 4: Tokenize
         self.log_debug("Tokenizing imported file");
-
         let tokenizer = Tokenizer::new(config_result.cleaned_input_string.clone());
         let token_result = tokenizer.tokenize();
 
@@ -380,27 +374,23 @@ impl ImportsResolver {
                 import.alias.clone(),
                 Some(import.path.clone()),
                 Some(resolved_path.to_string()),
-                None,
-                0,
-                0,
-                None,
+                None, 0, 0, None,
             );
-
             return Err("Tokenization produced no tokens".to_string());
         }
 
-        // STEP 5: Create operational settings
+        // STEP 5: Create operational settings for imported file
+        // CRITICAL: skip_imports_resolution = true prevents recursion!
         let mut import_operational_settings = self.operational_settings.clone();
         import_operational_settings.source_file_path = Some(resolved_path.to_string());
-        import_operational_settings.skip_imports_resolution = true;
+        import_operational_settings.skip_imports_resolution = true; // ✅ Prevents recursion
 
-        // STEP 6: Parse - FIX: GeneralParser::new() needs config_section
+        // STEP 6: Parse
         self.log_debug("Parsing imported file");
-
         let general_parser = GeneralParser::new(
             token_result.tokens,
             config_result.config_section.clone(),
-            import_operational_settings,
+            import_operational_settings.clone(),
         ).map_err(|e| {
             self.error_manager.add_imports_resolution_error(
                 ImportsResolutionErrorType::ParseError,
@@ -408,50 +398,119 @@ impl ImportsResolver {
                 import.alias.clone(),
                 Some(import.path.clone()),
                 Some(resolved_path.to_string()),
-                None,
-                0,
-                0,
-                None,
+                None, 0, 0, None,
             );
-
             format!("Failed to create parser: {}", e)
         })?;
 
-        let mut ast = general_parser.parse()
-            .map_err(|e| {
-                let parse_errors = self.error_manager.get_parse_errors();
+        let mut ast = general_parser.parse().map_err(|e| {
+            let parse_errors = self.error_manager.get_parse_errors();
 
-                if !parse_errors.is_empty() {
-                    let first_error = &parse_errors[0];
+            if !parse_errors.is_empty() {
+                let first_error = &parse_errors[0];
+                self.error_manager.add_imports_resolution_error(
+                    ImportsResolutionErrorType::ParseError,
+                    format!("Parse errors in imported file: {}", first_error.message),
+                    import.alias.clone(),
+                    Some(import.path.clone()),
+                    Some(resolved_path.to_string()),
+                    None,
+                    first_error.line as i32,
+                    first_error.column as i32,
+                    None,
+                );
+            }
 
-                    self.error_manager.add_imports_resolution_error(
-                        ImportsResolutionErrorType::ParseError,
-                        format!("Parse errors in imported file: {}", first_error.message),
-                        import.alias.clone(),
-                        Some(import.path.clone()),
-                        Some(resolved_path.to_string()),
-                        None,
-                        first_error.line as i32,
-                        first_error.column as i32,
-                        None,
-                    );
-                }
-
-                format!("Parse errors in imported file: {}", e)
-            })?;
+            format!("Parse errors in imported file: {}", e)
+        })?;
 
         ast.config = Some(config_result.config_section);
 
-        // STEP 7: Semantic analysis (TODO: When semantic analyzer is ported)
-        // NOTE: Imported files DO NOT go through AST enhancement phase
-        // Only the main file goes through enhancement after all imports are resolved
-        // This is correct because:
-        // 1. Imported files should be self-contained and already valid
-        // 2. We only extract their public API (global functions and enums)
-        // 3. Enhancement happens at the main file level
-        self.log_debug(&format!("Successfully parsed imported file: {}", resolved_path));
+        // ✅ STEP 7: Run semantic analysis
+        // Phase 0.5 (imports resolution) will be SKIPPED due to skip_imports_resolution=true
+        // Other phases (ENUMS, QUICKFUNCS, etc.) will run normally
+        self.log_debug(&format!(
+            "Running semantic analysis on imported file '{}' (Phase 0.5 will be skipped)",
+            import.alias
+        ));
 
-        Ok(ast)
+        let semantic_analyzer = GeneralSemanticAnalyzer::new(&ast, &import_operational_settings);
+        let semantic_result = semantic_analyzer.analyze();
+
+        if !semantic_result.is_success {
+            let error_summary = if !semantic_result.errors.is_empty() {
+                let first_error = &semantic_result.errors[0];
+                format!("{}: {}", first_error.error_type, first_error.message)
+            } else {
+                "Unknown semantic error".to_string()
+            };
+
+            self.error_manager.add_imports_resolution_error(
+                ImportsResolutionErrorType::ParseError,
+                format!(
+                    "Semantic analysis failed for '{}': {} (total: {} errors)",
+                    import.alias, error_summary, semantic_result.errors.len()
+                ),
+                import.alias.clone(),
+                Some(import.path.clone()),
+                Some(resolved_path.to_string()),
+                None, 0, 0, None,
+            );
+
+            return Err(format!("Semantic analysis failed for '{}'", import.alias));
+        }
+
+        self.log_debug(&format!(
+            "Semantic analysis passed for '{}' ({} warnings)",
+            import.alias, semantic_result.warnings.len()
+        ));
+
+        // ✅ STEP 8: Run AST enhancement
+        // This transforms QualifiedIdentifiers into concrete expression types
+        self.log_debug(&format!("Running AST enhancement on imported file '{}'", import.alias));
+
+        let mut ast_enhancer = GeneralAstEnhancer::new(import_operational_settings.clone());
+        let enhancement_result = ast_enhancer.enhance(&ast, Some(&semantic_result));
+
+        if !enhancement_result.is_success {
+            self.error_manager.add_imports_resolution_error(
+                ImportsResolutionErrorType::ParseError,
+                format!(
+                    "AST enhancement failed for '{}': {} warnings",
+                    import.alias, enhancement_result.warnings.len()
+                ),
+                import.alias.clone(),
+                Some(import.path.clone()),
+                Some(resolved_path.to_string()),
+                None, 0, 0, None,
+            );
+
+            return Err(format!("AST enhancement failed for '{}'", import.alias));
+        }
+
+        // STEP 9: Use ENHANCED AST (not raw AST)
+        let enhanced_ast = enhancement_result.enhanced_ast
+            .ok_or_else(|| {
+                self.error_manager.add_imports_resolution_error(
+                    ImportsResolutionErrorType::ParseError,
+                    format!("Enhancement produced no AST for '{}'", import.alias),
+                    import.alias.clone(),
+                    Some(import.path.clone()),
+                    Some(resolved_path.to_string()),
+                    None, 0, 0, None,
+                );
+                "Enhancement produced no AST".to_string()
+            })?;
+
+        self.log_debug(&format!(
+            "✅ Successfully processed imported file '{}' (enhanced {} functions)",
+            import.alias,
+            enhanced_ast.quick_functions.as_ref()
+                .map(|qf| qf.functions.len())
+                .unwrap_or(0)
+        ));
+
+        Ok(enhanced_ast)
     }
 
     /// Download cloud file with caching support
@@ -482,12 +541,8 @@ impl ImportsResolver {
                     alias.to_string(),
                     Some(cloud_url.to_string()),
                     Some(cloud_url.to_string()),
-                    None,
-                    0,
-                    0,
-                    None,
+                    None, 0, 0, None,
                 );
-
                 e
             })?;
 
@@ -500,12 +555,8 @@ impl ImportsResolver {
                     alias.to_string(),
                     Some(cloud_url.to_string()),
                     Some(cloud_url.to_string()),
-                    None,
-                    0,
-                    0,
-                    None,
+                    None, 0, 0, None,
                 );
-
                 format!("Cloud download failed: {}", e)
             })?;
 
@@ -745,4 +796,4 @@ impl std::fmt::Display for ImportResolutionStats {
             self.files_visited
         )
     }
-}
+                                          }

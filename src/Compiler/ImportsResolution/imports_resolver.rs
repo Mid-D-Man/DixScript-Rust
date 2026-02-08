@@ -16,59 +16,56 @@ use crate::Compiler::Utilities::{SymbolTable, QuickFunctionInfo, FunctionSignatu
 use crate::ErrorManager::{ErrorManager, ImportsResolutionErrorType};
 use super::{CloudFileCache, CloudProviderFactory, HashVerifier};
 
-/// ImportsResolver v1.0.0 - WITH SEMANTIC ANALYSIS + AST ENHANCEMENT
+/// ImportsResolver v1.0.0 - CORRECTED LIFETIME MANAGEMENT
 ///
-/// CRITICAL FIX: Imported files now go through FULL pipeline:
-/// 1. Parse → AST (with QualifiedIdentifiers)
-/// 2. Semantic Analysis → Validates and builds resolution metadata
-/// 3. AST Enhancement → Transforms QualifiedIdentifiers to concrete types
-/// 4. Extract API → Store ENHANCED functions/enums in SymbolTable
+/// CRITICAL: This resolver BORROWS SymbolTable from GeneralSemanticAnalyzer
+/// It does NOT own the symbol table - it mutates the parent's table.
 ///
-/// This ensures imported QuickFunctions have concrete expression types,
-/// not ambiguous QualifiedIdentifiers that would break ValueResolver.
+/// Flow for each import (including nested):
+/// 1. Parse imported file
+/// 2. Create NEW GeneralSemanticAnalyzer with NEW SymbolTable (for that file)
+/// 3. Run semantic analysis (validates, populates that file's symbol table)
+/// 4. Run AST enhancement (resolves qualified identifiers)
+/// 5. Extract global functions/enums from ENHANCED AST
+/// 6. Register extracted symbols in PARENT's SymbolTable (via &mut reference)
 ///
-/// Responsibilities:
-/// 1. Recursively resolve imports (including nested imports)
-/// 2. Support BOTH local and cloud imports
-/// 3. Detect circular dependencies using DFS algorithm
-/// 4. Verify file integrity with optional hash verification
-/// 5. Cache cloud files locally for performance
-/// 6. ✅ NEW: Run semantic analysis on imported files
-/// 7. ✅ NEW: Run AST enhancement on imported files
-/// 8. Extract ONLY global-scoped functions (scoped functions are not exported)
-/// 9. Populate SymbolTable with namespace hierarchy
-/// 10. Track local imports for scope-aware execution
-/// 11. Report errors through ErrorManager
-///
-/// Algorithm: Depth-First Search with visiting/visited sets
-/// - visiting: Files currently in the DFS path (cycle detection)
-/// - visited: Files completely processed (skip optimization)
-/// - import_stack: Current import chain (for error reporting)
-pub struct ImportsResolver {
-    symbol_table: SymbolTable,
+/// This ensures:
+/// - Each file's analysis is isolated
+/// - Nested imports work correctly (recursion creates new analyzers)
+/// - Parent gets access to all imported symbols
+/// - No symbol table cloning/merging needed
+pub struct ImportsResolver<'a> {
+    // BORROWED from GeneralSemanticAnalyzer (not owned!)
+    symbol_table: &'a mut SymbolTable,
+    operational_settings: &'a OperationalSettings,
+    
+    // Owned state
     error_manager: ErrorManager,
-    operational_settings: OperationalSettings,
     cloud_cache: CloudFileCache,
 
-    // State tracking for cycle detection
+    // Cycle detection state
     visiting: HashSet<String>,
     visited: HashSet<String>,
     import_stack: Vec<String>,
 }
 
-impl ImportsResolver {
-    /// Create new ImportsResolver
+impl<'a> ImportsResolver<'a> {
+    /// Create new ImportsResolver with borrowed references
+    ///
+    /// # Arguments
+    /// * `symbol_table` - Mutable reference to parent's symbol table
+    /// * `operational_settings` - Reference to compiler settings
     pub fn new(
-        symbol_table: SymbolTable,
-        operational_settings: OperationalSettings,
+        symbol_table: &'a mut SymbolTable,
+        operational_settings: &'a OperationalSettings,
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
         let cloud_cache = CloudFileCache::new(error_manager.clone());
 
         ImportsResolver {
             symbol_table,
-            error_manager,
             operational_settings,
+            error_manager,
             cloud_cache,
             visiting: HashSet::new(),
             visited: HashSet::new(),
@@ -289,7 +286,7 @@ impl ImportsResolver {
             }
         }
 
-        // STEP 8: Register namespace in SymbolTable
+        // STEP 8: Register namespace in PARENT's SymbolTable (via &mut reference)
         self.symbol_table.register_namespace(
             alias.to_string(),
             normalized_path.to_string(),
@@ -307,7 +304,10 @@ impl ImportsResolver {
     }
 
     /// Parse an imported file - SUPPORTS BOTH LOCAL AND CLOUD
-    /// ✅ NEW: Runs FULL pipeline (Parse → Semantic Analysis → AST Enhancement)
+    /// ✅ Runs FULL pipeline (Parse → Semantic Analysis → AST Enhancement)
+    ///
+    /// CRITICAL: Each imported file gets its OWN GeneralSemanticAnalyzer with OWN SymbolTable
+    /// This ensures isolation - nested imports work correctly via recursion
     async fn parse_imported_file(
         &mut self,
         import: &ImportDeclaration,
@@ -380,10 +380,11 @@ impl ImportsResolver {
         }
 
         // STEP 5: Create operational settings for imported file
-        // CRITICAL: skip_imports_resolution = true prevents recursion!
+        // CRITICAL: skip_imports_resolution = true prevents THIS resolver from being called again
+        // The imported file will create its OWN ImportsResolver if it has imports
         let mut import_operational_settings = self.operational_settings.clone();
         import_operational_settings.source_file_path = Some(resolved_path.to_string());
-        import_operational_settings.skip_imports_resolution = true; // ✅ Prevents recursion
+        import_operational_settings.skip_imports_resolution = false; // ✅ Allow nested resolution
 
         // STEP 6: Parse
         self.log_debug("Parsing imported file");
@@ -427,10 +428,10 @@ impl ImportsResolver {
         ast.config = Some(config_result.config_section);
 
         // ✅ STEP 7: Run semantic analysis
-        // Phase 0.5 (imports resolution) will be SKIPPED due to skip_imports_resolution=true
-        // Other phases (ENUMS, QUICKFUNCS, etc.) will run normally
+        // CRITICAL: Create NEW SymbolTable for this file (isolated analysis)
+        // Nested imports will create their own resolvers and populate this table
         self.log_debug(&format!(
-            "Running semantic analysis on imported file '{}' (Phase 0.5 will be skipped)",
+            "Running semantic analysis on imported file '{}' (with nested import resolution)",
             import.alias
         ));
 
@@ -469,15 +470,17 @@ impl ImportsResolver {
         // This transforms QualifiedIdentifiers into concrete expression types
         self.log_debug(&format!("Running AST enhancement on imported file '{}'", import.alias));
 
-        let mut ast_enhancer = GeneralAstEnhancer::new(import_operational_settings.clone());
+        let ast_enhancer = GeneralAstEnhancer::new(&import_operational_settings);
         let enhancement_result = ast_enhancer.enhance(&ast, Some(&semantic_result));
 
         if !enhancement_result.is_success {
             self.error_manager.add_imports_resolution_error(
                 ImportsResolutionErrorType::ParseError,
                 format!(
-                    "AST enhancement failed for '{}': {} warnings",
-                    import.alias, enhancement_result.warnings.len()
+                    "AST enhancement failed for '{}': {} errors, {} warnings",
+                    import.alias,
+                    enhancement_result.errors.len(),
+                    enhancement_result.warnings.len()
                 ),
                 import.alias.clone(),
                 Some(import.path.clone()),
@@ -489,18 +492,8 @@ impl ImportsResolver {
         }
 
         // STEP 9: Use ENHANCED AST (not raw AST)
-        let enhanced_ast = enhancement_result.enhanced_ast
-            .ok_or_else(|| {
-                self.error_manager.add_imports_resolution_error(
-                    ImportsResolutionErrorType::ParseError,
-                    format!("Enhancement produced no AST for '{}'", import.alias),
-                    import.alias.clone(),
-                    Some(import.path.clone()),
-                    Some(resolved_path.to_string()),
-                    None, 0, 0, None,
-                );
-                "Enhancement produced no AST".to_string()
-            })?;
+        // ✅ FIX: enhanced_ast is DixScript, not Option<DixScript>
+        let enhanced_ast = enhancement_result.enhanced_ast;
 
         self.log_debug(&format!(
             "✅ Successfully processed imported file '{}' (enhanced {} functions)",
@@ -513,6 +506,8 @@ impl ImportsResolver {
         Ok(enhanced_ast)
     }
 
+    // ... (rest of the helper methods remain the same)
+    
     /// Download cloud file with caching support
     async fn download_cloud_file(
         &mut self,
@@ -796,4 +791,4 @@ impl std::fmt::Display for ImportResolutionStats {
             self.files_visited
         )
     }
-                                          }
+            }

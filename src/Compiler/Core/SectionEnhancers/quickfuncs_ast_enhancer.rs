@@ -1,18 +1,15 @@
 // src/Compiler/Core/SectionEnhancers/quickfuncs_ast_enhancer.rs
 
-/*
-
 //! Enhances QuickFunctions section with compile-time completions
 //! Primary tasks:
 //! 1. Generate parameter defaults from type annotations
 //! 2. Resolve qualified identifiers using semantic analysis results
 
 use crate::Compiler::AST::*;
-use crate::Compiler::Core::SectionEnhancers::qualified_identifier_resolver::QualifiedIdentifierResolver;
+use crate::Compiler::Core::SectionEnhancers::QualifiedIdentifierResolver;
 use crate::Compiler::Core::SectionAnalyzers::SectionAnalysisResult;
-use crate::Compiler::Core::{OperationalSettings};
+use crate::Compiler::Core::OperationalSettings;
 use crate::Compiler::Extensions::TypeSystemManager;
-use crate::Compiler::VersionControl::VersionManager;
 use crate::ErrorManager::ErrorManager;
 use std::time::{Duration, Instant};
 
@@ -134,12 +131,14 @@ impl QuickFunctionsAstEnhancer {
             analysis_result.qualified_id_resolutions.len()
         ));
         
-        // Log all available resolutions
-        for (key, resolution) in &analysis_result.qualified_id_resolutions {
-            self.error_manager.log_debug(&format!(
-                "[QF-Enhancer] Resolution available: {} -> {}",
-                key.parts.join("."), resolution.resolved_type
-            ));
+        // Log all available resolutions (verbose mode)
+        if self.operational_settings.debug_mode == crate::Compiler::Core::DebugMode::Verbose {
+            for (key, resolution) in &analysis_result.qualified_id_resolutions {
+                self.error_manager.log_debug(&format!(
+                    "[QF-Enhancer] Resolution available: {} -> {}",
+                    key.parts.join("."), resolution.resolved_type
+                ));
+            }
         }
         
         let resolver = QualifiedIdentifierResolver::new(
@@ -182,7 +181,4 @@ impl QuickFunctionsAstEnhancer {
     pub fn get_enhancement_duration(&self) -> Duration {
         self.start_time.map(|t| t.elapsed()).unwrap_or_default()
     }
-  }
-
-
- */
+}

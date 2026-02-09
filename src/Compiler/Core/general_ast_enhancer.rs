@@ -115,8 +115,8 @@ impl<'a> GeneralAstEnhancer<'a> {
     ) {
         self.log_info("Phase 1: Enhancing QuickFunctions section");
 
-        // Check if QuickFunctions section exists
-        let quickfuncs_section = match &ast.quick_functions {
+        // Get a reference to the QuickFunctions section
+        let quickfuncs_section = match ast.quick_functions.as_ref() {
             Some(section) => section,
             None => {
                 self.log_debug("No QuickFunctions section to enhance");
@@ -131,11 +131,12 @@ impl<'a> GeneralAstEnhancer<'a> {
         if quickfuncs_analysis.is_none() {
             self.log_warning("No semantic analysis result for QUICKFUNCS - enhancement will be limited");
         } else {
-            let analysis = quickfuncs_analysis.unwrap();
-            self.log_debug_fmt(|| format!(
-                "Found {} qualified identifier resolutions in QUICKFUNCS analysis",
-                analysis.qualified_id_resolutions.len()
-            ));
+            if let Some(analysis) = quickfuncs_analysis {
+                self.log_debug_fmt(|| format!(
+                    "Found {} qualified identifier resolutions in QUICKFUNCS analysis",
+                    analysis.qualified_id_resolutions.len()
+                ));
+            }
         }
 
         // Create QuickFunctions enhancer
@@ -143,7 +144,7 @@ impl<'a> GeneralAstEnhancer<'a> {
             self.operational_settings.clone()
         );
 
-        // Enhance section
+        // Enhance section - passing reference to section
         let enhanced_section = enhancer.enhance(quickfuncs_section, quickfuncs_analysis);
 
         // Track enhancements

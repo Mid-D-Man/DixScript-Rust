@@ -11,15 +11,14 @@
 
 use crate::Compiler::AST::*;
 use crate::Compiler::AST::Visitors::{TypeInferenceVisitor, AstVisitorBase};
-use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
-use crate::Compiler::Core::Functions::{CycleDetectionValidator};
+use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
+use crate::Compiler::Core::Functions::CycleDetectionValidator;
 use crate::Compiler::Core::SectionAnalyzers::{
     SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo
 };
 use crate::Compiler::Utilities::{SymbolTable, ParameterInfo, FunctionSignature};
 use crate::Builtins::Core::DixType;
 use crate::Builtins::Resolver::{
-    instance_method_registry, static_object_registry,
     has_instance_method, has_static_method, has_static_object,
 };
 use crate::Utilities::Keywords;
@@ -29,7 +28,8 @@ use std::collections::HashMap;
 
 // ==================== CONSTANTS ====================
 
-const MAX_VALIDATION_DEPTH: usize = 200;
+const MAX_ABSOLUTE_VALIDATION_DEPTH: usize = 500;
+const BASE_VALIDATION_DEPTH: usize = 100;
 const MAX_TUPLE_ARGUMENTS: usize = 6;
 const MAX_ARRAY_ELEMENTS: usize = 10000;
 const MAX_OBJECT_PROPERTIES: usize = 1000;
@@ -38,58 +38,87 @@ const MAX_FUNCTION_BODY_STATEMENTS: usize = 1000;
 const MAX_NESTING_DEPTH: usize = 50;
 const MAX_METHOD_CHAIN_DEPTH: usize = 10;
 
-// Use phf for perfect hash tables (compile-time constants)
-use phf::{phf_set, Set};
+// ==================== RUNTIME VALIDATION SETS (NOT PHF) ====================
 
-static VALID_ARITHMETIC_OPERATORS: Set<&'static str> = phf_set! {
-    "+", "-", "*", "/", "%", "**", "%%", "%&", "&%"
-};
+/// Check if operator is valid arithmetic operator
+#[inline]
+fn is_valid_arithmetic_operator(op: &str) -> bool {
+    matches!(op, "+" | "-" | "*" | "/" | "%" | "**" | "%%" | "%&" | "&%")
+}
 
-static VALID_BITWISE_OPERATORS: Set<&'static str> = phf_set! {
-    "&", "|", "^", "<<", ">>"
-};
+/// Check if operator is valid bitwise operator
+#[inline]
+fn is_valid_bitwise_operator(op: &str) -> bool {
+    matches!(op, "&" | "|" | "^" | "<<" | ">>")
+}
 
-static VALID_COMPARISON_OPERATORS: Set<&'static str> = phf_set! {
-    "==", "!=", ">", "<", ">=", "<="
-};
+/// Check if operator is valid comparison operator
+#[inline]
+fn is_valid_comparison_operator(op: &str) -> bool {
+    matches!(op, "==" | "!=" | ">" | "<" | ">=" | "<=")
+}
 
-static VALID_LOGICAL_OPERATORS: Set<&'static str> = phf_set! {
-    "&&", "||", "and", "or"
-};
+/// Check if operator is valid logical operator
+#[inline]
+fn is_valid_logical_operator(op: &str) -> bool {
+    matches!(op, "&&" | "||" | "and" | "or")
+}
 
-static VALID_UNARY_OPERATORS: Set<&'static str> = phf_set! {
-    "!", "not", "-", "+", "~?"
-};
+/// Check if operator is valid unary operator
+#[inline]
+fn is_valid_unary_operator(op: &str) -> bool {
+    matches!(op, "!" | "not" | "-" | "+" | "~?")
+}
 
-static VALID_ARITHMETIC_ASSIGN_OPS: Set<&'static str> = phf_set! {
-    "+=", "-=", "*=", "/=", "%=", "**=", "&=", "|=", "^=", "<<=", ">>="
-};
+/// Check if operator is valid arithmetic assignment operator
+#[inline]
+fn is_valid_arithmetic_assign_op(op: &str) -> bool {
+    matches!(op, "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "&=" | "|=" | "^=" | "<<=" | ">>=")
+}
 
-static VALID_DATA_TYPES: Set<DataType> = phf_set! {
-    DataType::Int, DataType::Float, DataType::Double, DataType::String,
-    DataType::Bool, DataType::Array, DataType::Tuple, DataType::Hex,
-    DataType::Blob, DataType::Regex, DataType::Object, DataType::Timestamp,
-    DataType::Date, DataType::Enum, DataType::Any, DataType::Function,
-    DataType::Range
-};
+/// Check if data type is valid
+#[inline]
+fn is_valid_data_type(data_type: DataType) -> bool {
+    matches!(
+        data_type,
+        DataType::Int | DataType::Float | DataType::Double | DataType::String |
+        DataType::Bool | DataType::Array | DataType::Tuple | DataType::Hex |
+        DataType::Blob | DataType::Regex | DataType::Object | DataType::Timestamp |
+        DataType::Date | DataType::Enum | DataType::Any | DataType::Function |
+        DataType::Range
+    )
+}
 
 // ==================== MAIN ANALYZER ====================
 
 /// QuickFunctions section semantic analyzer
-pub struct QuickFuncsSectionAnalyzer {
-    operational_settings: OperationalSettings,
+pub struct QuickFuncsSectionAnalyzer<'a> {
+    operational_settings: &'a OperationalSettings,
     error_manager: ErrorManager,
-    validation_depth: usize,
+    // Cached logging flags (set once, checked many times)
+    is_debug: bool,
+    is_verbose: bool,
 }
 
-impl QuickFuncsSectionAnalyzer {
+impl<'a> QuickFuncsSectionAnalyzer<'a> {
     /// Create new analyzer
-    pub fn new(operational_settings: OperationalSettings) -> Self {
+    pub fn new(operational_settings: &'a OperationalSettings) -> Self {
+        let is_debug = operational_settings.debug_mode >= DebugMode::Regular;
+        let is_verbose = operational_settings.debug_mode >= DebugMode::Verbose;
+
         QuickFuncsSectionAnalyzer {
             operational_settings,
             error_manager: ErrorManager::get_shared_instance(),
-            validation_depth: 0,
+            is_debug,
+            is_verbose,
         }
+    }
+
+    /// Calculate max validation depth based on AST size
+    #[inline]
+    fn calculate_max_depth(ast_size: usize) -> usize {
+        let dynamic_depth = BASE_VALIDATION_DEPTH + (ast_size / 10);
+        dynamic_depth.min(MAX_ABSOLUTE_VALIDATION_DEPTH)
     }
 
     /// Main analysis entry point
@@ -106,7 +135,7 @@ impl QuickFuncsSectionAnalyzer {
             symbol_table.populate_builtin_objects();
         }
 
-        if self.operational_settings.debug_mode >= DebugMode::Regular {
+        if self.is_debug {
             self.error_manager.log_info(&format!(
                 "Analyzing QUICKFUNCS section with {} function definitions",
                 function_count
@@ -114,7 +143,7 @@ impl QuickFuncsSectionAnalyzer {
         }
 
         // Phase 1: Check for duplicate function names
-        if self.operational_settings.debug_mode >= DebugMode::Regular {
+        if self.is_debug {
             self.error_manager.log_debug("Phase 1: Checking for duplicate function names");
         }
 
@@ -143,7 +172,7 @@ impl QuickFuncsSectionAnalyzer {
         }
 
         // Phase 2: Pre-register all functions in symbol table
-        if self.operational_settings.debug_mode >= DebugMode::Regular {
+        if self.is_debug {
             self.error_manager.log_debug("Phase 2: Pre-registering all functions in symbol table");
         }
 
@@ -154,13 +183,13 @@ impl QuickFuncsSectionAnalyzer {
         }
 
         // Phase 3: Validate individual function declarations
-        if self.operational_settings.debug_mode >= DebugMode::Regular {
+        if self.is_debug {
             self.error_manager.log_debug("Phase 3: Validating individual function declarations");
         }
 
         for func in &section.functions {
             if duplicate_functions.contains(&func.name) {
-                if self.operational_settings.debug_mode >= DebugMode::Regular {
+                if self.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "Skipping validation of duplicate function '{}'",
                         func.name
@@ -177,7 +206,7 @@ impl QuickFuncsSectionAnalyzer {
         }
 
         // Phase 4: Detect circular function calls
-        if self.operational_settings.debug_mode >= DebugMode::Regular {
+        if self.is_debug {
             self.error_manager.log_debug("Phase 4: Detecting circular function calls");
         }
 
@@ -187,9 +216,6 @@ impl QuickFuncsSectionAnalyzer {
         );
 
         if !cycle_validator.validate_function_calls(section) {
-            // Cycle detector adds errors directly to error_manager
-            // We need to extract them and add to result
-            // For now, just mark as having errors
             result.is_success = false;
         }
 
@@ -199,7 +225,7 @@ impl QuickFuncsSectionAnalyzer {
 
         result.is_success = result.errors.is_empty();
 
-        if self.operational_settings.debug_mode >= DebugMode::Regular {
+        if self.is_debug {
             let status = if result.is_success { "SUCCESS" } else { "FAILURE" };
             self.error_manager.log_info(&format!(
                 "QUICKFUNCS analysis complete: {}",
@@ -222,12 +248,12 @@ impl QuickFuncsSectionAnalyzer {
     // ==================== FUNCTION VALIDATION ====================
 
     fn validate_quick_function(
-        &mut self,
+        &self,
         func: &QuickFunction,
         symbol_table: &SymbolTable,
         result: &mut SectionAnalysisResult,
     ) {
-        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+        if self.is_verbose {
             self.error_manager.log_debug(&format!("Validating function: {}", func.name));
         }
 
@@ -280,7 +306,7 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        self.validate_scopes(func, symbol_table, result);
+        self.validate_scopes(func, result);
         if self.should_halt(result) {
             return;
         }
@@ -290,7 +316,7 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+        if self.is_verbose {
             self.error_manager.log_debug(&format!(
                 "Function '{}' validation complete",
                 func.name
@@ -304,7 +330,7 @@ impl QuickFuncsSectionAnalyzer {
         result: &mut SectionAnalysisResult,
     ) {
         if let Some(return_type) = func.return_type {
-            if !VALID_DATA_TYPES.contains(&return_type) {
+            if !is_valid_data_type(return_type) {
                 self.add_error(
                     result,
                     "QFUNC003B",
@@ -379,7 +405,7 @@ impl QuickFuncsSectionAnalyzer {
         // Validate each parameter
         for param in &func.parameters {
             if duplicate_params.contains(&param.name) {
-                if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                if self.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "  Skipping validation of duplicate parameter '{}'",
                         param.name
@@ -457,7 +483,7 @@ impl QuickFuncsSectionAnalyzer {
 
             // Validate parameter type
             if let Some(param_type) = param.data_type {
-                if !VALID_DATA_TYPES.contains(&param_type) {
+                if !is_valid_data_type(param_type) {
                     self.add_error(
                         result,
                         "QFUNC007",
@@ -477,7 +503,7 @@ impl QuickFuncsSectionAnalyzer {
             }
 
             // Validate default value type if both type and default are present
-            if let (Some(_), Some(ref default_value)) = (param.data_type, &param.default_value) {
+            if param.data_type.is_some() && param.default_value.is_some() {
                 self.validate_default_value_type_strict(
                     param,
                     &func.name,
@@ -563,13 +589,12 @@ impl QuickFuncsSectionAnalyzer {
     fn validate_scopes(
         &self,
         func: &QuickFunction,
-        _symbol_table: &SymbolTable,
         result: &mut SectionAnalysisResult,
     ) {
         let scope_list = match &func.scope_list {
             Some(scopes) => scopes,
             None => {
-                if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                if self.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "  Function '{}' has no explicit scope declaration",
                         func.name
@@ -591,7 +616,7 @@ impl QuickFuncsSectionAnalyzer {
 
         for scope in scope_list {
             if scope.eq_ignore_ascii_case("global") {
-                if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                if self.is_verbose {
                     self.error_manager.log_debug(
                         "    Scope 'global' is valid - function callable from anywhere"
                     );
@@ -618,7 +643,7 @@ impl QuickFuncsSectionAnalyzer {
                 continue;
             }
 
-            if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            if self.is_verbose {
                 self.error_manager.log_debug(&format!(
                     "    Scope '{}' has valid syntax (existence will be verified in DATA section)",
                     scope
@@ -626,7 +651,7 @@ impl QuickFuncsSectionAnalyzer {
             }
         }
 
-        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+        if self.is_verbose {
             self.error_manager.log_debug(&format!(
                 "  Function '{}' scope validation complete: {} scope(s) declared",
                 func.name,
@@ -635,11 +660,8 @@ impl QuickFuncsSectionAnalyzer {
         }
     }
 
-    // ... continues in Part 2
-// ==================== FUNCTION BODY VALIDATION ====================
-
     fn validate_function_body(
-        &mut self,
+        &self,
         func: &QuickFunction,
         symbol_table: &SymbolTable,
         result: &mut SectionAnalysisResult,
@@ -683,6 +705,9 @@ impl QuickFuncsSectionAnalyzer {
         let mut local_scope = LocalScopeTracker::new(&func.parameters);
         let mut return_path_analyzer = ReturnPathAnalyzer::new(func.return_type.unwrap());
 
+        // Calculate max depth based on function body size
+        let max_depth = Self::calculate_max_depth(body_length);
+
         for statement in &func.body {
             self.validate_statement(
                 statement,
@@ -691,6 +716,7 @@ impl QuickFuncsSectionAnalyzer {
                 &mut local_scope,
                 result,
                 0,
+                max_depth,
                 &mut return_path_analyzer,
             );
 
@@ -718,29 +744,28 @@ impl QuickFuncsSectionAnalyzer {
     }
 
     fn validate_statement(
-        &mut self,
+        &self,
         statement: &QuickFuncStatement,
         func: &QuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &mut LocalScopeTracker,
         result: &mut SectionAnalysisResult,
         nesting_depth: usize,
+        max_depth: usize,
         return_path_analyzer: &mut ReturnPathAnalyzer,
     ) {
-        self.validation_depth += 1;
-        if self.validation_depth > MAX_VALIDATION_DEPTH {
+        if nesting_depth > max_depth {
             self.add_error(
                 result,
                 "QFUNC073",
                 "VALIDATION_DEPTH_EXCEEDED",
                 &format!(
                     "Maximum validation depth ({}) exceeded in function '{}'",
-                    MAX_VALIDATION_DEPTH, func.name
+                    max_depth, func.name
                 ),
-                "This indicates a circular validation issue - please report this bug",
+                "This indicates very deep nesting - please simplify your code structure",
                 statement.position(),
             );
-            self.validation_depth -= 1;
             return;
         }
 
@@ -756,7 +781,6 @@ impl QuickFuncsSectionAnalyzer {
                 "Reduce nesting depth by extracting code into separate functions",
                 statement.position(),
             );
-            self.validation_depth -= 1;
             return;
         }
 
@@ -781,6 +805,7 @@ impl QuickFuncsSectionAnalyzer {
                     local_scope,
                     result,
                     nesting_depth,
+                    max_depth,
                     return_path_analyzer,
                 );
             }
@@ -800,6 +825,7 @@ impl QuickFuncsSectionAnalyzer {
                     local_scope,
                     result,
                     nesting_depth,
+                    max_depth,
                     return_path_analyzer,
                 );
             }
@@ -830,19 +856,17 @@ impl QuickFuncsSectionAnalyzer {
             }
 
             QuickFuncStatement::Log { value, .. } => {
-                self.validate_expression(value, func, symbol_table, local_scope, result);
+                self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
             }
 
             QuickFuncStatement::ExpressionStatement { expression, .. } => {
-                self.validate_expression(expression, func, symbol_table, local_scope, result);
+                self.validate_expression(expression, func, symbol_table, local_scope, result, max_depth);
             }
 
             QuickFuncStatement::VariableDeclaration { .. } => {
                 self.validate_variable_declaration_statement(statement, func, symbol_table, local_scope, result);
             }
         }
-
-        self.validation_depth -= 1;
     }
 
     fn validate_return_statement(
@@ -853,7 +877,8 @@ impl QuickFuncsSectionAnalyzer {
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
     ) {
-        self.validate_expression(value, func, symbol_table, local_scope, result);
+        let max_depth = Self::calculate_max_depth(100);
+        self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
 
         let local_variable_types = local_scope.get_all_variable_types();
         let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, Some(local_variable_types));
@@ -877,7 +902,7 @@ impl QuickFuncsSectionAnalyzer {
                     ),
                     value.position(),
                 );
-            } else if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            } else if self.is_verbose {
                 self.error_manager.log_debug(&format!(
                     "    Return type {:?} matches expected {:?}",
                     actual_type, expected_return_type
@@ -998,7 +1023,8 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        self.validate_expression(value, func, symbol_table, local_scope, result);
+        let max_depth = Self::calculate_max_depth(100);
+        self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
 
         // Type inference
         let local_variable_types = local_scope.get_all_variable_types();
@@ -1030,7 +1056,7 @@ impl QuickFuncsSectionAnalyzer {
 
         local_scope.add_variable(variable_name.clone(), effective_type, is_const);
 
-        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+        if self.is_verbose {
             let mutability = if is_const { "immutable" } else { "mutable" };
             let type_str = if let Some(t) = effective_type {
                 format!("{:?}", t)
@@ -1046,7 +1072,7 @@ impl QuickFuncsSectionAnalyzer {
     }
 
     fn validate_if_statement(
-        &mut self,
+        &self,
         condition: &Expression,
         then_branch: &[QuickFuncStatement],
         else_branch: Option<&Vec<QuickFuncStatement>>,
@@ -1055,9 +1081,10 @@ impl QuickFuncsSectionAnalyzer {
         local_scope: &mut LocalScopeTracker,
         result: &mut SectionAnalysisResult,
         nesting_depth: usize,
+        max_depth: usize,
         return_path_analyzer: &mut ReturnPathAnalyzer,
     ) {
-        self.validate_expression(condition, func, symbol_table, local_scope, result);
+        self.validate_expression(condition, func, symbol_table, local_scope, result, max_depth);
 
         let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
         let condition_type = type_inference_visitor.infer_type_from_expression(condition);
@@ -1086,6 +1113,7 @@ impl QuickFuncsSectionAnalyzer {
                 local_scope,
                 result,
                 nesting_depth + 1,
+                max_depth,
                 &mut then_returns,
             );
         }
@@ -1099,6 +1127,7 @@ impl QuickFuncsSectionAnalyzer {
                     local_scope,
                     result,
                     nesting_depth + 1,
+                    max_depth,
                     &mut else_returns,
                 );
             }
@@ -1110,7 +1139,7 @@ impl QuickFuncsSectionAnalyzer {
     }
 
     fn validate_switch_statement(
-        &mut self,
+        &self,
         expression: &Expression,
         cases: &[SwitchCase],
         default_case: Option<&SwitchCase>,
@@ -1119,9 +1148,10 @@ impl QuickFuncsSectionAnalyzer {
         local_scope: &mut LocalScopeTracker,
         result: &mut SectionAnalysisResult,
         nesting_depth: usize,
+        max_depth: usize,
         return_path_analyzer: &mut ReturnPathAnalyzer,
     ) {
-        self.validate_expression(expression, func, symbol_table, local_scope, result);
+        self.validate_expression(expression, func, symbol_table, local_scope, result, max_depth);
 
         let mut case_returns = Vec::new();
         let has_default = default_case.is_some();
@@ -1137,6 +1167,7 @@ impl QuickFuncsSectionAnalyzer {
                     local_scope,
                     result,
                     nesting_depth + 1,
+                    max_depth,
                     &mut case_analyzer,
                 );
             }
@@ -1156,6 +1187,7 @@ impl QuickFuncsSectionAnalyzer {
                     local_scope,
                     result,
                     nesting_depth + 1,
+                    max_depth,
                     &mut analyzer,
                 );
             }
@@ -1228,7 +1260,8 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        self.validate_expression(value, func, symbol_table, local_scope, result);
+        let max_depth = Self::calculate_max_depth(100);
+        self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
 
         let local_variable_types = local_scope.get_all_variable_types();
         let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, Some(local_variable_types));
@@ -1254,7 +1287,7 @@ impl QuickFuncsSectionAnalyzer {
             if let Some(new) = new_type {
                 local_scope.update_variable_type(variable, new);
 
-                if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                if self.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "    Inferred type {:?} for variable '{}'",
                         new, variable
@@ -1304,7 +1337,7 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        if !VALID_ARITHMETIC_ASSIGN_OPS.contains(operator) {
+        if !is_valid_arithmetic_assign_op(operator) {
             self.add_error(
                 result,
                 "QFUNC022",
@@ -1316,7 +1349,8 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        self.validate_expression(value, func, symbol_table, local_scope, result);
+        let max_depth = Self::calculate_max_depth(100);
+        self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
 
         let var_type = local_scope.get_variable_type(variable);
         let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
@@ -1396,7 +1430,7 @@ impl QuickFuncsSectionAnalyzer {
                     func.position,
                 );
 
-                if self.operational_settings.debug_mode >= DebugMode::Verbose {
+                if self.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "    Unused variable detected: '{}'",
                         var_name
@@ -1405,7 +1439,7 @@ impl QuickFuncsSectionAnalyzer {
             }
         }
 
-        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+        if self.is_verbose {
             let declared_count = local_scope.get_declared_variable_names().count();
             let used_count = referenced_variables.len();
             self.error_manager.log_debug(&format!(
@@ -1415,31 +1449,29 @@ impl QuickFuncsSectionAnalyzer {
         }
     }
 
-    // ... continues in Part 3
     // ==================== EXPRESSION VALIDATION ====================
 
     fn validate_expression(
-        &mut self,
+        &self,
         expr: &Expression,
         func: &QuickFunction,
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
-        self.validation_depth += 1;
-        if self.validation_depth > MAX_VALIDATION_DEPTH {
+        if max_depth == 0 {
             self.add_error(
                 result,
                 "QFUNC074",
                 "EXPRESSION_DEPTH_EXCEEDED",
                 &format!(
-                    "Maximum expression depth ({}) exceeded in function '{}'",
-                    MAX_VALIDATION_DEPTH, func.name
+                    "Maximum expression depth exceeded in function '{}'",
+                    func.name
                 ),
                 "This indicates a circular expression - please simplify your expressions",
                 expr.position(),
             );
-            self.validation_depth -= 1;
             return;
         }
 
@@ -1449,11 +1481,11 @@ impl QuickFuncsSectionAnalyzer {
             }
 
             Expression::QualifiedIdentifier { parts, arguments, .. } => {
-                self.validate_qualified_identifier(parts, arguments.as_ref(), func, symbol_table, local_scope, result);
+                self.validate_qualified_identifier(parts, arguments.as_ref(), func, symbol_table, local_scope, result, max_depth);
             }
 
             Expression::QuickFuncCall { name, arguments, .. } => {
-                self.validate_quick_func_call(name, arguments, func, symbol_table, local_scope, result);
+                self.validate_quick_func_call(name, arguments, func, symbol_table, local_scope, result, max_depth);
             }
 
             Expression::ImportedFunctionCall {
@@ -1470,6 +1502,7 @@ impl QuickFuncsSectionAnalyzer {
                     symbol_table,
                     local_scope,
                     result,
+                    max_depth,
                 );
             }
 
@@ -1479,7 +1512,7 @@ impl QuickFuncsSectionAnalyzer {
                 arguments,
                 ..
             } => {
-                self.validate_instance_method_call(instance, method_name, arguments, func, symbol_table, local_scope, result);
+                self.validate_instance_method_call(instance, method_name, arguments, func, symbol_table, local_scope, result, max_depth);
             }
 
             Expression::StaticMethodCall {
@@ -1488,7 +1521,7 @@ impl QuickFuncsSectionAnalyzer {
                 arguments,
                 ..
             } => {
-                self.validate_static_method_call(object_name, method_name, arguments, func, symbol_table, local_scope, result);
+                self.validate_static_method_call(object_name, method_name, arguments, func, symbol_table, local_scope, result, max_depth);
             }
 
             Expression::EnumAccess {
@@ -1501,23 +1534,23 @@ impl QuickFuncsSectionAnalyzer {
             }
 
             Expression::ArithmeticOp { left, right, operator, .. } => {
-                self.validate_arithmetic_op_expression(left, right, operator, func, symbol_table, local_scope, result);
+                self.validate_arithmetic_op_expression(left, right, operator, func, symbol_table, local_scope, result, max_depth);
             }
 
             Expression::BitwiseOp { left, right, operator, .. } => {
-                self.validate_bitwise_op_expression(left, right, operator, func, symbol_table, local_scope, result);
+                self.validate_bitwise_op_expression(left, right, operator, func, symbol_table, local_scope, result, max_depth);
             }
 
             Expression::ComparisonOp { left, right, operator, .. } => {
-                self.validate_comparison_op_expression(left, right, operator, func, symbol_table, local_scope, result);
+                self.validate_comparison_op_expression(left, right, operator, func, symbol_table, local_scope, result, max_depth);
             }
 
             Expression::LogicalOp { left, right, operator, .. } => {
-                self.validate_logical_op_expression(left, right, operator, func, symbol_table, local_scope, result);
+                self.validate_logical_op_expression(left, right, operator, func, symbol_table, local_scope, result, max_depth);
             }
 
             Expression::UnaryOp { operand, operator, .. } => {
-                self.validate_unary_op_expression(operand, operator, func, symbol_table, local_scope, result);
+                self.validate_unary_op_expression(operand, operator, func, symbol_table, local_scope, result, max_depth);
             }
 
             Expression::Conditional {
@@ -1526,16 +1559,16 @@ impl QuickFuncsSectionAnalyzer {
                 false_value,
                 ..
             } => {
-                self.validate_conditional_expression(condition, true_value, false_value, func, symbol_table, local_scope, result);
+                self.validate_conditional_expression(condition, true_value, false_value, func, symbol_table, local_scope, result, max_depth);
             }
 
             Expression::PropertyAccess { object, .. } => {
-                self.validate_expression(object, func, symbol_table, local_scope, result);
+                self.validate_expression(object, func, symbol_table, local_scope, result, max_depth - 1);
             }
 
             Expression::IndexAccess { object, index, .. } => {
-                self.validate_expression(object, func, symbol_table, local_scope, result);
-                self.validate_expression(index, func, symbol_table, local_scope, result);
+                self.validate_expression(object, func, symbol_table, local_scope, result, max_depth - 1);
+                self.validate_expression(index, func, symbol_table, local_scope, result, max_depth - 1);
             }
 
             Expression::Value { value, .. } => {
@@ -1543,17 +1576,15 @@ impl QuickFuncsSectionAnalyzer {
             }
 
             Expression::Parenthesized { expression, .. } => {
-                self.validate_expression(expression, func, symbol_table, local_scope, result);
+                self.validate_expression(expression, func, symbol_table, local_scope, result, max_depth - 1);
             }
 
             Expression::TypeCast { expression, .. } => {
-                self.validate_expression(expression, func, symbol_table, local_scope, result);
+                self.validate_expression(expression, func, symbol_table, local_scope, result, max_depth - 1);
             }
 
             _ => {}
         }
-
-        self.validation_depth -= 1;
     }
 
     fn validate_identifier(
@@ -1595,6 +1626,7 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
         if parts.len() < 2 {
             return;
@@ -1607,7 +1639,7 @@ impl QuickFuncsSectionAnalyzer {
         if local_scope.has_variable(first_part) || local_scope.has_parameter(first_part) {
             if let Some(args) = arguments {
                 for arg in args {
-                    self.validate_expression(arg, func, symbol_table, local_scope, result);
+                    self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
                 }
             }
             return;
@@ -1633,13 +1665,13 @@ impl QuickFuncsSectionAnalyzer {
 
         // Check for namespace access
         if symbol_table.is_imported_namespace(first_part) {
-            self.validate_namespace_access(parts, arguments, func, symbol_table, local_scope, result);
+            self.validate_namespace_access(parts, arguments, func, symbol_table, local_scope, result, max_depth);
             return;
         }
 
         // Check for static object access
         if has_static_object(first_part) {
-            self.validate_static_object_access(parts, arguments, func, symbol_table, local_scope, result);
+            self.validate_static_object_access(parts, arguments, func, symbol_table, local_scope, result, max_depth);
             return;
         }
 
@@ -1647,7 +1679,7 @@ impl QuickFuncsSectionAnalyzer {
         if symbol_table.has_data_variable(first_part) {
             if let Some(args) = arguments {
                 for arg in args {
-                    self.validate_expression(arg, func, symbol_table, local_scope, result);
+                    self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
                 }
             }
             return;
@@ -1667,7 +1699,7 @@ impl QuickFuncsSectionAnalyzer {
 
         if let Some(args) = arguments {
             for arg in args {
-                self.validate_expression(arg, func, symbol_table, local_scope, result);
+                self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
             }
         }
     }
@@ -1680,6 +1712,7 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
         let namespace_name = &parts[0];
         let member_name = &parts[1];
@@ -1721,7 +1754,7 @@ impl QuickFuncsSectionAnalyzer {
                 }
 
                 for arg in args {
-                    self.validate_expression(arg, func, symbol_table, local_scope, result);
+                    self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
                 }
             } else {
                 // Namespaced enum reference
@@ -1785,6 +1818,7 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
         let object_name = &parts[0];
         let method_name = &parts[1];
@@ -1802,14 +1836,10 @@ impl QuickFuncsSectionAnalyzer {
                     "",
                     Position::UNKNOWN,
                 );
-            } else {
-                // Validate argument count (skip for variadic methods)
-                // Note: We'd need to query static_object_registry for method info
-                // For now, just validate arguments themselves
             }
 
             for arg in args {
-                self.validate_expression(arg, func, symbol_table, local_scope, result);
+                self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
             }
         }
     }
@@ -1823,8 +1853,9 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
-        if !VALID_ARITHMETIC_OPERATORS.contains(operator) {
+        if !is_valid_arithmetic_operator(operator) {
             self.add_error(
                 result,
                 "QFUNC025",
@@ -1839,8 +1870,8 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        self.validate_expression(left, func, symbol_table, local_scope, result);
-        self.validate_expression(right, func, symbol_table, local_scope, result);
+        self.validate_expression(left, func, symbol_table, local_scope, result, max_depth - 1);
+        self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
 
         let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
         let left_type = type_inference_visitor.infer_type_from_expression(left);
@@ -1908,8 +1939,9 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
-        if !VALID_BITWISE_OPERATORS.contains(operator) {
+        if !is_valid_bitwise_operator(operator) {
             self.add_error(
                 result,
                 "QFUNC029",
@@ -1924,8 +1956,8 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        self.validate_expression(left, func, symbol_table, local_scope, result);
-        self.validate_expression(right, func, symbol_table, local_scope, result);
+        self.validate_expression(left, func, symbol_table, local_scope, result, max_depth - 1);
+        self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
 
         let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
         let left_type = type_inference_visitor.infer_type_from_expression(left);
@@ -1973,8 +2005,9 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
-        if !VALID_COMPARISON_OPERATORS.contains(operator) {
+        if !is_valid_comparison_operator(operator) {
             self.add_error(
                 result,
                 "QFUNC032",
@@ -1989,8 +2022,8 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        self.validate_expression(left, func, symbol_table, local_scope, result);
-        self.validate_expression(right, func, symbol_table, local_scope, result);
+        self.validate_expression(left, func, symbol_table, local_scope, result, max_depth - 1);
+        self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
 
         let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
         let left_type = type_inference_visitor.infer_type_from_expression(left);
@@ -2038,8 +2071,9 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
-        if !VALID_LOGICAL_OPERATORS.contains(operator) {
+        if !is_valid_logical_operator(operator) {
             self.add_error(
                 result,
                 "QFUNC034",
@@ -2054,8 +2088,8 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        self.validate_expression(left, func, symbol_table, local_scope, result);
-        self.validate_expression(right, func, symbol_table, local_scope, result);
+        self.validate_expression(left, func, symbol_table, local_scope, result, max_depth - 1);
+        self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
 
         let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
         let left_type = type_inference_visitor.infer_type_from_expression(left);
@@ -2102,8 +2136,9 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
-        if !VALID_UNARY_OPERATORS.contains(operator) {
+        if !is_valid_unary_operator(operator) {
             self.add_error(
                 result,
                 "QFUNC037",
@@ -2118,7 +2153,7 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        self.validate_expression(operand, func, symbol_table, local_scope, result);
+        self.validate_expression(operand, func, symbol_table, local_scope, result, max_depth - 1);
 
         let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
         let operand_type = type_inference_visitor.infer_type_from_expression(operand);
@@ -2179,8 +2214,9 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
-        self.validate_expression(condition, func, symbol_table, local_scope, result);
+        self.validate_expression(condition, func, symbol_table, local_scope, result, max_depth - 1);
 
         let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
         let condition_type = type_inference_visitor.infer_type_from_expression(condition);
@@ -2201,8 +2237,8 @@ impl QuickFuncsSectionAnalyzer {
             }
         }
 
-        self.validate_expression(true_value, func, symbol_table, local_scope, result);
-        self.validate_expression(false_value, func, symbol_table, local_scope, result);
+        self.validate_expression(true_value, func, symbol_table, local_scope, result, max_depth - 1);
+        self.validate_expression(false_value, func, symbol_table, local_scope, result, max_depth - 1);
 
         let true_type = type_inference_visitor.infer_type_from_expression(true_value);
         let false_type = type_inference_visitor.infer_type_from_expression(false_value);
@@ -2223,7 +2259,6 @@ impl QuickFuncsSectionAnalyzer {
         }
     }
 
-    // Function call validations
     fn validate_quick_func_call(
         &self,
         name: &str,
@@ -2232,10 +2267,11 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
         // Check if it's a lambda invocation (local variable)
         if local_scope.has_variable(name) {
-            if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            if self.is_verbose {
                 self.error_manager.log_debug(&format!(
                     "    Lambda invocation detected: {}()",
                     name
@@ -2243,7 +2279,7 @@ impl QuickFuncsSectionAnalyzer {
             }
 
             for arg in arguments {
-                self.validate_expression(arg, func, symbol_table, local_scope, result);
+                self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
             }
             return;
         }
@@ -2281,7 +2317,7 @@ impl QuickFuncsSectionAnalyzer {
         }
 
         for arg in arguments {
-            self.validate_expression(arg, func, symbol_table, local_scope, result);
+            self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
         }
     }
 
@@ -2294,8 +2330,9 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
-        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+        if self.is_verbose {
             self.error_manager.log_debug(&format!(
                 "    Validating imported function: {}.{}()",
                 namespace_name, function_name
@@ -2304,7 +2341,7 @@ impl QuickFuncsSectionAnalyzer {
 
         // Check if it's actually a local variable (instance method call)
         if local_scope.has_variable(namespace_name) {
-            if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            if self.is_verbose {
                 self.error_manager.log_debug(&format!(
                     "    '{}' is a local variable, treating as instance method call",
                     namespace_name
@@ -2312,7 +2349,7 @@ impl QuickFuncsSectionAnalyzer {
             }
 
             for arg in arguments {
-                self.validate_expression(arg, func, symbol_table, local_scope, result);
+                self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
             }
             return;
         }
@@ -2385,10 +2422,10 @@ impl QuickFuncsSectionAnalyzer {
         }
 
         for arg in arguments {
-            self.validate_expression(arg, func, symbol_table, local_scope, result);
+            self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
         }
 
-        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+        if self.is_verbose {
             self.error_manager.log_debug(&format!(
                 "    Imported function validated: {}.{}() returns {:?}",
                 namespace_name, function_name, function_sig.return_type
@@ -2405,6 +2442,7 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
         let chain_depth = Self::count_method_chain_depth(instance);
         if chain_depth > MAX_METHOD_CHAIN_DEPTH {
@@ -2422,7 +2460,7 @@ impl QuickFuncsSectionAnalyzer {
             return;
         }
 
-        self.validate_expression(instance, func, symbol_table, local_scope, result);
+        self.validate_expression(instance, func, symbol_table, local_scope, result, max_depth - 1);
 
         let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
         let instance_type = type_inference_visitor.infer_type_from_expression(instance);
@@ -2442,7 +2480,7 @@ impl QuickFuncsSectionAnalyzer {
                     );
                 }
             }
-        } else if self.operational_settings.debug_mode >= DebugMode::Verbose {
+        } else if self.is_verbose {
             self.error_manager.log_debug(&format!(
                 "    Could not infer type for instance in method call: {}()",
                 method_name
@@ -2450,7 +2488,7 @@ impl QuickFuncsSectionAnalyzer {
         }
 
         for arg in arguments {
-            self.validate_expression(arg, func, symbol_table, local_scope, result);
+            self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
         }
     }
 
@@ -2463,6 +2501,7 @@ impl QuickFuncsSectionAnalyzer {
         symbol_table: &SymbolTable,
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
+        max_depth: usize,
     ) {
         if !has_static_object(object_name) {
             self.add_error(
@@ -2488,7 +2527,7 @@ impl QuickFuncsSectionAnalyzer {
         }
 
         for arg in arguments {
-            self.validate_expression(arg, func, symbol_table, local_scope, result);
+            self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
         }
     }
 
@@ -2502,7 +2541,7 @@ impl QuickFuncsSectionAnalyzer {
         result: &mut SectionAnalysisResult,
         position: Position,
     ) {
-        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+        if self.is_verbose {
             let full_name = if let Some(ns) = namespace_name {
                 format!("{}.{}.{}", ns, enum_name, value)
             } else {
@@ -2676,13 +2715,15 @@ impl QuickFuncsSectionAnalyzer {
             }
 
             Value::InterpolatedString { expressions, .. } => {
+                let max_depth = Self::calculate_max_depth(100);
                 for expr in expressions {
-                    self.validate_expression(expr, func, symbol_table, local_scope, result);
+                    self.validate_expression(expr, func, symbol_table, local_scope, result, max_depth);
                 }
             }
 
             Value::Expression { expr, .. } => {
-                self.validate_expression(expr, func, symbol_table, local_scope, result);
+                let max_depth = Self::calculate_max_depth(100);
+                self.validate_expression(expr, func, symbol_table, local_scope, result, max_depth);
             }
 
             Value::Lambda { .. } => {
@@ -2712,7 +2753,7 @@ impl QuickFuncsSectionAnalyzer {
         let first_type = type_inference_visitor.infer_type_from_value(&values[0]);
 
         if first_type.is_none() {
-            if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            if self.is_verbose {
                 self.error_manager.log_debug(
                     "    Cannot infer type of first array element - skipping homogeneity check"
                 );
@@ -2759,7 +2800,7 @@ impl QuickFuncsSectionAnalyzer {
             }
         }
 
-        if self.operational_settings.debug_mode >= DebugMode::Verbose {
+        if self.is_verbose {
             self.error_manager.log_debug(&format!(
                 "    Array homogeneity validated: all {} elements are {:?}",
                 values.len(),
@@ -3032,7 +3073,7 @@ impl QuickFuncsSectionAnalyzer {
             symbol_table.add_function(func.name.clone(), signature);
             success_count += 1;
 
-            if self.operational_settings.debug_mode >= DebugMode::Verbose {
+            if self.is_verbose {
                 self.error_manager.log_debug(&format!(
                     "    Pre-registered function '{}' in symbol table",
                     func.name
@@ -3040,7 +3081,7 @@ impl QuickFuncsSectionAnalyzer {
             }
         }
 
-        if self.operational_settings.debug_mode >= DebugMode::Regular {
+        if self.is_debug {
             self.error_manager.log_info(&format!(
                 "Symbol table populated: {} functions added, {} skipped",
                 success_count, skip_count
@@ -3119,7 +3160,7 @@ impl QuickFuncsSectionAnalyzer {
 
         result.errors.push(error.clone());
 
-        if self.operational_settings.debug_mode >= DebugMode::Regular {
+        if self.is_debug {
             self.error_manager.log_error(&format!(
                 "[{}] {}: {}",
                 error_id, error_type, message
@@ -3145,7 +3186,7 @@ impl QuickFuncsSectionAnalyzer {
 
         result.warnings.push(warning);
 
-        if self.operational_settings.debug_mode >= DebugMode::Regular {
+        if self.is_debug {
             self.error_manager.log_debug(&format!("[{}] {}", warning_id, message));
         }
     }
@@ -3475,6 +3516,3 @@ impl VariableReferenceCollector {
         }
     }
 }
-
-
-    

@@ -1,536 +1,976 @@
 {
   "project": {
-    "name": "DixScript Rust Port",
-    "subtitle": "MidManStudio Data Interchange Extension Script",
-    "version": "1.0.0",
-    "status": "Phase 3 - Native Rust Collections, Starting Compiler",
-    "repository": "https://github.com/Mid-D-Man/DixScript-Rust",
-    "file_extension": ".mdix"
+    "name": "DixScript Rust Port - Complete Reference",
+    "subtitle": "Comprehensive Rust Porting Guide with ErrorManager & Best Practices",
+    "version": "2.0.0",
+    "status": "Phase 3 - Compiler Development",
+    "repository": "https://github.com/Mid-D-Man/DixScript-Rust"
   },
 
-  "⚡_CRITICAL_RULES_READ_FIRST": {
-    "⭐_importance": "These rules are NON-NEGOTIABLE and prevent 90% of porting issues",
+  "🔥_CRITICAL_RUST_RULES": {
+    "⚠️_READ_FIRST": "These rules prevent 95% of Rust compilation errors",
 
-    "1_USE_NATIVE_RUST_RESULT": {
-      "rule": "DO NOT create custom Result<T,E> wrapper - USE RUST'S BUILT-IN",
-      "reason": "Rust's Result IS what the C# Result was modeled after",
-      "wrong": "pub struct Result<T, E> { /* custom wrapper */ }",
-      "right": "Use std::result::Result<T, E> directly",
-      "dixscript_pattern": "pub type DixResult<T> = Result<T, DixError>;",
-      "usage": {
-        "ok": "Ok(value)",
-        "err": "Err(DixError::ParseError(\"message\".to_string()))",
-        "match": "match result {\n  Ok(val) => /* use val */,\n  Err(e) => /* handle error */\n}",
-        "propagate": "let value = might_fail()?; // Auto-return Err if failed"
-      }
+    "1_THE_GOLDEN_RULE": {
+      "rule": "Aliasing XOR Mutability - NEVER both at the same time",
+      "explanation": "You can have MANY immutable references OR ONE mutable reference, NEVER both",
+      "visual": [
+        "✅ ALLOWED:",
+        "  let r1 = &data;  // immutable",
+        "  let r2 = &data;  // immutable",
+        "  let r3 = &data;  // unlimited immutable borrows",
+        "",
+        "✅ ALLOWED:",
+        "  let r1 = &mut data;  // ONLY ONE mutable borrow",
+        "",
+        "❌ FORBIDDEN:",
+        "  let r1 = &data;      // immutable",
+        "  let r2 = &mut data;  // ERROR! Can't have both"
+      ]
     },
 
-    "2_USE_NATIVE_RUST_COLLECTIONS": {
-      "rule": "DO NOT use DixCore wrappers - USE RUST'S BUILT-IN COLLECTIONS + ITERTOOLS",
-      "reason": "Native Rust collections are zero-cost, well-tested, and idiomatic",
-      "decision": "DixCore wrappers removed - too much trait bound complexity for minimal benefit",
-      "replacement_guide": {
-        "collections": {
-          "C#_List": "Vec<T>",
-          "C#_Dictionary": "HashMap<K, V> or BTreeMap<K, V>",
-          "C#_HashSet": "HashSet<T> or BTreeSet<T>",
-          "C#_ImmutableArray": "Box<[T]> or Arc<[T]>"
-        },
-        "linq_equivalents": {
-          "Select": ".map()",
-          "Where": ".filter()",
-          "Any": ".any()",
-          "All": ".all()",
-          "First": ".next() or .nth(0)",
-          "FirstOrDefault": ".next()",
-          "Count": ".count()",
-          "Sum": ".sum()",
-          "Min_Max": ".min() / .max()",
-          "Take": ".take()",
-          "Skip": ".skip()",
-          "OrderBy": ".sorted() // itertools",
-          "Distinct": ".unique() // itertools",
-          "Reverse": ".rev()",
-          "SelectMany": ".flat_map()",
-          "GroupBy": ".group_by() // itertools",
-          "Join": ".join() // itertools"
-        }
-      }
-    },
-
-    "3_BORROWING_RULES": {
-      "rule": "You can have EITHER many readers OR one writer, NEVER both",
-      "the_golden_rule": "Aliasing XOR Mutability - many reads OR one write, not both",
-      "immutable_borrows": {
-        "syntax": "&value",
-        "can_have": "UNLIMITED immutable borrows at once",
-        "cannot_do": "Modify the value",
-        "example": "fn read_data(data: &String) { println!(\"{}\", data); }"
-      },
-      "mutable_borrows": {
-        "syntax": "&mut value",
-        "can_have": "ONLY ONE mutable borrow at a time",
-        "cannot_do": "Have other borrows (even immutable) while mutable exists",
-        "example": "fn modify_data(data: &mut String) { data.push_str(\"!\"); }",
-        "common_error": {
-          "wrong": "let r1 = &mut data;\nlet r2 = &mut data; // ERROR!",
-          "right": "{\n  let r1 = &mut data;\n  r1.push_str(\"!\");\n} // r1 scope ends\nlet r2 = &mut data; // OK now"
-        }
-      },
-      "lifetime_basics": {
-        "what": "References must NEVER outlive the data they point to",
-        "when_needed": "When compiler can't infer (multiple inputs/outputs)",
-        "syntax": "'a is a lifetime parameter",
-        "example": "fn longest<'a>(s1: &'a str, s2: &'a str) -> &'a str",
-        "meaning": "Output lives as long as BOTH inputs (shortest lifetime)"
-      }
-    },
-
-    "4_OWNERSHIP_RULES": {
+    "2_OWNERSHIP_FLOW": {
       "rule": "Each value has EXACTLY ONE owner. When owner drops, value is freed.",
-      "three_ways_to_handle_data": {
-        "1_move": {
+      "three_choices": {
+        "MOVE": {
           "what": "Transfer ownership (original becomes invalid)",
-          "example": "let s1 = String::from(\"hello\");\nlet s2 = s1; // s1 MOVED, can't use anymore",
-          "when": "Passing to function that consumes it",
-          "cost": "Zero (just pointer reassignment)"
+          "cost": "FREE (just pointer reassignment)",
+          "example": "let s2 = s1; // s1 MOVED, cannot use anymore",
+          "when_to_use": "Passing to function that will consume/own the data"
         },
-        "2_borrow": {
-          "what": "Temporary access WITHOUT ownership transfer",
-          "example": "fn process(data: &String) { /* read only */ }",
-          "when": "Function needs to READ but not own",
-          "cost": "Zero (just a pointer)"
+        "BORROW": {
+          "what": "Temporary read-only access",
+          "cost": "FREE (just a pointer)",
+          "example": "fn read(data: &String) { ... }",
+          "when_to_use": "Function needs to READ but not own"
         },
-        "3_clone": {
-          "what": "Deep copy - creates NEW owned value",
-          "example": "let s2 = s1.clone(); // Both valid, but expensive",
-          "when": "ONLY when you actually need TWO independent copies",
-          "cost": "Expensive (allocates and copies all data)",
-          "warning": "⚠️ CLONING IS YOUR LAST RESORT, NOT YOUR FIRST"
+        "CLONE": {
+          "what": "Deep copy - creates NEW independent value",
+          "cost": "EXPENSIVE (allocates + copies all data)",
+          "example": "let s2 = s1.clone(); // Both valid, but costly",
+          "when_to_use": "⚠️ ONLY when you TRULY need TWO independent copies"
         }
       }
     },
 
-    "5_WHEN_TO_CLONE_VS_BORROW": {
-      "⚠️_performance_impact": "Cloning can be 10-1000x slower than borrowing",
-      "the_decision_tree": {
-        "ask_yourself": [
-          "1. Do I need to OWN this data? → Clone or move",
-          "2. Do I just need to READ it? → Borrow (&T)",
-          "3. Do I need to MODIFY it temporarily? → Mutable borrow (&mut T)",
-          "4. Is the borrow checker complaining? → DON'T clone yet, understand why first"
+    "3_LIFETIME_BASICS": {
+      "rule": "References must NEVER outlive the data they point to",
+      "when_needed": "When compiler can't infer (multiple inputs/outputs, struct fields)",
+      "syntax": "'a is a lifetime parameter - means 'lives at least as long as a'",
+      "examples": {
+        "function": {
+          "code": "fn longest<'a>(s1: &'a str, s2: &'a str) -> &'a str",
+          "meaning": "Output lives as long as BOTH inputs (shortest lifetime)"
+        },
+        "struct": {
+          "code": "struct Parser<'a> { source: &'a str }",
+          "meaning": "Parser cannot outlive the source string it references"
+        }
+      },
+      "when_NOT_needed": [
+        "Single input, single output - compiler infers",
+        "All owned data (String, Vec, etc.) - no lifetimes needed",
+        "Static data ('static lifetime)"
+      ]
+    },
+
+    "4_AVOID_CLONING": {
+      "rule": "Clone is your LAST resort, not your first",
+      "performance_impact": "10-1000x slower than borrowing",
+      "decision_tree": [
+        "1. Do I need to OWN this data? → Move or clone",
+        "2. Do I just need to READ it? → Borrow (&T)",
+        "3. Do I need to MODIFY temporarily? → Mutable borrow (&mut T)",
+        "4. Is borrow checker complaining? → DON'T clone yet, understand WHY first"
+      ],
+      "valid_clone_reasons": [
+        "Storing in multiple independent collections",
+        "Sending to another thread (consider Arc<T> instead)",
+        "Creating snapshot before modification",
+        "Working around complex lifetimes (after trying borrowing)"
+      ],
+      "invalid_clone_reasons": [
+        "❌ Cloning just to satisfy borrow checker",
+        "❌ Cloning in hot loops (lexer, parser)",
+        "❌ Cloning when function only reads",
+        "❌ Cloning to iterate",
+        "❌ Cloning in return values when & would work"
+      ]
+    },
+
+    "5_VALUE_USED_AFTER_MOVE": {
+      "error": "value used here after move",
+      "cause": "Tried to use value after transferring ownership",
+      "example_wrong": [
+        "let s1 = String::from(\"hello\");",
+        "let s2 = s1;  // s1 MOVED to s2",
+        "println!(\"{}\", s1);  // ❌ ERROR: s1 is invalid"
+      ],
+      "fixes": {
+        "fix_1_use_before_move": [
+          "println!(\"{}\", s1);  // Use first",
+          "let s2 = s1;  // Then move"
+        ],
+        "fix_2_clone": [
+          "let s2 = s1.clone();  // Both valid (expensive)"
+        ],
+        "fix_3_borrow": [
+          "let s2 = &s1;  // Just borrow instead"
         ]
-      },
-      "when_clone_is_ok": {
-        "valid_reasons": [
-          "Storing data in multiple independent collections",
-          "Sending data to another thread (Arc<T> is better though)",
-          "Creating a snapshot before modification",
-          "Working around complex lifetime issues (after trying borrowing first)"
-        ],
-        "example_ok": "let snapshot = current_state.clone();\nmodify(&mut current_state);\nif bad { current_state = snapshot; }"
-      },
-      "when_clone_is_wrong": {
-        "anti_patterns": [
-          "❌ Cloning just to satisfy borrow checker without understanding",
-          "❌ Cloning in hot loops (lexer, parser main loops)",
-          "❌ Cloning when function only needs to read",
-          "❌ Cloning large collections to iterate",
-          "❌ Cloning in return values when reference would work"
-        ],
-        "example_bad": "fn process(data: String) { /* uses data.clone() everywhere */ }",
-        "example_good": "fn process(data: &str) { /* just borrows */ }"
-      },
-      "specific_dixscript_guidance": {
-        "lexer_tokens": "DON'T clone tokens in main loop - use Vec<Token> and borrow",
-        "parser_state": "DON'T clone parse state - use &mut references",
-        "error_collections": "OK to clone individual errors when adding to collection",
-        "ast_nodes": "DON'T clone during traversal - use &Node or &mut Node",
-        "symbol_tables": "Store owned values, return references",
-        "string_literals": "Use &str for reading, String for ownership"
       }
     },
 
-    "6_COPY_VS_CLONE": {
-      "Copy": {
-        "what": "Implicit bitwise copy (like C# value types)",
-        "types": "i32, f64, bool, char, and other primitives",
-        "behavior": "let y = x; // x is COPIED, both valid",
-        "cost": "Zero (single CPU instruction)",
-        "derive": "#[derive(Copy, Clone)] // Copy requires Clone"
-      },
-      "Clone": {
-        "what": "Explicit deep copy (like C# .Clone())",
-        "types": "String, Vec, complex structs",
-        "behavior": "let y = x.clone(); // Explicit copy",
-        "cost": "Expensive (allocates and copies data)",
-        "derive": "#[derive(Clone)]"
-      },
-      "when_to_use": {
-        "use_Copy_for": "Small structs with only Copy fields (Point, Token metadata)",
-        "use_Clone_for": "Types with heap data (String, Vec) or large structs",
-        "never_both_for": "Types with heap allocations (can't be Copy)"
+    "6_CANNOT_BORROW_AS_MUTABLE": {
+      "error": "cannot borrow as mutable because it is also borrowed as immutable",
+      "cause": "Violating the golden rule (aliasing XOR mutability)",
+      "example_wrong": [
+        "let r1 = &data;      // immutable borrow",
+        "let r2 = &mut data;  // ❌ ERROR: can't have both"
+      ],
+      "fix": [
+        "{",
+        "  let r1 = &data;",
+        "  println!(\"{}\", r1);",
+        "}  // r1 dropped here",
+        "let r2 = &mut data;  // ✅ OK now"
+      ],
+      "pattern": "Ensure immutable borrow ENDS before mutable borrow starts"
+    },
+
+    "7_FILE_OWNERSHIP_PATTERNS": {
+      "rule": "Decide WHO OWNS the data in each file/struct",
+      "patterns": {
+        "OWNED_DATA": {
+          "when": "File/struct creates and fully owns its data",
+          "types": "String, Vec<T>, HashMap<K,V>",
+          "example": "struct Lexer { tokens: Vec<Token> }",
+          "no_lifetimes": "No lifetime annotations needed"
+        },
+        "BORROWED_DATA": {
+          "when": "File/struct references data owned elsewhere",
+          "types": "&str, &[T], &HashMap<K,V>",
+          "example": "struct Parser<'a> { source: &'a str }",
+          "needs_lifetimes": "⚠️ MUST annotate lifetimes"
+        },
+        "MIXED": {
+          "when": "Some owned, some borrowed",
+          "example": "struct Compiler<'a> { config: Config, source: &'a str }",
+          "needs_lifetimes": "Only for borrowed fields"
+        }
       }
     }
   },
 
-  "🎯_NATIVE_RUST_COLLECTIONS_GUIDE": {
-    "philosophy": "Use native Rust collections + itertools for all collection operations",
+  "📋_ERROR_MANAGER_COMPLETE_API": {
+    "overview": {
+      "pattern": "Thread-safe singleton using Arc<Mutex<T>>",
+      "access": "let error_mgr = ErrorManager::get_shared_instance();",
+      "thread_safety": "All methods are thread-safe via internal Mutex"
+    },
 
-    "collections_cheat_sheet": {
-      "Vec<T>": {
-        "c_sharp_equivalent": "List<T>",
-        "when_to_use": "Dynamic arrays, default choice for lists",
-        "create": "let mut vec = Vec::new(); or vec![1, 2, 3]",
-        "common_ops": {
-          "add": "vec.push(item)",
-          "insert": "vec.insert(index, item)",
-          "remove": "vec.remove(index)",
-          "get": "vec.get(index) or vec[index]",
-          "length": "vec.len()",
-          "iterate": "for item in &vec { ... }"
-        }
+    "error_types_and_when_to_use": {
+      "LexicalError": {
+        "when": "Tokenization/lexer phase errors",
+        "types": [
+          "InvalidCharacter - unknown character in source",
+          "UnterminatedString - missing closing quote",
+          "InvalidNumber - malformed number literal",
+          "InvalidEscapeSequence - bad \\x in string",
+          "UnexpectedEndOfInput - EOF during token",
+          "InvalidToken - token doesn't match any pattern"
+        ],
+        "severity": "Error (or Fatal if error_handling=halt)"
       },
-      "HashMap<K, V>": {
-        "c_sharp_equivalent": "Dictionary<K, V>",
-        "when_to_use": "Key-value pairs with O(1) lookup, unordered",
-        "create": "let mut map = HashMap::new();",
-        "common_ops": {
-          "add": "map.insert(key, value)",
-          "get": "map.get(&key) or map[&key]",
-          "remove": "map.remove(&key)",
-          "contains": "map.contains_key(&key)",
-          "iterate": "for (k, v) in &map { ... }"
-        }
+      "ParseError": {
+        "when": "Parsing/syntax errors",
+        "types": [
+          "UnexpectedToken - wrong token type",
+          "MissingToken - expected token not found",
+          "InvalidSyntax - malformed syntax",
+          "UnknownStaticObject - unknown built-in like Math2",
+          "UnknownStaticMethod - unknown method like Array.map2",
+          "UnknownInstanceMethod - unknown method on value",
+          "InvalidMethodSignature - wrong number/type of args",
+          "InvalidBuiltinCall - incorrect builtin usage"
+        ],
+        "severity": "Error (or Fatal if error_handling=halt)"
       },
-      "BTreeMap<K, V>": {
-        "c_sharp_equivalent": "SortedDictionary<K, V>",
-        "when_to_use": "Key-value pairs with sorted keys",
-        "create": "let mut map = BTreeMap::new();",
-        "advantage": "Maintains sorted order, range queries"
+      "SemanticError": {
+        "when": "Semantic analysis phase",
+        "types": [
+          "TypeMismatch - type incompatibility",
+          "UndefinedVariable - variable not declared",
+          "DuplicateDeclaration - redeclaration",
+          "InvalidOperation - operation not supported",
+          "CircularDependency - circular reference detected"
+        ],
+        "severity": "Warning (usually non-fatal)"
       },
-      "HashSet<T>": {
-        "c_sharp_equivalent": "HashSet<T>",
-        "when_to_use": "Unique values, O(1) membership test",
-        "create": "let mut set = HashSet::new();",
-        "common_ops": {
-          "add": "set.insert(item)",
-          "contains": "set.contains(&item)",
-          "remove": "set.remove(&item)"
-        }
+      "ImportsResolutionError": {
+        "when": "Import resolution failures",
+        "types": [
+          "FileNotFound - import file doesn't exist",
+          "CircularImport - circular import chain",
+          "InvalidPath - malformed import path",
+          "HashMismatch - verify hash doesn't match",
+          "CloudFetchFailed - cloud download failed"
+        ],
+        "severity": "Error (or Fatal if error_handling=halt)"
       },
-      "BTreeSet<T>": {
-        "c_sharp_equivalent": "SortedSet<T>",
-        "when_to_use": "Unique sorted values",
-        "create": "let mut set = BTreeSet::new();"
+      "AstEnhancementError": {
+        "when": "AST enhancement/transformation phase",
+        "types": [
+          "QualifiedIdentifierResolution - failed to resolve qualified name",
+          "FunctionSignatureMismatch - signature doesn't match",
+          "InvalidTypeAnnotation - bad type annotation"
+        ],
+        "severity": "Error"
       },
-      "Box<[T]>": {
-        "c_sharp_equivalent": "ImmutableArray<T>",
-        "when_to_use": "Fixed-size array on heap, immutable",
-        "create": "let arr: Box<[i32]> = vec![1, 2, 3].into_boxed_slice();"
+      "ValueResolutionError": {
+        "when": "QuickFunc evaluation/value resolution",
+        "types": [
+          "UndefinedVariable - variable not found in scope",
+          "FunctionCallFailed - function execution error",
+          "InvalidArgument - wrong argument type/value",
+          "DivisionByZero - division by zero in expression"
+        ],
+        "severity": "Error"
       },
-      "Arc<[T]>": {
-        "c_sharp_equivalent": "Shared ImmutableArray<T>",
-        "when_to_use": "Shared immutable array across threads",
-        "create": "let arr: Arc<[i32]> = Arc::from(vec![1, 2, 3]);"
+      "DlmError": {
+        "when": "DLM pipeline (compression/encryption/audit) errors",
+        "types": [
+          "CompressionFailed - compression error",
+          "EncryptionFailed - encryption error",
+          "DecryptionFailed - decryption error",
+          "AuditFailed - audit check failed",
+          "ModuleLoadFailed - DLM module load error"
+        ],
+        "severity": "Error"
+      },
+      "BinarySerializationError": {
+        "when": "Binary .mdix file serialization/deserialization",
+        "types": [
+          "InvalidFormat - not a valid .mdix file",
+          "VersionMismatch - incompatible file version",
+          "CorruptedData - checksum/integrity failure",
+          "SerializationFailed - encoding error",
+          "DeserializationFailed - decoding error"
+        ],
+        "severity": "Error"
+      },
+      "ConfigError": {
+        "when": "@CONFIG section validation errors",
+        "types": [
+          "MissingRequiredField - required config missing",
+          "InvalidValue - config value invalid",
+          "InvalidFormat - config format wrong",
+          "UnknownField - unknown config key"
+        ],
+        "severity": "Error"
+      },
+      "RuntimeError": {
+        "when": "Runtime execution errors (DixData usage)",
+        "types": [
+          "KeyNotFound - key doesn't exist in DixData",
+          "TypeConversionFailed - type cast error",
+          "InvalidOperation - invalid runtime operation",
+          "NullReference - null pointer/reference"
+        ],
+        "severity": "Error"
+      },
+      "GeneralError": {
+        "when": "General/uncategorized errors",
+        "types": [
+          "InternalError - internal compiler bug",
+          "IoError - file I/O failure",
+          "UnexpectedError - unexpected condition"
+        ],
+        "severity": "Error"
       }
     },
 
-    "linq_to_rust_iterator_guide": {
-      "basic_operations": {
-        "Select": {
-          "c_sharp": "list.Select(x => x * 2)",
-          "rust": "vec.iter().map(|x| x * 2).collect::<Vec<_>>()",
-          "notes": "Must call .collect() to materialize"
-        },
-        "Where": {
-          "c_sharp": "list.Where(x => x > 5)",
-          "rust": "vec.iter().filter(|x| **x > 5).collect::<Vec<_>>()"
-        },
-        "Any": {
-          "c_sharp": "list.Any(x => x > 5)",
-          "rust": "vec.iter().any(|x| *x > 5)",
-          "notes": "Returns bool, no .collect() needed"
-        },
-        "All": {
-          "c_sharp": "list.All(x => x > 0)",
-          "rust": "vec.iter().all(|x| *x > 0)"
-        },
-        "First": {
-          "c_sharp": "list.First()",
-          "rust": "vec.first() or vec.iter().next()",
-          "notes": "Returns Option<&T>"
-        },
-        "Count": {
-          "c_sharp": "list.Count()",
-          "rust": "vec.len() or vec.iter().count()"
-        },
-        "Sum": {
-          "c_sharp": "list.Sum()",
-          "rust": "vec.iter().sum::<i32>()"
-        }
+    "add_error_methods": {
+      "add_lexical_error": {
+        "signature": "pub fn add_lexical_error(&self, error_type: LexicalErrorType, message: String, line: usize, column: usize, suggestion: Option<String>, source_line: Option<String>)",
+        "returns": "void",
+        "example": [
+          "error_mgr.add_lexical_error(",
+          "  LexicalErrorType::InvalidCharacter,",
+          "  format!(\"Invalid character '{}'\", ch),",
+          "  token.line,",
+          "  token.column,",
+          "  Some(\"Remove this character\".to_string()),",
+          "  Some(source_line.clone())",
+          ");"
+        ]
       },
-      "itertools_operations": {
-        "note": "Add 'use itertools::Itertools;' at top",
-        "OrderBy": {
-          "c_sharp": "list.OrderBy(x => x.name)",
-          "rust": "vec.iter().sorted_by_key(|x| &x.name).collect::<Vec<_>>()"
-        },
-        "Distinct": {
-          "c_sharp": "list.Distinct()",
-          "rust": "vec.iter().unique().collect::<Vec<_>>()"
-        },
-        "GroupBy": {
-          "c_sharp": "list.GroupBy(x => x.category)",
-          "rust": "vec.iter().group_by(|x| &x.category)"
-        },
-        "Join": {
-          "c_sharp": "list1.Join(list2, x => x.id, y => y.id, (x, y) => ...)",
-          "rust": "vec1.iter().cartesian_product(vec2.iter()).filter(|(x, y)| x.id == y.id)"
-        }
+      "add_parse_error": {
+        "signature": "pub fn add_parse_error(&self, error_type: ParseErrorType, message: String, line: usize, column: usize, suggestion: Option<String>, source_line: Option<String>)",
+        "returns": "void",
+        "example": [
+          "error_mgr.add_parse_error(",
+          "  ParseErrorType::UnexpectedToken,",
+          "  format!(\"Expected '{{', found '{}'\", token.value),",
+          "  token.line,",
+          "  token.column,",
+          "  Some(\"Add opening brace\".to_string()),",
+          "  None",
+          ");"
+        ]
       },
-      "performance_tips": {
-        "lazy_evaluation": "Iterators are lazy - chain operations before .collect()",
-        "avoid_collect": "Don't .collect() if you don't need to - keep it lazy",
-        "reuse_iterators": "Can't reuse after .collect() - clone source if needed",
-        "parallel": "Use rayon crate for parallel iteration on large datasets"
+      "add_semantic_error": {
+        "signature": "pub fn add_semantic_error(&self, error_type: SemanticErrorType, message: String, line: i32, column: i32, section_name: Option<String>, suggestion: Option<String>)",
+        "returns": "void",
+        "example": [
+          "error_mgr.add_semantic_error(",
+          "  SemanticErrorType::UndefinedVariable,",
+          "  format!(\"Variable '{}' not defined\", name),",
+          "  node.position.line,",
+          "  node.position.column,",
+          "  Some(\"@DATA\".to_string()),",
+          "  Some(\"Declare the variable first\".to_string())",
+          ");"
+        ]
+      },
+      "add_imports_resolution_error": {
+        "signature": "pub fn add_imports_resolution_error(&self, error_type: ImportsResolutionErrorType, message: String, import_alias: String, import_path: Option<String>, resolved_path: Option<String>, circular_chain: Option<Vec<String>>, line: i32, column: i32, suggestion: Option<String>)",
+        "returns": "void"
+      },
+      "add_config_error": {
+        "signature": "pub fn add_config_error(&self, error_type: ConfigErrorType, message: String, section_name: Option<String>, field_name: Option<String>, expected_value: Option<String>, actual_value: Option<String>, line: i32, column: i32, suggestion: Option<String>)",
+        "returns": "void"
+      }
+    },
+
+    "query_methods": {
+      "has_errors": {
+        "signature": "pub fn has_errors(&self) -> bool",
+        "returns": "bool",
+        "usage": "if error_mgr.has_errors() { ... }"
+      },
+      "has_fatal_errors": {
+        "signature": "pub fn has_fatal_errors(&self) -> bool",
+        "returns": "bool",
+        "usage": "if error_mgr.has_fatal_errors() { return Err(...); }"
+      },
+      "should_terminate_parsing": {
+        "signature": "pub fn should_terminate_parsing(&self) -> bool",
+        "returns": "bool",
+        "usage": "if error_mgr.should_terminate_parsing() { break; }"
+      },
+      "get_lexical_errors": {
+        "signature": "pub fn get_lexical_errors(&self) -> Vec<LexicalError>",
+        "returns": "Vec<LexicalError>",
+        "usage": "let errors = error_mgr.get_lexical_errors();"
+      },
+      "get_parse_errors": {
+        "signature": "pub fn get_parse_errors(&self) -> Vec<ParseError>",
+        "returns": "Vec<ParseError>",
+        "usage": "let errors = error_mgr.get_parse_errors();"
+      },
+      "get_registry_errors": {
+        "signature": "pub fn get_registry_errors(&self) -> Vec<ParseError>",
+        "returns": "Vec<ParseError> (only builtin validation errors)",
+        "usage": "let builtin_errors = error_mgr.get_registry_errors();"
+      },
+      "clear_errors": {
+        "signature": "pub fn clear_errors(&self)",
+        "returns": "void",
+        "usage": "error_mgr.clear_errors(); // Reset for new compilation"
+      }
+    },
+
+    "reporting_methods": {
+      "generate_error_report": {
+        "signature": "pub fn generate_error_report(&self) -> String",
+        "returns": "String (formatted text report)",
+        "usage": "println!(\"{}\", error_mgr.generate_error_report());"
+      },
+      "get_all_errors_as_json": {
+        "signature": "pub fn get_all_errors_as_json(&self, pretty_print: bool) -> Result<String, String>",
+        "returns": "Result<String, String>",
+        "usage": [
+          "match error_mgr.get_all_errors_as_json(true) {",
+          "  Ok(json) => println!(\"{}\", json),",
+          "  Err(e) => eprintln!(\"JSON error: {}\", e)",
+          "}"
+        ]
+      },
+      "get_log_contents": {
+        "signature": "pub fn get_log_contents(&self) -> String",
+        "returns": "String (all logged messages)",
+        "usage": "let log = error_mgr.get_log_contents();"
+      }
+    },
+
+    "logging_delegation": {
+      "note": "ErrorManager delegates to MID_Logger for all logging",
+      "methods": {
+        "log_debug": {
+          "signature": "pub fn log_debug(&self, message: &str)",
+          "level": "LogLevel::Debug"
+        },
+        "log_info": {
+          "signature": "pub fn log_info(&self, message: &str)",
+          "level": "LogLevel::Info"
+        },
+        "log_warning": {
+          "signature": "pub fn log_warning(&self, message: &str)",
+          "level": "LogLevel::Warning"
+        },
+        "log_error": {
+          "signature": "pub fn log_error(&self, message: &str)",
+          "level": "LogLevel::Error"
+        }
+      }
+    }
+  },
+
+  "📝_LOGGING_BEST_PRACTICES": {
+    "rule": "Check log level BEFORE formatting expensive strings",
+    "rationale": "String formatting is expensive - avoid if message won't be logged",
+
+    "wrong_pattern": [
+      "❌ WRONG - Always formats string even if debug disabled:",
+      "logger.Debug(&format!(\"Token: {:?}, Value: {}\", token, expensive_computation()));"
+    ],
+
+    "correct_patterns": {
+      "pattern_1_variable_check": {
+        "description": "Make a variable for the enabled check",
+        "example": [
+          "✅ CORRECT - Check first, then format:",
+          "let is_debug_enabled = logger.IsDebugEnabled();",
+          "if is_debug_enabled {",
+          "  let msg = format!(\"Token: {:?}, Value: {}\", token, expensive_computation());",
+          "  logger.DebugStr(&msg);",
+          "}"
+        ]
+      },
+      "pattern_2_closure": {
+        "description": "Use closure for deferred evaluation (MID_Logger supports this)",
+        "example": [
+          "✅ CORRECT - Closure only evaluated if debug enabled:",
+          "logger.Debug(|| {",
+          "  format!(\"Token: {:?}, Value: {}\", token, expensive_computation())",
+          "});"
+        ]
+      },
+      "pattern_3_scope_guard": {
+        "description": "Use RAII scope guards for structured logging",
+        "example": [
+          "✅ CORRECT - Automatic scope tracking:",
+          "{",
+          "  let _scope = logger.CreateDebugScope(\"ParseExpression\");",
+          "  // ... parsing logic ...",
+          "}  // Scope automatically ends here (RAII)"
+        ]
+      }
+    },
+
+    "logger_methods": {
+      "Error": {
+        "signature": "pub fn Error(&mut self, message: &str)",
+        "always_logs": "Yes - errors always logged regardless of level"
+      },
+      "Warning": {
+        "signature": "pub fn Warning(&mut self, message: &str)",
+        "always_logs": "Yes - warnings always logged"
+      },
+      "Info": {
+        "signature": "pub fn Info(&mut self, message: &str)",
+        "check_level": "Logs if level <= Info"
+      },
+      "Debug": {
+        "signature": "pub fn Debug<F>(&mut self, message_builder: F) where F: FnOnce() -> String",
+        "check_level": "Logs if level <= Debug",
+        "pattern": "Use closure: logger.Debug(|| format!(\"...\"));"
+      },
+      "DebugStr": {
+        "signature": "pub fn DebugStr(&mut self, message: &str)",
+        "check_level": "Logs if level <= Debug",
+        "pattern": "Direct string: logger.DebugStr(&msg);"
+      },
+      "Verbose": {
+        "signature": "pub fn Verbose<F>(&mut self, message_builder: F) where F: FnOnce() -> String",
+        "check_level": "Logs if level <= Debug (verbose is subset of debug)"
+      }
+    },
+
+    "check_methods": {
+      "IsDebugEnabled": {
+        "signature": "pub fn IsDebugEnabled(&self) -> bool",
+        "usage": "if logger.IsDebugEnabled() { ... }"
+      },
+      "IsVerboseEnabled": {
+        "signature": "pub fn IsVerboseEnabled(&self) -> bool",
+        "usage": "if logger.IsVerboseEnabled() { ... }"
+      },
+      "WouldLog": {
+        "signature": "pub fn WouldLog(&self, level: LogLevel) -> bool",
+        "usage": "if logger.WouldLog(LogLevel::Info) { ... }"
+      }
+    },
+
+    "scope_guards": {
+      "CreateScope": {
+        "signature": "pub fn CreateScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a>",
+        "level": "Info",
+        "example": [
+          "let _scope = logger.CreateScope(\"CompileFile\");",
+          "// Logs '▶ CompileFile' on enter",
+          "// ... work ...",
+          "// Logs '◀ CompileFile' on drop (automatic)"
+        ]
+      },
+      "CreateDebugScope": {
+        "signature": "pub fn CreateDebugScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a>",
+        "level": "Debug"
+      },
+      "CreateVerboseScope": {
+        "signature": "pub fn CreateVerboseScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a>",
+        "level": "Debug (verbose)"
+      },
+      "note": "LoggerScope uses RAII - automatically calls end_scope on drop"
+    }
+  },
+
+  "⚙️_OPERATIONAL_SETTINGS": {
+    "what": "Runtime configuration extracted from @CONFIG section",
+    "location": "src/Compiler/Core/Config/operational_settings.rs",
+
+    "struct_definition": {
+      "fields": {
+        "version": {
+          "type": "String",
+          "default": "\"1.0.0\".to_string()",
+          "description": "DixScript version"
+        },
+        "error_handling_strategy": {
+          "type": "ErrorHandlingStrategy",
+          "default": "ErrorHandlingStrategy::Halt",
+          "values": ["Halt", "Continue", "Recover"],
+          "description": "How to handle compilation errors"
+        },
+        "compatibility_mode": {
+          "type": "CompatibilityMode",
+          "default": "CompatibilityMode::Strict",
+          "values": ["Strict", "BestEffort", "Permissive"],
+          "description": "Compatibility enforcement level"
+        },
+        "debug_mode": {
+          "type": "DebugMode",
+          "default": "DebugMode::Off",
+          "values": ["Off", "Regular", "Verbose"],
+          "description": "Debug logging level"
+        },
+        "enabled_features": {
+          "type": "Vec<String>",
+          "default": "vec![\"advanced\".to_string()]",
+          "description": "Enabled DixScript features"
+        }
+      }
+    },
+
+    "usage_patterns": {
+      "create_default": {
+        "code": "let settings = OperationalSettings::default();"
+      },
+      "from_config": {
+        "code": [
+          "let config = parse_config_section()?;",
+          "let settings = ConfigSchema::extract_operational_settings(&config);"
+        ]
+      },
+      "update_error_manager": {
+        "code": [
+          "let error_mgr = ErrorManager::get_shared_instance();",
+          "error_mgr.update_settings(settings);"
+        ]
+      },
+      "check_strategy": {
+        "code": [
+          "match settings.error_handling_strategy {",
+          "  ErrorHandlingStrategy::Halt => {",
+          "    // Stop on first error",
+          "    if error_mgr.has_errors() { return Err(...); }",
+          "  }",
+          "  ErrorHandlingStrategy::Continue => {",
+          "    // Collect all errors, continue parsing",
+          "  }",
+          "  ErrorHandlingStrategy::Recover => {",
+          "    // Attempt error recovery",
+          "  }",
+          "}"
+        ]
+      }
+    },
+
+    "error_handling_strategies": {
+      "Halt": {
+        "behavior": "Stop immediately on first error",
+        "severity_change": "Lexer/Parser errors become Fatal",
+        "use_when": "Strict compilation, CI/CD pipelines"
+      },
+      "Continue": {
+        "behavior": "Collect all errors, continue compilation",
+        "severity_change": "Errors remain Error severity",
+        "use_when": "IDE integration, interactive development"
+      },
+      "Recover": {
+        "behavior": "Attempt error recovery and continue",
+        "severity_change": "Some errors may be downgraded",
+        "use_when": "Best-effort compilation, error-tolerant tools"
+      }
+    },
+
+    "debug_modes": {
+      "Off": {
+        "logger_level": "LogLevel::Info",
+        "output": "Only Info, Warning, Error messages"
+      },
+      "Regular": {
+        "logger_level": "LogLevel::Debug",
+        "output": "Includes Debug messages"
+      },
+      "Verbose": {
+        "logger_level": "LogLevel::Debug",
+        "output": "Includes Debug + Verbose messages"
+      }
+    }
+  },
+
+  "🚨_RUST_EXCEPTION_HANDLING": {
+    "rule": "Rust doesn't have exceptions - use Result<T, E> for error propagation",
+
+    "result_type": {
+      "definition": "enum Result<T, E> { Ok(T), Err(E) }",
+      "standard": "Use std::result::Result<T, E>",
+      "project_alias": "pub type DixResult<T> = Result<T, DixError>;",
+      "never_use": "❌ DON'T create custom Result wrapper - use Rust's built-in"
+    },
+
+    "error_propagation": {
+      "question_mark_operator": {
+        "syntax": "let value = might_fail()?;",
+        "meaning": "If Err, RETURN immediately with that Err. If Ok, unwrap value.",
+        "example": [
+          "fn compile_file(path: &str) -> DixResult<Ast> {",
+          "  let source = read_file(path)?;  // Auto-return Err if read fails",
+          "  let tokens = tokenize(&source)?;  // Auto-return Err if tokenize fails",
+          "  let ast = parse(tokens)?;  // Auto-return Err if parse fails",
+          "  Ok(ast)  // Success",
+          "}"
+        ]
+      },
+      "match_pattern": {
+        "when": "Need custom handling for each case",
+        "example": [
+          "match tokenize(&source) {",
+          "  Ok(tokens) => process(tokens),",
+          "  Err(e) => {",
+          "    eprintln!(\"Tokenization failed: {}\", e);",
+          "    return Err(e);",
+          "  }",
+          "}"
+        ]
+      },
+      "if_let_pattern": {
+        "when": "Only care about one variant",
+        "example": [
+          "if let Err(e) = validate_config(&config) {",
+          "  error_mgr.add_config_error(...);",
+          "  return Err(e);",
+          "}"
+        ]
+      }
+    },
+
+    "error_types": {
+      "dixscript_errors": {
+        "pattern": "Use specific error types with ErrorManager",
+        "example": [
+          "// When error occurs:",
+          "error_mgr.add_parse_error(",
+          "  ParseErrorType::UnexpectedToken,",
+          "  message,",
+          "  line,",
+          "  column,",
+          "  suggestion,",
+          "  source_line",
+          ");",
+          "",
+          "// Then return Error:",
+          "return Err(DixError::ParseError(\"Parsing failed\".to_string()));"
+        ]
+      },
+      "never_panic": {
+        "rule": "❌ NEVER use panic!(), unwrap(), or expect() in library code",
+        "reason": "Library should return errors, not crash the program",
+        "exceptions": [
+          "✅ Test code (panic is OK in #[cfg(test)])",
+          "✅ When impossible state is reached (should_never_happen)",
+          "✅ In examples/binaries (not library code)"
+        ],
+        "use_instead": [
+          "Use '?' operator for propagation",
+          "Use .ok_or() to convert Option to Result",
+          "Use match to handle all cases"
+        ]
+      }
+    },
+
+    "converting_option_to_result": {
+      "problem": "Function returns Option<T> but you need Result<T, E>",
+      "solutions": {
+        "ok_or": {
+          "usage": "let value = maybe_value.ok_or(error)?;",
+          "example": [
+            "let token = tokens.get(index)",
+            "  .ok_or(DixError::ParseError(\"Unexpected EOF\".to_string()))?;"
+          ]
+        },
+        "ok_or_else": {
+          "usage": "let value = maybe_value.ok_or_else(|| create_error())?;",
+          "example": [
+            "let token = tokens.get(index)",
+            "  .ok_or_else(|| {",
+            "    DixError::ParseError(format!(\"Missing token at {}\", index))",
+            "  })?;"
+          ]
+        }
       }
     },
 
     "common_patterns": {
-      "filter_and_map": {
-        "c_sharp": "list.Where(x => x != null).Select(x => x.value)",
-        "rust": "vec.iter().filter(|x| x.is_some()).map(|x| x.unwrap()).collect()",
-        "better_rust": "vec.iter().filter_map(|x| x.as_ref()).collect()"
+      "early_return": {
+        "description": "Check for errors early, return immediately",
+        "example": [
+          "if tokens.is_empty() {",
+          "  error_mgr.add_parse_error(...);",
+          "  return Err(DixError::ParseError(\"Empty token stream\".to_string()));",
+          "}",
+          "",
+          "if error_mgr.should_terminate_parsing() {",
+          "  return Err(DixError::ParseError(\"Too many errors\".to_string()));",
+          "}"
+        ]
       },
-      "find_first": {
-        "c_sharp": "list.FirstOrDefault(x => x > 5)",
-        "rust": "vec.iter().find(|x| **x > 5)"
-      },
-      "take_and_skip": {
-        "c_sharp": "list.Skip(10).Take(5)",
-        "rust": "vec.iter().skip(10).take(5).collect()"
-      },
-      "flatten": {
-        "c_sharp": "list.SelectMany(x => x.items)",
-        "rust": "vec.iter().flat_map(|x| &x.items).collect()"
-      }
-    }
-  },
-
-  "🏗️_PORTING_STRATEGY": {
-    "approach": "Use native Rust collections + itertools instead of custom wrappers",
-    "naming_decisions": {
-      "rust_style_snake_case": {
-        "what": "All Rust code uses standard Rust naming",
-        "applies_to": [
-          "All modules (error_manager, lexer, parser)",
-          "All functions (fn parse_token(), fn add_error())",
-          "All local variables (let token_type, let error_count)",
-          "All file names (error_manager.rs, lexical_error.rs)"
-        ],
-        "reason": "Standard Rust conventions, better tooling support"
-      },
-      "collections_usage": {
-        "vec_t": "For dynamic lists - replaces C# List<T>",
-        "hashmap_k_v": "For dictionaries - replaces C# Dictionary<K, V>",
-        "hashset_t": "For unique sets - replaces C# HashSet<T>",
-        "itertools": "For LINQ operations - replaces C# LINQ methods"
-      }
-    },
-
-    "phases": [
-      {
-        "phase": 1,
-        "name": "Utilities",
-        "status": "✅ COMPLETE",
-        "files": [
-          "src/Utilities/keyword_definitions.rs",
-          "src/Utilities/mid_logger.rs",
-          "src/Utilities/mid_helper_functions.rs",
-          "src/Utilities/utilities.rs"
-        ],
-        "note": "Moved Token to Tokenizer module"
-      },
-      {
-        "phase": 2,
-        "name": "ErrorManager",
-        "status": "✅ COMPLETE",
-        "files": [
-          "src/ErrorManager/error_manager.rs",
-          "src/ErrorManager/operational_settings.rs",
-          "src/ErrorManager/ErrorTypes/*.rs (all 10 error types)"
-        ],
-        "note": "Uses Rust naming (snake_case), Result<T,E>, and native collections"
-      },
-      {
-        "phase": 3,
-        "name": "Compiler - Tokenizer (Lexer)",
-        "status": "⏳ IN PROGRESS",
-        "files": [
-          "src/Compiler/Core/Tokenizer/lexer.rs",
-          "src/Compiler/Core/Tokenizer/token.rs"
-        ],
-        "strategy": "Use Vec<Token> directly (hot path), borrow heavily",
-        "c_sharp_ref": "DixScript/Compiler/Core/Lexer.cs"
-      },
-      {
-        "phase": 4,
-        "name": "Compiler - Parser",
-        "status": "⏳ PENDING",
-        "files": [
-          "src/Compiler/Core/general_parser.rs",
-          "src/Compiler/Core/SectionParsers/*.rs"
-        ],
-        "strategy": "AST with owned nodes, borrow during traversal"
-      },
-      {
-        "phase": 5,
-        "name": "Compiler - Semantic Analysis",
-        "status": "⏳ PENDING",
-        "files": [
-          "src/Compiler/Core/general_semantics_analyzer.rs",
-          "src/Compiler/Core/SectionAnalyzers/*.rs"
+      "collect_errors_then_fail": {
+        "description": "Collect multiple errors, then return if any",
+        "example": [
+          "for item in items {",
+          "  if let Err(e) = validate_item(item) {",
+          "    error_mgr.add_semantic_error(...);",
+          "    // Continue to find ALL errors",
+          "  }",
+          "}",
+          "",
+          "if error_mgr.has_errors() {",
+          "  return Err(DixError::SemanticError(\"Validation failed\".to_string()));",
+          "}"
         ]
       }
-    ],
-
-    "step_by_step_porting_workflow": {
-      "1_understand_c_sharp": "Read C# code, understand algorithm",
-      "2_identify_types": "What types does it use? (List → Vec, Dictionary → HashMap)",
-      "3_check_hot_path": "Is this called in a loop? (Yes = native types, borrow heavily)",
-      "4_create_skeleton": "Create struct with pub fields",
-      "5_port_methods": "One method at a time, test each",
-      "6_handle_ownership": {
-        "reading": "Use &T (borrow)",
-        "modifying": "Use &mut T (mutable borrow)",
-        "consuming": "Take ownership (move)",
-        "last_resort": "Clone if truly needed"
-      },
-      "7_replace_linq": {
-        "select": "Use .map()",
-        "where": "Use .filter()",
-        "orderby": "Use .sorted() from itertools",
-        "groupby": "Use .group_by() from itertools"
-      },
-      "8_test_incrementally": "cargo test after each method",
-      "9_fix_errors": "Read error messages carefully, they're helpful",
-      "10_profile_if_slow": "cargo flamegraph to find real bottlenecks",
-      "11_iterate": "Refine and optimize based on benchmarks"
     }
   },
 
-  "📊_PERFORMANCE_GUIDELINES": {
-    "hot_paths": {
-      "definition": "Code executed thousands+ times per file (lexer loops, parser lookahead)",
-      "rules": [
-        "❌ NEVER clone in hot paths",
-        "✅ Use slices (&[T]) instead of Vec<T>",
-        "✅ Borrow, don't own",
-        "✅ Reuse allocations (Vec::with_capacity)",
-        "✅ Keep iterators lazy (don't .collect() early)",
-        "✅ Profile BEFORE optimizing (cargo flamegraph)"
-      ]
-    },
-    "cold_paths": {
-      "definition": "Code executed once or rarely (setup, error reporting)",
-      "rules": [
-        "✅ Clone is fine here",
-        "✅ Readability > micro-optimization",
-        "✅ Use String instead of &str for simplicity",
-        "✅ Don't worry about allocation overhead"
-      ]
-    },
-    "specific_optimizations": {
-      "avoid": {
-        "collect_then_iterate": "items.iter().collect::<Vec<_>>().iter() // ❌ Wasteful",
-        "repeated_cloning": "for item in &items { let owned = item.clone(); } // ❌ Bad",
-        "string_concat_loop": "for s in &strings { result = result + s; } // ❌ O(n²)"
+  "🎯_HOT_PATH_OPTIMIZATION": {
+    "definition": "Code executed 1000+ times per file (lexer loops, parser token consumption)",
+
+    "critical_rules": [
+      "❌ NEVER clone in hot paths",
+      "❌ NEVER allocate (Vec::new()) in hot paths",
+      "✅ Pre-allocate with capacity",
+      "✅ Borrow, don't own",
+      "✅ Use slices (&[T])",
+      "✅ Keep iterators lazy (don't .collect() early)"
+    ],
+
+    "examples": {
+      "lexer_main_loop": {
+        "hot_path": "Yes - runs once per character",
+        "wrong": [
+          "❌ for ch in source.chars() {",
+          "  let token = Token { value: ch.to_string().clone(), ... };",
+          "  tokens.push(token.clone());",
+          "}"
+        ],
+        "right": [
+          "✅ let mut tokens = Vec::with_capacity(estimate_token_count(source.len()));",
+          "for ch in source.chars() {",
+          "  tokens.push(Token { value: ch, ... });  // No clone",
+          "}"
+        ]
       },
-      "prefer": {
-        "lazy_iteration": "items.iter().filter(...).map(...) // ✅ No allocation",
-        "borrowing": "for item in &items { process(item); } // ✅ Zero copy",
-        "string_join": "strings.join(\"\") // ✅ Single allocation"
+      "parser_token_consumption": {
+        "hot_path": "Yes - runs once per token",
+        "wrong": [
+          "❌ fn current_token(&self) -> Token {",
+          "  self.tokens[self.index].clone()  // Clone on EVERY call",
+          "}"
+        ],
+        "right": [
+          "✅ fn current_token(&self) -> &Token {",
+          "  &self.tokens[self.index]  // Just borrow",
+          "}"
+        ]
+      },
+      "error_reporting": {
+        "hot_path": "No - only called on errors (rare)",
+        "ok_to_clone": "Yes - readability > micro-optimization",
+        "example": [
+          "✅ error_mgr.add_parse_error(",
+          "  ...,",
+          "  Some(source_line.clone())  // OK - error path is cold",
+          ");"
+        ]
       }
     },
-    "cow_pattern": {
-      "what": "Clone-on-Write - borrows when possible, clones only when modified",
-      "type": "Cow<'a, T> (std::borrow::Cow)",
-      "use_when": "Data is USUALLY not modified, but SOMETIMES needs to be",
-      "example": "use std::borrow::Cow;\nfn process(s: Cow<str>) -> Cow<str> {\n  if s.contains(\"bad\") {\n    Cow::Owned(s.replace(\"bad\", \"good\"))\n  } else {\n    s // No clone!\n  }\n}"
+
+    "pre_allocation": {
+      "rule": "Always pre-allocate collections in hot paths",
+      "helper_functions": [
+        "estimate_properties_count(token_count) -> usize",
+        "estimate_array_items_count(token_count) -> usize",
+        "estimate_statements_count(token_count) -> usize",
+        "estimate_enum_fields_count(token_count) -> usize"
+      ],
+      "usage": [
+        "// Reduces allocations by 15-20%",
+        "let capacity = estimate_properties_count(tokens.len());",
+        "let mut properties = Vec::with_capacity(capacity);"
+      ]
     }
   },
 
-  "🔧_COMMON_ERRORS_AND_FIXES": {
-    "value_moved_error": {
-      "error": "value used after move",
-      "cause": "Tried to use value after moving it",
-      "example_wrong": "let s1 = String::from(\"hello\");\nlet s2 = s1;\nprintln!(\"{}\", s1); // ❌ s1 was moved",
-      "fix_1_clone": "let s2 = s1.clone(); // Both valid",
-      "fix_2_borrow": "let s2 = &s1; // Borrow instead",
-      "fix_3_use_after": "println!(\"{}\", s1);\nlet s2 = s1; // Use before move"
+  "📚_COMMON_ANTI_PATTERNS": {
+    "1_unnecessary_cloning": {
+      "pattern": "Cloning when borrowing would work",
+      "wrong": [
+        "fn process_token(token: Token) {",
+        "  println!(\"{}\", token.value);",
+        "}"
+      ],
+      "right": [
+        "fn process_token(token: &Token) {",
+        "  println!(\"{}\", token.value);",
+        "}"
+      ]
     },
-    "cannot_borrow_as_mutable": {
-      "error": "cannot borrow as mutable because it is also borrowed as immutable",
-      "cause": "Trying to mutate while immutable borrows exist",
-      "example_wrong": "let r1 = &data;\nlet r2 = &mut data; // ❌ Can't have both",
-      "fix": "// Ensure immutable borrow ends before mutable\n{\n  let r1 = &data;\n  println!(\"{}\", r1);\n} // r1 dropped\nlet r2 = &mut data; // ✅ OK now"
+    "2_returning_owned_string": {
+      "pattern": "Returning String when &str would work",
+      "wrong": [
+        "fn get_keyword() -> String {",
+        "  \"if\".to_string()  // Unnecessary allocation",
+        "}"
+      ],
+      "right": [
+        "fn get_keyword() -> &'static str {",
+        "  \"if\"  // No allocation",
+        "}"
+      ]
     },
-    "cannot_move_out_of_borrowed": {
-      "error": "cannot move out of `*vec` which is behind a shared reference",
-      "cause": "Trying to take ownership from a borrow",
-      "example_wrong": "fn process(vec: &Vec<String>) {\n  let item = vec[0]; // ❌ Can't move\n}",
-      "fix": "fn process(vec: &Vec<String>) {\n  if let Some(item) = vec.get(0) {\n    let owned = item.clone(); // Clone if need ownership\n    // Or just use &item\n  }\n}"
+    "3_collect_then_iterate": {
+      "pattern": "Collecting iterator just to iterate again",
+      "wrong": [
+        "tokens.iter()",
+        "  .filter(|t| t.is_keyword())",
+        "  .collect::<Vec<_>>()",
+        "  .iter()  // Wasteful - already had iterator",
+        "  .map(|t| t.value)"
+      ],
+      "right": [
+        "tokens.iter()",
+        "  .filter(|t| t.is_keyword())",
+        "  .map(|t| t.value)  // Keep it lazy"
+      ]
+    },
+    "4_string_concat_in_loop": {
+      "pattern": "String concatenation in loop (O(n²))",
+      "wrong": [
+        "let mut result = String::new();",
+        "for s in &strings {",
+        "  result = result + s;  // O(n²) - reallocates each time",
+        "}"
+      ],
+      "right": [
+        "let result = strings.join(\"\");  // O(n) - single allocation"
+      ]
+    },
+    "5_unwrap_in_library_code": {
+      "pattern": "Using unwrap() instead of proper error handling",
+      "wrong": [
+        "let token = tokens.get(index).unwrap();  // Panics on None"
+      ],
+      "right": [
+        "let token = tokens.get(index)",
+        "  .ok_or(DixError::ParseError(\"Unexpected EOF\".to_string()))?;"
+      ]
     }
   },
 
-  "🎯_NEXT_STEPS": {
-    "completed": [
-      "✅ Utilities (Token, Logger, Keywords)",
-      "✅ ErrorManager (all 10 error types)",
-      "✅ Decided to use native Rust collections instead of DixCore",
-      "✅ Added itertools for LINQ-like operations",
-      "✅ Consolidated porting strategy"
-    ],
-    "immediate_next": [
-      "1. Remove DixCore module entirely (no longer needed)",
-      "2. Update any existing code using DixCore to use native collections",
-      "3. Continue porting Lexer using native Vec<Token>",
-      "4. Port Parser with AST using owned nodes + native collections",
-      "5. Use itertools for any LINQ-style operations needed"
-    ],
-    "files_to_reference": {
-      "this_strategy": "others/Rust_Port.json",
-      "c_sharp_lexer": "DixScript/Compiler/Core/Lexer.cs",
-      "c_sharp_parser": "DixScript/Compiler/Core/GeneralParser.cs",
-      "rust_error_manager": "src/ErrorManager/error_manager.rs",
-      "rust_tokenizer": "src/Compiler/Core/Tokenizer/lexer.rs"
+  "🔄_ITERTOOLS_REPLACEMENTS": {
+    "note": "Use itertools crate for LINQ-like operations",
+    "dependency": "itertools = \"0.13\"",
+    "import": "use itertools::Itertools;",
+
+    "common_operations": {
+      "sorted": {
+        "c_sharp": "list.OrderBy(x => x.name)",
+        "rust": "vec.iter().sorted_by_key(|x| &x.name).collect()"
+      },
+      "unique": {
+        "c_sharp": "list.Distinct()",
+        "rust": "vec.iter().unique().collect()"
+      },
+      "group_by": {
+        "c_sharp": "list.GroupBy(x => x.category)",
+        "rust": "vec.iter().group_by(|x| &x.category)"
+      },
+      "cartesian_product": {
+        "c_sharp": "from a in list1 from b in list2 select (a, b)",
+        "rust": "vec1.iter().cartesian_product(vec2.iter())"
+      },
+      "join": {
+        "c_sharp": "list.Join(\", \")",
+        "rust": "vec.iter().join(\", \")"
+      }
     }
   },
 
-  "📖_RESOURCES": {
-    "official_docs": [
-      "The Rust Book: https://doc.rust-lang.org/book/",
-      "Rust by Example: https://doc.rust-lang.org/rust-by-example/",
-      "Rust docs.rs: https://docs.rs/",
-      "Ownership explained: https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html",
-      "Collections: https://doc.rust-lang.org/book/ch08-00-common-collections.html"
+  "📖_QUICK_REFERENCE": {
+    "compilation_flow": [
+      "1. Get ErrorManager: let error_mgr = ErrorManager::get_shared_instance();",
+      "2. Create/Update settings: error_mgr.update_settings(settings);",
+      "3. Tokenize: tokens = lexer.tokenize(&source)?;",
+      "4. Check errors: if error_mgr.should_terminate_parsing() { return Err(...); }",
+      "5. Parse: ast = parser.parse(tokens)?;",
+      "6. Check errors: if error_mgr.has_errors() { return Err(...); }",
+      "7. Analyze: analyzer.analyze(&ast)?;",
+      "8. Report: if error_mgr.has_errors() { print error_mgr.generate_error_report(); }"
     ],
-    "crates": [
-      "itertools: https://docs.rs/itertools/",
-      "HashMap: https://doc.rust-lang.org/std/collections/struct.HashMap.html",
-      "Vec: https://doc.rust-lang.org/std/vec/struct.Vec.html",
-      "Iterator: https://doc.rust-lang.org/std/iter/trait.Iterator.html"
+
+    "error_handling_checklist": [
+      "✅ Add error to ErrorManager",
+      "✅ Return Err with appropriate DixError variant",
+      "✅ Use '?' for propagation",
+      "✅ Never unwrap() in library code",
+      "✅ Check should_terminate_parsing() in loops"
     ],
-    "performance": [
-      "Rust Performance Book: https://nnethercote.github.io/perf-book/",
-      "Criterion benchmarking: https://bheisler.github.io/criterion.rs/book/",
-      "Flamegraph: https://github.com/flamegraph-rs/flamegraph"
+
+    "logging_checklist": [
+      "✅ Check log level BEFORE formatting",
+      "✅ Use closures for expensive formatting",
+      "✅ Use scope guards for structured logging",
+      "✅ Use appropriate log level (Debug/Info/Warning/Error)"
     ],
-    "best_practices": [
-      "Rust Design Patterns: https://rust-unofficial.github.io/patterns/",
-      "API Guidelines: https://rust-lang.github.io/api-guidelines/",
-      "Clippy lints: https://rust-lang.github.io/rust-clippy/"
+
+    "optimization_checklist": [
+      "✅ Identify hot paths (called 1000+ times)",
+      "✅ Pre-allocate collections in hot paths",
+      "✅ Borrow, don't clone, in hot paths",
+      "✅ Use slices (&[T]) for reading",
+      "✅ Keep iterators lazy",
+      "✅ Profile with cargo flamegraph BEFORE micro-optimizing"
     ]
   }
-}
+          }

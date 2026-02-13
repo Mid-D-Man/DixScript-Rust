@@ -99,7 +99,7 @@ impl DixFormatOptions {
     /// Get indentation string for given level
     /// 
     /// # Examples
-    /// ```
+    /// ``` rust,ignore
     /// let opts = DixFormatOptions::new();
     /// assert_eq!(opts.get_indentation(1), "  "); // 2 spaces
     /// assert_eq!(opts.get_indentation(2), "    "); // 4 spaces

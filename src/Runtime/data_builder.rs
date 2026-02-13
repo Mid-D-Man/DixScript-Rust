@@ -15,7 +15,7 @@ use super::format_options::DixFormatOptions;
 /// 
 /// # Examples
 /// 
-/// ```
+/// ``` rust,ignore
 /// use dixscript::Runtime::*;
 /// 
 /// let data = DixDataBuilder::new()

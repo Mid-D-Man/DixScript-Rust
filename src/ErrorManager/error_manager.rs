@@ -343,7 +343,29 @@ impl ErrorManager {
             suggestion,
         );
     }
-
+    pub fn add_runtime_error_with_severity(
+        &self,
+        error_type: RuntimeErrorType,
+        message: String,
+        function_name: Option<String>,
+        line: i32,
+        column: i32,
+        stack_trace: Vec<String>,
+        suggestion: Option<String>,
+        severity: ErrorSeverity,  // NEW: explicit severity parameter
+    ) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.add_runtime_error_with_severity(
+            error_type,
+            message,
+            function_name,
+            line,
+            column,
+            stack_trace,
+            suggestion,
+            severity,
+        );
+    }
     /// Get all runtime errors
     pub fn get_runtime_errors(&self) -> Vec<RuntimeError> {
         let inner = self.inner.lock().unwrap();
@@ -742,6 +764,33 @@ impl ErrorManagerInner {
         self.has_errors = true;
     }
 
+    fn add_runtime_error_with_severity(
+        &mut self,
+        error_type: RuntimeErrorType,
+        message: String,
+        function_name: Option<String>,
+        line: i32,
+        column: i32,
+        stack_trace: Vec<String>,
+        suggestion: Option<String>,
+        severity: ErrorSeverity,  // NEW: use provided severity instead of determine_severity
+    ) {
+        let error = RuntimeError::new(
+            error_type,
+            message,
+            function_name,
+            line,
+            column,
+            stack_trace,
+            suggestion,
+            severity,  // Use provided severity
+        );
+
+        let mut logger = self.logger.lock().unwrap();
+        logger.Error(&format!("[Runtime] {}", error));
+        self.runtime_errors.push(error);
+        self.has_errors = true;
+    }
     fn add_config_error(
         &mut self,
         error_type: ConfigErrorType,

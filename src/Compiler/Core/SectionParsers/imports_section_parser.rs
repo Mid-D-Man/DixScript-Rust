@@ -130,7 +130,7 @@ impl<'a> ImportsSectionParser<'a> {
             self.track_progress();
 
             if self.is_stuck() {
-                self.error_manager.log_Warning(&format!("Parser stuck at position {}", self.position));
+                self.error_manager.log_warning(&format!("Parser stuck at position {}", self.position));
                 if !self.recover_from_stuck() {
                     break;
                 }
@@ -217,7 +217,7 @@ impl<'a> ImportsSectionParser<'a> {
         let result = ImportsSection::new(imports, section_start_pos);
 
         if self.has_encountered_errors {
-            self.error_manager.log_Warning(&format!(
+            self.error_manager.log_warning(&format!(
                 "IMPORTS section parsed with errors ({} imports recovered)",
                 result.imports.len()
             ));
@@ -447,7 +447,7 @@ impl<'a> ImportsSectionParser<'a> {
                     && !path.contains("localhost")
                     && !path.contains("127.0.0.1")
                 {
-                    self.error_manager.log_Warning(&format!(
+                    self.error_manager.log_warning(&format!(
                         "⚠️ SECURITY WARNING: Using insecure HTTP for cloud import. \
                          Use HTTPS for production: {}",
                         path
@@ -525,7 +525,7 @@ impl<'a> ImportsSectionParser<'a> {
 
         // Warn if absolute path (should be relative)
         if path_without_query.starts_with('/') || (path_without_query.len() > 1 && path_without_query.chars().nth(1) == Some(':')) {
-            self.error_manager.log_Warning(&format!(
+            self.error_manager.log_warning(&format!(
                 "Import path '{}' appears to be absolute - relative paths are recommended",
                 path_without_query
             ));
@@ -582,7 +582,7 @@ impl<'a> ImportsSectionParser<'a> {
             self.error_manager.log_error("IMPORTS section parsing halted due to errors");
             None
         } else {
-            self.error_manager.log_Warning("IMPORTS section parsing completed with errors - returning empty section");
+            self.error_manager.log_warning("IMPORTS section parsing completed with errors - returning empty section");
             Some(ImportsSection::new(Vec::new(), start_pos))
         }
     }

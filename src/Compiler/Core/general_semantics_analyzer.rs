@@ -711,7 +711,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
     #[inline]
     fn log_warning(&self, message: &str) {
-        self.error_manager.log_Warning(message);
+        self.error_manager.log_warning(message);
     }
 
     #[inline]
@@ -719,7 +719,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
     where
         F: FnOnce() -> String,
     {
-        self.error_manager.log_Warning(&f());
+        self.error_manager.log_warning(&f());
     }
 
     #[inline]

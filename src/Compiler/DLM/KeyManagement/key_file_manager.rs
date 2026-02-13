@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use chrono::Utc;
 use regex::Regex;
-
+use crate::ErrorSeverity;
 use super::key_file_data::*;
 
 /// Manages .mdix.key file operations
@@ -266,6 +266,7 @@ impl KeyFileManager {
                 Some("KeyFileManager".to_string()),
                 Some(key_file_path.to_str().unwrap().to_string()),
                 None,
+                ErrorSeverity::Fatal,
             );
             return Err(format!("Key file not found: {}", key_file_path.display()));
         }

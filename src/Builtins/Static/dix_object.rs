@@ -52,7 +52,7 @@ impl DixObject {
             DixType::Void,
             |args| {
                 let message = convert_to_log_message(&args[0]);
-                ErrorManager::get_shared_instance().log_Warning(&message);
+                ErrorManager::get_shared_instance().log_warning(&message);
                 Ok(DixValue::null())
             },
             "Logs a warning message".to_string(),

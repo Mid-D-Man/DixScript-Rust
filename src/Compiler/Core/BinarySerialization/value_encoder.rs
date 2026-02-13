@@ -61,7 +61,7 @@ impl<'a> ValueEncoder<'a> {
 
             // EnumValue should be resolved to integers before serialization
             Value::EnumValue { enum_name, value, position } => {
-                self.error_manager.log_Warning(&format!(
+                self.error_manager.log_warning(&format!(
                     "EnumValue {}.{} encountered during serialization - should be resolved",
                     enum_name, value
                 ));

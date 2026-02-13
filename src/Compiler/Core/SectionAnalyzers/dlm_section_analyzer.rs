@@ -494,7 +494,7 @@ impl<'a> DlmSectionAnalyzer<'a> {
 
     #[inline]
     fn log_warning(&self, message: &str) {
-        self.error_manager.log_Warning(message);
+        self.error_manager.log_warning(message);
     }
 
     // ==================== ERROR/WARNING HELPERS ====================

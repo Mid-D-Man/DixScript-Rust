@@ -2905,7 +2905,7 @@ impl<'a> DataSectionParser<'a> {
             self.error_manager.log_error("DATA section parsing halted due to errors");
             None
         } else {
-            self.error_manager.log_Warning("DATA section parsing completed with errors - returning empty section");
+            self.error_manager.log_warning("DATA section parsing completed with errors - returning empty section");
             Some(DataSection::new(Vec::new(), start_pos))
         }
     }

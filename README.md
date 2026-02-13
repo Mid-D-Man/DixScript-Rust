@@ -214,7 +214,7 @@ Commas are optional **between entries** (but required in arrays/objects).
   
   x = 1
   y = 2
-  z = 3                        // Vertical (no commas)
+  z = 3                        // Vertical (no commas) choose your style
   
   server: host = "localhost", port = 8080    // Inline table (commas)
 )

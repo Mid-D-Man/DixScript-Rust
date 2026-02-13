@@ -1,10 +1,36 @@
 // src/ErrorManager/error_manager.rs
-use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
+use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::ErrorManager::ErrorTypes::*;
 use crate::ErrorManager::Helpers::*;
 use crate::Utilities::MID_Logger;
 use std::sync::{Arc, Mutex, OnceLock};
 
+/// Debug configuration cached at module construction
+/// Used by DLM modules to avoid repeated debug mode checks
+#[derive(Debug, Clone, Copy)]
+pub struct DebugConfig {
+    pub is_enabled: bool,
+    pub is_verbose: bool,
+}
+
+impl DebugConfig {
+    pub fn from_debug_mode(mode: DebugMode) -> Self {
+        match mode {
+            DebugMode::Off => DebugConfig {
+                is_enabled: false,
+                is_verbose: false,
+            },
+            DebugMode::Regular => DebugConfig {
+                is_enabled: true,
+                is_verbose: false,
+            },
+            DebugMode::Verbose => DebugConfig {
+                is_enabled: true,
+                is_verbose: true,
+            },
+        }
+    }
+}
 
 /// Thread-safe singleton ErrorManager
 /// Uses OnceLock for lazy initialization
@@ -62,6 +88,12 @@ impl ErrorManager {
     pub fn update_settings(&self, settings: OperationalSettings) {
         let mut inner = self.inner.lock().unwrap();
         inner.update_settings(settings);
+    }
+
+    /// Get current debug mode from operational settings
+    pub fn get_debug_mode(&self) -> DebugMode {
+        let inner = self.inner.lock().unwrap();
+        inner.operational_settings.debug_mode
     }
 
     // ==================== LEXICAL ERRORS ====================
@@ -246,9 +278,10 @@ impl ErrorManager {
         library_path: Option<String>,
         function_name: Option<String>,
         suggestion: Option<String>,
+        severity: ErrorSeverity,
     ) {
         let mut inner = self.inner.lock().unwrap();
-        inner.add_dlm_error(error_type, message, library_path, function_name, suggestion);
+        inner.add_dlm_error(error_type, message, library_path, function_name, suggestion, severity);
     }
 
     /// Get all DLM errors
@@ -638,8 +671,8 @@ impl ErrorManagerInner {
         library_path: Option<String>,
         function_name: Option<String>,
         suggestion: Option<String>,
+        severity: ErrorSeverity,
     ) {
-        let severity = self.determine_severity(ErrorSource::DLM);
         let error = DlmError::new(
             error_type,
             message,
@@ -873,21 +906,21 @@ impl ErrorManager {
 
     /// Log info message
     pub fn log_info(&self, message: &str) {
-        let mut inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap();
         let mut logger = inner.logger.lock().unwrap();
         logger.Info(message);
     }
 
-    /// Log Warning message
-    pub fn log_Warning(&self, message: &str) {
-        let mut inner = self.inner.lock().unwrap();
+    /// Log warning message
+    pub fn log_warning(&self, message: &str) {
+        let inner = self.inner.lock().unwrap();
         let mut logger = inner.logger.lock().unwrap();
         logger.Warning(message);
     }
 
     /// Log error message
     pub fn log_error(&self, message: &str) {
-        let mut inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap();
         let mut logger = inner.logger.lock().unwrap();
         logger.Error(message);
     }

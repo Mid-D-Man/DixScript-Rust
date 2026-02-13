@@ -98,7 +98,6 @@ impl ICompressor for GzipCompressor {
                 Some(self.module_name().to_string()),
                 None,
                 Some("Provide non-empty data to compress".to_string()),
-                ErrorSeverity::Error,
             );
             return Err("Cannot compress null or empty data".to_string());
         }
@@ -117,7 +116,7 @@ impl ICompressor for GzipCompressor {
                 Some(self.module_name().to_string()),
                 None,
                 Some("Check input data validity and available memory".to_string()),
-                ErrorSeverity::Error,
+
             );
             error_msg
         })?;
@@ -130,7 +129,7 @@ impl ICompressor for GzipCompressor {
                 Some(self.module_name().to_string()),
                 None,
                 None,
-                ErrorSeverity::Error,
+
             );
             error_msg
         })?;
@@ -157,7 +156,7 @@ impl ICompressor for GzipCompressor {
                 Some(self.module_name().to_string()),
                 None,
                 Some("Provide non-empty data to decompress".to_string()),
-                ErrorSeverity::Error,
+
             );
             return Err("Cannot decompress null or empty data".to_string());
         }
@@ -176,7 +175,7 @@ impl ICompressor for GzipCompressor {
                 Some(self.module_name().to_string()),
                 None,
                 Some("Verify data integrity and format".to_string()),
-                ErrorSeverity::Error,
+
             );
             error_msg
         })?;
@@ -189,7 +188,7 @@ impl ICompressor for GzipCompressor {
                 Some(self.module_name().to_string()),
                 None,
                 None,
-                ErrorSeverity::Error,
+
             );
             error_msg
         })?;

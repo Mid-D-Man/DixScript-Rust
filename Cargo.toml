@@ -20,7 +20,7 @@ rand = "0.8"
 # UUID for GUID operations - ENABLE v4 feature
 uuid = { version = "1.0", features = ["v4", "serde"] }
 # Date and time handling for error timestamps
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 bitflags = "2.4"        # NEW: For section flags
 
 # JSON serialization for error reporting

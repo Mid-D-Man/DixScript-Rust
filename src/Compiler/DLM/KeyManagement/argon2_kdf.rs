@@ -119,7 +119,7 @@ impl Argon2KDF {
                 Some("Argon2KDF".to_string()),
                 None,
                 None,
-                crate::ErrorManager::ErrorSeverity::Error,
+
             );
             return Err("Password cannot be empty".to_string());
         }
@@ -131,7 +131,7 @@ impl Argon2KDF {
                 Some("Argon2KDF".to_string()),
                 None,
                 None,
-                crate::ErrorManager::ErrorSeverity::Error,
+
             );
             return Err("Key length must be 16 or 32 bytes".to_string());
         }
@@ -162,7 +162,7 @@ impl Argon2KDF {
                     Some("Argon2KDF".to_string()),
                     None,
                     None,
-                    crate::ErrorManager::ErrorSeverity::Error,
+
                 );
                 return Err(format!("Invalid Argon2 parameters: {}", e));
             }
@@ -180,7 +180,7 @@ impl Argon2KDF {
                 Some("Argon2KDF".to_string()),
                 None,
                 Some("Check password and system resources".to_string()),
-                crate::ErrorManager::ErrorSeverity::Error,
+
             );
             return Err(format!("Key derivation failed: {}", e));
         }

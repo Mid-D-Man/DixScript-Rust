@@ -279,23 +279,23 @@ impl KeyFileDataBuilder {
             data: KeyFileData::new(),
         }
     }
-    
+
     pub fn with_source_file(mut self, source_file: String) -> Self {
         self.data.config.source_file = Some(source_file.clone());
         self.data.file_info.source_file = Some(source_file);
         self
     }
-    
+
     pub fn with_encryption_mode(mut self, mode: String) -> Self {
         self.data.config.key_type = mode;
         self
     }
-    
+
     pub fn with_module(mut self, module_name: String) -> Self {
         self.data.pipeline.modules_used.push(module_name);
         self
     }
-    
+
     pub fn with_execution_step(
         mut self,
         step: usize,
@@ -309,34 +309,34 @@ impl KeyFileDataBuilder {
         );
         self
     }
-    
+
     pub fn with_encryption(mut self, encryption: EncryptionKeyData) -> Self {
         self.data.key_data.encryption = Some(encryption);
         self
     }
-    
+
     pub fn with_compression(mut self, compression: CompressionKeyData) -> Self {
         self.data.key_data.compression = Some(compression);
         self
     }
-    
+
     pub fn with_validation(mut self, validation: ValidationData) -> Self {
         self.data.key_data.validation = Some(validation);
         self
     }
-    
+
     pub fn with_file_sizes(mut self, original: usize, compressed: usize, encrypted: usize) -> Self {
         self.data.file_info.original_size = original;
         self.data.file_info.compressed_size = compressed;
         self.data.file_info.encrypted_size = encrypted;
-        
+
         if original > 0 && encrypted > 0 {
             self.data.file_info.compression_ratio = 1.0 - (encrypted as f64 / original as f64);
         }
-        
+
         self
     }
-    
+
     pub fn build(mut self) -> KeyFileData {
         // Calculate reversal order (reverse of execution order)
         self.data.pipeline.reversal_order = self.data.pipeline.modules_used
@@ -344,7 +344,7 @@ impl KeyFileDataBuilder {
             .rev()
             .cloned()
             .collect();
-        
+
         self.data
     }
 }
@@ -361,71 +361,71 @@ impl KeyFileData {
     pub fn is_password_mode(&self) -> bool {
         self.config.key_type.eq_ignore_ascii_case("password")
     }
-    
+
     /// Check if using keyfile mode
     pub fn is_keyfile_mode(&self) -> bool {
         self.config.key_type.eq_ignore_ascii_case("keyfile")
     }
-    
+
     /// Check if encryption was used
     pub fn has_encryption(&self) -> bool {
         self.key_data.encryption.is_some()
     }
-    
+
     /// Check if compression was used
     pub fn has_compression(&self) -> bool {
         self.key_data.compression.is_some()
     }
-    
+
     /// Get human-readable summary
     pub fn get_summary(&self) -> String {
         let modules = self.pipeline.modules_used.join(" → ");
         let mode = if self.is_password_mode() { "Password Mode" } else { "Keyfile Mode" };
         format!("{}: {}", mode, modules)
     }
-    
+
     /// Validate key file data integrity
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
-        
+
         // Check version
         if self.config.version.is_empty() {
             errors.push("Missing version in config".to_string());
         }
-        
+
         // Check modules
         if self.pipeline.modules_used.is_empty() {
             errors.push("No modules specified in pipeline".to_string());
         }
-        
+
         // Check encryption data
         if let Some(ref enc) = self.key_data.encryption {
             if enc.algorithm.is_empty() {
                 errors.push("Missing encryption algorithm".to_string());
             }
-            
+
             if enc.iv.is_empty() {
                 errors.push("Missing IV/nonce".to_string());
             }
-            
+
             // Keyfile mode requires key data
             if self.is_keyfile_mode() && enc.key_data.is_none() {
                 errors.push("Keyfile mode requires key_data".to_string());
             }
-            
+
             // Password mode requires KDF parameters
             if self.is_password_mode() && enc.kdf.is_none() {
                 errors.push("Password mode requires KDF parameters".to_string());
             }
         }
-        
+
         // Check compression data
         if let Some(ref comp) = self.key_data.compression {
             if comp.algorithm.is_empty() {
                 errors.push("Missing compression algorithm".to_string());
             }
         }
-        
+
         if errors.is_empty() {
             Ok(())
         } else {

@@ -266,7 +266,6 @@ impl KeyFileManager {
                 Some("KeyFileManager".to_string()),
                 Some(key_file_path.to_str().unwrap().to_string()),
                 None,
-                crate::ErrorManager::ErrorSeverity::Error,
             );
             return Err(format!("Key file not found: {}", key_file_path.display()));
         }

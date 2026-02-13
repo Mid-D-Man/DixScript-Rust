@@ -13,6 +13,8 @@ pub enum DlmErrorType {
     SecurityViolation,
     VersionMismatch,
     DependencyMissing,
+    KeyGenerationFailed,
+    KeyFileMissing,
 }
 
 /// DLM error with library context

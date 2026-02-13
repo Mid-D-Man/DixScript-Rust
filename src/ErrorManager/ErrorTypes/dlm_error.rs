@@ -15,6 +15,7 @@ pub enum DlmErrorType {
     DependencyMissing,
     KeyGenerationFailed,
     KeyFileMissing,
+    ModuleExecutionFailed,
 }
 
 /// DLM error with library context

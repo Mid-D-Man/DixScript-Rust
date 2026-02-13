@@ -13,14 +13,14 @@ use super::{
     binary_serialization_error::BinarySerializationError,
 };
 
-// TODO: Import section writers when implemented
-// use super::section_writers::{
-//     ConfigSectionWriter,
-//     EnumsSectionWriter,
-//     DataSectionWriter,
-//     SecuritySectionWriter,
-//     ImportsSectionWriter,
-// };
+use super::{
+    ConfigSectionWriter,
+    EnumsSectionWriter,
+    DataSectionWriter,
+    SecuritySectionWriter,
+    ImportsSectionWriter,
+    ValueEncoder,
+};
 
 /// Main binary packer - orchestrates serialization of DixScript AST
 pub struct BinaryPacker {
@@ -170,23 +170,16 @@ impl BinaryPacker {
         ast: &DixScript,
         buffer: &mut Cursor<Vec<u8>>,
     ) -> Result<SectionOffset, BinarySerializationError> {
-        let start_offset = buffer.position() as i32;
-
-        // TODO: Use ConfigSectionWriter when implemented
-        // let writer = ConfigSectionWriter::new(&mut self.context);
-        // writer.write(buffer, &ast.config)?;
-
-        // PLACEHOLDER: Write minimal config section
-        self.context.log_verbose("Writing Config section (placeholder)");
-        buffer.write_all(&[0u8; 4])
-            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "ConfigSection"))?;
-
-        let end_offset = buffer.position() as i32;
-        let length = end_offset - start_offset;
-
-        self.context.statistics.record_section_size(SectionId::Config, length as usize);
-
-        Ok(SectionOffset::new(SectionId::Config, start_offset, length))
+        if let Some(ref config_section) = ast.config {
+            let mut value_encoder = ValueEncoder::new(&mut self.context);
+            let mut writer = ConfigSectionWriter::new(&mut self.context, &mut value_encoder);
+            writer.write_section(buffer, config_section)
+        } else {
+            Err(BinarySerializationError::invalid_state(
+                "Config section is None",
+                "ConfigSection"
+            ))
+        }
     }
 
     /// Write Enums section
@@ -195,24 +188,15 @@ impl BinaryPacker {
         ast: &DixScript,
         buffer: &mut Cursor<Vec<u8>>,
     ) -> Result<SectionOffset, BinarySerializationError> {
-        let start_offset = buffer.position() as i32;
-
-        // TODO: Use EnumsSectionWriter when implemented
-        // let writer = EnumsSectionWriter::new(&mut self.context);
-        // writer.write(buffer, &ast.enums)?;
-
-        // PLACEHOLDER: Write minimal enums section
-        self.context.log_verbose(&format!("Writing Enums section (placeholder): {} enums", ast.enums.len()));
-        let count = ast.enums.len() as i32;
-        buffer.write_all(&count.to_le_bytes())
-            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "EnumsSection"))?;
-
-        let end_offset = buffer.position() as i32;
-        let length = end_offset - start_offset;
-
-        self.context.statistics.record_section_size(SectionId::Enums, length as usize);
-
-        Ok(SectionOffset::new(SectionId::Enums, start_offset, length))
+        if let Some(ref enums_section) = ast.enums {
+            let mut writer = EnumsSectionWriter::new(&mut self.context);
+            writer.write_section(buffer, enums_section)
+        } else {
+            Err(BinarySerializationError::invalid_state(
+                "Enums section is None",
+                "EnumsSection"
+            ))
+        }
     }
 
     /// Write Data section
@@ -221,24 +205,16 @@ impl BinaryPacker {
         ast: &DixScript,
         buffer: &mut Cursor<Vec<u8>>,
     ) -> Result<SectionOffset, BinarySerializationError> {
-        let start_offset = buffer.position() as i32;
-
-        // TODO: Use DataSectionWriter when implemented
-        // let writer = DataSectionWriter::new(&mut self.context);
-        // writer.write(buffer, &ast.data)?;
-
-        // PLACEHOLDER: Write minimal data section
-        self.context.log_verbose(&format!("Writing Data section (placeholder): {} items", ast.data.len()));
-        let count = ast.data.len() as i32;
-        buffer.write_all(&count.to_le_bytes())
-            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "DataSection"))?;
-
-        let end_offset = buffer.position() as i32;
-        let length = end_offset - start_offset;
-
-        self.context.statistics.record_section_size(SectionId::Data, length as usize);
-
-        Ok(SectionOffset::new(SectionId::Data, start_offset, length))
+        if let Some(ref data_section) = ast.data {
+            let mut value_encoder = ValueEncoder::new(&mut self.context);
+            let mut writer = DataSectionWriter::new(&mut self.context, &mut value_encoder);
+            writer.write_section(buffer, data_section)
+        } else {
+            Err(BinarySerializationError::invalid_state(
+                "Data section is None",
+                "DataSection"
+            ))
+        }
     }
 
     /// Write Security section
@@ -247,23 +223,16 @@ impl BinaryPacker {
         ast: &DixScript,
         buffer: &mut Cursor<Vec<u8>>,
     ) -> Result<SectionOffset, BinarySerializationError> {
-        let start_offset = buffer.position() as i32;
-
-        // TODO: Use SecuritySectionWriter when implemented
-        // let writer = SecuritySectionWriter::new(&mut self.context);
-        // writer.write(buffer, &ast.security)?;
-
-        // PLACEHOLDER: Write minimal security section
-        self.context.log_verbose("Writing Security section (placeholder)");
-        buffer.write_all(&[0u8; 4])
-            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "SecuritySection"))?;
-
-        let end_offset = buffer.position() as i32;
-        let length = end_offset - start_offset;
-
-        self.context.statistics.record_section_size(SectionId::Security, length as usize);
-
-        Ok(SectionOffset::new(SectionId::Security, start_offset, length))
+        if let Some(ref security_section) = ast.security {
+            let mut value_encoder = ValueEncoder::new(&mut self.context);
+            let mut writer = SecuritySectionWriter::new(&mut self.context, &mut value_encoder);
+            writer.write_section(buffer, security_section)
+        } else {
+            Err(BinarySerializationError::invalid_state(
+                "Security section is None",
+                "SecuritySection"
+            ))
+        }
     }
 
     /// Write Imports section
@@ -272,24 +241,15 @@ impl BinaryPacker {
         ast: &DixScript,
         buffer: &mut Cursor<Vec<u8>>,
     ) -> Result<SectionOffset, BinarySerializationError> {
-        let start_offset = buffer.position() as i32;
-
-        // TODO: Use ImportsSectionWriter when implemented
-        // let writer = ImportsSectionWriter::new(&mut self.context);
-        // writer.write(buffer, &ast.imports)?;
-
-        // PLACEHOLDER: Write minimal imports section
-        self.context.log_verbose(&format!("Writing Imports section (placeholder): {} imports", ast.imports.len()));
-        let count = ast.imports.len() as i32;
-        buffer.write_all(&count.to_le_bytes())
-            .map_err(|e| BinarySerializationError::write_error(e.to_string(), "ImportsSection"))?;
-
-        let end_offset = buffer.position() as i32;
-        let length = end_offset - start_offset;
-
-        self.context.statistics.record_section_size(SectionId::Imports, length as usize);
-
-        Ok(SectionOffset::new(SectionId::Imports, start_offset, length))
+        if let Some(ref imports_section) = ast.imports {
+            let mut writer = ImportsSectionWriter::new(&mut self.context);
+            writer.write_section(buffer, imports_section)
+        } else {
+            Err(BinarySerializationError::invalid_state(
+                "Imports section is None",
+                "ImportsSection"
+            ))
+        }
     }
 
     /// Write offset table

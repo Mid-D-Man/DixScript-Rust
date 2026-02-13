@@ -12,15 +12,14 @@ use super::{
     binary_serialization_result::BinaryDeserializationResult,
     binary_serialization_error::BinarySerializationError,
 };
-
-// TODO: Import section readers when implemented
-// use super::section_readers::{
-//     ConfigSectionReader,
-//     EnumsSectionReader,
-//     DataSectionReader,
-//     SecuritySectionReader,
-//     ImportsSectionReader,
-// };
+use super::{
+    ConfigSectionReader,
+    EnumsSectionReader,
+    DataSectionReader,
+    SecuritySectionReader,
+    ImportsSectionReader,
+    ValueDecoder,
+};
 
 /// Main binary unpacker - orchestrates deserialization into DixScript AST
 pub struct BinaryUnpacker {
@@ -197,18 +196,13 @@ impl BinaryUnpacker {
         &mut self,
         data: &[u8],
         offset: &SectionOffset,
-    ) -> Result<Config, BinarySerializationError> {
-        self.context.log_verbose("Reading Config section (placeholder)");
-
-        // Get section data
+    ) -> Result<ConfigSection, BinarySerializationError> {
         let section_data = self.get_section_data(data, offset)?;
+        let mut cursor = Cursor::new(section_data);
 
-        // TODO: Use ConfigSectionReader when implemented
-        // let reader = ConfigSectionReader::new(&mut self.context);
-        // reader.read(&section_data)
-
-        // PLACEHOLDER: Return default config
-        Ok(Config::default())
+        let mut value_decoder = ValueDecoder::new(&mut self.context);
+        let mut reader = ConfigSectionReader::new(&mut self.context, &mut value_decoder);
+        reader.read_section(&mut cursor, offset)
     }
 
     /// Read Enums section
@@ -216,18 +210,12 @@ impl BinaryUnpacker {
         &mut self,
         data: &[u8],
         offset: &SectionOffset,
-    ) -> Result<Vec<crate::Compiler::AST::EnumDeclaration>, BinarySerializationError> {
-        self.context.log_verbose("Reading Enums section (placeholder)");
+    ) -> Result<EnumsSection, BinarySerializationError> {
+        let section_data = self.get_section_data(data, offset)?;
+        let mut cursor = Cursor::new(section_data);
 
-        // Get section data
-        let _section_data = self.get_section_data(data, offset)?;
-
-        // TODO: Use EnumsSectionReader when implemented
-        // let reader = EnumsSectionReader::new(&mut self.context);
-        // reader.read(&section_data)
-
-        // PLACEHOLDER: Return empty vec
-        Ok(Vec::new())
+        let mut reader = EnumsSectionReader::new(&mut self.context);
+        reader.read_section(&mut cursor, offset)
     }
 
     /// Read Data section
@@ -235,18 +223,13 @@ impl BinaryUnpacker {
         &mut self,
         data: &[u8],
         offset: &SectionOffset,
-    ) -> Result<Vec<crate::Compiler::AST::DataItem>, BinarySerializationError> {
-        self.context.log_verbose("Reading Data section (placeholder)");
+    ) -> Result<DataSection, BinarySerializationError> {
+        let section_data = self.get_section_data(data, offset)?;
+        let mut cursor = Cursor::new(section_data);
 
-        // Get section data
-        let _section_data = self.get_section_data(data, offset)?;
-
-        // TODO: Use DataSectionReader when implemented
-        // let reader = DataSectionReader::new(&mut self.context);
-        // reader.read(&section_data)
-
-        // PLACEHOLDER: Return empty vec
-        Ok(Vec::new())
+        let mut value_decoder = ValueDecoder::new(&mut self.context);
+        let mut reader = DataSectionReader::new(&mut self.context, &mut value_decoder);
+        reader.read_section(&mut cursor, offset)
     }
 
     /// Read Security section
@@ -254,18 +237,13 @@ impl BinaryUnpacker {
         &mut self,
         data: &[u8],
         offset: &SectionOffset,
-    ) -> Result<Security, BinarySerializationError> {
-        self.context.log_verbose("Reading Security section (placeholder)");
+    ) -> Result<SecuritySection, BinarySerializationError> {
+        let section_data = self.get_section_data(data, offset)?;
+        let mut cursor = Cursor::new(section_data);
 
-        // Get section data
-        let _section_data = self.get_section_data(data, offset)?;
-
-        // TODO: Use SecuritySectionReader when implemented
-        // let reader = SecuritySectionReader::new(&mut self.context);
-        // reader.read(&section_data)
-
-        // PLACEHOLDER: Return default security
-        Ok(Security::default())
+        let mut value_decoder = ValueDecoder::new(&mut self.context);
+        let mut reader = SecuritySectionReader::new(&mut self.context, &mut value_decoder);
+        reader.read_section(&mut cursor, offset)
     }
 
     /// Read Imports section
@@ -273,18 +251,12 @@ impl BinaryUnpacker {
         &mut self,
         data: &[u8],
         offset: &SectionOffset,
-    ) -> Result<Vec<crate::Compiler::AST::Import>, BinarySerializationError> {
-        self.context.log_verbose("Reading Imports section (placeholder)");
+    ) -> Result<ImportsSection, BinarySerializationError> {
+        let section_data = self.get_section_data(data, offset)?;
+        let mut cursor = Cursor::new(section_data);
 
-        // Get section data
-        let _section_data = self.get_section_data(data, offset)?;
-
-        // TODO: Use ImportsSectionReader when implemented
-        // let reader = ImportsSectionReader::new(&mut self.context);
-        // reader.read(&section_data)
-
-        // PLACEHOLDER: Return empty vec
-        Ok(Vec::new())
+        let mut reader = ImportsSectionReader::new(&mut self.context);
+        reader.read_section(&mut cursor, offset)
     }
 
     /// Extract section data from binary

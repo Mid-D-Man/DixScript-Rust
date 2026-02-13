@@ -282,32 +282,46 @@ impl<'a> ValueEncoder<'a> {
         let (r, g, b, a) = match hex_str.len() {
             3 => {
                 // #RGB
-                let r = u8::from_str_radix(&hex_str[0..1].repeat(2), 16)?;
-                let g = u8::from_str_radix(&hex_str[1..2].repeat(2), 16)?;
-                let b = u8::from_str_radix(&hex_str[2..3].repeat(2), 16)?;
+                let r = u8::from_str_radix(&hex_str[0..1].repeat(2), 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let g = u8::from_str_radix(&hex_str[1..2].repeat(2), 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let b = u8::from_str_radix(&hex_str[2..3].repeat(2), 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
                 (r, g, b, 255u8)
             }
             4 => {
                 // #RGBA
-                let r = u8::from_str_radix(&hex_str[0..1].repeat(2), 16)?;
-                let g = u8::from_str_radix(&hex_str[1..2].repeat(2), 16)?;
-                let b = u8::from_str_radix(&hex_str[2..3].repeat(2), 16)?;
-                let a = u8::from_str_radix(&hex_str[3..4].repeat(2), 16)?;
+                let r = u8::from_str_radix(&hex_str[0..1].repeat(2), 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let g = u8::from_str_radix(&hex_str[1..2].repeat(2), 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let b = u8::from_str_radix(&hex_str[2..3].repeat(2), 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let a = u8::from_str_radix(&hex_str[3..4].repeat(2), 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
                 (r, g, b, a)
             }
             6 => {
                 // #RRGGBB
-                let r = u8::from_str_radix(&hex_str[0..2], 16)?;
-                let g = u8::from_str_radix(&hex_str[2..4], 16)?;
-                let b = u8::from_str_radix(&hex_str[4..6], 16)?;
+                let r = u8::from_str_radix(&hex_str[0..2], 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let g = u8::from_str_radix(&hex_str[2..4], 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let b = u8::from_str_radix(&hex_str[4..6], 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
                 (r, g, b, 255u8)
             }
             8 => {
                 // #RRGGBBAA
-                let r = u8::from_str_radix(&hex_str[0..2], 16)?;
-                let g = u8::from_str_radix(&hex_str[2..4], 16)?;
-                let b = u8::from_str_radix(&hex_str[4..6], 16)?;
-                let a = u8::from_str_radix(&hex_str[6..8], 16)?;
+                let r = u8::from_str_radix(&hex_str[0..2], 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let g = u8::from_str_radix(&hex_str[2..4], 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let b = u8::from_str_radix(&hex_str[4..6], 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let a = u8::from_str_radix(&hex_str[6..8], 16)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
                 (r, g, b, a)
             }
             _ => {

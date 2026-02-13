@@ -46,7 +46,7 @@ regex = "1.10"
 itertools = "0.13"
 # Lazy static for something i dont know
 lazy_static = "1.4"
-#Fo concureb=ncy
+# For concurrency
 rayon = "1.8"
 unicase = "2.7"
 rustc-hash = "2.0"
@@ -59,6 +59,24 @@ sha2 = "0.11.0-pre.4"
 
 # URL parsing
 url = "2.5"
+
+# =============================================================================
+# DLM (Data Lifecycle Modules) Dependencies
+# =============================================================================
+
+# --- Compression Modules ---
+flate2 = "1.0"          # GZIP compression (fast, good ratio)
+bzip2 = "0.4"           # BZIP2 compression (slower, better ratio)
+xz2 = "0.1"             # LZMA compression (slowest, best ratio)
+
+# --- Encryption Modules ---
+aes-gcm = "0.10"        # AES-128/256-GCM authenticated encryption
+chacha20poly1305 = "0.10" # ChaCha20-Poly1305 authenticated encryption
+argon2 = "0.5"          # Argon2id key derivation function (password-based)
+
+# --- Utilities ---
+hex = "0.4"             # Hex encoding for checksums and key display
+
 [dev-dependencies]
 # Benchmarking framework
 criterion = { version = "0.5", features = ["html_reports"] }

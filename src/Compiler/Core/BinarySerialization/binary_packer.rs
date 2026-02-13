@@ -1,7 +1,7 @@
 //! Main binary serialization orchestrator - packs DixScript AST into binary format
 
 use std::time::Instant;
-use std::io::{Write, Cursor};
+use std::io::{Write, Cursor, Seek, SeekFrom};
 use crate::Compiler::AST::DixScript;
 use super::{
     binary_format::{HEADER_SIZE, FOOTER_SIZE, SectionId, SectionFlags},
@@ -11,9 +11,6 @@ use super::{
     binary_serialization_context::BinarySerializationContext,
     binary_serialization_result::BinarySerializationResult,
     binary_serialization_error::BinarySerializationError,
-};
-
-use super::{
     ConfigSectionWriter,
     EnumsSectionWriter,
     DataSectionWriter,
@@ -38,7 +35,7 @@ impl BinaryPacker {
     /// Pack DixScript AST into binary format
     pub fn pack(&mut self, ast: &DixScript) -> BinarySerializationResult {
         let start_time = Instant::now();
-        
+
         self.context.log_info("Starting binary serialization...");
 
         // Estimate original size (rough JSON equivalent)
@@ -97,6 +94,7 @@ impl BinaryPacker {
         // Get position for offset table
         let offset_table_position = buffer.position() as i32;
         header.offset_table_position = offset_table_position;
+        header.section_count = section_offsets.len() as i32;
 
         // Write offset table
         self.write_offset_table(&section_offsets, &mut buffer)?;
@@ -127,37 +125,37 @@ impl BinaryPacker {
         section_offsets: &mut Vec<SectionOffset>,
     ) -> Result<(), BinarySerializationError> {
         // Write Config section if present
-        if let Some(_config) = &ast.config {
+        if ast.config.is_some() {
             let offset = self.write_config_section(ast, buffer)?;
             header.add_section(SectionFlags::CONFIG);
             section_offsets.push(offset);
         }
 
+        // Write Imports section if present
+        if ast.imports.is_some() {
+            let offset = self.write_imports_section(ast, buffer)?;
+            header.add_section(SectionFlags::IMPORTS);
+            section_offsets.push(offset);
+        }
+
         // Write Enums section if present
-        if !ast.enums.is_empty() {
+        if ast.enums.is_some() {
             let offset = self.write_enums_section(ast, buffer)?;
             header.add_section(SectionFlags::ENUMS);
             section_offsets.push(offset);
         }
 
         // Write Data section if present
-        if !ast.data.is_empty() {
+        if ast.data.is_some() {
             let offset = self.write_data_section(ast, buffer)?;
             header.add_section(SectionFlags::DATA);
             section_offsets.push(offset);
         }
 
         // Write Security section if present
-        if let Some(_security) = &ast.security {
+        if ast.security.is_some() {
             let offset = self.write_security_section(ast, buffer)?;
             header.add_section(SectionFlags::SECURITY);
-            section_offsets.push(offset);
-        }
-
-        // Write Imports section if present
-        if !ast.imports.is_empty() {
-            let offset = self.write_imports_section(ast, buffer)?;
-            header.add_section(SectionFlags::IMPORTS);
             section_offsets.push(offset);
         }
 
@@ -275,27 +273,27 @@ impl BinaryPacker {
 
     /// Estimate original size (rough JSON equivalent)
     fn estimate_original_size(&self, ast: &DixScript) -> usize {
-        // Rough estimate: 
-        // - Config: ~200 bytes
-        // - Each enum: ~100 bytes
-        // - Each data item: ~150 bytes
-        // - Security: ~100 bytes
-        // - Each import: ~80 bytes
-        
         let mut size = 100; // Base overhead
 
         if ast.config.is_some() {
             size += 200;
         }
 
-        size += ast.enums.len() * 100;
-        size += ast.data.len() * 150;
+        if let Some(ref enums) = ast.enums {
+            size += enums.enums.len() * 100;
+        }
+
+        if let Some(ref data) = ast.data {
+            size += data.entries.len() * 150;
+        }
 
         if ast.security.is_some() {
             size += 100;
         }
 
-        size += ast.imports.len() * 80;
+        if let Some(ref imports) = ast.imports {
+            size += imports.imports.len() * 80;
+        }
 
         size
     }
@@ -305,4 +303,4 @@ impl Default for BinaryPacker {
     fn default() -> Self {
         Self::new()
     }
-                     }
+}

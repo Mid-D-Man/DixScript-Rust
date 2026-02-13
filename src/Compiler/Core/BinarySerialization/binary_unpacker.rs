@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 use std::io::Cursor;
-use crate::Compiler::AST::{DixScript, Config, Security};
+use crate::Compiler::AST::DixScript;
 use super::{
     binary_format::{HEADER_SIZE, FOOTER_SIZE, SectionId, SectionFlags},
     binary_header::BinaryHeader,
@@ -11,14 +11,21 @@ use super::{
     binary_serialization_context::BinarySerializationContext,
     binary_serialization_result::BinaryDeserializationResult,
     binary_serialization_error::BinarySerializationError,
-};
-use super::{
     ConfigSectionReader,
     EnumsSectionReader,
     DataSectionReader,
     SecuritySectionReader,
     ImportsSectionReader,
     ValueDecoder,
+};
+
+// Import AST types
+use crate::Compiler::AST::{
+    ConfigSection,
+    EnumsSection,
+    DataSection,
+    SecuritySection,
+    ImportsSection,
 };
 
 /// Main binary unpacker - orchestrates deserialization into DixScript AST
@@ -37,7 +44,7 @@ impl BinaryUnpacker {
     /// Unpack binary data into DixScript AST
     pub fn unpack(&mut self, binary_data: &[u8]) -> BinaryDeserializationResult {
         let start_time = Instant::now();
-        
+
         self.context.log_info("Starting binary deserialization...");
 
         let binary_size = binary_data.len();
@@ -52,11 +59,18 @@ impl BinaryUnpacker {
                     duration.as_secs_f64() * 1000.0
                 ));
 
+                // Convert statistics
+                let mut deser_stats = super::binary_serialization_context::BinaryDeserializationStatistics::new();
+                deser_stats.total_sections = self.context.statistics.total_sections;
+                deser_stats.total_values = self.context.statistics.total_values;
+                deser_stats.total_bytes = binary_size;
+                deser_stats.value_counts = self.context.statistics.value_counts.clone();
+
                 BinaryDeserializationResult::success(
                     ast,
                     binary_size,
                     duration,
-                    self.context.statistics.clone().into(), // Convert statistics
+                    deser_stats,
                 )
             }
             Err(e) => {
@@ -81,21 +95,21 @@ impl BinaryUnpacker {
         // Validate minimum size
         if binary_data.len() < HEADER_SIZE + FOOTER_SIZE {
             return Err(BinarySerializationError::corrupted_data(
-                format!("File too small: {} bytes (minimum {} required)", 
-                    binary_data.len(), 
-                    HEADER_SIZE + FOOTER_SIZE
+                format!("File too small: {} bytes (minimum {} required)",
+                        binary_data.len(),
+                        HEADER_SIZE + FOOTER_SIZE
                 )
             ));
         }
 
         // Validate checksum
         let data_without_checksum = ChecksumValidator::validate_and_extract(binary_data)
-            .map_err(|e| BinarySerializationError::corrupted_data(e))?;
+            .map_err(BinarySerializationError::corrupted_data)?;
 
         // Read header
-        let mut cursor = Cursor::new(data_without_checksum);
+        let mut cursor = Cursor::new(data_without_checksum.as_slice());
         let header = BinaryHeader::read_from(&mut cursor)
-            .map_err(|e| BinarySerializationError::corrupted_header(e))?;
+            .map_err(|e| BinarySerializationError::corrupted_header(e.to_string()))?;
 
         self.context.log_verbose(&format!("Header: {}", header));
 
@@ -106,7 +120,7 @@ impl BinaryUnpacker {
         self.context.log_verbose(&format!("Found {} sections", section_offsets.len()));
 
         // Read sections and build AST
-        let ast = self.read_sections(data_without_checksum, &header, &section_offsets)?;
+        let ast = self.read_sections(&data_without_checksum, &header, &section_offsets)?;
 
         // Update statistics
         self.context.statistics.total_bytes = binary_data.len();
@@ -129,7 +143,7 @@ impl BinaryUnpacker {
                     format!("Failed to read offset {}: {}", i, e),
                     "OffsetTable"
                 ))?;
-            
+
             self.context.log_verbose(&format!("  Section {}: {}", i, offset));
             offsets.push(offset);
         }
@@ -145,10 +159,10 @@ impl BinaryUnpacker {
         section_offsets: &[SectionOffset],
     ) -> Result<DixScript, BinarySerializationError> {
         let mut config = None;
-        let mut enums = Vec::new();
-        let mut data_items = Vec::new();
+        let mut enums = None;
+        let mut data_section = None;
         let mut security = None;
-        let mut imports = Vec::new();
+        let mut imports = None;
 
         // Read each section
         for offset in section_offsets {
@@ -160,12 +174,12 @@ impl BinaryUnpacker {
                 }
                 SectionId::Enums => {
                     if header.has_section(SectionFlags::ENUMS) {
-                        enums = self.read_enums_section(data, offset)?;
+                        enums = Some(self.read_enums_section(data, offset)?);
                     }
                 }
                 SectionId::Data => {
                     if header.has_section(SectionFlags::DATA) {
-                        data_items = self.read_data_section(data, offset)?;
+                        data_section = Some(self.read_data_section(data, offset)?);
                     }
                 }
                 SectionId::Security => {
@@ -175,7 +189,7 @@ impl BinaryUnpacker {
                 }
                 SectionId::Imports => {
                     if header.has_section(SectionFlags::IMPORTS) {
-                        imports = self.read_imports_section(data, offset)?;
+                        imports = Some(self.read_imports_section(data, offset)?);
                     }
                 }
             }
@@ -184,10 +198,12 @@ impl BinaryUnpacker {
         // Construct DixScript AST
         Ok(DixScript {
             config,
-            enums,
-            data: data_items,
-            security,
             imports,
+            dlm: None, // DLM section not in binary format
+            enums,
+            quick_functions: None, // QuickFunctions section not in binary format
+            data: data_section,
+            security,
         })
     }
 
@@ -271,7 +287,7 @@ impl BinaryUnpacker {
         if end > data.len() {
             return Err(BinarySerializationError::corrupted_data(
                 format!("Section extends beyond file: offset={}, length={}, file_size={}",
-                    offset.offset, offset.length, data.len()
+                        offset.offset, offset.length, data.len()
                 )
             ));
         }
@@ -285,17 +301,3 @@ impl Default for BinaryUnpacker {
         Self::new()
     }
 }
-
-// Helper to convert statistics types
-impl From<crate::Compiler::Core::BinarySerialization::binary_serialization_context::BinarySerializationStatistics> 
-    for crate::Compiler::Core::BinarySerialization::binary_serialization_context::BinaryDeserializationStatistics 
-{
-    fn from(stats: crate::Compiler::Core::BinarySerialization::binary_serialization_context::BinarySerializationStatistics) -> Self {
-        let mut deser_stats = crate::Compiler::Core::BinarySerialization::binary_serialization_context::BinaryDeserializationStatistics::new();
-        deser_stats.total_sections = stats.total_sections;
-        deser_stats.total_values = stats.total_values;
-        deser_stats.total_bytes = stats.total_bytes;
-        deser_stats.value_counts = stats.value_counts;
-        deser_stats
-    }
-          }

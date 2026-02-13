@@ -16,8 +16,8 @@ impl DixCompactor {
     /// - Necessary spaces between identifiers/keywords
     /// 
     /// # Examples
-    /// ```
-    /// let input = "@CONFIG(\n  version -> \"1.0.0\"\n)";
+    ///! ```
+    ///  let input = "@CONFIG(\n  version -> \"1.0.0\"\n)";
     /// let output = DixCompactor::minify(input);
     /// // "@CONFIG(version->\"1.0.0\")"
     /// ```

@@ -1,4 +1,4 @@
-// src/Compiler/Core/ValueResolution/function_interpreter.rs
+// src/Compiler/Core/ValueResolution/function_interpreter.rs - PART 1
 //!
 //! FunctionInterpreter — Executes QuickFunction bodies at compile time.
 //!
@@ -7,24 +7,27 @@
 //! - DebugConfig cached — format!() never called when debug is off
 //! - All errors are typed InterpreterError variants (no string throws)
 //! - Recursion depth has both absolute and dynamic limits
-//! - Dead code removed (EvaluateIdentifier, duplicate Blob/Regex converters)
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::Builtins::Core::{DixType, DixValue};
-use crate::Builtins::Resolver::BuiltinCallResolver;
+// FIXED: Correct import path for BuiltinCallResolver
+use crate::Builtins::Resolver::builtin_call_resolver::BuiltinCallResolver;
 use crate::Compiler::AST::{
     Expression, Position, QuickFunction, QuickFuncParam, QuickFuncStatement,
     SwitchCase, Value, ObjectProperty,
 };
 use crate::Compiler::Core::DebugMode;
 use crate::Compiler::Utilities::SymbolTable;
+// FIXED: Import ImportedNamespace from the correct location
+use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 use crate::ErrorManager::ErrorManager;
 
 use super::execution_context::ExecutionContext;
-use super::supporting_classes::{DebugConfig, ImportedNamespace};
+// FIXED: Import DebugConfig from supporting_classes (it's pub(crate) so accessible within crate)
+use super::supporting_classes::DebugConfig;
 
 // ==================== RECURSION LIMITS ====================
 
@@ -36,11 +39,8 @@ const BASE_RECURSION_DEPTH: u32 = 1000;
 
 /// Calculate dynamic recursion limit based on function complexity
 fn calculate_recursion_limit(param_count: usize, body_size: usize) -> u32 {
-    // Factor in parameter count and body size
     let complexity_factor = (param_count * 10 + body_size / 5) as u32;
     let dynamic_limit = BASE_RECURSION_DEPTH + complexity_factor;
-    
-    // Never exceed absolute maximum
     dynamic_limit.min(ABSOLUTE_MAX_RECURSION)
 }
 
@@ -160,7 +160,7 @@ impl std::fmt::Display for InterpreterError {
             InterpreterError::InvalidOperation { message, position } => {
                 write!(f, "Invalid operation at {}: {}", position, message)
             }
-            _ => write!(f, "{:?}", self), // Fallback for other variants
+            _ => write!(f, "{:?}", self),
         }
     }
 }
@@ -193,7 +193,7 @@ pub struct FunctionInterpreter<'a> {
 
 impl<'a> FunctionInterpreter<'a> {
     // ==================== CONSTRUCTOR ====================
-    
+
     pub fn new(
         symbol_table: &'a SymbolTable,
         quick_functions: Vec<QuickFunction>,
@@ -201,7 +201,7 @@ impl<'a> FunctionInterpreter<'a> {
         debug_mode: DebugMode,
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
-        
+
         FunctionInterpreter {
             symbol_table,
             quick_functions,
@@ -214,12 +214,12 @@ impl<'a> FunctionInterpreter<'a> {
             error_manager,
         }
     }
-    
+
     // ==================== DATA CONTEXT UPDATE ====================
-    
+
     pub fn update_data_context(&mut self, key: String, value: DixValue) {
         self.data_context.borrow_mut().insert(key.clone(), value.clone());
-        
+
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
                 "Updated data context: {} = {}",
@@ -228,10 +228,26 @@ impl<'a> FunctionInterpreter<'a> {
             ));
         }
     }
-    
+
+    // ==================== HELPER: FIND FUNCTION ====================
+
+    /// Find a function by name in the quick_functions list
+    pub fn find_function(&self, name: &str) -> Option<&QuickFunction> {
+        self.quick_functions.iter().find(|f| f.name == name)
+    }
+
+    // ==================== HELPER: TAKE LOGS ====================
+
+    /// Drain accumulated log statements (zero-copy move)
+    pub fn take_logs(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.log_statements)
+    }
+
     // ==================== MAIN EXECUTION ENTRY ====================
-    
+
     /// Execute function with parameter threading (no mutable field swapping)
+    ///
+    /// FIXED: Changed signature to accept &[Expression] for arguments
     pub fn execute(
         &mut self,
         function: &QuickFunction,
@@ -240,13 +256,12 @@ impl<'a> FunctionInterpreter<'a> {
         scope_context: &HashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        // Calculate dynamic recursion limit based on function complexity
         let param_count = function.parameters.len();
         let body_size = function.body.len();
         self.current_recursion_limit = calculate_recursion_limit(param_count, body_size);
-        
+
         self.recursion_depth += 1;
-        
+
         if self.recursion_depth > self.current_recursion_limit {
             let err = InterpreterError::RecursionLimitExceeded {
                 function_name: function.name.clone(),
@@ -254,9 +269,9 @@ impl<'a> FunctionInterpreter<'a> {
                 depth: self.recursion_depth,
                 limit: self.current_recursion_limit,
             };
-            
+
             self.recursion_depth -= 1;
-            
+
             self.error_manager.add_value_resolution_error(
                 crate::ErrorManager::ValueResolutionErrorType::InvalidOperation,
                 format!("Recursion limit exceeded in '{}'", function.name),
@@ -265,15 +280,15 @@ impl<'a> FunctionInterpreter<'a> {
                 Some("Check for infinite recursion".to_string()),
                 Some(function.name.clone()),
             );
-            
+
             return Err(err);
         }
-        
+
         // Bind parameters
         self.bind_parameters(&function.parameters, arguments, context, scope_context, namespace)?;
-        
+
         let mut last_result = DixValue::null();
-        
+
         // Execute body statements
         for (i, statement) in function.body.iter().enumerate() {
             if self.debug_config.is_enabled {
@@ -284,9 +299,9 @@ impl<'a> FunctionInterpreter<'a> {
                     statement_variant_name(statement)
                 ));
             }
-            
+
             last_result = self.execute_statement(statement, context, scope_context, namespace)?;
-            
+
             // Early return on explicit return
             if matches!(statement, QuickFuncStatement::Return { .. }) {
                 if self.debug_config.is_enabled {
@@ -300,8 +315,7 @@ impl<'a> FunctionInterpreter<'a> {
                 return Ok(last_result);
             }
         }
-        
-        // Implicit return (last statement result)
+
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
                 "[Execute] Implicit return: {} = {}",
@@ -309,13 +323,15 @@ impl<'a> FunctionInterpreter<'a> {
                 last_result
             ));
         }
-        
+
         self.recursion_depth -= 1;
         Ok(last_result)
     }
-    
+
+    // src/Compiler/Core/ValueResolution/function_interpreter.rs - PART 2
+
     // ==================== PARAMETER BINDING ====================
-    
+
     fn bind_parameters(
         &mut self,
         parameters: &[QuickFuncParam],
@@ -325,12 +341,12 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<(), InterpreterError> {
         let required_count = parameters.iter().filter(|p| p.default_value.is_none()).count();
-        
+
         if arguments.len() < required_count {
             let position = parameters.first()
                 .map(|p| p.position)
                 .unwrap_or(Position::UNKNOWN);
-            
+
             return Err(InterpreterError::ParameterCountMismatch {
                 expected: parameters.len(),
                 got: arguments.len(),
@@ -338,7 +354,7 @@ impl<'a> FunctionInterpreter<'a> {
                 position,
             });
         }
-        
+
         for (i, param) in parameters.iter().enumerate() {
             let value = if i < arguments.len() {
                 // Evaluate argument
@@ -366,19 +382,19 @@ impl<'a> FunctionInterpreter<'a> {
                     position: param.position,
                 });
             };
-            
+
             context.define_variable(&param.name, value)
                 .map_err(|e| InterpreterError::InvalidOperation {
                     message: e.to_string(),
                     position: param.position,
                 })?;
         }
-        
+
         Ok(())
     }
-    
+
     // ==================== IDENTIFIER RESOLUTION (4-TIER PRIORITY) ====================
-    
+
     /// CRITICAL: 4-tier priority identifier resolution
     /// 1. Execution context (parameters/locals)
     /// 2. Scope context → data context (array item isolation)
@@ -394,7 +410,7 @@ impl<'a> FunctionInterpreter<'a> {
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!("[ResolveId] Resolving: {}", name));
         }
-        
+
         // Priority 1: Execution context
         if let Ok(value) = context.get_variable(name) {
             if self.debug_config.is_verbose {
@@ -405,7 +421,7 @@ impl<'a> FunctionInterpreter<'a> {
             }
             return Ok(value);
         }
-        
+
         // Priority 2: Scope context → data context (CRITICAL for array item isolation)
         if let Some(full_path) = scope_context.get(name) {
             if self.debug_config.is_verbose {
@@ -414,7 +430,7 @@ impl<'a> FunctionInterpreter<'a> {
                     name, full_path
                 ));
             }
-            
+
             if let Some(value) = self.data_context.borrow().get(full_path) {
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
@@ -431,7 +447,7 @@ impl<'a> FunctionInterpreter<'a> {
                 });
             }
         }
-        
+
         // Priority 3: Path-suffix search
         if let Some(value) = self.try_resolve_by_path_suffix(name) {
             if self.debug_config.is_verbose {
@@ -442,7 +458,7 @@ impl<'a> FunctionInterpreter<'a> {
             }
             return Ok(value);
         }
-        
+
         // Priority 4: Direct global lookup
         if let Some(value) = self.data_context.borrow().get(name) {
             if self.debug_config.is_verbose {
@@ -453,13 +469,13 @@ impl<'a> FunctionInterpreter<'a> {
             }
             return Ok(value.clone());
         }
-        
+
         // Not found anywhere
         let scope_keys = scope_context.keys()
             .map(|s| s.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        
+
         Err(InterpreterError::UndefinedVariable {
             name: name.to_string(),
             function_name: context.function_name().to_string(),
@@ -467,21 +483,21 @@ impl<'a> FunctionInterpreter<'a> {
             checked_scopes: scope_keys,
         })
     }
-    
+
     fn try_resolve_by_path_suffix(&self, name: &str) -> Option<DixValue> {
         let data_ctx = self.data_context.borrow();
-        
+
         for (key, value) in data_ctx.iter() {
             if key == name || key.ends_with(&format!(".{}", name)) {
                 return Some(value.clone());
             }
         }
-        
+
         None
     }
-    
+
     // ==================== STATEMENT EXECUTION DISPATCHER ====================
-    
+
     fn execute_statement(
         &mut self,
         statement: &QuickFuncStatement,
@@ -495,7 +511,7 @@ impl<'a> FunctionInterpreter<'a> {
                 statement_variant_name(statement)
             ));
         }
-        
+
         match statement {
             QuickFuncStatement::Return { value, .. } => {
                 self.execute_return(value, context, scope_context, namespace)
@@ -525,9 +541,10 @@ impl<'a> FunctionInterpreter<'a> {
                 self.execute_object_creation(variable, object, *position, context, scope_context, namespace)
             }
         }
-}
+    }
+
     // ==================== STATEMENT EXECUTION IMPLEMENTATIONS ====================
-    
+
     fn execute_return(
         &mut self,
         value: &Expression,
@@ -538,9 +555,9 @@ impl<'a> FunctionInterpreter<'a> {
         if self.debug_config.is_enabled {
             self.error_manager.log_debug("[ExecuteReturn] Processing return statement");
         }
-        
+
         let return_value = self.evaluate_expression(value, context, scope_context, namespace)?;
-        
+
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
                 "[ExecuteReturn] Evaluated to: {} = {}",
@@ -548,10 +565,10 @@ impl<'a> FunctionInterpreter<'a> {
                 return_value
             ));
         }
-        
+
         Ok(return_value)
     }
-    
+
     fn execute_assignment(
         &mut self,
         variable: &str,
@@ -562,14 +579,14 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let val = self.evaluate_expression(value, context, scope_context, namespace)?;
-        
+
         // Track lambda assignments
         if let Expression::Value { value: Value::Lambda { parameters, body, .. }, .. } = value {
             self.lambda_registry.insert(variable.to_string(), LambdaAst {
                 params: parameters.clone(),
                 body: *body.clone(),
             });
-            
+
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!(
                     "[Lambda] Registered lambda for variable: {}",
@@ -577,7 +594,7 @@ impl<'a> FunctionInterpreter<'a> {
                 ));
             }
         }
-        
+
         // Upsert semantics: set if exists, define if not
         if context.has_variable(variable) {
             context.set_variable(variable, val.clone())
@@ -592,10 +609,10 @@ impl<'a> FunctionInterpreter<'a> {
                     position,
                 })?;
         }
-        
+
         Ok(val)
     }
-    
+
     fn execute_variable_declaration(
         &mut self,
         variable_name: &str,
@@ -611,16 +628,16 @@ impl<'a> FunctionInterpreter<'a> {
                 variable_name
             ));
         }
-        
+
         let val = self.evaluate_expression(value, context, scope_context, namespace)?;
-        
+
         // Track lambda assignments
         if let Expression::Value { value: Value::Lambda { parameters, body, .. }, .. } = value {
             self.lambda_registry.insert(variable_name.to_string(), LambdaAst {
                 params: parameters.clone(),
                 body: *body.clone(),
             });
-            
+
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!(
                     "[Lambda] Registered lambda for variable: {}",
@@ -628,16 +645,16 @@ impl<'a> FunctionInterpreter<'a> {
                 ));
             }
         }
-        
+
         context.define_variable(variable_name, val.clone())
             .map_err(|e| InterpreterError::InvalidOperation {
                 message: e.to_string(),
                 position,
             })?;
-        
+
         Ok(val)
     }
-    
+
     fn execute_arithmetic_assignment(
         &mut self,
         variable: &str,
@@ -649,15 +666,15 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let current_value = context.get_variable(variable)
-            .map_err(|e| InterpreterError::UndefinedVariable {
+            .map_err(|_e| InterpreterError::UndefinedVariable {
                 name: variable.to_string(),
                 function_name: context.function_name().to_string(),
                 position,
                 checked_scopes: "execution context".to_string(),
             })?;
-        
+
         let operand_value = self.evaluate_expression(value, context, scope_context, namespace)?;
-        
+
         let result = match operator {
             "+=" => current_value.add(&operand_value).map_err(|e| InterpreterError::InvalidOperation {
                 message: e,
@@ -690,16 +707,16 @@ impl<'a> FunctionInterpreter<'a> {
                 position,
             }),
         };
-        
+
         context.set_variable(variable, result.clone())
             .map_err(|e| InterpreterError::InvalidOperation {
                 message: e.to_string(),
                 position,
             })?;
-        
+
         Ok(result)
     }
-    
+
     fn execute_object_creation(
         &mut self,
         variable: &str,
@@ -710,16 +727,16 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let dix_obj = self.convert_ast_value_to_dix_value(object, context, scope_context, namespace)?;
-        
+
         context.define_variable(variable, dix_obj.clone())
             .map_err(|e| InterpreterError::InvalidOperation {
                 message: e.to_string(),
                 position,
             })?;
-        
+
         Ok(dix_obj)
     }
-    
+
     fn execute_if(
         &mut self,
         condition: &Expression,
@@ -733,22 +750,22 @@ impl<'a> FunctionInterpreter<'a> {
         if self.debug_config.is_enabled {
             self.error_manager.log_debug("[ExecuteIf] Evaluating condition");
         }
-        
+
         let cond_value = self.evaluate_expression(condition, context, scope_context, namespace)?;
-        
+
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!("[ExecuteIf] Condition: {}", cond_value.as_bool()));
         }
-        
+
         if cond_value.as_bool() {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug("[ExecuteIf] Taking THEN branch");
             }
-            
+
             let mut last_result = DixValue::null();
             for stmt in then_branch {
                 last_result = self.execute_statement(stmt, context, scope_context, namespace)?;
-                
+
                 if matches!(stmt, QuickFuncStatement::Return { .. }) {
                     if self.debug_config.is_enabled {
                         self.error_manager.log_debug(&format!(
@@ -759,17 +776,17 @@ impl<'a> FunctionInterpreter<'a> {
                     return Ok(last_result);
                 }
             }
-            
+
             Ok(last_result)
         } else if let Some(else_stmts) = else_branch {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug("[ExecuteIf] Taking ELSE branch");
             }
-            
+
             let mut last_result = DixValue::null();
             for stmt in else_stmts {
                 last_result = self.execute_statement(stmt, context, scope_context, namespace)?;
-                
+
                 if matches!(stmt, QuickFuncStatement::Return { .. }) {
                     if self.debug_config.is_enabled {
                         self.error_manager.log_debug(&format!(
@@ -780,7 +797,7 @@ impl<'a> FunctionInterpreter<'a> {
                     return Ok(last_result);
                 }
             }
-            
+
             Ok(last_result)
         } else {
             if self.debug_config.is_enabled {
@@ -789,7 +806,7 @@ impl<'a> FunctionInterpreter<'a> {
             Ok(DixValue::null())
         }
     }
-    
+
     fn execute_switch(
         &mut self,
         expression: &Expression,
@@ -803,9 +820,9 @@ impl<'a> FunctionInterpreter<'a> {
         if self.debug_config.is_enabled {
             self.error_manager.log_debug("[ExecuteSwitch] Evaluating switch expression");
         }
-        
+
         let switch_value = self.evaluate_expression(expression, context, scope_context, namespace)?;
-        
+
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!(
                 "[ExecuteSwitch] Switch value: {} = {}",
@@ -813,59 +830,59 @@ impl<'a> FunctionInterpreter<'a> {
                 switch_value
             ));
         }
-        
+
         for (i, case) in cases.iter().enumerate() {
             let case_value = self.convert_ast_value_to_dix_value(&case.case_value, context, scope_context, namespace)?;
-            
+
             if self.debug_config.is_verbose {
                 self.error_manager.log_debug(&format!(
                     "[ExecuteSwitch] Comparing with case [{}]: {}",
                     i, case_value
                 ));
             }
-            
+
             if switch_value.equal_to(&case_value) {
                 if self.debug_config.is_enabled {
                     self.error_manager.log_debug(&format!("[ExecuteSwitch] Match found! Case [{}]", i));
                 }
-                
+
                 let mut last_result = DixValue::null();
                 for stmt in &case.statements {
                     last_result = self.execute_statement(stmt, context, scope_context, namespace)?;
-                    
+
                     if matches!(stmt, QuickFuncStatement::Return { .. }) {
                         return Ok(last_result);
                     }
                 }
-                
+
                 return Ok(last_result);
             }
         }
-        
+
         if let Some(default) = default_case {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug("[ExecuteSwitch] No match, executing default");
             }
-            
+
             let mut last_result = DixValue::null();
             for stmt in &default.statements {
                 last_result = self.execute_statement(stmt, context, scope_context, namespace)?;
-                
+
                 if matches!(stmt, QuickFuncStatement::Return { .. }) {
                     return Ok(last_result);
                 }
             }
-            
+
             return Ok(last_result);
         }
-        
+
         if self.debug_config.is_enabled {
             self.error_manager.log_debug("[ExecuteSwitch] No match and no default");
         }
-        
+
         Ok(DixValue::null())
     }
-    
+
     fn execute_log(
         &mut self,
         value: &Expression,
@@ -876,18 +893,18 @@ impl<'a> FunctionInterpreter<'a> {
     ) -> Result<DixValue, InterpreterError> {
         let val = self.evaluate_expression(value, context, scope_context, namespace)?;
         let message = val.as_string();
-        
+
         self.log_statements.push(message.clone());
-        
+
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!("[log:] {}", message));
         }
-        
+
         Ok(DixValue::null())
     }
-    
+
     // ==================== EXPRESSION EVALUATION DISPATCHER ====================
-    
+
     fn evaluate_expression(
         &mut self,
         expr: &Expression,
@@ -899,76 +916,78 @@ impl<'a> FunctionInterpreter<'a> {
             Expression::Identifier { name, position } => {
                 self.resolve_identifier(name, *position, context, scope_context)
             }
-            
+
             Expression::Value { value, .. } => {
                 self.convert_ast_value_to_dix_value(value, context, scope_context, namespace)
             }
-            
+
             Expression::ArithmeticOp { left, operator, right, position } => {
                 self.evaluate_arithmetic_op(left, operator, right, *position, context, scope_context, namespace)
             }
-            
+
             Expression::ComparisonOp { left, operator, right, position } => {
                 self.evaluate_comparison_op(left, operator, right, *position, context, scope_context, namespace)
             }
-            
+
             Expression::LogicalOp { left, operator, right, position } => {
                 self.evaluate_logical_op(left, operator, right, *position, context, scope_context, namespace)
             }
-            
+
             Expression::UnaryOp { operator, operand, position } => {
                 self.evaluate_unary_op(operator, operand, *position, context, scope_context, namespace)
             }
-            
+
             Expression::Conditional { condition, true_value, false_value, position } => {
                 self.evaluate_conditional(condition, true_value, false_value, *position, context, scope_context, namespace)
             }
-            
+
             Expression::StaticMethodCall { object_name, method_name, arguments, position } => {
                 self.evaluate_static_method_call(object_name, method_name, arguments, *position, context, scope_context, namespace)
             }
-            
+
             Expression::InstanceMethodCall { instance, method_name, arguments, position } => {
                 self.evaluate_instance_method_call(instance, method_name, arguments, *position, context, scope_context, namespace)
             }
-            
+
             Expression::PropertyAccess { object, property, position } => {
                 self.evaluate_property_access(object, property, *position, context, scope_context, namespace)
             }
-            
+
             Expression::IndexAccess { object, index, position } => {
                 self.evaluate_index_access(object, index, *position, context, scope_context, namespace)
             }
-            
+
             Expression::EnumAccess { namespace_name, enum_name, value, position } => {
                 self.evaluate_enum_access(namespace_name.as_deref(), enum_name, value, *position, namespace)
             }
-            
+
             Expression::QuickFuncCall { name, arguments, position } => {
                 self.evaluate_quick_func_call(name, arguments, *position, context, scope_context, namespace)
             }
-            
+
             Expression::ImportedFunctionCall { namespace_name, function_name, arguments, position } => {
                 self.evaluate_imported_function_call(namespace_name, function_name, arguments, *position, context, scope_context)
             }
-            
+
             Expression::ConfigAccess { key, position } => {
                 self.evaluate_config_access(key, *position)
             }
-            
+
             Expression::Parenthesized { expression, .. } => {
                 self.evaluate_expression(expression, context, scope_context, namespace)
             }
-            
+
             _ => Err(InterpreterError::UnsupportedExpression {
                 variant: format!("{:?}", expr),
                 position: expr.position(),
             }),
         }
     }
-    
+
+    // src/Compiler/Core/ValueResolution/function_interpreter.rs - PART 3
+
     // ==================== ARITHMETIC OPERATIONS ====================
-    
+
     fn evaluate_arithmetic_op(
         &mut self,
         left: &Expression,
@@ -983,7 +1002,7 @@ impl<'a> FunctionInterpreter<'a> {
         if matches!(operator, "<<" | ">>" | "&" | "|" | "^") {
             return self.evaluate_bitwise_op(left, operator, right, position, context, scope_context, namespace);
         }
-        
+
         // Special modulo operators
         match operator {
             "%%" => return self.evaluate_circular_modulo(left, right, position, context, scope_context, namespace),
@@ -991,10 +1010,10 @@ impl<'a> FunctionInterpreter<'a> {
             "&%" => return self.evaluate_bitwise_modulo(left, right, position, context, scope_context, namespace),
             _ => {}
         }
-        
+
         let left_val = self.evaluate_expression(left, context, scope_context, namespace)?;
         let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
-        
+
         match operator {
             "+" => left_val.add(&right_val),
             "-" => left_val.subtract(&right_val),
@@ -1002,10 +1021,7 @@ impl<'a> FunctionInterpreter<'a> {
             "/" => left_val.divide(&right_val),
             "%" => Ok(DixValue::from_double(left_val.as_double() % right_val.as_double())),
             "**" => Ok(DixValue::from_double(left_val.as_double().powf(right_val.as_double()))),
-            _ => Err(InterpreterError::InvalidOperation {
-                message: format!("Unknown arithmetic operator: {}", operator),
-                position,
-            }),
+            _ => Err(format!("Unknown arithmetic operator: {}", operator)),
         }.map_err(|e| {
             if e.contains("zero") {
                 InterpreterError::DivisionByZero { position }
@@ -1014,7 +1030,7 @@ impl<'a> FunctionInterpreter<'a> {
             }
         })
     }
-    
+
     fn evaluate_bitwise_op(
         &mut self,
         left: &Expression,
@@ -1027,7 +1043,7 @@ impl<'a> FunctionInterpreter<'a> {
     ) -> Result<DixValue, InterpreterError> {
         let left_val = self.evaluate_expression(left, context, scope_context, namespace)?;
         let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
-        
+
         if !left_val.is_numeric() || !right_val.is_numeric() {
             return Err(InterpreterError::InvalidOperation {
                 message: format!(
@@ -1039,10 +1055,10 @@ impl<'a> FunctionInterpreter<'a> {
                 position,
             });
         }
-        
+
         let left_int = left_val.as_int();
         let right_int = right_val.as_int();
-        
+
         let result = match operator {
             "<<" => left_int << right_int,
             ">>" => left_int >> right_int,
@@ -1054,10 +1070,10 @@ impl<'a> FunctionInterpreter<'a> {
                 position,
             }),
         };
-        
+
         Ok(DixValue::from_int(result))
     }
-    
+
     fn evaluate_circular_modulo(
         &mut self,
         left: &Expression,
@@ -1069,18 +1085,18 @@ impl<'a> FunctionInterpreter<'a> {
     ) -> Result<DixValue, InterpreterError> {
         let left_val = self.evaluate_expression(left, context, scope_context, namespace)?;
         let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
-        
+
         if !left_val.is_numeric() || !right_val.is_numeric() {
             return Err(InterpreterError::InvalidOperation {
                 message: "Circular modulo requires numeric operands".to_string(),
                 position,
             });
         }
-        
+
         let a = left_val.as_double();
         let b = right_val.as_double();
         let result = ((a % b) + b) % b;
-        
+
         Ok(if left_val.get_type() == DixType::Int && right_val.get_type() == DixType::Int {
             DixValue::from_int(result as i32)
         } else if left_val.get_type() == DixType::Float || right_val.get_type() == DixType::Float {
@@ -1089,7 +1105,7 @@ impl<'a> FunctionInterpreter<'a> {
             DixValue::from_double(result)
         })
     }
-    
+
     fn evaluate_percentage(
         &mut self,
         amount: &Expression,
@@ -1101,16 +1117,16 @@ impl<'a> FunctionInterpreter<'a> {
     ) -> Result<DixValue, InterpreterError> {
         let amount_val = self.evaluate_expression(amount, context, scope_context, namespace)?;
         let percentage_val = self.evaluate_expression(percentage, context, scope_context, namespace)?;
-        
+
         if !amount_val.is_numeric() || !percentage_val.is_numeric() {
             return Err(InterpreterError::InvalidOperation {
                 message: "Percentage operator requires numeric operands".to_string(),
                 position,
             });
         }
-        
+
         let result = (amount_val.as_double() * percentage_val.as_double()) / 100.0;
-        
+
         Ok(if amount_val.get_type() == DixType::Int && percentage_val.get_type() == DixType::Int {
             DixValue::from_int(result as i32)
         } else if amount_val.get_type() == DixType::Float || percentage_val.get_type() == DixType::Float {
@@ -1119,7 +1135,7 @@ impl<'a> FunctionInterpreter<'a> {
             DixValue::from_double(result)
         })
     }
-    
+
     fn evaluate_bitwise_modulo(
         &mut self,
         left: &Expression,
@@ -1131,23 +1147,23 @@ impl<'a> FunctionInterpreter<'a> {
     ) -> Result<DixValue, InterpreterError> {
         let left_val = self.evaluate_expression(left, context, scope_context, namespace)?;
         let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
-        
+
         if !left_val.is_numeric() || !right_val.is_numeric() {
             return Err(InterpreterError::InvalidOperation {
                 message: "Bitwise modulo requires numeric operands".to_string(),
                 position,
             });
         }
-        
+
         let a = left_val.as_int();
         let b = right_val.as_int();
         let result = a & (b - 1);
-        
+
         Ok(DixValue::from_int(result))
     }
-    
+
     // ==================== COMPARISON & LOGICAL OPERATIONS ====================
-    
+
     fn evaluate_comparison_op(
         &mut self,
         left: &Expression,
@@ -1160,7 +1176,7 @@ impl<'a> FunctionInterpreter<'a> {
     ) -> Result<DixValue, InterpreterError> {
         let left_val = self.evaluate_expression(left, context, scope_context, namespace)?;
         let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
-        
+
         let result = match operator {
             "==" => Ok(left_val.equal_to(&right_val)),
             "!=" => Ok(!left_val.equal_to(&right_val)),
@@ -1176,10 +1192,10 @@ impl<'a> FunctionInterpreter<'a> {
             message: e,
             position,
         })?;
-        
+
         Ok(DixValue::from_bool(result))
     }
-    
+
     fn evaluate_logical_op(
         &mut self,
         left: &Expression,
@@ -1191,7 +1207,7 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let left_val = self.evaluate_expression(left, context, scope_context, namespace)?;
-        
+
         // Short-circuit evaluation
         match operator {
             "&&" | "and" => {
@@ -1214,7 +1230,7 @@ impl<'a> FunctionInterpreter<'a> {
             }),
         }
     }
-    
+
     fn evaluate_unary_op(
         &mut self,
         operator: &str,
@@ -1225,7 +1241,7 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let operand_val = self.evaluate_expression(operand, context, scope_context, namespace)?;
-        
+
         match operator {
             "-" => {
                 if !operand_val.is_numeric() {
@@ -1270,7 +1286,7 @@ impl<'a> FunctionInterpreter<'a> {
             }),
         }
     }
-    
+
     fn evaluate_conditional(
         &mut self,
         condition: &Expression,
@@ -1282,16 +1298,16 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let cond = self.evaluate_expression(condition, context, scope_context, namespace)?;
-        
+
         if cond.as_bool() {
             self.evaluate_expression(true_value, context, scope_context, namespace)
         } else {
             self.evaluate_expression(false_value, context, scope_context, namespace)
         }
     }
-    
+
     // ==================== METHOD CALLS ====================
-    
+
     fn evaluate_static_method_call(
         &mut self,
         object_name: &str,
@@ -1308,11 +1324,11 @@ impl<'a> FunctionInterpreter<'a> {
                 object_name, method_name, arguments.len()
             ));
         }
-        
+
         let mut args = Vec::with_capacity(arguments.len());
         for (i, arg) in arguments.iter().enumerate() {
             let val = self.evaluate_expression(arg, context, scope_context, namespace)?;
-            
+
             if self.debug_config.is_verbose {
                 self.error_manager.log_info(&format!(
                     "[StaticMethodCall] Arg[{}]: {} = {}",
@@ -1321,10 +1337,10 @@ impl<'a> FunctionInterpreter<'a> {
                     val
                 ));
             }
-            
+
             args.push(val);
         }
-        
+
         BuiltinCallResolver::resolve_static_call(object_name, method_name, &args)
             .map_err(|e| InterpreterError::BuiltinCallFailed {
                 object: object_name.to_string(),
@@ -1333,7 +1349,7 @@ impl<'a> FunctionInterpreter<'a> {
                 position,
             })
     }
-    
+
     fn evaluate_instance_method_call(
         &mut self,
         instance: &Expression,
@@ -1345,12 +1361,12 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let instance_val = self.evaluate_expression(instance, context, scope_context, namespace)?;
-        
+
         let mut args = Vec::with_capacity(arguments.len());
         for arg in arguments {
             args.push(self.evaluate_expression(arg, context, scope_context, namespace)?);
         }
-        
+
         BuiltinCallResolver::resolve_instance_call(&instance_val, method_name, &args)
             .map_err(|e| InterpreterError::BuiltinCallFailed {
                 object: format!("{:?}", instance_val.get_type()),
@@ -1359,9 +1375,9 @@ impl<'a> FunctionInterpreter<'a> {
                 position,
             })
     }
-    
+
     // ==================== PROPERTY & INDEX ACCESS ====================
-    
+
     fn evaluate_property_access(
         &mut self,
         object: &Expression,
@@ -1372,7 +1388,7 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let obj = self.evaluate_expression(object, context, scope_context, namespace)?;
-        
+
         if obj.get_type() != DixType::Object {
             return Err(InterpreterError::InvalidOperation {
                 message: format!(
@@ -1383,7 +1399,7 @@ impl<'a> FunctionInterpreter<'a> {
                 position,
             });
         }
-        
+
         let obj_dict = obj.as_object();
         obj_dict.get(property)
             .cloned()
@@ -1392,7 +1408,7 @@ impl<'a> FunctionInterpreter<'a> {
                 position,
             })
     }
-    
+
     fn evaluate_index_access(
         &mut self,
         object: &Expression,
@@ -1404,12 +1420,12 @@ impl<'a> FunctionInterpreter<'a> {
     ) -> Result<DixValue, InterpreterError> {
         let obj = self.evaluate_expression(object, context, scope_context, namespace)?;
         let idx = self.evaluate_expression(index, context, scope_context, namespace)?;
-        
+
         match obj.get_type() {
             DixType::Array | DixType::Tuple => {
                 let array = obj.as_array();
                 let index_val = idx.as_int() as usize;
-                
+
                 if index_val >= array.len() {
                     return Err(InterpreterError::IndexOutOfBounds {
                         index: index_val as i64,
@@ -1417,13 +1433,13 @@ impl<'a> FunctionInterpreter<'a> {
                         position,
                     });
                 }
-                
+
                 Ok(array[index_val].clone())
             }
             DixType::Object => {
                 let obj_dict = obj.as_object();
                 let key = idx.as_string();
-                
+
                 obj_dict.get(&key)
                     .cloned()
                     .ok_or_else(|| InterpreterError::PropertyNotFound {
@@ -1434,7 +1450,7 @@ impl<'a> FunctionInterpreter<'a> {
             DixType::String => {
                 let s = obj.as_string();
                 let index_val = idx.as_int() as usize;
-                
+
                 if index_val >= s.len() {
                     return Err(InterpreterError::IndexOutOfBounds {
                         index: index_val as i64,
@@ -1442,7 +1458,7 @@ impl<'a> FunctionInterpreter<'a> {
                         position,
                     });
                 }
-                
+
                 Ok(DixValue::from_string(s.chars().nth(index_val).unwrap().to_string()))
             }
             _ => Err(InterpreterError::InvalidOperation {
@@ -1451,9 +1467,9 @@ impl<'a> FunctionInterpreter<'a> {
             }),
         }
     }
-    
+
     // ==================== ENUM & CONFIG ACCESS ====================
-    
+
     fn evaluate_enum_access(
         &self,
         namespace_name: Option<&str>,
@@ -1470,25 +1486,25 @@ impl<'a> FunctionInterpreter<'a> {
                     ns_name, enum_name, value
                 ));
             }
-            
+
             let ns = self.resolve_namespace(ns_name, namespace)
                 .ok_or_else(|| InterpreterError::NamespaceNotFound {
                     name: ns_name.to_string(),
                     position,
                 })?;
-            
+
             let enum_fields = ns.enums.get(enum_name)
                 .ok_or_else(|| InterpreterError::InvalidEnumAccess {
                     location: format!("{}.{}.{}", ns_name, enum_name, value),
                     position,
                 })?;
-            
+
             let field_value = enum_fields.get(value)
                 .ok_or_else(|| InterpreterError::InvalidEnumAccess {
                     location: format!("{}.{}.{}", ns_name, enum_name, value),
                     position,
                 })?;
-            
+
             Ok(DixValue::from_int(*field_value))
         } else {
             // Local enum
@@ -1500,7 +1516,7 @@ impl<'a> FunctionInterpreter<'a> {
                 })
         }
     }
-    
+
     fn evaluate_config_access(
         &self,
         key: &str,
@@ -1513,9 +1529,9 @@ impl<'a> FunctionInterpreter<'a> {
                 position,
             })
     }
-    
+
     // ==================== FUNCTION CALLS ====================
-    
+
     fn evaluate_quick_func_call(
         &mut self,
         name: &str,
@@ -1532,7 +1548,7 @@ impl<'a> FunctionInterpreter<'a> {
             }
             return self.invoke_lambda(&lambda, arguments, position, context, scope_context, namespace);
         }
-        
+
         // Check current namespace functions (if executing in imported context)
         if let Some(ns) = namespace {
             if let Some(func_info) = ns.functions.get(name) {
@@ -1542,12 +1558,12 @@ impl<'a> FunctionInterpreter<'a> {
                         name
                     ));
                 }
-                
+
                 let mut nested_context = ExecutionContext::new(name, None);
                 return self.execute(&func_info.ast, arguments, &mut nested_context, scope_context, namespace);
             }
         }
-        
+
         // Check local functions
         let function = self.quick_functions.iter()
             .find(|f| f.name == name)
@@ -1555,11 +1571,11 @@ impl<'a> FunctionInterpreter<'a> {
                 name: name.to_string(),
                 position,
             })?;
-        
+
         let mut nested_context = ExecutionContext::new(name, None);
         self.execute(function, arguments, &mut nested_context, scope_context, None)
     }
-    
+
     fn evaluate_imported_function_call(
         &mut self,
         namespace_name: &str,
@@ -1575,26 +1591,26 @@ impl<'a> FunctionInterpreter<'a> {
                 namespace_name, function_name
             ));
         }
-        
+
         let target_namespace = self.resolve_namespace(namespace_name, None)
             .ok_or_else(|| InterpreterError::NamespaceNotFound {
                 name: namespace_name.to_string(),
                 position,
             })?;
-        
+
         let func_info = target_namespace.functions.get(function_name)
             .ok_or_else(|| InterpreterError::FunctionNotInNamespace {
                 namespace: namespace_name.to_string(),
                 function: function_name.to_string(),
                 position,
             })?;
-        
+
         let fully_qualified_name = format!("{}.{}", namespace_name, function_name);
         let mut imported_context = ExecutionContext::new(&fully_qualified_name, None);
-        
+
         self.execute(&func_info.ast, arguments, &mut imported_context, scope_context, Some(target_namespace))
     }
-    
+
     fn invoke_lambda(
         &mut self,
         lambda: &LambdaAst,
@@ -1611,9 +1627,9 @@ impl<'a> FunctionInterpreter<'a> {
                 position,
             });
         }
-        
+
         let mut lambda_context = ExecutionContext::new("<lambda>", None);
-        
+
         for (i, param_name) in lambda.params.iter().enumerate() {
             let arg_value = self.evaluate_expression(&arguments[i], context, scope_context, namespace)?;
             lambda_context.define_variable(param_name, arg_value)
@@ -1622,12 +1638,12 @@ impl<'a> FunctionInterpreter<'a> {
                     position,
                 })?;
         }
-        
+
         self.evaluate_expression(&lambda.body, &mut lambda_context, scope_context, namespace)
     }
-    
+
     // ==================== NAMESPACE RESOLUTION ====================
-    
+
     fn resolve_namespace(
         &self,
         namespace_name: &str,
@@ -1637,19 +1653,19 @@ impl<'a> FunctionInterpreter<'a> {
         if let Some(ns) = self.symbol_table.try_get_namespace(namespace_name) {
             return Some(ns);
         }
-        
+
         // Check current namespace's local imports
         if let Some(current_ns) = current_namespace {
             if let Some(local_ns) = current_ns.local_imports.get(namespace_name) {
                 return Some(local_ns);
             }
         }
-        
+
         None
     }
-    
+
     // ==================== VALUE CONVERSION ====================
-    
+
     fn convert_ast_value_to_dix_value(
         &mut self,
         value: &Value,
@@ -1719,7 +1735,7 @@ impl<'a> FunctionInterpreter<'a> {
             }),
         }
     }
-    
+
     fn convert_array(
         &mut self,
         values: &[Value],
@@ -1729,14 +1745,14 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let mut dix_values = Vec::with_capacity(values.len());
-        
+
         for value in values {
             dix_values.push(self.convert_ast_value_to_dix_value(value, context, scope_context, namespace)?);
         }
-        
+
         Ok(DixValue::from_array(dix_values))
     }
-    
+
     fn convert_object_literal(
         &mut self,
         properties: &[ObjectProperty],
@@ -1746,15 +1762,15 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         let mut dix_obj = HashMap::with_capacity(properties.len());
-        
+
         for prop in properties {
             let value = self.convert_ast_value_to_dix_value(&prop.value, context, scope_context, namespace)?;
             dix_obj.insert(prop.key.clone(), value);
         }
-        
+
         Ok(DixValue::from_object(dix_obj))
     }
-    
+
     fn convert_prefixed_constructor(
         &mut self,
         prefix: &str,
@@ -1768,11 +1784,11 @@ impl<'a> FunctionInterpreter<'a> {
             "t" => {
                 // Tuple
                 let mut tuple_values = Vec::with_capacity(arguments.len().min(6));
-                
+
                 for arg in arguments.iter().take(6) {
                     tuple_values.push(self.convert_ast_value_to_dix_value(arg, context, scope_context, namespace)?);
                 }
-                
+
                 Ok(DixValue::from_tuple(tuple_values))
             }
             "b" => {
@@ -1783,12 +1799,12 @@ impl<'a> FunctionInterpreter<'a> {
                         position,
                     });
                 }
-                
+
                 let base64_data = match &arguments[0] {
                     Value::String { value, .. } => value.clone(),
                     other => self.convert_ast_value_to_dix_value(other, context, scope_context, namespace)?.as_string(),
                 };
-                
+
                 DixValue::from_blob(base64_data).map_err(|e| InterpreterError::InvalidOperation {
                     message: e,
                     position,
@@ -1802,12 +1818,12 @@ impl<'a> FunctionInterpreter<'a> {
                         position,
                     });
                 }
-                
+
                 let pattern = match &arguments[0] {
                     Value::String { value, .. } => value.clone(),
                     other => self.convert_ast_value_to_dix_value(other, context, scope_context, namespace)?.as_string(),
                 };
-                
+
                 DixValue::from_regex(pattern).map_err(|e| InterpreterError::InvalidOperation {
                     message: e,
                     position,
@@ -1819,7 +1835,7 @@ impl<'a> FunctionInterpreter<'a> {
             }),
         }
     }
-    
+
     fn evaluate_interpolated_string(
         &mut self,
         template: &str,
@@ -1835,36 +1851,29 @@ impl<'a> FunctionInterpreter<'a> {
                 template, expressions.len()
             ));
         }
-        
+
         let mut result = template.to_string();
-        
+
         for (i, expr) in expressions.iter().enumerate() {
             let value = self.evaluate_expression(expr, context, scope_context, namespace)?;
             let placeholder = format!("{{{}}}", i);
             let value_string = value.as_string();
-            
+
             if self.debug_config.is_verbose {
                 self.error_manager.log_debug(&format!(
                     "[InterpolatedString] Replacing '{}' with '{}'",
                     placeholder, value_string
                 ));
             }
-            
+
             result = result.replace(&placeholder, &value_string);
         }
-        
+
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!("[InterpolatedString] Result: '{}'", result));
         }
-        
+
         Ok(DixValue::from_string(result))
-    }
-    
-    // ==================== LOG STATEMENT MANAGEMENT ====================
-    
-    /// Drain accumulated log statements (zero-copy move)
-    pub fn drain_log_statements(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.log_statements)
     }
 }
 
@@ -1882,4 +1891,4 @@ fn statement_variant_name(stmt: &QuickFuncStatement) -> &'static str {
         QuickFuncStatement::ExpressionStatement { .. } => "ExpressionStatement",
         QuickFuncStatement::ObjectCreation { .. } => "ObjectCreation",
     }
-        }
+}

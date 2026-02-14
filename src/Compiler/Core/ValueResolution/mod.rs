@@ -14,8 +14,8 @@
 pub mod supporting_classes;
 pub mod execution_context;
 pub mod ast_walker;
-pub mod value_resolver;        // ADDED: Now implemented
-pub mod function_interpreter;  // ADDED: Now implemented
+pub mod value_resolver;
+pub mod function_interpreter;
 
 // ── convenience re-exports ──────────────────────────────────────────────────
 
@@ -27,14 +27,15 @@ pub use supporting_classes::{
     FunctionRegistry,
     ExecutionError,
     FunctionExecutionError,
-    DebugConfig,           // ADDED: Export from supporting_classes
-    ImportedNamespace,     // ADDED: Export from supporting_classes
+    // Note: DebugConfig is pub(crate) in supporting_classes, so we can't re-export it publicly
 };
+
+// Import ImportedNamespace from the correct location (SymbolTable)
+pub use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 
 pub use execution_context::{ExecutionContext, ExecutionContextSnapshot};
 
 pub use ast_walker::ASTWalker;
 
-// ADDED: Export ValueResolver and FunctionInterpreter
 pub use value_resolver::{ValueResolver, ResolverError};
 pub use function_interpreter::{FunctionInterpreter, InterpreterError, LambdaAst};

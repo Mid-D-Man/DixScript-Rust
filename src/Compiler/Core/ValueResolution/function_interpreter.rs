@@ -1,4 +1,4 @@
-// src/Compiler/Core/ValueResolution/function_interpreter.rs - PART 1
+// src/Compiler/Core/ValueResolution/function_interpreter.rs - FIXED PART 1
 //!
 //! FunctionInterpreter — Executes QuickFunction bodies at compile time.
 //!
@@ -13,31 +13,25 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::Builtins::Core::{DixType, DixValue};
-// FIXED: Correct import path for BuiltinCallResolver
-use crate::Builtins::Resolver::builtin_call_resolver::BuiltinCallResolver;
+// FIXED: Use module functions directly, not a struct
+use crate::Builtins::Resolver::builtin_call_resolver;
 use crate::Compiler::AST::{
     Expression, Position, QuickFunction, QuickFuncParam, QuickFuncStatement,
     SwitchCase, Value, ObjectProperty,
 };
 use crate::Compiler::Core::DebugMode;
 use crate::Compiler::Utilities::SymbolTable;
-// FIXED: Import ImportedNamespace from the correct location
 use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 use crate::ErrorManager::ErrorManager;
 
 use super::execution_context::ExecutionContext;
-// FIXED: Import DebugConfig from supporting_classes (it's pub(crate) so accessible within crate)
 use super::supporting_classes::DebugConfig;
 
 // ==================== RECURSION LIMITS ====================
 
-/// Absolute maximum recursion depth - never exceeded
 const ABSOLUTE_MAX_RECURSION: u32 = 10000;
-
-/// Base recursion depth for simple functions
 const BASE_RECURSION_DEPTH: u32 = 1000;
 
-/// Calculate dynamic recursion limit based on function complexity
 fn calculate_recursion_limit(param_count: usize, body_size: usize) -> u32 {
     let complexity_factor = (param_count * 10 + body_size / 5) as u32;
     let dynamic_limit = BASE_RECURSION_DEPTH + complexity_factor;
@@ -46,7 +40,6 @@ fn calculate_recursion_limit(param_count: usize, body_size: usize) -> u32 {
 
 // ==================== INTERPRETER ERROR ====================
 
-/// Typed errors from function interpretation
 #[derive(Debug, Clone)]
 pub enum InterpreterError {
     RecursionLimitExceeded {
@@ -136,6 +129,16 @@ pub enum InterpreterError {
     },
 }
 
+// FIXED: Add From<String> implementation for InterpreterError
+impl From<String> for InterpreterError {
+    fn from(message: String) -> Self {
+        InterpreterError::InvalidOperation {
+            message,
+            position: Position::UNKNOWN,
+        }
+    }
+}
+
 impl std::fmt::Display for InterpreterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -169,7 +172,6 @@ impl std::error::Error for InterpreterError {}
 
 // ==================== LAMBDA AST ====================
 
-/// Lambda representation for registry
 #[derive(Debug, Clone)]
 pub struct LambdaAst {
     pub params: Vec<String>,
@@ -178,7 +180,6 @@ pub struct LambdaAst {
 
 // ==================== FUNCTION INTERPRETER ====================
 
-/// Executes QuickFunction bodies at compile time with parameter threading
 pub struct FunctionInterpreter<'a> {
     symbol_table: &'a SymbolTable,
     quick_functions: Vec<QuickFunction>,
@@ -192,8 +193,6 @@ pub struct FunctionInterpreter<'a> {
 }
 
 impl<'a> FunctionInterpreter<'a> {
-    // ==================== CONSTRUCTOR ====================
-
     pub fn new(
         symbol_table: &'a SymbolTable,
         quick_functions: Vec<QuickFunction>,
@@ -215,8 +214,6 @@ impl<'a> FunctionInterpreter<'a> {
         }
     }
 
-    // ==================== DATA CONTEXT UPDATE ====================
-
     pub fn update_data_context(&mut self, key: String, value: DixValue) {
         self.data_context.borrow_mut().insert(key.clone(), value.clone());
 
@@ -229,25 +226,14 @@ impl<'a> FunctionInterpreter<'a> {
         }
     }
 
-    // ==================== HELPER: FIND FUNCTION ====================
-
-    /// Find a function by name in the quick_functions list
     pub fn find_function(&self, name: &str) -> Option<&QuickFunction> {
         self.quick_functions.iter().find(|f| f.name == name)
     }
 
-    // ==================== HELPER: TAKE LOGS ====================
-
-    /// Drain accumulated log statements (zero-copy move)
     pub fn take_logs(&mut self) -> Vec<String> {
         std::mem::take(&mut self.log_statements)
     }
 
-    // ==================== MAIN EXECUTION ENTRY ====================
-
-    /// Execute function with parameter threading (no mutable field swapping)
-    ///
-    /// FIXED: Changed signature to accept &[Expression] for arguments
     pub fn execute(
         &mut self,
         function: &QuickFunction,
@@ -272,24 +258,25 @@ impl<'a> FunctionInterpreter<'a> {
 
             self.recursion_depth -= 1;
 
+            // FIXED: Add all 8 parameters
             self.error_manager.add_value_resolution_error(
                 crate::ErrorManager::ValueResolutionErrorType::InvalidOperation,
                 format!("Recursion limit exceeded in '{}'", function.name),
                 function.position.line as i32,
                 function.position.column as i32,
+                Some("@QUICKFUNCS".to_string()),
+                None, // variable_name
+                Some(function.name.clone()), // function_name
                 Some("Check for infinite recursion".to_string()),
-                Some(function.name.clone()),
             );
 
             return Err(err);
         }
 
-        // Bind parameters
         self.bind_parameters(&function.parameters, arguments, context, scope_context, namespace)?;
 
         let mut last_result = DixValue::null();
 
-        // Execute body statements
         for (i, statement) in function.body.iter().enumerate() {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!(
@@ -302,7 +289,6 @@ impl<'a> FunctionInterpreter<'a> {
 
             last_result = self.execute_statement(statement, context, scope_context, namespace)?;
 
-            // Early return on explicit return
             if matches!(statement, QuickFuncStatement::Return { .. }) {
                 if self.debug_config.is_enabled {
                     self.error_manager.log_debug(&format!(
@@ -327,10 +313,6 @@ impl<'a> FunctionInterpreter<'a> {
         self.recursion_depth -= 1;
         Ok(last_result)
     }
-
-    // src/Compiler/Core/ValueResolution/function_interpreter.rs - PART 2
-
-    // ==================== PARAMETER BINDING ====================
 
     fn bind_parameters(
         &mut self,
@@ -357,7 +339,6 @@ impl<'a> FunctionInterpreter<'a> {
 
         for (i, param) in parameters.iter().enumerate() {
             let value = if i < arguments.len() {
-                // Evaluate argument
                 self.evaluate_expression(&arguments[i], context, scope_context, namespace)
                     .map_err(|e| InterpreterError::ParameterEvalFailed {
                         index: i,
@@ -366,7 +347,6 @@ impl<'a> FunctionInterpreter<'a> {
                         position: arguments[i].position(),
                     })?
             } else if let Some(ref default) = param.default_value {
-                // Use default value
                 self.evaluate_expression(default, context, scope_context, namespace)
                     .map_err(|e| InterpreterError::ParameterEvalFailed {
                         index: i,
@@ -393,13 +373,6 @@ impl<'a> FunctionInterpreter<'a> {
         Ok(())
     }
 
-    // ==================== IDENTIFIER RESOLUTION (4-TIER PRIORITY) ====================
-
-    /// CRITICAL: 4-tier priority identifier resolution
-    /// 1. Execution context (parameters/locals)
-    /// 2. Scope context → data context (array item isolation)
-    /// 3. Path-suffix search in data context
-    /// 4. Direct key lookup in data context
     fn resolve_identifier(
         &self,
         name: &str,
@@ -411,7 +384,6 @@ impl<'a> FunctionInterpreter<'a> {
             self.error_manager.log_debug(&format!("[ResolveId] Resolving: {}", name));
         }
 
-        // Priority 1: Execution context
         if let Ok(value) = context.get_variable(name) {
             if self.debug_config.is_verbose {
                 self.error_manager.log_debug(&format!(
@@ -422,7 +394,6 @@ impl<'a> FunctionInterpreter<'a> {
             return Ok(value);
         }
 
-        // Priority 2: Scope context → data context (CRITICAL for array item isolation)
         if let Some(full_path) = scope_context.get(name) {
             if self.debug_config.is_verbose {
                 self.error_manager.log_debug(&format!(
@@ -448,7 +419,6 @@ impl<'a> FunctionInterpreter<'a> {
             }
         }
 
-        // Priority 3: Path-suffix search
         if let Some(value) = self.try_resolve_by_path_suffix(name) {
             if self.debug_config.is_verbose {
                 self.error_manager.log_debug(&format!(
@@ -459,7 +429,6 @@ impl<'a> FunctionInterpreter<'a> {
             return Ok(value);
         }
 
-        // Priority 4: Direct global lookup
         if let Some(value) = self.data_context.borrow().get(name) {
             if self.debug_config.is_verbose {
                 self.error_manager.log_debug(&format!(
@@ -470,7 +439,6 @@ impl<'a> FunctionInterpreter<'a> {
             return Ok(value.clone());
         }
 
-        // Not found anywhere
         let scope_keys = scope_context.keys()
             .map(|s| s.as_str())
             .collect::<Vec<_>>()
@@ -488,15 +456,13 @@ impl<'a> FunctionInterpreter<'a> {
         let data_ctx = self.data_context.borrow();
 
         for (key, value) in data_ctx.iter() {
-            if key == name || key.ends_with(&format!(".{}", name)) {
+            if key.to_string() == name || key.ends_with(&format!(".{}", name)) {
                 return Some(value.clone());
             }
         }
 
         None
     }
-
-    // ==================== STATEMENT EXECUTION DISPATCHER ====================
 
     fn execute_statement(
         &mut self,
@@ -543,8 +509,6 @@ impl<'a> FunctionInterpreter<'a> {
         }
     }
 
-    // ==================== STATEMENT EXECUTION IMPLEMENTATIONS ====================
-
     fn execute_return(
         &mut self,
         value: &Expression,
@@ -580,7 +544,6 @@ impl<'a> FunctionInterpreter<'a> {
     ) -> Result<DixValue, InterpreterError> {
         let val = self.evaluate_expression(value, context, scope_context, namespace)?;
 
-        // Track lambda assignments
         if let Expression::Value { value: Value::Lambda { parameters, body, .. }, .. } = value {
             self.lambda_registry.insert(variable.to_string(), LambdaAst {
                 params: parameters.clone(),
@@ -595,7 +558,6 @@ impl<'a> FunctionInterpreter<'a> {
             }
         }
 
-        // Upsert semantics: set if exists, define if not
         if context.has_variable(variable) {
             context.set_variable(variable, val.clone())
                 .map_err(|e| InterpreterError::InvalidOperation {
@@ -631,7 +593,6 @@ impl<'a> FunctionInterpreter<'a> {
 
         let val = self.evaluate_expression(value, context, scope_context, namespace)?;
 
-        // Track lambda assignments
         if let Expression::Value { value: Value::Lambda { parameters, body, .. }, .. } = value {
             self.lambda_registry.insert(variable_name.to_string(), LambdaAst {
                 params: parameters.clone(),
@@ -903,8 +864,6 @@ impl<'a> FunctionInterpreter<'a> {
         Ok(DixValue::null())
     }
 
-    // ==================== EXPRESSION EVALUATION DISPATCHER ====================
-
     fn evaluate_expression(
         &mut self,
         expr: &Expression,
@@ -984,10 +943,6 @@ impl<'a> FunctionInterpreter<'a> {
         }
     }
 
-    // src/Compiler/Core/ValueResolution/function_interpreter.rs - PART 3
-
-    // ==================== ARITHMETIC OPERATIONS ====================
-
     fn evaluate_arithmetic_op(
         &mut self,
         left: &Expression,
@@ -998,12 +953,10 @@ impl<'a> FunctionInterpreter<'a> {
         scope_context: &HashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        // Bitwise operators
         if matches!(operator, "<<" | ">>" | "&" | "|" | "^") {
             return self.evaluate_bitwise_op(left, operator, right, position, context, scope_context, namespace);
         }
 
-        // Special modulo operators
         match operator {
             "%%" => return self.evaluate_circular_modulo(left, right, position, context, scope_context, namespace),
             "%&" => return self.evaluate_percentage(left, right, position, context, scope_context, namespace),
@@ -1162,8 +1115,6 @@ impl<'a> FunctionInterpreter<'a> {
         Ok(DixValue::from_int(result))
     }
 
-    // ==================== COMPARISON & LOGICAL OPERATIONS ====================
-
     fn evaluate_comparison_op(
         &mut self,
         left: &Expression,
@@ -1182,8 +1133,21 @@ impl<'a> FunctionInterpreter<'a> {
             "!=" => Ok(!left_val.equal_to(&right_val)),
             "<" => left_val.less_than(&right_val),
             ">" => left_val.greater_than(&right_val),
-            "<=" => Ok(left_val.less_than(&right_val)? || left_val.equal_to(&right_val)),
-            ">=" => Ok(left_val.greater_than(&right_val)? || left_val.equal_to(&right_val)),
+            // FIXED: Handle the Result properly for <= and >=
+            "<=" => {
+                let less = left_val.less_than(&right_val).map_err(|e| InterpreterError::InvalidOperation {
+                    message: e,
+                    position,
+                })?;
+                Ok(less || left_val.equal_to(&right_val))
+            }
+            ">=" => {
+                let greater = left_val.greater_than(&right_val).map_err(|e| InterpreterError::InvalidOperation {
+                    message: e,
+                    position,
+                })?;
+                Ok(greater || left_val.equal_to(&right_val))
+            }
             _ => return Err(InterpreterError::InvalidOperation {
                 message: format!("Unknown comparison operator: {}", operator),
                 position,
@@ -1208,7 +1172,6 @@ impl<'a> FunctionInterpreter<'a> {
     ) -> Result<DixValue, InterpreterError> {
         let left_val = self.evaluate_expression(left, context, scope_context, namespace)?;
 
-        // Short-circuit evaluation
         match operator {
             "&&" | "and" => {
                 if !left_val.as_bool() {
@@ -1306,8 +1269,6 @@ impl<'a> FunctionInterpreter<'a> {
         }
     }
 
-    // ==================== METHOD CALLS ====================
-
     fn evaluate_static_method_call(
         &mut self,
         object_name: &str,
@@ -1341,7 +1302,8 @@ impl<'a> FunctionInterpreter<'a> {
             args.push(val);
         }
 
-        BuiltinCallResolver::resolve_static_call(object_name, method_name, &args)
+        // FIXED: Use module function directly
+        builtin_call_resolver::resolve_static_call(object_name, method_name, &args)
             .map_err(|e| InterpreterError::BuiltinCallFailed {
                 object: object_name.to_string(),
                 method: method_name.to_string(),
@@ -1367,7 +1329,8 @@ impl<'a> FunctionInterpreter<'a> {
             args.push(self.evaluate_expression(arg, context, scope_context, namespace)?);
         }
 
-        BuiltinCallResolver::resolve_instance_call(&instance_val, method_name, &args)
+        // FIXED: Use module function directly
+        builtin_call_resolver::resolve_instance_call(&instance_val, method_name, &args)
             .map_err(|e| InterpreterError::BuiltinCallFailed {
                 object: format!("{:?}", instance_val.get_type()),
                 method: method_name.to_string(),
@@ -1375,8 +1338,6 @@ impl<'a> FunctionInterpreter<'a> {
                 position,
             })
     }
-
-    // ==================== PROPERTY & INDEX ACCESS ====================
 
     fn evaluate_property_access(
         &mut self,
@@ -1468,8 +1429,6 @@ impl<'a> FunctionInterpreter<'a> {
         }
     }
 
-    // ==================== ENUM & CONFIG ACCESS ====================
-
     fn evaluate_enum_access(
         &self,
         namespace_name: Option<&str>,
@@ -1479,7 +1438,6 @@ impl<'a> FunctionInterpreter<'a> {
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         if let Some(ns_name) = namespace_name {
-            // Imported enum
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!(
                     "[EnumAccess] Imported: {}.{}.{}",
@@ -1507,7 +1465,6 @@ impl<'a> FunctionInterpreter<'a> {
 
             Ok(DixValue::from_int(*field_value))
         } else {
-            // Local enum
             self.symbol_table.try_get_enum_field_value(enum_name, value)
                 .map(DixValue::from_int)
                 .ok_or_else(|| InterpreterError::InvalidEnumAccess {
@@ -1530,8 +1487,6 @@ impl<'a> FunctionInterpreter<'a> {
             })
     }
 
-    // ==================== FUNCTION CALLS ====================
-
     fn evaluate_quick_func_call(
         &mut self,
         name: &str,
@@ -1549,7 +1504,7 @@ impl<'a> FunctionInterpreter<'a> {
             return self.invoke_lambda(&lambda, arguments, position, context, scope_context, namespace);
         }
 
-        // Check current namespace functions (if executing in imported context)
+        // Check current namespace functions
         if let Some(ns) = namespace {
             if let Some(func_info) = ns.functions.get(name) {
                 if self.debug_config.is_enabled {
@@ -1560,20 +1515,23 @@ impl<'a> FunctionInterpreter<'a> {
                 }
 
                 let mut nested_context = ExecutionContext::new(name, None);
-                return self.execute(&func_info.ast, arguments, &mut nested_context, scope_context, namespace);
+                // FIXED: Clone the AST to avoid borrow issues
+                let func_ast = func_info.ast.clone();
+                return self.execute(&func_ast, arguments, &mut nested_context, scope_context, namespace);
             }
         }
 
-        // Check local functions
+        // FIXED: Clone to avoid borrow checker issues
         let function = self.quick_functions.iter()
             .find(|f| f.name == name)
+            .cloned()
             .ok_or_else(|| InterpreterError::UndefinedFunction {
                 name: name.to_string(),
                 position,
             })?;
 
         let mut nested_context = ExecutionContext::new(name, None);
-        self.execute(function, arguments, &mut nested_context, scope_context, None)
+        self.execute(&function, arguments, &mut nested_context, scope_context, None)
     }
 
     fn evaluate_imported_function_call(
@@ -1592,23 +1550,25 @@ impl<'a> FunctionInterpreter<'a> {
             ));
         }
 
+        // FIXED: Get namespace data before mutable borrow
         let target_namespace = self.resolve_namespace(namespace_name, None)
             .ok_or_else(|| InterpreterError::NamespaceNotFound {
                 name: namespace_name.to_string(),
                 position,
             })?;
 
-        let func_info = target_namespace.functions.get(function_name)
+        let func_ast = target_namespace.functions.get(function_name)
             .ok_or_else(|| InterpreterError::FunctionNotInNamespace {
                 namespace: namespace_name.to_string(),
                 function: function_name.to_string(),
                 position,
-            })?;
+            })?
+            .ast.clone(); // Clone the AST
 
         let fully_qualified_name = format!("{}.{}", namespace_name, function_name);
         let mut imported_context = ExecutionContext::new(&fully_qualified_name, None);
 
-        self.execute(&func_info.ast, arguments, &mut imported_context, scope_context, Some(target_namespace))
+        self.execute(&func_ast, arguments, &mut imported_context, scope_context, Some(target_namespace))
     }
 
     fn invoke_lambda(
@@ -1642,19 +1602,16 @@ impl<'a> FunctionInterpreter<'a> {
         self.evaluate_expression(&lambda.body, &mut lambda_context, scope_context, namespace)
     }
 
-    // ==================== NAMESPACE RESOLUTION ====================
-
+    // FIXED: Changed lifetime to allow returning borrowed namespace
     fn resolve_namespace(
         &self,
         namespace_name: &str,
-        current_namespace: Option<&ImportedNamespace>,
-    ) -> Option<&ImportedNamespace> {
-        // Check global imports first
+        current_namespace: Option<&'a ImportedNamespace>,
+    ) -> Option<&'a ImportedNamespace> {
         if let Some(ns) = self.symbol_table.try_get_namespace(namespace_name) {
             return Some(ns);
         }
 
-        // Check current namespace's local imports
         if let Some(current_ns) = current_namespace {
             if let Some(local_ns) = current_ns.local_imports.get(namespace_name) {
                 return Some(local_ns);
@@ -1663,8 +1620,6 @@ impl<'a> FunctionInterpreter<'a> {
 
         None
     }
-
-    // ==================== VALUE CONVERSION ====================
 
     fn convert_ast_value_to_dix_value(
         &mut self,
@@ -1782,7 +1737,6 @@ impl<'a> FunctionInterpreter<'a> {
     ) -> Result<DixValue, InterpreterError> {
         match prefix.to_lowercase().as_str() {
             "t" => {
-                // Tuple
                 let mut tuple_values = Vec::with_capacity(arguments.len().min(6));
 
                 for arg in arguments.iter().take(6) {
@@ -1792,7 +1746,6 @@ impl<'a> FunctionInterpreter<'a> {
                 Ok(DixValue::from_tuple(tuple_values))
             }
             "b" => {
-                // Blob
                 if arguments.is_empty() {
                     return DixValue::from_blob(String::new()).map_err(|e| InterpreterError::InvalidOperation {
                         message: e,
@@ -1811,7 +1764,6 @@ impl<'a> FunctionInterpreter<'a> {
                 })
             }
             "r" => {
-                // Regex
                 if arguments.is_empty() {
                     return DixValue::from_regex(".*".to_string()).map_err(|e| InterpreterError::InvalidOperation {
                         message: e,
@@ -1876,8 +1828,6 @@ impl<'a> FunctionInterpreter<'a> {
         Ok(DixValue::from_string(result))
     }
 }
-
-// ==================== HELPER FUNCTIONS ====================
 
 fn statement_variant_name(stmt: &QuickFuncStatement) -> &'static str {
     match stmt {

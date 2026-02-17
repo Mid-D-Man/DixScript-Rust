@@ -4,7 +4,7 @@ use std::time::Instant;
 use std::io::Cursor;
 use crate::Compiler::AST::DixScript;
 use super::{
-    binary_format::{HEADER_SIZE, FOOTER_SIZE, SectionId, SectionFlags},
+    binary_format::{HEADER_SIZE, FOOTER_SIZE, SectionFlags},
     binary_header::BinaryHeader,
     section_offset::SectionOffset,
     checksum_validator::ChecksumValidator,
@@ -167,27 +167,27 @@ impl BinaryUnpacker {
         // Read each section
         for offset in section_offsets {
             match offset.section_id {
-                SectionId::Config => {
+                super::binary_format::SectionId::Config => {
                     if header.has_section(SectionFlags::CONFIG) {
                         config = Some(self.read_config_section(data, offset)?);
                     }
                 }
-                SectionId::Enums => {
+                super::binary_format::SectionId::Enums => {
                     if header.has_section(SectionFlags::ENUMS) {
                         enums = Some(self.read_enums_section(data, offset)?);
                     }
                 }
-                SectionId::Data => {
+                super::binary_format::SectionId::Data => {
                     if header.has_section(SectionFlags::DATA) {
                         data_section = Some(self.read_data_section(data, offset)?);
                     }
                 }
-                SectionId::Security => {
+                super::binary_format::SectionId::Security => {
                     if header.has_section(SectionFlags::SECURITY) {
                         security = Some(self.read_security_section(data, offset)?);
                     }
                 }
-                SectionId::Imports => {
+                super::binary_format::SectionId::Imports => {
                     if header.has_section(SectionFlags::IMPORTS) {
                         imports = Some(self.read_imports_section(data, offset)?);
                     }
@@ -213,10 +213,11 @@ impl BinaryUnpacker {
         data: &[u8],
         offset: &SectionOffset,
     ) -> Result<ConfigSection, BinarySerializationError> {
-        let section_data = self.get_section_data(data, offset)?;
+        let section_data = extract_section_data(data, offset)?;
         let mut cursor = Cursor::new(section_data);
 
-        let mut value_decoder = ValueDecoder::new(&mut self.context);
+        // Create decoder without context reference
+        let mut value_decoder = ValueDecoder::new();
         let mut reader = ConfigSectionReader::new(&mut self.context, &mut value_decoder);
         reader.read_section(&mut cursor, offset)
     }
@@ -227,7 +228,7 @@ impl BinaryUnpacker {
         data: &[u8],
         offset: &SectionOffset,
     ) -> Result<EnumsSection, BinarySerializationError> {
-        let section_data = self.get_section_data(data, offset)?;
+        let section_data = extract_section_data(data, offset)?;
         let mut cursor = Cursor::new(section_data);
 
         let mut reader = EnumsSectionReader::new(&mut self.context);
@@ -240,10 +241,11 @@ impl BinaryUnpacker {
         data: &[u8],
         offset: &SectionOffset,
     ) -> Result<DataSection, BinarySerializationError> {
-        let section_data = self.get_section_data(data, offset)?;
+        let section_data = extract_section_data(data, offset)?;
         let mut cursor = Cursor::new(section_data);
 
-        let mut value_decoder = ValueDecoder::new(&mut self.context);
+        // Create decoder without context reference
+        let mut value_decoder = ValueDecoder::new();
         let mut reader = DataSectionReader::new(&mut self.context, &mut value_decoder);
         reader.read_section(&mut cursor, offset)
     }
@@ -254,10 +256,11 @@ impl BinaryUnpacker {
         data: &[u8],
         offset: &SectionOffset,
     ) -> Result<SecuritySection, BinarySerializationError> {
-        let section_data = self.get_section_data(data, offset)?;
+        let section_data = extract_section_data(data, offset)?;
         let mut cursor = Cursor::new(section_data);
 
-        let mut value_decoder = ValueDecoder::new(&mut self.context);
+        // Create decoder without context reference
+        let mut value_decoder = ValueDecoder::new();
         let mut reader = SecuritySectionReader::new(&mut self.context, &mut value_decoder);
         reader.read_section(&mut cursor, offset)
     }
@@ -268,32 +271,32 @@ impl BinaryUnpacker {
         data: &[u8],
         offset: &SectionOffset,
     ) -> Result<ImportsSection, BinarySerializationError> {
-        let section_data = self.get_section_data(data, offset)?;
+        let section_data = extract_section_data(data, offset)?;
         let mut cursor = Cursor::new(section_data);
 
         let mut reader = ImportsSectionReader::new(&mut self.context);
         reader.read_section(&mut cursor, offset)
     }
+}
 
-    /// Extract section data from binary
-    fn get_section_data(
-        &self,
-        data: &[u8],
-        offset: &SectionOffset,
-    ) -> Result<&[u8], BinarySerializationError> {
-        let start = offset.offset as usize;
-        let end = start + offset.length as usize;
+/// Extract section data from binary (free function to avoid borrow conflicts)
+/// Extract section data from binary (free function to avoid borrow conflicts)
+fn extract_section_data<'a>(
+    data: &'a [u8],
+    offset: &SectionOffset,
+) -> Result<&'a [u8], BinarySerializationError> {
+    let start = offset.offset as usize;
+    let end = start + offset.length as usize;
 
-        if end > data.len() {
-            return Err(BinarySerializationError::corrupted_data(
-                format!("Section extends beyond file: offset={}, length={}, file_size={}",
-                        offset.offset, offset.length, data.len()
-                )
-            ));
-        }
-
-        Ok(&data[start..end])
+    if end > data.len() {
+        return Err(BinarySerializationError::corrupted_data(
+            format!("Section extends beyond file: offset={}, length={}, file_size={}",
+                    offset.offset, offset.length, data.len()
+            )
+        ));
     }
+
+    Ok(&data[start..end])
 }
 
 impl Default for BinaryUnpacker {

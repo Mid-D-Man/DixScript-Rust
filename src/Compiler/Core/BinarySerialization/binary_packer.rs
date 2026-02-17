@@ -1,10 +1,10 @@
 //! Main binary serialization orchestrator - packs DixScript AST into binary format
 
 use std::time::Instant;
-use std::io::{Write, Cursor, Seek, SeekFrom};
+use std::io::{Write, Cursor};
 use crate::Compiler::AST::DixScript;
 use super::{
-    binary_format::{HEADER_SIZE, FOOTER_SIZE, SectionId, SectionFlags},
+    binary_format::{HEADER_SIZE, SectionFlags},
     binary_header::BinaryHeader,
     section_offset::SectionOffset,
     checksum_validator::ChecksumValidator,
@@ -169,7 +169,8 @@ impl BinaryPacker {
         buffer: &mut Cursor<Vec<u8>>,
     ) -> Result<SectionOffset, BinarySerializationError> {
         if let Some(ref config_section) = ast.config {
-            let mut value_encoder = ValueEncoder::new(&mut self.context);
+            // Create encoder and writer - encoder no longer holds context
+            let mut value_encoder = ValueEncoder::new();
             let mut writer = ConfigSectionWriter::new(&mut self.context, &mut value_encoder);
             writer.write_section(buffer, config_section)
         } else {
@@ -204,7 +205,8 @@ impl BinaryPacker {
         buffer: &mut Cursor<Vec<u8>>,
     ) -> Result<SectionOffset, BinarySerializationError> {
         if let Some(ref data_section) = ast.data {
-            let mut value_encoder = ValueEncoder::new(&mut self.context);
+            // Create encoder and writer - encoder no longer holds context
+            let mut value_encoder = ValueEncoder::new();
             let mut writer = DataSectionWriter::new(&mut self.context, &mut value_encoder);
             writer.write_section(buffer, data_section)
         } else {
@@ -222,7 +224,8 @@ impl BinaryPacker {
         buffer: &mut Cursor<Vec<u8>>,
     ) -> Result<SectionOffset, BinarySerializationError> {
         if let Some(ref security_section) = ast.security {
-            let mut value_encoder = ValueEncoder::new(&mut self.context);
+            // Create encoder and writer - encoder no longer holds context
+            let mut value_encoder = ValueEncoder::new();
             let mut writer = SecuritySectionWriter::new(&mut self.context, &mut value_encoder);
             writer.write_section(buffer, security_section)
         } else {

@@ -25,7 +25,7 @@ impl CloudFileCache {
 
         // Ensure cache directory exists
         if let Err(e) = fs::create_dir_all(&cache_root) {
-            error_manager.log_Warning(&format!(
+            error_manager.log_warning(&format!(
                 "Failed to create cache directory: {}",
                 e
             ));
@@ -109,7 +109,7 @@ impl CloudFileCache {
                 Some(content)
             }
             Err(e) => {
-                self.error_manager.log_Warning(&format!(
+                self.error_manager.log_warning(&format!(
                     "Failed to read cached file for '{}': {}",
                     cloud_url, e
                 ));
@@ -125,7 +125,7 @@ impl CloudFileCache {
         // Ensure directory exists
         if let Some(cache_dir) = cache_path.parent() {
             if let Err(e) = fs::create_dir_all(cache_dir) {
-                self.error_manager.log_Warning(&format!(
+                self.error_manager.log_warning(&format!(
                     "Failed to create cache directory: {}",
                     e
                 ));
@@ -143,7 +143,7 @@ impl CloudFileCache {
                 ));
             }
             Err(e) => {
-                self.error_manager.log_Warning(&format!(
+                self.error_manager.log_warning(&format!(
                     "Failed to cache file for '{}': {}",
                     cloud_url, e
                 ));
@@ -156,7 +156,7 @@ impl CloudFileCache {
     pub fn clear_cache(&self) {
         if self.cache_root_directory.exists() {
             if let Err(e) = fs::remove_dir_all(&self.cache_root_directory) {
-                self.error_manager.log_Warning(&format!(
+                self.error_manager.log_warning(&format!(
                     "Failed to clear cache: {}",
                     e
                 ));

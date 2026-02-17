@@ -8,16 +8,15 @@ use super::binary_serialization_context::BinarySerializationContext;
 use super::binary_serialization_error::BinarySerializationError;
 
 /// Decodes binary format to AST values with type tag validation
-pub struct ValueDecoder<'a> {
-    context: &'a mut BinarySerializationContext,
+/// NOTE: Does NOT store context - context must be passed to each method
+pub struct ValueDecoder {
     error_manager: ErrorManager,
 }
 
-impl<'a> ValueDecoder<'a> {
+impl ValueDecoder {
     /// Create new value decoder
-    pub fn new(context: &'a mut BinarySerializationContext) -> Self {
+    pub fn new() -> Self {
         ValueDecoder {
-            context,
             error_manager: ErrorManager::get_shared_instance(),
         }
     }
@@ -26,53 +25,61 @@ impl<'a> ValueDecoder<'a> {
 
     /// Decode any value from binary
     /// Format: [Type Tag: 1 byte] [Value Data: variable]
-    pub fn decode_value<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
+    pub fn decode_value<R: Read>(
+        &mut self,
+        reader: &mut R,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
         // Read type tag
         let mut tag_buf = [0u8; 1];
         reader.read_exact(&mut tag_buf)?;
         let type_tag = ValueTypeTag::from_u8(tag_buf[0]).ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                BinarySerializationError::invalid_type_tag(tag_buf[0], self.context.get_current_scope()),
+                BinarySerializationError::invalid_type_tag(tag_buf[0], context.get_current_scope()),
             )
         })?;
 
         // Decode based on type tag
         let value = match type_tag {
-            ValueTypeTag::Int32 => self.decode_int32(reader)?,
-            ValueTypeTag::Float32 => self.decode_float32(reader)?,
-            ValueTypeTag::Float64 => self.decode_float64(reader)?,
-            ValueTypeTag::String => self.decode_string(reader)?,
-            ValueTypeTag::Bool => self.decode_bool(reader)?,
-            ValueTypeTag::Null => self.decode_null()?,
-            ValueTypeTag::Array => self.decode_array(reader)?,
-            ValueTypeTag::Object => self.decode_object(reader)?,
-            ValueTypeTag::Tuple => self.decode_tuple(reader)?,
-            ValueTypeTag::Date => self.decode_date(reader)?,
-            ValueTypeTag::Timestamp => self.decode_timestamp(reader)?,
-            ValueTypeTag::Hex => self.decode_hex(reader)?,
-            ValueTypeTag::Blob => self.decode_blob(reader)?,
-            ValueTypeTag::Regex => self.decode_regex(reader)?,
+            ValueTypeTag::Int32 => self.decode_int32(reader, context)?,
+            ValueTypeTag::Float32 => self.decode_float32(reader, context)?,
+            ValueTypeTag::Float64 => self.decode_float64(reader, context)?,
+            ValueTypeTag::String => self.decode_string(reader, context)?,
+            ValueTypeTag::Bool => self.decode_bool(reader, context)?,
+            ValueTypeTag::Null => self.decode_null(context)?,
+            ValueTypeTag::Array => self.decode_array(reader, context)?,
+            ValueTypeTag::Object => self.decode_object(reader, context)?,
+            ValueTypeTag::Tuple => self.decode_tuple(reader, context)?,
+            ValueTypeTag::Date => self.decode_date(reader, context)?,
+            ValueTypeTag::Timestamp => self.decode_timestamp(reader, context)?,
+            ValueTypeTag::Hex => self.decode_hex(reader, context)?,
+            ValueTypeTag::Blob => self.decode_blob(reader, context)?,
+            ValueTypeTag::Regex => self.decode_regex(reader, context)?,
             _ => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     BinarySerializationError::new(
                         crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::UnsupportedType,
                         format!("Unsupported type tag: {:?}", type_tag),
-                        self.context.get_current_scope(),
+                        context.get_current_scope(),
                     ),
                 ));
             }
         };
 
-        self.context.statistics.increment_value_count(type_tag);
+        context.statistics.increment_value_count(type_tag);
         Ok(value)
     }
 
     // ==================== PRIMITIVE TYPE DECODERS ====================
 
     /// Decode Int32: [4 bytes little-endian]
-    fn decode_int32<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
+    fn decode_int32<R: Read>(
+        &mut self,
+        reader: &mut R,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
         let mut buf = [0u8; 4];
         reader.read_exact(&mut buf)?;
         let value = i32::from_le_bytes(buf);
@@ -83,7 +90,11 @@ impl<'a> ValueDecoder<'a> {
     }
 
     /// Decode Float32: [4 bytes IEEE 754]
-    fn decode_float32<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
+    fn decode_float32<R: Read>(
+        &mut self,
+        reader: &mut R,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
         let mut buf = [0u8; 4];
         reader.read_exact(&mut buf)?;
         let value = f32::from_le_bytes(buf);
@@ -94,7 +105,11 @@ impl<'a> ValueDecoder<'a> {
     }
 
     /// Decode Float64: [8 bytes IEEE 754]
-    fn decode_float64<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
+    fn decode_float64<R: Read>(
+        &mut self,
+        reader: &mut R,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
         let mut buf = [0u8; 8];
         reader.read_exact(&mut buf)?;
         let value = f64::from_le_bytes(buf);
@@ -105,12 +120,16 @@ impl<'a> ValueDecoder<'a> {
     }
 
     /// Decode String: [Length: 4 bytes][UTF-8 bytes]
-    fn decode_string<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
+    fn decode_string<R: Read>(
+        &mut self,
+        reader: &mut R,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
         let mut len_buf = [0u8; 4];
         reader.read_exact(&mut len_buf)?;
         let length = i32::from_le_bytes(len_buf) as usize;
 
-        self.context.validate_string_length(length)
+        context.validate_string_length(length)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let mut bytes = vec![0u8; length];
@@ -127,7 +146,11 @@ impl<'a> ValueDecoder<'a> {
     }
 
     /// Decode Bool: [1 byte: 0x00 or 0x01]
-    fn decode_bool<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
+    fn decode_bool<R: Read>(
+        &mut self,
+        reader: &mut R,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
         let mut buf = [0u8; 1];
         reader.read_exact(&mut buf)?;
         let value = buf[0] != 0x00;
@@ -138,7 +161,7 @@ impl<'a> ValueDecoder<'a> {
     }
 
     /// Decode Null: (no data)
-    fn decode_null(&mut self) -> IoResult<Value> {
+    fn decode_null(&mut self, _context: &mut BinarySerializationContext) -> IoResult<Value> {
         Ok(Value::Null {
             position: Position::UNKNOWN,
         })
@@ -147,15 +170,19 @@ impl<'a> ValueDecoder<'a> {
     // ==================== COMPLEX TYPE DECODERS ====================
 
     /// Decode Array: [Count: 4 bytes][Element Type: 1 byte][Values...]
-    fn decode_array<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
-        self.context.enter_nested("Array")
+    fn decode_array<R: Read>(
+        &mut self,
+        reader: &mut R,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
+        context.enter_nested("Array")
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let mut count_buf = [0u8; 4];
         reader.read_exact(&mut count_buf)?;
         let count = i32::from_le_bytes(count_buf) as usize;
 
-        self.context.validate_array_length(count)
+        context.validate_array_length(count)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         // Read element type (not used for decoding, just metadata)
@@ -164,10 +191,10 @@ impl<'a> ValueDecoder<'a> {
 
         let mut values = Vec::with_capacity(count);
         for _ in 0..count {
-            values.push(self.decode_value(reader)?);
+            values.push(self.decode_value(reader, context)?);
         }
 
-        self.context.exit_nested()
+        context.exit_nested()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         Ok(Value::Array {
@@ -177,15 +204,19 @@ impl<'a> ValueDecoder<'a> {
     }
 
     /// Decode Object: [Count: 4 bytes][Key-Value pairs...]
-    fn decode_object<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
-        self.context.enter_nested("Object")
+    fn decode_object<R: Read>(
+        &mut self,
+        reader: &mut R,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
+        context.enter_nested("Object")
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let mut count_buf = [0u8; 4];
         reader.read_exact(&mut count_buf)?;
         let count = i32::from_le_bytes(count_buf) as usize;
 
-        self.context.validate_object_property_count(count)
+        context.validate_object_property_count(count)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let mut properties = Vec::with_capacity(count);
@@ -202,12 +233,12 @@ impl<'a> ValueDecoder<'a> {
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
             // Read value
-            let value = self.decode_value(reader)?;
+            let value = self.decode_value(reader, context)?;
 
             properties.push(ObjectProperty::new(key, value, Position::UNKNOWN));
         }
 
-        self.context.exit_nested()
+        context.exit_nested()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         Ok(Value::Object {
@@ -217,8 +248,12 @@ impl<'a> ValueDecoder<'a> {
     }
 
     /// Decode Tuple: [Count: 1 byte (1-6)][Values...]
-    fn decode_tuple<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
-        self.context.enter_nested("Tuple")
+    fn decode_tuple<R: Read>(
+        &mut self,
+        reader: &mut R,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
+        context.enter_nested("Tuple")
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let mut count_buf = [0u8; 1];
@@ -234,10 +269,10 @@ impl<'a> ValueDecoder<'a> {
 
         let mut arguments = Vec::with_capacity(count);
         for _ in 0..count {
-            arguments.push(self.decode_value(reader)?);
+            arguments.push(self.decode_value(reader, context)?);
         }
 
-        self.context.exit_nested()
+        context.exit_nested()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         Ok(Value::PrefixedConstructor {
@@ -250,7 +285,11 @@ impl<'a> ValueDecoder<'a> {
     // ==================== TEMPORAL TYPE DECODERS ====================
 
     /// Decode Date: [8 bytes ticks since epoch]
-    fn decode_date<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
+    fn decode_date<R: Read>(
+        &mut self,
+        reader: &mut R,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
         let mut buf = [0u8; 8];
         reader.read_exact(&mut buf)?;
         let ticks = i64::from_le_bytes(buf);
@@ -272,7 +311,11 @@ impl<'a> ValueDecoder<'a> {
     }
 
     /// Decode Timestamp: [8 bytes ticks since epoch]
-    fn decode_timestamp<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
+    fn decode_timestamp<R: Read>(
+        &mut self,
+        reader: &mut R,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
         let mut buf = [0u8; 8];
         reader.read_exact(&mut buf)?;
         let ticks = i64::from_le_bytes(buf);
@@ -296,7 +339,11 @@ impl<'a> ValueDecoder<'a> {
     // ==================== SPECIAL TYPE DECODERS ====================
 
     /// Decode Hex Color: [4 bytes RGBA]
-    fn decode_hex<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
+    fn decode_hex<R: Read>(
+        &mut self,
+        reader: &mut R,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
         let mut buf = [0u8; 4];
         reader.read_exact(&mut buf)?;
         let (r, g, b, a) = (buf[0], buf[1], buf[2], buf[3]);
@@ -311,7 +358,11 @@ impl<'a> ValueDecoder<'a> {
     }
 
     /// Decode Blob: [Encoding: 1][Length: 4][Data bytes]
-    fn decode_blob<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
+    fn decode_blob<R: Read>(
+        &mut self,
+        reader: &mut R,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
         // Read encoding (not used for decoding, just metadata)
         let mut _encoding_buf = [0u8; 1];
         reader.read_exact(&mut _encoding_buf)?;
@@ -321,7 +372,7 @@ impl<'a> ValueDecoder<'a> {
         reader.read_exact(&mut len_buf)?;
         let length = i32::from_le_bytes(len_buf) as usize;
 
-        self.context.validate_string_length(length)
+        context.validate_string_length(length)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         // Read data
@@ -341,13 +392,17 @@ impl<'a> ValueDecoder<'a> {
     }
 
     /// Decode Regex: [Length: 4][Pattern UTF-8 bytes]
-    fn decode_regex<R: Read>(&mut self, reader: &mut R) -> IoResult<Value> {
+    fn decode_regex<R: Read>(
+        &mut self,
+        reader: &mut R,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
         // Read pattern length
         let mut len_buf = [0u8; 4];
         reader.read_exact(&mut len_buf)?;
         let length = i32::from_le_bytes(len_buf) as usize;
 
-        self.context.validate_string_length(length)
+        context.validate_string_length(length)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         // Read pattern
@@ -373,4 +428,10 @@ impl<'a> ValueDecoder<'a> {
             position: Position::UNKNOWN,
         })
     }
-                      }
+}
+
+impl Default for ValueDecoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}

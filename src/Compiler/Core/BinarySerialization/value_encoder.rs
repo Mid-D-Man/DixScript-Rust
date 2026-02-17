@@ -8,16 +8,15 @@ use super::binary_serialization_context::BinarySerializationContext;
 use super::binary_serialization_error::BinarySerializationError;
 
 /// Encodes AST values to binary format with type tags
-pub struct ValueEncoder<'a> {
-    context: &'a mut BinarySerializationContext,
+/// NOTE: Does NOT store context - context must be passed to each method
+pub struct ValueEncoder {
     error_manager: ErrorManager,
 }
 
-impl<'a> ValueEncoder<'a> {
+impl ValueEncoder {
     /// Create new value encoder
-    pub fn new(context: &'a mut BinarySerializationContext) -> Self {
+    pub fn new() -> Self {
         ValueEncoder {
-            context,
             error_manager: ErrorManager::get_shared_instance(),
         }
     }
@@ -26,32 +25,37 @@ impl<'a> ValueEncoder<'a> {
 
     /// Encode any AST value to binary
     /// Format: [Type Tag: 1 byte] [Value Data: variable]
-    pub fn encode_value<W: Write>(&mut self, writer: &mut W, value: &Value) -> IoResult<()> {
+    pub fn encode_value<W: Write>(
+        &mut self,
+        writer: &mut W,
+        value: &Value,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         match value {
-            Value::Integer { value, .. } => self.encode_int32(writer, *value),
-            Value::Float { value, .. } => self.encode_float32(writer, *value),
-            Value::Double { value, .. } => self.encode_float64(writer, *value),
-            Value::ScientificNotation { value, .. } => self.encode_float64(writer, *value),
-            Value::String { value, .. } => self.encode_string(writer, value),
-            Value::Boolean { value, .. } => self.encode_bool(writer, *value),
-            Value::Null { .. } => self.encode_null(writer),
-            Value::Array { values, .. } => self.encode_array(writer, values),
-            Value::Object { properties, .. } => self.encode_object(writer, properties),
-            Value::HexColor { value, .. } => self.encode_hex(writer, value),
-            Value::Date { value, .. } => self.encode_date(writer, value),
-            Value::Timestamp { value, .. } => self.encode_timestamp(writer, value),
-            
+            Value::Integer { value, .. } => self.encode_int32(writer, *value, context),
+            Value::Float { value, .. } => self.encode_float32(writer, *value, context),
+            Value::Double { value, .. } => self.encode_float64(writer, *value, context),
+            Value::ScientificNotation { value, .. } => self.encode_float64(writer, *value, context),
+            Value::String { value, .. } => self.encode_string(writer, value, context),
+            Value::Boolean { value, .. } => self.encode_bool(writer, *value, context),
+            Value::Null { .. } => self.encode_null(writer, context),
+            Value::Array { values, .. } => self.encode_array(writer, values, context),
+            Value::Object { properties, .. } => self.encode_object(writer, properties, context),
+            Value::HexColor { value, .. } => self.encode_hex(writer, value, context),
+            Value::Date { value, .. } => self.encode_date(writer, value, context),
+            Value::Timestamp { value, .. } => self.encode_timestamp(writer, value, context),
+
             // Prefixed constructors
             Value::PrefixedConstructor { prefix, arguments, position } => {
                 match prefix.as_str() {
-                    "t" => self.encode_tuple(writer, arguments),
-                    "b" => self.encode_blob(writer, arguments),
-                    "r" => self.encode_regex(writer, arguments),
+                    "t" => self.encode_tuple(writer, arguments, context),
+                    "b" => self.encode_blob(writer, arguments, context),
+                    "r" => self.encode_regex(writer, arguments, context),
                     _ => {
                         let err = BinarySerializationError::with_position(
                             crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::UnsupportedType,
                             format!("Unsupported prefixed constructor: {}", prefix),
-                            self.context.get_current_scope(),
+                            context.get_current_scope(),
                             *position,
                         );
                         Err(std::io::Error::new(std::io::ErrorKind::InvalidData, err))
@@ -60,60 +64,80 @@ impl<'a> ValueEncoder<'a> {
             }
 
             // EnumValue should be resolved to integers before serialization
-            Value::EnumValue { enum_name, value, position } => {
+            Value::EnumValue { enum_name, value, .. } => {
                 self.error_manager.log_warning(&format!(
                     "EnumValue {}.{} encountered during serialization - should be resolved",
                     enum_name, value
                 ));
                 // Encode as integer 0 as fallback
-                self.encode_int32(writer, 0)
+                self.encode_int32(writer, 0, context)
             }
 
             _ => {
                 let err = BinarySerializationError::new(
                     crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::UnsupportedType,
                     format!("Unsupported value type: {:?}", value),
-                    self.context.get_current_scope(),
+                    context.get_current_scope(),
                 );
                 Err(std::io::Error::new(std::io::ErrorKind::InvalidData, err))
             }
         }?;
 
         // Update statistics
-        self.context.statistics.increment_value_count(self.get_type_tag_for_value(value));
+        context.statistics.increment_value_count(self.get_type_tag_for_value(value));
         Ok(())
     }
 
     // ==================== PRIMITIVE TYPE ENCODERS ====================
 
     /// Encode Int32: [0x01][4 bytes little-endian]
-    fn encode_int32<W: Write>(&mut self, writer: &mut W, value: i32) -> IoResult<()> {
+    fn encode_int32<W: Write>(
+        &mut self,
+        writer: &mut W,
+        value: i32,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         writer.write_all(&[ValueTypeTag::Int32 as u8])?;
         writer.write_all(&value.to_le_bytes())?;
         Ok(())
     }
 
     /// Encode Float32: [0x02][4 bytes IEEE 754]
-    fn encode_float32<W: Write>(&mut self, writer: &mut W, value: f32) -> IoResult<()> {
+    fn encode_float32<W: Write>(
+        &mut self,
+        writer: &mut W,
+        value: f32,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         writer.write_all(&[ValueTypeTag::Float32 as u8])?;
         writer.write_all(&value.to_le_bytes())?;
         Ok(())
     }
 
     /// Encode Float64: [0x03][8 bytes IEEE 754]
-    fn encode_float64<W: Write>(&mut self, writer: &mut W, value: f64) -> IoResult<()> {
+    fn encode_float64<W: Write>(
+        &mut self,
+        writer: &mut W,
+        value: f64,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         writer.write_all(&[ValueTypeTag::Float64 as u8])?;
         writer.write_all(&value.to_le_bytes())?;
         Ok(())
     }
 
     /// Encode String: [0x04][Length: 4 bytes][UTF-8 bytes]
-    fn encode_string<W: Write>(&mut self, writer: &mut W, value: &str) -> IoResult<()> {
+    fn encode_string<W: Write>(
+        &mut self,
+        writer: &mut W,
+        value: &str,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         let bytes = value.as_bytes();
         let length = bytes.len();
 
         // Validate length
-        self.context.validate_string_length(length)
+        context.validate_string_length(length)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         writer.write_all(&[ValueTypeTag::String as u8])?;
@@ -123,14 +147,23 @@ impl<'a> ValueEncoder<'a> {
     }
 
     /// Encode Bool: [0x05][1 byte: 0x00 or 0x01]
-    fn encode_bool<W: Write>(&mut self, writer: &mut W, value: bool) -> IoResult<()> {
+    fn encode_bool<W: Write>(
+        &mut self,
+        writer: &mut W,
+        value: bool,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         writer.write_all(&[ValueTypeTag::Bool as u8])?;
         writer.write_all(&[if value { 0x01 } else { 0x00 }])?;
         Ok(())
     }
 
     /// Encode Null: [0x06]
-    fn encode_null<W: Write>(&mut self, writer: &mut W) -> IoResult<()> {
+    fn encode_null<W: Write>(
+        &mut self,
+        writer: &mut W,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         writer.write_all(&[ValueTypeTag::Null as u8])?;
         Ok(())
     }
@@ -138,12 +171,17 @@ impl<'a> ValueEncoder<'a> {
     // ==================== COMPLEX TYPE ENCODERS ====================
 
     /// Encode Array: [0x07][Count: 4 bytes][Element Type: 1 byte][Values...]
-    fn encode_array<W: Write>(&mut self, writer: &mut W, values: &[Value]) -> IoResult<()> {
-        self.context.enter_nested("Array")
+    fn encode_array<W: Write>(
+        &mut self,
+        writer: &mut W,
+        values: &[Value],
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
+        context.enter_nested("Array")
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let count = values.len();
-        self.context.validate_array_length(count)
+        context.validate_array_length(count)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         writer.write_all(&[ValueTypeTag::Array as u8])?;
@@ -159,10 +197,10 @@ impl<'a> ValueEncoder<'a> {
 
         // Encode all elements
         for value in values {
-            self.encode_value(writer, value)?;
+            self.encode_value(writer, value, context)?;
         }
 
-        self.context.exit_nested()
+        context.exit_nested()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         Ok(())
     }
@@ -173,12 +211,13 @@ impl<'a> ValueEncoder<'a> {
         &mut self,
         writer: &mut W,
         properties: &[crate::Compiler::AST::ObjectProperty],
+        context: &mut BinarySerializationContext,
     ) -> IoResult<()> {
-        self.context.enter_nested("Object")
+        context.enter_nested("Object")
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let count = properties.len();
-        self.context.validate_object_property_count(count)
+        context.validate_object_property_count(count)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         writer.write_all(&[ValueTypeTag::Object as u8])?;
@@ -192,17 +231,22 @@ impl<'a> ValueEncoder<'a> {
             writer.write_all(key_bytes)?;
 
             // Encode value (with type tag)
-            self.encode_value(writer, &prop.value)?;
+            self.encode_value(writer, &prop.value, context)?;
         }
 
-        self.context.exit_nested()
+        context.exit_nested()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         Ok(())
     }
 
     /// Encode Tuple: [0x0C][Count: 1 byte (1-6)][Values...]
-    fn encode_tuple<W: Write>(&mut self, writer: &mut W, values: &[Value]) -> IoResult<()> {
-        self.context.enter_nested("Tuple")
+    fn encode_tuple<W: Write>(
+        &mut self,
+        writer: &mut W,
+        values: &[Value],
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
+        context.enter_nested("Tuple")
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let count = values.len();
@@ -210,7 +254,7 @@ impl<'a> ValueEncoder<'a> {
             let err = BinarySerializationError::new(
                 crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::InvalidFormat,
                 format!("Tuple must have 1-6 elements, got {}", count),
-                self.context.get_current_scope(),
+                context.get_current_scope(),
             );
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, err));
         }
@@ -220,10 +264,10 @@ impl<'a> ValueEncoder<'a> {
 
         // Encode all elements (mixed types allowed)
         for value in values {
-            self.encode_value(writer, value)?;
+            self.encode_value(writer, value, context)?;
         }
 
-        self.context.exit_nested()
+        context.exit_nested()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         Ok(())
     }
@@ -231,9 +275,14 @@ impl<'a> ValueEncoder<'a> {
     // ==================== TEMPORAL TYPE ENCODERS ====================
 
     /// Encode Date: [0x09][8 bytes ticks since epoch]
-    fn encode_date<W: Write>(&mut self, writer: &mut W, date_str: &str) -> IoResult<()> {
+    fn encode_date<W: Write>(
+        &mut self,
+        writer: &mut W,
+        date_str: &str,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         use chrono::NaiveDate;
-        
+
         let date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
             .or_else(|_| NaiveDate::parse_from_str(date_str, "%Y/%m/%d"))
             .map_err(|e| {
@@ -253,7 +302,12 @@ impl<'a> ValueEncoder<'a> {
     }
 
     /// Encode Timestamp: [0x0A][8 bytes ticks since epoch]
-    fn encode_timestamp<W: Write>(&mut self, writer: &mut W, timestamp_str: &str) -> IoResult<()> {
+    fn encode_timestamp<W: Write>(
+        &mut self,
+        writer: &mut W,
+        timestamp_str: &str,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         use chrono::DateTime;
 
         let timestamp = DateTime::parse_from_rfc3339(timestamp_str)
@@ -276,7 +330,12 @@ impl<'a> ValueEncoder<'a> {
 
     /// Encode Hex Color: [0x0B][4 bytes RGBA]
     /// Format: #RGB, #RGBA, #RRGGBB, or #RRGGBBAA
-    fn encode_hex<W: Write>(&mut self, writer: &mut W, hex_str: &str) -> IoResult<()> {
+    fn encode_hex<W: Write>(
+        &mut self,
+        writer: &mut W,
+        hex_str: &str,
+        _context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         let hex_str = hex_str.strip_prefix('#').unwrap_or(hex_str);
 
         let (r, g, b, a) = match hex_str.len() {
@@ -338,7 +397,12 @@ impl<'a> ValueEncoder<'a> {
     }
 
     /// Encode Blob: [0x0D][Encoding: 1][Length: 4][Data bytes]
-    fn encode_blob<W: Write>(&mut self, writer: &mut W, arguments: &[Value]) -> IoResult<()> {
+    fn encode_blob<W: Write>(
+        &mut self,
+        writer: &mut W,
+        arguments: &[Value],
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         // Extract string from first argument
         let data = if let Some(Value::String { value, .. }) = arguments.first() {
             value.as_str()
@@ -365,7 +429,7 @@ impl<'a> ValueEncoder<'a> {
 
         // Encode data as UTF-8 string
         let bytes = data.as_bytes();
-        self.context.validate_string_length(bytes.len())
+        context.validate_string_length(bytes.len())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         writer.write_all(&(bytes.len() as i32).to_le_bytes())?;
@@ -374,7 +438,12 @@ impl<'a> ValueEncoder<'a> {
     }
 
     /// Encode Regex: [0x0E][Length: 4][Pattern UTF-8 bytes]
-    fn encode_regex<W: Write>(&mut self, writer: &mut W, arguments: &[Value]) -> IoResult<()> {
+    fn encode_regex<W: Write>(
+        &mut self,
+        writer: &mut W,
+        arguments: &[Value],
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<()> {
         // Extract pattern from first argument
         let pattern = if let Some(Value::String { value, .. }) = arguments.first() {
             value.as_str()
@@ -396,7 +465,7 @@ impl<'a> ValueEncoder<'a> {
         writer.write_all(&[ValueTypeTag::Regex as u8])?;
 
         let bytes = pattern.as_bytes();
-        self.context.validate_string_length(bytes.len())
+        context.validate_string_length(bytes.len())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         writer.write_all(&(bytes.len() as i32).to_le_bytes())?;
@@ -429,4 +498,10 @@ impl<'a> ValueEncoder<'a> {
             _ => ValueTypeTag::Invalid,
         }
     }
-               }
+}
+
+impl Default for ValueEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}

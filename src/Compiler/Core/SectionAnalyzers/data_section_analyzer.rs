@@ -1,17 +1,17 @@
 // src/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs
 
 use crate::Compiler::AST::{
-    DataSection, DataEntry, TablePath, PropertyAssignment, Value, Expression,
-    Position, DataType, ObjectProperty,
+    DataSection, DataEntry, TablePath, PropertyAssignment, Value,
+    Position, DataType,
 };
-use crate::Compiler::AST::Visitors::{TypeInferenceVisitor, AstVisitorBase};
+use crate::Compiler::AST::Visitors::TypeInferenceVisitor;
 use crate::Compiler::Utilities::{SymbolTable, VariableInfo, PathBuilder};
 use crate::Compiler::Core::{OperationalSettings, DebugMode};
-use crate::ErrorManager::{ErrorManager, SemanticErrorType};
+use crate::ErrorManager::ErrorManager;
 use crate::Utilities::Keywords;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::HashMap;
 use regex::Regex;
+use base64::{Engine as _, engine::general_purpose};
 
 use super::{SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo};
 
@@ -53,33 +53,15 @@ const MAX_CALL_DEPTH: usize = 10;
 // ==================== DATA SECTION ANALYZER ====================
 
 /// DATA Section Semantic Analyzer v1.0.0 - COMPREHENSIVE VALIDATION
-/// 
-/// HANDLES:
-/// - Function call parameter type validation
-/// - Variable reference validation in function calls
-/// - Imported function/enum validation
-/// - Blob/Regex content validation
-/// - Expression type restrictions (no +=, *=, etc.)
-/// - Tuple limit enforcement (6 elements)
-/// - Function call parameter limit (100 params)
-/// - Call depth tracking (max 10)
-/// - Enhanced homogeneity checking
-/// 
-/// OPTIMIZATIONS:
-/// - FxHashMap/FxHashSet for all collections
-/// - &str usage to avoid cloning
-/// - Debug mode checks before logging
-/// - Collection preallocation
-/// - Borrowed strings in error messages
 pub struct DataSectionAnalyzer<'a> {
     operational_settings: &'a OperationalSettings,
     error_manager: ErrorManager,
-    
+
     // Validation state (temporary - owned during analysis)
     declared_table_paths: FxHashSet<String>,
     current_nesting_depth: usize,
     current_call_depth: usize,
-    
+
     // Indexes (built during analysis, returned to caller)
     short_name_to_full_paths: FxHashMap<String, Vec<String>>,
     path_to_type: FxHashMap<String, DataType>,
@@ -105,7 +87,7 @@ impl<'a> DataSectionAnalyzer<'a> {
     ) -> SectionAnalysisResult {
         let mut result = SectionAnalysisResult::new("DATA");
         let entry_count = section.entries.len();
-        
+
         // Preallocate collections
         self.declared_table_paths = FxHashSet::with_capacity_and_hasher(
             entry_count / 2,
@@ -113,10 +95,7 @@ impl<'a> DataSectionAnalyzer<'a> {
         );
         self.current_nesting_depth = 0;
         self.current_call_depth = 0;
-        
-        // Create type inference visitor
-        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
-        
+
         // Check debug mode ONCE
         let is_info = self.operational_settings.debug_mode != DebugMode::Off;
         let is_debug = self.operational_settings.debug_mode == DebugMode::Verbose;
@@ -146,12 +125,11 @@ impl<'a> DataSectionAnalyzer<'a> {
                 "Phase 3: Validating individual data entries and building indexes"
             );
         }
-        
+
         for entry in &section.entries {
             self.validate_data_entry(
                 entry,
                 symbol_table,
-                &type_inference_visitor,
                 &mut result,
                 is_debug
             );
@@ -184,8 +162,9 @@ impl<'a> DataSectionAnalyzer<'a> {
         &self
     ) -> (&FxHashMap<String, Vec<String>>, &FxHashMap<String, DataType>) {
         (&self.short_name_to_full_paths, &self.path_to_type)
-  }
-  // ==================== PHASE 1: TWO-TIER ORDERING VALIDATION ====================
+    }
+
+    // ==================== PHASE 1: TWO-TIER ORDERING VALIDATION ====================
 
     fn validate_two_tier_ordering(
         &self,
@@ -200,7 +179,7 @@ impl<'a> DataSectionAnalyzer<'a> {
             match entry {
                 DataEntry::SimpleProperty { name, position, .. } => {
                     flat_props_count += 1;
-                    
+
                     if has_seen_grouped_data {
                         self.add_error(
                             result,
@@ -221,7 +200,7 @@ impl<'a> DataSectionAnalyzer<'a> {
                 }
                 DataEntry::ObjectProperty { .. } => {
                     flat_props_count += 1;
-                    
+
                     if has_seen_grouped_data {
                         // Object properties are treated like simple properties
                         // (they can cause ordering violations too)
@@ -260,7 +239,7 @@ impl<'a> DataSectionAnalyzer<'a> {
             match entry {
                 DataEntry::TableProperty { path, position, .. } => {
                     let path_str = Self::join_table_path(&path.segments);
-                    
+
                     if !table_property_paths.insert(path_str.clone()) {
                         self.add_error(
                             result,
@@ -275,7 +254,7 @@ impl<'a> DataSectionAnalyzer<'a> {
                 }
                 DataEntry::GroupArray { path, position, .. } => {
                     let path_str = Self::join_table_path(&path.segments);
-                    
+
                     if !group_array_paths.insert(path_str.clone()) {
                         self.add_error(
                             result,
@@ -307,7 +286,6 @@ impl<'a> DataSectionAnalyzer<'a> {
         &mut self,
         entry: &DataEntry,
         symbol_table: &mut SymbolTable,
-        type_inference_visitor: &TypeInferenceVisitor,
         result: &mut SectionAnalysisResult,
         is_debug: bool,
     ) {
@@ -322,7 +300,6 @@ impl<'a> DataSectionAnalyzer<'a> {
                     value,
                     *position,
                     symbol_table,
-                    type_inference_visitor,
                     result,
                     is_debug
                 );
@@ -337,7 +314,6 @@ impl<'a> DataSectionAnalyzer<'a> {
                     properties,
                     *position,
                     symbol_table,
-                    type_inference_visitor,
                     result,
                     is_debug
                 );
@@ -352,7 +328,6 @@ impl<'a> DataSectionAnalyzer<'a> {
                     items,
                     *position,
                     symbol_table,
-                    type_inference_visitor,
                     result,
                     is_debug
                 );
@@ -367,7 +342,6 @@ impl<'a> DataSectionAnalyzer<'a> {
                     object.as_ref(),
                     *position,
                     symbol_table,
-                    type_inference_visitor,
                     result,
                     is_debug
                 );
@@ -382,7 +356,6 @@ impl<'a> DataSectionAnalyzer<'a> {
         value: &Value,
         position: Position,
         symbol_table: &mut SymbolTable,
-        type_inference_visitor: &TypeInferenceVisitor,
         result: &mut SectionAnalysisResult,
         is_debug: bool,
     ) {
@@ -403,25 +376,26 @@ impl<'a> DataSectionAnalyzer<'a> {
             self.validate_type_annotation(dt, name, is_debug);
         }
 
-        // Validate value and infer type
+        // Validate value and infer type (create TypeInferenceVisitor locally)
         let context = format!("property '{}'", name);
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
         let inferred_type = self.validate_value(
             value,
             &context,
             symbol_table,
-            type_inference_visitor,
+            &type_inference_visitor,
             result,
             is_debug
         );
 
         // Build index IMMEDIATELY
         let full_path = PathBuilder::build(&[name]);
-        
+
         self.short_name_to_full_paths
             .entry(name.to_string())
             .or_insert_with(Vec::new)
             .push(full_path.clone());
-        
+
         if let Some(inf_type) = inferred_type {
             self.path_to_type.insert(full_path.clone(), inf_type);
         } else if let Some(decl_type) = declared_type {
@@ -450,7 +424,7 @@ impl<'a> DataSectionAnalyzer<'a> {
                     self.path_to_type.insert(full_path.clone(), DataType::Float);
                 }
             }
-            
+
             if !Self::is_type_compatible(decl, inf) {
                 self.add_error(
                     result,
@@ -493,7 +467,6 @@ impl<'a> DataSectionAnalyzer<'a> {
         properties: &[PropertyAssignment],
         _position: Position,
         symbol_table: &mut SymbolTable,
-        type_inference_visitor: &TypeInferenceVisitor,
         result: &mut SectionAnalysisResult,
         is_debug: bool,
     ) {
@@ -520,13 +493,14 @@ impl<'a> DataSectionAnalyzer<'a> {
                 self.validate_type_annotation(dt, &assignment.name, is_debug);
             }
 
-            // Validate value
+            // Validate value (create TypeInferenceVisitor locally)
             let context = format!("table property '{}.{}'", full_path, assignment.name);
+            let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
             let inferred_type = self.validate_value(
                 &assignment.value,
                 &context,
                 symbol_table,
-                type_inference_visitor,
+                &type_inference_visitor,
                 result,
                 is_debug
             );
@@ -544,7 +518,7 @@ impl<'a> DataSectionAnalyzer<'a> {
                         inf = DataType::Float;
                     }
                 }
-                
+
                 if !Self::is_type_compatible(decl, inf) {
                     self.add_error(
                         result,
@@ -561,12 +535,12 @@ impl<'a> DataSectionAnalyzer<'a> {
 
             // Build index
             let property_full_path = PathBuilder::build_from(&full_path, &[&assignment.name]);
-            
+
             self.short_name_to_full_paths
                 .entry(assignment.name.clone())
                 .or_insert_with(Vec::new)
                 .push(property_full_path.clone());
-            
+
             if let Some(inf) = inferred_type {
                 self.path_to_type.insert(property_full_path.clone(), inf);
             }
@@ -598,7 +572,6 @@ impl<'a> DataSectionAnalyzer<'a> {
         items: &[Value],
         position: Position,
         symbol_table: &mut SymbolTable,
-        type_inference_visitor: &TypeInferenceVisitor,
         result: &mut SectionAnalysisResult,
         is_debug: bool,
     ) {
@@ -615,14 +588,15 @@ impl<'a> DataSectionAnalyzer<'a> {
 
         // Validate array homogeneity
         let mut first_item_type: Option<DataType> = None;
-        
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
+
         for (i, item) in items.iter().enumerate() {
             let context = format!("group array '{}[{}]'", full_path, i);
             let item_type = self.validate_value(
                 item,
                 &context,
                 symbol_table,
-                type_inference_visitor,
+                &type_inference_visitor,
                 result,
                 is_debug
             );
@@ -653,7 +627,7 @@ impl<'a> DataSectionAnalyzer<'a> {
             if let Value::Object { properties, .. } = item {
                 for prop in properties {
                     let item_path = PathBuilder::build_array_item_property(&full_path, i, &prop.key);
-                    
+
                     self.short_name_to_full_paths
                         .entry(prop.key.clone())
                         .or_insert_with(Vec::new)
@@ -688,7 +662,6 @@ impl<'a> DataSectionAnalyzer<'a> {
         object: &Value,
         position: Position,
         symbol_table: &mut SymbolTable,
-        type_inference_visitor: &TypeInferenceVisitor,
         result: &mut SectionAnalysisResult,
         is_debug: bool,
     ) {
@@ -700,23 +673,24 @@ impl<'a> DataSectionAnalyzer<'a> {
         // Validate object literal
         self.current_nesting_depth = 0;
         let context = format!("object property '{}'", name);
+        let type_inference_visitor = TypeInferenceVisitor::new(symbol_table, None);
         self.validate_object_literal(
             object,
             &context,
             symbol_table,
-            type_inference_visitor,
+            &type_inference_visitor,
             result,
             is_debug
         );
 
         // Index the object itself
         let full_path = PathBuilder::build(&[name]);
-        
+
         self.short_name_to_full_paths
             .entry(name.to_string())
             .or_insert_with(Vec::new)
             .push(full_path.clone());
-        
+
         let object_type = declared_type.unwrap_or(DataType::Object);
         self.path_to_type.insert(full_path.clone(), object_type);
 
@@ -747,8 +721,9 @@ impl<'a> DataSectionAnalyzer<'a> {
     #[inline]
     fn join_table_path(segments: &[String]) -> String {
         segments.join(".")
-                  }
-  // ==================== VALUE VALIDATION ====================
+    }
+
+    // ==================== VALUE VALIDATION ====================
 
     #[inline]
     fn validate_value(
@@ -820,7 +795,7 @@ impl<'a> DataSectionAnalyzer<'a> {
                     is_debug
                 );
             }
-            Value::Object { properties, .. } => {
+            Value::Object { .. } => {
                 return Some(self.validate_object_literal(
                     value,
                     context,
@@ -895,7 +870,7 @@ impl<'a> DataSectionAnalyzer<'a> {
         }
 
         self.current_nesting_depth += 1;
-        
+
         let mut first_type: Option<DataType> = None;
         for (i, element) in values.iter().enumerate() {
             let elem_context = format!("{}[{}]", context, i);
@@ -958,7 +933,7 @@ impl<'a> DataSectionAnalyzer<'a> {
 
         // Extract table path from context
         let object_path = Self::extract_table_path_from_context(context);
-        
+
         if is_debug {
             self.error_manager.log_debug(&format!(
                 "    Validating object literal in context: {}",
@@ -1088,7 +1063,7 @@ impl<'a> DataSectionAnalyzer<'a> {
         is_debug: bool,
     ) -> Option<DataType> {
         let arg_count = arguments.len();
-        
+
         if arg_count > MAX_TUPLE_ELEMENTS {
             self.add_error(
                 result,
@@ -1144,8 +1119,8 @@ impl<'a> DataSectionAnalyzer<'a> {
 
         let arg = &arguments[0];
         if let Value::String { value: str_val, .. } = arg {
-            // Validate base64 content
-            if base64::decode(str_val).is_err() {
+            // Validate base64 content using new Engine API
+            if general_purpose::STANDARD.decode(str_val).is_err() {
                 self.add_error(
                     result,
                     ERROR_INVALID_BLOB_CONTENT,
@@ -1213,8 +1188,90 @@ impl<'a> DataSectionAnalyzer<'a> {
         Some(DataType::Regex)
     }
 
-    // ... Continued in validation methods for enum, function calls, variable references
-    // (Due to length, these will follow the same pattern - I can provide them if needed)
+    // ==================== NEW: MISSING VALIDATION METHODS ====================
+
+    fn validate_enum_value(
+        &self,
+        enum_name: &str,
+        enum_value: &str,
+        position: Position,
+        context: &str,
+        symbol_table: &SymbolTable,
+        result: &mut SectionAnalysisResult,
+        is_debug: bool,
+    ) -> DataType {
+        // Check if enum exists
+        if !symbol_table.has_enum(enum_name) {
+            self.add_error(
+                result,
+                ERROR_ENUM_NOT_FOUND,
+                &format!("Enum '{}' not found in {}", enum_name, context),
+                position,
+                Some("Check @ENUMS section for available enums")
+            );
+            return DataType::Enum;
+        }
+
+        // Check if enum value exists
+        if !symbol_table.has_enum_field(enum_name, enum_value) {
+            self.add_error(
+                result,
+                ERROR_ENUM_VALUE_NOT_FOUND,
+                &format!(
+                    "Enum value '{}.{}' not found in {}",
+                    enum_name, enum_value, context
+                ),
+                position,
+                Some(&format!("Check available values in enum '{}'", enum_name))
+            );
+        }
+
+        if is_debug {
+            self.error_manager.log_debug(&format!(
+                "  Validated enum value: {}.{}",
+                enum_name, enum_value
+            ));
+        }
+
+        DataType::Enum
+    }
+
+    fn validate_function_call_value(
+        &mut self,
+        function_name: &str,
+        _arguments: &[crate::Compiler::AST::Expression],
+        position: Position,
+        context: &str,
+        symbol_table: &SymbolTable,
+        _type_inference_visitor: &TypeInferenceVisitor,
+        result: &mut SectionAnalysisResult,
+        is_debug: bool,
+    ) -> Option<DataType> {
+        // Check if function exists
+        if !symbol_table.has_function(function_name) {
+            self.add_error(
+                result,
+                ERROR_FUNCTION_NOT_FOUND,
+                &format!("Function '{}' not found in {}", function_name, context),
+                position,
+                Some("Check @QUICKFUNCS section or imports for available functions")
+            );
+            return None;
+        }
+
+        // Get function signature
+        let func_sig = symbol_table.try_get_function(function_name);
+
+        if is_debug {
+            self.error_manager.log_debug(&format!(
+                "  Validated function call: {}()",
+                function_name
+            ));
+        }
+
+        // Return function's return type
+        func_sig.and_then(|sig| sig.return_type)
+    }
 
     // ==================== TYPE SYSTEM HELPERS ====================
 
@@ -1319,7 +1376,7 @@ impl<'a> DataSectionAnalyzer<'a> {
         };
 
         result.errors.push(error);
-        
+
         if self.operational_settings.debug_mode != DebugMode::Off {
             self.error_manager.log_error(&format!("  [{}] {}", error_type, message));
             if let Some(sugg) = suggestion {
@@ -1343,9 +1400,9 @@ impl<'a> DataSectionAnalyzer<'a> {
         };
 
         result.warnings.push(warning);
-        
+
         if self.operational_settings.debug_mode != DebugMode::Off {
-            self.error_manager.log_Warning(message);
+            self.error_manager.log_warning(message);
         }
     }
-              }
+}

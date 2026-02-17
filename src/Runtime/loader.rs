@@ -211,7 +211,7 @@ impl DixLoader {
         ));
 
         // Deserialize binary to AST
-        let unpacker = BinaryUnpacker::new();
+        let mut unpacker = BinaryUnpacker::new();
         let deser_result = unpacker.unpack(&binary_data);
 
         if !deser_result.is_success {
@@ -457,7 +457,7 @@ impl DixLoader {
 
             // Binary serialization
             let packer = BinaryPacker::new();
-            let ser_result = packer.pack(&ast_with_security);
+            let mut ser_result = packer.pack(&ast_with_security);
 
             if !ser_result.is_success {
                 return Err(format!("Binary serialization failed: {:?}", ser_result.errors));

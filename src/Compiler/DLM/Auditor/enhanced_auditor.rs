@@ -142,7 +142,7 @@ impl EnhancedAuditor {
                 if let Some(caps) = ast_re.captures(&content) {
                     match general_purpose::STANDARD.decode(&caps[1]) {
                         Ok(binary_ast) => {
-                            let unpacker = BinaryUnpacker::new();
+                            let mut unpacker = BinaryUnpacker::new();
                             let unpack_result = unpacker.unpack(&binary_ast);
 
                             if unpack_result.is_success {
@@ -477,7 +477,7 @@ impl EnhancedAuditor {
         }
 
         // Serialize current AST as base64
-        let packer = BinaryPacker::new();
+        let mut packer = BinaryPacker::new();
         let pack_result = packer.pack(&self.current_ast);
         if pack_result.is_success {
             let ast_snapshot = general_purpose::STANDARD.encode(&pack_result.binary_data);

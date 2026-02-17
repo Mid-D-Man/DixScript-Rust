@@ -41,7 +41,7 @@ impl Chacha20Encryptor {
 
         self.nonce = Self::generate_nonce();
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug("Generated random ChaCha20 key and nonce");
         }
     }
@@ -64,9 +64,11 @@ impl IEncryptor for Chacha20Encryptor {
     }
 
     fn initialize(&mut self, config: HashMap<String, String>) {
+        use base64::{Engine as _, engine::general_purpose};
+
         // Load key from metadata (decryption scenario)
         if let Some(key_data) = config.get("key_data") {
-            self.key = base64::decode(key_data).unwrap_or_else(|_| {
+            self.key = general_purpose::STANDARD.decode(key_data).unwrap_or_else(|_| {
                 self.base.log_warning("Failed to decode key data, generating new key");
                 let mut key = vec![0u8; 32];
                 OsRng.fill_bytes(&mut key);
@@ -74,10 +76,10 @@ impl IEncryptor for Chacha20Encryptor {
             });
 
             if let Some(nonce_data) = config.get("nonce") {
-                self.nonce = base64::decode(nonce_data).unwrap_or_else(|_| Self::generate_nonce());
+                self.nonce = general_purpose::STANDARD.decode(nonce_data).unwrap_or_else(|_| Self::generate_nonce());
             }
 
-            if self.base.debug_config().is_enabled {
+            if self.base.is_debug_enabled() {
                 self.base.log_debug("Loaded ChaCha20 key from metadata");
             }
         } else {
@@ -86,7 +88,7 @@ impl IEncryptor for Chacha20Encryptor {
             self.base.log_info("Generated new ChaCha20 encryption key (keyfile mode)");
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug("Initialized ChaCha20-Poly1305 encryptor");
         }
     }
@@ -141,7 +143,7 @@ impl IEncryptor for Chacha20Encryptor {
             return Err("Encryption key not set".to_string());
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!("Encrypting {} bytes with ChaCha20-Poly1305...", data.len()));
         }
 
@@ -168,7 +170,7 @@ impl IEncryptor for Chacha20Encryptor {
         encrypted.extend_from_slice(&self.nonce);
         encrypted.extend_from_slice(&ciphertext);
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
                 "✅ ChaCha20-Poly1305 encryption complete: {} → {} bytes",
                 data.len(),
@@ -208,7 +210,7 @@ impl IEncryptor for Chacha20Encryptor {
             return Err("Encrypted data too short".to_string());
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!("Decrypting {} bytes with ChaCha20-Poly1305...", encrypted_data.len()));
         }
 
@@ -221,7 +223,7 @@ impl IEncryptor for Chacha20Encryptor {
         let nonce = Nonce::from_slice(extracted_nonce);
 
         let plaintext = cipher.decrypt(nonce, ciphertext)
-            .map_err(|e| {
+            .map_err(|_e| {
                 let error_msg = "Decryption failed - invalid password or corrupted data".to_string();
                 self.base.error_manager().add_dlm_error(
                     DlmErrorType::InvocationFailed,
@@ -234,7 +236,7 @@ impl IEncryptor for Chacha20Encryptor {
                 error_msg
             })?;
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
                 "✅ ChaCha20-Poly1305 decryption complete: {} → {} bytes",
                 encrypted_data.len(),
@@ -253,17 +255,19 @@ impl IEncryptor for Chacha20Encryptor {
     }
 
     fn get_metadata(&self) -> HashMap<String, String> {
+        use base64::{Engine as _, engine::general_purpose};
+
         let mut metadata = HashMap::new();
         metadata.insert("algorithm".to_string(), "chacha20-poly1305".to_string());
         metadata.insert("key_length".to_string(), "32".to_string());
-        metadata.insert("nonce".to_string(), base64::encode(&self.nonce));
+        metadata.insert("nonce".to_string(), general_purpose::STANDARD.encode(&self.nonce));
         metadata.insert("module_name".to_string(), self.module_name().to_string());
         metadata.insert("priority".to_string(), self.priority().to_string());
         metadata.insert("security_level".to_string(), "HIGH".to_string());
 
         // Include key if keyfile mode (NOT password mode)
         if self.kdf.is_none() && !self.key.is_empty() {
-            metadata.insert("key_data".to_string(), base64::encode(&self.key));
+            metadata.insert("key_data".to_string(), general_purpose::STANDARD.encode(&self.key));
         }
 
         // Include KDF parameters if password mode

@@ -17,7 +17,7 @@ impl LzmaCompressor {
     /// Create new LZMA compressor
     pub fn new() -> Self {
         let base = DLMModuleBase::new("DCompressor.lzma", 2);
-        
+
         LzmaCompressor { base }
     }
 }
@@ -38,7 +38,7 @@ impl ICompressor for LzmaCompressor {
     }
 
     fn initialize(&mut self, _config: HashMap<String, String>) {
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug("Initialized LZMA compressor");
         }
     }
@@ -56,13 +56,13 @@ impl ICompressor for LzmaCompressor {
             return Err("Cannot compress null or empty data".to_string());
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!("Compressing {} bytes with LZMA...", data.len()));
             self.base.log_warning("⏱️ LZMA compression is slow - this may take a while for large files");
         }
 
         let mut encoder = XzEncoder::new(Vec::new(), 9); // Level 9 = best compression
-        
+
         encoder.write_all(data).map_err(|e| {
             let error_msg = format!("LZMA compression failed: {}", e);
             self.base.error_manager().add_dlm_error(
@@ -91,7 +91,7 @@ impl ICompressor for LzmaCompressor {
 
         let ratio = 1.0 - (compressed.len() as f64 / data.len() as f64);
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
                 "✅ LZMA compression complete: {} → {} bytes ({:.1}% reduction)",
                 data.len(),
@@ -116,12 +116,12 @@ impl ICompressor for LzmaCompressor {
             return Err("Cannot decompress null or empty data".to_string());
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!("Decompressing {} bytes with LZMA...", compressed_data.len()));
         }
 
         let mut decoder = XzDecoder::new(Vec::new());
-        
+
         decoder.write_all(compressed_data).map_err(|e| {
             let error_msg = format!("LZMA decompression failed: {}", e);
             self.base.error_manager().add_dlm_error(
@@ -148,7 +148,7 @@ impl ICompressor for LzmaCompressor {
             error_msg
         })?;
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
                 "✅ LZMA decompression complete: {} → {} bytes",
                 compressed_data.len(),
@@ -175,4 +175,4 @@ impl ICompressor for LzmaCompressor {
     fn priority(&self) -> i32 {
         self.base.priority()
     }
-      }
+}

@@ -60,7 +60,7 @@ impl EnhancedAuditor {
             .file_stem()
             .and_then(|s| s.to_str())
             .ok_or("Invalid source file path")?;
-        
+
         let source_dir = source_path
             .parent()
             .unwrap_or_else(|| Path::new("."));
@@ -69,7 +69,7 @@ impl EnhancedAuditor {
 
         // Check if audit file exists in source directory
         if primary_path.exists() {
-            if self.base.debug_config().is_enabled {
+            if self.base.is_debug_enabled() {
                 self.base.log_debug(&format!(
                     "Found existing audit file in source directory: {:?}",
                     primary_path
@@ -100,7 +100,7 @@ impl EnhancedAuditor {
         }
 
         // Create new audit file in source directory
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug(&format!("Creating new audit file in source directory: {:?}", primary_path));
         }
 
@@ -117,8 +117,10 @@ impl EnhancedAuditor {
 
     /// Load previous audit from file
     fn load_previous_audit(&mut self) {
+        use base64::{Engine as _, engine::general_purpose};
+
         if !Path::new(&self.audit_file_path).exists() {
-            if self.base.debug_config().is_enabled {
+            if self.base.is_debug_enabled() {
                 self.base.log_debug("No previous audit file found");
             }
             return;
@@ -130,7 +132,7 @@ impl EnhancedAuditor {
                 let checksum_re = Regex::new(r#"source_checksum\s*=\s*"([^"]+)""#).unwrap();
                 if let Some(caps) = checksum_re.captures(&content) {
                     self.current_entry.previous_checksum = Some(caps[1].to_string());
-                    if self.base.debug_config().is_enabled {
+                    if self.base.is_debug_enabled() {
                         self.base.log_debug(&format!("Loaded previous checksum: {}", &caps[1]));
                     }
                 }
@@ -138,21 +140,20 @@ impl EnhancedAuditor {
                 // Extract and deserialize previous AST snapshot
                 let ast_re = Regex::new(r#"ast_snapshot\s*=\s*"([^"]+)""#).unwrap();
                 if let Some(caps) = ast_re.captures(&content) {
-                    match base64::decode(&caps[1]) {
+                    match general_purpose::STANDARD.decode(&caps[1]) {
                         Ok(binary_ast) => {
-                            let mut unpacker = BinaryUnpacker::new();
-                            match unpacker.unpack(&binary_ast) {
-                                Ok(unpack_result) if unpack_result.is_success => {
-                                    if let Some(ast) = unpack_result.ast {
-                                        self.previous_ast = Some(ast);
-                                        if self.base.debug_config().is_enabled {
-                                            self.base.log_debug("Successfully loaded previous AST snapshot");
-                                        }
+                            let unpacker = BinaryUnpacker::new();
+                            let unpack_result = unpacker.unpack(&binary_ast);
+
+                            if unpack_result.is_success {
+                                if let Some(ast) = unpack_result.ast {
+                                    self.previous_ast = Some(ast);
+                                    if self.base.is_debug_enabled() {
+                                        self.base.log_debug("Successfully loaded previous AST snapshot");
                                     }
                                 }
-                                _ => {
-                                    self.base.log_warning("Failed to deserialize previous AST");
-                                }
+                            } else {
+                                self.base.log_warning("Failed to deserialize previous AST");
                             }
                         }
                         Err(e) => {
@@ -202,7 +203,7 @@ impl EnhancedAuditor {
             self.current_entry.changes_summary = Some(parts.join(", "));
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
                 "Changes detected: {}",
                 self.current_entry.changes_summary.as_ref().unwrap()
@@ -444,6 +445,8 @@ impl EnhancedAuditor {
 
     /// Write audit entry to file
     fn write_audit_entry(&self) -> Result<(), String> {
+        use base64::{Engine as _, engine::general_purpose};
+
         let mut content = String::new();
 
         if !Path::new(&self.audit_file_path).exists() {
@@ -474,12 +477,11 @@ impl EnhancedAuditor {
         }
 
         // Serialize current AST as base64
-        let mut packer = BinaryPacker::new();
-        if let Ok(pack_result) = packer.pack(&self.current_ast) {
-            if pack_result.is_success {
-                let ast_snapshot = base64::encode(&pack_result.binary_data);
-                content.push_str(&format!("    ast_snapshot = \"{}\",\n", ast_snapshot));
-            }
+        let packer = BinaryPacker::new();
+        let pack_result = packer.pack(&self.current_ast);
+        if pack_result.is_success {
+            let ast_snapshot = general_purpose::STANDARD.encode(&pack_result.binary_data);
+            content.push_str(&format!("    ast_snapshot = \"{}\",\n", ast_snapshot));
         }
 
         content.push_str(&format!("    status = \"{}\",\n", self.current_entry.status));
@@ -567,7 +569,7 @@ impl IAuditor for EnhancedAuditor {
     }
 
     fn initialize(&mut self, _config: HashMap<String, String>) {
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug("Initialized Enhanced auditor (DixScript format with smart diff)");
         }
     }
@@ -617,7 +619,7 @@ impl IAuditor for EnhancedAuditor {
         self.current_entry.modules_executed.push(step_name.to_string());
         self.current_entry.execution_time_ms += duration_ms;
 
-        if self.base.debug_config().is_verbose {
+        if self.base.is_verbose_enabled() {
             self.base.log_verbose(&format!("Logged step: {} ({:.2}ms)", step_name, duration_ms));
         }
     }
@@ -683,4 +685,4 @@ impl IAuditor for EnhancedAuditor {
     fn priority(&self) -> i32 {
         self.base.priority()
     }
-                           }
+}

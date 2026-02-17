@@ -1,349 +1,387 @@
-//! Manages .mdix.key file generation and reading
+//! Key File Manager - handles .dxkey file creation and reading
+//! Manages encryption keys, compression metadata, and audit information
 
-use crate::Compiler::AST::DixScript;
-use crate::Compiler::DLM::dlm_module_base::DebugConfig;
-use crate::ErrorManager::{ErrorManager, DlmErrorType};
+use crate::Compiler::DLM::dlm_module_base::DLMModuleBase;
+use crate::ErrorManager::{DlmErrorType, ErrorSeverity};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use chrono::Utc;
-use regex::Regex;
-use crate::ErrorSeverity;
-use super::key_file_data::*;
+use std::fs;
+use std::path::Path;
 
-/// Manages .mdix.key file operations
+/// Metadata stored in .dxkey file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyFileMetadata {
+    pub version: String,
+    pub source_file: String,
+    pub compiled_file: String,
+    pub timestamp: String,
+    pub compression: Option<CompressionMetadata>,
+    pub encryption: Option<EncryptionMetadata>,
+    pub audit: Option<AuditMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompressionMetadata {
+    pub algorithm: String,
+    pub original_size: usize,
+    pub compressed_size: usize,
+    pub compression_ratio: f64,
+    pub module_name: String,
+    pub priority: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptionMetadata {
+    pub algorithm: String,
+    pub key_data: Option<String>, // Base64 encoded key (only for keyfile mode)
+    pub iv: Option<String>,        // Base64 encoded IV
+    pub salt: Option<String>,      // Base64 encoded salt (password mode)
+    pub kdf_algorithm: Option<String>,
+    pub kdf_iterations: Option<u32>,
+    pub kdf_memory: Option<u32>,
+    pub kdf_parallelism: Option<u32>,
+    pub key_length: u32,
+    pub module_name: String,
+    pub priority: i32,
+    pub security_level: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditMetadata {
+    pub audit_type: String,
+    pub audit_file_path: String,
+    pub timestamp: String,
+    pub module_name: String,
+}
+
+/// Key File Manager for .dxkey files
 pub struct KeyFileManager {
-    error_manager: ErrorManager,
-    debug_config: DebugConfig,
+    base: DLMModuleBase,
+    output_directory: String,
+    source_file_path: String,
 }
 
 impl KeyFileManager {
     /// Create new KeyFileManager
-    pub fn new(debug_mode: crate::Compiler::Core::Config::DebugMode) -> Self {
-        let error_manager = ErrorManager::get_shared_instance();
-        let debug_config = DebugConfig::from_debug_mode(debug_mode);
-        
+    pub fn new(source_file_path: String, output_directory: String) -> Self {
+        let base = DLMModuleBase::new("KeyFileManager", 0);
+
         KeyFileManager {
-            error_manager,
-            debug_config,
+            base,
+            output_directory,
+            source_file_path,
         }
     }
-    
-    /// Generate .mdix.key file from pipeline metadata
-    pub fn generate_key_file(
+
+    /// Create .dxkey file with metadata
+    pub fn create_key_file(
         &self,
-        key_file_path: &Path,
-        pipeline_metadata: &HashMap<String, HashMap<String, String>>,
-        ast: &DixScript,
-    ) -> Result<(), String> {
-        self.error_manager.log_info(&format!(
-            "[KeyFileManager] Generating key file: {}",
-            key_file_path.display()
-        ));
-        
-        let key_file_content = self.build_key_file_content(pipeline_metadata, ast)?;
-        
-        // Write key file
-        let mut file = File::create(key_file_path)
-            .map_err(|e| format!("Failed to create key file: {}", e))?;
-        
-        file.write_all(key_file_content.as_bytes())
-            .map_err(|e| format!("Failed to write key file: {}", e))?;
-        
-        self.error_manager.log_info(&format!(
-            "[KeyFileManager] ✅ Key file generated: {}",
-            key_file_path.display()
-        ));
-        
-        // Handle backups (if configured)
-        if let Some(ref security) = ast.security {
-            self.handle_backups(key_file_path, security)?;
-        }
-        
-        Ok(())
-    }
-    
-    /// Build .mdix.key file content in DixScript format
-    fn build_key_file_content(
-        &self,
-        metadata: &HashMap<String, HashMap<String, String>>,
-        ast: &DixScript,
+        compiled_file_path: &str,
+        compression_metadata: Option<HashMap<String, String>>,
+        encryption_metadata: Option<HashMap<String, String>>,
+        audit_metadata: Option<HashMap<String, String>>,
     ) -> Result<String, String> {
-        let mut content = String::new();
-        
-        // Header
-        content.push_str("// DixScript Key File - v1.0.0\n");
-        content.push_str(&format!("// Generated: {}\n", Utc::now().format("%Y-%m-%dT%H:%M:%SZ")));
-        content.push_str("// ⚠️ KEEP THIS FILE SECRET - Contains decryption keys!\n");
-        content.push_str("\n");
-        
-        // @CONFIG section
-        content.push_str("@CONFIG(\n");
-        content.push_str("  version -> \"1.0.0\",\n");
-        content.push_str("  type -> \"keyfile\",\n");
-        content.push_str(&format!("  generated -> {}\n", Utc::now().format("%Y-%m-%dT%H:%M:%SZ")));
-        content.push_str(")\n");
-        content.push_str("\n");
-        
-        // @DLM_PIPELINE section
-        content.push_str("@DLM_PIPELINE(\n");
-        
-        // Modules used
-        let mut modules = Vec::new();
-        if metadata.contains_key("compressor") {
-            if let Some(comp_meta) = metadata.get("compressor") {
-                if let Some(module_name) = comp_meta.get("module_name") {
-                    modules.push(module_name.clone());
-                }
-            }
+        if self.base.is_debug_enabled() {
+            self.base.log_info("Creating .dxkey file...");
         }
-        if metadata.contains_key("encryptor") {
-            if let Some(enc_meta) = metadata.get("encryptor") {
-                if let Some(module_name) = enc_meta.get("module_name") {
-                    modules.push(module_name.clone());
-                }
-            }
-        }
-        if metadata.contains_key("auditor") {
-            if let Some(aud_meta) = metadata.get("auditor") {
-                if let Some(module_name) = aud_meta.get("module_name") {
-                    modules.push(module_name.clone());
-                }
-            }
-        }
-        
-        content.push_str(&format!("  modules_used:: \"{}\"\n", modules.join("\", \"")));
-        content.push_str(")\n");
-        content.push_str("\n");
-        
-        // @KEY_DATA section
-        content.push_str("@KEY_DATA(\n");
-        
-        // Encryption metadata
-        if let Some(enc_meta) = metadata.get("encryptor") {
-            content.push_str("  // Encryption configuration\n");
-            self.append_metadata(&mut content, enc_meta, "  ");
-            content.push_str("\n");
-        }
-        
-        // Compression metadata
-        if let Some(comp_meta) = metadata.get("compressor") {
-            content.push_str("  // Compression configuration\n");
-            self.append_metadata(&mut content, comp_meta, "  ");
-        }
-        
-        content.push_str(")\n");
-        content.push_str("\n");
-        
-        // @FILE_INFO section
-        content.push_str("@FILE_INFO(\n");
-        content.push_str(&format!("  created -> {}", Utc::now().format("%Y-%m-%dT%H:%M:%SZ")));
-        content.push_str("\n)\n");
-        
-        Ok(content)
-    }
-    
-    #[inline]
-    fn append_metadata(&self, content: &mut String, meta: &HashMap<String, String>, indent: &str) {
-        for (key, value) in meta {
-            // Try to parse as number
-            if let Ok(_) = value.parse::<i64>() {
-                content.push_str(&format!("{}{} = {},\n", indent, key, value));
-            } else if let Ok(_) = value.parse::<f64>() {
-                content.push_str(&format!("{}{} = {},\n", indent, key, value));
-            } else if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false") {
-                content.push_str(&format!("{}{} = {},\n", indent, key, value.to_lowercase()));
-            } else {
-                content.push_str(&format!("{}{} = \"{}\",\n", indent, key, value));
-            }
-        }
-    }
-    
-    /// Handle backup creation (if enabled in @SECURITY)
-    fn handle_backups(
-        &self,
-        key_file_path: &Path,
-        security: &crate::Compiler::AST::SecuritySection,
-    ) -> Result<(), String> {
-        // Find keystore block
-        let keystore_block = security.entries.iter()
-            .find(|e| e.block_key.eq_ignore_ascii_case("keystore"));
-        
-        if keystore_block.is_none() {
-            return Ok(());
-        }
-        
-        let block = keystore_block.unwrap();
-        
-        // Check backup_count field
-        let backup_count_field = block.fields.iter()
-            .find(|f| f.key.eq_ignore_ascii_case("backup_count"));
-        
-        if backup_count_field.is_none() {
-            return Ok(());
-        }
-        
-        let backup_count = if let crate::Compiler::AST::Value::Integer { value, .. } = &backup_count_field.unwrap().value {
-            *value
-        } else {
-            return Ok(());
+
+        // Build metadata structure
+        let metadata = KeyFileMetadata {
+            version: "1.0.0".to_string(),
+            source_file: self.source_file_path.clone(),
+            compiled_file: compiled_file_path.to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            compression: compression_metadata.as_ref().map(|m| self.parse_compression_metadata(m)),
+            encryption: encryption_metadata.as_ref().map(|m| self.parse_encryption_metadata(m)),
+            audit: audit_metadata.as_ref().map(|m| self.parse_audit_metadata(m)),
         };
-        
-        if backup_count <= 0 {
-            return Ok(());
-        }
-        
-        self.error_manager.log_info(&format!(
-            "[KeyFileManager] Creating {} backup(s) of key file...",
-            backup_count
-        ));
-        
-        // Create backups with timestamp
-        let directory = key_file_path.parent().unwrap_or_else(|| Path::new("."));
-        let file_stem = key_file_path.file_stem().unwrap().to_str().unwrap();
-        
-        // Get existing backups
-        let mut existing_backups = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(directory) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with(file_stem) && name.contains(".backup_") {
-                        existing_backups.push(path);
-                    }
-                }
-            }
-        }
-        
-        // Sort by creation time (newest first)
-        existing_backups.sort_by_key(|p| {
-            std::fs::metadata(p)
-                .and_then(|m| m.created())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-        });
-        existing_backups.reverse();
-        
-        // Delete oldest backups if we exceed limit
-        while existing_backups.len() >= backup_count as usize {
-            if let Some(oldest) = existing_backups.pop() {
-                std::fs::remove_file(&oldest).ok();
-                if self.debug_config.is_enabled {
-                    self.error_manager.log_debug(&format!(
-                        "[KeyFileManager] Deleted old backup: {}",
-                        oldest.file_name().unwrap().to_str().unwrap()
-                    ));
-                }
-            }
-        }
-        
-        // Create new backup
-        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-        let backup_path = directory.join(format!("{}.backup_{}", file_stem, timestamp));
-        
-        std::fs::copy(key_file_path, &backup_path)
-            .map_err(|e| format!("Failed to create backup: {}", e))?;
-        
-        self.error_manager.log_info(&format!(
-            "[KeyFileManager] 🔑 Backup created: {}",
-            backup_path.file_name().unwrap().to_str().unwrap()
-        ));
-        
-        Ok(())
-    }
-    
-    /// Read .mdix.key file and extract metadata
-    pub fn read_key_file(&self, key_file_path: &Path) -> Result<HashMap<String, HashMap<String, String>>, String> {
-        self.error_manager.log_info(&format!(
-            "[KeyFileManager] Reading key file: {}",
-            key_file_path.display()
-        ));
-        
-        if !key_file_path.exists() {
-            self.error_manager.add_dlm_error(
-                DlmErrorType::KeyFileMissing,
-                format!("Key file not found: {}", key_file_path.display()),
-                Some("KeyFileManager".to_string()),
-                Some(key_file_path.to_str().unwrap().to_string()),
+
+        // Serialize to JSON
+        let json_content = serde_json::to_string_pretty(&metadata).map_err(|e| {
+            let error_msg = format!("Failed to serialize key file metadata: {}", e);
+            self.base.error_manager().add_dlm_error(
+                DlmErrorType::InvocationFailed,
+                error_msg.clone(),
+                Some(self.base.module_name().to_string()),
                 None,
-                ErrorSeverity::Fatal,
+                None,
+                ErrorSeverity::Error,
             );
-            return Err(format!("Key file not found: {}", key_file_path.display()));
+            error_msg
+        })?;
+
+        // Generate key file path
+        let key_file_path = self.generate_key_file_path(compiled_file_path);
+
+        // Ensure output directory exists
+        if let Some(parent) = Path::new(&key_file_path).parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                format!("Failed to create key file directory: {}", e)
+            })?;
         }
-        
-        let mut file = File::open(key_file_path)
-            .map_err(|e| format!("Failed to open key file: {}", e))?;
-        
-        let mut content = String::new();
-        file.read_to_string(&mut content)
-            .map_err(|e| format!("Failed to read key file: {}", e))?;
-        
-        // Parse key file (simple regex-based parsing for now)
-        let mut metadata = HashMap::new();
-        
-        // Extract KEY_DATA section
-        let re = Regex::new(r"@KEY_DATA\((.*?)\)").unwrap();
-        if let Some(captures) = re.captures(&content) {
-            if let Some(key_data_content) = captures.get(1) {
-                self.parse_key_data(key_data_content.as_str(), &mut metadata);
+
+        // Write to file
+        fs::write(&key_file_path, json_content).map_err(|e| {
+            let error_msg = format!("Failed to write key file: {}", e);
+            self.base.error_manager().add_dlm_error(
+                DlmErrorType::InvocationFailed,
+                error_msg.clone(),
+                Some(self.base.module_name().to_string()),
+                None,
+                Some(format!("Check write permissions for: {}", key_file_path)),
+                ErrorSeverity::Error,
+            );
+            error_msg
+        })?;
+
+        self.base.log_info(&format!("✅ Key file created: {}", key_file_path));
+
+        if self.base.is_verbose_enabled() {
+            self.base.log_debug("Key file contents:");
+            self.base.log_debug(&format!("  - Version: {}", metadata.version));
+            self.base.log_debug(&format!("  - Source: {}", metadata.source_file));
+            self.base.log_debug(&format!("  - Compiled: {}", metadata.compiled_file));
+
+            if let Some(ref comp) = metadata.compression {
+                self.base.log_debug(&format!("  - Compression: {} ({:.1}% reduction)",
+                                             comp.algorithm, (1.0 - comp.compression_ratio) * 100.0));
+            }
+
+            if let Some(ref enc) = metadata.encryption {
+                self.base.log_debug(&format!("  - Encryption: {} ({} security)",
+                                             enc.algorithm, enc.security_level));
+            }
+
+            if let Some(ref audit) = metadata.audit {
+                self.base.log_debug(&format!("  - Audit: {}", audit.audit_type));
             }
         }
-        
-        self.error_manager.log_info("[KeyFileManager] ✅ Key file parsed successfully");
-        
+
+        Ok(key_file_path)
+    }
+
+    /// Read and parse .dxkey file
+    pub fn read_key_file(&self, key_file_path: &str) -> Result<KeyFileMetadata, String> {
+        if self.base.is_debug_enabled() {
+            self.base.log_info(&format!("Reading key file: {}", key_file_path));
+        }
+
+        // Check if file exists
+        if !Path::new(key_file_path).exists() {
+            let error_msg = format!("Key file not found: {}", key_file_path);
+            self.base.error_manager().add_dlm_error(
+                DlmErrorType::InvalidFunctionSignature,
+                error_msg.clone(),
+                Some(self.base.module_name().to_string()),
+                None,
+                Some("Ensure the .dxkey file exists in the expected location".to_string()),
+                ErrorSeverity::Error,
+            );
+            return Err(error_msg);
+        }
+
+        // Read file content
+        let json_content = fs::read_to_string(key_file_path).map_err(|e| {
+            let error_msg = format!("Failed to read key file: {}", e);
+            self.base.error_manager().add_dlm_error(
+                DlmErrorType::InvocationFailed,
+                error_msg.clone(),
+                Some(self.base.module_name().to_string()),
+                None,
+                None,
+                ErrorSeverity::Error,
+            );
+            error_msg
+        })?;
+
+        // Parse JSON
+        let metadata: KeyFileMetadata = serde_json::from_str(&json_content).map_err(|e| {
+            let error_msg = format!("Failed to parse key file JSON: {}", e);
+            self.base.error_manager().add_dlm_error(
+                DlmErrorType::InvocationFailed,
+                error_msg.clone(),
+                Some(self.base.module_name().to_string()),
+                None,
+                Some("Key file may be corrupted or in invalid format".to_string()),
+                ErrorSeverity::Error,
+            );
+            error_msg
+        })?;
+
+        if self.base.is_debug_enabled() {
+            self.base.log_info("✅ Key file loaded successfully");
+
+            if self.base.is_verbose_enabled() {
+                self.base.log_debug(&format!("  - Version: {}", metadata.version));
+                self.base.log_debug(&format!("  - Source: {}", metadata.source_file));
+                self.base.log_debug(&format!("  - Compiled: {}", metadata.compiled_file));
+            }
+        }
+
         Ok(metadata)
     }
-    
-    /// Simple parser for KEY_DATA section
-    /// TODO: Replace with full DixScript parser later
-    fn parse_key_data(&self, key_data_content: &str, metadata: &mut HashMap<String, HashMap<String, String>>) {
-        let lines: Vec<&str> = key_data_content.lines().collect();
-        
-        let mut encryptor_meta = HashMap::new();
-        let mut compressor_meta = HashMap::new();
-        
-        let mut in_encryption = false;
-        let mut in_compression = false;
-        
-        for line in lines {
-            let trimmed = line.trim();
-            
-            if trimmed.starts_with("//") {
-                if trimmed.contains("Encryption") {
-                    in_encryption = true;
-                    in_compression = false;
-                } else if trimmed.contains("Compression") {
-                    in_encryption = false;
-                    in_compression = true;
-                }
-                continue;
-            }
-            
-            if !trimmed.contains('=') {
-                continue;
-            }
-            
-            let parts: Vec<&str> = trimmed.splitn(2, '=').collect();
-            if parts.len() != 2 {
-                continue;
-            }
-            
-            let key = parts[0].trim();
-            let value = parts[1].trim().trim_end_matches(',').trim_matches('"');
-            
-            if in_encryption {
-                encryptor_meta.insert(key.to_string(), value.to_string());
-            } else if in_compression {
-                compressor_meta.insert(key.to_string(), value.to_string());
-            }
-        }
-        
-        if !encryptor_meta.is_empty() {
-            metadata.insert("encryptor".to_string(), encryptor_meta);
-        }
-        
-        if !compressor_meta.is_empty() {
-            metadata.insert("compressor".to_string(), compressor_meta);
+
+    /// Generate key file path from compiled file path
+    fn generate_key_file_path(&self, compiled_file_path: &str) -> String {
+        let compiled_path = Path::new(compiled_file_path);
+        let file_stem = compiled_path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+
+        let key_file_name = format!("{}.dxkey", file_stem);
+
+        Path::new(&self.output_directory)
+            .join(key_file_name)
+            .to_string_lossy()
+            .to_string()
+    }
+
+    /// Parse compression metadata from HashMap
+    fn parse_compression_metadata(&self, metadata: &HashMap<String, String>) -> CompressionMetadata {
+        CompressionMetadata {
+            algorithm: metadata.get("algorithm").cloned().unwrap_or_default(),
+            original_size: metadata.get("original_size")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            compressed_size: metadata.get("compressed_size")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            compression_ratio: metadata.get("compression_ratio")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1.0),
+            module_name: metadata.get("module_name").cloned().unwrap_or_default(),
+            priority: metadata.get("priority")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
         }
     }
-          }
+
+    /// Parse encryption metadata from HashMap
+    fn parse_encryption_metadata(&self, metadata: &HashMap<String, String>) -> EncryptionMetadata {
+        EncryptionMetadata {
+            algorithm: metadata.get("algorithm").cloned().unwrap_or_default(),
+            key_data: metadata.get("key_data").cloned(),
+            iv: metadata.get("iv").cloned(),
+            salt: metadata.get("salt").cloned(),
+            kdf_algorithm: metadata.get("kdf_algorithm").cloned(),
+            kdf_iterations: metadata.get("kdf_iterations")
+                .and_then(|s| s.parse().ok()),
+            kdf_memory: metadata.get("kdf_memory")
+                .and_then(|s| s.parse().ok()),
+            kdf_parallelism: metadata.get("kdf_parallelism")
+                .and_then(|s| s.parse().ok()),
+            key_length: metadata.get("key_length")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            module_name: metadata.get("module_name").cloned().unwrap_or_default(),
+            priority: metadata.get("priority")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            security_level: metadata.get("security_level").cloned().unwrap_or_else(|| "UNKNOWN".to_string()),
+        }
+    }
+
+    /// Parse audit metadata from HashMap
+    fn parse_audit_metadata(&self, metadata: &HashMap<String, String>) -> AuditMetadata {
+        AuditMetadata {
+            audit_type: metadata.get("audit_type").cloned().unwrap_or_default(),
+            audit_file_path: metadata.get("audit_file_path").cloned().unwrap_or_default(),
+            timestamp: metadata.get("timestamp").cloned().unwrap_or_default(),
+            module_name: metadata.get("module_name").cloned().unwrap_or_default(),
+        }
+    }
+
+    /// Extract encryption metadata as HashMap for re-initialization
+    pub fn extract_encryption_config(&self, metadata: &KeyFileMetadata) -> Option<HashMap<String, String>> {
+        metadata.encryption.as_ref().map(|enc| {
+            let mut config = HashMap::new();
+
+            config.insert("algorithm".to_string(), enc.algorithm.clone());
+            config.insert("key_length".to_string(), enc.key_length.to_string());
+
+            if let Some(ref key_data) = enc.key_data {
+                config.insert("key_data".to_string(), key_data.clone());
+            }
+
+            if let Some(ref iv) = enc.iv {
+                config.insert("iv".to_string(), iv.clone());
+            }
+
+            if let Some(ref salt) = enc.salt {
+                config.insert("salt".to_string(), salt.clone());
+            }
+
+            if let Some(ref kdf_algorithm) = enc.kdf_algorithm {
+                config.insert("kdf_algorithm".to_string(), kdf_algorithm.clone());
+            }
+
+            if let Some(kdf_iterations) = enc.kdf_iterations {
+                config.insert("kdf_iterations".to_string(), kdf_iterations.to_string());
+            }
+
+            if let Some(kdf_memory) = enc.kdf_memory {
+                config.insert("kdf_memory".to_string(), kdf_memory.to_string());
+            }
+
+            if let Some(kdf_parallelism) = enc.kdf_parallelism {
+                config.insert("kdf_parallelism".to_string(), kdf_parallelism.to_string());
+            }
+
+            config
+        })
+    }
+
+    /// Extract compression metadata as HashMap for re-initialization
+    pub fn extract_compression_config(&self, metadata: &KeyFileMetadata) -> Option<HashMap<String, String>> {
+        metadata.compression.as_ref().map(|comp| {
+            let mut config = HashMap::new();
+            config.insert("algorithm".to_string(), comp.algorithm.clone());
+            config.insert("original_size".to_string(), comp.original_size.to_string());
+            config.insert("compressed_size".to_string(), comp.compressed_size.to_string());
+            config.insert("compression_ratio".to_string(), comp.compression_ratio.to_string());
+            config
+        })
+    }
+
+    /// Check if key file is password-protected
+    pub fn is_password_protected(&self, metadata: &KeyFileMetadata) -> bool {
+        metadata.encryption.as_ref()
+            .map(|enc| enc.salt.is_some() && enc.kdf_algorithm.is_some())
+            .unwrap_or(false)
+    }
+
+    /// Validate key file integrity
+    pub fn validate_key_file(&self, metadata: &KeyFileMetadata) -> Result<(), String> {
+        // Check version
+        if metadata.version.is_empty() {
+            return Err("Key file missing version information".to_string());
+        }
+
+        // Check source file reference
+        if metadata.source_file.is_empty() {
+            return Err("Key file missing source file reference".to_string());
+        }
+
+        // Check compiled file reference
+        if metadata.compiled_file.is_empty() {
+            return Err("Key file missing compiled file reference".to_string());
+        }
+
+        // Validate encryption metadata if present
+        if let Some(ref enc) = metadata.encryption {
+            if enc.algorithm.is_empty() {
+                return Err("Encryption metadata missing algorithm".to_string());
+            }
+
+            if enc.key_length == 0 {
+                return Err("Encryption metadata has invalid key length".to_string());
+            }
+        }
+
+        if self.base.is_debug_enabled() {
+            self.base.log_debug("✅ Key file validation passed");
+        }
+
+        Ok(())
+    }
+}

@@ -41,7 +41,7 @@ impl Aes128Encryptor {
 
         self.iv = Self::generate_iv();
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug("Generated random AES-128 key and IV");
         }
     }
@@ -64,9 +64,11 @@ impl IEncryptor for Aes128Encryptor {
     }
 
     fn initialize(&mut self, config: HashMap<String, String>) {
+        use base64::{Engine as _, engine::general_purpose};
+
         // Load key from metadata (decryption scenario)
         if let Some(key_data) = config.get("key_data") {
-            self.key = base64::decode(key_data).unwrap_or_else(|_| {
+            self.key = general_purpose::STANDARD.decode(key_data).unwrap_or_else(|_| {
                 self.base.log_warning("Failed to decode key data, generating new key");
                 let mut key = vec![0u8; 16];
                 OsRng.fill_bytes(&mut key);
@@ -74,10 +76,10 @@ impl IEncryptor for Aes128Encryptor {
             });
 
             if let Some(iv_data) = config.get("iv") {
-                self.iv = base64::decode(iv_data).unwrap_or_else(|_| Self::generate_iv());
+                self.iv = general_purpose::STANDARD.decode(iv_data).unwrap_or_else(|_| Self::generate_iv());
             }
 
-            if self.base.debug_config().is_enabled {
+            if self.base.is_debug_enabled() {
                 self.base.log_debug("Loaded AES-128 key from metadata");
             }
         } else {
@@ -86,7 +88,7 @@ impl IEncryptor for Aes128Encryptor {
             self.base.log_info("Generated new AES-128 encryption key (keyfile mode)");
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug("Initialized AES-128-GCM encryptor");
         }
     }
@@ -141,7 +143,7 @@ impl IEncryptor for Aes128Encryptor {
             return Err("Encryption key not set".to_string());
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!("Encrypting {} bytes with AES-128-GCM...", data.len()));
         }
 
@@ -168,7 +170,7 @@ impl IEncryptor for Aes128Encryptor {
         encrypted.extend_from_slice(&self.iv);
         encrypted.extend_from_slice(&ciphertext);
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
                 "✅ AES-128-GCM encryption complete: {} → {} bytes",
                 data.len(),
@@ -208,7 +210,7 @@ impl IEncryptor for Aes128Encryptor {
             return Err("Encrypted data too short".to_string());
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!("Decrypting {} bytes with AES-128-GCM...", encrypted_data.len()));
         }
 
@@ -221,7 +223,7 @@ impl IEncryptor for Aes128Encryptor {
         let nonce = Nonce::from_slice(extracted_iv);
 
         let plaintext = cipher.decrypt(nonce, ciphertext)
-            .map_err(|e| {
+            .map_err(|_e| {
                 let error_msg = "Decryption failed - invalid password or corrupted data".to_string();
                 self.base.error_manager().add_dlm_error(
                     DlmErrorType::InvocationFailed,
@@ -234,7 +236,7 @@ impl IEncryptor for Aes128Encryptor {
                 error_msg
             })?;
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
                 "✅ AES-128-GCM decryption complete: {} → {} bytes",
                 encrypted_data.len(),
@@ -253,17 +255,19 @@ impl IEncryptor for Aes128Encryptor {
     }
 
     fn get_metadata(&self) -> HashMap<String, String> {
+        use base64::{Engine as _, engine::general_purpose};
+
         let mut metadata = HashMap::new();
         metadata.insert("algorithm".to_string(), "aes128-gcm".to_string());
         metadata.insert("key_length".to_string(), "16".to_string());
-        metadata.insert("iv".to_string(), base64::encode(&self.iv));
+        metadata.insert("iv".to_string(), general_purpose::STANDARD.encode(&self.iv));
         metadata.insert("module_name".to_string(), self.module_name().to_string());
         metadata.insert("priority".to_string(), self.priority().to_string());
         metadata.insert("security_level".to_string(), "MEDIUM".to_string());
 
         // Include key if keyfile mode (NOT password mode)
         if self.kdf.is_none() && !self.key.is_empty() {
-            metadata.insert("key_data".to_string(), base64::encode(&self.key));
+            metadata.insert("key_data".to_string(), general_purpose::STANDARD.encode(&self.key));
         }
 
         // Include KDF parameters if password mode
@@ -278,4 +282,4 @@ impl IEncryptor for Aes128Encryptor {
     fn priority(&self) -> i32 {
         self.base.priority()
     }
-  }
+}

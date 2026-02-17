@@ -2,7 +2,7 @@
 //! Fast compression with good ratio (recommended for most use cases)
 
 use super::compressor_trait::{ICompressor, CompressorResult};
-use crate::Compiler::DLM::dlm_module_base::{DLMModuleBase, DebugConfig};
+use crate::Compiler::DLM::dlm_module_base::DLMModuleBase;
 use crate::ErrorManager::{DlmErrorType, ErrorSeverity};
 use flate2::Compression;
 use flate2::write::{GzEncoder, GzDecoder};
@@ -54,7 +54,7 @@ impl GzipCompressor {
     /// Create new Gzip compressor
     pub fn new() -> Self {
         let base = DLMModuleBase::new("DCompressor.gzip", 2);
-        
+
         GzipCompressor {
             base,
             compression_level: CompressionLevel::Optimal,
@@ -82,7 +82,7 @@ impl ICompressor for GzipCompressor {
             self.compression_level = CompressionLevel::from_string(level);
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug(&format!(
                 "Initialized with compression level: {:?}",
                 self.compression_level
@@ -103,12 +103,12 @@ impl ICompressor for GzipCompressor {
             return Err("Cannot compress null or empty data".to_string());
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!("Compressing {} bytes with GZIP...", data.len()));
         }
 
         let mut encoder = GzEncoder::new(Vec::new(), self.compression_level.to_flate2_compression());
-        
+
         encoder.write_all(data).map_err(|e| {
             let error_msg = format!("GZIP compression failed: {}", e);
             self.base.error_manager().add_dlm_error(
@@ -137,7 +137,7 @@ impl ICompressor for GzipCompressor {
 
         let ratio = 1.0 - (compressed.len() as f64 / data.len() as f64);
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
                 "✅ GZIP compression complete: {} → {} bytes ({:.1}% reduction)",
                 data.len(),
@@ -162,12 +162,12 @@ impl ICompressor for GzipCompressor {
             return Err("Cannot decompress null or empty data".to_string());
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!("Decompressing {} bytes with GZIP...", compressed_data.len()));
         }
 
         let mut decoder = GzDecoder::new(Vec::new());
-        
+
         decoder.write_all(compressed_data).map_err(|e| {
             let error_msg = format!("GZIP decompression failed: {}", e);
             self.base.error_manager().add_dlm_error(
@@ -194,7 +194,7 @@ impl ICompressor for GzipCompressor {
             error_msg
         })?;
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
                 "✅ GZIP decompression complete: {} → {} bytes",
                 compressed_data.len(),
@@ -222,4 +222,4 @@ impl ICompressor for GzipCompressor {
     fn priority(&self) -> i32 {
         self.base.priority()
     }
-              }
+}

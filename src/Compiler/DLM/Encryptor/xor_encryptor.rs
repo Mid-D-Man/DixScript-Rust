@@ -33,7 +33,7 @@ impl XorEncryptor {
         self.key = vec![0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut self.key);
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug("Generated random XOR key");
         }
     }
@@ -51,16 +51,18 @@ impl IEncryptor for XorEncryptor {
     fn initialize(&mut self, config: HashMap<String, String>) {
         self.base.log_warning("⚠️ XOR cipher provides LOW security - use only for testing!");
 
+        use base64::{Engine as _, engine::general_purpose};
+
         // Load key from metadata or generate new one
         if let Some(key_data) = config.get("key_data") {
-            self.key = base64::decode(key_data).unwrap_or_else(|_| {
+            self.key = general_purpose::STANDARD.decode(key_data).unwrap_or_else(|_| {
                 self.base.log_warning("Failed to decode key data, generating new key");
                 let mut key = vec![0u8; 32];
                 rand::rngs::OsRng.fill_bytes(&mut key);
                 key
             });
 
-            if self.base.debug_config().is_enabled {
+            if self.base.is_debug_enabled() {
                 self.base.log_debug("Loaded XOR key from metadata");
             }
         } else {
@@ -68,13 +70,13 @@ impl IEncryptor for XorEncryptor {
             self.base.log_info("Generated new XOR encryption key (keyfile mode)");
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug(&format!("Initialized XOR encryptor with {}-byte key", self.key.len()));
         }
     }
 
     fn set_password(&mut self, password: &str) -> EncryptorResult<()> {
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug("Setting password for XOR encryption");
         }
 
@@ -111,7 +113,7 @@ impl IEncryptor for XorEncryptor {
             return Err("Encryption key not set".to_string());
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!("Encrypting {} bytes with XOR cipher...", data.len()));
         }
 
@@ -120,7 +122,7 @@ impl IEncryptor for XorEncryptor {
             encrypted[i] = byte ^ self.key[i % self.key.len()];
         }
 
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_info(&format!("✅ XOR encryption complete: {} bytes", encrypted.len()));
         }
 
@@ -140,9 +142,11 @@ impl IEncryptor for XorEncryptor {
     }
 
     fn get_metadata(&self) -> HashMap<String, String> {
+        use base64::{Engine as _, engine::general_purpose};
+
         let mut metadata = HashMap::new();
         metadata.insert("algorithm".to_string(), "xor".to_string());
-        metadata.insert("key_data".to_string(), base64::encode(&self.key));
+        metadata.insert("key_data".to_string(), general_purpose::STANDARD.encode(&self.key));
         metadata.insert("key_length".to_string(), self.key.len().to_string());
         metadata.insert("module_name".to_string(), self.module_name().to_string());
         metadata.insert("priority".to_string(), self.priority().to_string());
@@ -153,4 +157,4 @@ impl IEncryptor for XorEncryptor {
     fn priority(&self) -> i32 {
         self.base.priority()
     }
-          }
+}

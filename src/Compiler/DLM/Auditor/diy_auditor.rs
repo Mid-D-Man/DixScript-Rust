@@ -25,13 +25,13 @@ pub struct DiyAuditor {
 
 impl DiyAuditor {
     /// Create new DIY auditor
-    pub fn new(source_file_path: String, output_directory: String) -> Self {
+    pub fn new(source_file_path: impl AsRef<Path>, output_directory: impl AsRef<Path>) -> Self {
         let base = DLMModuleBase::new("DAuditor.diy", 1);
 
         DiyAuditor {
             base,
-            source_file_path,
-            output_directory,
+            source_file_path: source_file_path.as_ref().to_string_lossy().to_string(),
+            output_directory: output_directory.as_ref().to_string_lossy().to_string(),
             audit_file_path: String::new(),
             current_entry: AuditEntry::new(),
             log_lines: Vec::new(),
@@ -53,7 +53,7 @@ impl DiyAuditor {
             .file_stem()
             .and_then(|s| s.to_str())
             .ok_or("Invalid source file path")?;
-        
+
         let source_dir = source_path
             .parent()
             .unwrap_or_else(|| Path::new("."));
@@ -62,7 +62,7 @@ impl DiyAuditor {
 
         // Check if audit file exists in source directory
         if primary_path.exists() {
-            if self.base.debug_config().is_enabled {
+            if self.base.is_debug_enabled() {
                 self.base.log_debug(&format!(
                     "Found existing audit file in source directory: {:?}",
                     primary_path
@@ -93,7 +93,7 @@ impl DiyAuditor {
         }
 
         // Create new audit file in source directory
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug(&format!("Creating new audit file in source directory: {:?}", primary_path));
         }
 
@@ -127,7 +127,7 @@ impl IAuditor for DiyAuditor {
     }
 
     fn initialize(&mut self, _config: HashMap<String, String>) {
-        if self.base.debug_config().is_enabled {
+        if self.base.is_debug_enabled() {
             self.base.log_debug("Initialized DIY auditor (simple text format)");
         }
     }
@@ -201,7 +201,7 @@ impl IAuditor for DiyAuditor {
 
         self.log_lines.push(String::new());
 
-        if self.base.debug_config().is_verbose {
+        if self.base.is_verbose_enabled() {
             self.base.log_verbose(&format!("Logged step: {}", step_name));
         }
     }
@@ -311,4 +311,4 @@ impl IAuditor for DiyAuditor {
     fn priority(&self) -> i32 {
         self.base.priority()
     }
-      }
+}

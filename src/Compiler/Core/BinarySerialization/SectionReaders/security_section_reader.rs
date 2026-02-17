@@ -15,7 +15,7 @@ use super::value_decoder::ValueDecoder;
 /// Each field: [Key Length: 4][Key UTF-8][Value]
 pub struct SecuritySectionReader<'a> {
     context: &'a mut BinarySerializationContext,
-    value_decoder: &'a mut ValueDecoder<'a>,
+    value_decoder: &'a mut ValueDecoder,
     error_manager: ErrorManager,
 }
 
@@ -23,7 +23,7 @@ impl<'a> SecuritySectionReader<'a> {
     /// Create new security section reader
     pub fn new(
         context: &'a mut BinarySerializationContext,
-        value_decoder: &'a mut ValueDecoder<'a>,
+        value_decoder: &'a mut ValueDecoder,
     ) -> Self {
         SecuritySectionReader {
             context,
@@ -142,7 +142,7 @@ impl<'a> SecuritySectionReader<'a> {
             .map_err(|e| BinarySerializationError::read_error(e.to_string(), "SecurityField"))?;
 
         // Read field value
-        let value = self.value_decoder.decode_value(reader)
+        let value = self.value_decoder.decode_value(reader,self.context)
             .map_err(|e| BinarySerializationError::read_error(e.to_string(), "SecurityField"))?;
 
         self.context.log_debug(&format!("    Field: {} = {}", key, value));

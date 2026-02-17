@@ -15,7 +15,7 @@ use super::value_encoder::ValueEncoder;
 /// Each field: [Key Length: 4][Key UTF-8][Value]
 pub struct SecuritySectionWriter<'a> {
     context: &'a mut BinarySerializationContext,
-    value_encoder: &'a mut ValueEncoder<'a>,
+    value_encoder: &'a mut ValueEncoder,
     error_manager: ErrorManager,
 }
 
@@ -23,7 +23,7 @@ impl<'a> SecuritySectionWriter<'a> {
     /// Create new security section writer
     pub fn new(
         context: &'a mut BinarySerializationContext,
-        value_encoder: &'a mut ValueEncoder<'a>,
+        value_encoder: &'a mut ValueEncoder,
     ) -> Self {
         SecuritySectionWriter {
             context,
@@ -138,7 +138,7 @@ impl<'a> SecuritySectionWriter<'a> {
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "SecurityField"))?;
 
         // Write field value
-        self.value_encoder.encode_value(writer, &field.value)
+        self.value_encoder.encode_value(writer, &field.value,self.context)
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "SecurityField"))?;
 
         self.context.log_debug(&format!("    Field: {} = {}", field.key, field.value));

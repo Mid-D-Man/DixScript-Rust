@@ -19,11 +19,10 @@ use super::value_encoder::ValueEncoder;
 /// 4. Object Property: [Type: 4][Name Length: 4][Name UTF-8][Object Value]
 pub struct DataSectionWriter<'a> {
     context: &'a mut BinarySerializationContext,
-    value_encoder: &'a mut ValueEncoder<'a>,
+    value_encoder: &'a mut ValueEncoder,
     error_manager: ErrorManager,
 }
 
-/// Data entry type tags
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DataEntryType {
@@ -34,10 +33,9 @@ enum DataEntryType {
 }
 
 impl<'a> DataSectionWriter<'a> {
-    /// Create new data section writer
     pub fn new(
         context: &'a mut BinarySerializationContext,
-        value_encoder: &'a mut ValueEncoder<'a>,
+        value_encoder: &'a mut ValueEncoder,
     ) -> Self {
         DataSectionWriter {
             context,
@@ -46,8 +44,6 @@ impl<'a> DataSectionWriter<'a> {
         }
     }
 
-    /// Write @DATA section to binary
-    /// Returns offset information for offset table
     pub fn write_section<W: Write + Seek>(
         &mut self,
         writer: &mut W,
@@ -62,26 +58,21 @@ impl<'a> DataSectionWriter<'a> {
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "DataSection"))?
             as i32;
 
-        // Write section header
         writer.write_all(&(SectionId::Data as u32).to_le_bytes())
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "DataSection"))?;
 
-        // Placeholder for section length
         let length_position = writer.stream_position()
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "DataSection"))?;
         writer.write_all(&0i32.to_le_bytes())
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "DataSection"))?;
 
-        // Write entry count
         writer.write_all(&(data_section.entries.len() as i32).to_le_bytes())
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "DataSection"))?;
 
-        // Write each data entry
         for entry in &data_section.entries {
             self.write_data_entry(writer, entry)?;
         }
 
-        // Calculate and update section length
         let end_position = writer.stream_position()
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "DataSection"))?
             as i32;
@@ -104,7 +95,6 @@ impl<'a> DataSectionWriter<'a> {
         ))
     }
 
-    /// Write any data entry (dispatches to specific writer)
     fn write_data_entry<W: Write>(
         &mut self,
         writer: &mut W,
@@ -126,27 +116,22 @@ impl<'a> DataSectionWriter<'a> {
         }
     }
 
-    /// Write Simple Property: [Type: 1][Name Length: 4][Name UTF-8][Value]
-    /// Example: app_name = "MyApp"
     fn write_simple_property<W: Write>(
         &mut self,
         writer: &mut W,
         name: &str,
         value: &Value,
     ) -> Result<(), BinarySerializationError> {
-        // Write type tag
         writer.write_all(&[DataEntryType::SimpleProperty as u8])
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "SimpleProperty"))?;
 
-        // Write property name
         let name_bytes = name.as_bytes();
         writer.write_all(&(name_bytes.len() as i32).to_le_bytes())
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "SimpleProperty"))?;
         writer.write_all(name_bytes)
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "SimpleProperty"))?;
 
-        // Write value
-        self.value_encoder.encode_value(writer, value)
+        self.value_encoder.encode_value(writer, value, self.context)
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "SimpleProperty"))?;
 
         self.context.log_debug(&format!("  Simple: {} = {}", name, value));
@@ -154,19 +139,15 @@ impl<'a> DataSectionWriter<'a> {
         Ok(())
     }
 
-    /// Write Table Property: [Type: 2][Path Length: 4][Path UTF-8][Property Count: 4][Properties...]
-    /// Example: server.config: host = "localhost", port = 8080
     fn write_table_property<W: Write>(
         &mut self,
         writer: &mut W,
         path: &TablePath,
         properties: &[PropertyAssignment],
     ) -> Result<(), BinarySerializationError> {
-        // Write type tag
         writer.write_all(&[DataEntryType::TableProperty as u8])
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "TableProperty"))?;
 
-        // Write table path
         let path_str = path.segments.join(".");
         let path_bytes = path_str.as_bytes();
         writer.write_all(&(path_bytes.len() as i32).to_le_bytes())
@@ -174,7 +155,6 @@ impl<'a> DataSectionWriter<'a> {
         writer.write_all(path_bytes)
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "TableProperty"))?;
 
-        // Write property count
         writer.write_all(&(properties.len() as i32).to_le_bytes())
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "TableProperty"))?;
 
@@ -184,7 +164,6 @@ impl<'a> DataSectionWriter<'a> {
             properties.len()
         ));
 
-        // Write each property assignment
         for prop in properties {
             self.write_property_assignment(writer, prop)?;
         }
@@ -192,21 +171,18 @@ impl<'a> DataSectionWriter<'a> {
         Ok(())
     }
 
-    /// Write Property Assignment: [Name Length: 4][Name UTF-8][Value]
     fn write_property_assignment<W: Write>(
         &mut self,
         writer: &mut W,
         prop: &PropertyAssignment,
     ) -> Result<(), BinarySerializationError> {
-        // Write property name
         let name_bytes = prop.name.as_bytes();
         writer.write_all(&(name_bytes.len() as i32).to_le_bytes())
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "PropertyAssignment"))?;
         writer.write_all(name_bytes)
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "PropertyAssignment"))?;
 
-        // Write value
-        self.value_encoder.encode_value(writer, &prop.value)
+        self.value_encoder.encode_value(writer, &prop.value, self.context)
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "PropertyAssignment"))?;
 
         self.context.log_debug(&format!("    Property: {} = {}", prop.name, prop.value));
@@ -214,19 +190,15 @@ impl<'a> DataSectionWriter<'a> {
         Ok(())
     }
 
-    /// Write Group Array: [Type: 3][Path Length: 4][Path UTF-8][Item Count: 4][Items...]
-    /// Example: users.admins:: { name = "Alice" }, { name = "Bob" }
     fn write_group_array<W: Write>(
         &mut self,
         writer: &mut W,
         path: &TablePath,
         items: &[Value],
     ) -> Result<(), BinarySerializationError> {
-        // Write type tag
         writer.write_all(&[DataEntryType::GroupArray as u8])
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "GroupArray"))?;
 
-        // Write array path
         let path_str = path.segments.join(".");
         let path_bytes = path_str.as_bytes();
         writer.write_all(&(path_bytes.len() as i32).to_le_bytes())
@@ -234,42 +206,35 @@ impl<'a> DataSectionWriter<'a> {
         writer.write_all(path_bytes)
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "GroupArray"))?;
 
-        // Write item count
         writer.write_all(&(items.len() as i32).to_le_bytes())
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "GroupArray"))?;
 
         self.context.log_debug(&format!("  Array: {} ({} items)", path_str, items.len()));
 
-        // Write each item
         for item in items {
-            self.value_encoder.encode_value(writer, item)
+            self.value_encoder.encode_value(writer, item, self.context)
                 .map_err(|e| BinarySerializationError::write_error(e.to_string(), "GroupArray"))?;
         }
 
         Ok(())
     }
 
-    /// Write Object Property: [Type: 4][Name Length: 4][Name UTF-8][Object Value]
-    /// Example: config = { timeout = 30, retries = 3 }
     fn write_object_property<W: Write>(
         &mut self,
         writer: &mut W,
         name: &str,
         object: &Value,
     ) -> Result<(), BinarySerializationError> {
-        // Write type tag
         writer.write_all(&[DataEntryType::ObjectProperty as u8])
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "ObjectProperty"))?;
 
-        // Write property name
         let name_bytes = name.as_bytes();
         writer.write_all(&(name_bytes.len() as i32).to_le_bytes())
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "ObjectProperty"))?;
         writer.write_all(name_bytes)
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "ObjectProperty"))?;
 
-        // Verify it's an object
-        if !matches!(object.as_ref(), Value::Object { .. }) {
+        if !matches!(object, Value::Object { .. }) {
             return Err(BinarySerializationError::new(
                 crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::InvalidFormat,
                 format!("Expected object literal, got {:?}", object),
@@ -277,8 +242,7 @@ impl<'a> DataSectionWriter<'a> {
             ));
         }
 
-        // Write object value (ValueEncoder handles ObjectLiteral)
-        self.value_encoder.encode_value(writer, object)
+        self.value_encoder.encode_value(writer, object, self.context)
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "ObjectProperty"))?;
 
         self.context.log_debug(&format!("  Object: {}", name));

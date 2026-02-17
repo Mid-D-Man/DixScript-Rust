@@ -19,7 +19,7 @@ use super::value_decoder::ValueDecoder;
 /// 4. Object Property: [Type: 4][Name Length: 4][Name UTF-8][Object Value]
 pub struct DataSectionReader<'a> {
     context: &'a mut BinarySerializationContext,
-    value_decoder: &'a mut ValueDecoder<'a>,
+    value_decoder: &'a mut ValueDecoder,
     error_manager: ErrorManager,
 }
 
@@ -49,7 +49,7 @@ impl<'a> DataSectionReader<'a> {
     /// Create new data section reader
     pub fn new(
         context: &'a mut BinarySerializationContext,
-        value_decoder: &'a mut ValueDecoder<'a>,
+        value_decoder: &'a mut ValueDecoder,
     ) -> Self {
         DataSectionReader {
             context,
@@ -157,7 +157,7 @@ impl<'a> DataSectionReader<'a> {
             .map_err(|e| BinarySerializationError::read_error(e.to_string(), "SimpleProperty"))?;
 
         // Read value
-        let value = self.value_decoder.decode_value(reader)
+        let value = self.value_decoder.decode_value(reader,self.context)
             .map_err(|e| BinarySerializationError::read_error(e.to_string(), "SimpleProperty"))?;
 
         self.context.log_debug(&format!("  Simple: {} = {}", name, value));
@@ -241,7 +241,7 @@ impl<'a> DataSectionReader<'a> {
             .map_err(|e| BinarySerializationError::read_error(e.to_string(), "PropertyAssignment"))?;
 
         // Read value
-        let value = self.value_decoder.decode_value(reader)
+        let value = self.value_decoder.decode_value(reader,self.context)
             .map_err(|e| BinarySerializationError::read_error(e.to_string(), "PropertyAssignment"))?;
 
         self.context.log_debug(&format!("    Property: {} = {}", name, value));
@@ -292,7 +292,7 @@ impl<'a> DataSectionReader<'a> {
         // Read all items
         let mut items = Vec::with_capacity(item_count as usize);
         for _ in 0..item_count {
-            let item = self.value_decoder.decode_value(reader)
+            let item = self.value_decoder.decode_value(reader,self.context)
                 .map_err(|e| BinarySerializationError::read_error(e.to_string(), "GroupArray"))?;
             items.push(item);
         }
@@ -324,7 +324,7 @@ impl<'a> DataSectionReader<'a> {
             .map_err(|e| BinarySerializationError::read_error(e.to_string(), "ObjectProperty"))?;
 
         // Read object value (ValueDecoder handles ObjectLiteral)
-        let value = self.value_decoder.decode_value(reader)
+        let value = self.value_decoder.decode_value(reader,self.context)
             .map_err(|e| BinarySerializationError::read_error(e.to_string(), "ObjectProperty"))?;
 
         // Verify it's an object

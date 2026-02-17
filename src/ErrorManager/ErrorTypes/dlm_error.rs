@@ -148,6 +148,15 @@ impl DlmError {
             }
             DlmErrorType::DependencyMissing => {
                 "Library dependencies are missing or cannot be resolved.".to_string()
+            },
+            DlmErrorType::KeyGenerationFailed => {
+                "Failed to generate encryption key for module.".to_string()
+            }
+            DlmErrorType::KeyFileMissing => {
+                "Required key file is missing. Check key file path.".to_string()
+            }
+            DlmErrorType::ModuleExecutionFailed => {
+                "DLM module execution failed. Check module configuration.".to_string()
             }
         }
     }

@@ -16,7 +16,7 @@ use crate::Compiler::AST::Value;
 /// Each entry: [Key Length: 4][Key UTF-8][Value Type: 1][Value Data]
 pub struct ConfigSectionReader<'a> {
     context: &'a mut BinarySerializationContext,
-    value_decoder: &'a mut ValueDecoder<'a>,
+    value_decoder: &'a mut ValueDecoder,
     error_manager: ErrorManager,
 }
 
@@ -24,7 +24,7 @@ impl<'a> ConfigSectionReader<'a> {
     /// Create new config section reader
     pub fn new(
         context: &'a mut BinarySerializationContext,
-        value_decoder: &'a mut ValueDecoder<'a>,
+        value_decoder: &'a mut ValueDecoder,
     ) -> Self {
         ConfigSectionReader {
             context,
@@ -103,7 +103,7 @@ impl<'a> ConfigSectionReader<'a> {
             .map_err(|e| BinarySerializationError::read_error(e.to_string(), "ConfigEntry"))?;
 
         // Read value
-        let ast_value = self.value_decoder.decode_value(reader)
+        let ast_value = self.value_decoder.decode_value(reader,self.context)
             .map_err(|e| BinarySerializationError::read_error(e.to_string(), "ConfigEntry"))?;
 
         // Convert AST Value to ConfigValue

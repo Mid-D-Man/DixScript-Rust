@@ -107,7 +107,7 @@ impl<'a> EnumsSectionParser<'a> {
             self.track_progress();
 
             if self.is_stuck() {
-                self.error_manager.log_Warning("Parser stuck in ENUMS section");
+                self.error_manager.log_warning("Parser stuck in ENUMS section");
                 if !self.recover_from_stuck() {
                     break;
                 }
@@ -169,7 +169,7 @@ impl<'a> EnumsSectionParser<'a> {
         let result = EnumsSection::new(enum_declarations, section_start_pos);
 
         if self.has_encountered_errors {
-            self.error_manager.log_Warning(&format!(
+            self.error_manager.log_warning(&format!(
                 "ENUMS section parsed with errors ({} enums recovered)",
                 result.enums.len()
             ));
@@ -228,7 +228,7 @@ impl<'a> EnumsSectionParser<'a> {
             self.track_progress();
 
             if self.is_stuck() {
-                self.error_manager.log_Warning(&format!("Parser stuck in enum '{}' fields", enum_name));
+                self.error_manager.log_warning(&format!("Parser stuck in enum '{}' fields", enum_name));
                 if !self.recover_from_stuck() {
                     break;
                 }
@@ -491,7 +491,7 @@ impl<'a> EnumsSectionParser<'a> {
             self.error_manager.log_error("ENUMS section parsing halted due to errors");
             None
         } else {
-            self.error_manager.log_Warning("ENUMS section parsing completed with errors - returning empty section");
+            self.error_manager.log_warning("ENUMS section parsing completed with errors - returning empty section");
             Some(EnumsSection::new(Vec::new(), start_pos))
         }
     }

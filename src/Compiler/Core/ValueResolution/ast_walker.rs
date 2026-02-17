@@ -105,7 +105,7 @@ impl<'a> ASTWalker<'a> {
         // Warning is always emitted — it signals a potential problem
         if self.found_calls.is_empty() {
             self.error_manager
-                .log_Warning("[ASTWalker] Found ZERO function calls!");
+                .log_warning("[ASTWalker] Found ZERO function calls!");
         } else if self.debug_config.is_verbose {
             // Only build the grouped map when verbose is actually on
             let mut groups: HashMap<String, usize> = HashMap::new();

@@ -110,7 +110,7 @@ impl<'a> SecuritySectionParser<'a> {
                 self.track_progress();
 
                 if self.is_stuck() {
-                    self.error_manager.log_Warning("Parser stuck in SECURITY section");
+                    self.error_manager.log_warning("Parser stuck in SECURITY section");
                     if !self.recover_from_stuck() {
                         break;
                     }
@@ -166,7 +166,7 @@ impl<'a> SecuritySectionParser<'a> {
         let result = SecuritySection::new(security_entries, section_start_pos);
 
         if self.has_encountered_errors {
-            self.error_manager.log_Warning(&format!(
+            self.error_manager.log_warning(&format!(
                 "SECURITY section parsed with errors ({} entries recovered)",
                 result.entries.len()
             ));
@@ -247,7 +247,7 @@ impl<'a> SecuritySectionParser<'a> {
                 self.track_progress();
 
                 if self.is_stuck() {
-                    self.error_manager.log_Warning(&format!("Parser stuck in security block '{}' fields", block_key));
+                    self.error_manager.log_warning(&format!("Parser stuck in security block '{}' fields", block_key));
                     if !self.recover_from_stuck() {
                         break;
                     }
@@ -570,7 +570,7 @@ impl<'a> SecuritySectionParser<'a> {
             self.error_manager.log_error("SECURITY section parsing halted due to errors");
             None
         } else {
-            self.error_manager.log_Warning("SECURITY section parsing completed with errors - returning empty section");
+            self.error_manager.log_warning("SECURITY section parsing completed with errors - returning empty section");
             Some(SecuritySection::new(Vec::new(), start_pos))
         }
     }

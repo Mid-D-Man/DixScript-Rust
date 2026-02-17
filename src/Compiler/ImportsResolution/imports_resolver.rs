@@ -760,7 +760,7 @@ impl<'a> ImportsResolver<'a> {
 
     #[inline]
     fn log_warning(&self, message: &str) {
-        self.error_manager.log_Warning(&format!("[ImportsResolver] {}", message));
+        self.error_manager.log_warning(&format!("[ImportsResolver] {}", message));
     }
 
     #[inline]

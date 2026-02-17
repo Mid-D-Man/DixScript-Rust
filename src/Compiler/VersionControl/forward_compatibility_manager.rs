@@ -75,7 +75,7 @@ impl ForwardCompatibilityManager {
         ));
 
         if !manager.is_compatible_with(&script_version) {
-            error_manager.log_Warning(&format!(
+            error_manager.log_warning(&format!(
                 "Script version {} is newer than compiler",
                 script_version
             ));
@@ -115,14 +115,14 @@ impl ForwardCompatibilityManager {
         let message = format!("Ignoring unknown {}: {}", element_type, element_name);
 
         let error_manager = ErrorManager::get_shared_instance();
-        error_manager.log_Warning(&message);
+        error_manager.log_warning(&message);
 
         Ok(true)
     }
 
     fn handle_best_effort(&self, element_type: &str, element_name: &str) -> Result<bool, String> {
         let error_manager = ErrorManager::get_shared_instance();
-        error_manager.log_Warning(&format!(
+        error_manager.log_warning(&format!(
             "Unknown {} '{}' - using tolerant handling",
             element_type, element_name
         ));

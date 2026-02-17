@@ -441,7 +441,7 @@ impl<'a> ImportsSectionAnalyzer<'a> {
     
     fn add_warning(&self, message: &str, position: Position) {
         if self.operational_settings.debug_mode != DebugMode::Off {
-            self.error_manager.log_Warning(&format!(
+            self.error_manager.log_warning(&format!(
                 "[Line {}:{}] {}",
                 position.line,
                 position.column,

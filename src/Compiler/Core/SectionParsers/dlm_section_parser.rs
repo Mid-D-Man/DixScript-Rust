@@ -114,7 +114,7 @@ impl<'a> DlmSectionParser<'a> {
             self.track_progress();
 
             if self.is_stuck() {
-                self.error_manager.log_Warning(&format!("Parser stuck at position {}", self.position));
+                self.error_manager.log_warning(&format!("Parser stuck at position {}", self.position));
                 if !self.recover_from_stuck() {
                     self.error_manager.log_error("Could not recover from stuck state");
                     break;
@@ -202,7 +202,7 @@ impl<'a> DlmSectionParser<'a> {
         let result = DLMSection::new(modules, section_start_pos);
 
         if self.has_encountered_errors {
-            self.error_manager.log_Warning(&format!(
+            self.error_manager.log_warning(&format!(
                 "DLM section parsed with errors ({} modules recovered)",
                 result.modules.len()
             ));
@@ -373,7 +373,7 @@ impl<'a> DlmSectionParser<'a> {
             self.error_manager.log_error("DLM section parsing halted due to errors");
             None
         } else {
-            self.error_manager.log_Warning("DLM section parsing completed with errors - returning empty section");
+            self.error_manager.log_warning("DLM section parsing completed with errors - returning empty section");
             Some(DLMSection::new(Vec::new(), start_pos))
         }
     }

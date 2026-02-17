@@ -48,17 +48,14 @@ impl DLMReverseExecutor {
     pub fn execute(&self) -> DLMReverseResult {
         let start_time = Instant::now();
 
-        self.error_manager
-            .log_info("=== DLM REVERSE PIPELINE STARTED ===");
+        self.error_manager.log_info("=== DLM REVERSE PIPELINE STARTED ===");
 
         // Read encrypted file
         let encrypted_data = match fs::read(&self.encrypted_file_path) {
             Ok(data) => data,
             Err(e) => {
                 let mut result = DLMReverseResult::new(0);
-                result
-                    .errors
-                    .push(format!("Failed to read encrypted file: {}", e));
+                result.errors.push(format!("Failed to read encrypted file: {}", e));
                 result.total_duration = start_time.elapsed();
                 return result;
             }
@@ -99,12 +96,9 @@ impl DLMReverseExecutor {
             // Set password if provided
             if let Some(ref password) = self.password {
                 if let Err(e) = enc.set_password(password) {
-                    result
-                        .errors
-                        .push(format!("Failed to set password: {}", e));
+                    result.errors.push(format!("Failed to set password: {}", e));
                     result.total_duration = start_time.elapsed();
 
-                    // Log failed decryption attempt
                     if let Some(ref mut aud) = auditor {
                         aud.log_decryption_attempt(
                             false,
@@ -122,7 +116,6 @@ impl DLMReverseExecutor {
 
             match self.execute_decryption(enc.as_ref(), &processed_data, &mut result) {
                 Ok(decrypted) => {
-                    // Log successful decryption
                     if let Some(ref mut aud) = auditor {
                         aud.log_decryption_attempt(
                             true,
@@ -135,7 +128,6 @@ impl DLMReverseExecutor {
                     processed_data = decrypted;
                 }
                 Err(e) => {
-                    // Log failed decryption attempt
                     if let Some(ref mut aud) = auditor {
                         aud.log_decryption_attempt(
                             false,
@@ -171,9 +163,7 @@ impl DLMReverseExecutor {
         // Finalize auditor
         if let Some(ref mut aud) = auditor {
             if let Err(e) = aud.finalize_audit() {
-                result
-                    .warnings
-                    .push(format!("Audit finalization warning: {}", e));
+                result.warnings.push(format!("Audit finalization warning: {}", e));
             }
         }
 
@@ -182,17 +172,15 @@ impl DLMReverseExecutor {
         result.is_success = true;
         result.total_duration = start_time.elapsed();
 
-        self.error_manager
-            .log_info("=== DLM REVERSE PIPELINE COMPLETE ===");
+        self.error_manager.log_info("=== DLM REVERSE PIPELINE COMPLETE ===");
 
         result
     }
 
-    /// Parse .mdix.key file — returns typed KeyFileMetadata
+    /// Parse .mdix.key file - returns typed KeyFileMetadata
     fn parse_key_file(&self) -> Result<KeyFileMetadata, String> {
         self.error_manager.log_info("Parsing .mdix.key file...");
 
-        // KeyFileManager needs source and output paths; use enclosing directory for both
         let dir_str = self
             .encrypted_file_path
             .parent()
@@ -213,62 +201,55 @@ impl DLMReverseExecutor {
     fn instantiate_modules(
         &self,
         metadata: &KeyFileMetadata,
-    ) -> Result
-    (
-        Option<Box<dyn IEncryptor>>,
-        Option<Box<dyn ICompressor>>,
-        Option<Box<dyn IAuditor>>,
-    ),
-    String,
-    > {
-    let dir_str = self
-    .encrypted_file_path
-    .parent()
-    .unwrap_or_else(|| Path::new("."))
-    .to_string_lossy()
-    .to_string();
+    ) -> Result<(Option<Box<dyn IEncryptor>>, Option<Box<dyn ICompressor>>, Option<Box<dyn IAuditor>>), String> {
+        let dir_str = self
+            .encrypted_file_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_string_lossy()
+            .to_string();
 
-    let key_manager = KeyFileManager::new(dir_str.clone(), dir_str);
+        let key_manager = KeyFileManager::new(dir_str.clone(), dir_str);
 
-    let mut encryptor: Option<Box<dyn IEncryptor>> = None;
-    let mut compressor: Option<Box<dyn ICompressor>> = None;
-    let mut auditor: Option<Box<dyn IAuditor>> = None;
+        let mut encryptor: Option<Box<dyn IEncryptor>> = None;
+        let mut compressor: Option<Box<dyn ICompressor>> = None;
+        let mut auditor: Option<Box<dyn IAuditor>> = None;
 
-    // Create decryptor from encryption metadata
-    if let Some(ref enc_meta) = metadata.encryption {
-    let config = key_manager
-    .extract_encryption_config(metadata)
-    .unwrap_or_default();
+        // Create decryptor from encryption metadata
+        if let Some(ref enc_meta) = metadata.encryption {
+            let config = key_manager
+                .extract_encryption_config(metadata)
+                .unwrap_or_default();
 
-    encryptor = Some(self.create_decryptor(&enc_meta.algorithm, &config)?);
-    self.error_manager
-    .log_info(&format!("Decryptor initialized: {}", enc_meta.algorithm));
+            encryptor = Some(self.create_decryptor(&enc_meta.algorithm, &config)?);
+            self.error_manager
+                .log_info(&format!("Decryptor initialized: {}", enc_meta.algorithm));
+        }
+
+        // Create decompressor from compression metadata
+        if let Some(ref comp_meta) = metadata.compression {
+            compressor = Some(self.create_decompressor(&comp_meta.algorithm)?);
+            self.error_manager
+                .log_info(&format!("Decompressor initialized: {}", comp_meta.algorithm));
+        }
+
+        // Create auditor for logging decryption attempts (if audit data was present)
+        if metadata.audit.is_some() {
+            let source_file = self.determine_source_file_path();
+            let output_dir = self
+                .encrypted_file_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."));
+
+            auditor = Some(Box::new(DiyAuditor::new(&source_file, output_dir)));
+            self.error_manager
+                .log_info("Auditor initialized for decryption logging");
+        }
+
+        Ok((encryptor, compressor, auditor))
     }
 
-    // Create decompressor from compression metadata
-    if let Some(ref comp_meta) = metadata.compression {
-    compressor = Some(self.create_decompressor(&comp_meta.algorithm)?);
-    self.error_manager
-    .log_info(&format!("Decompressor initialized: {}", comp_meta.algorithm));
-    }
-
-    // Create auditor for logging decryption attempts (if audit data was present)
-    if metadata.audit.is_some() {
-    let source_file = self.determine_source_file_path();
-    let output_dir = self
-    .encrypted_file_path
-    .parent()
-    .unwrap_or_else(|| Path::new("."));
-
-    auditor = Some(Box::new(DiyAuditor::new(&source_file, output_dir)));
-    self.error_manager
-    .log_info("Auditor initialized for decryption logging");
-    }
-
-    Ok((encryptor, compressor, auditor))
-    }
-
-    /// Create decryptor: construct with no security config, then initialize from metadata
+    /// Create decryptor: construct with no security config, then initialize from key metadata
     fn create_decryptor(
         &self,
         algorithm: &str,
@@ -282,7 +263,7 @@ impl DLMReverseExecutor {
             _ => return Err(format!("Unknown encryption algorithm: {}", algorithm)),
         };
 
-        // Load key material from metadata via initialize
+        // Load key material from saved metadata
         enc.initialize(config.clone());
 
         Ok(enc)
@@ -364,7 +345,6 @@ impl DLMReverseExecutor {
             .unwrap_or("unknown")
             .to_string();
 
-        // Strip extensions: .enc → .mdix → base
         if base_name.ends_with(".enc") {
             base_name = base_name[..base_name.len() - 4].to_string();
         }

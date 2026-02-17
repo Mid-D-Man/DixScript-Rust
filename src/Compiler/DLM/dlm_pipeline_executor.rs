@@ -71,8 +71,6 @@ impl DLMPipelineExecutor {
         };
 
         let mut processed_data = binary_data;
-
-        // Keep auditor alive across the pipeline
         let mut active_auditor: Option<Box<dyn IAuditor>> = None;
 
         // Execute Auditor (if present)
@@ -90,8 +88,8 @@ impl DLMPipelineExecutor {
         }
 
         // Execute Compressor (if present)
-        if let Some(compressor) = compressor {
-            match self.execute_compressor(&*compressor, &processed_data, &mut result) {
+        if let Some(comp) = compressor {
+            match self.execute_compressor(&*comp, &processed_data, &mut result) {
                 Ok(compressed) => {
                     processed_data = compressed;
                 }
@@ -104,8 +102,8 @@ impl DLMPipelineExecutor {
         }
 
         // Execute Encryptor (if present)
-        if let Some(encryptor) = encryptor {
-            match self.execute_encryptor(&*encryptor, &processed_data, &mut result) {
+        if let Some(enc) = encryptor {
+            match self.execute_encryptor(&*enc, &processed_data, &mut result) {
                 Ok(encrypted) => {
                     processed_data = encrypted;
                 }
@@ -145,44 +143,38 @@ impl DLMPipelineExecutor {
     fn parse_dlm_section(
         &self,
         ast: &mut DixScript,
-    ) -> Result
-    (
-        Option<Box<dyn IAuditor>>,
-        Option<Box<dyn ICompressor>>,
-        Option<Box<dyn IEncryptor>>,
-    ),
-    String,
-    > {
-    let dlm = ast.dlm.as_ref().unwrap();
+    ) -> Result<(Option<Box<dyn IAuditor>>, Option<Box<dyn ICompressor>>, Option<Box<dyn IEncryptor>>), String> {
+        let dlm = ast.dlm.as_ref().unwrap();
 
-    self.error_manager
-    .log_info(&format!("Parsing {} DLM module(s)", dlm.modules.len()));
+        self.error_manager.log_info(&format!("Parsing {} DLM module(s)", dlm.modules.len()));
 
-    let mut auditor: Option<Box<dyn IAuditor>> = None;
-    let mut compressor: Option<Box<dyn ICompressor>> = None;
-    let mut encryptor: Option<Box<dyn IEncryptor>> = None;
+        let mut auditor: Option<Box<dyn IAuditor>> = None;
+        let mut compressor: Option<Box<dyn ICompressor>> = None;
+        let mut encryptor: Option<Box<dyn IEncryptor>> = None;
 
-    // Clone modules to avoid borrow conflict when we need &mut ast later
-    let modules: Vec<_> = dlm.modules.iter().cloned().collect();
+        // Clone modules to avoid borrow conflict when we need &mut ast for encryptor creation
+        let modules: Vec<_> = dlm.modules.iter().cloned().collect();
 
-    for module in &modules {
-    match module.module_type {
-    DLMModuleType::DAuditor => {
-    auditor = Some(self.create_auditor(module.subtype, ast)?);
-    }
-    DLMModuleType::DCompressor => {
-    compressor = Some(self.create_compressor(module.subtype)?);
-    }
-    DLMModuleType::DEncryptor => {
-    encryptor = Some(self.create_encryptor(module.subtype, ast)?);
-    }
-    DLMModuleType::ParseError => {
-    return Err("DLM section contains a parse error module - check @DLM syntax".to_string());
-    }
-    }
-    }
+        for module in &modules {
+            match module.module_type {
+                DLMModuleType::DAuditor => {
+                    auditor = Some(self.create_auditor(module.subtype, ast)?);
+                }
+                DLMModuleType::DCompressor => {
+                    compressor = Some(self.create_compressor(module.subtype)?);
+                }
+                DLMModuleType::DEncryptor => {
+                    encryptor = Some(self.create_encryptor(module.subtype, ast)?);
+                }
+                DLMModuleType::ParseError => {
+                    return Err(
+                        "DLM section contains a parse error module - check @DLM syntax".to_string(),
+                    );
+                }
+            }
+        }
 
-    Ok((auditor, compressor, encryptor))
+        Ok((auditor, compressor, encryptor))
     }
 
     /// Create auditor module
@@ -284,18 +276,14 @@ impl DLMPipelineExecutor {
 
         let audit_result = auditor.start_audit(ast, data)?;
 
-        result
-            .executed_modules
-            .push(auditor.module_name().to_string());
-        result
-            .metadata
-            .insert("auditor".to_string(), auditor.get_metadata());
+        result.executed_modules.push(auditor.module_name().to_string());
+        result.metadata.insert("auditor".to_string(), auditor.get_metadata());
 
-        // Log before moving
+        // Clone path before moving into result
         let audit_path = audit_result.audit_file_path.clone();
-        self.error_manager
-            .log_info(&format!("Auditor started: {}", audit_path));
         result.audit_file_path = Some(audit_result.audit_file_path);
+
+        self.error_manager.log_info(&format!("Auditor started: {}", audit_path));
 
         Ok(())
     }
@@ -314,12 +302,8 @@ impl DLMPipelineExecutor {
         let compressed = compressor.compress(data)?;
         let _duration = start.elapsed();
 
-        result
-            .executed_modules
-            .push(compressor.module_name().to_string());
-        result
-            .metadata
-            .insert("compressor".to_string(), compressor.get_metadata());
+        result.executed_modules.push(compressor.module_name().to_string());
+        result.metadata.insert("compressor".to_string(), compressor.get_metadata());
 
         let ratio = 1.0 - (compressed.len() as f64 / data.len() as f64);
         self.error_manager.log_info(&format!(
@@ -346,12 +330,8 @@ impl DLMPipelineExecutor {
         let encrypted = encryptor.encrypt(data)?;
         let _duration = start.elapsed();
 
-        result
-            .executed_modules
-            .push(encryptor.module_name().to_string());
-        result
-            .metadata
-            .insert("encryptor".to_string(), encryptor.get_metadata());
+        result.executed_modules.push(encryptor.module_name().to_string());
+        result.metadata.insert("encryptor".to_string(), encryptor.get_metadata());
 
         self.error_manager.log_info(&format!(
             "Encryption complete: {} -> {} bytes",
@@ -374,37 +354,35 @@ impl DLMPipelineExecutor {
             .and_then(|s| s.to_str())
             .ok_or("Invalid source file name")?;
 
-        // Generate .mdix.enc file (if any modules ran)
-        if !result.metadata.is_empty() {
-            let enc_path = self
-                .output_directory
-                .join(format!("{}.mdix.enc", base_name));
-
-            fs::write(&enc_path, &result.processed_data)
-                .map_err(|e| format!("Failed to write encrypted file: {}", e))?;
-
-            let enc_path_str = enc_path.to_string_lossy().to_string();
-            self.error_manager
-                .log_info(&format!("Generated: {}", enc_path.display()));
-
-            // Generate .mdix.key file
-            let key_manager = KeyFileManager::new(
-                self.source_file_path.to_string_lossy().to_string(),
-                self.output_directory.to_string_lossy().to_string(),
-            );
-
-            let key_file_path = key_manager.create_key_file(
-                &enc_path_str,
-                result.metadata.get("compressor").cloned(),
-                result.metadata.get("encryptor").cloned(),
-                result.metadata.get("auditor").cloned(),
-            )?;
-
-            self.error_manager
-                .log_info(&format!("Generated: {}", key_file_path));
-            result.encrypted_file_path = Some(enc_path_str);
-            result.key_file_path = Some(key_file_path);
+        // Only generate files if any modules actually ran
+        if result.metadata.is_empty() {
+            return Ok(());
         }
+
+        let enc_path = self.output_directory.join(format!("{}.mdix.enc", base_name));
+
+        fs::write(&enc_path, &result.processed_data)
+            .map_err(|e| format!("Failed to write encrypted file: {}", e))?;
+
+        let enc_path_str = enc_path.to_string_lossy().to_string();
+        self.error_manager.log_info(&format!("Generated: {}", enc_path.display()));
+
+        // Generate .mdix.key file
+        let key_manager = KeyFileManager::new(
+            self.source_file_path.to_string_lossy().to_string(),
+            self.output_directory.to_string_lossy().to_string(),
+        );
+
+        let key_file_path = key_manager.create_key_file(
+            &enc_path_str,
+            result.metadata.get("compressor").cloned(),
+            result.metadata.get("encryptor").cloned(),
+            result.metadata.get("auditor").cloned(),
+        )?;
+
+        self.error_manager.log_info(&format!("Generated: {}", key_file_path));
+        result.encrypted_file_path = Some(enc_path_str);
+        result.key_file_path = Some(key_file_path);
 
         Ok(())
     }

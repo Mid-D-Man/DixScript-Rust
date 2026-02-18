@@ -1,4 +1,4 @@
-// src/Compiler/Core/ValueResolution/value_resolver.rs - RESPONSE 1
+// src/Compiler/Core/ValueResolution/value_resolver.rs
 //!
 //! ValueResolver — Orchestrates compile-time value resolution
 //!
@@ -12,7 +12,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use chrono::Utc;
 
@@ -20,11 +20,10 @@ use crate::Builtins::Core::DixValue;
 use crate::Builtins::Resolver;
 use crate::Compiler::AST::{
     DataEntry, DataSection, DixScript, Expression, ObjectProperty, Position,
-    PropertyAssignment, TablePath, Value,
+    PropertyAssignment, Value,
 };
 use crate::Compiler::Core::DebugMode;
 use crate::Compiler::Utilities::{PathBuilder, SymbolTable};
-use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 use crate::ErrorManager::ErrorManager;
 
 use super::ast_walker::ASTWalker;
@@ -149,16 +148,13 @@ impl<'a> ValueResolver<'a> {
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
 
-        // Clone quick_functions for interpreter (decouples from AST mutations)
         let quick_functions = ast.quick_functions
             .as_ref()
             .map(|qf| qf.functions.to_vec())
             .unwrap_or_default();
 
-        // Shared data context
         let data_context = Rc::new(RefCell::new(HashMap::new()));
 
-        // Create interpreter with cloned functions
         let interpreter = FunctionInterpreter::new(
             symbol_table,
             quick_functions,
@@ -166,7 +162,6 @@ impl<'a> ValueResolver<'a> {
             debug_mode,
         );
 
-        // Initialize builtin resolver
         Resolver::initialize();
 
         let debug_config = DebugConfig::from_mode(debug_mode);
@@ -217,7 +212,6 @@ impl<'a> ValueResolver<'a> {
                 "[DIAGNOSTIC] Found {} total function calls to resolve",
                 function_calls.len()
             ));
-
             self.log_function_call_breakdown(&function_calls);
         }
 
@@ -251,7 +245,6 @@ impl<'a> ValueResolver<'a> {
 
         let duration = self.start_time.elapsed();
 
-        // Final summary
         if self.debug_config.is_enabled {
             self.error_manager.log_info("==========================================");
             self.error_manager.log_info("[Phase 4.1] Resolution Complete");
@@ -275,42 +268,59 @@ impl<'a> ValueResolver<'a> {
 
     // ==================== PHASE 1: ENUM PRE-RESOLUTION ====================
 
-    /// CRITICAL: Pre-process DATA section to resolve ALL enum values to integers
+    /// CRITICAL: Pre-process DATA section to resolve ALL enum values to integers.
+    ///
+    /// FIX: Clone the entries first so the mutable borrow of `self.ast.data`
+    /// is dropped before `self.resolve_enums_in_entry()` needs `&self`.
     fn resolve_all_enum_values(&mut self) -> Result<(), ResolverError> {
-        let data_section = match &mut self.ast.data {
-            Some(data) => data,
-            None => {
-                if self.debug_config.is_enabled {
-                    self.error_manager.log_debug("No DATA section - skipping enum resolution");
-                }
-                return Ok(());
+        // Early-out: nothing to do without a DATA section
+        if self.ast.data.is_none() {
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug("No DATA section - skipping enum resolution");
             }
-        };
+            return Ok(());
+        }
 
         if self.debug_config.is_enabled {
             self.error_manager.log_info("Pre-processing: Resolving all enum values to integers");
         }
 
-        let mut local_enum_count = 0;
-        let mut imported_enum_count = 0;
-        let mut new_entries = Vec::with_capacity(data_section.entries.len());
+        // ── BORROW FIX ────────────────────────────────────────────────────────
+        // Clone the minimal state we need from `self.ast.data` so that the
+        // mutable borrow ends here.  `resolve_enums_in_entry` only needs &self,
+        // so there must be no outstanding &mut when we call it.
+        let (entries_snapshot, section_position) = {
+            let data = self.ast.data.as_ref().unwrap();
+            (data.entries.clone(), data.position)
+        };
+        // ─────────────────────────────────────────────────────────────────────
 
-        for entry in &data_section.entries {
+        let mut local_enum_count = 0usize;
+        let mut imported_enum_count = 0usize;
+        let mut new_entries = Vec::with_capacity(entries_snapshot.len());
+
+        for entry in &entries_snapshot {
             let (new_entry, local_count, imported_count) = self.resolve_enums_in_entry(entry)?;
             new_entries.push(new_entry);
             local_enum_count += local_count;
             imported_enum_count += imported_count;
         }
 
-        // Update AST with resolved entries
+        // Write resolved entries back — no existing borrows at this point
         self.ast.data = Some(DataSection {
             entries: new_entries,
-            position: data_section.position,
+            position: section_position,
         });
 
         if self.debug_config.is_enabled {
-            self.error_manager.log_info(&format!("✓ Resolved {} local enum values to integers", local_enum_count));
-            self.error_manager.log_info(&format!("✓ Resolved {} imported enum values to integers", imported_enum_count));
+            self.error_manager.log_info(&format!(
+                "✓ Resolved {} local enum values to integers",
+                local_enum_count
+            ));
+            self.error_manager.log_info(&format!(
+                "✓ Resolved {} imported enum values to integers",
+                imported_enum_count
+            ));
         }
 
         Ok(())
@@ -448,7 +458,6 @@ impl<'a> ValueResolver<'a> {
 
         match value {
             Value::EnumValue { enum_name, value: enum_value, position } => {
-                // Check if it's an imported enum (dotted name)
                 if enum_name.contains('.') {
                     let parts: Vec<&str> = enum_name.split('.').collect();
                     if parts.len() == 2 {
@@ -472,15 +481,12 @@ impl<'a> ValueResolver<'a> {
                         let field_value = enum_fields.get(enum_value)
                             .ok_or_else(|| ResolverError::InvalidEnumAccess {
                                 location: format!("{}.{}.{}", namespace_name, actual_enum_name, enum_value),
-                                message: format!("Enum value not found"),
+                                message: "Enum value not found".to_string(),
                                 position: *position,
                             })?;
 
                         return Ok((
-                            Value::Integer {
-                                value: *field_value,
-                                position: *position,
-                            },
+                            Value::Integer { value: *field_value, position: *position },
                             0,
                             1,
                         ));
@@ -496,10 +502,7 @@ impl<'a> ValueResolver<'a> {
                     })?;
 
                 Ok((
-                    Value::Integer {
-                        value: enum_int_value,
-                        position: *position,
-                    },
+                    Value::Integer { value: enum_int_value, position: *position },
                     1,
                     0,
                 ))
@@ -508,7 +511,6 @@ impl<'a> ValueResolver<'a> {
             Value::Expression { expr, position: _ } => {
                 if let Expression::EnumAccess { namespace_name, enum_name, value: enum_value, position } = expr.as_ref() {
                     if let Some(ns_name) = namespace_name {
-                        // Imported enum
                         let ns = self.symbol_table.try_get_namespace(ns_name)
                             .ok_or_else(|| ResolverError::InvalidEnumAccess {
                                 location: format!("{}.{}.{}", ns_name, enum_name, enum_value),
@@ -531,15 +533,11 @@ impl<'a> ValueResolver<'a> {
                             })?;
 
                         return Ok((
-                            Value::Integer {
-                                value: *field_value,
-                                position: *position,
-                            },
+                            Value::Integer { value: *field_value, position: *position },
                             0,
                             1,
                         ));
                     } else {
-                        // Local enum
                         let local_enum_value = self.symbol_table.try_get_enum_field_value(enum_name, enum_value)
                             .ok_or_else(|| ResolverError::InvalidEnumAccess {
                                 location: format!("{}.{}", enum_name, enum_value),
@@ -548,10 +546,7 @@ impl<'a> ValueResolver<'a> {
                             })?;
 
                         return Ok((
-                            Value::Integer {
-                                value: local_enum_value,
-                                position: *position,
-                            },
+                            Value::Integer { value: local_enum_value, position: *position },
                             1,
                             0,
                         ));
@@ -580,10 +575,7 @@ impl<'a> ValueResolver<'a> {
 
                 if any_changed {
                     Ok((
-                        Value::Array {
-                            values: new_values,
-                            position: *position,
-                        },
+                        Value::Array { values: new_values, position: *position },
                         local_count,
                         imported_count,
                     ))
@@ -593,7 +585,8 @@ impl<'a> ValueResolver<'a> {
             }
 
             Value::Object { properties, position } => {
-                let (new_obj, local, imported) = self.resolve_enums_in_object_literal_from_value(properties, *position)?;
+                let (new_obj, local, imported) =
+                    self.resolve_enums_in_object_literal_from_value(properties, *position)?;
                 local_count += local;
                 imported_count += imported;
 
@@ -669,19 +662,13 @@ impl<'a> ValueResolver<'a> {
 
         if any_changed {
             Ok((
-                Value::Object {
-                    properties: new_properties,
-                    position,
-                },
+                Value::Object { properties: new_properties, position },
                 local_count,
                 imported_count,
             ))
         } else {
             Ok((
-                Value::Object {
-                    properties: properties.to_vec(),
-                    position,
-                },
+                Value::Object { properties: properties.to_vec(), position },
                 local_count,
                 imported_count,
             ))
@@ -826,18 +813,18 @@ impl<'a> ValueResolver<'a> {
             None => return Vec::new(),
         };
 
+        let debug_mode = if self.debug_config.is_verbose {
+            DebugMode::Verbose
+        } else if self.debug_config.is_enabled {
+            DebugMode::Regular
+        } else {
+            DebugMode::Off
+        };
+
         let mut walker = ASTWalker::new(
             self.error_manager.clone(),
             self.symbol_table,
-            if self.debug_config.is_enabled {
-                if self.debug_config.is_verbose {
-                    DebugMode::Verbose
-                } else {
-                    DebugMode::Regular
-                }
-            } else {
-                DebugMode::Off
-            },
+            debug_mode,
         );
 
         walker.find_all(data_section)
@@ -858,7 +845,6 @@ impl<'a> ValueResolver<'a> {
         let mut errors: Vec<String> = Vec::new();
         let mut iteration = 0usize;
 
-        // Track which calls have been resolved
         let mut pending: Vec<(FunctionCallInfo, bool)> = function_calls
             .into_iter()
             .map(|call| (call, false))
@@ -876,9 +862,7 @@ impl<'a> ValueResolver<'a> {
                     .filter(|(_, resolved)| !resolved)
                     .map(|(call, _)| call.location.clone())
                     .collect();
-                errors.push(
-                    ResolverError::CircularDependency { stuck_calls: stuck }.to_string()
-                );
+                errors.push(ResolverError::CircularDependency { stuck_calls: stuck }.to_string());
                 break;
             }
 
@@ -910,7 +894,6 @@ impl<'a> ValueResolver<'a> {
                 };
 
                 let call_start = Instant::now();
-
                 let result = self.execute_call(call, resolved_args);
                 let call_duration = call_start.elapsed();
 
@@ -922,7 +905,7 @@ impl<'a> ValueResolver<'a> {
 
                         let new_value = Self::convert_dix_value_to_value(&dix_value, pos);
 
-                        self.replace_value_in_ast_by_location(&location, pos, new_value.clone());
+                        self.replace_value_in_ast_by_location(&location, pos, new_value);
                         self.data_context.borrow_mut().insert(location.clone(), dix_value.clone());
                         self.resolved_values.insert(location.clone(), dix_value.clone());
 
@@ -984,9 +967,7 @@ impl<'a> ValueResolver<'a> {
                     .filter(|(_, resolved)| !resolved)
                     .map(|(call, _)| call.location.clone())
                     .collect();
-                errors.push(
-                    ResolverError::CircularDependency { stuck_calls: stuck }.to_string()
-                );
+                errors.push(ResolverError::CircularDependency { stuck_calls: stuck }.to_string());
                 break;
             }
         }
@@ -1001,12 +982,23 @@ impl<'a> ValueResolver<'a> {
         (resolved_count, errors)
     }
 
+    /// Execute a single function call — handles both local and imported (namespaced) functions.
+    ///
+    /// FIX: For local calls `find_function` returns `&QuickFunction` which borrows
+    /// `self.interpreter` immutably.  We then need `&mut self.interpreter` for
+    /// `execute()`.  Rust forbids having both at once.
+    ///
+    /// Solution: clone the `QuickFunction` out of the registry so the immutable
+    /// borrow is dropped before `execute()` takes the mutable borrow.
+    /// `QuickFunction` derives `Clone`, so this is a one-time, call-site clone
+    /// (cold path — only on errors is cloning expensive, and function bodies are
+    /// small relative to the total resolution work).
     fn execute_call(
         &mut self,
         call: &FunctionCallInfo,
         arguments: Vec<DixValue>,
     ) -> Result<DixValue, InterpreterError> {
-        // Convert DixValue args to Expression args
+        // Convert DixValue args back to Expression wrappers expected by the interpreter
         let expr_args: Vec<Expression> = arguments.iter().map(|dv| {
             Expression::Value {
                 value: Self::convert_dix_value_to_value(dv, call.position),
@@ -1015,38 +1007,54 @@ impl<'a> ValueResolver<'a> {
         }).collect();
 
         match &call.namespace_name {
+            // ── IMPORTED (namespaced) function ────────────────────────────────
             Some(ns_name) => {
-                let ns = self.symbol_table.try_get_namespace(ns_name)
-                    .ok_or_else(|| InterpreterError::UndefinedFunction {
-                        name: format!("{}.{}", ns_name, call.function_name),
-                        position: call.position,
-                    })?;
+                // Look up namespace + function; clone the AST to free the borrow.
+                let func_ast = {
+                    let ns = self.symbol_table.try_get_namespace(ns_name)
+                        .ok_or_else(|| InterpreterError::UndefinedFunction {
+                            name: format!("{}.{}", ns_name, call.function_name),
+                            position: call.position,
+                        })?;
 
-                let func_info = ns.functions.get(&call.function_name)
-                    .ok_or_else(|| InterpreterError::UndefinedFunction {
-                        name: format!("{}.{}", ns_name, call.function_name),
-                        position: call.position,
-                    })?;
+                    ns.functions.get(&call.function_name)
+                        .ok_or_else(|| InterpreterError::UndefinedFunction {
+                            name: format!("{}.{}", ns_name, call.function_name),
+                            position: call.position,
+                        })?
+                        .ast
+                        .clone() // ← drop the borrow on symbol_table
+                };
+
+                // Also grab the namespace ref separately for passing to execute()
+                let ns = self.symbol_table.try_get_namespace(ns_name).unwrap();
 
                 let mut context = ExecutionContext::new(&call.function_name, None);
                 self.interpreter.execute(
-                    &func_info.ast,
+                    &func_ast,
                     &expr_args,
                     &mut context,
                     &call.scope_context,
                     Some(ns),
                 )
             }
+
+            // ── LOCAL function ────────────────────────────────────────────────
             None => {
-                let function = self.interpreter.find_function(&call.function_name)
+                // FIX: clone the QuickFunction so the immutable borrow of
+                // `self.interpreter` from `find_function` is dropped before
+                // `execute()` takes a mutable borrow.
+                let function_clone = self.interpreter
+                    .find_function(&call.function_name)
                     .ok_or_else(|| InterpreterError::UndefinedFunction {
                         name: call.function_name.clone(),
                         position: call.position,
-                    })?;
+                    })?
+                    .clone(); // ← releases the &self.interpreter borrow
 
                 let mut context = ExecutionContext::new(&call.function_name, None);
                 self.interpreter.execute(
-                    function,
+                    &function_clone,
                     &expr_args,
                     &mut context,
                     &call.scope_context,
@@ -1055,6 +1063,7 @@ impl<'a> ValueResolver<'a> {
             }
         }
     }
+
     // ==================== PHASE 4 HELPERS ====================
 
     fn has_unresolved_dependencies(&self, call: &FunctionCallInfo) -> bool {
@@ -1068,12 +1077,16 @@ impl<'a> ValueResolver<'a> {
             Expression::QuickFuncCall { .. } => true,
             Expression::ImportedFunctionCall { .. } => true,
             Expression::ArithmeticOp { left, right, .. } => {
-                Self::expr_has_unresolved_ref(left, ctx) || Self::expr_has_unresolved_ref(right, ctx)
+                Self::expr_has_unresolved_ref(left, ctx)
+                    || Self::expr_has_unresolved_ref(right, ctx)
             }
             Expression::Value { value, .. } => Self::value_has_unresolved_ref(value, ctx),
-            Expression::PropertyAccess { object, .. } => Self::expr_has_unresolved_ref(object, ctx),
+            Expression::PropertyAccess { object, .. } => {
+                Self::expr_has_unresolved_ref(object, ctx)
+            }
             Expression::IndexAccess { object, index, .. } => {
-                Self::expr_has_unresolved_ref(object, ctx) || Self::expr_has_unresolved_ref(index, ctx)
+                Self::expr_has_unresolved_ref(object, ctx)
+                    || Self::expr_has_unresolved_ref(index, ctx)
             }
             _ => false,
         }
@@ -1086,9 +1099,9 @@ impl<'a> ValueResolver<'a> {
             Value::Array { values, .. } | Value::NestedArray { values, .. } => {
                 values.iter().any(|v| Self::value_has_unresolved_ref(v, ctx))
             }
-            Value::Object { properties, .. } => {
-                properties.iter().any(|p| Self::value_has_unresolved_ref(&p.value, ctx))
-            }
+            Value::Object { properties, .. } => properties
+                .iter()
+                .any(|p| Self::value_has_unresolved_ref(&p.value, ctx)),
             Value::PrefixedConstructor { arguments, .. } => {
                 arguments.iter().any(|a| Self::value_has_unresolved_ref(a, ctx))
             }
@@ -1099,7 +1112,8 @@ impl<'a> ValueResolver<'a> {
     fn validate_function_scope(&self, call: &FunctionCallInfo) -> Result<(), ResolverError> {
         match &call.namespace_name {
             Some(ns_name) => {
-                let ns = self.symbol_table.try_get_namespace(ns_name)
+                let ns = self.symbol_table
+                    .try_get_namespace(ns_name)
                     .ok_or_else(|| ResolverError::NamespaceNotFound {
                         name: ns_name.clone(),
                         location: call.location.clone(),
@@ -1150,10 +1164,15 @@ impl<'a> ValueResolver<'a> {
         call_pos: Position,
     ) -> Result<DixValue, ResolverError> {
         match expr {
-            Expression::Value { value, .. } => Self::resolve_value_to_dix(value, ctx, call_pos),
+            Expression::Value { value, .. } => {
+                Self::resolve_value_to_dix(value, ctx, call_pos)
+            }
             Expression::Identifier { name, .. } => {
                 ctx.get(name).cloned().ok_or_else(|| ResolverError::Fatal {
-                    message: format!("identifier '{}' missing from context at {}", name, call_pos),
+                    message: format!(
+                        "identifier '{}' missing from context at {}",
+                        name, call_pos
+                    ),
                 })
             }
             _ => Err(ResolverError::Fatal {
@@ -1180,7 +1199,8 @@ impl<'a> ValueResolver<'a> {
                 })
             }
             Value::Array { values, .. } => {
-                let items: Result<Vec<DixValue>, ResolverError> = values.iter()
+                let items: Result<Vec<DixValue>, ResolverError> = values
+                    .iter()
                     .map(|v| Self::resolve_value_to_dix(v, ctx, call_pos))
                     .collect();
                 Ok(DixValue::from_array(items?))
@@ -1194,7 +1214,10 @@ impl<'a> ValueResolver<'a> {
                 Ok(DixValue::from_object(map))
             }
             _ => Err(ResolverError::Fatal {
-                message: format!("cannot convert value variant to DixValue at {}", call_pos),
+                message: format!(
+                    "cannot convert value variant to DixValue at {}",
+                    call_pos
+                ),
             }),
         }
     }
@@ -1205,7 +1228,10 @@ impl<'a> ValueResolver<'a> {
         target_position: Position,
         new_value: Value,
     ) {
-        let data = self.ast.data.as_mut().expect("ast.data is None");
+        let data = match self.ast.data.as_mut() {
+            Some(d) => d,
+            None => return,
+        };
 
         for entry in &mut data.entries {
             if Self::replace_in_entry(entry, target_position, &new_value) {
@@ -1321,7 +1347,10 @@ impl<'a> ValueResolver<'a> {
 
         for pass in 1..=max_passes {
             let (new_entries, resolved_count, skipped_count, newly_resolved) = {
-                let data = self.ast.data.as_ref().unwrap();
+                let data = match self.ast.data.as_ref() {
+                    Some(d) => d,
+                    None => break,
+                };
                 let ctx = self.data_context.borrow();
 
                 let mut newly_resolved: Vec<(String, DixValue)> = Vec::new();
@@ -1331,7 +1360,9 @@ impl<'a> ValueResolver<'a> {
 
                 for entry in &data.entries {
                     let (new_entry, res, skip) = Self::resolve_identifiers_in_entry(
-                        entry, &ctx, &mut newly_resolved,
+                        entry,
+                        &ctx,
+                        &mut newly_resolved,
                     );
                     new_entries.push(new_entry);
                     resolved_count += res;
@@ -1391,19 +1422,24 @@ impl<'a> ValueResolver<'a> {
                     Self::resolve_identifiers_in_value(value, &base, ctx, newly_resolved);
 
                 if res > 0 {
-                    (DataEntry::SimpleProperty {
-                        name: name.clone(),
-                        data_type: *data_type,
-                        value: new_value,
-                        position: *position,
-                    }, res, skip)
+                    (
+                        DataEntry::SimpleProperty {
+                            name: name.clone(),
+                            data_type: *data_type,
+                            value: new_value,
+                            position: *position,
+                        },
+                        res,
+                        skip,
+                    )
                 } else {
                     (entry.clone(), 0, skip)
                 }
             }
 
             DataEntry::TableProperty { path: table_path, properties, position } => {
-                let segments: Vec<&str> = table_path.segments.iter().map(|s| s.as_str()).collect();
+                let segments: Vec<&str> =
+                    table_path.segments.iter().map(|s| s.as_str()).collect();
                 let mut new_props = Vec::with_capacity(properties.len());
                 let mut total_res = 0usize;
                 let mut total_skip = 0usize;
@@ -1413,8 +1449,12 @@ impl<'a> ValueResolver<'a> {
                     let mut full_segs = segments.clone();
                     full_segs.push(&prop.name);
                     let full = PathBuilder::build(&full_segs);
-                    let (new_value, res, skip) =
-                        Self::resolve_identifiers_in_value(&prop.value, &full, ctx, newly_resolved);
+                    let (new_value, res, skip) = Self::resolve_identifiers_in_value(
+                        &prop.value,
+                        &full,
+                        ctx,
+                        newly_resolved,
+                    );
                     total_res += res;
                     total_skip += skip;
 
@@ -1432,18 +1472,23 @@ impl<'a> ValueResolver<'a> {
                 }
 
                 if any_changed {
-                    (DataEntry::TableProperty {
-                        path: table_path.clone(),
-                        properties: new_props,
-                        position: *position,
-                    }, total_res, total_skip)
+                    (
+                        DataEntry::TableProperty {
+                            path: table_path.clone(),
+                            properties: new_props,
+                            position: *position,
+                        },
+                        total_res,
+                        total_skip,
+                    )
                 } else {
                     (entry.clone(), 0, total_skip)
                 }
             }
 
             DataEntry::GroupArray { path: group_path, items, position } => {
-                let segments: Vec<&str> = group_path.segments.iter().map(|s| s.as_str()).collect();
+                let segments: Vec<&str> =
+                    group_path.segments.iter().map(|s| s.as_str()).collect();
                 let base = PathBuilder::build(&segments);
                 let mut new_items = Vec::with_capacity(items.len());
                 let mut total_res = 0usize;
@@ -1452,8 +1497,12 @@ impl<'a> ValueResolver<'a> {
 
                 for (i, item) in items.iter().enumerate() {
                     let indexed = format!("{}[{}]", base, i);
-                    let (new_value, res, skip) =
-                        Self::resolve_identifiers_in_value(item, &indexed, ctx, newly_resolved);
+                    let (new_value, res, skip) = Self::resolve_identifiers_in_value(
+                        item,
+                        &indexed,
+                        ctx,
+                        newly_resolved,
+                    );
                     total_res += res;
                     total_skip += skip;
 
@@ -1466,11 +1515,15 @@ impl<'a> ValueResolver<'a> {
                 }
 
                 if any_changed {
-                    (DataEntry::GroupArray {
-                        path: group_path.clone(),
-                        items: new_items,
-                        position: *position,
-                    }, total_res, total_skip)
+                    (
+                        DataEntry::GroupArray {
+                            path: group_path.clone(),
+                            items: new_items,
+                            position: *position,
+                        },
+                        total_res,
+                        total_skip,
+                    )
                 } else {
                     (entry.clone(), 0, total_skip)
                 }
@@ -1482,12 +1535,16 @@ impl<'a> ValueResolver<'a> {
                     Self::resolve_identifiers_in_value(object, &base, ctx, newly_resolved);
 
                 if res > 0 {
-                    (DataEntry::ObjectProperty {
-                        name: name.clone(),
-                        data_type: *data_type,
-                        object: Box::from(new_obj),
-                        position: *position,
-                    }, res, skip)
+                    (
+                        DataEntry::ObjectProperty {
+                            name: name.clone(),
+                            data_type: *data_type,
+                            object: Box::from(new_obj),
+                            position: *position,
+                        },
+                        res,
+                        skip,
+                    )
                 } else {
                     (entry.clone(), 0, skip)
                 }
@@ -1509,7 +1566,7 @@ impl<'a> ValueResolver<'a> {
                         newly_resolved.push((path.to_string(), dix.clone()));
                         (new_val, 1, 0)
                     }
-                    None => (value.clone(), 0, 1)
+                    None => (value.clone(), 0, 1),
                 }
             }
 
@@ -1521,16 +1578,26 @@ impl<'a> ValueResolver<'a> {
 
                 for (i, item) in values.iter().enumerate() {
                     let indexed = format!("{}[{}]", path, i);
-                    let (nv, res, skip) =
-                        Self::resolve_identifiers_in_value(item, &indexed, ctx, newly_resolved);
+                    let (nv, res, skip) = Self::resolve_identifiers_in_value(
+                        item,
+                        &indexed,
+                        ctx,
+                        newly_resolved,
+                    );
                     total_res += res;
                     total_skip += skip;
-                    if res > 0 { any_changed = true; }
+                    if res > 0 {
+                        any_changed = true;
+                    }
                     new_values.push(if res > 0 { nv } else { item.clone() });
                 }
 
                 if any_changed {
-                    (Value::Array { values: new_values, position: *position }, total_res, total_skip)
+                    (
+                        Value::Array { values: new_values, position: *position },
+                        total_res,
+                        total_skip,
+                    )
                 } else {
                     (value.clone(), 0, total_skip)
                 }
@@ -1544,8 +1611,12 @@ impl<'a> ValueResolver<'a> {
 
                 for prop in properties {
                     let child = format!("{}.{}", path, prop.key);
-                    let (nv, res, skip) =
-                        Self::resolve_identifiers_in_value(&prop.value, &child, ctx, newly_resolved);
+                    let (nv, res, skip) = Self::resolve_identifiers_in_value(
+                        &prop.value,
+                        &child,
+                        ctx,
+                        newly_resolved,
+                    );
                     total_res += res;
                     total_skip += skip;
 
@@ -1562,7 +1633,11 @@ impl<'a> ValueResolver<'a> {
                 }
 
                 if any_changed {
-                    (Value::Object { properties: new_props, position: *position }, total_res, total_skip)
+                    (
+                        Value::Object { properties: new_props, position: *position },
+                        total_res,
+                        total_skip,
+                    )
                 } else {
                     (value.clone(), 0, total_skip)
                 }
@@ -1576,20 +1651,30 @@ impl<'a> ValueResolver<'a> {
 
                 for (i, arg) in arguments.iter().enumerate() {
                     let arg_path = format!("{}.__arg{}", path, i);
-                    let (nv, res, skip) =
-                        Self::resolve_identifiers_in_value(arg, &arg_path, ctx, newly_resolved);
+                    let (nv, res, skip) = Self::resolve_identifiers_in_value(
+                        arg,
+                        &arg_path,
+                        ctx,
+                        newly_resolved,
+                    );
                     total_res += res;
                     total_skip += skip;
-                    if res > 0 { any_changed = true; }
+                    if res > 0 {
+                        any_changed = true;
+                    }
                     new_args.push(if res > 0 { nv } else { arg.clone() });
                 }
 
                 if any_changed {
-                    (Value::PrefixedConstructor {
-                        prefix: prefix.clone(),
-                        arguments: new_args,
-                        position: *position,
-                    }, total_res, total_skip)
+                    (
+                        Value::PrefixedConstructor {
+                            prefix: prefix.clone(),
+                            arguments: new_args,
+                            position: *position,
+                        },
+                        total_res,
+                        total_skip,
+                    )
                 } else {
                     (value.clone(), 0, total_skip)
                 }
@@ -1611,9 +1696,8 @@ impl<'a> ValueResolver<'a> {
             Value::Null { .. } => Some(DixValue::null()),
 
             Value::Array { values, .. } | Value::NestedArray { values, .. } => {
-                let items: Option<Vec<DixValue>> = values.iter()
-                    .map(|v| Self::try_value_to_dix(v))
-                    .collect();
+                let items: Option<Vec<DixValue>> =
+                    values.iter().map(|v| Self::try_value_to_dix(v)).collect();
                 items.map(DixValue::from_array)
             }
 
@@ -1631,35 +1715,35 @@ impl<'a> ValueResolver<'a> {
 
     fn convert_dix_value_to_value(dix: &DixValue, position: Position) -> Value {
         match dix.get_type() {
-            crate::Builtins::Core::DixType::Int => Value::Integer {
-                value: dix.as_int(),
-                position
-            },
-            crate::Builtins::Core::DixType::Float => Value::Float {
-                value: dix.as_float(),
-                position
-            },
-            crate::Builtins::Core::DixType::Double => Value::Double {
-                value: dix.as_double(),
-                position
-            },
-            crate::Builtins::Core::DixType::String => Value::String {
-                value: dix.as_string(),
-                position
-            },
-            crate::Builtins::Core::DixType::Bool => Value::Boolean {
-                value: dix.as_bool(),
-                position
-            },
+            crate::Builtins::Core::DixType::Int => {
+                Value::Integer { value: dix.as_int(), position }
+            }
+            crate::Builtins::Core::DixType::Float => {
+                Value::Float { value: dix.as_float(), position }
+            }
+            crate::Builtins::Core::DixType::Double => {
+                Value::Double { value: dix.as_double(), position }
+            }
+            crate::Builtins::Core::DixType::String => {
+                Value::String { value: dix.as_string(), position }
+            }
+            crate::Builtins::Core::DixType::Bool => {
+                Value::Boolean { value: dix.as_bool(), position }
+            }
             crate::Builtins::Core::DixType::Null => Value::Null { position },
-            crate::Builtins::Core::DixType::Array | crate::Builtins::Core::DixType::Tuple => {
-                let values: Vec<Value> = dix.as_array().iter()
+            crate::Builtins::Core::DixType::Array
+            | crate::Builtins::Core::DixType::Tuple => {
+                let values: Vec<Value> = dix
+                    .as_array()
+                    .iter()
                     .map(|item| Self::convert_dix_value_to_value(item, position))
                     .collect();
                 Value::Array { values, position }
             }
             crate::Builtins::Core::DixType::Object => {
-                let properties: Vec<ObjectProperty> = dix.as_object().iter()
+                let properties: Vec<ObjectProperty> = dix
+                    .as_object()
+                    .iter()
                     .map(|(key, val)| ObjectProperty {
                         key: key.clone(),
                         value: Self::convert_dix_value_to_value(val, position),
@@ -1670,7 +1754,7 @@ impl<'a> ValueResolver<'a> {
             }
             _ => Value::String {
                 value: format!("{:?}", dix),
-                position
+                position,
             },
         }
     }
@@ -1680,14 +1764,16 @@ impl<'a> ValueResolver<'a> {
     fn dump_data_context(&self) {
         let ctx = self.data_context.borrow();
         self.error_manager.log_info("[DIAGNOSTIC] ── data_context dump ──");
-        self.error_manager.log_info(&format!("  entries: {}", ctx.len()));
+        self.error_manager
+            .log_info(&format!("  entries: {}", ctx.len()));
 
         let mut keys: Vec<&String> = ctx.keys().collect();
         keys.sort_unstable();
 
         for key in keys {
             if self.debug_config.is_verbose {
-                self.error_manager.log_debug(&format!("  {} = {:?}", key, ctx[key]));
+                self.error_manager
+                    .log_debug(&format!("  {} = {:?}", key, ctx[key]));
             } else {
                 let repr = format!("{:?}", ctx[key]);
                 let truncated = if repr.len() > 80 {
@@ -1695,7 +1781,8 @@ impl<'a> ValueResolver<'a> {
                 } else {
                     repr
                 };
-                self.error_manager.log_info(&format!("  {} = {}", key, truncated));
+                self.error_manager
+                    .log_info(&format!("  {} = {}", key, truncated));
             }
         }
     }
@@ -1705,15 +1792,19 @@ impl<'a> ValueResolver<'a> {
         let ns_count = calls.iter().filter(|c| c.namespace_name.is_some()).count();
 
         self.error_manager.log_info(&format!(
-            "[DIAGNOSTIC]   local calls:      {}", local_count
+            "[DIAGNOSTIC]   local calls:      {}",
+            local_count
         ));
         self.error_manager.log_info(&format!(
-            "[DIAGNOSTIC]   namespaced calls: {}", ns_count
+            "[DIAGNOSTIC]   namespaced calls: {}",
+            ns_count
         ));
 
         if self.debug_config.is_verbose {
             for call in calls {
-                let prefix = call.namespace_name.as_ref()
+                let prefix = call
+                    .namespace_name
+                    .as_ref()
                     .map(|ns| format!("{}.", ns))
                     .unwrap_or_default();
                 self.error_manager.log_debug(&format!(

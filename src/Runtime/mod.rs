@@ -2,8 +2,6 @@
 
 //! Runtime - Public API for loading and using .mdix files
 //!
-//! This module provides the core runtime components for working with DixScript files.
-//!
 //! ## Core Types
 //! - `DixData` - Loaded data container with flattened access
 //! - `DixValue` - Runtime value representation
@@ -15,7 +13,8 @@
 //! ## Utilities
 //! - `DixCompactor` - Minification and compaction
 //! - `DixConverter` - HashMap ↔ AST conversion
-//! - `KeyFileResolver` - Key file resolution for encrypted files
+//! - `KeyFileResolver` - Locates .dxkey files for encrypted loading
+//! - `KeyResolver` - Derives/extracts actual encryption key bytes
 
 // Module declarations
 pub mod format_options;
@@ -36,8 +35,19 @@ pub use dix_value::DixValue;
 pub use converter::DixConverter;
 pub use dix_data::DixData;
 pub use loader::DixLoader;
-pub use key_resolver::{KeyFileResolver, KeyFileResolution, KeyFileSource};
+pub use key_resolver::{
+    KeyFileResolver,
+    KeyFileResolution,
+    KeyFileSource,
+    KeyResolver,
+    ResolvedKey,
+    KeySource,
+};
 pub use data_builder::{
-    DixDataBuilder, ConfigBuilder, EnumsBuilder,
-    DataBuilder, TablePropertiesBuilder, GroupArrayBuilder
+    DixDataBuilder,
+    ConfigBuilder,
+    EnumsBuilder,
+    DataBuilder,
+    TablePropertiesBuilder,
+    GroupArrayBuilder,
 };

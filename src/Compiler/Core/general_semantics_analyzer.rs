@@ -649,14 +649,14 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
     /// Finalize analysis result
     fn finalize_result(mut self) -> SemanticAnalysisResult {
         self.analysis_result.is_success = self.analysis_result.errors.is_empty();
-        self.analysis_result.symbol_table = Some(self.symbol_table);
         self.analysis_result.analysis_duration = self.stopwatch.elapsed();
 
-        self.log_info_fmt(|| format!(
-            "Analysis duration: {:.2}ms",
-            self.analysis_result.analysis_duration.as_secs_f64() * 1000.0
-        ));
+        // Log BEFORE moving symbol_table (self must still be intact)
+        let duration_ms = self.analysis_result.analysis_duration.as_secs_f64() * 1000.0;
+        self.log_info(&format!("Analysis duration: {:.2}ms", duration_ms));
 
+        // Now do the partial move — nothing borrows self after this
+        self.analysis_result.symbol_table = Some(self.symbol_table);
         self.analysis_result
     }
 

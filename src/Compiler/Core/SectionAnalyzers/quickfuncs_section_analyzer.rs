@@ -10,7 +10,7 @@
 //! - Circular function calls (via CycleDetectionValidator)
 
 use crate::Compiler::AST::*;
-use crate::Compiler::AST::Visitors::{TypeInferenceVisitor, AstVisitorBase};
+use crate::Compiler::AST::Visitors::{TypeInferenceVisitor};
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::Compiler::Core::Functions::CycleDetectionValidator;
 use crate::Compiler::Core::SectionAnalyzers::{
@@ -1414,7 +1414,7 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
     ) {
-        let collector = VariableReferenceCollector::new(&func.parameters);
+        let mut collector = VariableReferenceCollector::new(&func.parameters);
         let referenced_variables = collector.collect_from_function(func);
 
         for var_name in local_scope.get_declared_variable_names() {
@@ -2737,7 +2737,7 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
     fn validate_array_homogeneity(
         &self,
         values: &[Value],
-        function_name: &str,
+        _function_name: &str,
         local_scope: &LocalScopeTracker,
         symbol_table: &SymbolTable,
         result: &mut SectionAnalysisResult,
@@ -2792,7 +2792,7 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
                     &format!(
                         "Cannot infer type of array element {} in function '{}'",
                         i + 1,
-                        function_name
+                        _function_name
                     ),
                     "QUICKFUNCS",
                     position,

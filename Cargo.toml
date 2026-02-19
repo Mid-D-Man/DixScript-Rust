@@ -81,6 +81,27 @@ hex = "0.4"             # Hex encoding for checksums and key display
 # Benchmarking framework
 criterion = { version = "0.5", features = ["html_reports"] }
 
+# Temp file management for loader tests
+tempfile = "3.10"
+
+# =============================================================================
+# Format Comparison Dependencies (for benchmarking DixScript vs competitors)
+# =============================================================================
+
+# --- Jsonnet ---
+# Pure Rust Jsonnet evaluator - in-process, no subprocess needed
+# Used to benchmark against DixScript compile-time function evaluation
+jrsonnet-evaluator = "0.4"
+jrsonnet-stdlib = "0.4"    # Standard library for Jsonnet (std.*)
+
+# --- CUE ---
+# No Rust crate exists for CUE - it is a Go tool.
+# CUE comparison tests use std::process::Command to call the `cue` CLI.
+# Install CUE: https://cuelang.org/docs/install/
+# Tests that require the CUE CLI are gated behind:
+#   #[cfg(feature = "cue_cli_available")]
+# or will be skipped if the binary is not on PATH.
+
 # Note: Configure benchmark harness
 [[bench]]
 name = "throughput_benchmark"
@@ -99,6 +120,14 @@ name = "simple_bench"
 path = "benches/simple_bench.rs"
 test = false
 bench = false
+
+# =============================================================================
+# Feature Flags
+# =============================================================================
+[features]
+default = []
+# Enable comparison tests that require the CUE CLI to be installed on PATH
+cue_cli_available = []
 
 [profile.release]
 opt-level = 3

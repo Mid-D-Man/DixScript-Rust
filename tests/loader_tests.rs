@@ -840,21 +840,31 @@ const BULK_DIXSCRIPT: &str = r#"
 )
 "#;
 
-/// Helper: evaluate Jsonnet snippet in-process using jrsonnet and return manifest JSON string.
+/// Helper: evaluate Jsonnet snippet in-process using jrsonnet 0.4.x and return manifest JSON string.
 /// Returns Err if jrsonnet fails.
+///
+/// API notes (jrsonnet 0.4.x):
+/// - `jrsonnet_stdlib` 0.4.x exports ONLY `STDLIB_STR` — no `ContextInitializer` (that is 0.5.x).
+///   Stdlib is initialized via `state.with_stdlib()`, which is sufficient.
+/// - The snippet evaluation method is `evaluate_snippet_raw(source_name: IStr, source: IStr)`.
+///   The 0.5.x name `evaluate_snippet` does not exist in this version.
+/// - JSON manifesting lives on `Val` directly (`val.manifest(&ManifestFormat)`),
+///   NOT on `EvaluationState`. `manifest_json_ex` is a 0.5.x concept.
 fn eval_jsonnet(snippet: &str) -> Result<String, String> {
-    use jrsonnet_evaluator::{EvaluationState, FileImportResolver, ManifestFormat};
-    use jrsonnet_stdlib::ContextInitializer;
+    use jrsonnet_evaluator::{EvaluationState, ManifestFormat};
 
     let state = EvaluationState::default();
+    // with_stdlib() is the correct 0.4.x method — no ContextInitializer needed.
     state.with_stdlib();
 
+    // evaluate_snippet_raw is the 0.4.x name; takes two IStr (interned strings).
     let val = state
-        .evaluate_snippet("test".into(), snippet)
+        .evaluate_snippet_raw("test".into(), snippet.into())
         .map_err(|e| format!("jrsonnet eval error: {:?}", e))?;
 
-    let json = state
-        .manifest_json_ex(&val, &ManifestFormat::Json(2))
+    // manifest() is a method on Val in 0.4.x — EvaluationState is not involved here.
+    let json = val
+        .manifest(&ManifestFormat::Json(2))
         .map_err(|e| format!("jrsonnet manifest error: {:?}", e))?;
 
     Ok(json.to_string())

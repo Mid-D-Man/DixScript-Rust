@@ -21,7 +21,7 @@ rand = "0.8"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 # Date and time handling for error timestamps
 chrono = { version = "0.4", features = ["serde"] }
-bitflags = "2.4"        # NEW: For section flags
+bitflags = "2.4"
 
 # JSON serialization for error reporting
 serde = { version = "1.0", features = ["derive"] }
@@ -42,9 +42,8 @@ base64 = "0.21"
 # Regex support for regex values
 regex = "1.10"
 
-# LINQ-like iterator extensions (replaces DixCore wrappers)
+# LINQ-like iterator extensions
 itertools = "0.13"
-# Lazy static for something i dont know
 lazy_static = "1.4"
 # For concurrency
 rayon = "1.8"
@@ -77,43 +76,51 @@ argon2 = "0.5"          # Argon2id key derivation function (password-based)
 # --- Utilities ---
 hex = "0.4"             # Hex encoding for checksums and key display
 
+# =============================================================================
+# [dev-dependencies]
+# =============================================================================
 [dev-dependencies]
 # Benchmarking framework
 criterion = { version = "0.5", features = ["html_reports"] }
 
-# Temp file management for loader tests
+# Temp file management for loader/DLM tests
 tempfile = "3.10"
 
-# =============================================================================
-# Format Comparison Dependencies (for benchmarking DixScript vs competitors)
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Serialisation format comparison
+# ---------------------------------------------------------------------------
+# Compact binary serialisation (Rust ecosystem standard)
+bincode = "1.3"
 
-# --- Jsonnet ---
-# Pure Rust Jsonnet evaluator - in-process, no subprocess needed
-# Used to benchmark against DixScript compile-time function evaluation
+# MessagePack - widely used cross-language compact binary format
+rmp-serde = "1.1"
+
+# Postcard - no-std friendly, very compact binary, used in embedded/IoT
+postcard = { version = "1.0", features = ["alloc"] }
+
+# CBOR - Concise Binary Object Representation (RFC 7049, used in IoT/WebAuthn)
+ciborium = "0.2"
+
+# ---------------------------------------------------------------------------
+# Format Comparison: Jsonnet (in-process, no subprocess needed)
+# ---------------------------------------------------------------------------
 jrsonnet-evaluator = "0.4"
-jrsonnet-stdlib = "0.4"    # Standard library for Jsonnet (std.*)
+jrsonnet-stdlib = "0.4"
 
-# --- CUE ---
-# No Rust crate exists for CUE - it is a Go tool.
-# CUE comparison tests use std::process::Command to call the `cue` CLI.
-# Install CUE: https://cuelang.org/docs/install/
-# Tests that require the CUE CLI are gated behind:
-#   #[cfg(feature = "cue_cli_available")]
-# or will be skipped if the binary is not on PATH.
-
-# Note: Configure benchmark harness
+# =============================================================================
+# Test / Bench targets
+# =============================================================================
 [[bench]]
 name = "throughput_benchmark"
+harness = false
+
+[[bench]]
+name = "lexer_throughput"
 harness = false
 
 [[test]]
 name = "config_tests"
 path = "tests/config_tests.rs"
-
-[[bench]]
-name = "lexer_throughput"
-harness = false
 
 [[bin]]
 name = "simple_bench"
@@ -126,9 +133,11 @@ bench = false
 # =============================================================================
 [features]
 default = []
-# Enable comparison tests that require the CUE CLI to be installed on PATH
 cue_cli_available = []
 
+# =============================================================================
+# Build Profiles
+# =============================================================================
 [profile.release]
 opt-level = 3
 lto = true
@@ -140,7 +149,6 @@ debug = true
 opt-level = 0
 debug = true
 
-# Optimize for old MacBook Pro 2010
 [profile.dev.build-override]
 opt-level = 0
 

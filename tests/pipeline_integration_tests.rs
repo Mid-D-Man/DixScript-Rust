@@ -93,7 +93,7 @@ const SRC_QUICKFUNCS: &str = r#"@CONFIG(
         };
     }
 
-    ~double<int> => global(x<int>) {
+    ~doubleX<int> => global(x<int>) {
         return x * 2;
     }
 
@@ -112,7 +112,7 @@ const SRC_QUICKFUNCS: &str = r#"@CONFIG(
     goblin = createEnemy("Goblin", 50, 10),
     orc = createEnemy("Orc", 100, 20),
     troll = createEnemy("Troll", 200, 40),
-    doubled = double(21),
+    doubled = doubleX(21),
     dev_server = serverConfig(Difficulty.EASY, "dev"),
     prod_server = serverConfig(Difficulty.HARD, "prod")
 )"#;
@@ -564,15 +564,15 @@ fn parse_quickfuncs_correct_function_count_and_params() {
     let r = run_pipeline(SRC_QUICKFUNCS);
 
     let qf = r.ast.quick_functions.as_ref().expect("QUICKFUNCS missing from AST");
-    assert_eq!(qf.functions.len(), 3, "Should have createEnemy, double, serverConfig");
+    assert_eq!(qf.functions.len(), 3, "Should have createEnemy, doubleX, serverConfig");
 
     let create_enemy = qf.functions.iter().find(|f| f.name == "createEnemy")
         .expect("createEnemy missing");
     assert_eq!(create_enemy.parameters.len(), 3, "createEnemy should have 3 params");
 
     let double_fn = qf.functions.iter().find(|f| f.name == "double")
-        .expect("double missing");
-    assert_eq!(double_fn.parameters.len(), 1, "double should have 1 param");
+        .expect("doubleX missing");
+    assert_eq!(double_fn.parameters.len(), 1, "doubleX should have 1 param");
 
     println!("[parse_qf] function_count={}", qf.functions.len());
     r.metrics.print("Parse — QuickFuncs");

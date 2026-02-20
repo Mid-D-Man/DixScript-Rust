@@ -372,7 +372,7 @@ fn gzip_compress(data: &[u8]) -> Vec<u8> {
 }
 
 fn bzip2_compress(data: &[u8]) -> Vec<u8> {
-    let mut enc = BzEncoder::new(Vec::new(), Bz2Level::Best);
+    let mut enc = BzEncoder::new(Vec::new(), Bz2Level::best());
     enc.write_all(data).unwrap();
     enc.finish().unwrap()
 }

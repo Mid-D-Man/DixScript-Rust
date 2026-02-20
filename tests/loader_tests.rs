@@ -852,17 +852,16 @@ const BULK_DIXSCRIPT: &str = r#"
 ///   NOT on `EvaluationState`. `manifest_json_ex` is a 0.5.x concept.
 fn eval_jsonnet(snippet: &str) -> Result<String, String> {
     use jrsonnet_evaluator::{EvaluationState, ManifestFormat};
+    use std::path::PathBuf;
 
     let state = EvaluationState::default();
-    // with_stdlib() is the correct 0.4.x method — no ContextInitializer needed.
     state.with_stdlib();
 
-    // evaluate_snippet_raw is the 0.4.x name; takes two IStr (interned strings).
+    // First arg is Rc<Path>, so go through PathBuf which has Into<Rc<Path>>
     let val = state
-        .evaluate_snippet_raw("test".into(), snippet.into())
+        .evaluate_snippet_raw(PathBuf::from("test.jsonnet").into(), snippet.into())
         .map_err(|e| format!("jrsonnet eval error: {:?}", e))?;
 
-    // manifest() is a method on Val in 0.4.x — EvaluationState is not involved here.
     let json = val
         .manifest(&ManifestFormat::Json(2))
         .map_err(|e| format!("jrsonnet manifest error: {:?}", e))?;

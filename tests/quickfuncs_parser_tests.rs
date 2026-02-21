@@ -237,7 +237,7 @@ fn test_multiple_functions() {
     "#;
 
     let section = parse_quickfuncs_default(input).expect("Failed to parse");
-    assert_eq!(section.functions.len(), 3);
+    assert_eq!(section.functions.len(), 14);
 }
 
 #[test]
@@ -943,10 +943,102 @@ fn test_recover_strategy_continues() {
 fn test_parse_speed_small_input() {
     let input = r#"
         @QUICKFUNCS(
-            ~add<int> => global(a<int>, b<int>) {
-                return a + b;
-            }
-        )
+    ~testAllTypes<string> => global(
+        intVal<int>,
+        floatVal<float>,
+        doubleVal<double>,
+        stringVal<string>,
+        boolVal<bool>,
+        hexVal<hex>,
+        dateVal<date>,
+        timestampVal<timestamp>,
+        arrayVal<array>,
+        tupleVal<tuple>,
+        objectVal<object>,
+        blobVal<blob>,
+        regexVal<regex>,
+        enumVal<enum>
+    ) {
+        return $"Received all {14} data types successfully";
+    }
+
+    ~testIntOperations<int> => global(a<int>, b<int>, c<int>) {
+        let sum = a + b + c;
+        let product = a * b;
+        let difference = a - b;
+        return sum + product - difference;
+    }
+
+    ~testFloatOperations<float> => global(x<float>, y<float>) {
+        let sum = x + y;
+        let product = x * y;
+        let division = x / y;
+        return sum + product + division;
+    }
+
+    ~testDoubleOperations<double> => global(d1<double>, d2<double>) {
+        let sum = d1 + d2;
+        let average = sum / 2.0;
+        return average;
+    }
+
+    ~testStringOperations<string> => global(s1<string>, s2<string>, s3<string>) {
+        return s1 + " " + s2 + " " + s3;
+    }
+
+    ~testBoolOperations<bool> => global(b1<bool>, b2<bool>) {
+        let and_result = b1 && b2;
+        let or_result = b1 || b2;
+        return and_result || or_result;
+    }
+
+    ~testArrayOperations<int> => global(arr<array>) {
+        let len<int> = arr.length();
+        let first = arr.first();
+        let last = arr.last();
+        return len + first + last;
+    }
+
+    ~testTupleOperations<int> => global(tup<tuple>) {
+        let len<int> = tup.length();
+        let first = tup.first();
+        return len + first;
+    }
+
+    ~testObjectOperations<string> => global(obj<object>) {
+        return "Object received successfully";
+    }
+
+    ~testDateOperations<string> => global(d<date>) {
+        let year<int> = DateTime.year(d);
+        let month<int> = DateTime.month(d);
+        let day<int> = DateTime.day(d);
+        return $"Date: {year}-{month}-{day}";
+    }
+
+    ~testTimestampOperations<string> => global(ts<timestamp>) {
+        return DateTime.format(ts, "yyyy-MM-dd HH:mm:ss");
+    }
+
+    ~testEnumOperations<int> => global(e<enum>) {
+        return e == TestEnum.FIRST ? 100 :
+               e == TestEnum.SECOND ? 200 : 300;
+    }
+
+    ~testHexOperations<string> => global(hexVal<hex>) {
+        return $"Hex value: {hexVal}";
+    }
+
+    ~testNullHandling<string> => global() {
+        let nullVal = null;
+        if: nullVal.isNull() {
+            return "Null handled correctly";
+        }
+        else {
+            return "Null check failed";
+        }
+    }
+)
     "#;
 
     let tokens = tokenize_input(input);

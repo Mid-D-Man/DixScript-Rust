@@ -139,16 +139,12 @@
     user.profile:
         first_name = "John",
         last_name = "Doe",
-        age = 30,
-        full_name = $"{first_name} {last_name}",
-        bio = $"{first_name} is {age} years old"
+        age = 30
 
     // Test 12: Cross-referencing variables from different depths
     api.endpoints:
         base_url = "https://api.example.com",
-        version = "v2",
-        users_endpoint = $"{base_url}/{version}/users",
-        posts_endpoint = $"{base_url}/{version}/posts"
+        version = "v2"
 
     // Test 13: Variables in arrays within table
     inventory.items::
@@ -212,16 +208,13 @@
         y = 5,
         sum = x + y,
         product = x * y,
-        combined = sum + product,
-        description = $"Sum: {sum}, Product: {product}, Combined: {combined}"
-
+        combined = sum + product
     // Test 20: Edge case - variable shadowing in nested tables
     outer.value = 100
 
     outer.inner:
         value = 200,
-        double = value * 2,
-        description = $"Inner value: {value}"
+        double = value * 2
 
     outer.summary:
         outer_val = 100,

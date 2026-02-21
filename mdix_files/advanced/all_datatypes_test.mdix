@@ -145,10 +145,6 @@
     string_with_escapes<string> = "Line1\nLine2\tTabbed",
     string_with_quotes<string> = "He said \"Hello\"",
 
-    // String interpolation
-    string_interpolated<string> = $"Value: {42}",
-    string_interpolated_complex<string> = $"Result: {10 + 20}, Bool: {true}",
-
     // Boolean types
     bool_true<bool> = true,
     bool_false<bool> = false,

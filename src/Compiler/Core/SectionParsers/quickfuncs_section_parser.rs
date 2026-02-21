@@ -66,6 +66,16 @@ lazy_static::lazy_static! {
     static ref VALID_UNARY_OPERATORS: Vec<&'static str> = {
         vec!["!", "not", "-", "+", "~?"]
     };
+
+    // Interpolated string patterns — compiled ONCE, reused forever
+    static ref INTERP_PLACEHOLDER_RE: regex::Regex =
+        regex::Regex::new(r"\{([^}]+)\}").expect("INTERP_PLACEHOLDER_RE compile failed");
+
+    static ref INTERP_METHOD_CALL_RE: regex::Regex =
+        regex::Regex::new(r"^(\w+)\.(\w+)\(\)$").expect("INTERP_METHOD_CALL_RE compile failed");
+
+    static ref INTERP_PROPERTY_RE: regex::Regex =
+        regex::Regex::new(r"^(\w+)\.(\w+)$").expect("INTERP_PROPERTY_RE compile failed");
 }
 
 impl<'a> QuickFuncsSectionParser<'a> {
@@ -2020,36 +2030,33 @@ impl<'a> QuickFuncsSectionParser<'a> {
         raw_content: &str,
         position: Position,
     ) -> (String, Vec<Expression>) {
-        use regex::Regex;
-
         let mut expressions = Vec::new();
         let mut template = String::new();
         let mut expression_index = 0;
 
-        // Simple pattern matching for {expr}
-        let re = Regex::new(r"\{([^}]+)\}").unwrap();
         let mut last_end = 0;
 
-        for cap in re.captures_iter(raw_content) {
+        // Reuse the lazy-static compiled regex — zero allocation cost here
+        for cap in INTERP_PLACEHOLDER_RE.captures_iter(raw_content) {
             let match_start = cap.get(0).unwrap().start();
             let match_end = cap.get(0).unwrap().end();
             let expr_text = cap.get(1).unwrap().as_str();
 
-            // Add literal text before this expression
+            // Literal text before this expression
             template.push_str(&raw_content[last_end..match_start]);
 
             // Parse the expression content
             let parsed_expr = self.parse_interpolated_expression(expr_text, position);
             expressions.push(parsed_expr);
 
-            // Add placeholder
+            // Placeholder index
             template.push_str(&format!("{{{}}}", expression_index));
             expression_index += 1;
 
             last_end = match_end;
         }
 
-        // Add remaining literal text
+        // Remaining literal text
         template.push_str(&raw_content[last_end..]);
 
         (template, expressions)
@@ -2058,7 +2065,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
     fn parse_interpolated_expression(&self, expr_text: &str, position: Position) -> Expression {
         let trimmed = expr_text.trim();
 
-        // Try parsing as integer
+        // Integer literal
         if let Ok(val) = trimmed.parse::<i32>() {
             return Expression::Value {
                 value: Value::Integer { value: val, position },
@@ -2066,7 +2073,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
             };
         }
 
-        // Try parsing as float (with 'f' suffix)
+        // Float literal (f/F suffix)
         if trimmed.ends_with('f') || trimmed.ends_with('F') {
             let num_part = &trimmed[..trimmed.len() - 1];
             if let Ok(val) = num_part.parse::<f32>() {
@@ -2077,17 +2084,24 @@ impl<'a> QuickFuncsSectionParser<'a> {
             }
         }
 
-        // Try parsing as double
+        // Double literal
         if trimmed.contains('.') {
-            if let Ok(val) = trimmed.parse::<f64>() {
-                return Expression::Value {
-                    value: Value::Double { value: val, position },
-                    position,
-                };
+            // Guard: must not match a property-access pattern like "obj.prop"
+            // Only try f64 parse when it looks purely numeric
+            let is_numeric_double = trimmed
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-');
+            if is_numeric_double {
+                if let Ok(val) = trimmed.parse::<f64>() {
+                    return Expression::Value {
+                        value: Value::Double { value: val, position },
+                        position,
+                    };
+                }
             }
         }
 
-        // Try parsing as boolean
+        // Boolean
         if trimmed.eq_ignore_ascii_case("true") {
             return Expression::Value {
                 value: Value::Boolean { value: true, position },
@@ -2101,7 +2115,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
             };
         }
 
-        // Try parsing as quoted string
+        // Quoted string
         if (trimmed.starts_with('"') && trimmed.ends_with('"'))
             || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
         {
@@ -2115,10 +2129,8 @@ impl<'a> QuickFuncsSectionParser<'a> {
             };
         }
 
-        // Check for method call: obj.method()
-        use regex::Regex;
-        let method_re = Regex::new(r"^(\w+)\.(\w+)\(\)$").unwrap();
-        if let Some(cap) = method_re.captures(trimmed) {
+        // Method call: obj.method()  — reuse lazy-static regex
+        if let Some(cap) = INTERP_METHOD_CALL_RE.captures(trimmed) {
             let parts = vec![cap[1].to_string(), cap[2].to_string()];
             return Expression::QualifiedIdentifier {
                 parts,
@@ -2127,9 +2139,8 @@ impl<'a> QuickFuncsSectionParser<'a> {
             };
         }
 
-        // Check for property access: obj.property
-        let prop_re = Regex::new(r"^(\w+)\.(\w+)$").unwrap();
-        if let Some(cap) = prop_re.captures(trimmed) {
+        // Property access: obj.property  — reuse lazy-static regex
+        if let Some(cap) = INTERP_PROPERTY_RE.captures(trimmed) {
             let parts = vec![cap[1].to_string(), cap[2].to_string()];
             return Expression::QualifiedIdentifier {
                 parts,

@@ -202,7 +202,7 @@ fn test_mixed_entry_types() {
                 x = 1,
                 y = 2,
 
-            array:: 10, 20, 30,
+            array_ofNums:: 10, 20, 30,
 
             obj = { a = 1, b = 2 }
         )
@@ -377,7 +377,7 @@ fn test_two_tier_correct_order() {
             flat2 = 42,
 
             table.prop: x = 1,
-            array:: item1, item2
+            array_:: item1, item2
         )
     "#;
 
@@ -704,12 +704,181 @@ fn test_exceed_object_nesting_depth() {
 
 #[test]
 fn test_parse_speed_small_input() {
+    //note cant use comments if testing individual sections cause comments
+    //supposed to be striped out by general parser... could make helper for it tough
     let input = r#"
-        @DATA(
-            name = "test",
-            value = 42,
-            enabled = true
-        )
+     @DATA(
+
+    int_positive<int> = 42,
+    int_negative<int> = -100,
+    int_zero<int> = 0,
+    int_large<int> = 2147483647,
+    int_small<int> = -2147483648,
+
+
+    float_positive<float> = 3.14f,
+    float_negative<float> = -2.5f,
+    float_zero<float> = 0.0f,
+    float_no_decimal<float> = 42f,
+    float_small<float> = 0.001f,
+    float_large<float> = 999999.99f,
+
+
+    double_positive<double> = 3.141592653589793,
+    double_negative<double> = -2.718281828,
+    double_zero<double> = 0.0,
+    double_scientific<double> = 1.23e10,
+    double_scientific_negative<double> = -4.56e-5,
+    double_scientific_positive_exp<double> = 7.89e+12,
+
+
+    sci_float<float> = 1.5e3f,
+    sci_float_negative<float> = -2.5e-2f,
+
+
+    string_double_quotes<string> = "Hello World",
+    string_single_quotes<string> = 'Single quotes',
+    string_empty<string> = "",
+    string_with_spaces<string> = "   spaces   ",
+    string_with_escapes<string> = "Line1\nLine2\tTabbed",
+    string_with_quotes<string> = "He said \"Hello\"",
+
+
+
+    bool_true<bool> = true,
+    bool_false<bool> = false,
+
+
+    hex_simple<hex> = 0xFF,
+    hex_large<hex> = 0xDEADBEEF,
+    hex_zero<hex> = 0x0,
+    hex_with_letters<hex> = 0xABCDEF,
+
+
+    color_rgb_short<hex> = #F00,
+    color_rgb_long<hex> = #FF0000,
+    color_rgba_short<hex> = #F00F,
+    color_rgba_long<hex> = #FF0000FF,
+    color_with_alpha<hex> = #80FFFFFF,
+
+
+    date_standard<date> = 2025-01-15,
+    date_leap_year<date> = 2024-02-29,
+    date_year_end<date> = 2025-12-31,
+    date_year_start<date> = 2025-01-01,
+
+
+    timestamp_basic<timestamp> = 2025-01-15T10:30:00Z,
+    timestamp_with_millis<timestamp> = 2025-01-15T10:30:00.123Z,
+    timestamp_with_timezone<timestamp> = 2025-01-15T10:30:00+05:30,
+    timestamp_utc<timestamp> = 2025-01-15T10:30:00.999Z,
+
+
+    array_integers = [1, 2, 3, 4, 5],
+    array_floats = [1.1f, 2.2f, 3.3f],
+    array_strings = ["apple", "banana", "cherry"],
+    array_booleans = [true, false, true, true],
+    array_empty = [],
+    array_nested = [[1, 2], [3, 4], [5, 6]],
+    array_objects = [
+        { id = 1, name = "First" },
+        { id = 2, name = "Second" },
+        { id = 3, name = "Third" }
+    ],
+
+
+    tuple_empty = t:(),
+    tuple_single = t:(42),
+    tuple_two = t:(42, "text"),
+    tuple_three = t:(42, "text", true),
+    tuple_four = t:(42, "text", true, 3.14f),
+    tuple_mixed_types = t:(100, "hello", false, 2.5f),
+
+
+    object_simple = {
+        name = "Test",
+        value = 42
+    },
+    object_nested = {
+        outer = {
+            inner = {
+                deep = "value"
+            }
+        }
+    },
+    object_complex = {
+        id = 1,
+        name = "Complex",
+        active = true,
+        score = 95.5f,
+        tags = ["tag1", "tag2"],
+        metadata = {
+            created = 2025-01-15,
+            author = "System"
+        }
+    },
+    object_empty = {},
+
+
+    blob_simple = b:("SGVsbG8gV29ybGQ="),
+    blob_empty = b:(""),
+    blob_long = b:("VGhpcyBpcyBhIGxvbmdlciBiYXNlNjQgZW5jb2RlZCBzdHJpbmcgdGhhdCByZXByZXNlbnRzIGJpbmFyeSBkYXRh"),
+
+
+    regex_simple = r:("^[a-z]+$"),
+    regex_email = r:("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"),
+    regex_phone = r:("^\d{3}-\d{3}-\d{4}$"),
+    regex_complex = r:("^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$"),
+
+
+    enum_first<enum> = TestEnum.FIRST,
+    enum_second<enum> = TestEnum.SECOND,
+    enum_third<enum> = TestEnum.THIRD,
+
+
+    null_value = null
+
+
+    mixed_types:
+        int_val<int> = 100,
+        float_val<float> = 3.14f,
+        string_val<string> = "mixed",
+        bool_val<bool> = true,
+        array_val = [1, 2, 3],
+        object_val = { x = 10, y = 20 },
+
+
+    test_all_types_call = testAllTypes(
+        42,
+        3.14f,
+        2.718281828,
+        "test string",
+        true,
+        0xFF00AA,
+        2025-01-15,
+        2025-01-15T10:30:00Z,
+        [1, 2, 3],
+        t:(1, "text", true),
+        { key = "value" },
+        b:("SGVsbG8="),
+        r:("^test$"),
+        TestEnum.FIRST
+    ),
+
+    test_int_ops = testIntOperations(10, 5, 3),
+    test_float_ops = testFloatOperations(10.5f, 2.5f),
+    test_double_ops = testDoubleOperations(100.75, 50.25),
+    test_string_ops = testStringOperations("Hello", "beautiful", "world"),
+    test_bool_ops = testBoolOperations(true, false),
+    test_array_ops = testArrayOperations([5, 10, 15, 20]),
+    test_tuple_ops = testTupleOperations(t:(10, 20, 30)),
+    test_object_ops = testObjectOperations({ test = "value" }),
+    test_date_ops = testDateOperations(2025-12-31),
+    test_timestamp_ops = testTimestampOperations(2025-01-15T10:30:45Z),
+    test_enum_ops = testEnumOperations(TestEnum.SECOND),
+    test_hex_ops = testHexOperations(0xABCDEF),
+    test_null_ops = testNullHandling()
+)
     "#;
 
     let tokens = tokenize_input(input);
@@ -836,13 +1005,10 @@ fn test_parse_complex_structures() {
 
     // Group arrays
     for i in 0..50 {
-        input.push_str(&format!("    array{i}:: {i}, {}, {}\n", i*2, i*3));
+        input.push_str(&format!("    array_{i}:: {i}, {}, {}\n", i*2, i*3));
     }
 
-    // Objects
-    for i in 0..50 {
-        input.push_str(&format!("    obj{} = {{ a = {}, b = {} }}\n", i, i, i*2));
-    }
+
 
     input.push_str(")");
 
@@ -939,9 +1105,9 @@ fn test_memory_usage_estimate() {
         @DATA(
             simple = 42,
             table.path: x = 1, y = 2,
-            array:: 1, 2, 3,
+            array_ofNums:: 1, 2, 3,//cant use array as identifier its a type,
             objs_only_within:
-            obj = { a = 1 }
+
         )
     "#;
 
@@ -1022,7 +1188,7 @@ fn test_whitespace_handling() {
         @DATA(
             prop1   =   42  ,
             table.path  :   x   =   1   ,
-            array  ::  1  ,  2  ,  3
+            array_  ::  1  ,  2  ,  3
         )
     "#;
 

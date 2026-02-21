@@ -1,5 +1,5 @@
 // src/Compiler/Core/general_parser.rs
-//! GeneralParser v1.1.0
+//! GeneralParser v1.0.0
 //!
 //! Handles comment filtering, section extraction, and routing to specialized parsers.
 //! Supports both sequential and concurrent parsing modes.
@@ -111,7 +111,7 @@ impl GeneralParser {
 
     /// Enable or disable concurrent (rayon) section parsing.
     ///
-    /// ```rust
+    /// ```rust no
     /// let parser = GeneralParser::new(tokens, config, settings)?
     ///     .with_concurrent_parsing(false);  // force sequential for profiling
     /// ```

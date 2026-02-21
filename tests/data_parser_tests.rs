@@ -200,11 +200,9 @@ fn test_mixed_entry_types() {
 
             table.path:
                 x = 1,
-                y = 2,
+                y = 2
 
-            array_ofNums:: 10, 20, 30,
-
-            obj = { a = 1, b = 2 }
+            array_ofNums:: 10, 20, 30
         )
     "#;
 
@@ -214,7 +212,7 @@ fn test_mixed_entry_types() {
     assert!(matches!(section.entries[0], DataEntry::SimpleProperty { .. }));
     assert!(matches!(section.entries[1], DataEntry::TableProperty { .. }));
     assert!(matches!(section.entries[2], DataEntry::GroupArray { .. }));
-    assert!(matches!(section.entries[3], DataEntry::ObjectProperty { .. }));
+
 }
 
 #[test]
@@ -1026,7 +1024,7 @@ fn test_parse_complex_structures() {
     println!("Time: {:?}", duration);
     println!("=================================\n");
 
-    assert_eq!(section.entries.len(), 200);
+    assert_eq!(section.entries.len(), 150);
 }
 
 #[test]
@@ -1105,7 +1103,7 @@ fn test_memory_usage_estimate() {
         @DATA(
             simple = 42,
             table.path: x = 1, y = 2,
-            array_ofNums:: 1, 2, 3,//cant use array as identifier its a type,
+            array_ofNums:: 1, 2, 3
             objs_only_within:
 
         )

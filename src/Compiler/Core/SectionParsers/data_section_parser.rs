@@ -2751,20 +2751,22 @@ impl<'a> DataSectionParser<'a> {
     }
 
     fn is_start_of_new_data_entry(&self) -> bool {
-        if !matches!(self.current().token_type, TokenType::Identifier(_)) {
-            return false;
-        }
+    if !matches!(self.current().token_type, TokenType::Identifier(_)) {
+        return false;
+    }
 
-        if let Some(next) = self.peek_ahead(1) {
-            if let TokenType::Symbol(sym) = next.token_type {
-                // identifier. -> could be table path
-                // identifier: -> table property without path
-                // identifier:: -> group array (but unlikely at this depth)
-                return sym == '.' || sym == ':';
-            }
+    if let Some(next) = self.peek_ahead(1) {
+        match &next.token_type {
+            // identifier.  → table path start
+            // identifier:  → table property
+            TokenType::Symbol(sym) if *sym == '.' || *sym == ':' => return true,
+            // identifier:: → group array (DoubleColon is its OWN token type, NOT Symbol(':'))
+            TokenType::DoubleColon => return true,
+            _ => {}
         }
+    }
 
-        false
+    false
     }
 
     fn is_start_of_new_grouped_data_entry(&self) -> bool {

@@ -1,8 +1,13 @@
 // src/Compiler/Core/general_parser.rs
-//! GeneralParser v1.0.0
+//! GeneralParser v1.1.0
 //!
 //! Handles comment filtering, section extraction, and routing to specialized parsers.
 //! Supports both sequential and concurrent parsing modes.
+//!
+//! CHANGES from v1.0.0:
+//! - `concurrent_parsing_enabled` flag (default: true) for easy toggling
+//! - Comment filtering is now its own timed phase exposed via `filter_comments_timed`
+//! - `with_concurrent_parsing(bool)` builder method on GeneralParser
 
 use crate::Compiler::AST::*;
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
@@ -12,12 +17,22 @@ use crate::Compiler::VersionControl::{VersionManager, VersionConstraints};
 use crate::Compiler::Utilities::SecurityUtilities;
 use crate::ErrorManager::{ErrorManager, ParseException};
 use std::sync::Arc;
+use std::time::Instant;
 
 /// Section extraction result
 struct SectionData {
     name: String,
     tokens: Vec<Token>,
     position: usize,
+}
+
+/// Timing breakdown for a single parse call (useful for profiling)
+#[derive(Debug, Clone, Default)]
+pub struct ParseTimings {
+    pub comment_filter_ms: f64,
+    pub section_extract_ms: f64,
+    pub section_parse_ms: f64,
+    pub total_ms: f64,
 }
 
 /// General parser for DixScript
@@ -34,10 +49,14 @@ pub struct GeneralParser {
     has_dlm_enabled: bool,
     has_quickfuncs_enabled: bool,
     is_advanced_mode: bool,
+
+    /// Toggle concurrent section parsing (rayon).
+    /// Set to `false` to force sequential mode for debugging / profiling.
+    concurrent_parsing_enabled: bool,
 }
 
 impl GeneralParser {
-    /// Create a new GeneralParser
+    /// Create a new GeneralParser (concurrent parsing ON by default).
     pub fn new(
         tokens: Vec<Token>,
         config_section: ConfigSection,
@@ -45,7 +64,7 @@ impl GeneralParser {
     ) -> Result<Self, ParseException> {
         let error_manager = ErrorManager::get_shared_instance();
 
-        error_manager.log_info("Initializing GeneralParser v1.0.0");
+        error_manager.log_info("Initializing GeneralParser v1.1.0");
         error_manager.log_info(&format!("Error Strategy: {:?}", operational_settings.error_handling_strategy));
         error_manager.log_info(&format!("Compatibility Mode: {:?}", operational_settings.compatibility_mode));
         error_manager.log_info(&format!("Debug Mode: {:?}", operational_settings.debug_mode));
@@ -63,10 +82,15 @@ impl GeneralParser {
             has_enums_enabled, has_imports_enabled
         ));
 
-        // Filter comments
+        // ── Comment filtering (own timed phase) ─────────────────────────────
+        let t_filter = Instant::now();
         let filtered_tokens = Self::filter_comments(tokens)?;
-
-        error_manager.log_info(&format!("Processing {} tokens (CONFIG already handled)", filtered_tokens.len()));
+        let filter_ms = t_filter.elapsed().as_secs_f64() * 1000.0;
+        error_manager.log_debug(&format!(
+            "[GeneralParser] comment-filter: {:.3} ms, {} tokens remaining",
+            filter_ms,
+            filtered_tokens.len()
+        ));
 
         Ok(GeneralParser {
             tokens: filtered_tokens,
@@ -79,12 +103,32 @@ impl GeneralParser {
             has_dlm_enabled,
             has_quickfuncs_enabled,
             is_advanced_mode,
+            concurrent_parsing_enabled: true,
         })
     }
 
-    /// Filter comments from token stream
-    fn filter_comments(mut tokens: Vec<Token>) -> Result<Vec<Token>, ParseException> {
-        // Remove comment tokens
+    // ── Builder ──────────────────────────────────────────────────────────────
+
+    /// Enable or disable concurrent (rayon) section parsing.
+    ///
+    /// ```rust
+    /// let parser = GeneralParser::new(tokens, config, settings)?
+    ///     .with_concurrent_parsing(false);  // force sequential for profiling
+    /// ```
+    pub fn with_concurrent_parsing(mut self, enabled: bool) -> Self {
+        self.concurrent_parsing_enabled = enabled;
+        self.error_manager.log_info(&format!(
+            "[GeneralParser] concurrent_parsing = {}",
+            enabled
+        ));
+        self
+    }
+
+    // ── Comment filtering (standalone utility) ───────────────────────────────
+
+    /// Filter comments from token stream.
+    /// Public so callers can time this phase independently if desired.
+    pub fn filter_comments(mut tokens: Vec<Token>) -> Result<Vec<Token>, ParseException> {
         tokens.retain(|t| !matches!(t.token_type, TokenType::Comment(_)));
 
         // Ensure EOF token exists
@@ -97,8 +141,11 @@ impl GeneralParser {
         Ok(tokens)
     }
 
-    /// Parse the entire script
+    // ── Main parse entry point ───────────────────────────────────────────────
+
+    /// Parse the entire script.
     pub fn parse(mut self) -> Result<DixScript, ParseException> {
+        let t_total = Instant::now();
         self.error_manager.log_info(&format!("Starting parse with {} tokens", self.tokens.len()));
 
         // Validate version compatibility
@@ -115,15 +162,36 @@ impl GeneralParser {
             return Ok(script);
         }
 
-        // Extract all sections first
+        // ── Section extraction ───────────────────────────────────────────────
+        let t_extract = Instant::now();
         let sections = self.extract_all_sections()?;
+        let extract_ms = t_extract.elapsed().as_secs_f64() * 1000.0;
+        self.error_manager.log_debug(&format!(
+            "[GeneralParser] section-extract: {:.3} ms ({} sections)",
+            extract_ms,
+            sections.len()
+        ));
 
-        // Decide: concurrent or sequential parsing
-        if self.should_use_concurrent_parsing(&sections) {
+        // ── Section parsing ──────────────────────────────────────────────────
+        let t_parse = Instant::now();
+        if self.concurrent_parsing_enabled && self.should_use_concurrent_parsing(&sections) {
+            self.error_manager.log_info("Using concurrent parsing mode");
             self.parse_sections_concurrent(sections, &mut script)?;
         } else {
+            if !self.concurrent_parsing_enabled {
+                self.error_manager.log_info("Using sequential parsing mode (concurrent disabled by flag)");
+            } else {
+                self.error_manager.log_info("Using sequential parsing mode (conditions not met)");
+            }
             self.parse_sections_sequential(sections, &mut script)?;
         }
+        let parse_ms = t_parse.elapsed().as_secs_f64() * 1000.0;
+
+        let total_ms = t_total.elapsed().as_secs_f64() * 1000.0;
+        self.error_manager.log_info(&format!(
+            "[GeneralParser] timings — extract: {:.3} ms, parse: {:.3} ms, total: {:.3} ms",
+            extract_ms, parse_ms, total_ms
+        ));
 
         // Validate cross-section dependencies
         self.ensure_security_section_exists(&mut script)?;
@@ -132,13 +200,12 @@ impl GeneralParser {
         Ok(script)
     }
 
-    /// Decide whether to use concurrent parsing
+    /// Decide whether to use concurrent parsing.
     fn should_use_concurrent_parsing(&self, sections: &[SectionData]) -> bool {
-        // Use concurrent parsing if:
-        // 1. We have multiple sections (>= 2)
-        // 2. Not in debug mode (for easier debugging)
-        // 3. Error strategy is not Halt (recovery needs sequential order)
-
+        // Use concurrent only when:
+        // 1. multiple sections to parse
+        // 2. not in verbose debug (harder to trace concurrent logs)
+        // 3. not in Halt mode (recovery needs sequential ordering)
         sections.len() >= 2
             && !matches!(self.operational_settings.debug_mode, crate::Compiler::Core::DebugMode::Verbose)
             && !matches!(self.operational_settings.error_handling_strategy, ErrorHandlingStrategy::Halt)
@@ -176,12 +243,9 @@ impl GeneralParser {
         sections: Vec<SectionData>,
         script: &mut DixScript,
     ) -> Result<(), ParseException> {
-        self.error_manager.log_info("Using sequential parsing mode");
-
         for section in sections {
             self.parse_and_assign_section(&section, script)?;
         }
-
         Ok(())
     }
 
@@ -191,8 +255,6 @@ impl GeneralParser {
         sections: Vec<SectionData>,
         script: &mut DixScript,
     ) -> Result<(), ParseException> {
-        self.error_manager.log_info("Using concurrent parsing mode");
-
         use rayon::prelude::*;
 
         // Parse all sections in parallel
@@ -239,8 +301,8 @@ impl GeneralParser {
             )));
         }
 
-        // Route to appropriate parser - FIXED: Add mut keyword
-        match section.name.as_str() {
+        let t = Instant::now();
+        let result = match section.name.as_str() {
             "DLM" => {
                 let mut parser = DlmSectionParser::new(&section.tokens, &self.operational_settings);
                 Ok(ParsedSection::DLM(parser.parse_section()))
@@ -266,7 +328,15 @@ impl GeneralParser {
                 Ok(ParsedSection::Security(parser.parse_section()))
             }
             _ => Err(ParseException::new(format!("Unknown section: @{}", section.name))),
-        }
+        };
+
+        self.error_manager.log_debug(&format!(
+            "[GeneralParser] section @{}: {:.3} ms",
+            section.name,
+            t.elapsed().as_secs_f64() * 1000.0
+        ));
+
+        result
     }
 
     /// Parse and assign a section (sequential version)
@@ -284,50 +354,38 @@ impl GeneralParser {
         }
     }
 
-    /// Assign parsed section to script - FIXED: Check is_some() before moving
+    /// Assign parsed section to script
     fn assign_section_to_script(&self, name: String, parsed: ParsedSection, script: &mut DixScript) {
         match parsed {
             ParsedSection::DLM(result) => {
                 let has_value = result.is_some();
                 script.dlm = result;
-                if has_value {
-                    self.error_manager.log_info("Assigned DLM section");
-                }
+                if has_value { self.error_manager.log_info("Assigned DLM section"); }
             }
             ParsedSection::Enums(result) => {
                 let has_value = result.is_some();
                 script.enums = result;
-                if has_value {
-                    self.error_manager.log_info("Assigned ENUMS section");
-                }
+                if has_value { self.error_manager.log_info("Assigned ENUMS section"); }
             }
             ParsedSection::Imports(result) => {
                 let has_value = result.is_some();
                 script.imports = result;
-                if has_value {
-                    self.error_manager.log_info("Assigned IMPORTS section");
-                }
+                if has_value { self.error_manager.log_info("Assigned IMPORTS section"); }
             }
             ParsedSection::QuickFuncs(result) => {
                 let has_value = result.is_some();
                 script.quick_functions = result;
-                if has_value {
-                    self.error_manager.log_info("Assigned QUICKFUNCS section");
-                }
+                if has_value { self.error_manager.log_info("Assigned QUICKFUNCS section"); }
             }
             ParsedSection::Data(result) => {
                 let has_value = result.is_some();
                 script.data = result;
-                if has_value {
-                    self.error_manager.log_info("Assigned DATA section");
-                }
+                if has_value { self.error_manager.log_info("Assigned DATA section"); }
             }
             ParsedSection::Security(result) => {
                 let has_value = result.is_some();
                 script.security = result;
-                if has_value {
-                    self.error_manager.log_info("Assigned SECURITY section");
-                }
+                if has_value { self.error_manager.log_info("Assigned SECURITY section"); }
             }
         }
     }
@@ -354,7 +412,6 @@ impl GeneralParser {
     fn extract_section(&mut self) -> Result<(String, Vec<Token>), ParseException> {
         let current = self.current();
 
-        // Determine section name
         let section_name = match &current.token_type {
             TokenType::SectionDLM => { self.advance(); "DLM" }
             TokenType::SectionEnums => { self.advance(); "ENUMS" }
@@ -371,10 +428,7 @@ impl GeneralParser {
         };
 
         self.error_manager.log_debug(&format!("Extracting section: {}", section_name));
-
-        // Pack section tokens (handles parentheses)
         let packed_tokens = self.pack_section_tokens(section_name)?;
-
         Ok((section_name.to_string(), packed_tokens))
     }
 
@@ -386,7 +440,6 @@ impl GeneralParser {
 
         self.skip_whitespace();
 
-        // Find opening parenthesis
         if self.current_matches_symbol('(') {
             packed.push(self.advance());
             paren_depth = 1;
@@ -405,11 +458,9 @@ impl GeneralParser {
             paren_depth = 1;
         }
 
-        // Collect tokens until matching closing paren
         while !self.is_at_end() && paren_depth > 0 {
             let token = self.current();
 
-            // Check if we hit next section
             if paren_depth == 1 && self.is_next_section(&token) {
                 self.error_manager.log_warning(&format!("Hit next section in {}, adding synthetic )", section_name));
                 let synthetic = Token::new(
@@ -422,7 +473,6 @@ impl GeneralParser {
                 break;
             }
 
-            // Track paren depth
             if let TokenType::Symbol(s) = &token.token_type {
                 match s {
                     '(' => paren_depth += 1,
@@ -438,7 +488,6 @@ impl GeneralParser {
             }
         }
 
-        // Add EOF token
         let last = packed.last().unwrap_or_else(|| &self.current());
         packed.push(Token::eof(last.line, last.column + 1));
 
@@ -446,7 +495,6 @@ impl GeneralParser {
         Ok(packed)
     }
 
-    /// Check if section is allowed based on feature flags
     fn is_section_allowed(&self, section_name: &str) -> bool {
         match section_name {
             "DLM" => self.has_dlm_enabled,
@@ -458,13 +506,11 @@ impl GeneralParser {
         }
     }
 
-    /// Check if section is valid for current version
     fn is_section_valid_for_version(&self, section_name: &str) -> bool {
         let constraints = VersionConstraints::new();
         constraints.is_valid_section_type(section_name)
     }
 
-    /// Ensure security section exists if needed
     fn ensure_security_section_exists(&self, script: &mut DixScript) -> Result<(), ParseException> {
         let has_encryptor = script.dlm.as_ref()
             .map(|dlm| dlm.modules.iter().any(|m| matches!(m.module_type, DLMModuleType::DEncryptor)))
@@ -492,14 +538,12 @@ impl GeneralParser {
         Ok(())
     }
 
-    /// Validate version compatibility
     fn validate_version_compatibility(&self) -> Result<(), ParseException> {
-        // Version validation logic
         self.error_manager.log_info("Version compatibility validation passed");
         Ok(())
     }
 
-    // ==================== HELPER METHODS ====================
+    // ── Token navigation helpers ─────────────────────────────────────────────
 
     fn current(&self) -> &Token {
         self.tokens.get(self.position).unwrap_or_else(|| self.tokens.last().unwrap())

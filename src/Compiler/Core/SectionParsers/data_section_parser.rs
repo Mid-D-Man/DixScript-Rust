@@ -2770,45 +2770,52 @@ impl<'a> DataSectionParser<'a> {
     }
 
     fn is_start_of_new_grouped_data_entry(&self) -> bool {
-        if !matches!(self.current().token_type, TokenType::Identifier(_)) {
+    if !matches!(self.current().token_type, TokenType::Identifier(_)) {
+        return false;
+    }
+
+    // Fast path: identifier immediately followed by :: (no dot-path segment)
+    if let Some(next) = self.peek_ahead(1) {
+        if matches!(next.token_type, TokenType::DoubleColon) {
+            return true;
+        }
+    }
+
+    // Look ahead for dot-separated path followed by : or ::
+    let mut look_ahead = 1;
+
+    while let Some(token) = self.peek_ahead(look_ahead) {
+        // Found opening paren - function call, not grouped data
+        if let TokenType::Symbol('(') = token.token_type {
             return false;
         }
 
-        // Look ahead for dot-separated path followed by : or ::
-        let mut look_ahead = 1;
+        // Found colon - table property or group array
+        if let TokenType::Symbol(':') = token.token_type {
+            return true;
+        }
 
-        while let Some(token) = self.peek_ahead(look_ahead) {
-            // Found opening paren - function call, not grouped data
-            if let TokenType::Symbol('(') = token.token_type {
-                return false;
-            }
+        if matches!(token.token_type, TokenType::DoubleColon) {
+            return true;
+        }
 
-            // Found colon - table property or group array
-            if let TokenType::Symbol(':') = token.token_type {
-                return true;
-            }
-
-            if matches!(token.token_type, TokenType::DoubleColon) {
-                return true;
-            }
-
-            // Found dot - continue scanning path
-            if let TokenType::Symbol('.') = token.token_type {
-                look_ahead += 1;
-                if let Some(next_token) = self.peek_ahead(look_ahead) {
-                    if matches!(next_token.token_type, TokenType::Identifier(_)) {
-                        look_ahead += 1;
-                        continue;
-                    }
+        // Found dot - continue scanning path
+        if let TokenType::Symbol('.') = token.token_type {
+            look_ahead += 1;
+            if let Some(next_token) = self.peek_ahead(look_ahead) {
+                if matches!(next_token.token_type, TokenType::Identifier(_)) {
+                    look_ahead += 1;
+                    continue;
                 }
-                return false;
             }
-
-            // Hit something else - not grouped data
             return false;
         }
 
-        false
+        // Hit something else - not grouped data
+        return false;
+    }
+
+    false
     }
 
     fn consume_double_colon(&mut self) -> bool {

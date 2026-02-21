@@ -570,7 +570,7 @@ fn parse_quickfuncs_correct_function_count_and_params() {
         .expect("createEnemy missing");
     assert_eq!(create_enemy.parameters.len(), 3, "createEnemy should have 3 params");
 
-    let double_fn = qf.functions.iter().find(|f| f.name == "double")
+    let double_fn = qf.functions.iter().find(|f| f.name == "doubleX")
         .expect("doubleX missing");
     assert_eq!(double_fn.parameters.len(), 1, "doubleX should have 1 param");
 

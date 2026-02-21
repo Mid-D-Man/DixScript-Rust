@@ -3119,13 +3119,8 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
     }
 
     #[inline]
-    fn is_valid_value_expression(expr: &Expression) -> bool {
-        !matches!(
-            expr,
-            Expression::ArithmeticOp { .. }
-                | Expression::ComparisonOp { .. }
-                | Expression::LogicalOp { .. }
-        )
+    fn is_valid_value_expression(_expr: &Expression) -> bool {
+        true
     }
 
     #[inline]

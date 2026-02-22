@@ -1,0 +1,765 @@
+name: DixScript — Test & Bench Publisher
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      publish_type:
+        description: 'What to publish'
+        required: true
+        default: 'tests'
+        type: choice
+        options:
+          - tests
+          - bench
+          - flame
+          - all
+
+permissions:
+  contents: write
+  actions: read
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+
+  # ── 1. Decide what to run ──────────────────────────────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      run_tests: ${{ steps.decide.outputs.run_tests }}
+      run_bench: ${{ steps.decide.outputs.run_bench }}
+      run_flame:  ${{ steps.decide.outputs.run_flame }}
+    steps:
+      - name: Decide what to publish
+        id: decide
+        run: |
+          T=false; B=false; F=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            case "${{ github.event.inputs.publish_type }}" in
+              tests) T=true ;;
+              bench) B=true ;;
+              flame)  F=true ;;
+              all)   T=true; B=true; F=true ;;
+            esac
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-publish-(tests|all)' && T=true || true
+            echo "$MSG" | grep -qiE '\-\-publish-(bench|all)' && B=true || true
+            echo "$MSG" | grep -qiE '\-\-publish-(flame|all)' && F=true || true
+          fi
+
+          echo "run_tests=$T" >> $GITHUB_OUTPUT
+          echo "run_bench=$B" >> $GITHUB_OUTPUT
+          echo "run_flame=$F"  >> $GITHUB_OUTPUT
+          echo "Tests=$T  Bench=$B  Flame=$F"
+
+  # ── 2. Run tests ───────────────────────────────────────────────────────────
+  run-tests:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_tests == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Get Rust version
+        id: rustver
+        run: echo "ver=$(rustc --version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build test binaries
+        run: cargo test --no-run 2>&1
+
+      - name: Run all tests
+        run: |
+          set +e
+          cargo test 2>&1 | tee test-raw.txt
+          echo "TEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+      - name: Parse results to JSON
+        env:
+          BUILD_NUM:    ${{ github.run_number }}
+          BRANCH:       ${{ github.ref_name }}
+          COMMIT:       ${{ github.sha }}
+          BUILD_DATE:   ${{ github.event.head_commit.timestamp }}
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+        run: |
+          python3 - << 'PYEOF'
+          import re, json, os, sys
+
+          # ── helpers ────────────────────────────────────────────────────────
+          def build_suite(name, tests, dur_s=0.0):
+              return {
+                  'name':       name,
+                  'passed':     sum(1 for t in tests if t['status'] == 'passed'),
+                  'failed':     sum(1 for t in tests if t['status'] == 'failed'),
+                  'ignored':    sum(1 for t in tests if t['status'] == 'ignored'),
+                  'duration_s': round(dur_s, 4),
+                  'tests':      tests,
+              }
+
+          # ── load output ────────────────────────────────────────────────────
+          text = open('test-raw.txt', encoding='utf-8', errors='replace').read()
+
+          # ── collect failure stdout snippets ────────────────────────────────
+          fail_out = {}
+          for m in re.finditer(
+                  r'---- ([\w:]+) stdout ----\n(.*?)(?=\n---- |\n\nfailures:|\ntest result:)',
+                  text, re.DOTALL):
+              fail_out[m.group(1)] = m.group(2).strip()
+
+          # ── parse per-suite blocks ─────────────────────────────────────────
+          suites   = []
+          cur_name = None
+          cur_tests= []
+          cur_dur  = 0.0
+
+          # These can be "Running tests/foo.rs" or "Running unittests src/lib.rs"
+          RE_RUN    = re.compile(r'Running\s+(?:unittests?\s+)?(\S+)\s+\(')
+          RE_TEST   = re.compile(
+              r'^test ([\w:]+(?:::\w+)*)\s+\.\.\.\s+'
+              r'(ok|FAILED|ignored)(?:\s+\(([\d.]+)s\))?'
+          )
+          RE_RESULT = re.compile(r'test result:.*?finished in ([\d.]+)s')
+
+          for line in text.splitlines():
+              m = RE_RUN.search(line)
+              if m:
+                  if cur_name is not None and cur_tests:
+                      suites.append(build_suite(cur_name, cur_tests, cur_dur))
+                  raw  = m.group(1)
+                  base = os.path.splitext(os.path.basename(raw))[0]
+                  cur_name  = (base + ' (unit tests)') if base in ('lib', 'main') else base
+                  cur_tests = []; cur_dur = 0.0
+                  continue
+
+              m = RE_TEST.match(line)
+              if m:
+                  tname, status, dur = m.group(1), m.group(2), m.group(3)
+                  cur_tests.append({
+                      'name':        tname,
+                      'status':      {'ok': 'passed', 'FAILED': 'failed',
+                                      'ignored': 'ignored'}.get(status, 'unknown'),
+                      'duration_ms': int(float(dur) * 1000) if dur else 0,
+                      'output':      fail_out.get(tname, ''),
+                  })
+                  continue
+
+              m = RE_RESULT.search(line)
+              if m:
+                  cur_dur = float(m.group(1))
+                  if cur_name is not None and cur_tests:
+                      suites.append(build_suite(cur_name, cur_tests, cur_dur))
+                      cur_name = None; cur_tests = []; cur_dur = 0.0
+
+          # flush last suite if result line was missing
+          if cur_name and cur_tests:
+              suites.append(build_suite(cur_name, cur_tests, cur_dur))
+
+          # ── summary ────────────────────────────────────────────────────────
+          total   = sum(s['passed'] + s['failed'] + s['ignored'] for s in suites)
+          passed  = sum(s['passed']  for s in suites)
+          failed  = sum(s['failed']  for s in suites)
+          ignored = sum(s['ignored'] for s in suites)
+          dur     = sum(s['duration_s'] for s in suites)
+
+          result = {
+              'build':        os.environ.get('BUILD_NUM',    '0'),
+              'branch':       os.environ.get('BRANCH',       'unknown'),
+              'commit':       os.environ.get('COMMIT',       'unknown')[:8],
+              'date':         os.environ.get('BUILD_DATE',   ''),
+              'rust_version': os.environ.get('RUST_VERSION', 'stable'),
+              'summary': {
+                  'total':      total,
+                  'passed':     passed,
+                  'failed':     failed,
+                  'ignored':    ignored,
+                  'duration_s': round(dur, 3),
+              },
+              'suites': suites,
+          }
+
+          with open('test-results.json', 'w') as f:
+              json.dump(result, f, indent=2)
+
+          print(f"Suites:{len(suites)}  Total:{total}  Passed:{passed}  Failed:{failed}")
+          if failed > 0:
+              print("FAILED:")
+              for s in suites:
+                  for t in s['tests']:
+                      if t['status'] == 'failed':
+                          print(f"  {s['name']}::{t['name']}")
+          PYEOF
+
+      - name: Build HTML report
+        env:
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+        run: |
+          cp .github/test-results-template.html test-results-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  test-results-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       test-results-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            test-results-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     test-results-index.html
+          sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        test-results-index.html
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_number }}
+          path: |
+            test-results.json
+            test-results-index.html
+          retention-days: 30
+
+  # ── 3. Run benchmarks ──────────────────────────────────────────────────────
+  run-bench:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_bench == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Get Rust version
+        id: rustver
+        run: echo "ver=$(rustc --version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run benchmarks
+        run: |
+          # Run each criterion bench target and capture output
+          # Continue even if individual benches fail
+          {
+            echo "=== throughput_benchmark ==="
+            cargo bench --bench throughput_benchmark 2>&1 || true
+            echo "=== lexer_throughput ==="
+            cargo bench --bench lexer_throughput 2>&1 || true
+          } | tee bench-raw.txt
+
+      - name: Parse benchmark results to JSON
+        env:
+          BUILD_NUM:  ${{ github.run_number }}
+          BRANCH:     ${{ github.ref_name }}
+          COMMIT:     ${{ github.sha }}
+          BUILD_DATE: ${{ github.event.head_commit.timestamp }}
+        run: |
+          python3 - << 'PYEOF'
+          import re, json, os, glob, sys
+
+          # ── time converter → always output ns ─────────────────────────────
+          def to_ns(val_str, unit):
+              v = float(val_str.replace(',', ''))
+              u = unit.strip().rstrip('/')
+              return v * {'ns': 1, 'µs': 1e3, 'us': 1e3,
+                          'ms': 1e6, 's': 1e9}.get(u, 1)
+
+          text = open('bench-raw.txt', encoding='utf-8', errors='replace').read()
+
+          benches    = []
+          seen_names = set()
+          current_suite = 'benchmarks'
+
+          # Track which suite block we're in from our echo markers
+          RE_SUITE_HEADER = re.compile(r'^=== (\w+) ===$', re.MULTILINE)
+          # Criterion output: "name   time:  [lower unit  mean unit  upper unit]"
+          # The name may have spaces, so we anchor on the large gap before "time:"
+          RE_CRIT = re.compile(
+              r'^([\w /\-]+?)\s{2,}time:\s+\[\s*'
+              r'([\d.,]+)\s*(ns|µs|us|ms|s)\s+'
+              r'([\d.,]+)\s*(ns|µs|us|ms|s)\s+'
+              r'([\d.,]+)\s*(ns|µs|us|ms|s)\s*\]',
+              re.MULTILINE
+          )
+          # Also capture std_dev from the change line or separate estimates
+          RE_STDDEV = re.compile(
+              r'std\s+dev\s+time:\s+\[\s*'
+              r'([\d.,]+)\s*(ns|µs|us|ms|s)',
+              re.MULTILINE
+          )
+
+          # Split by suite markers first
+          sections = re.split(r'^=== (\w+) ===$', text, flags=re.MULTILINE)
+          # sections = [pre, name1, body1, name2, body2, ...]
+          pairs = []
+          if len(sections) >= 3:
+              i = 1
+              while i + 1 < len(sections):
+                  pairs.append((sections[i], sections[i + 1]))
+                  i += 2
+          else:
+              pairs = [('benchmarks', text)]
+
+          for suite_name, body in pairs:
+              for m in RE_CRIT.finditer(body):
+                  name  = m.group(1).strip()
+                  lower = to_ns(m.group(2), m.group(3))
+                  mean  = to_ns(m.group(4), m.group(5))
+                  upper = to_ns(m.group(6), m.group(7))
+
+                  key = f"{suite_name}/{name}"
+                  if key in seen_names:
+                      continue
+                  seen_names.add(key)
+
+                  # Within-suite hierarchy (e.g. "parse/simple" → sub-group "parse")
+                  parts = name.rsplit('/', 1)
+                  group = parts[0] if len(parts) == 2 else suite_name
+                  bench_name = parts[-1]
+
+                  benches.append({
+                      'suite':     suite_name,
+                      'group':     group,
+                      'name':      bench_name,
+                      'full_name': f'{suite_name}/{name}',
+                      'lower_ns':  round(lower, 2),
+                      'mean_ns':   round(mean,  2),
+                      'upper_ns':  round(upper, 2),
+                      'std_ns':    round((upper - lower) / 4, 2),  # rough estimate
+                  })
+
+          # Fallback: criterion JSON files (present when --save-baseline or just run)
+          if not benches:
+              for est in sorted(glob.glob('target/criterion/**/**/estimates.json',
+                                          recursive=True)):
+                  try:
+                      data = json.load(open(est, encoding='utf-8'))
+                      parts = est.replace('target/criterion/', '').split('/')
+                      # target/criterion/<suite>/<bench>/new/estimates.json
+                      if len(parts) < 3:
+                          continue
+                      suite_name = parts[0]
+                      bench_name = parts[1]
+                      if bench_name in ('new', 'base', 'baseline'):
+                          continue
+
+                      mn  = data.get('mean', {})
+                      ci  = mn.get('confidence_interval', {})
+                      sd  = data.get('std_dev', {}).get('point_estimate', 0)
+
+                      key = f"{suite_name}/{bench_name}"
+                      if key in seen_names:
+                          continue
+                      seen_names.add(key)
+
+                      benches.append({
+                          'suite':     suite_name,
+                          'group':     suite_name,
+                          'name':      bench_name,
+                          'full_name': key,
+                          'lower_ns':  round(ci.get('lower_bound', mn.get('point_estimate', 0)), 2),
+                          'mean_ns':   round(mn.get('point_estimate', 0), 2),
+                          'upper_ns':  round(ci.get('upper_bound', mn.get('point_estimate', 0)), 2),
+                          'std_ns':    round(sd, 2),
+                      })
+                  except Exception as e:
+                      print(f"Warn parsing {est}: {e}", file=sys.stderr)
+
+          # ── group into suites ─────────────────────────────────────────────
+          suite_map = {}
+          for b in benches:
+              suite_map.setdefault(b['suite'], []).append(b)
+
+          suites = [{'name': k, 'benchmarks': v} for k, v in suite_map.items()]
+
+          result = {
+              'build':   os.environ.get('BUILD_NUM', '0'),
+              'branch':  os.environ.get('BRANCH',    'unknown'),
+              'commit':  os.environ.get('COMMIT',    'unknown')[:8],
+              'date':    os.environ.get('BUILD_DATE', ''),
+              'summary': {
+                  'total':  len(benches),
+                  'suites': len(suites),
+              },
+              'suites': suites,
+          }
+
+          with open('bench-results.json', 'w') as f:
+              json.dump(result, f, indent=2)
+
+          print(f"Suites:{len(suites)}  Benchmarks:{len(benches)}")
+          for s in suites:
+              for b in s['benchmarks']:
+                  print(f"  {s['name']}/{b['name']}: {b['mean_ns']:.1f} ns")
+          PYEOF
+
+      - name: Build HTML report
+        env:
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+        run: |
+          cp .github/bench-results-template.html bench-results-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  bench-results-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       bench-results-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            bench-results-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     bench-results-index.html
+          sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        bench-results-index.html
+
+      - name: Upload bench artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-${{ github.run_number }}
+          path: |
+            bench-results.json
+            bench-results-index.html
+            bench-raw.txt
+          retention-days: 30
+
+  # ── 4. Flamegraph ──────────────────────────────────────────────────────────
+  run-flame:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_flame == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-flame-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Setup perf
+        run: |
+          sudo apt-get install -y linux-tools-common linux-tools-generic \
+            "linux-tools-$(uname -r)" 2>/dev/null || \
+          sudo apt-get install -y linux-tools-common linux-tools-generic || true
+          echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
+          echo 0   | sudo tee /proc/sys/kernel/kptr_restrict
+
+      - name: Install flamegraph
+        run: cargo install flamegraph --locked 2>/dev/null || true
+
+      - name: Generate flamegraphs
+        run: |
+          mkdir -p flame-output
+
+          # Build in release with debug symbols (needed for flamegraph)
+          export CARGO_PROFILE_RELEASE_DEBUG=true
+
+          run_flame() {
+            local kind=$1   # --bench or --test
+            local target=$2
+            local outfile=$3
+            echo "--- flamegraph: $target ---"
+            cargo flamegraph $kind "$target" -o "flame-output/${outfile}.svg" \
+              -- 2>/dev/null && echo "OK: $outfile" || echo "SKIP: $outfile (perf unavailable or build failed)"
+          }
+
+          run_flame "--bench" "throughput_benchmark" "throughput_benchmark"
+          run_flame "--bench" "lexer_throughput"      "lexer_throughput"
+          run_flame "--test"  "pipeline_integration_tests" "pipeline_integration_tests"
+          run_flame "--test"  "tokenizer_tests"       "tokenizer_tests"
+
+          echo "Generated:"
+          ls -lh flame-output/ || echo "(none)"
+
+      - name: Build flamegraph index HTML
+        run: |
+          BUILD_NUM="${{ github.run_number }}"
+          BRANCH="${{ github.ref_name }}"
+          COMMIT="${GITHUB_SHA:0:8}"
+          DATE="$(date -u)"
+
+          cat > flame-output/index.html << FLAMEEOF
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>DixScript Flamegraphs — Build #${BUILD_NUM}</title>
+            <style>
+              * { box-sizing: border-box; margin: 0; padding: 0; }
+              body { font-family: 'Segoe UI', system-ui, sans-serif;
+                background: #0d1117; color: #e6edf3; padding: 32px 24px; }
+              .container { max-width: 1100px; margin: 0 auto; }
+              header { border-bottom: 2px solid #a371f7; padding-bottom: 16px; margin-bottom: 24px; }
+              header h1 { font-size: 1.7rem; color: #a371f7; }
+              .meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+              .meta-item { background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+                padding: 5px 12px; font-size: 0.82rem; }
+              .meta-item strong { color: #79c0ff; }
+              .back-link { display: inline-flex; align-items: center; gap: 6px; color: #8b949e;
+                font-size: 0.80rem; text-decoration: none; margin-bottom: 14px;
+                padding: 5px 12px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; }
+              .card { background: #161b22; border: 1px solid #30363d;
+                border-radius: 8px; margin-bottom: 18px; overflow: hidden; }
+              .card-header { padding: 14px 18px; border-bottom: 1px solid #30363d;
+                display: flex; align-items: center; gap: 10px; }
+              .card-header h2 { font-size: 0.95rem; font-weight: 700; }
+              .card-header p { font-size: 0.80rem; color: #8b949e; margin-left: auto; }
+              .card-body iframe { width: 100%; height: 520px; border: none; background: white; }
+              .no-graph { padding: 28px; text-align: center; color: #484f58; font-size: 0.85rem; }
+              footer { margin-top: 32px; border-top: 1px solid #30363d;
+                padding-top: 14px; color: #484f58; font-size: 0.76rem; text-align: center; }
+            </style>
+          </head>
+          <body>
+          <div class="container">
+            <a class="back-link" href="../tests/">← Test Results</a>
+            <header>
+              <h1>🔥 DixScript — Flamegraphs</h1>
+              <div class="meta">
+                <div class="meta-item"><strong>Build:</strong> #${BUILD_NUM}</div>
+                <div class="meta-item"><strong>Branch:</strong> ${BRANCH}</div>
+                <div class="meta-item"><strong>Commit:</strong> ${COMMIT}</div>
+                <div class="meta-item"><strong>Date:</strong> ${DATE}</div>
+              </div>
+            </header>
+          FLAMEEOF
+
+          SVG_COUNT=0
+          for svg in flame-output/*.svg; do
+            [ -f "$svg" ] || continue
+            SVG_COUNT=$((SVG_COUNT + 1))
+            name=$(basename "$svg" .svg)
+            cat >> flame-output/index.html << CARDEOF
+            <div class="card">
+              <div class="card-header">
+                <h2>🔥 ${name}</h2>
+                <p>Click frames to zoom · Right-click to reset · Scroll to pan</p>
+              </div>
+              <div class="card-body">
+                <iframe src="${name}.svg" title="${name} flamegraph"></iframe>
+              </div>
+            </div>
+          CARDEOF
+          done
+
+          if [ "$SVG_COUNT" -eq 0 ]; then
+            cat >> flame-output/index.html << NOEOF
+            <div class="card">
+              <div class="no-graph">
+                ⚠ No flamegraphs were generated.<br>
+                <span style="font-size:0.78rem;margin-top:6px;display:block">
+                  This usually means <code>perf</code> is unavailable on this runner,
+                  or all bench/test targets failed to build. Check the workflow logs.
+                </span>
+              </div>
+            </div>
+          NOEOF
+          fi
+
+          cat >> flame-output/index.html << FOOTEOF
+            <footer>DixScript-Rust Flamegraphs — MidManStudio — Build #${BUILD_NUM}</footer>
+          </div>
+          </body>
+          </html>
+          FOOTEOF
+
+      - name: Upload flamegraph artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flamegraph-${{ github.run_number }}
+          path: flame-output/
+          retention-days: 30
+
+  # ── 5. Deploy to gh-pages ──────────────────────────────────────────────────
+  deploy-results:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, run-tests, run-bench, run-flame]
+    if: |
+      always() &&
+      (needs.run-tests.result  == 'success' ||
+       needs.run-bench.result  == 'success' ||
+       needs.run-flame.result  == 'success')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download test results
+        if: needs.run-tests.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results-${{ github.run_number }}
+          path: deploy/tests/
+
+      - name: Download bench results
+        if: needs.run-bench.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: bench-results-${{ github.run_number }}
+          path: deploy/bench/
+
+      - name: Download flamegraph artifacts
+        if: needs.run-flame.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: flamegraph-${{ github.run_number }}
+          path: deploy/flame/
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            echo "Creating fresh gh-pages branch"
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          # ── tests ──────────────────────────────────────────────────────────
+          if [ -d "deploy/tests" ]; then
+            mkdir -p "$WORK/tests" "$WORK/tests/builds/build_${BUILD_NUM}"
+            # Rename the index to the standard name the HTML expects
+            cp deploy/tests/test-results.json       "$WORK/tests/test-results.json"
+            cp deploy/tests/test-results-index.html "$WORK/tests/index.html"
+            # Versioned snapshot
+            cp deploy/tests/test-results.json       "$WORK/tests/builds/build_${BUILD_NUM}/test-results.json"
+            cp deploy/tests/test-results-index.html "$WORK/tests/builds/build_${BUILD_NUM}/index.html"
+            echo "✓ Test results deployed"
+          fi
+
+          # ── bench ──────────────────────────────────────────────────────────
+          if [ -d "deploy/bench" ]; then
+            mkdir -p "$WORK/bench" "$WORK/bench/builds/build_${BUILD_NUM}"
+            cp deploy/bench/bench-results.json       "$WORK/bench/bench-results.json"
+            cp deploy/bench/bench-results-index.html "$WORK/bench/index.html"
+            cp deploy/bench/bench-results.json       "$WORK/bench/builds/build_${BUILD_NUM}/bench-results.json"
+            cp deploy/bench/bench-results-index.html "$WORK/bench/builds/build_${BUILD_NUM}/index.html"
+            echo "✓ Bench results deployed"
+          fi
+
+          # ── flame ──────────────────────────────────────────────────────────
+          if [ -d "deploy/flame" ]; then
+            mkdir -p "$WORK/flame" "$WORK/flame/builds/build_${BUILD_NUM}"
+            cp -r deploy/flame/* "$WORK/flame/"
+            cp -r deploy/flame/* "$WORK/flame/builds/build_${BUILD_NUM}/"
+            echo "✓ Flamegraphs deployed"
+          fi
+
+          # ── root landing ───────────────────────────────────────────────────
+          cat > "$WORK/index.html" << 'LANDEOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <title>DixScript-Rust — CI Dashboard</title>
+            <style>
+              * { box-sizing: border-box; margin: 0; padding: 0; }
+              body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117;
+                color: #e6edf3; display: flex; align-items: center;
+                justify-content: center; min-height: 100vh; padding: 24px; }
+              .card { background: #161b22; border: 1px solid #30363d;
+                border-radius: 12px; padding: 36px 40px; max-width: 460px; width: 100%; }
+              h1 { font-size: 1.6rem; color: #79c0ff; margin-bottom: 6px; }
+              p { color: #8b949e; font-size: 0.85rem; margin-bottom: 24px; }
+              .links { display: flex; flex-direction: column; gap: 10px; }
+              a { display: flex; align-items: center; gap: 10px; background: #1c2128;
+                border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px;
+                text-decoration: none; color: #e6edf3; font-size: 0.88rem;
+                transition: all 0.15s; }
+              a:hover { border-color: #79c0ff; color: #79c0ff; }
+              a .icon { font-size: 1.2rem; }
+              a .desc { font-size: 0.75rem; color: #8b949e; margin-top: 2px; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h1>🦀 DixScript-Rust</h1>
+              <p>MidManStudio · CI Result Dashboard</p>
+              <div class="links">
+                <a href="tests/">
+                  <span class="icon">✅</span>
+                  <div><div>Test Results</div><div class="desc">cargo test — per-suite breakdown with output</div></div>
+                </a>
+                <a href="bench/">
+                  <span class="icon">📊</span>
+                  <div><div>Benchmarks</div><div class="desc">criterion — throughput & latency</div></div>
+                </a>
+                <a href="flame/">
+                  <span class="icon">🔥</span>
+                  <div><div>Flamegraphs</div><div class="desc">perf — profiling for hot paths</div></div>
+                </a>
+              </div>
+            </div>
+          </body>
+          </html>
+          LANDEOF
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "DixScript CI — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+          echo ""
+          echo "Deployed:"
+          echo "  https://mid-d-man.github.io/DixScript-Rust/"
+          echo "  https://mid-d-man.github.io/DixScript-Rust/tests/"
+          echo "  https://mid-d-man.github.io/DixScript-Rust/bench/"
+          echo "  https://mid-d-man.github.io/DixScript-Rust/flame/"
+
+  # ── 6. Summary ─────────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, run-tests, run-bench, run-flame, deploy-results]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "═══════════════════════════════════════════════"
+          echo "  DixScript — Publish Results Summary"
+          echo "═══════════════════════════════════════════════"
+          echo "Build:    #${{ github.run_number }}"
+          echo "Branch:    ${{ github.ref_name }}"
+          echo "Tests:     ${{ needs.run-tests.result  || 'skipped' }}"
+          echo "Bench:     ${{ needs.run-bench.result  || 'skipped' }}"
+          echo "Flame:     ${{ needs.run-flame.result  || 'skipped' }}"
+          echo "Deploy:    ${{ needs.deploy-results.result || 'skipped' }}"
+          echo ""
+          echo "Commit message flags:"
+          echo "  --publish-tests  → run & deploy test results"
+          echo "  --publish-bench  → run & deploy benchmarks"
+          echo "  --publish-flame  → run & deploy flamegraphs"
+          echo "  --publish-all    → all of the above"
+          echo ""
+          echo "Or use workflow_dispatch for manual runs."

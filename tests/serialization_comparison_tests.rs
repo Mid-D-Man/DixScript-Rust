@@ -2,6 +2,11 @@
 //
 // DixScript Binary Format vs Industry Alternatives — Comparison Suite
 //
+// IMPORTANT: All DixScript test sources use PRE-COMPUTED plain literal values only.
+// No @QUICKFUNCS or @ENUMS sections are included. BinaryPacker expects a fully
+// resolved AST where every DATA value is a plain literal (int, float, string,
+// bool, array, object) — no function call nodes, no enum references.
+//
 // What we measure:
 //   Raw size          — bytes on disk before any compression
 //   After gzip        — flate2 level 6 (balanced)
@@ -18,45 +23,36 @@
 //   4. MessagePack              (rmp-serde)
 //   5. Postcard                 (postcard)
 //   6. CBOR                     (ciborium)
-//
-// Run:
-//   cargo test serialization_comparison -- --nocapture
-//   cargo test serialization_comparison -- --nocapture --include-ignored  # slow benches
-//
-// NOTE: All "equivalent data" structures are serde-annotated so every non-DixScript
-// format serialises exactly the same logical payload, making size comparisons fair.
 
-use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::time::Instant;
 
 use bincode;
-use ciborium;
-use flate2::{Compression as FlateLevel, read::GzDecoder, write::GzEncoder};
 use bzip2::Compression as Bz2Level;
 use bzip2::read::BzDecoder;
 use bzip2::write::BzEncoder;
+use ciborium;
+use flate2::{Compression as FlateLevel, read::GzDecoder, write::GzEncoder};
+use postcard;
+use rmp_serde;
+use serde::{Deserialize, Serialize};
 use xz2::read::XzDecoder;
 use xz2::write::XzEncoder;
-use rmp_serde;
-use postcard;
-use serde::{Deserialize, Serialize};
 
 use dixscript::Compiler::AST::DixScript;
 use dixscript::Compiler::Core::BinarySerialization::{BinaryPacker, BinaryUnpacker};
 use dixscript::Compiler::Core::Config::ConfigSectionHandler;
 use dixscript::Compiler::Core::Tokenizer::Tokenizer;
-use dixscript::Compiler::Core::ValueResolution::ValueResolver;
-use dixscript::Compiler::Core::{DebugMode, GeneralParser, GeneralSemanticAnalyzer};
+use dixscript::Compiler::Core::GeneralParser;
 use dixscript::ErrorManager::ErrorManager;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // EQUIVALENT DATA STRUCTURES
 // Each struct mirrors a DixScript DATA section so all formats carry identical
-// logical payloads.  serde derives allow encoding in every format under test.
+// logical payloads. serde derives allow encoding in every format under test.
 // ══════════════════════════════════════════════════════════════════════════════
 
-/// Flat key-value config record — mirrors SRC_FLAT.
+/// Flat key-value config record.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct FlatConfig {
     app_name:    String,
@@ -71,7 +67,7 @@ struct FlatConfig {
     base_url:    String,
 }
 
-/// Server entry in a list — mirrors the servers array.
+/// Single server entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ServerEntry {
     id:        i32,
@@ -84,7 +80,7 @@ struct ServerEntry {
     weight:    f32,
 }
 
-/// Top-level multi-server config — mirrors SRC_OBJECTS.
+/// Multi-server config.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct MultiServerConfig {
     environment: String,
@@ -92,7 +88,7 @@ struct MultiServerConfig {
     servers:     Vec<ServerEntry>,
 }
 
-/// Deeply nested game-data style record — mirrors SRC_NESTED.
+/// Game enemy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct EnemyStats {
     name:       String,
@@ -106,16 +102,16 @@ struct EnemyStats {
     loot:       Vec<String>,
 }
 
+/// Full game data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct GameData {
-    game_title:  String,
-    version:     String,
-    difficulty:  String,
-    enemies:     Vec<EnemyStats>,
+    game_title: String,
+    version:    String,
+    difficulty: String,
+    enemies:    Vec<EnemyStats>,
 }
 
-/// Repetitive endpoint list — mirrors SRC_REPETITIVE.
-/// This is the case where DixScript's deduplication shines most.
+/// API endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Endpoint {
     path:       String,
@@ -125,20 +121,26 @@ struct Endpoint {
     version:    String,
 }
 
+/// Full API config.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ApiConfig {
-    base_url:   String,
+    base_url:    String,
     api_version: i32,
-    endpoints:  Vec<Endpoint>,
+    endpoints:   Vec<Endpoint>,
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// DIXSCRIPT SOURCE STRINGS (one per logical dataset)
-// These are the .mdix equivalents of the serde structs above.
-// They intentionally use QuickFuncs to show the deduplication advantage.
+// DIXSCRIPT SOURCE STRINGS
+//
+// All values are PRE-COMPUTED plain literals. No function calls, no enum
+// references. This mirrors what BinaryPacker receives after value resolution
+// in a real compilation pipeline.
+//
+// NOTE: Compared to the QuickFuncs version these sources are larger, because
+// deduplication has been expanded. The binary OUTPUT sizes are what matter for
+// the format comparison — the source is the input, not the deliverable.
 // ══════════════════════════════════════════════════════════════════════════════
 
-/// Plain flat config — no QuickFuncs, no deduplication advantage.
 const SRC_FLAT: &str = r#"
 @CONFIG(version -> "1.0.0", features -> "advanced", error_handling -> "continue")
 @DATA(
@@ -155,107 +157,78 @@ const SRC_FLAT: &str = r#"
 )
 "#;
 
-/// Multi-server config — QuickFuncs deduplicate the repeated structure.
-/// The JSON equivalent must repeat every field for every server.
+/// Pre-computed server objects — timeout=5000 explicit, no function call.
 const SRC_OBJECTS: &str = r#"
 @CONFIG(version -> "1.0.0", features -> "advanced", error_handling -> "continue")
-@ENUMS( Env { DEV = 1, STAGING = 2, PROD = 3 } )
-@QUICKFUNCS(
-    ~server<object> => global(id<int>, host<string>, port<int>, ssl<bool>, pool<int>, region<string>, weight<float>) {
-        return { id = id, host = host, port = port, ssl = ssl, pool_size = pool,
-                 timeout = 5000, region = region, weight = weight };
-    }
-)
 @DATA(
     environment = "production",
     version     = "1.0.0",
     servers::
-        server(1, "10.0.0.1", 8080, false, 10, "us-east", 1.0f),
-        server(2, "10.0.0.2", 8080, false, 10, "us-east", 1.0f),
-        server(3, "10.0.0.3", 8080, false, 10, "us-east", 1.0f),
-        server(4, "10.0.0.4", 8443, true,  20, "us-west", 0.8f),
-        server(5, "10.0.0.5", 8443, true,  20, "us-west", 0.8f),
-        server(6, "10.0.1.1", 8080, false, 15, "eu-central", 0.9f),
-        server(7, "10.0.1.2", 8080, false, 15, "eu-central", 0.9f),
-        server(8, "10.0.1.3", 8443, true,  25, "eu-west", 0.7f)
+        { id = 1, host = "10.0.0.1", port = 8080, ssl = false, pool_size = 10, timeout = 5000, region = "us-east",    weight = 1.0f },
+        { id = 2, host = "10.0.0.2", port = 8080, ssl = false, pool_size = 10, timeout = 5000, region = "us-east",    weight = 1.0f },
+        { id = 3, host = "10.0.0.3", port = 8080, ssl = false, pool_size = 10, timeout = 5000, region = "us-east",    weight = 1.0f },
+        { id = 4, host = "10.0.0.4", port = 8443, ssl = true,  pool_size = 20, timeout = 5000, region = "us-west",    weight = 0.8f },
+        { id = 5, host = "10.0.0.5", port = 8443, ssl = true,  pool_size = 20, timeout = 5000, region = "us-west",    weight = 0.8f },
+        { id = 6, host = "10.0.1.1", port = 8080, ssl = false, pool_size = 15, timeout = 5000, region = "eu-central", weight = 0.9f },
+        { id = 7, host = "10.0.1.2", port = 8080, ssl = false, pool_size = 15, timeout = 5000, region = "eu-central", weight = 0.9f },
+        { id = 8, host = "10.0.1.3", port = 8443, ssl = true,  pool_size = 25, timeout = 5000, region = "eu-west",    weight = 0.7f }
 )
 "#;
 
-/// Game enemy data — repeated structure with computed fields (DixScript's sweet spot).
+/// Pre-computed enemy stats — armor=hp/10, xp=hp/2, gold=hp/4 already evaluated.
+/// Dragon: ai_type="boss", spawn_rate=0.01. All others: ai_type="standard", spawn_rate=0.3.
 const SRC_NESTED: &str = r#"
 @CONFIG(version -> "1.0.0", features -> "advanced", error_handling -> "continue")
-@ENUMS( AIType { PASSIVE = 0, NEUTRAL = 1, AGGRESSIVE = 2, BOSS = 3 } )
-@QUICKFUNCS(
-    ~enemy<object> => global(name<string>, hp<int>, dmg<int>, ai<enum>) {
-        return {
-            name       = name,
-            health     = hp,
-            damage     = dmg,
-            armor      = hp / 10,
-            xp         = hp / 2,
-            gold       = hp / 4,
-            ai_type    = ai == AIType.BOSS ? "boss" : "standard",
-            spawn_rate = ai == AIType.BOSS ? 0.01f : 0.3f,
-            loot       = ["health_potion", "gold_coin"]
-        };
-    }
-)
 @DATA(
-    game_title  = "DixScript Demo Game",
-    version     = "1.0.0",
-    difficulty  = "normal",
+    game_title = "DixScript Demo Game",
+    version    = "1.0.0",
+    difficulty = "normal",
     enemies::
-        enemy("Goblin",        50,   10, AIType.AGGRESSIVE),
-        enemy("Orc",          100,   20, AIType.AGGRESSIVE),
-        enemy("Troll",        200,   40, AIType.AGGRESSIVE),
-        enemy("Dark Elf",     150,   35, AIType.NEUTRAL),
-        enemy("Skeleton",      75,   15, AIType.AGGRESSIVE),
-        enemy("Zombie",        60,   12, AIType.NEUTRAL),
-        enemy("Bandit",        80,   18, AIType.AGGRESSIVE),
-        enemy("Wolf",          45,    8, AIType.NEUTRAL),
-        enemy("Giant Spider", 120,   25, AIType.AGGRESSIVE),
-        enemy("Dragon",      1000,  150, AIType.BOSS)
+        { name = "Goblin",       health =   50, damage =  10, armor =   5, xp =  25, gold =  12, ai_type = "standard", spawn_rate = 0.3f,  loot = ["health_potion", "gold_coin"] },
+        { name = "Orc",          health =  100, damage =  20, armor =  10, xp =  50, gold =  25, ai_type = "standard", spawn_rate = 0.3f,  loot = ["health_potion", "gold_coin"] },
+        { name = "Troll",        health =  200, damage =  40, armor =  20, xp = 100, gold =  50, ai_type = "standard", spawn_rate = 0.3f,  loot = ["health_potion", "gold_coin"] },
+        { name = "Dark Elf",     health =  150, damage =  35, armor =  15, xp =  75, gold =  37, ai_type = "standard", spawn_rate = 0.3f,  loot = ["health_potion", "gold_coin"] },
+        { name = "Skeleton",     health =   75, damage =  15, armor =   7, xp =  37, gold =  18, ai_type = "standard", spawn_rate = 0.3f,  loot = ["health_potion", "gold_coin"] },
+        { name = "Zombie",       health =   60, damage =  12, armor =   6, xp =  30, gold =  15, ai_type = "standard", spawn_rate = 0.3f,  loot = ["health_potion", "gold_coin"] },
+        { name = "Bandit",       health =   80, damage =  18, armor =   8, xp =  40, gold =  20, ai_type = "standard", spawn_rate = 0.3f,  loot = ["health_potion", "gold_coin"] },
+        { name = "Wolf",         health =   45, damage =   8, armor =   4, xp =  22, gold =  11, ai_type = "standard", spawn_rate = 0.3f,  loot = ["health_potion", "gold_coin"] },
+        { name = "Giant Spider", health =  120, damage =  25, armor =  12, xp =  60, gold =  30, ai_type = "standard", spawn_rate = 0.3f,  loot = ["health_potion", "gold_coin"] },
+        { name = "Dragon",       health = 1000, damage = 150, armor = 100, xp = 500, gold = 250, ai_type = "boss",     spawn_rate = 0.01f, loot = ["health_potion", "gold_coin"] }
 )
 "#;
 
-/// Highly repetitive API endpoint list — maximum deduplication benefit.
+/// Pre-computed API endpoints — method as string, version="v2" explicit.
 const SRC_REPETITIVE: &str = r#"
 @CONFIG(version -> "1.0.0", features -> "advanced", error_handling -> "continue")
-@ENUMS( Method { GET = 1, POST = 2, PUT = 3, DELETE = 4 } )
-@QUICKFUNCS(
-    ~ep<object> => global(path<string>, method<enum>, rate<int>, auth<bool>) {
-        return { path = path, method = method, rate_limit = rate, auth = auth, version = "v2" };
-    }
-)
 @DATA(
     base_url    = "https://api.example.com",
     api_version = 2,
     endpoints::
-        ep("/users",            Method.GET,    200, true),
-        ep("/users",            Method.POST,    50, true),
-        ep("/users/{id}",       Method.GET,    200, true),
-        ep("/users/{id}",       Method.PUT,     50, true),
-        ep("/users/{id}",       Method.DELETE,  20, true),
-        ep("/products",         Method.GET,    500, false),
-        ep("/products",         Method.POST,    50, true),
-        ep("/products/{id}",    Method.GET,    500, false),
-        ep("/products/{id}",    Method.PUT,     50, true),
-        ep("/products/{id}",    Method.DELETE,  20, true),
-        ep("/orders",           Method.GET,    200, true),
-        ep("/orders",           Method.POST,    50, true),
-        ep("/orders/{id}",      Method.GET,    200, true),
-        ep("/orders/{id}",      Method.PUT,     30, true),
-        ep("/orders/{id}",      Method.DELETE,  10, true),
-        ep("/health",           Method.GET,   1000, false),
-        ep("/metrics",          Method.GET,    100, true),
-        ep("/auth/login",       Method.POST,    20, false),
-        ep("/auth/logout",      Method.POST,   100, true),
-        ep("/auth/refresh",     Method.POST,    50, true)
+        { path = "/users",            method = "GET",    rate_limit = 200, auth = true,  version = "v2" },
+        { path = "/users",            method = "POST",   rate_limit =  50, auth = true,  version = "v2" },
+        { path = "/users/{id}",       method = "GET",    rate_limit = 200, auth = true,  version = "v2" },
+        { path = "/users/{id}",       method = "PUT",    rate_limit =  50, auth = true,  version = "v2" },
+        { path = "/users/{id}",       method = "DELETE", rate_limit =  20, auth = true,  version = "v2" },
+        { path = "/products",         method = "GET",    rate_limit = 500, auth = false, version = "v2" },
+        { path = "/products",         method = "POST",   rate_limit =  50, auth = true,  version = "v2" },
+        { path = "/products/{id}",    method = "GET",    rate_limit = 500, auth = false, version = "v2" },
+        { path = "/products/{id}",    method = "PUT",    rate_limit =  50, auth = true,  version = "v2" },
+        { path = "/products/{id}",    method = "DELETE", rate_limit =  20, auth = true,  version = "v2" },
+        { path = "/orders",           method = "GET",    rate_limit = 200, auth = true,  version = "v2" },
+        { path = "/orders",           method = "POST",   rate_limit =  50, auth = true,  version = "v2" },
+        { path = "/orders/{id}",      method = "GET",    rate_limit = 200, auth = true,  version = "v2" },
+        { path = "/orders/{id}",      method = "PUT",    rate_limit =  30, auth = true,  version = "v2" },
+        { path = "/orders/{id}",      method = "DELETE", rate_limit =  10, auth = true,  version = "v2" },
+        { path = "/health",           method = "GET",    rate_limit = 1000,auth = false, version = "v2" },
+        { path = "/metrics",          method = "GET",    rate_limit = 100, auth = true,  version = "v2" },
+        { path = "/auth/login",       method = "POST",   rate_limit =  20, auth = false, version = "v2" },
+        { path = "/auth/logout",      method = "POST",   rate_limit = 100, auth = true,  version = "v2" },
+        { path = "/auth/refresh",     method = "POST",   rate_limit =  50, auth = true,  version = "v2" }
 )
 "#;
 
 // ══════════════════════════════════════════════════════════════════════════════
-// EQUIVALENT SERDE PAYLOADS (same logical data as the .mdix sources above)
+// EQUIVALENT SERDE PAYLOADS
 // ══════════════════════════════════════════════════════════════════════════════
 
 fn make_flat_config() -> FlatConfig {
@@ -274,7 +247,7 @@ fn make_flat_config() -> FlatConfig {
 }
 
 fn make_multi_server() -> MultiServerConfig {
-    let base_servers = [
+    let raw = [
         (1, "10.0.0.1", 8080, false, 10, "us-east",    1.0f32),
         (2, "10.0.0.2", 8080, false, 10, "us-east",    1.0f32),
         (3, "10.0.0.3", 8080, false, 10, "us-east",    1.0f32),
@@ -287,7 +260,7 @@ fn make_multi_server() -> MultiServerConfig {
     MultiServerConfig {
         environment: "production".into(),
         version:     "1.0.0".into(),
-        servers: base_servers.iter().map(|&(id, host, port, ssl, pool, region, weight)| {
+        servers: raw.iter().map(|&(id, host, port, ssl, pool, region, weight)| {
             ServerEntry { id, host: host.into(), port, ssl, pool_size: pool,
                           timeout: 5000, region: region.into(), weight }
         }).collect(),
@@ -295,29 +268,30 @@ fn make_multi_server() -> MultiServerConfig {
 }
 
 fn make_game_data() -> GameData {
-    let raw: &[(&str, i32, i32, &str, f32)] = &[
-        ("Goblin",        50,   10, "standard", 0.3),
-        ("Orc",          100,   20, "standard", 0.3),
-        ("Troll",        200,   40, "standard", 0.3),
-        ("Dark Elf",     150,   35, "standard", 0.3),
-        ("Skeleton",      75,   15, "standard", 0.3),
-        ("Zombie",        60,   12, "standard", 0.3),
-        ("Bandit",        80,   18, "standard", 0.3),
-        ("Wolf",          45,    8, "standard", 0.3),
-        ("Giant Spider", 120,   25, "standard", 0.3),
-        ("Dragon",      1000,  150, "boss",     0.01),
+    // Values match SRC_NESTED exactly: armor=hp/10, xp=hp/2, gold=hp/4 (integer division)
+    let raw: &[(&str, i32, i32, i32, i32, i32, &str, f32)] = &[
+        ("Goblin",        50,   10,   5,  25,  12, "standard", 0.30),
+        ("Orc",          100,   20,  10,  50,  25, "standard", 0.30),
+        ("Troll",        200,   40,  20, 100,  50, "standard", 0.30),
+        ("Dark Elf",     150,   35,  15,  75,  37, "standard", 0.30),
+        ("Skeleton",      75,   15,   7,  37,  18, "standard", 0.30),
+        ("Zombie",        60,   12,   6,  30,  15, "standard", 0.30),
+        ("Bandit",        80,   18,   8,  40,  20, "standard", 0.30),
+        ("Wolf",          45,    8,   4,  22,  11, "standard", 0.30),
+        ("Giant Spider", 120,   25,  12,  60,  30, "standard", 0.30),
+        ("Dragon",      1000,  150, 100, 500, 250, "boss",     0.01),
     ];
     GameData {
         game_title: "DixScript Demo Game".into(),
         version:    "1.0.0".into(),
         difficulty: "normal".into(),
-        enemies: raw.iter().map(|&(name, hp, dmg, ai, spawn)| EnemyStats {
+        enemies: raw.iter().map(|&(name, hp, dmg, armor, xp, gold, ai, spawn)| EnemyStats {
             name:       name.into(),
             health:     hp,
             damage:     dmg,
-            armor:      hp / 10,
-            xp:         hp / 2,
-            gold:       hp / 4,
+            armor,
+            xp,
+            gold,
             ai_type:    ai.into(),
             spawn_rate: spawn,
             loot:       vec!["health_potion".into(), "gold_coin".into()],
@@ -327,26 +301,26 @@ fn make_game_data() -> GameData {
 
 fn make_api_config() -> ApiConfig {
     let raw: &[(&str, &str, i32, bool)] = &[
-        ("/users",         "GET",    200, true),
-        ("/users",         "POST",    50, true),
-        ("/users/{id}",    "GET",    200, true),
-        ("/users/{id}",    "PUT",     50, true),
-        ("/users/{id}",    "DELETE",  20, true),
-        ("/products",      "GET",    500, false),
-        ("/products",      "POST",    50, true),
-        ("/products/{id}", "GET",    500, false),
-        ("/products/{id}", "PUT",     50, true),
-        ("/products/{id}", "DELETE",  20, true),
-        ("/orders",        "GET",    200, true),
-        ("/orders",        "POST",    50, true),
-        ("/orders/{id}",   "GET",    200, true),
-        ("/orders/{id}",   "PUT",     30, true),
-        ("/orders/{id}",   "DELETE",  10, true),
-        ("/health",        "GET",   1000, false),
-        ("/metrics",       "GET",    100, true),
-        ("/auth/login",    "POST",    20, false),
-        ("/auth/logout",   "POST",   100, true),
-        ("/auth/refresh",  "POST",    50, true),
+        ("/users",         "GET",     200, true),
+        ("/users",         "POST",     50, true),
+        ("/users/{id}",    "GET",     200, true),
+        ("/users/{id}",    "PUT",      50, true),
+        ("/users/{id}",    "DELETE",   20, true),
+        ("/products",      "GET",     500, false),
+        ("/products",      "POST",     50, true),
+        ("/products/{id}", "GET",     500, false),
+        ("/products/{id}", "PUT",      50, true),
+        ("/products/{id}", "DELETE",   20, true),
+        ("/orders",        "GET",     200, true),
+        ("/orders",        "POST",     50, true),
+        ("/orders/{id}",   "GET",     200, true),
+        ("/orders/{id}",   "PUT",      30, true),
+        ("/orders/{id}",   "DELETE",   10, true),
+        ("/health",        "GET",    1000, false),
+        ("/metrics",       "GET",     100, true),
+        ("/auth/login",    "POST",     20, false),
+        ("/auth/logout",   "POST",    100, true),
+        ("/auth/refresh",  "POST",     50, true),
     ];
     ApiConfig {
         base_url:    "https://api.example.com".into(),
@@ -359,6 +333,45 @@ fn make_api_config() -> ApiConfig {
             version:    "v2".into(),
         }).collect(),
     }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DIXSCRIPT PIPELINE HELPER
+//
+// Runs: ConfigSectionHandler → Tokenizer → GeneralParser → BinaryPacker
+// No QuickFuncs / value resolution step — all DATA values are plain literals.
+// ══════════════════════════════════════════════════════════════════════════════
+
+fn dixscript_binary(source: &str) -> Vec<u8> {
+    ErrorManager::get_shared_instance().clear_errors();
+    let cr  = ConfigSectionHandler::new(None).process_config_section(source);
+    let tok = Tokenizer::new(cr.cleaned_input_string.clone()).tokenize();
+    let ast = GeneralParser::new(
+        tok.tokens,
+        cr.config_section.clone(),
+        cr.operational_settings.clone(),
+    )
+    .expect("GeneralParser::new failed")
+    .parse()
+    .expect("GeneralParser::parse failed");
+
+    let result = BinaryPacker::new().pack(&ast);
+    assert!(
+        result.is_success,
+        "BinaryPacker failed — errors: {:?}",
+        result.errors
+    );
+    result.binary_data
+}
+
+fn dixscript_unpack(bytes: &[u8]) -> DixScript {
+    let result = BinaryUnpacker::new().unpack(bytes);
+    assert!(
+        result.is_success,
+        "BinaryUnpacker failed — errors: {:?}",
+        result.errors
+    );
+    result.ast.expect("BinaryUnpacker returned no AST")
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -405,7 +418,7 @@ fn lzma_decompress(data: &[u8]) -> Vec<u8> {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SERIALISATION HELPERS — one function per format
+// SERIALISATION HELPERS
 // ══════════════════════════════════════════════════════════════════════════════
 
 fn encode_json<T: Serialize>(v: &T) -> Vec<u8> {
@@ -434,51 +447,16 @@ fn encode_cbor<T: Serialize>(v: &T) -> Vec<u8> {
     buf
 }
 
-/// Run DixScript full pipeline on a source string, return BinaryPacker bytes.
-fn dixscript_binary(source: &str) -> Vec<u8> {
-    ErrorManager::get_shared_instance().clear_errors();
-
-    let cr  = ConfigSectionHandler::new(None).process_config_section(source);
-    let tok = Tokenizer::new(cr.cleaned_input_string.clone()).tokenize();
-    let ast = GeneralParser::new(
-                  tok.tokens,
-                  cr.config_section.clone(),
-                  cr.operational_settings.clone(),
-              )
-              .expect("parser")
-              .parse()
-              .expect("parse");
-
-    let sem = GeneralSemanticAnalyzer::new(&ast, &cr.operational_settings).analyze();
-
-    // Run value resolution if QuickFuncs are present
-    let resolved = if ast.quick_functions.is_some() {
-        if let Some(st) = sem.symbol_table.as_ref() {
-            let vr  = ValueResolver::new(ast, st, DebugMode::Off);
-            let res = vr.resolve();
-            res.resolved_ast.unwrap_or_default()
-        } else {
-            ast
-        }
-    } else {
-        ast
-    };
-
-    let result = BinaryPacker::new().pack(&resolved);
-    assert!(result.is_success, "BinaryPacker failed: {:?}", result.errors);
-    result.binary_data
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
-// SIZE REPORT
+// SIZE REPORT HELPERS
 // ══════════════════════════════════════════════════════════════════════════════
 
 struct SizeRow {
-    format:    &'static str,
-    raw:       usize,
-    gzip:      usize,
-    bzip2:     usize,
-    lzma:      usize,
+    format: &'static str,
+    raw:    usize,
+    gzip:   usize,
+    bzip2:  usize,
+    lzma:   usize,
 }
 
 impl SizeRow {
@@ -494,35 +472,34 @@ impl SizeRow {
 }
 
 fn print_size_table(label: &str, rows: &[SizeRow]) {
-    // Find baseline (first row = DixScript)
-    let baseline = rows[0].raw as f64;
+    let json_raw = rows
+        .iter()
+        .find(|r| r.format == "JSON (compact)")
+        .map(|r| r.raw as f64)
+        .unwrap_or(1.0);
 
     println!("\n╔══════════════════════════════════════════════════════════════════════════════════════╗");
     println!("║  {}  — Binary Size Comparison", label);
     println!("╠══════════════════╦══════════╦══════════╦══════════╦══════════╦══════════╦═══════════╗");
-    println!("║  Format          ║  Raw (B) ║ +gzip(B) ║+bzip2(B) ║ +lzma(B) ║  vs raw  ║  vs json  ║");
+    println!("║  Format          ║  Raw (B) ║ +gzip(B) ║+bzip2(B) ║ +lzma(B) ║  gz-red  ║  vs json  ║");
     println!("╠══════════════════╬══════════╬══════════╬══════════╬══════════╬══════════╬═══════════╣");
 
-    let json_raw = rows.iter().find(|r| r.format == "JSON (compact)").map(|r| r.raw as f64).unwrap_or(1.0);
-
     for row in rows {
-        let vs_raw  = (1.0 - row.gzip as f64 / row.raw  as f64) * 100.0;
+        let gz_red  = (1.0 - row.gzip as f64 / row.raw  as f64) * 100.0;
         let vs_json = (1.0 - row.raw  as f64 / json_raw)         * 100.0;
         println!(
             "║  {:<16} ║ {:>8} ║ {:>8} ║ {:>8} ║ {:>8} ║ {:>+7.1}% ║ {:>+8.1}% ║",
             row.format, row.raw, row.gzip, row.bzip2, row.lzma,
-            -vs_raw,   // negative = gzip reduced size
-            vs_json,   // negative = smaller than JSON
+            -gz_red, vs_json,
         );
     }
     println!("╠══════════════════╩══════════╩══════════╩══════════╩══════════╩══════════╩═══════════╣");
-    // Best raw / best compressed annotations
     let best_raw  = rows.iter().min_by_key(|r| r.raw).unwrap();
     let best_gz   = rows.iter().min_by_key(|r| r.gzip).unwrap();
     let best_lzma = rows.iter().min_by_key(|r| r.lzma).unwrap();
-    println!("║  Smallest raw:        {:<16}  ({} B)                                   ║", best_raw.format, best_raw.raw);
-    println!("║  Smallest +gzip:      {:<16}  ({} B)                                   ║", best_gz.format, best_gz.gzip);
-    println!("║  Smallest +lzma:      {:<16}  ({} B)                                   ║", best_lzma.format, best_lzma.lzma);
+    println!("║  Smallest raw:    {:<18} ({} B)", best_raw.format,  best_raw.raw);
+    println!("║  Smallest +gzip:  {:<18} ({} B)", best_gz.format,   best_gz.gzip);
+    println!("║  Smallest +lzma:  {:<18} ({} B)", best_lzma.format, best_lzma.lzma);
     println!("╚══════════════════════════════════════════════════════════════════════════════════════╝");
 }
 
@@ -531,9 +508,9 @@ fn print_size_table(label: &str, rows: &[SizeRow]) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 struct SpeedRow {
-    format:     &'static str,
-    encode_us:  f64,
-    decode_us:  f64,
+    format:    &'static str,
+    encode_us: f64,
+    decode_us: f64,
 }
 
 fn time_encode<T: Serialize>(v: &T, encode: impl Fn(&T) -> Vec<u8>, n: u32) -> f64 {
@@ -573,12 +550,10 @@ fn time_decode_cbor<T: for<'de> Deserialize<'de>>(bytes: &[u8], n: u32) -> f64 {
 }
 
 fn time_dixscript_pack(source: &str, n: u32) -> (f64, f64) {
-    // encode
-    let enc_t = Instant::now();
+    let enc_t  = Instant::now();
     for _ in 0..n { let _ = dixscript_binary(source); }
     let enc_us = enc_t.elapsed().as_micros() as f64 / n as f64;
 
-    // decode
     let packed = dixscript_binary(source);
     let dec_t  = Instant::now();
     for _ in 0..n {
@@ -622,11 +597,7 @@ fn size_flat_config() {
     ];
 
     print_size_table("Flat Config (10 fields)", &rows);
-
-    // Smoke: every format produces at least 1 byte
-    for row in &rows {
-        assert!(row.raw > 0, "{} produced 0 bytes", row.format);
-    }
+    for row in &rows { assert!(row.raw > 0, "{} produced 0 bytes", row.format); }
 }
 
 #[test]
@@ -644,11 +615,8 @@ fn size_repetitive_objects() {
         SizeRow::new("CBOR",           &encode_cbor(&payload)),
     ];
 
-    print_size_table("Multi-Server Config (8 servers, repeated structure)", &rows);
-
-    for row in &rows {
-        assert!(row.raw > 0, "{} produced 0 bytes", row.format);
-    }
+    print_size_table("Multi-Server Config (8 servers)", &rows);
+    for row in &rows { assert!(row.raw > 0, "{} produced 0 bytes", row.format); }
 }
 
 #[test]
@@ -666,11 +634,8 @@ fn size_nested_game_data() {
         SizeRow::new("CBOR",           &encode_cbor(&payload)),
     ];
 
-    print_size_table("Game Enemy Data (10 enemies, computed fields)", &rows);
-
-    for row in &rows {
-        assert!(row.raw > 0, "{} produced 0 bytes", row.format);
-    }
+    print_size_table("Game Enemy Data (10 enemies, pre-computed fields)", &rows);
+    for row in &rows { assert!(row.raw > 0, "{} produced 0 bytes", row.format); }
 }
 
 #[test]
@@ -688,11 +653,8 @@ fn size_repetitive_api_endpoints() {
         SizeRow::new("CBOR",           &encode_cbor(&payload)),
     ];
 
-    print_size_table("API Endpoints (20 endpoints, max repetition)", &rows);
-
-    for row in &rows {
-        assert!(row.raw > 0, "{} produced 0 bytes", row.format);
-    }
+    print_size_table("API Endpoints (20 endpoints)", &rows);
+    for row in &rows { assert!(row.raw > 0, "{} produced 0 bytes", row.format); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -702,10 +664,9 @@ fn size_repetitive_api_endpoints() {
 #[test]
 fn roundtrip_json_flat() {
     let original = make_flat_config();
-    let bytes    = encode_json(&original);
-    let decoded: FlatConfig = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(original, decoded, "JSON round-trip failed for FlatConfig");
-    println!("[rt_json_flat] ok — {} bytes", bytes.len());
+    let decoded: FlatConfig = serde_json::from_slice(&encode_json(&original)).unwrap();
+    assert_eq!(original, decoded);
+    println!("[rt_json_flat] ok — {} bytes", encode_json(&original).len());
 }
 
 #[test]
@@ -746,43 +707,47 @@ fn roundtrip_cbor_flat() {
 
 #[test]
 fn roundtrip_dixscript_pack_unpack() {
-    // DixScript binary round-trip: pack → unpack → DATA section present
-    let dx     = dixscript_binary(SRC_NESTED);
-    let result = BinaryUnpacker::new().unpack(&dx);
-    assert!(result.is_success, "DixScript unpack failed: {:?}", result.errors);
-    let restored = result.ast.expect("no AST");
+    // Verifies BinaryPacker → BinaryUnpacker preserves the DATA section.
+    let dx       = dixscript_binary(SRC_NESTED);
+    let restored = dixscript_unpack(&dx);
     assert!(restored.data.is_some(), "DATA section lost in DixScript round-trip");
-    println!("[rt_dixscript] ok — {} bytes → DATA entries={}",
-        dx.len(),
-        restored.data.as_ref().unwrap().entries.len()
+    let entry_count = restored.data.as_ref().unwrap().entries.len();
+    assert!(entry_count > 0, "DATA section has no entries after round-trip");
+    println!(
+        "[rt_dixscript] ok — {} bytes → {} DATA entries",
+        dx.len(), entry_count
     );
+}
+
+#[test]
+fn roundtrip_dixscript_all_sources() {
+    for (label, src) in [
+        ("flat",       SRC_FLAT),
+        ("objects",    SRC_OBJECTS),
+        ("nested",     SRC_NESTED),
+        ("repetitive", SRC_REPETITIVE),
+    ] {
+        let bytes    = dixscript_binary(src);
+        let restored = dixscript_unpack(&bytes);
+        assert!(restored.data.is_some(), "[{}] DATA section missing after round-trip", label);
+        println!("[rt_dixscript/{}] ok — {} bytes", label, bytes.len());
+    }
 }
 
 #[test]
 fn roundtrip_all_formats_game_data() {
     let original = make_game_data();
-
-    // JSON
     let j: GameData = serde_json::from_slice(&encode_json(&original)).unwrap();
-    assert_eq!(original, j);
-
-    // Bincode
+    assert_eq!(original, j, "JSON round-trip failed");
     let b: GameData = bincode::deserialize(&encode_bincode(&original)).unwrap();
-    assert_eq!(original, b);
-
-    // MessagePack
+    assert_eq!(original, b, "Bincode round-trip failed");
     let m: GameData = rmp_serde::from_slice(&encode_msgpack(&original)).unwrap();
-    assert_eq!(original, m);
-
-    // Postcard
+    assert_eq!(original, m, "MessagePack round-trip failed");
     let p: GameData = postcard::from_bytes(&encode_postcard(&original)).unwrap();
-    assert_eq!(original, p);
-
-    // CBOR
+    assert_eq!(original, p, "Postcard round-trip failed");
     let c: GameData = ciborium::from_reader(encode_cbor(&original).as_slice()).unwrap();
-    assert_eq!(original, c);
-
-    println!("[rt_all_formats_game] all 5 non-DixScript formats round-tripped OK");
+    assert_eq!(original, c, "CBOR round-trip failed");
+    println!("[rt_all_formats_game] all 5 non-DixScript formats OK");
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -794,8 +759,8 @@ fn compression_roundtrip_gzip() {
     let data       = encode_json(&make_game_data());
     let compressed = gzip_compress(&data);
     let restored   = gzip_decompress(&compressed);
-    assert_eq!(data, restored, "gzip round-trip failed");
-    println!("[gzip_rt] {} → {} → {} bytes", data.len(), compressed.len(), restored.len());
+    assert_eq!(data, restored);
+    println!("[gzip_rt] {} → {} → {} B", data.len(), compressed.len(), restored.len());
 }
 
 #[test]
@@ -803,8 +768,8 @@ fn compression_roundtrip_bzip2() {
     let data       = encode_json(&make_game_data());
     let compressed = bzip2_compress(&data);
     let restored   = bzip2_decompress(&compressed);
-    assert_eq!(data, restored, "bzip2 round-trip failed");
-    println!("[bzip2_rt] {} → {} → {} bytes", data.len(), compressed.len(), restored.len());
+    assert_eq!(data, restored);
+    println!("[bzip2_rt] {} → {} → {} B", data.len(), compressed.len(), restored.len());
 }
 
 #[test]
@@ -812,98 +777,65 @@ fn compression_roundtrip_lzma() {
     let data       = encode_json(&make_game_data());
     let compressed = lzma_compress(&data);
     let restored   = lzma_decompress(&compressed);
-    assert_eq!(data, restored, "lzma round-trip failed");
-    println!("[lzma_rt] {} → {} → {} bytes", data.len(), compressed.len(), restored.len());
+    assert_eq!(data, restored);
+    println!("[lzma_rt] {} → {} → {} B", data.len(), compressed.len(), restored.len());
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// COMPREHENSIVE SUMMARY — all datasets × all formats × all compressions
+// COMPREHENSIVE SUMMARY
 // ══════════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn summary_all_datasets_all_formats() {
-    struct Dataset<T> {
-        label:   &'static str,
-        src:     &'static str,    // mdix source
-        payload: T,
-    }
-
-    // We can't easily make a generic function over T here, so we do it manually.
-
-    let datasets: &[(&str, &str)] = &[
-        ("Flat Config (10 fields)",             SRC_FLAT),
-        ("Multi-Server (8×repeated struct)",    SRC_OBJECTS),
-        ("Game Data (10 enemies+computed)",     SRC_NESTED),
-        ("API Endpoints (20×repeated struct)",  SRC_REPETITIVE),
+    let datasets = [
+        ("Flat Config (10 fields)",            SRC_FLAT),
+        ("Multi-Server (8 repeated structs)",  SRC_OBJECTS),
+        ("Game Data (10 enemies+fields)",      SRC_NESTED),
+        ("API Endpoints (20 repeated structs)",SRC_REPETITIVE),
     ];
 
-    let payloads_flat: Vec<Vec<u8>> = vec![
+    let json_payloads: Vec<Vec<u8>> = vec![
         encode_json(&make_flat_config()),
         encode_json(&make_multi_server()),
         encode_json(&make_game_data()),
         encode_json(&make_api_config()),
     ];
-
-    let payloads_bincode: Vec<Vec<u8>> = vec![
+    let bc_payloads: Vec<Vec<u8>> = vec![
         encode_bincode(&make_flat_config()),
         encode_bincode(&make_multi_server()),
         encode_bincode(&make_game_data()),
         encode_bincode(&make_api_config()),
     ];
-
-    let payloads_msgpack: Vec<Vec<u8>> = vec![
-        encode_msgpack(&make_flat_config()),
-        encode_msgpack(&make_multi_server()),
-        encode_msgpack(&make_game_data()),
-        encode_msgpack(&make_api_config()),
-    ];
-
-    let payloads_postcard: Vec<Vec<u8>> = vec![
+    let pc_payloads: Vec<Vec<u8>> = vec![
         encode_postcard(&make_flat_config()),
         encode_postcard(&make_multi_server()),
         encode_postcard(&make_game_data()),
         encode_postcard(&make_api_config()),
     ];
 
-    let payloads_cbor: Vec<Vec<u8>> = vec![
-        encode_cbor(&make_flat_config()),
-        encode_cbor(&make_multi_server()),
-        encode_cbor(&make_game_data()),
-        encode_cbor(&make_api_config()),
-    ];
-
     println!("\n");
-    println!("╔══════════════════════════════════════════════════════════════════════════════════════════════════════╗");
-    println!("║                              COMPREHENSIVE FORMAT × COMPRESSION SUMMARY                             ║");
-    println!("║  Values = raw bytes.  Lower is better.  DixScript includes full pipeline overhead (parse + pack).  ║");
-    println!("╠══════════════════════════╦══════════════════╦══════════════════╦══════════════════╦═════════════════╣");
-    println!("║  Dataset                 ║  DixScript       ║  JSON+gzip       ║  Bincode+gzip    ║  Postcard       ║");
-    println!("╠══════════════════════════╬══════════════════╬══════════════════╬══════════════════╬═════════════════╣");
+    println!("╔════════════════════════════════════════════════════════════════════════════════════════════╗");
+    println!("║                     COMPREHENSIVE FORMAT × COMPRESSION SUMMARY                            ║");
+    println!("╠═══════════════════════════╦══════════════════╦══════════════════╦══════════════╦══════════╣");
+    println!("║  Dataset                  ║  DixScript       ║  JSON+gzip       ║  Bincode+gz  ║ Postcard ║");
+    println!("╠═══════════════════════════╬══════════════════╬══════════════════╬══════════════╬══════════╣");
 
     for (i, (label, src)) in datasets.iter().enumerate() {
-        let dx_raw   = dixscript_binary(src);
-        let dx_gz    = gzip_compress(&dx_raw);
-        let json_gz  = gzip_compress(&payloads_flat[i]);
-        let bc_gz    = gzip_compress(&payloads_bincode[i]);
-        let pc_raw   = &payloads_postcard[i];
-
+        let dx_raw  = dixscript_binary(src);
+        let dx_gz   = gzip_compress(&dx_raw);
+        let json_gz = gzip_compress(&json_payloads[i]);
+        let bc_gz   = gzip_compress(&bc_payloads[i]);
+        let pc_raw  = &pc_payloads[i];
         println!(
-            "║  {:<24}  ║  raw={:>5} gz={:>5} ║  raw={:>5} gz={:>5} ║  raw={:>5} gz={:>5} ║  raw={:>5}        ║",
+            "║  {:<25}  ║ raw={:>5} gz={:>5} ║ raw={:>5} gz={:>5} ║ raw={:>5} gz={:>4} ║ raw={:>5} ║",
             label,
             dx_raw.len(), dx_gz.len(),
-            payloads_flat[i].len(), json_gz.len(),
-            payloads_bincode[i].len(), bc_gz.len(),
+            json_payloads[i].len(), json_gz.len(),
+            bc_payloads[i].len(), bc_gz.len(),
             pc_raw.len(),
         );
     }
-
-    println!("╠══════════════════════════╩══════════════════╩══════════════════╩══════════════════╩═════════════════╣");
-    println!("║  Notes:                                                                                              ║");
-    println!("║  • DixScript 'raw' = binary after full compile pipeline (QuickFuncs resolved, checksummed)          ║");
-    println!("║  • DixScript 'gz'  = ready to store or send (apply DLM Compressor in production)                   ║");
-    println!("║  • JSON requires external compression; DixScript DLM integrates it.                                 ║");
-    println!("║  • Postcard is smallest raw binary — no schema overhead, but no schema means no self-description.   ║");
-    println!("╚══════════════════════════════════════════════════════════════════════════════════════════════════════╝");
+    println!("╚════════════════════════════════════════════════════════════════════════════════════════════╝");
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -911,92 +843,82 @@ fn summary_all_datasets_all_formats() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 #[test]
-#[ignore = "slow — run with --include-ignored"]
+#[ignore = "slow — run with: cargo test bench_encode_speed_flat -- --ignored --nocapture"]
 fn bench_encode_speed_flat_config() {
     const N: u32 = 10_000;
     let payload = make_flat_config();
-
-    let rows = vec![
-        SpeedRow {
-            format:    "JSON",
-            encode_us: time_encode(&payload, encode_json, N),
-            decode_us: time_decode_json::<FlatConfig>(&encode_json(&payload), N),
-        },
-        SpeedRow {
-            format:    "Bincode",
-            encode_us: time_encode(&payload, encode_bincode, N),
-            decode_us: time_decode_bincode::<FlatConfig>(&encode_bincode(&payload), N),
-        },
-        SpeedRow {
-            format:    "MessagePack",
-            encode_us: time_encode(&payload, encode_msgpack, N),
-            decode_us: time_decode_msgpack::<FlatConfig>(&encode_msgpack(&payload), N),
-        },
-        SpeedRow {
-            format:    "Postcard",
-            encode_us: time_encode(&payload, encode_postcard, N),
-            decode_us: time_decode_postcard::<FlatConfig>(&encode_postcard(&payload), N),
-        },
-        SpeedRow {
-            format:    "CBOR",
-            encode_us: time_encode(&payload, encode_cbor, N),
-            decode_us: time_decode_cbor::<FlatConfig>(&encode_cbor(&payload), N),
-        },
-    ];
-
-    // DixScript encode includes full pipeline (parse + resolve + pack)
-    let (dx_enc, dx_dec) = time_dixscript_pack(SRC_FLAT, 200);
-    let mut all_rows = vec![SpeedRow { format: "DixScript", encode_us: dx_enc, decode_us: dx_dec }];
-    all_rows.extend(rows);
-
-    print_speed_table("Flat Config ×10k (DixScript ×200)", &all_rows);
+    let mut rows = vec![{
+        let (enc, dec) = time_dixscript_pack(SRC_FLAT, 200);
+        SpeedRow { format: "DixScript", encode_us: enc, decode_us: dec }
+    }];
+    rows.push(SpeedRow {
+        format:    "JSON",
+        encode_us: time_encode(&payload, encode_json, N),
+        decode_us: time_decode_json::<FlatConfig>(&encode_json(&payload), N),
+    });
+    rows.push(SpeedRow {
+        format:    "Bincode",
+        encode_us: time_encode(&payload, encode_bincode, N),
+        decode_us: time_decode_bincode::<FlatConfig>(&encode_bincode(&payload), N),
+    });
+    rows.push(SpeedRow {
+        format:    "MessagePack",
+        encode_us: time_encode(&payload, encode_msgpack, N),
+        decode_us: time_decode_msgpack::<FlatConfig>(&encode_msgpack(&payload), N),
+    });
+    rows.push(SpeedRow {
+        format:    "Postcard",
+        encode_us: time_encode(&payload, encode_postcard, N),
+        decode_us: time_decode_postcard::<FlatConfig>(&encode_postcard(&payload), N),
+    });
+    rows.push(SpeedRow {
+        format:    "CBOR",
+        encode_us: time_encode(&payload, encode_cbor, N),
+        decode_us: time_decode_cbor::<FlatConfig>(&encode_cbor(&payload), N),
+    });
+    print_speed_table("Flat Config ×10k (DixScript ×200)", &rows);
 }
 
 #[test]
-#[ignore = "slow — run with --include-ignored"]
+#[ignore = "slow — run with: cargo test bench_encode_speed_game -- --ignored --nocapture"]
 fn bench_encode_speed_game_data() {
     const N: u32 = 5_000;
     let payload = make_game_data();
-
-    let rows = vec![
-        SpeedRow {
-            format:    "JSON",
-            encode_us: time_encode(&payload, encode_json, N),
-            decode_us: time_decode_json::<GameData>(&encode_json(&payload), N),
-        },
-        SpeedRow {
-            format:    "Bincode",
-            encode_us: time_encode(&payload, encode_bincode, N),
-            decode_us: time_decode_bincode::<GameData>(&encode_bincode(&payload), N),
-        },
-        SpeedRow {
-            format:    "MessagePack",
-            encode_us: time_encode(&payload, encode_msgpack, N),
-            decode_us: time_decode_msgpack::<GameData>(&encode_msgpack(&payload), N),
-        },
-        SpeedRow {
-            format:    "Postcard",
-            encode_us: time_encode(&payload, encode_postcard, N),
-            decode_us: time_decode_postcard::<GameData>(&encode_postcard(&payload), N),
-        },
-        SpeedRow {
-            format:    "CBOR",
-            encode_us: time_encode(&payload, encode_cbor, N),
-            decode_us: time_decode_cbor::<GameData>(&encode_cbor(&payload), N),
-        },
-    ];
-
-    let (dx_enc, dx_dec) = time_dixscript_pack(SRC_NESTED, 100);
-    let mut all_rows = vec![SpeedRow { format: "DixScript", encode_us: dx_enc, decode_us: dx_dec }];
-    all_rows.extend(rows);
-
-    print_speed_table("Game Data ×5k (DixScript ×100)", &all_rows);
+    let mut rows = vec![{
+        let (enc, dec) = time_dixscript_pack(SRC_NESTED, 100);
+        SpeedRow { format: "DixScript", encode_us: enc, decode_us: dec }
+    }];
+    rows.push(SpeedRow {
+        format:    "JSON",
+        encode_us: time_encode(&payload, encode_json, N),
+        decode_us: time_decode_json::<GameData>(&encode_json(&payload), N),
+    });
+    rows.push(SpeedRow {
+        format:    "Bincode",
+        encode_us: time_encode(&payload, encode_bincode, N),
+        decode_us: time_decode_bincode::<GameData>(&encode_bincode(&payload), N),
+    });
+    rows.push(SpeedRow {
+        format:    "MessagePack",
+        encode_us: time_encode(&payload, encode_msgpack, N),
+        decode_us: time_decode_msgpack::<GameData>(&encode_msgpack(&payload), N),
+    });
+    rows.push(SpeedRow {
+        format:    "Postcard",
+        encode_us: time_encode(&payload, encode_postcard, N),
+        decode_us: time_decode_postcard::<GameData>(&encode_postcard(&payload), N),
+    });
+    rows.push(SpeedRow {
+        format:    "CBOR",
+        encode_us: time_encode(&payload, encode_cbor, N),
+        decode_us: time_decode_cbor::<GameData>(&encode_cbor(&payload), N),
+    });
+    print_speed_table("Game Data ×5k (DixScript ×100)", &rows);
 }
 
 #[test]
-#[ignore = "slow — run with --include-ignored"]
+#[ignore = "slow — run with: cargo test bench_compression_speed -- --ignored --nocapture"]
 fn bench_compression_speed() {
-    // How long does each compression algorithm take on ~2KB of JSON?
     let data = encode_json_pretty(&make_game_data());
     println!("\n[compression speed] input = {} bytes", data.len());
 
@@ -1014,15 +936,12 @@ fn bench_compression_speed() {
         let t0        = Instant::now();
         for _ in 0..N { let _ = compress(&data); }
         let comp_us   = t0.elapsed().as_micros() as f64 / N as f64;
-
         let compressed = compress(&data);
         let out_bytes  = compressed.len();
-
-        let t1        = Instant::now();
+        let t1         = Instant::now();
         for _ in 0..N { let _ = decompress(&compressed); }
         let decomp_us = t1.elapsed().as_micros() as f64 / N as f64;
-
         println!("║  {:<10} ║ {:>13.2} ║ {:>13.2} ║ {:>12} ║", name, comp_us, decomp_us, out_bytes);
     }
     println!("╚════════════╩═══════════════╩═══════════════╩══════════════╝");
-}
+    }

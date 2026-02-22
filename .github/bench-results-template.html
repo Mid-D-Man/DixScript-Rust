@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript — Benchmark Results · Build #BUILD_NUM_PLACEHOLDER</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117; color: #e6edf3;
+      padding: 32px 24px; min-height: 100vh;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    /* ── Header ── */
+    header { border-bottom: 2px solid #f78166; padding-bottom: 18px; margin-bottom: 28px; }
+    header h1 { font-size: 1.9rem; color: #f78166; }
+    header h1 span { color: #e6edf3; }
+    .meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+    .meta-item { background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      padding: 5px 12px; font-size: 0.82rem; }
+    .meta-item strong { color: #f78166; }
+
+    /* ── Banner ── */
+    .banner { border-radius: 8px; padding: 14px 20px; margin-bottom: 24px;
+      font-weight: 600; font-size: 0.95rem;
+      background: #0f1e3a; border: 1px solid #1f4080; color: #79c0ff; }
+    .banner.loading { background: #1c2128; border: 1px solid #30363d; color: #8b949e; }
+
+    /* ── Summary cards ── */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px; margin-bottom: 24px; }
+    .stat-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px 16px; }
+    .stat-card .s-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.6px;
+      color: #484f58; margin-bottom: 6px; }
+    .stat-card .s-value { font-size: 1.5rem; font-weight: 700; color: #f78166; }
+    .stat-card .s-sub   { font-size: 0.72rem; color: #8b949e; margin-top: 2px; }
+
+    /* ── Toolbar ── */
+    .toolbar { display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+    .toolbar-title { font-size: 1rem; font-weight: 700; border-left: 3px solid #f78166;
+      padding-left: 10px; }
+    .sort-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .sort-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e;
+      padding: 5px 14px; border-radius: 6px; font-size: 0.80rem; cursor: pointer;
+      transition: all 0.15s; }
+    .sort-btn:hover { border-color: #8b949e; color: #e6edf3; }
+    .sort-btn.active { border-color: #f78166; color: #f78166;
+      background: rgba(247,129,102,0.1); font-weight: 600; }
+    .search-box { background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+      padding: 5px 12px; border-radius: 6px; font-size: 0.82rem; outline: none;
+      transition: border-color 0.15s; width: 220px; }
+    .search-box:focus { border-color: #f78166; }
+    .search-box::placeholder { color: #484f58; }
+
+    /* ── Suite block ── */
+    .suite { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      margin-bottom: 16px; overflow: hidden; }
+    .suite-header { display: flex; align-items: center; gap: 12px;
+      padding: 12px 16px; cursor: pointer; user-select: none;
+      transition: background 0.15s; }
+    .suite-header:hover { background: #1c2128; }
+    .suite-chevron { color: #484f58; font-size: 0.8rem; transition: transform 0.2s; flex-shrink: 0; }
+    .suite.open .suite-chevron { transform: rotate(90deg); }
+    .suite-name { font-weight: 700; font-size: 0.95rem; flex: 1; }
+    .suite-meta { font-size: 0.78rem; color: #8b949e; }
+    .suite-body { display: none; border-top: 1px solid #30363d; }
+    .suite.open .suite-body { display: block; }
+
+    /* ── Bench table ── */
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    thead th { padding: 8px 14px; text-align: left; color: #484f58; font-size: 0.70rem;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      border-bottom: 1px solid #30363d; background: #0d1117; white-space: nowrap; }
+    thead th.right { text-align: right; }
+    tbody tr.bench-row { cursor: pointer; border-bottom: 1px solid #21262d; }
+    tbody tr.bench-row:last-of-type { border-bottom: none; }
+    tbody tr.bench-row:hover td { background: #1c2128; }
+    td { padding: 9px 14px; vertical-align: middle; }
+    td.right { text-align: right; }
+
+    /* ── Bench bar ── */
+    .bar-track { background: #0d1117; border-radius: 3px; height: 8px;
+      width: 100%; min-width: 60px; overflow: hidden; }
+    .bar-fill  { height: 100%; border-radius: 3px;
+      background: linear-gradient(90deg, #f78166, #e3b341);
+      transition: width 0.3s ease; }
+    .bar-wrap  { display: flex; align-items: center; gap: 8px; }
+    .bar-pct   { font-size: 0.72rem; color: #484f58; white-space: nowrap; flex-shrink: 0; }
+
+    /* ── Time display ── */
+    .time-main { font-weight: 700; font-family: 'SFMono-Regular', Consolas, monospace; }
+    .time-unit { color: #8b949e; font-size: 0.78rem; }
+    .time-range { color: #484f58; font-size: 0.73rem; font-family: monospace; }
+    .fastest { color: #3fb950 !important; }
+    .slowest { color: #f85149 !important; }
+
+    /* ── Expanded detail ── */
+    tr.bench-detail td { padding: 0; }
+    .detail-box { background: #0d1117; border-top: 1px solid #30363d;
+      padding: 16px 18px; display: none; }
+    .detail-box.visible { display: block; }
+    .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+    .detail-card { background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 10px 14px; }
+    .detail-card .d-label { font-size: 0.70rem; color: #484f58; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 4px; }
+    .detail-card .d-value { font-size: 1.05rem; font-weight: 700; font-family: monospace; }
+    .detail-card .d-sub   { font-size: 0.72rem; color: #8b949e; margin-top: 2px; }
+
+    /* ── Legend ── */
+    .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 12px; font-size: 0.80rem; }
+    .legend-item { display: flex; align-items: center; gap: 6px; color: #8b949e; }
+    .leg-bar { width: 16px; height: 8px; border-radius: 2px;
+      background: linear-gradient(90deg, #f78166, #e3b341); }
+    .leg-fastest { color: #3fb950; font-weight: 700; }
+    .leg-slowest { color: #f85149; font-weight: 700; }
+
+    .click-hint { font-size: 0.72rem; color: #484f58; margin-bottom: 10px; }
+
+    /* ── Hidden ── */
+    .hidden { display: none !important; }
+
+    /* ── Footer ── */
+    footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid #30363d;
+      color: #484f58; font-size: 0.76rem; text-align: center; }
+
+    /* ── Nav links ── */
+    .nav-links { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+    .nav-link { display: inline-flex; align-items: center; gap: 5px; color: #8b949e;
+      font-size: 0.80rem; text-decoration: none; padding: 5px 12px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      transition: color 0.15s, border-color 0.15s; }
+    .nav-link:hover { color: #e6edf3; border-color: #8b949e; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="nav-links">
+    <a class="nav-link" href="../tests/">✅ Test Results</a>
+    <a class="nav-link" href="../flame/">🔥 Flamegraphs</a>
+  </div>
+
+  <header>
+    <h1>📊 DixScript <span>— Benchmark Results</span></h1>
+    <p style="color:#8b949e;margin-top:5px">MidManStudio | DixScript-Rust · Criterion Benchmarks</p>
+    <div class="meta">
+      <div class="meta-item"><strong>Build:</strong> #BUILD_NUM_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Branch:</strong> BRANCH_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Commit:</strong> COMMIT_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Date:</strong> DATE_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Rust:</strong> RUST_VERSION_PLACEHOLDER</div>
+    </div>
+  </header>
+
+  <div class="banner loading" id="banner">⏳ Loading benchmark results…</div>
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="s-label">Benchmarks</div>
+      <div class="s-value" id="s-total">—</div>
+      <div class="s-sub">total measurements</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Suites</div>
+      <div class="s-value" id="s-suites">—</div>
+      <div class="s-sub">bench targets</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Fastest</div>
+      <div class="s-value" id="s-fastest" style="color:#3fb950;font-size:1rem">—</div>
+      <div class="s-sub" id="s-fastest-name">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Slowest</div>
+      <div class="s-value" id="s-slowest" style="color:#f85149;font-size:1rem">—</div>
+      <div class="s-sub" id="s-slowest-name">—</div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="toolbar-title">Benchmark Suites</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <div class="sort-row">
+        <span style="font-size:0.78rem;color:#484f58;align-self:center">Sort:</span>
+        <button class="sort-btn active" data-sort="name"   onclick="setSort('name')">Name</button>
+        <button class="sort-btn"       data-sort="fastest" onclick="setSort('fastest')">Fastest first</button>
+        <button class="sort-btn"       data-sort="slowest" onclick="setSort('slowest')">Slowest first</button>
+      </div>
+      <input class="search-box" id="search-box" placeholder="🔍 Search benchmarks…"
+             oninput="applySearch()" />
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="leg-bar"></div>Relative time (100% = slowest in suite)</div>
+    <div class="legend-item"><span class="leg-fastest">■</span> Fastest in suite</div>
+    <div class="legend-item"><span class="leg-slowest">■</span> Slowest in suite</div>
+  </div>
+  <p class="click-hint">💡 Click any benchmark row to expand confidence interval and std dev details</p>
+
+  <div id="suites-container"></div>
+
+  <footer>DixScript-Rust Benchmarks — MidManStudio — Build #BUILD_NUM_PLACEHOLDER</footer>
+</div>
+
+<script>
+let ALL_DATA   = null;
+let currentSort = 'name';
+
+// ── Time formatting ──────────────────────────────────────────────────────────
+
+function bestUnit(ns) {
+  if (ns >= 1e9) return { val: ns / 1e9, unit: 's'  };
+  if (ns >= 1e6) return { val: ns / 1e6, unit: 'ms' };
+  if (ns >= 1e3) return { val: ns / 1e3, unit: 'µs' };
+  return           { val: ns,            unit: 'ns' };
+}
+
+function fmtNs(ns, decimals = 3) {
+  if (ns == null || ns === 0) return '—';
+  const { val, unit } = bestUnit(ns);
+  return `<span class="time-main">${val.toFixed(decimals)}</span><span class="time-unit"> ${unit}</span>`;
+}
+
+function fmtNsPlain(ns, decimals = 2) {
+  if (ns == null || ns === 0) return '—';
+  const { val, unit } = bestUnit(ns);
+  return `${val.toFixed(decimals)} ${unit}`;
+}
+
+// ── Build DOM ────────────────────────────────────────────────────────────────
+
+function renderAll(data) {
+  ALL_DATA = data;
+
+  const banner = document.getElementById('banner');
+  banner.className = 'banner';
+  banner.textContent = `✅ ${data.summary.total} benchmarks across ${data.summary.suites} suite(s) — Build #${data.build}`;
+
+  document.getElementById('s-total').textContent  = data.summary.total;
+  document.getElementById('s-suites').textContent = data.summary.suites;
+
+  // Global fastest / slowest
+  const allBenches = data.suites.flatMap(s => s.benchmarks);
+  if (allBenches.length) {
+    const sorted   = [...allBenches].sort((a, b) => a.mean_ns - b.mean_ns);
+    const fastest  = sorted[0];
+    const slowest  = sorted[sorted.length - 1];
+    document.getElementById('s-fastest').innerHTML      = fmtNs(fastest.mean_ns, 2);
+    document.getElementById('s-fastest-name').textContent = fastest.name;
+    document.getElementById('s-slowest').innerHTML      = fmtNs(slowest.mean_ns, 2);
+    document.getElementById('s-slowest-name').textContent = slowest.name;
+  }
+
+  renderSuites(data.suites);
+}
+
+function renderSuites(suites) {
+  const container = document.getElementById('suites-container');
+  container.innerHTML = '';
+
+  suites.forEach((suite, si) => {
+    let benches = [...suite.benchmarks];
+
+    // Sort within suite
+    if      (currentSort === 'fastest') benches.sort((a, b) => a.mean_ns - b.mean_ns);
+    else if (currentSort === 'slowest') benches.sort((a, b) => b.mean_ns - a.mean_ns);
+    else                                benches.sort((a, b) => a.name.localeCompare(b.name));
+
+    const maxNs = Math.max(...benches.map(b => b.mean_ns), 1);
+    const minNs = Math.min(...benches.map(b => b.mean_ns), Infinity);
+
+    const div = document.createElement('div');
+    div.className = 'suite open';
+    div.dataset.suite = si;
+
+    div.innerHTML = `
+      <div class="suite-header" onclick="toggleSuite(this)">
+        <span class="suite-chevron">▶</span>
+        <span class="suite-name">${suite.name}</span>
+        <span class="suite-meta">${benches.length} benchmark${benches.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="suite-body">
+        <table>
+          <thead>
+            <tr>
+              <th>Benchmark</th>
+              <th class="right" style="width:130px">Mean</th>
+              <th class="right" style="width:170px">Range (±)</th>
+              <th style="width:220px">Relative</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-${si}"></tbody>
+        </table>
+      </div>`;
+
+    const tbody = div.querySelector(`#tbody-${si}`);
+
+    benches.forEach((bench, bi) => {
+      const isFastest = bench.mean_ns === minNs;
+      const isSlowest = bench.mean_ns === maxNs;
+      const pct       = maxNs > 0 ? (bench.mean_ns / maxNs) * 100 : 0;
+      const rangeLo   = fmtNsPlain(bench.lower_ns);
+      const rangeHi   = fmtNsPlain(bench.upper_ns);
+      const nameClass = isFastest ? 'fastest' : isSlowest ? 'slowest' : '';
+      const icon      = isFastest ? ' ⚡' : isSlowest ? ' 🐢' : '';
+
+      const mainTr = document.createElement('tr');
+      mainTr.className = 'bench-row';
+      mainTr.dataset.name = bench.name.toLowerCase();
+      mainTr.dataset.full = bench.full_name.toLowerCase();
+      mainTr.innerHTML = `
+        <td>
+          <span class="test-name ${nameClass}" style="font-family:monospace;font-size:0.80rem">
+            ${bench.name}${icon}
+          </span>
+        </td>
+        <td class="right">${fmtNs(bench.mean_ns)}</td>
+        <td class="right">
+          <span class="time-range">${rangeLo} … ${rangeHi}</span>
+        </td>
+        <td>
+          <div class="bar-wrap">
+            <div class="bar-track" style="flex:1">
+              <div class="bar-fill" style="width:${pct.toFixed(1)}%"></div>
+            </div>
+            <span class="bar-pct">${pct.toFixed(0)}%</span>
+          </div>
+        </td>`;
+
+      const detTr = document.createElement('tr');
+      detTr.className = 'bench-detail';
+      detTr.dataset.name = bench.name.toLowerCase();
+      detTr.dataset.full = bench.full_name.toLowerCase();
+      detTr.innerHTML = `
+        <td colspan="4">
+          <div class="detail-box" id="det-${si}-${bi}">
+            <div class="detail-grid">
+              <div class="detail-card">
+                <div class="d-label">Mean</div>
+                <div class="d-value">${fmtNsPlain(bench.mean_ns)}</div>
+                <div class="d-sub">point estimate</div>
+              </div>
+              <div class="detail-card">
+                <div class="d-label">Lower bound</div>
+                <div class="d-value" style="color:#3fb950">${fmtNsPlain(bench.lower_ns)}</div>
+                <div class="d-sub">95% CI lower</div>
+              </div>
+              <div class="detail-card">
+                <div class="d-label">Upper bound</div>
+                <div class="d-value" style="color:#e3b341">${fmtNsPlain(bench.upper_ns)}</div>
+                <div class="d-sub">95% CI upper</div>
+              </div>
+              <div class="detail-card">
+                <div class="d-label">Spread</div>
+                <div class="d-value">${fmtNsPlain(bench.upper_ns - bench.lower_ns)}</div>
+                <div class="d-sub">upper − lower</div>
+              </div>
+              <div class="detail-card">
+                <div class="d-label">Std dev (est.)</div>
+                <div class="d-value">${fmtNsPlain(bench.std_ns || 0)}</div>
+                <div class="d-sub">approx σ</div>
+              </div>
+              <div class="detail-card">
+                <div class="d-label">Relative</div>
+                <div class="d-value" style="color:${isFastest?'#3fb950':isSlowest?'#f85149':'#e6edf3'}">
+                  ${pct.toFixed(1)}%
+                </div>
+                <div class="d-sub">of slowest in suite</div>
+              </div>
+            </div>
+          </div>
+        </td>`;
+
+      mainTr.addEventListener('click', () => {
+        const box = document.getElementById(`det-${si}-${bi}`);
+        if (box) box.classList.toggle('visible');
+      });
+
+      tbody.appendChild(mainTr);
+      tbody.appendChild(detTr);
+    });
+
+    container.appendChild(div);
+  });
+}
+
+// ── Controls ─────────────────────────────────────────────────────────────────
+
+function toggleSuite(header) {
+  header.closest('.suite').classList.toggle('open');
+}
+
+function setSort(s) {
+  currentSort = s;
+  document.querySelectorAll('.sort-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.sort === s));
+  if (ALL_DATA) renderSuites(ALL_DATA.suites);
+}
+
+function applySearch() {
+  const q = document.getElementById('search-box').value.toLowerCase().trim();
+  document.querySelectorAll('.bench-row').forEach(row => {
+    const match = !q
+      || row.dataset.name.includes(q)
+      || (row.dataset.full || '').includes(q);
+    row.classList.toggle('hidden', !match);
+    const det = row.nextElementSibling;
+    if (det && det.classList.contains('bench-detail')) {
+      det.classList.toggle('hidden', !match);
+    }
+  });
+
+  if (q) {
+    document.querySelectorAll('.suite').forEach(suite => {
+      const visible = suite.querySelectorAll('.bench-row:not(.hidden)');
+      if (visible.length > 0) suite.classList.add('open');
+    });
+  }
+}
+
+// ── Fetch ─────────────────────────────────────────────────────────────────────
+
+fetch('bench-results.json')
+  .then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  })
+  .then(data => renderAll(data))
+  .catch(err => {
+    const banner = document.getElementById('banner');
+    banner.className = 'banner loading';
+    banner.textContent = `❌ Failed to load bench-results.json: ${err.message}`;
+    document.getElementById('suites-container').innerHTML = `
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;
+        padding:28px;text-align:center;color:#8b949e;">
+        <p>No benchmark data available.</p>
+        <p style="margin-top:8px;font-size:0.80rem">
+          Commit with <code>--publish-bench</code> or use workflow_dispatch to generate results.
+        </p>
+      </div>`;
+  });
+</script>
+</body>
+  </html>

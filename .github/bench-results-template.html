@@ -42,6 +42,7 @@
       flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
     .toolbar-title { font-size: 1rem; font-weight: 700; border-left: 3px solid #f78166;
       padding-left: 10px; }
+    .toolbar-right { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .sort-row { display: flex; gap: 6px; flex-wrap: wrap; }
     .sort-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e;
       padding: 5px 14px; border-radius: 6px; font-size: 0.80rem; cursor: pointer;
@@ -49,11 +50,20 @@
     .sort-btn:hover { border-color: #8b949e; color: #e6edf3; }
     .sort-btn.active { border-color: #f78166; color: #f78166;
       background: rgba(247,129,102,0.1); font-weight: 600; }
+
+    /* ── Search ── */
+    .search-wrap { position: relative; }
     .search-box { background: #21262d; border: 1px solid #30363d; color: #e6edf3;
-      padding: 5px 12px; border-radius: 6px; font-size: 0.82rem; outline: none;
-      transition: border-color 0.15s; width: 220px; }
-    .search-box:focus { border-color: #f78166; }
+      padding: 6px 32px 6px 12px; border-radius: 6px; font-size: 0.82rem; outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s; width: 260px; }
+    .search-box:focus { border-color: #f78166; box-shadow: 0 0 0 3px rgba(247,129,102,0.15); }
     .search-box::placeholder { color: #484f58; }
+    .search-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: #484f58; cursor: pointer; font-size: 0.85rem;
+      display: none; padding: 2px 4px; }
+    .search-clear:hover { color: #8b949e; }
+    .search-clear.visible { display: block; }
+    .search-count { font-size: 0.75rem; color: #484f58; white-space: nowrap; align-self: center; }
 
     /* ── Suite block ── */
     .suite { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
@@ -66,6 +76,11 @@
     .suite.open .suite-chevron { transform: rotate(90deg); }
     .suite-name { font-weight: 700; font-size: 0.95rem; flex: 1; }
     .suite-meta { font-size: 0.78rem; color: #8b949e; }
+    .suite-copy-btn { background: none; border: 1px solid #30363d; color: #484f58;
+      padding: 3px 8px; border-radius: 5px; font-size: 0.72rem; cursor: pointer;
+      transition: all 0.15s; flex-shrink: 0; }
+    .suite-copy-btn:hover { border-color: #f78166; color: #f78166; }
+    .suite-copy-btn.copied { border-color: #3fb950; color: #3fb950; }
     .suite-body { display: none; border-top: 1px solid #30363d; }
     .suite.open .suite-body { display: block; }
 
@@ -75,13 +90,14 @@
       text-transform: uppercase; letter-spacing: 0.5px;
       border-bottom: 1px solid #30363d; background: #0d1117; white-space: nowrap; }
     thead th.right { text-align: right; }
-    tbody tr.bench-row { cursor: pointer; border-bottom: 1px solid #21262d; }
+    thead th.th-actions { width: 80px; text-align: right; }
+    tbody tr.bench-row { border-bottom: 1px solid #21262d; }
     tbody tr.bench-row:last-of-type { border-bottom: none; }
     tbody tr.bench-row:hover td { background: #1c2128; }
     td { padding: 9px 14px; vertical-align: middle; }
     td.right { text-align: right; }
 
-    /* ── Bench bar ── */
+    /* ── Bar ── */
     .bar-track { background: #0d1117; border-radius: 3px; height: 8px;
       width: 100%; min-width: 60px; overflow: hidden; }
     .bar-fill  { height: 100%; border-radius: 3px;
@@ -97,11 +113,30 @@
     .fastest { color: #3fb950 !important; }
     .slowest { color: #f85149 !important; }
 
+    /* ── Row action buttons ── */
+    .row-actions { display: flex; gap: 5px; justify-content: flex-end; }
+    .action-btn { background: none; border: 1px solid #30363d; color: #484f58;
+      padding: 3px 8px; border-radius: 5px; font-size: 0.70rem; cursor: pointer;
+      transition: all 0.15s; white-space: nowrap; }
+    .action-btn:hover { border-color: #f78166; color: #f78166; background: rgba(247,129,102,0.05); }
+    .action-btn.copied { border-color: #3fb950 !important; color: #3fb950 !important; }
+    .action-btn.expand-btn:hover { border-color: #8b949e; color: #8b949e; }
+
     /* ── Expanded detail ── */
     tr.bench-detail td { padding: 0; }
     .detail-box { background: #0d1117; border-top: 1px solid #30363d;
       padding: 16px 18px; display: none; }
     .detail-box.visible { display: block; }
+    .detail-header { display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px; }
+    .detail-label { font-size: 0.70rem; text-transform: uppercase; letter-spacing: 0.5px;
+      color: #484f58; }
+    .detail-actions { display: flex; gap: 6px; }
+    .detail-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e;
+      padding: 4px 10px; border-radius: 5px; font-size: 0.72rem; cursor: pointer;
+      transition: all 0.15s; }
+    .detail-btn:hover { border-color: #f78166; color: #f78166; }
+    .detail-btn.copied { border-color: #3fb950; color: #3fb950; }
     .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
     .detail-card { background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 10px 14px; }
     .detail-card .d-label { font-size: 0.70rem; color: #484f58; text-transform: uppercase;
@@ -119,8 +154,19 @@
 
     .click-hint { font-size: 0.72rem; color: #484f58; margin-bottom: 10px; }
 
+    /* ── No results ── */
+    .no-results { text-align: center; padding: 32px; color: #484f58; font-size: 0.85rem; }
+
     /* ── Hidden ── */
     .hidden { display: none !important; }
+
+    /* ── Toast ── */
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #161b22;
+      border: 1px solid #3fb950; color: #3fb950; padding: 10px 18px; border-radius: 8px;
+      font-size: 0.82rem; font-weight: 600; z-index: 9999;
+      transform: translateY(80px); opacity: 0; transition: all 0.25s ease;
+      pointer-events: none; }
+    .toast.show { transform: translateY(0); opacity: 1; }
 
     /* ── Footer ── */
     footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid #30363d;
@@ -182,15 +228,19 @@
 
   <div class="toolbar">
     <div class="toolbar-title">Benchmark Suites</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <div class="toolbar-right">
       <div class="sort-row">
         <span style="font-size:0.78rem;color:#484f58;align-self:center">Sort:</span>
-        <button class="sort-btn active" data-sort="name"   onclick="setSort('name')">Name</button>
-        <button class="sort-btn"       data-sort="fastest" onclick="setSort('fastest')">Fastest first</button>
-        <button class="sort-btn"       data-sort="slowest" onclick="setSort('slowest')">Slowest first</button>
+        <button class="sort-btn active" data-sort="name"    onclick="setSort('name')">Name</button>
+        <button class="sort-btn"       data-sort="fastest"  onclick="setSort('fastest')">Fastest first</button>
+        <button class="sort-btn"       data-sort="slowest"  onclick="setSort('slowest')">Slowest first</button>
       </div>
-      <input class="search-box" id="search-box" placeholder="🔍 Search benchmarks…"
-             oninput="applySearch()" />
+      <div class="search-wrap">
+        <input class="search-box" id="search-box" placeholder="🔍 Search benchmarks…"
+               oninput="applySearch()" />
+        <button class="search-clear" id="search-clear" onclick="clearSearch()" title="Clear">✕</button>
+      </div>
+      <span class="search-count" id="search-count"></span>
     </div>
   </div>
 
@@ -199,18 +249,51 @@
     <div class="legend-item"><span class="leg-fastest">■</span> Fastest in suite</div>
     <div class="legend-item"><span class="leg-slowest">■</span> Slowest in suite</div>
   </div>
-  <p class="click-hint">💡 Click any benchmark row to expand confidence interval and std dev details</p>
+  <p class="click-hint">💡 Click any row to expand confidence intervals · Use copy buttons to grab timing data</p>
 
   <div id="suites-container"></div>
+  <div class="no-results hidden" id="no-results">No benchmarks match your search.</div>
 
   <footer>DixScript-Rust Benchmarks — MidManStudio — Build #BUILD_NUM_PLACEHOLDER</footer>
 </div>
 
+<div class="toast" id="toast"></div>
+
 <script>
-let ALL_DATA   = null;
+let ALL_DATA    = null;
 let currentSort = 'name';
 
-// ── Time formatting ──────────────────────────────────────────────────────────
+// ── Clipboard ────────────────────────────────────────────────────────────────
+
+async function copyText(text, btn, label) {
+  label = label || 'Copied!';
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
+  }
+  showToast(label);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = '✓ ' + msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ── Time formatting ───────────────────────────────────────────────────────────
 
 function bestUnit(ns) {
   if (ns >= 1e9) return { val: ns / 1e9, unit: 's'  };
@@ -219,19 +302,21 @@ function bestUnit(ns) {
   return           { val: ns,            unit: 'ns' };
 }
 
-function fmtNs(ns, decimals = 3) {
+function fmtNs(ns, decimals) {
+  decimals = decimals == null ? 3 : decimals;
   if (ns == null || ns === 0) return '—';
   const { val, unit } = bestUnit(ns);
   return `<span class="time-main">${val.toFixed(decimals)}</span><span class="time-unit"> ${unit}</span>`;
 }
 
-function fmtNsPlain(ns, decimals = 2) {
+function fmtNsPlain(ns, decimals) {
+  decimals = decimals == null ? 2 : decimals;
   if (ns == null || ns === 0) return '—';
   const { val, unit } = bestUnit(ns);
   return `${val.toFixed(decimals)} ${unit}`;
 }
 
-// ── Build DOM ────────────────────────────────────────────────────────────────
+// ── Build DOM ─────────────────────────────────────────────────────────────────
 
 function renderAll(data) {
   ALL_DATA = data;
@@ -243,15 +328,14 @@ function renderAll(data) {
   document.getElementById('s-total').textContent  = data.summary.total;
   document.getElementById('s-suites').textContent = data.summary.suites;
 
-  // Global fastest / slowest
   const allBenches = data.suites.flatMap(s => s.benchmarks);
   if (allBenches.length) {
-    const sorted   = [...allBenches].sort((a, b) => a.mean_ns - b.mean_ns);
-    const fastest  = sorted[0];
-    const slowest  = sorted[sorted.length - 1];
-    document.getElementById('s-fastest').innerHTML      = fmtNs(fastest.mean_ns, 2);
+    const sorted  = [...allBenches].sort((a, b) => a.mean_ns - b.mean_ns);
+    const fastest = sorted[0];
+    const slowest = sorted[sorted.length - 1];
+    document.getElementById('s-fastest').innerHTML       = fmtNs(fastest.mean_ns, 2);
     document.getElementById('s-fastest-name').textContent = fastest.name;
-    document.getElementById('s-slowest').innerHTML      = fmtNs(slowest.mean_ns, 2);
+    document.getElementById('s-slowest').innerHTML       = fmtNs(slowest.mean_ns, 2);
     document.getElementById('s-slowest-name').textContent = slowest.name;
   }
 
@@ -264,8 +348,6 @@ function renderSuites(suites) {
 
   suites.forEach((suite, si) => {
     let benches = [...suite.benchmarks];
-
-    // Sort within suite
     if      (currentSort === 'fastest') benches.sort((a, b) => a.mean_ns - b.mean_ns);
     else if (currentSort === 'slowest') benches.sort((a, b) => b.mean_ns - a.mean_ns);
     else                                benches.sort((a, b) => a.name.localeCompare(b.name));
@@ -282,6 +364,8 @@ function renderSuites(suites) {
         <span class="suite-chevron">▶</span>
         <span class="suite-name">${suite.name}</span>
         <span class="suite-meta">${benches.length} benchmark${benches.length !== 1 ? 's' : ''}</span>
+        <button class="suite-copy-btn" title="Copy all benchmark results"
+          onclick="event.stopPropagation(); copySuite(${si})">⎘ Copy suite</button>
       </div>
       <div class="suite-body">
         <table>
@@ -290,7 +374,8 @@ function renderSuites(suites) {
               <th>Benchmark</th>
               <th class="right" style="width:130px">Mean</th>
               <th class="right" style="width:170px">Range (±)</th>
-              <th style="width:220px">Relative</th>
+              <th style="width:200px">Relative</th>
+              <th class="th-actions">Actions</th>
             </tr>
           </thead>
           <tbody id="tbody-${si}"></tbody>
@@ -329,6 +414,14 @@ function renderSuites(suites) {
             </div>
             <span class="bar-pct">${pct.toFixed(0)}%</span>
           </div>
+        </td>
+        <td>
+          <div class="row-actions">
+            <button class="action-btn" title="Copy timing"
+              onclick="copyBench(${si},${bi},this)">⎘ Copy</button>
+            <button class="action-btn expand-btn" title="Expand details"
+              onclick="expandBench(${si},${bi})">↕ Details</button>
+          </div>
         </td>`;
 
       const detTr = document.createElement('tr');
@@ -336,8 +429,14 @@ function renderSuites(suites) {
       detTr.dataset.name = bench.name.toLowerCase();
       detTr.dataset.full = bench.full_name.toLowerCase();
       detTr.innerHTML = `
-        <td colspan="4">
+        <td colspan="5">
           <div class="detail-box" id="det-${si}-${bi}">
+            <div class="detail-header">
+              <div class="detail-label">Confidence Intervals — ${bench.name}</div>
+              <div class="detail-actions">
+                <button class="detail-btn" onclick="copyBenchFull(${si},${bi},this)">⎘ Copy full report</button>
+              </div>
+            </div>
             <div class="detail-grid">
               <div class="detail-card">
                 <div class="d-label">Mean</div>
@@ -375,23 +474,60 @@ function renderSuites(suites) {
           </div>
         </td>`;
 
-      mainTr.addEventListener('click', () => {
-        const box = document.getElementById(`det-${si}-${bi}`);
-        if (box) box.classList.toggle('visible');
-      });
-
       tbody.appendChild(mainTr);
       tbody.appendChild(detTr);
     });
 
     container.appendChild(div);
   });
+
+  // Re-apply search after re-render
+  if (document.getElementById('search-box').value.trim()) applySearch();
 }
 
-// ── Controls ─────────────────────────────────────────────────────────────────
+// ── Copy helpers ──────────────────────────────────────────────────────────────
+
+function copyBench(si, bi, btn) {
+  const bench = ALL_DATA.suites[si].benchmarks[bi];
+  const text  = `${bench.name}: ${fmtNsPlain(bench.mean_ns)} (${fmtNsPlain(bench.lower_ns)} … ${fmtNsPlain(bench.upper_ns)})`;
+  copyText(text, btn, 'Timing copied');
+}
+
+function copyBenchFull(si, bi, btn) {
+  const suite = ALL_DATA.suites[si];
+  const bench = suite.benchmarks[bi];
+  const text = [
+    `Benchmark: ${bench.full_name}`,
+    `Suite:     ${suite.name}`,
+    `Mean:      ${fmtNsPlain(bench.mean_ns)}`,
+    `Lower:     ${fmtNsPlain(bench.lower_ns)} (95% CI)`,
+    `Upper:     ${fmtNsPlain(bench.upper_ns)} (95% CI)`,
+    `Spread:    ${fmtNsPlain(bench.upper_ns - bench.lower_ns)}`,
+    `Std Dev:   ${fmtNsPlain(bench.std_ns || 0)}`,
+  ].join('\n');
+  copyText(text, btn, 'Full report copied');
+}
+
+function copySuite(si) {
+  const suite   = ALL_DATA.suites[si];
+  const benches = [...suite.benchmarks].sort((a, b) => a.mean_ns - b.mean_ns);
+  const lines   = benches.map(b =>
+    `${b.name.padEnd(40)} ${fmtNsPlain(b.mean_ns).padStart(12)}  [${fmtNsPlain(b.lower_ns)} … ${fmtNsPlain(b.upper_ns)}]`
+  );
+  const text = `Suite: ${suite.name}\n${'─'.repeat(72)}\n${lines.join('\n')}`;
+  const btn  = document.querySelector(`.suite[data-suite="${si}"] .suite-copy-btn`);
+  copyText(text, btn, 'Suite copied');
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────────
 
 function toggleSuite(header) {
   header.closest('.suite').classList.toggle('open');
+}
+
+function expandBench(si, bi) {
+  const box = document.getElementById(`det-${si}-${bi}`);
+  if (box) box.classList.toggle('visible');
 }
 
 function setSort(s) {
@@ -401,34 +537,49 @@ function setSort(s) {
   if (ALL_DATA) renderSuites(ALL_DATA.suites);
 }
 
+function clearSearch() {
+  document.getElementById('search-box').value = '';
+  document.getElementById('search-clear').classList.remove('visible');
+  applySearch();
+}
+
 function applySearch() {
   const q = document.getElementById('search-box').value.toLowerCase().trim();
+  const clearBtn = document.getElementById('search-clear');
+  clearBtn.classList.toggle('visible', q.length > 0);
+
+  let visible = 0, total = 0;
+
   document.querySelectorAll('.bench-row').forEach(row => {
-    const match = !q
-      || row.dataset.name.includes(q)
-      || (row.dataset.full || '').includes(q);
+    const match = !q || row.dataset.name.includes(q) || (row.dataset.full || '').includes(q);
     row.classList.toggle('hidden', !match);
     const det = row.nextElementSibling;
-    if (det && det.classList.contains('bench-detail')) {
+    if (det && det.classList.contains('bench-detail'))
       det.classList.toggle('hidden', !match);
-    }
+    if (!match === false) visible++;
+    total++;
   });
+
+  // Count visible properly
+  visible = document.querySelectorAll('.bench-row:not(.hidden)').length;
+
+  const countEl = document.getElementById('search-count');
+  countEl.textContent = q ? `${visible} / ${total}` : '';
 
   if (q) {
     document.querySelectorAll('.suite').forEach(suite => {
-      const visible = suite.querySelectorAll('.bench-row:not(.hidden)');
-      if (visible.length > 0) suite.classList.add('open');
+      const vis = suite.querySelectorAll('.bench-row:not(.hidden)');
+      if (vis.length > 0) suite.classList.add('open');
     });
   }
+
+  document.getElementById('no-results').classList.toggle('hidden', visible > 0);
 }
 
 // ── Fetch ─────────────────────────────────────────────────────────────────────
 
 fetch('bench-results.json')
-  .then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  })
+  .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
   .then(data => renderAll(data))
   .catch(err => {
     const banner = document.getElementById('banner');
@@ -439,7 +590,7 @@ fetch('bench-results.json')
         padding:28px;text-align:center;color:#8b949e;">
         <p>No benchmark data available.</p>
         <p style="margin-top:8px;font-size:0.80rem">
-          Commit with <code>--publish-bench</code> or use workflow_dispatch to generate results.
+          Trigger the workflow with <strong>bench</strong> or <strong>all</strong> to generate results.
         </p>
       </div>`;
   });

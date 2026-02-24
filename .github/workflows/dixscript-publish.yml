@@ -93,10 +93,11 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          cargo test 2>&1 | tee test-raw.txt
+          # --color=never prevents ANSI escape codes from corrupting the output file
+          cargo test --color=never 2>&1 | tee test-raw.txt
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT=${TEST_EXIT_CODE}" >> $GITHUB_ENV
-          
+
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             echo "⚠️ Tests failed with exit code ${TEST_EXIT_CODE}"
             echo "Continuing to generate report..."
@@ -116,6 +117,14 @@ jobs:
           python3 - << 'PYEOF'
           import re, json, os, sys
 
+          # ── strip ANSI escape codes ────────────────────────────────────────
+          # Handles bold, color, cursor codes etc. that cargo/GitHub may inject
+          # even when --color=never is set at the cargo level.
+          RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+          def strip_ansi(s):
+              return RE_ANSI.sub('', s)
+
           # ── helpers ────────────────────────────────────────────────────────
           def build_suite(name, tests, dur_s=0.0):
               return {
@@ -127,8 +136,15 @@ jobs:
                   'tests':      tests,
               }
 
-          # ── load output ────────────────────────────────────────────────────
-          text = open('test-raw.txt', encoding='utf-8', errors='replace').read()
+          # ── load & clean output ────────────────────────────────────────────
+          raw  = open('test-raw.txt', encoding='utf-8', errors='replace').read()
+          text = strip_ansi(raw)
+
+          # Debug: print first 20 lines (repr) so future failures are diagnosable
+          print("=== test-raw.txt preview (first 20 lines) ===")
+          for i, l in enumerate(text.splitlines()[:20], 1):
+              print(f"  {i:3}: {repr(l)}")
+          print("==============================================")
 
           # ── collect failure stdout snippets ────────────────────────────────
           fail_out = {}
@@ -138,32 +154,42 @@ jobs:
               fail_out[m.group(1)] = m.group(2).strip()
 
           # ── parse per-suite blocks ─────────────────────────────────────────
-          suites   = []
-          cur_name = None
-          cur_tests= []
-          cur_dur  = 0.0
+          suites    = []
+          cur_name  = None
+          cur_tests = []
+          cur_dur   = 0.0
 
-          # These can be "Running tests/foo.rs" or "Running unittests src/lib.rs"
+          # "Running unittests src/lib.rs (" or "Running tests/foo.rs ("
           RE_RUN    = re.compile(r'Running\s+(?:unittests?\s+)?(\S+)\s+\(')
           RE_TEST   = re.compile(
-              r'^test ([\w:]+(?:::\w+)*)\s+\.\.\.\s+'
+              r'^test\s+([\w:]+(?:::\w+)*)\s+\.\.\.\s+'
               r'(ok|FAILED|ignored)(?:\s+\(([\d.]+)s\))?'
           )
           RE_RESULT = re.compile(r'test result:.*?finished in ([\d.]+)s')
 
           for line in text.splitlines():
+              # ── new suite header ──
               m = RE_RUN.search(line)
               if m:
                   if cur_name is not None and cur_tests:
                       suites.append(build_suite(cur_name, cur_tests, cur_dur))
-                  raw  = m.group(1)
-                  base = os.path.splitext(os.path.basename(raw))[0]
+                  raw_path = m.group(1)
+                  base     = os.path.splitext(os.path.basename(raw_path))[0]
                   cur_name  = (base + ' (unit tests)') if base in ('lib', 'main') else base
-                  cur_tests = []; cur_dur = 0.0
+                  cur_tests = []
+                  cur_dur   = 0.0
                   continue
 
+              # ── individual test result ──
               m = RE_TEST.match(line)
               if m:
+                  # If we see test lines but never got a Running header,
+                  # create a fallback suite so nothing is lost.
+                  if cur_name is None:
+                      cur_name  = 'lib (unit tests)'
+                      cur_tests = []
+                      cur_dur   = 0.0
+
                   tname, status, dur = m.group(1), m.group(2), m.group(3)
                   cur_tests.append({
                       'name':        tname,
@@ -174,12 +200,15 @@ jobs:
                   })
                   continue
 
+              # ── suite summary line ──
               m = RE_RESULT.search(line)
               if m:
                   cur_dur = float(m.group(1))
                   if cur_name is not None and cur_tests:
                       suites.append(build_suite(cur_name, cur_tests, cur_dur))
-                      cur_name = None; cur_tests = []; cur_dur = 0.0
+                      cur_name  = None
+                      cur_tests = []
+                      cur_dur   = 0.0
 
           # flush last suite if result line was missing
           if cur_name and cur_tests:
@@ -213,7 +242,7 @@ jobs:
 
           print(f"Suites:{len(suites)}  Total:{total}  Passed:{passed}  Failed:{failed}")
           if failed > 0:
-              print("FAILED:")
+              print("FAILED tests:")
               for s in suites:
                   for t in s['tests']:
                       if t['status'] == 'failed':
@@ -239,6 +268,7 @@ jobs:
           path: |
             test-results.json
             test-results-index.html
+            test-raw.txt
           retention-days: 30
 
   # ── 3. Run benchmarks ──────────────────────────────────────────────────────
@@ -271,13 +301,11 @@ jobs:
       - name: Run benchmarks
         continue-on-error: true
         run: |
-          # Run each criterion bench target and capture output
-          # Continue even if individual benches fail
           {
             echo "=== throughput_benchmark ==="
-            cargo bench --bench throughput_benchmark 2>&1 || true
+            cargo bench --bench throughput_benchmark --color=never 2>&1 || true
             echo "=== lexer_throughput ==="
-            cargo bench --bench lexer_throughput 2>&1 || true
+            cargo bench --bench lexer_throughput --color=never 2>&1 || true
           } | tee bench-raw.txt
 
       - name: Parse benchmark results to JSON
@@ -290,23 +318,22 @@ jobs:
           python3 - << 'PYEOF'
           import re, json, os, glob, sys
 
-          # ── time converter → always output ns ─────────────────────────────
+          RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+          def strip_ansi(s):
+              return RE_ANSI.sub('', s)
+
           def to_ns(val_str, unit):
               v = float(val_str.replace(',', ''))
               u = unit.strip().rstrip('/')
               return v * {'ns': 1, 'µs': 1e3, 'us': 1e3,
                           'ms': 1e6, 's': 1e9}.get(u, 1)
 
-          text = open('bench-raw.txt', encoding='utf-8', errors='replace').read()
+          raw  = open('bench-raw.txt', encoding='utf-8', errors='replace').read()
+          text = strip_ansi(raw)
 
           benches    = []
           seen_names = set()
-          current_suite = 'benchmarks'
 
-          # Track which suite block we're in from our echo markers
-          RE_SUITE_HEADER = re.compile(r'^=== (\w+) ===$', re.MULTILINE)
-          # Criterion output: "name   time:  [lower unit  mean unit  upper unit]"
-          # The name may have spaces, so we anchor on the large gap before "time:"
           RE_CRIT = re.compile(
               r'^([\w /\-]+?)\s{2,}time:\s+\[\s*'
               r'([\d.,]+)\s*(ns|µs|us|ms|s)\s+'
@@ -315,9 +342,7 @@ jobs:
               re.MULTILINE
           )
 
-          # Split by suite markers first
           sections = re.split(r'^=== (\w+) ===$', text, flags=re.MULTILINE)
-          # sections = [pre, name1, body1, name2, body2, ...]
           pairs = []
           if len(sections) >= 3:
               i = 1
@@ -339,9 +364,8 @@ jobs:
                       continue
                   seen_names.add(key)
 
-                  # Within-suite hierarchy (e.g. "parse/simple" → sub-group "parse")
-                  parts = name.rsplit('/', 1)
-                  group = parts[0] if len(parts) == 2 else suite_name
+                  parts      = name.rsplit('/', 1)
+                  group      = parts[0] if len(parts) == 2 else suite_name
                   bench_name = parts[-1]
 
                   benches.append({
@@ -352,33 +376,28 @@ jobs:
                       'lower_ns':  round(lower, 2),
                       'mean_ns':   round(mean,  2),
                       'upper_ns':  round(upper, 2),
-                      'std_ns':    round((upper - lower) / 4, 2),  # rough estimate
+                      'std_ns':    round((upper - lower) / 4, 2),
                   })
 
-          # Fallback: criterion JSON files (present when --save-baseline or just run)
           if not benches:
               for est in sorted(glob.glob('target/criterion/**/**/estimates.json',
                                           recursive=True)):
                   try:
                       data = json.load(open(est, encoding='utf-8'))
                       parts = est.replace('target/criterion/', '').split('/')
-                      # target/criterion/<suite>/<bench>/new/estimates.json
                       if len(parts) < 3:
                           continue
                       suite_name = parts[0]
                       bench_name = parts[1]
                       if bench_name in ('new', 'base', 'baseline'):
                           continue
-
                       mn  = data.get('mean', {})
                       ci  = mn.get('confidence_interval', {})
                       sd  = data.get('std_dev', {}).get('point_estimate', 0)
-
                       key = f"{suite_name}/{bench_name}"
                       if key in seen_names:
                           continue
                       seen_names.add(key)
-
                       benches.append({
                           'suite':     suite_name,
                           'group':     suite_name,
@@ -392,7 +411,6 @@ jobs:
                   except Exception as e:
                       print(f"Warn parsing {est}: {e}", file=sys.stderr)
 
-          # ── group into suites ─────────────────────────────────────────────
           suite_map = {}
           for b in benches:
               suite_map.setdefault(b['suite'], []).append(b)
@@ -404,11 +422,8 @@ jobs:
               'branch':  os.environ.get('BRANCH',    'unknown'),
               'commit':  os.environ.get('COMMIT',    'unknown')[:8],
               'date':    os.environ.get('BUILD_DATE', ''),
-              'summary': {
-                  'total':  len(benches),
-                  'suites': len(suites),
-              },
-              'suites': suites,
+              'summary': {'total': len(benches), 'suites': len(suites)},
+              'suites':  suites,
           }
 
           with open('bench-results.json', 'w') as f:
@@ -480,12 +495,10 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p flame-output
-
-          # Build in release with debug symbols (needed for flamegraph)
           export CARGO_PROFILE_RELEASE_DEBUG=true
 
           run_flame() {
-            local kind=$1   # --bench or --test
+            local kind=$1
             local target=$2
             local outfile=$3
             echo "--- flamegraph: $target ---"
@@ -654,10 +667,8 @@ jobs:
           # ── tests ──────────────────────────────────────────────────────────
           if [ -d "deploy/tests" ]; then
             mkdir -p "$WORK/tests" "$WORK/tests/builds/build_${BUILD_NUM}"
-            # Rename the index to the standard name the HTML expects
             cp deploy/tests/test-results.json       "$WORK/tests/test-results.json"
             cp deploy/tests/test-results-index.html "$WORK/tests/index.html"
-            # Versioned snapshot
             cp deploy/tests/test-results.json       "$WORK/tests/builds/build_${BUILD_NUM}/test-results.json"
             cp deploy/tests/test-results-index.html "$WORK/tests/builds/build_${BUILD_NUM}/index.html"
             echo "✓ Test results deployed"

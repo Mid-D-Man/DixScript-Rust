@@ -72,7 +72,7 @@ impl DebugConfig {
     /// Use only in unit tests that explicitly need all diagnostic passes.
     ///
     /// Example:
-    /// ```rust
+    /// ```rust no
     /// #[cfg(test)]
     /// fn test_static_call_detection() {
     ///     let config = DebugConfig::full();

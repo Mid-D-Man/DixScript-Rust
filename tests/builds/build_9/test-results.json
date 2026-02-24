@@ -1,0 +1,15 @@
+{
+  "build": "9",
+  "branch": "master",
+  "commit": "7a4f21ef",
+  "date": "2026-02-24T17:41:39+01:00",
+  "rust_version": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+  "summary": {
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "ignored": 0,
+    "duration_s": 0
+  },
+  "suites": []
+}

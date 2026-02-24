@@ -1,0 +1,1398 @@
+[1m[33mwarning[0m: file `/Users/runner/work/DixScript-Rust/DixScript-Rust/benches/simple_bench.rs` found to be present in multiple build targets:
+  * `bin` target `simple_bench`
+  * `bench` target `simple_bench`
+[1m[92m   Compiling[0m serde_core v1.0.228
+[1m[92m   Compiling[0m serde v1.0.228
+[1m[92m   Compiling[0m syn v1.0.109
+[1m[92m   Compiling[0m unicode-xid v0.2.6
+[1m[92m   Compiling[0m synstructure v0.12.6
+[1m[92m   Compiling[0m zerocopy v0.8.39
+[1m[92m   Compiling[0m zerocopy-derive v0.8.39
+[1m[92m   Compiling[0m jrsonnet-gc-derive v0.4.1
+[1m[92m   Compiling[0m num-traits v0.2.19
+[1m[92m   Compiling[0m peg-runtime v0.7.0
+[1m[92m   Compiling[0m peg-macros v0.7.0
+[1m[92m   Compiling[0m serde_json v1.0.149
+[1m[92m   Compiling[0m jrsonnet-gc v0.4.2
+[1m[92m   Compiling[0m semver v1.0.27
+[1m[92m   Compiling[0m rustc-hash v1.1.0
+[1m[92m   Compiling[0m jrsonnet-interner v0.4.2
+[1m[92m   Compiling[0m rustc_version v0.4.1
+[1m[92m   Compiling[0m ppv-lite86 v0.2.21
+[1m[92m   Compiling[0m peg v0.7.0
+[1m[92m   Compiling[0m unescape v0.1.0
+[1m[92m   Compiling[0m thiserror v2.0.18
+[1m[92m   Compiling[0m serde_urlencoded v0.7.1
+[1m[92m   Compiling[0m jrsonnet-parser v0.4.2
+[1m[92m   Compiling[0m rand_chacha v0.3.1
+[1m[92m   Compiling[0m heapless v0.7.17
+[1m[92m   Compiling[0m half v2.7.1
+[1m[92m   Compiling[0m bincode v1.3.3
+[1m[92m   Compiling[0m thiserror-impl v2.0.18
+[1m[92m   Compiling[0m anstyle v1.0.13
+[1m[92m   Compiling[0m jrsonnet-stdlib v0.4.2
+[1m[92m   Compiling[0m byteorder v1.5.0
+[1m[92m   Compiling[0m clap_lex v1.0.0
+[1m[92m   Compiling[0m thiserror v1.0.69
+[1m[92m   Compiling[0m plotters-backend v0.3.7
+[1m[92m   Compiling[0m ciborium-io v0.2.2
+[1m[92m   Compiling[0m ciborium-ll v0.2.2
+[1m[92m   Compiling[0m plotters-svg v0.3.7
+[1m[92m   Compiling[0m reqwest v0.11.27
+[1m[92m   Compiling[0m clap_builder v4.5.60
+[1m[92m   Compiling[0m hash32 v0.2.1
+[1m[92m   Compiling[0m jrsonnet-evaluator v0.4.2
+[1m[92m   Compiling[0m chrono v0.4.44
+[1m[92m   Compiling[0m rand v0.8.5
+[1m[92m   Compiling[0m itertools v0.10.5
+[1m[92m   Compiling[0m uuid v1.21.0
+[1m[92m   Compiling[0m thiserror-impl v1.0.69
+[1m[92m   Compiling[0m yansi-term v0.1.2
+[1m[92m   Compiling[0m same-file v1.0.6
+[1m[92m   Compiling[0m unicode-width v0.1.14
+[1m[92m   Compiling[0m cast v0.3.0
+[1m[92m   Compiling[0m criterion-plot v0.5.0
+[1m[92m   Compiling[0m annotate-snippets v0.9.2
+[1m[92m   Compiling[0m walkdir v2.5.0
+[1m[92m   Compiling[0m clap v4.5.60
+[1m[92m   Compiling[0m cobs v0.3.0
+[1m[92m   Compiling[0m plotters v0.3.7
+[1m[92m   Compiling[0m ciborium v0.2.2
+[1m[92m   Compiling[0m jrsonnet-types v0.4.2
+[1m[92m   Compiling[0m tinytemplate v1.2.1
+[1m[92m   Compiling[0m rmp v0.8.15
+[1m[92m   Compiling[0m is-terminal v0.4.17
+[1m[92m   Compiling[0m md5 v0.7.0
+[1m[92m   Compiling[0m pathdiff v0.2.3
+[1m[92m   Compiling[0m oorandom v11.1.5
+[1m[92m   Compiling[0m anes v0.1.6
+[1m[92m   Compiling[0m base64 v0.13.1
+[1m[92m   Compiling[0m criterion v0.5.1
+[1m[92m   Compiling[0m rmp-serde v1.3.1
+[1m[92m   Compiling[0m postcard v1.1.3
+[1m[92m   Compiling[0m dixscript v1.0.0 (/Users/runner/work/DixScript-Rust/DixScript-Rust)
+[1m[33mwarning[0m[1m: type `MID_Logger` should have an upper camel case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_logger.rs:17:12
+   [1m[94m|[0m
+[1m[94m17[0m [1m[94m|[0m pub struct MID_Logger {
+   [1m[94m|[0m            [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to upper camel case: `MidLogger`[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `debug_logging`[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:293:15
+    [1m[94m|[0m
+[1m[94m293[0m [1m[94m|[0m         #[cfg(feature = "debug_logging")]
+    [1m[94m|[0m               [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `cue_cli_available` and `default`
+    [1m[94m= [0m[1mhelp[0m: consider adding `debug_logging` as a feature in `Cargo.toml`
+    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    [1m[94m= [0m[1mnote[0m: `#[warn(unexpected_cfgs)]` on by default
+
+[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `debug_logging`[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:297:19
+    [1m[94m|[0m
+[1m[94m297[0m [1m[94m|[0m         #[cfg(not(feature = "debug_logging"))]
+    [1m[94m|[0m                   [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `cue_cli_available` and `default`
+    [1m[94m= [0m[1mhelp[0m: consider adding `debug_logging` as a feature in `Cargo.toml`
+    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `verbose_logging`[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:305:15
+    [1m[94m|[0m
+[1m[94m305[0m [1m[94m|[0m         #[cfg(feature = "verbose_logging")]
+    [1m[94m|[0m               [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `cue_cli_available` and `default`
+    [1m[94m= [0m[1mhelp[0m: consider adding `verbose_logging` as a feature in `Cargo.toml`
+    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `verbose_logging`[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:309:19
+    [1m[94m|[0m
+[1m[94m309[0m [1m[94m|[0m         #[cfg(not(feature = "verbose_logging"))]
+    [1m[94m|[0m                   [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `cue_cli_available` and `default`
+    [1m[94m= [0m[1mhelp[0m: consider adding `verbose_logging` as a feature in `Cargo.toml`
+    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+[1m[33mwarning[0m[1m: unused import: `std::collections::HashSet`[0m
+ [1m[94m--> [0msrc/Utilities/mid_helper_functions.rs:2:5
+  [1m[94m|[0m
+[1m[94m2[0m [1m[94m|[0m use std::collections::HashSet;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [1m[94m|[0m
+  [1m[94m= [0m[1mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: unused import: `std::fmt::Write`[0m
+ [1m[94m--> [0msrc/Utilities/mid_helper_functions.rs:3:5
+  [1m[94m|[0m
+[1m[94m3[0m [1m[94m|[0m use std::fmt::Write;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: type `MID_HelperFunctions` should have an upper camel case name[0m
+ [1m[94m--> [0msrc/Utilities/mid_helper_functions.rs:7:12
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m pub struct MID_HelperFunctions;
+  [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to upper camel case: `MidHelperFunctions`[0m
+
+[1m[33mwarning[0m[1m: unused import: `std::fmt::Write`[0m
+ [1m[94m--> [0msrc/Utilities/ast_debug_printer.rs:4:5
+  [1m[94m|[0m
+[1m[94m4[0m [1m[94m|[0m use std::fmt::Write;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `std::fmt::Write`[0m
+ [1m[94m--> [0msrc/Utilities/token_debug_printer.rs:2:5
+  [1m[94m|[0m
+[1m[94m2[0m [1m[94m|[0m use std::fmt::Write;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `crate::ErrorManager::Helpers::*`[0m
+ [1m[94m--> [0msrc/ErrorManager/error_manager.rs:4:5
+  [1m[94m|[0m
+[1m[94m4[0m [1m[94m|[0m use crate::ErrorManager::Helpers::*;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `std::path::Path`[0m
+ [1m[94m--> [0msrc/ErrorManager/diagnostic_dumper.rs:4:5
+  [1m[94m|[0m
+[1m[94m4[0m [1m[94m|[0m use std::path::Path;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `BuiltinMethodException`[0m
+ [1m[94m--> [0msrc/Builtins/Instance/string_methods.rs:7:5
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m     BuiltinMethodException, validation_helpers,
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `validation_helpers`[0m
+ [1m[94m--> [0msrc/Builtins/Instance/regex_methods.rs:6:55
+  [1m[94m|[0m
+[1m[94m6[0m [1m[94m|[0m     DixType, DixValue, IBuiltinMethod, BuiltinMethod, validation_helpers,
+  [1m[94m|[0m                                                       [1m[33m^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `super::position::Position`[0m
+ [1m[94m--> [0msrc/Compiler/AST/root.rs:1:5
+  [1m[94m|[0m
+[1m[94m1[0m [1m[94m|[0m use super::position::Position;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `Position`[0m
+ [1m[94m--> [0msrc/Compiler/Core/mod.rs:7:28
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m use crate::Compiler::AST::{Position, DataType, DixScript};
+  [1m[94m|[0m                            [1m[33m^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `std::collections::HashMap`[0m
+  [1m[94m--> [0msrc/Compiler/Core/Tokenizer/lexer.rs:12:5
+   [1m[94m|[0m
+[1m[94m12[0m [1m[94m|[0m use std::collections::HashMap;
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unnecessary parentheses around assigned value[0m
+   [1m[94m--> [0msrc/Compiler/Core/Tokenizer/lexer.rs:747:37
+    [1m[94m|[0m
+[1m[94m747[0m [1m[94m|[0m                     state.column += (found_pos + 1 - search_start);
+    [1m[94m|[0m                                     [1m[33m^[0m                            [1m[33m^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(unused_parens)]` (part of `#[warn(unused)]`) on by default
+[1m[96mhelp[0m: remove these parentheses
+    [1m[94m|[0m
+[1m[94m747[0m [91m- [0m                    state.column += [91m([0mfound_pos + 1 - search_start[91m)[0m;
+[1m[94m747[0m [92m+ [0m                    state.column += found_pos + 1 - search_start;
+    [1m[94m|[0m
+
+[1m[33mwarning[0m[1m: unused import: `crate::Utilities::estimate_properties_count`[0m
+ [1m[94m--> [0msrc/Compiler/Core/SectionParsers/imports_section_parser.rs:7:5
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m use crate::Utilities::estimate_properties_count;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `IdentifierPattern`[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionParsers/data_section_parser.rs:10:32
+   [1m[94m|[0m
+[1m[94m10[0m [1m[94m|[0m     IdentifierPatternAnalyzer, IdentifierPattern, IdentifierPatternType
+   [1m[94m|[0m                                [1m[33m^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `FxHashMap`[0m
+ [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/dlm_section_analyzer.rs:8:18
+  [1m[94m|[0m
+[1m[94m8[0m [1m[94m|[0m use rustc_hash::{FxHashMap, FxHashSet};
+  [1m[94m|[0m                  [1m[33m^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `SemanticErrorType`[0m
+ [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs:6:41
+  [1m[94m|[0m
+[1m[94m6[0m [1m[94m|[0m use crate::ErrorManager::{ErrorManager, SemanticErrorType};
+  [1m[94m|[0m                                         [1m[33m^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `SemanticErrorInfo`[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs:10:36
+   [1m[94m|[0m
+[1m[94m10[0m [1m[94m|[0m use super::{SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo};
+   [1m[94m|[0m                                    [1m[33m^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `Position`[0m
+ [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/binary_format.rs:4:38
+  [1m[94m|[0m
+[1m[94m4[0m [1m[94m|[0m use crate::Compiler::AST::{DataType, Position};
+  [1m[94m|[0m                                      [1m[33m^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `DataType`[0m
+ [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/value_encoder.rs:4:35
+  [1m[94m|[0m
+[1m[94m4[0m [1m[94m|[0m use crate::Compiler::AST::{Value, DataType};
+  [1m[94m|[0m                                   [1m[33m^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `MAX_STRING_LENGTH`[0m
+ [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/value_encoder.rs:6:56
+  [1m[94m|[0m
+[1m[94m6[0m [1m[94m|[0m use super::binary_format::{ValueTypeTag, BlobEncoding, MAX_STRING_LENGTH};
+  [1m[94m|[0m                                                        [1m[33m^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `crate::Compiler::AST::Position`[0m
+ [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/binary_serialization_context.rs:5:5
+  [1m[94m|[0m
+[1m[94m5[0m [1m[94m|[0m use crate::Compiler::AST::Position;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `crate::ErrorManager::ErrorTypes::BinarySerializationErrorType`[0m
+ [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/checksum_validator.rs:4:5
+  [1m[94m|[0m
+[1m[94m4[0m [1m[94m|[0m use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused imports: `ConfigEntry` and `ConfigValue`[0m
+ [1m[94m--> [0msrc/Compiler/Core/Config/config_section_handler.rs:9:43
+  [1m[94m|[0m
+[1m[94m9[0m [1m[94m|[0m use crate::Compiler::AST::{ConfigSection, ConfigEntry, ConfigValue};
+  [1m[94m|[0m                                           [1m[33m^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `VersionManager`[0m
+  [1m[94m--> [0msrc/Compiler/Core/general_parser.rs:16:39
+   [1m[94m|[0m
+[1m[94m16[0m [1m[94m|[0m use crate::Compiler::VersionControl::{VersionManager, VersionConstraints};
+   [1m[94m|[0m                                       [1m[33m^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `std::sync::Arc`[0m
+  [1m[94m--> [0msrc/Compiler/Core/general_parser.rs:19:5
+   [1m[94m|[0m
+[1m[94m19[0m [1m[94m|[0m use std::sync::Arc;
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `SemanticWarningInfo`[0m
+  [1m[94m--> [0msrc/Compiler/Core/general_semantics_analyzer.rs:10:5
+   [1m[94m|[0m
+[1m[94m10[0m [1m[94m|[0m     SemanticWarningInfo,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `ValidationResult`[0m
+  [1m[94m--> [0msrc/Compiler/Core/general_semantics_analyzer.rs:14:59
+   [1m[94m|[0m
+[1m[94m14[0m [1m[94m|[0m use crate::Compiler::VersionControl::{VersionConstraints, ValidationResult};
+   [1m[94m|[0m                                                           [1m[33m^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `SemanticErrorType`[0m
+  [1m[94m--> [0msrc/Compiler/Core/general_semantics_analyzer.rs:16:41
+   [1m[94m|[0m
+[1m[94m16[0m [1m[94m|[0m use crate::ErrorManager::{ErrorManager, SemanticErrorType};
+   [1m[94m|[0m                                         [1m[33m^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `Duration`[0m
+  [1m[94m--> [0msrc/Compiler/Core/general_semantics_analyzer.rs:19:17
+   [1m[94m|[0m
+[1m[94m19[0m [1m[94m|[0m use std::time::{Duration, Instant};
+   [1m[94m|[0m                 [1m[33m^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `Position`[0m
+ [1m[94m--> [0msrc/Compiler/DLM/Auditor/auditor_trait.rs:3:39
+  [1m[94m|[0m
+[1m[94m3[0m [1m[94m|[0m use crate::Compiler::AST::{DixScript, Position};
+  [1m[94m|[0m                                       [1m[33m^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused imports: `DlmErrorType` and `ErrorSeverity`[0m
+ [1m[94m--> [0msrc/Compiler/DLM/Auditor/diy_auditor.rs:9:27
+  [1m[94m|[0m
+[1m[94m9[0m [1m[94m|[0m use crate::ErrorManager::{DlmErrorType, ErrorSeverity};
+  [1m[94m|[0m                           [1m[33m^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `File`[0m
+  [1m[94m--> [0msrc/Compiler/DLM/Auditor/diy_auditor.rs:11:15
+   [1m[94m|[0m
+[1m[94m11[0m [1m[94m|[0m use std::fs::{File, OpenOptions};
+   [1m[94m|[0m               [1m[33m^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `PathBuf`[0m
+  [1m[94m--> [0msrc/Compiler/DLM/Auditor/diy_auditor.rs:13:23
+   [1m[94m|[0m
+[1m[94m13[0m [1m[94m|[0m use std::path::{Path, PathBuf};
+   [1m[94m|[0m                       [1m[33m^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused imports: `ConfigSection`, `DLMSection`, `DataSection`, `EnumsSection`, `ImportsSection`, and `SecuritySection`[0m
+ [1m[94m--> [0msrc/Compiler/DLM/Auditor/enhanced_auditor.rs:9:39
+  [1m[94m|[0m
+[1m[94m9[0m [1m[94m|[0m use crate::Compiler::AST::{DixScript, ConfigSection, ImportsSection, DLMSection, EnumsSection, DataSection, SecuritySection};
+  [1m[94m|[0m                                       [1m[33m^^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused imports: `DlmErrorType` and `ErrorSeverity`[0m
+  [1m[94m--> [0msrc/Compiler/DLM/Auditor/enhanced_auditor.rs:11:27
+   [1m[94m|[0m
+[1m[94m11[0m [1m[94m|[0m use crate::ErrorManager::{DlmErrorType, ErrorSeverity};
+   [1m[94m|[0m                           [1m[33m^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `File`[0m
+  [1m[94m--> [0msrc/Compiler/DLM/Auditor/enhanced_auditor.rs:13:15
+   [1m[94m|[0m
+[1m[94m13[0m [1m[94m|[0m use std::fs::{File, OpenOptions};
+   [1m[94m|[0m               [1m[33m^^^^[0m
+
+[1m[33mwarning[0m[1m: unused imports: `PasswordHasher`, `SaltString`, and `rand_core::OsRng`[0m
+ [1m[94m--> [0msrc/Compiler/DLM/KeyManagement/argon2_kdf.rs:9:21
+  [1m[94m|[0m
+[1m[94m9[0m [1m[94m|[0m     password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
+  [1m[94m|[0m                     [1m[33m^^^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `std::collections::HashMap`[0m
+ [1m[94m--> [0msrc/Compiler/DLM/KeyManagement/key_file_data.rs:3:5
+  [1m[94m|[0m
+[1m[94m3[0m [1m[94m|[0m use std::collections::HashMap;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `std::collections::HashMap`[0m
+ [1m[94m--> [0msrc/Compiler/DLM/dlm_module_base.rs:5:5
+  [1m[94m|[0m
+[1m[94m5[0m [1m[94m|[0m use std::collections::HashMap;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `ObjectProperty`[0m
+ [1m[94m--> [0msrc/Compiler/Extensions/type_system_manager.rs:7:65
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m     DataType, QuickFunction, QuickFuncParam, Expression, Value, ObjectProperty, Position
+  [1m[94m|[0m                                                                 [1m[33m^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `GeneralErrorType`[0m
+  [1m[94m--> [0msrc/Compiler/Utilities/security_utilities.rs:12:41
+   [1m[94m|[0m
+[1m[94m12[0m [1m[94m|[0m use crate::ErrorManager::{ErrorManager, GeneralErrorType};
+   [1m[94m|[0m                                         [1m[33m^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `Position`[0m
+  [1m[94m--> [0msrc/Compiler/Utilities/symbol_table.rs:12:38
+   [1m[94m|[0m
+[1m[94m12[0m [1m[94m|[0m use crate::Compiler::AST::{DataType, Position, QuickFunction};
+   [1m[94m|[0m                                      [1m[33m^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `super::compatibility_result::CompatibilityResult`[0m
+ [1m[94m--> [0msrc/Compiler/VersionControl/forward_compatibility_manager.rs:6:5
+  [1m[94m|[0m
+[1m[94m6[0m [1m[94m|[0m use super::compatibility_result::CompatibilityResult;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `CompatibilityResult`[0m
+ [1m[94m--> [0msrc/Compiler/VersionControl/version_constraints.rs:7:84
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m use crate::Compiler::VersionControl::{VersionManager, ForwardCompatibilityManager, CompatibilityResult};
+  [1m[94m|[0m                                                                                    [1m[33m^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `Path`[0m
+ [1m[94m--> [0msrc/Compiler/ImportsResolution/cloud_file_cache.rs:4:17
+  [1m[94m|[0m
+[1m[94m4[0m [1m[94m|[0m use std::path::{Path, PathBuf};
+  [1m[94m|[0m                 [1m[33m^^^^[0m
+
+[1m[33mwarning[0m[1m: unused imports: `EnumDeclaration`, `EnumField`, and `EnumsSection`[0m
+ [1m[94m--> [0msrc/Runtime/converter.rs:7:32
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m     TablePath, ObjectProperty, EnumDeclaration, EnumField,
+  [1m[94m|[0m                                [1m[33m^^^^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^[0m
+[1m[94m8[0m [1m[94m|[0m     EnumsSection, Position,
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `std::collections::HashMap`[0m
+  [1m[94m--> [0msrc/Runtime/key_resolver.rs:14:5
+   [1m[94m|[0m
+[1m[94m14[0m [1m[94m|[0m use std::collections::HashMap;
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused import: `std::collections::HashMap`[0m
+ [1m[94m--> [0msrc/Runtime/data_builder.rs:3:5
+  [1m[94m|[0m
+[1m[94m3[0m [1m[94m|[0m use std::collections::HashMap;
+  [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: use of deprecated function `base64::decode`: Use Engine::decode[0m
+   [1m[94m--> [0msrc/Builtins/Core/dix_value.rs:128:17
+    [1m[94m|[0m
+[1m[94m128[0m [1m[94m|[0m         base64::decode(&base64_data)
+    [1m[94m|[0m                 [1m[33m^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(deprecated)]` on by default
+
+[1m[33mwarning[0m[1m: use of deprecated function `base64::decode`: Use Engine::decode[0m
+   [1m[94m--> [0msrc/Builtins/Core/dix_value.rs:452:25
+    [1m[94m|[0m
+[1m[94m452[0m [1m[94m|[0m                 base64::decode(b)
+    [1m[94m|[0m                         [1m[33m^^^^^^[0m
+
+[1m[33mwarning[0m[1m: use of deprecated function `base64::encode`: Use Engine::encode[0m
+   [1m[94m--> [0msrc/Builtins/Instance/blob_methods.rs:136:38
+    [1m[94m|[0m
+[1m[94m136[0m [1m[94m|[0m                 let base64 = base64::encode(sliced);
+    [1m[94m|[0m                                      [1m[33m^^^^^^[0m
+
+[1m[33mwarning[0m[1m: use of deprecated method `chrono::NaiveDateTime::timestamp`: use `.and_utc().timestamp()` instead[0m
+   [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/value_encoder.rs:297:14
+    [1m[94m|[0m
+[1m[94m297[0m [1m[94m|[0m             .timestamp() * 10_000_000; // Convert to .NET ticks
+    [1m[94m|[0m              [1m[33m^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: use of deprecated associated function `chrono::NaiveDateTime::from_timestamp_opt`: use `DateTime::from_timestamp` instead[0m
+   [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/value_decoder.rs:299:36
+    [1m[94m|[0m
+[1m[94m299[0m [1m[94m|[0m         let naive = NaiveDateTime::from_timestamp_opt(seconds, 0)
+    [1m[94m|[0m                                    [1m[33m^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: use of deprecated associated function `chrono::NaiveDateTime::from_timestamp_opt`: use `DateTime::from_timestamp` instead[0m
+   [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/value_decoder.rs:325:36
+    [1m[94m|[0m
+[1m[94m325[0m [1m[94m|[0m         let naive = NaiveDateTime::from_timestamp_opt(seconds, 0)
+    [1m[94m|[0m                                    [1m[33m^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: unused variable: `src`[0m
+  [1m[94m--> [0msrc/ErrorManager/ErrorTypes/lexical_error.rs:41:43
+   [1m[94m|[0m
+[1m[94m41[0m [1m[94m|[0m         let error_indicator = if let Some(ref src) = source_line {
+   [1m[94m|[0m                                           [1m[33m^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_src`[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: unused variable: `src`[0m
+  [1m[94m--> [0msrc/ErrorManager/ErrorTypes/parse_error.rs:54:43
+   [1m[94m|[0m
+[1m[94m54[0m [1m[94m|[0m         let error_indicator = if let Some(ref src) = source_line {
+   [1m[94m|[0m                                           [1m[33m^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_src`[0m
+
+[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
+   [1m[94m--> [0msrc/Builtins/Instance/tuple_methods.rs:343:9
+    [1m[94m|[0m
+[1m[94m343[0m [1m[94m|[0m     let mut reversed: Vec<DixValue> = elements.iter().rev().cloned().collect();
+    [1m[94m|[0m         [1m[94m----[0m[1m[33m^^^^^^^^[0m
+    [1m[94m|[0m         [1m[94m|[0m
+    [1m[94m|[0m         [1m[94mhelp: remove this `mut`[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
+   [1m[94m--> [0msrc/Builtins/Static/array_object.rs:189:21
+    [1m[94m|[0m
+[1m[94m189[0m [1m[94m|[0m                 let mut reversed: Vec<DixValue> = array.iter().rev().cloned().collect();
+    [1m[94m|[0m                     [1m[94m----[0m[1m[33m^^^^^^^^[0m
+    [1m[94m|[0m                     [1m[94m|[0m
+    [1m[94m|[0m                     [1m[94mhelp: remove this `mut`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `value`[0m
+   [1m[94m--> [0msrc/Compiler/AST/Visitors/ast_visitor_base.rs:188:55
+    [1m[94m|[0m
+[1m[94m188[0m [1m[94m|[0m             QuickFuncStatement::VariableDeclaration { value, .. } => {
+    [1m[94m|[0m                                                       [1m[33m^^^^^[0m [1m[33mhelp: try ignoring the field: `value: _`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `object_name`[0m
+   [1m[94m--> [0msrc/Compiler/AST/Visitors/type_inference_visitor.rs:274:52
+    [1m[94m|[0m
+[1m[94m274[0m [1m[94m|[0m     fn infer_static_method_call_return_type(&self, object_name: &str, method_name: &str) -> Option<DataType> {
+    [1m[94m|[0m                                                    [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_object_name`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `method_name`[0m
+   [1m[94m--> [0msrc/Compiler/AST/Visitors/type_inference_visitor.rs:274:71
+    [1m[94m|[0m
+[1m[94m274[0m [1m[94m|[0m     fn infer_static_method_call_return_type(&self, object_name: &str, method_name: &str) -> Option<DataType> {
+    [1m[94m|[0m                                                                       [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_method_name`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `method_name`[0m
+   [1m[94m--> [0msrc/Compiler/AST/Visitors/type_inference_visitor.rs:291:70
+    [1m[94m|[0m
+[1m[94m291[0m [1m[94m|[0m     fn infer_instance_method_call_type(&self, instance: &Expression, method_name: &str) -> Option<DataType> {
+    [1m[94m|[0m                                                                      [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_method_name`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `instance_type`[0m
+   [1m[94m--> [0msrc/Compiler/AST/Visitors/type_inference_visitor.rs:292:13
+    [1m[94m|[0m
+[1m[94m292[0m [1m[94m|[0m         let instance_type = self.infer_type_from_expression(instance)?;
+    [1m[94m|[0m             [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_instance_type`[0m
+
+[1m[33mwarning[0m[1m: value assigned to `path` is never read[0m
+    [1m[94m--> [0msrc/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs:2696:24
+     [1m[94m|[0m
+[1m[94m2696[0m [1m[94m|[0m         let mut path = String::new();
+     [1m[94m|[0m                        [1m[33m^^^^^^^^^^^^^[0m
+     [1m[94m|[0m
+     [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
+     [1m[94m= [0m[1mnote[0m: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: unused variable: `result`[0m
+   [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/enums_section_analyzer.rs:359:9
+    [1m[94m|[0m
+[1m[94m359[0m [1m[94m|[0m         result: &mut SectionAnalysisResult,
+    [1m[94m|[0m         [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_result`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `function_name`[0m
+    [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/quickfuncs_section_analyzer.rs:2539:9
+     [1m[94m|[0m
+[1m[94m2539[0m [1m[94m|[0m         function_name: &str,
+     [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_function_name`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `location`[0m
+    [1m[94m--> [0msrc/Compiler/Core/ValueResolution/value_resolver.rs:1227:9
+     [1m[94m|[0m
+[1m[94m1227[0m [1m[94m|[0m         location: &str,
+     [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_location`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `context`[0m
+    [1m[94m--> [0msrc/Compiler/Core/ValueResolution/function_interpreter.rs:1543:9
+     [1m[94m|[0m
+[1m[94m1543[0m [1m[94m|[0m         context: &mut ExecutionContext,
+     [1m[94m|[0m         [1m[33m^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_context`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `name`[0m
+   [1m[94m--> [0msrc/Compiler/Core/general_parser.rs:358:40
+    [1m[94m|[0m
+[1m[94m358[0m [1m[94m|[0m     fn assign_section_to_script(&self, name: String, parsed: ParsedSection, script: &mut DixScript) {
+    [1m[94m|[0m                                        [1m[33m^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_name`[0m
+
+[1m[33mwarning[0m[1m: unused variable: `data_type`[0m
+   [1m[94m--> [0msrc/Compiler/Extensions/type_system_manager.rs:268:27
+    [1m[94m|[0m
+[1m[94m268[0m [1m[94m|[0m     fn is_valid_data_type(data_type: DataType) -> bool {
+    [1m[94m|[0m                           [1m[33m^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_data_type`[0m
+
+[1m[33mwarning[0m[1m: type `ValueData` is more private than the item `Builtins::Core::dix_value::DixValue::new`[0m
+  [1m[94m--> [0msrc/Builtins/Core/dix_value.rs:41:5
+   [1m[94m|[0m
+[1m[94m41[0m [1m[94m|[0m     pub fn new(value: ValueData, dix_type: DixType) -> Self {
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[33massociated function `Builtins::Core::dix_value::DixValue::new` is reachable at visibility `pub`[0m
+   [1m[94m|[0m
+[1m[92mnote[0m: but type `ValueData` is only usable at visibility `pub(crate)`
+  [1m[94m--> [0msrc/Builtins/Core/dix_value.rs:21:1
+   [1m[94m|[0m
+[1m[94m21[0m [1m[94m|[0m pub(crate) enum ValueData {
+   [1m[94m|[0m [1m[92m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+   [1m[94m= [0m[1mnote[0m: `#[warn(private_interfaces)]` on by default
+
+[1m[33mwarning[0m[1m: associated items `MAX_DEPTH`, `MAX_COLLECTION_ITEMS`, `get_indentation`, and `get_arrow_indentation` are never used[0m
+  [1m[94m--> [0msrc/Utilities/mid_helper_functions.rs:14:11
+   [1m[94m|[0m
+ [1m[94m9[0m [1m[94m|[0m impl MID_HelperFunctions {
+   [1m[94m|[0m [1m[94m------------------------[0m [1m[94massociated items in this implementation[0m
+[1m[94m...[0m
+[1m[94m14[0m [1m[94m|[0m     const MAX_DEPTH: usize = 10;
+   [1m[94m|[0m           [1m[33m^^^^^^^^^[0m
+[1m[94m15[0m [1m[94m|[0m     const MAX_COLLECTION_ITEMS: usize = 100;
+   [1m[94m|[0m           [1m[33m^^^^^^^^^^^^^^^^^^^^[0m
+[1m[94m...[0m
+[1m[94m83[0m [1m[94m|[0m     fn get_indentation(depth: usize) -> String {
+   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^[0m
+[1m[94m...[0m
+[1m[94m88[0m [1m[94m|[0m     fn get_arrow_indentation(depth: usize) -> &'static str {
+   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: field `show_types` is never read[0m
+  [1m[94m--> [0msrc/Utilities/ast_debug_printer.rs:12:5
+   [1m[94m|[0m
+ [1m[94m8[0m [1m[94m|[0m pub struct AstDebugPrinter {
+   [1m[94m|[0m            [1m[94m---------------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m12[0m [1m[94m|[0m     show_types: bool,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: method `format_node_type` is never used[0m
+   [1m[94m--> [0msrc/Utilities/ast_debug_printer.rs:100:8
+    [1m[94m|[0m
+ [1m[94m17[0m [1m[94m|[0m impl AstDebugPrinter {
+    [1m[94m|[0m [1m[94m--------------------[0m [1m[94mmethod in this implementation[0m
+[1m[94m...[0m
+[1m[94m100[0m [1m[94m|[0m     fn format_node_type(&self, node_type: &str) -> String {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `VALID_BLOCK_KEYS` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionParsers/security_section_parser.rs:35:7
+   [1m[94m|[0m
+[1m[94m35[0m [1m[94m|[0m const VALID_BLOCK_KEYS: &[&str] = &["encryption", "validation", "keystore", "override", "metadata"];
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: fields `last_position` and `stuck_count` are never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs:23:5
+   [1m[94m|[0m
+[1m[94m16[0m [1m[94m|[0m pub struct QuickFuncsSectionParser<'a> {
+   [1m[94m|[0m            [1m[94m-----------------------[0m [1m[94mfields in this struct[0m
+[1m[94m...[0m
+[1m[94m23[0m [1m[94m|[0m     last_position: usize,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+[1m[94m24[0m [1m[94m|[0m     stuck_count: usize,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `MAX_STUCK_COUNT` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs:32:7
+   [1m[94m|[0m
+[1m[94m32[0m [1m[94m|[0m const MAX_STUCK_COUNT: usize = 3;
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `ERROR_ENUM_VALUE_OVERFLOW` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/enums_section_analyzer.rs:33:7
+   [1m[94m|[0m
+[1m[94m33[0m [1m[94m|[0m const ERROR_ENUM_VALUE_OVERFLOW: &str = "ENUM_VALUE_OVERFLOW";
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: method `get_bool_field` is never used[0m
+   [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs:198:8
+    [1m[94m|[0m
+[1m[94m142[0m [1m[94m|[0m impl<'a> ParsedEncryptionConfig<'a> {
+    [1m[94m|[0m [1m[94m-----------------------------------[0m [1m[94mmethod in this implementation[0m
+[1m[94m...[0m
+[1m[94m198[0m [1m[94m|[0m     fn get_bool_field(&self, key: &str) -> Option<bool> {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `ERROR_NULL_VALUE` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:25:7
+   [1m[94m|[0m
+[1m[94m25[0m [1m[94m|[0m const ERROR_NULL_VALUE: &str = "NULL_VALUE";
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `ERROR_PARAMETER_COUNT_MISMATCH` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:33:7
+   [1m[94m|[0m
+[1m[94m33[0m [1m[94m|[0m const ERROR_PARAMETER_COUNT_MISMATCH: &str = "PARAMETER_COUNT_MISMATCH";
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `ERROR_PARAMETER_TYPE_MISMATCH` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:34:7
+   [1m[94m|[0m
+[1m[94m34[0m [1m[94m|[0m const ERROR_PARAMETER_TYPE_MISMATCH: &str = "PARAMETER_TYPE_MISMATCH";
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `ERROR_SCOPE_VIOLATION` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:35:7
+   [1m[94m|[0m
+[1m[94m35[0m [1m[94m|[0m const ERROR_SCOPE_VIOLATION: &str = "SCOPE_VIOLATION";
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `ERROR_NAMESPACE_NOT_FOUND` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:36:7
+   [1m[94m|[0m
+[1m[94m36[0m [1m[94m|[0m const ERROR_NAMESPACE_NOT_FOUND: &str = "NAMESPACE_NOT_FOUND";
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `ERROR_IMPORTED_FUNCTION_NOT_FOUND` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:37:7
+   [1m[94m|[0m
+[1m[94m37[0m [1m[94m|[0m const ERROR_IMPORTED_FUNCTION_NOT_FOUND: &str = "IMPORTED_FUNCTION_NOT_FOUND";
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `ERROR_IMPORTED_ENUM_NOT_FOUND` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:38:7
+   [1m[94m|[0m
+[1m[94m38[0m [1m[94m|[0m const ERROR_IMPORTED_ENUM_NOT_FOUND: &str = "IMPORTED_ENUM_NOT_FOUND";
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `ERROR_UNDEFINED_VARIABLE` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:40:7
+   [1m[94m|[0m
+[1m[94m40[0m [1m[94m|[0m const ERROR_UNDEFINED_VARIABLE: &str = "UNDEFINED_VARIABLE";
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `ERROR_CALL_DEPTH_EXCEEDED` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:43:7
+   [1m[94m|[0m
+[1m[94m43[0m [1m[94m|[0m const ERROR_CALL_DEPTH_EXCEEDED: &str = "CALL_DEPTH_EXCEEDED";
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `ERROR_TOO_MANY_PARAMETERS` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:44:7
+   [1m[94m|[0m
+[1m[94m44[0m [1m[94m|[0m const ERROR_TOO_MANY_PARAMETERS: &str = "TOO_MANY_PARAMETERS";
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `MAX_FUNCTION_PARAMS` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:50:7
+   [1m[94m|[0m
+[1m[94m50[0m [1m[94m|[0m const MAX_FUNCTION_PARAMS: usize = 100;
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: constant `MAX_CALL_DEPTH` is never used[0m
+  [1m[94m--> [0msrc/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:51:7
+   [1m[94m|[0m
+[1m[94m51[0m [1m[94m|[0m const MAX_CALL_DEPTH: usize = 10;
+   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/value_decoder.rs:13:5
+   [1m[94m|[0m
+[1m[94m12[0m [1m[94m|[0m pub struct ValueDecoder {
+   [1m[94m|[0m            [1m[94m------------[0m [1m[94mfield in this struct[0m
+[1m[94m13[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/SectionReaders/config_section_reader.rs:20:5
+   [1m[94m|[0m
+[1m[94m17[0m [1m[94m|[0m pub struct ConfigSectionReader<'a> {
+   [1m[94m|[0m            [1m[94m-------------------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m20[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/SectionReaders/enums_section_reader.rs:17:5
+   [1m[94m|[0m
+[1m[94m15[0m [1m[94m|[0m pub struct EnumsSectionReader<'a> {
+   [1m[94m|[0m            [1m[94m------------------[0m [1m[94mfield in this struct[0m
+[1m[94m16[0m [1m[94m|[0m     context: &'a mut BinarySerializationContext,
+[1m[94m17[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/SectionReaders/imports_section_reader.rs:17:5
+   [1m[94m|[0m
+[1m[94m15[0m [1m[94m|[0m pub struct ImportsSectionReader<'a> {
+   [1m[94m|[0m            [1m[94m--------------------[0m [1m[94mfield in this struct[0m
+[1m[94m16[0m [1m[94m|[0m     context: &'a mut BinarySerializationContext,
+[1m[94m17[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/SectionReaders/security_section_reader.rs:19:5
+   [1m[94m|[0m
+[1m[94m16[0m [1m[94m|[0m pub struct SecuritySectionReader<'a> {
+   [1m[94m|[0m            [1m[94m---------------------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m19[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/SectionReaders/data_section_reader.rs:23:5
+   [1m[94m|[0m
+[1m[94m20[0m [1m[94m|[0m pub struct DataSectionReader<'a> {
+   [1m[94m|[0m            [1m[94m-----------------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m23[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/SectionWriters/config_section_writer.rs:18:5
+   [1m[94m|[0m
+[1m[94m15[0m [1m[94m|[0m pub struct ConfigSectionWriter<'a> {
+   [1m[94m|[0m            [1m[94m-------------------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m18[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/SectionWriters/enums_section_writer.rs:17:5
+   [1m[94m|[0m
+[1m[94m15[0m [1m[94m|[0m pub struct EnumsSectionWriter<'a> {
+   [1m[94m|[0m            [1m[94m------------------[0m [1m[94mfield in this struct[0m
+[1m[94m16[0m [1m[94m|[0m     context: &'a mut BinarySerializationContext,
+[1m[94m17[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/SectionWriters/imports_section_writer.rs:17:5
+   [1m[94m|[0m
+[1m[94m15[0m [1m[94m|[0m pub struct ImportsSectionWriter<'a> {
+   [1m[94m|[0m            [1m[94m--------------------[0m [1m[94mfield in this struct[0m
+[1m[94m16[0m [1m[94m|[0m     context: &'a mut BinarySerializationContext,
+[1m[94m17[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/SectionWriters/security_section_writer.rs:19:5
+   [1m[94m|[0m
+[1m[94m16[0m [1m[94m|[0m pub struct SecuritySectionWriter<'a> {
+   [1m[94m|[0m            [1m[94m---------------------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m19[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/SectionWriters/data_section_writer.rs:23:5
+   [1m[94m|[0m
+[1m[94m20[0m [1m[94m|[0m pub struct DataSectionWriter<'a> {
+   [1m[94m|[0m            [1m[94m-----------------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m23[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `position` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/general_parser.rs:26:5
+   [1m[94m|[0m
+[1m[94m23[0m [1m[94m|[0m struct SectionData {
+   [1m[94m|[0m        [1m[94m-----------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m26[0m [1m[94m|[0m     position: usize,
+   [1m[94m|[0m     [1m[33m^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: struct `ParseTimings` is never constructed[0m
+  [1m[94m--> [0msrc/Compiler/Core/general_parser.rs:31:12
+   [1m[94m|[0m
+[1m[94m31[0m [1m[94m|[0m pub struct ParseTimings {
+   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `is_advanced_mode` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/general_parser.rs:51:5
+   [1m[94m|[0m
+[1m[94m39[0m [1m[94m|[0m pub struct GeneralParser {
+   [1m[94m|[0m            [1m[94m-------------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m51[0m [1m[94m|[0m     is_advanced_mode: bool,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `can_log_verbose` is never read[0m
+  [1m[94m--> [0msrc/Compiler/Core/general_ast_enhancer.rs:39:5
+   [1m[94m|[0m
+[1m[94m28[0m [1m[94m|[0m pub struct GeneralAstEnhancer<'a> {
+   [1m[94m|[0m            [1m[94m------------------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m39[0m [1m[94m|[0m     can_log_verbose: bool,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: methods `log_verbose` and `log_verbose_fmt` are never used[0m
+   [1m[94m--> [0msrc/Compiler/Core/general_semantics_analyzer.rs:816:8
+    [1m[94m|[0m
+ [1m[94m55[0m [1m[94m|[0m impl<'a> GeneralSemanticAnalyzer<'a> {
+    [1m[94m|[0m [1m[94m------------------------------------[0m [1m[94mmethods in this implementation[0m
+[1m[94m...[0m
+[1m[94m816[0m [1m[94m|[0m     fn log_verbose(&self, message: &str) {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^[0m
+[1m[94m...[0m
+[1m[94m823[0m [1m[94m|[0m     fn log_verbose_fmt<F>(&self, f: F)
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `debug_config` is never read[0m
+  [1m[94m--> [0msrc/Compiler/DLM/dlm_pipeline_executor.rs:22:5
+   [1m[94m|[0m
+[1m[94m20[0m [1m[94m|[0m pub struct DLMPipelineExecutor {
+   [1m[94m|[0m            [1m[94m-------------------[0m [1m[94mfield in this struct[0m
+[1m[94m21[0m [1m[94m|[0m     error_manager: ErrorManager,
+[1m[94m22[0m [1m[94m|[0m     debug_config: DebugConfig,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
+  [1m[94m--> [0msrc/Runtime/key_resolver.rs:44:5
+   [1m[94m|[0m
+[1m[94m43[0m [1m[94m|[0m pub struct KeyFileResolver {
+   [1m[94m|[0m            [1m[94m---------------[0m [1m[94mfield in this struct[0m
+[1m[94m44[0m [1m[94m|[0m     error_manager: ErrorManager,
+   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: module `Utilities` should have a snake case name[0m
+ [1m[94m--> [0msrc/lib.rs:7:9
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m pub mod Utilities;
+  [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `utilities`[0m
+  [1m[94m|[0m
+  [1m[94m= [0m[1mnote[0m: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+[1m[33mwarning[0m[1m: module `ErrorManager` should have a snake case name[0m
+ [1m[94m--> [0msrc/lib.rs:8:9
+  [1m[94m|[0m
+[1m[94m8[0m [1m[94m|[0m pub mod ErrorManager;
+  [1m[94m|[0m         [1m[33m^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `error_manager`[0m
+
+[1m[33mwarning[0m[1m: module `Builtins` should have a snake case name[0m
+ [1m[94m--> [0msrc/lib.rs:9:9
+  [1m[94m|[0m
+[1m[94m9[0m [1m[94m|[0m pub mod Builtins;
+  [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `builtins`[0m
+
+[1m[33mwarning[0m[1m: module `Compiler` should have a snake case name[0m
+  [1m[94m--> [0msrc/lib.rs:10:9
+   [1m[94m|[0m
+[1m[94m10[0m [1m[94m|[0m pub mod Compiler;
+   [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `compiler`[0m
+
+[1m[33mwarning[0m[1m: module `Runtime` should have a snake case name[0m
+  [1m[94m--> [0msrc/lib.rs:11:9
+   [1m[94m|[0m
+[1m[94m11[0m [1m[94m|[0m pub mod Runtime;
+   [1m[94m|[0m         [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `runtime`[0m
+
+[1m[33mwarning[0m[1m: method `GetSharedInstance` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_logger.rs:40:12
+   [1m[94m|[0m
+[1m[94m40[0m [1m[94m|[0m     pub fn GetSharedInstance(level: Option<LogLevel>, enabled: Option<bool>) -> Arc<Mutex<Self>> {
+   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_shared_instance`[0m
+
+[1m[33mwarning[0m[1m: method `HasSharedInstance` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_logger.rs:63:12
+   [1m[94m|[0m
+[1m[94m63[0m [1m[94m|[0m     pub fn HasSharedInstance() -> bool {
+   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `has_shared_instance`[0m
+
+[1m[33mwarning[0m[1m: method `IncreaseIndent` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_logger.rs:71:12
+   [1m[94m|[0m
+[1m[94m71[0m [1m[94m|[0m     pub fn IncreaseIndent(&mut self) {
+   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `increase_indent`[0m
+
+[1m[33mwarning[0m[1m: method `DecreaseIndent` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_logger.rs:75:12
+   [1m[94m|[0m
+[1m[94m75[0m [1m[94m|[0m     pub fn DecreaseIndent(&mut self) {
+   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `decrease_indent`[0m
+
+[1m[33mwarning[0m[1m: method `ResetIndent` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_logger.rs:81:12
+   [1m[94m|[0m
+[1m[94m81[0m [1m[94m|[0m     pub fn ResetIndent(&mut self) {
+   [1m[94m|[0m            [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `reset_indent`[0m
+
+[1m[33mwarning[0m[1m: method `Error` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_logger.rs:87:12
+   [1m[94m|[0m
+[1m[94m87[0m [1m[94m|[0m     pub fn Error(&mut self, message: &str) {
+   [1m[94m|[0m            [1m[33m^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `error`[0m
+
+[1m[33mwarning[0m[1m: method `Warning` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_logger.rs:94:12
+   [1m[94m|[0m
+[1m[94m94[0m [1m[94m|[0m     pub fn Warning(&mut self, message: &str) {
+   [1m[94m|[0m            [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `warning`[0m
+
+[1m[33mwarning[0m[1m: method `Info` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:101:12
+    [1m[94m|[0m
+[1m[94m101[0m [1m[94m|[0m     pub fn Info(&mut self, message: &str) {
+    [1m[94m|[0m            [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `info`[0m
+
+[1m[33mwarning[0m[1m: method `Debug` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:113:12
+    [1m[94m|[0m
+[1m[94m113[0m [1m[94m|[0m     pub fn Debug<F>(&mut self, message_builder: F)
+    [1m[94m|[0m            [1m[33m^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `debug`[0m
+
+[1m[33mwarning[0m[1m: method `DebugStr` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:129:12
+    [1m[94m|[0m
+[1m[94m129[0m [1m[94m|[0m     pub fn DebugStr(&mut self, message: &str) {
+    [1m[94m|[0m            [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `debug_str`[0m
+
+[1m[33mwarning[0m[1m: method `Verbose` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:141:12
+    [1m[94m|[0m
+[1m[94m141[0m [1m[94m|[0m     pub fn Verbose<F>(&mut self, message_builder: F)
+    [1m[94m|[0m            [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `verbose`[0m
+
+[1m[33mwarning[0m[1m: method `VerboseStr` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:157:12
+    [1m[94m|[0m
+[1m[94m157[0m [1m[94m|[0m     pub fn VerboseStr(&mut self, message: &str) {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `verbose_str`[0m
+
+[1m[33mwarning[0m[1m: method `CreateScope` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:197:12
+    [1m[94m|[0m
+[1m[94m197[0m [1m[94m|[0m     pub fn CreateScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a> {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `create_scope`[0m
+
+[1m[33mwarning[0m[1m: method `CreateDebugScope` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:217:12
+    [1m[94m|[0m
+[1m[94m217[0m [1m[94m|[0m     pub fn CreateDebugScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a> {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `create_debug_scope`[0m
+
+[1m[33mwarning[0m[1m: method `CreateVerboseScope` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:237:12
+    [1m[94m|[0m
+[1m[94m237[0m [1m[94m|[0m     pub fn CreateVerboseScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a> {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `create_verbose_scope`[0m
+
+[1m[33mwarning[0m[1m: method `SetLogLevel` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:275:12
+    [1m[94m|[0m
+[1m[94m275[0m [1m[94m|[0m     pub fn SetLogLevel(&mut self, level: LogLevel) {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `set_log_level`[0m
+
+[1m[33mwarning[0m[1m: method `SetEnabled` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:279:12
+    [1m[94m|[0m
+[1m[94m279[0m [1m[94m|[0m     pub fn SetEnabled(&mut self, enabled: bool) {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `set_enabled`[0m
+
+[1m[33mwarning[0m[1m: method `GetCurrentLevel` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:283:12
+    [1m[94m|[0m
+[1m[94m283[0m [1m[94m|[0m     pub fn GetCurrentLevel(&self) -> LogLevel {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_current_level`[0m
+
+[1m[33mwarning[0m[1m: method `IsEnabled` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:287:12
+    [1m[94m|[0m
+[1m[94m287[0m [1m[94m|[0m     pub fn IsEnabled(&self) -> bool {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_enabled`[0m
+
+[1m[33mwarning[0m[1m: method `IsDebugEnabled` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:292:12
+    [1m[94m|[0m
+[1m[94m292[0m [1m[94m|[0m     pub fn IsDebugEnabled(&self) -> bool {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_debug_enabled`[0m
+
+[1m[33mwarning[0m[1m: method `IsVerboseEnabled` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:304:12
+    [1m[94m|[0m
+[1m[94m304[0m [1m[94m|[0m     pub fn IsVerboseEnabled(&self) -> bool {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_verbose_enabled`[0m
+
+[1m[33mwarning[0m[1m: method `WouldLog` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:315:12
+    [1m[94m|[0m
+[1m[94m315[0m [1m[94m|[0m     pub fn WouldLog(&self, level: LogLevel) -> bool {
+    [1m[94m|[0m            [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `would_log`[0m
+
+[1m[33mwarning[0m[1m: method `GetLogContents` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:321:12
+    [1m[94m|[0m
+[1m[94m321[0m [1m[94m|[0m     pub fn GetLogContents(&self) -> &str {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_log_contents`[0m
+
+[1m[33mwarning[0m[1m: method `ClearLogBuffer` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/mid_logger.rs:325:12
+    [1m[94m|[0m
+[1m[94m325[0m [1m[94m|[0m     pub fn ClearLogBuffer(&mut self) {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `clear_log_buffer`[0m
+
+[1m[33mwarning[0m[1m: method `IsValidString` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_helper_functions.rs:20:12
+   [1m[94m|[0m
+[1m[94m20[0m [1m[94m|[0m     pub fn IsValidString(input: Option<&str>) -> bool {
+   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_valid_string`[0m
+
+[1m[33mwarning[0m[1m: method `GetEnvironment` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_helper_functions.rs:37:12
+   [1m[94m|[0m
+[1m[94m37[0m [1m[94m|[0m     pub fn GetEnvironment() -> &'static str {
+   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_environment`[0m
+
+[1m[33mwarning[0m[1m: method `GenerateRandomString` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_helper_functions.rs:49:12
+   [1m[94m|[0m
+[1m[94m49[0m [1m[94m|[0m     pub fn GenerateRandomString(length: usize, use_special_characters: bool) -> String {
+   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `generate_random_string`[0m
+
+[1m[33mwarning[0m[1m: method `GetStructOrClassMemberValues` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/mid_helper_functions.rs:78:12
+   [1m[94m|[0m
+[1m[94m78[0m [1m[94m|[0m     pub fn GetStructOrClassMemberValues<T: std::fmt::Debug>(instance: &T) -> String {
+   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_struct_or_class_member_values`[0m
+
+[1m[33mwarning[0m[1m: trait method `IsNullOrEmpty` should have a snake case name[0m
+ [1m[94m--> [0msrc/Utilities/utilities.rs:3:8
+  [1m[94m|[0m
+[1m[94m3[0m [1m[94m|[0m     fn IsNullOrEmpty(&self) -> bool;
+  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_null_or_empty`[0m
+
+[1m[33mwarning[0m[1m: trait method `IsNullOrWhiteSpace` should have a snake case name[0m
+ [1m[94m--> [0msrc/Utilities/utilities.rs:4:8
+  [1m[94m|[0m
+[1m[94m4[0m [1m[94m|[0m     fn IsNullOrWhiteSpace(&self) -> bool;
+  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_null_or_white_space`[0m
+
+[1m[33mwarning[0m[1m: trait method `ToUpperInvariant` should have a snake case name[0m
+ [1m[94m--> [0msrc/Utilities/utilities.rs:5:8
+  [1m[94m|[0m
+[1m[94m5[0m [1m[94m|[0m     fn ToUpperInvariant(&self) -> String;
+  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `to_upper_invariant`[0m
+
+[1m[33mwarning[0m[1m: trait method `ToLowerInvariant` should have a snake case name[0m
+ [1m[94m--> [0msrc/Utilities/utilities.rs:6:8
+  [1m[94m|[0m
+[1m[94m6[0m [1m[94m|[0m     fn ToLowerInvariant(&self) -> String;
+  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `to_lower_invariant`[0m
+
+[1m[33mwarning[0m[1m: trait method `Contains` should have a snake case name[0m
+ [1m[94m--> [0msrc/Utilities/utilities.rs:7:8
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m     fn Contains(&self, value: &str) -> bool;
+  [1m[94m|[0m        [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `contains`[0m
+
+[1m[33mwarning[0m[1m: trait method `StartsWith` should have a snake case name[0m
+ [1m[94m--> [0msrc/Utilities/utilities.rs:8:8
+  [1m[94m|[0m
+[1m[94m8[0m [1m[94m|[0m     fn StartsWith(&self, value: &str) -> bool;
+  [1m[94m|[0m        [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `starts_with`[0m
+
+[1m[33mwarning[0m[1m: trait method `EndsWith` should have a snake case name[0m
+ [1m[94m--> [0msrc/Utilities/utilities.rs:9:8
+  [1m[94m|[0m
+[1m[94m9[0m [1m[94m|[0m     fn EndsWith(&self, value: &str) -> bool;
+  [1m[94m|[0m        [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `ends_with`[0m
+
+[1m[33mwarning[0m[1m: trait method `Trim` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/utilities.rs:10:8
+   [1m[94m|[0m
+[1m[94m10[0m [1m[94m|[0m     fn Trim(&self) -> String;
+   [1m[94m|[0m        [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case: `trim`[0m
+
+[1m[33mwarning[0m[1m: trait method `TrimStart` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/utilities.rs:11:8
+   [1m[94m|[0m
+[1m[94m11[0m [1m[94m|[0m     fn TrimStart(&self) -> String;
+   [1m[94m|[0m        [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `trim_start`[0m
+
+[1m[33mwarning[0m[1m: trait method `TrimEnd` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/utilities.rs:12:8
+   [1m[94m|[0m
+[1m[94m12[0m [1m[94m|[0m     fn TrimEnd(&self) -> String;
+   [1m[94m|[0m        [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `trim_end`[0m
+
+[1m[33mwarning[0m[1m: trait method `Replace` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/utilities.rs:13:8
+   [1m[94m|[0m
+[1m[94m13[0m [1m[94m|[0m     fn Replace(&self, old: &str, new: &str) -> String;
+   [1m[94m|[0m        [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `replace`[0m
+
+[1m[33mwarning[0m[1m: trait method `Split` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/utilities.rs:14:8
+   [1m[94m|[0m
+[1m[94m14[0m [1m[94m|[0m     fn Split(&self, separator: char) -> Vec<String>;
+   [1m[94m|[0m        [1m[33m^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `split`[0m
+
+[1m[33mwarning[0m[1m: trait method `Join` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/utilities.rs:15:8
+   [1m[94m|[0m
+[1m[94m15[0m [1m[94m|[0m     fn Join(separator: &str, values: &[String]) -> String;
+   [1m[94m|[0m        [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case: `join`[0m
+
+[1m[33mwarning[0m[1m: trait method `Substring` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/utilities.rs:16:8
+   [1m[94m|[0m
+[1m[94m16[0m [1m[94m|[0m     fn Substring(&self, start: usize, length: Option<usize>) -> String;
+   [1m[94m|[0m        [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `substring`[0m
+
+[1m[33mwarning[0m[1m: trait method `IndexOf` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/utilities.rs:17:8
+   [1m[94m|[0m
+[1m[94m17[0m [1m[94m|[0m     fn IndexOf(&self, value: &str) -> Option<usize>;
+   [1m[94m|[0m        [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `index_of`[0m
+
+[1m[33mwarning[0m[1m: trait method `LastIndexOf` should have a snake case name[0m
+  [1m[94m--> [0msrc/Utilities/utilities.rs:18:8
+   [1m[94m|[0m
+[1m[94m18[0m [1m[94m|[0m     fn LastIndexOf(&self, value: &str) -> Option<usize>;
+   [1m[94m|[0m        [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `last_index_of`[0m
+
+[1m[33mwarning[0m[1m: trait method `ToString` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/utilities.rs:162:8
+    [1m[94m|[0m
+[1m[94m162[0m [1m[94m|[0m     fn ToString(&self) -> String;
+    [1m[94m|[0m        [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `to_string`[0m
+
+[1m[33mwarning[0m[1m: trait method `GetHashCode` should have a snake case name[0m
+   [1m[94m--> [0msrc/Utilities/utilities.rs:163:8
+    [1m[94m|[0m
+[1m[94m163[0m [1m[94m|[0m     fn GetHashCode(&self) -> u64;
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_hash_code`[0m
+
+[1m[33mwarning[0m[1m: module `ErrorTypes` should have a snake case name[0m
+ [1m[94m--> [0msrc/ErrorManager/mod.rs:7:9
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m pub mod ErrorTypes;
+  [1m[94m|[0m         [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `error_types`[0m
+
+[1m[33mwarning[0m[1m: module `Helpers` should have a snake case name[0m
+ [1m[94m--> [0msrc/ErrorManager/mod.rs:8:9
+  [1m[94m|[0m
+[1m[94m8[0m [1m[94m|[0m pub mod Helpers;
+  [1m[94m|[0m         [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `helpers`[0m
+
+[1m[33mwarning[0m[1m: module `Core` should have a snake case name[0m
+ [1m[94m--> [0msrc/Builtins/mod.rs:4:9
+  [1m[94m|[0m
+[1m[94m4[0m [1m[94m|[0m pub mod Core;
+  [1m[94m|[0m         [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `core`[0m
+
+[1m[33mwarning[0m[1m: module `Instance` should have a snake case name[0m
+ [1m[94m--> [0msrc/Builtins/mod.rs:5:9
+  [1m[94m|[0m
+[1m[94m5[0m [1m[94m|[0m pub mod Instance;
+  [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `instance`[0m
+
+[1m[33mwarning[0m[1m: module `Static` should have a snake case name[0m
+ [1m[94m--> [0msrc/Builtins/mod.rs:6:9
+  [1m[94m|[0m
+[1m[94m6[0m [1m[94m|[0m pub mod Static;
+  [1m[94m|[0m         [1m[33m^^^^^^[0m
+  [1m[94m|[0m
+[1m[96mhelp[0m: rename the identifier or convert it to a snake case raw identifier
+  [1m[94m|[0m
+[1m[94m6[0m [91m- [0mpub mod [91mStatic[0m;
+[1m[94m6[0m [92m+ [0mpub mod [92mr#static[0m;
+  [1m[94m|[0m
+
+[1m[33mwarning[0m[1m: module `Resolver` should have a snake case name[0m
+ [1m[94m--> [0msrc/Builtins/mod.rs:7:9
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m pub mod Resolver;
+  [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `resolver`[0m
+
+[1m[33mwarning[0m[1m: module `AST` should have a snake case name[0m
+ [1m[94m--> [0msrc/Compiler/mod.rs:5:9
+  [1m[94m|[0m
+[1m[94m5[0m [1m[94m|[0m pub mod AST;
+  [1m[94m|[0m         [1m[33m^^^[0m [1m[33mhelp: convert the identifier to snake case: `ast`[0m
+
+[1m[33mwarning[0m[1m: module `Core` should have a snake case name[0m
+ [1m[94m--> [0msrc/Compiler/mod.rs:6:9
+  [1m[94m|[0m
+[1m[94m6[0m [1m[94m|[0m pub mod Core;
+  [1m[94m|[0m         [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `core`[0m
+
+[1m[33mwarning[0m[1m: module `DLM` should have a snake case name[0m
+ [1m[94m--> [0msrc/Compiler/mod.rs:7:9
+  [1m[94m|[0m
+[1m[94m7[0m [1m[94m|[0m pub mod DLM;
+  [1m[94m|[0m         [1m[33m^^^[0m [1m[33mhelp: convert the identifier to snake case: `dlm`[0m
+
+[1m[33mwarning[0m[1m: module `Extensions` should have a snake case name[0m
+ [1m[94m--> [0msrc/Compiler/mod.rs:8:9
+  [1m[94m|[0m
+[1m[94m8[0m [1m[94m|[0m pub mod Extensions;
+  [1m[94m|[0m         [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `extensions`[0m
+
+[1m[33mwarning[0m[1m: module `Utilities` should have a snake case name[0m
+ [1m[94m--> [0msrc/Compiler/mod.rs:9:9
+  [1m[94m|[0m
+[1m[94m9[0m [1m[94m|[0m pub mod Utilities;
+  [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `utilities`[0m
+
+[1m[33mwarning[0m[1m: module `VersionControl` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/mod.rs:10:9
+   [1m[94m|[0m
+[1m[94m10[0m [1m[94m|[0m pub mod VersionControl;
+   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `version_control`[0m
+
+[1m[33mwarning[0m[1m: module `ImportsResolution` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/mod.rs:11:9
+   [1m[94m|[0m
+[1m[94m11[0m [1m[94m|[0m pub mod ImportsResolution;
+   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `imports_resolution`[0m
+
+[1m[33mwarning[0m[1m: module `Visitors` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/AST/mod.rs:36:9
+   [1m[94m|[0m
+[1m[94m36[0m [1m[94m|[0m pub mod Visitors;
+   [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `visitors`[0m
+
+[1m[33mwarning[0m[1m: module `Tokenizer` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/Core/mod.rs:10:9
+   [1m[94m|[0m
+[1m[94m10[0m [1m[94m|[0m pub mod Tokenizer;
+   [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `tokenizer`[0m
+
+[1m[33mwarning[0m[1m: module `SectionParsers` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/Core/mod.rs:11:9
+   [1m[94m|[0m
+[1m[94m11[0m [1m[94m|[0m pub mod SectionParsers;
+   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_parsers`[0m
+
+[1m[33mwarning[0m[1m: module `SectionAnalyzers` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/Core/mod.rs:12:9
+   [1m[94m|[0m
+[1m[94m12[0m [1m[94m|[0m pub mod SectionAnalyzers;
+   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_analyzers`[0m
+
+[1m[33mwarning[0m[1m: module `SectionEnhancers` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/Core/mod.rs:13:9
+   [1m[94m|[0m
+[1m[94m13[0m [1m[94m|[0m pub mod SectionEnhancers;
+   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_enhancers`[0m
+
+[1m[33mwarning[0m[1m: module `ValueResolution` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/Core/mod.rs:14:9
+   [1m[94m|[0m
+[1m[94m14[0m [1m[94m|[0m pub mod ValueResolution;
+   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `value_resolution`[0m
+
+[1m[33mwarning[0m[1m: module `BinarySerialization` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/Core/mod.rs:15:9
+   [1m[94m|[0m
+[1m[94m15[0m [1m[94m|[0m pub mod BinarySerialization;
+   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `binary_serialization`[0m
+
+[1m[33mwarning[0m[1m: module `Config` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/Core/mod.rs:16:9
+   [1m[94m|[0m
+[1m[94m16[0m [1m[94m|[0m pub mod Config;
+   [1m[94m|[0m         [1m[33m^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `config`[0m
+
+[1m[33mwarning[0m[1m: module `Functions` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/Core/mod.rs:17:9
+   [1m[94m|[0m
+[1m[94m17[0m [1m[94m|[0m pub mod Functions;
+   [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `functions`[0m
+
+[1m[33mwarning[0m[1m: module `SectionReaders` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/mod.rs:36:9
+   [1m[94m|[0m
+[1m[94m36[0m [1m[94m|[0m pub mod SectionReaders;
+   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_readers`[0m
+
+[1m[33mwarning[0m[1m: module `SectionWriters` should have a snake case name[0m
+  [1m[94m--> [0msrc/Compiler/Core/BinarySerialization/mod.rs:37:9
+   [1m[94m|[0m
+[1m[94m37[0m [1m[94m|[0m pub mod SectionWriters;
+   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_writers`[0m
+
+[1m[33mwarning[0m[1m: module `Auditor` should have a snake case name[0m
+ [1m[94m--> [0msrc/Compiler/DLM/mod.rs:3:9
+  [1m[94m|[0m
+[1m[94m3[0m [1m[94m|[0m pub mod Auditor;
+  [1m[94m|[0m         [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `auditor`[0m
+
+[1m[33mwarning[0m[1m: module `Compressor` should have a snake case name[0m
+ [1m[94m--> [0msrc/Compiler/DLM/mod.rs:4:9
+  [1m[94m|[0m
+[1m[94m4[0m [1m[94m|[0m pub mod Compressor;
+  [1m[94m|[0m         [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `compressor`[0m
+
+[1m[33mwarning[0m[1m: module `Encryptor` should have a snake case name[0m
+ [1m[94m--> [0msrc/Compiler/DLM/mod.rs:5:9
+  [1m[94m|[0m
+[1m[94m5[0m [1m[94m|[0m pub mod Encryptor;
+  [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `encryptor`[0m
+
+[1m[33mwarning[0m[1m: module `KeyManagement` should have a snake case name[0m
+ [1m[94m--> [0msrc/Compiler/DLM/mod.rs:6:9
+  [1m[94m|[0m
+[1m[94m6[0m [1m[94m|[0m pub mod KeyManagement;
+  [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `key_management`[0m
+
+[1m[33mwarning[0m[1m: use of deprecated function `base64::encode`: Use Engine::encode[0m
+   [1m[94m--> [0msrc/Builtins/Instance/blob_methods.rs:233:34
+    [1m[94m|[0m
+[1m[94m233[0m [1m[94m|[0m         let png_header = base64::encode(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+    [1m[94m|[0m                                  [1m[33m^^^^^^[0m
+
+[1m[33mwarning[0m: `dixscript` (lib test) generated 195 warnings (194 duplicates)
+[1m[33mwarning[0m: `dixscript` (lib) generated 194 warnings (run `cargo fix --lib -p dixscript` to apply 63 suggestions)
+[1m[33mwarning[0m[1m: unused import: `BenchmarkId`[0m
+ [1m[94m--> [0mbenches/lexer_throughput.rs:2:84
+  [1m[94m|[0m
+[1m[94m2[0m [1m[94m|[0m use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput, BenchmarkId};
+  [1m[94m|[0m                                                                                    [1m[33m^^^^^^^^^^^[0m
+  [1m[94m|[0m
+  [1m[94m= [0m[1mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m: `dixscript` (bench "lexer_throughput") generated 1 warning (run `cargo fix --bench "lexer_throughput" -p dixscript` to apply 1 suggestion)
+[1m[92m    Finished[0m `bench` profile [optimized + debuginfo] target(s) in 3m 10s
+[1m[33mwarning[0m: the following packages contain code that will be rejected by a future version of Rust: jrsonnet-evaluator v0.4.2
+[1m[92mnote[0m: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+[1m[92m  Executable[0m benches src/lib.rs (target/release/deps/dixscript-54d65bfa9de89b18)
+[1m[92m  Executable[0m benches/lexer_throughput.rs (target/release/deps/lexer_throughput-0ecf6848a6e66400)
+[1m[92m  Executable[0m benches/simple_bench.rs (target/release/deps/simple_bench-02acaf1121cb237e)
+[1m[92m  Executable[0m benches/throughput_benchmark.rs (target/release/deps/throughput_benchmark-e1168d89520a9ee8)

@@ -89,7 +89,7 @@ jobs:
       - name: Build test binaries
         run: cargo test --no-run 2>&1
 
-      - name: Run all tests (FIXED: continue on failure)
+      - name: "Run all tests (FIXED: continue on failure)"
         continue-on-error: true
         run: |
           set +e

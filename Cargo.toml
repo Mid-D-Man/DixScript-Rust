@@ -12,110 +12,83 @@ categories = ["config", "encoding", "data-structures"]
 
 [lib]
 name = "dixscript"
+# NOTE: staticlib/cdylib are kept here until the workspace split is done.
+# Once you create a separate dixscript-ffi crate, remove staticlib and cdylib
+# from here — they hurt compile times and prevent some LTO optimisations for
+# library consumers.
 crate-type = ["lib", "staticlib", "cdylib"]
 
+# =============================================================================
+# Runtime dependencies
+# =============================================================================
 [dependencies]
-# Random number generation for helper functions
-rand = "0.8"
-# UUID for GUID operations - ENABLE v4 feature
-uuid = { version = "1.0", features = ["v4", "serde"] }
-# Date and time handling for error timestamps
-chrono = { version = "0.4", features = ["serde"] }
-bitflags = "2.4"
+rand       = "0.8"
+uuid       = { version = "1.0", features = ["v4", "serde"] }
+chrono     = { version = "0.4", features = ["serde"] }
+bitflags   = "2.4"
 
-# JSON serialization for error reporting
-serde = { version = "1.0", features = ["derive"] }
+serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-# Hostname for diagnostic dumps
-hostname = "0.3"
+hostname   = "0.3"
 
-# Perfect hash maps for keywords
-phf = { version = "0.11", features = ["macros"] }
-
-# SIMD string scanning
-memchr = "2.7"
-
-# Base64 encoding/decoding for blob values
-base64 = "0.21"
-
-# Regex support for regex values
-regex = "1.10"
-
-# LINQ-like iterator extensions
-itertools = "0.13"
+phf        = { version = "0.11", features = ["macros"] }
+memchr     = "2.7"
+base64     = "0.21"
+regex      = "1.10"
+itertools  = "0.13"
 lazy_static = "1.4"
-# For concurrency
-rayon = "1.8"
-unicase = "2.7"
+rayon      = "1.8"
+unicase    = "2.7"
 rustc-hash = "2.0"
 
-# HTTP client for cloud imports
-reqwest = { version = "0.11", features = ["json"] }
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
+# sha2 pre-release — kept as-is; upgrade to stable 0.10.x when ready
 sha2 = "0.11.0-pre.4"
 
-# URL parsing
-url = "2.5"
+# Cloud-import deps are OPTIONAL: `cargo build` skips them unless you pass
+# --features cloud_imports. This significantly cuts compile time on dev machines.
+reqwest     = { version = "0.11", features = ["json"],  optional = true }
+tokio       = { version = "1",    features = ["full"],  optional = true }
+async-trait = { version = "0.1",                        optional = true }
+url         = { version = "2.5",                        optional = true }
 
 # =============================================================================
-# DLM (Data Lifecycle Modules) Dependencies
+# DLM (Data Lifecycle Modules)
 # =============================================================================
-
-# --- Compression Modules ---
-flate2 = "1.0"          # GZIP compression (fast, good ratio)
-bzip2 = "0.4"           # BZIP2 compression (slower, better ratio)
-xz2 = "0.1"             # LZMA compression (slowest, best ratio)
-
-# --- Encryption Modules ---
-aes-gcm = "0.10"        # AES-128/256-GCM authenticated encryption
-chacha20poly1305 = "0.10" # ChaCha20-Poly1305 authenticated encryption
-argon2 = "0.5"          # Argon2id key derivation function (password-based)
-
-# --- Utilities ---
-hex = "0.4"             # Hex encoding for checksums and key display
+flate2            = "1.0"
+bzip2             = "0.4"
+xz2               = "0.1"
+aes-gcm           = "0.10"
+chacha20poly1305  = "0.10"
+argon2            = "0.5"
+hex               = "0.4"
 
 # =============================================================================
-# [dev-dependencies]
+# Dev / bench dependencies
 # =============================================================================
 [dev-dependencies]
-# Benchmarking framework
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion  = { version = "0.5", features = ["html_reports"] }
+tempfile   = "3.10"
 
-# Temp file management for loader/DLM tests
-tempfile = "3.10"
-
-# ---------------------------------------------------------------------------
 # Serialisation format comparison
-# ---------------------------------------------------------------------------
-# Compact binary serialisation (Rust ecosystem standard)
-bincode = "1.3"
+bincode    = "1.3"
+rmp-serde  = "1.1"
+postcard   = { version = "1.0", features = ["alloc"] }
+ciborium   = "0.2"
 
-# MessagePack - widely used cross-language compact binary format
-rmp-serde = "1.1"
-
-# Postcard - no-std friendly, very compact binary, used in embedded/IoT
-postcard = { version = "1.0", features = ["alloc"] }
-
-# CBOR - Concise Binary Object Representation (RFC 7049, used in IoT/WebAuthn)
-ciborium = "0.2"
-
-# ---------------------------------------------------------------------------
-# Format Comparison: Jsonnet (in-process, no subprocess needed)
-# ---------------------------------------------------------------------------
+# Jsonnet comparison
 jrsonnet-evaluator = "0.4"
-jrsonnet-stdlib = "0.4"
+jrsonnet-stdlib    = "0.4"
 
 # =============================================================================
-# Test / Bench targets
+# Bench / test targets
 # =============================================================================
 [[bench]]
-name = "throughput_benchmark"
+name    = "throughput_benchmark"
 harness = false
 
 [[bench]]
-name = "lexer_throughput"
+name    = "lexer_throughput"
 harness = false
 
 [[test]]
@@ -123,31 +96,49 @@ name = "config_tests"
 path = "tests/config_tests.rs"
 
 [[bin]]
-name = "simple_bench"
-path = "benches/simple_bench.rs"
-test = false
+name  = "simple_bench"
+path  = "benches/simple_bench.rs"
+test  = false
 bench = false
 
 # =============================================================================
-# Feature Flags
+# Feature flags
 # =============================================================================
 [features]
 default = []
+# Pull in reqwest / tokio / async-trait / url only when cloud imports are needed
+cloud_imports     = ["reqwest", "tokio", "async-trait", "url"]
 cue_cli_available = []
 
 # =============================================================================
-# Build Profiles
+# Build profiles
 # =============================================================================
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
-debug = true
 
+# --- Production release: fully stripped, maximum optimisation
+[profile.release]
+opt-level      = 3
+lto            = true      # "fat" LTO — full cross-crate optimisation
+codegen-units  = 1
+strip          = true      # strips DWARF symbols; makes debug = true meaningless
+debug          = false     # explicit: strip wins anyway, keep this consistent
+
+# --- Benchmarking: same opt level as release but symbols preserved
+#
+# This is what was missing: flamegraph/perf need DWARF info.
+# With strip = true in release, every function showed up as the binary blob
+# [lexer_throughput-cec1e10d392a4a97] making flamegraphs unreadable.
+# Use: cargo flamegraph --profile bench --bench lexer_throughput
+[profile.bench]
+opt-level     = 3
+lto           = "thin"    # thin LTO: still good, much faster to link than fat
+codegen-units = 1
+strip         = false     # KEEP symbols — flamegraph requires these
+debug         = true      # full DWARF info
+
+# --- Development
 [profile.dev]
 opt-level = 0
-debug = true
+debug     = true
 
 [profile.dev.build-override]
 opt-level = 0

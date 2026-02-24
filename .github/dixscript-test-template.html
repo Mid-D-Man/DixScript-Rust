@@ -22,7 +22,7 @@
       padding: 5px 12px; font-size: 0.82rem; }
     .meta-item strong { color: #79c0ff; }
 
-    /* ── Summary banner ── */
+    /* ── Banner ── */
     .banner { border-radius: 8px; padding: 14px 20px; margin-bottom: 24px;
       font-weight: 600; font-size: 0.95rem; }
     .banner.pass { background: #0f2a1a; border: 1px solid #2ea043; color: #3fb950; }
@@ -43,6 +43,7 @@
       flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
     .toolbar-title { font-size: 1rem; font-weight: 700; border-left: 3px solid #79c0ff;
       padding-left: 10px; }
+    .toolbar-right { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .filter-row { display: flex; gap: 6px; flex-wrap: wrap; }
     .filter-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e;
       padding: 5px 14px; border-radius: 6px; font-size: 0.80rem; cursor: pointer;
@@ -50,11 +51,20 @@
     .filter-btn:hover { border-color: #8b949e; color: #e6edf3; }
     .filter-btn.active { border-color: #79c0ff; color: #79c0ff;
       background: rgba(121,192,255,0.1); font-weight: 600; }
+
+    /* ── Search ── */
+    .search-wrap { position: relative; }
     .search-box { background: #21262d; border: 1px solid #30363d; color: #e6edf3;
-      padding: 5px 12px; border-radius: 6px; font-size: 0.82rem; outline: none;
-      transition: border-color 0.15s; width: 220px; }
-    .search-box:focus { border-color: #79c0ff; }
+      padding: 6px 32px 6px 12px; border-radius: 6px; font-size: 0.82rem; outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s; width: 260px; }
+    .search-box:focus { border-color: #79c0ff; box-shadow: 0 0 0 3px rgba(121,192,255,0.15); }
     .search-box::placeholder { color: #484f58; }
+    .search-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: #484f58; cursor: pointer; font-size: 0.85rem;
+      display: none; padding: 2px 4px; border-radius: 3px; }
+    .search-clear:hover { color: #8b949e; }
+    .search-clear.visible { display: block; }
+    .search-count { font-size: 0.75rem; color: #484f58; white-space: nowrap; align-self: center; }
 
     /* ── Suite container ── */
     .suite { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
@@ -66,7 +76,7 @@
     .suite-chevron { color: #484f58; font-size: 0.8rem; transition: transform 0.2s;
       flex-shrink: 0; }
     .suite.open .suite-chevron { transform: rotate(90deg); }
-    .suite-name { font-weight: 700; font-size: 0.95rem; flex: 1; }
+    .suite-name { font-weight: 700; font-size: 0.95rem; flex: 1; min-width: 0; }
     .suite-badges { display: flex; gap: 6px; margin-left: auto; flex-shrink: 0; }
     .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.72rem;
       font-weight: 700; padding: 3px 8px; border-radius: 10px; }
@@ -75,6 +85,13 @@
     .badge-skip  { background: rgba(227,179,65,0.15); border: 1px solid #e3b341; color: #e3b341; }
     .badge-time  { background: #1c2128; border: 1px solid #30363d; color: #8b949e; }
 
+    /* ── Suite copy button ── */
+    .suite-copy-btn { background: none; border: 1px solid #30363d; color: #484f58;
+      padding: 3px 8px; border-radius: 5px; font-size: 0.72rem; cursor: pointer;
+      transition: all 0.15s; flex-shrink: 0; }
+    .suite-copy-btn:hover { border-color: #79c0ff; color: #79c0ff; }
+    .suite-copy-btn.copied { border-color: #3fb950; color: #3fb950; }
+
     /* ── Test table ── */
     .suite-body { display: none; border-top: 1px solid #30363d; }
     .suite.open .suite-body { display: block; }
@@ -82,16 +99,18 @@
     thead th { padding: 8px 14px; text-align: left; color: #484f58; font-size: 0.70rem;
       text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #30363d;
       background: #0d1117; }
-    tbody tr.test-row { cursor: pointer; border-bottom: 1px solid #21262d; }
+    thead th.th-actions { width: 80px; text-align: right; }
+    tbody tr.test-row { border-bottom: 1px solid #21262d; }
     tbody tr.test-row:last-of-type { border-bottom: none; }
     tbody tr.test-row:hover td { background: #1c2128; }
     td { padding: 9px 14px; vertical-align: middle; }
-    .status-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block;
-      flex-shrink: 0; }
+
+    /* ── Status indicators ── */
+    .status-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
     .dot-pass   { background: #3fb950; }
     .dot-fail   { background: #f85149; }
     .dot-ignore { background: #e3b341; }
-    .test-name-cell { display: flex; align-items: center; gap: 9px; }
+    .test-name-cell { display: flex; align-items: center; gap: 9px; cursor: pointer; }
     .test-name { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.80rem; }
     .test-time { color: #484f58; font-size: 0.75rem; white-space: nowrap; }
     .status-text { font-weight: 600; font-size: 0.80rem; }
@@ -99,22 +118,52 @@
     .status-failed  { color: #f85149; }
     .status-ignored { color: #e3b341; }
 
+    /* ── Row action buttons ── */
+    .row-actions { display: flex; gap: 5px; justify-content: flex-end; }
+    .action-btn { background: none; border: 1px solid #30363d; color: #484f58;
+      padding: 3px 8px; border-radius: 5px; font-size: 0.70rem; cursor: pointer;
+      transition: all 0.15s; white-space: nowrap; }
+    .action-btn:hover { border-color: #79c0ff; color: #79c0ff; background: rgba(121,192,255,0.05); }
+    .action-btn.copied { border-color: #3fb950 !important; color: #3fb950 !important; }
+    .action-btn.expand-btn:hover { border-color: #8b949e; color: #8b949e; }
+
     /* ── Expanded test output ── */
     tr.test-detail td { padding: 0; }
     .detail-box { background: #0d1117; border-top: 1px solid #30363d; padding: 14px 18px;
       display: none; }
     .detail-box.visible { display: block; }
+    .detail-header { display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px; }
     .detail-label { font-size: 0.70rem; text-transform: uppercase; letter-spacing: 0.6px;
-      color: #484f58; margin-bottom: 8px; }
+      color: #484f58; }
+    .detail-actions { display: flex; gap: 6px; }
+    .detail-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e;
+      padding: 4px 10px; border-radius: 5px; font-size: 0.72rem; cursor: pointer;
+      transition: all 0.15s; }
+    .detail-btn:hover { border-color: #79c0ff; color: #79c0ff; }
+    .detail-btn.copied { border-color: #3fb950; color: #3fb950; }
     .detail-output { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.75rem;
       color: #8b949e; white-space: pre-wrap; line-height: 1.6;
-      max-height: 300px; overflow-y: auto; word-break: break-all; }
+      max-height: 320px; overflow-y: auto; word-break: break-all;
+      background: #161b22; border: 1px solid #21262d; border-radius: 6px;
+      padding: 12px 14px; }
     .detail-output .panic-line  { color: #f85149; }
     .detail-output .assert-line { color: #e3b341; }
     .detail-empty { color: #484f58; font-style: italic; font-size: 0.80rem; }
 
-    /* ── Hidden row filter ── */
+    /* ── No results ── */
+    .no-results { text-align: center; padding: 32px; color: #484f58; font-size: 0.85rem; }
+
+    /* ── Hidden ── */
     tr.hidden { display: none; }
+
+    /* ── Toast ── */
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #161b22;
+      border: 1px solid #3fb950; color: #3fb950; padding: 10px 18px; border-radius: 8px;
+      font-size: 0.82rem; font-weight: 600; z-index: 9999;
+      transform: translateY(80px); opacity: 0; transition: all 0.25s ease;
+      pointer-events: none; }
+    .toast.show { transform: translateY(0); opacity: 1; }
 
     /* ── Footer ── */
     footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid #30363d;
@@ -162,33 +211,71 @@
 
   <div class="toolbar">
     <div class="toolbar-title">Test Suites</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <div class="toolbar-right">
       <div class="filter-row" id="filter-row">
-        <button class="filter-btn active" data-filter="all"    onclick="setFilter('all')">All</button>
-        <button class="filter-btn"        data-filter="passed" onclick="setFilter('passed')">Passed</button>
-        <button class="filter-btn"        data-filter="failed" onclick="setFilter('failed')">Failed</button>
-        <button class="filter-btn"        data-filter="ignored"onclick="setFilter('ignored')">Ignored</button>
+        <button class="filter-btn active" data-filter="all"     onclick="setFilter('all')">All</button>
+        <button class="filter-btn"        data-filter="passed"  onclick="setFilter('passed')">Passed</button>
+        <button class="filter-btn"        data-filter="failed"  onclick="setFilter('failed')">Failed</button>
+        <button class="filter-btn"        data-filter="ignored" onclick="setFilter('ignored')">Ignored</button>
       </div>
-      <input class="search-box" id="search-box" placeholder="🔍 Search tests…"
-             oninput="applyFilters()" />
+      <div class="search-wrap">
+        <input class="search-box" id="search-box" placeholder="🔍 Search tests…"
+               oninput="applyFilters()" />
+        <button class="search-clear" id="search-clear" onclick="clearSearch()" title="Clear">✕</button>
+      </div>
+      <span class="search-count" id="search-count"></span>
     </div>
   </div>
-  <p class="click-hint">💡 Click any test row to expand output</p>
+  <p class="click-hint">💡 Click any test row to expand output · Use copy buttons to grab test paths or output</p>
 
   <div id="suites-container"></div>
+  <div class="no-results hidden" id="no-results">No tests match your search.</div>
 
   <footer>DixScript-Rust Test Results — MidManStudio — Build #BUILD_NUM_PLACEHOLDER</footer>
 </div>
 
+<!-- Toast notification -->
+<div class="toast" id="toast"></div>
+
 <script>
 let ALL_DATA = null;
 let currentFilter = 'all';
+let currentSearch = '';
 
-// ── Formatting helpers ──────────────────────────────────────────────────────
+// ── Clipboard ────────────────────────────────────────────────────────────────
+
+async function copyText(text, btn, label = 'Copied!') {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
+  }
+  showToast(label);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = '✓ ' + msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ── Formatting ───────────────────────────────────────────────────────────────
 
 function fmtDuration(s) {
-  if (s < 1)   return (s * 1000).toFixed(0) + 'ms';
-  if (s < 60)  return s.toFixed(2) + 's';
+  if (s < 1)  return (s * 1000).toFixed(0) + 'ms';
+  if (s < 60) return s.toFixed(2) + 's';
   return Math.floor(s / 60) + 'm ' + (s % 60).toFixed(0) + 's';
 }
 
@@ -206,12 +293,11 @@ function highlightOutput(text) {
     .replace(/(assertion.*failed.*)/g,  '<span class="assert-line">$1</span>');
 }
 
-// ── Render ──────────────────────────────────────────────────────────────────
+// ── Render ───────────────────────────────────────────────────────────────────
 
 function renderAll(data) {
   ALL_DATA = data;
 
-  // Banner
   const banner = document.getElementById('banner');
   const allPass = data.summary.failed === 0;
   banner.className = 'banner ' + (allPass ? 'pass' : 'fail');
@@ -219,7 +305,6 @@ function renderAll(data) {
     ? `✅ All ${data.summary.passed} tests passed`
     : `❌ ${data.summary.failed} test(s) FAILED — ${data.summary.passed} passed`;
 
-  // Stats
   document.getElementById('s-total').textContent   = data.summary.total;
   document.getElementById('s-passed').textContent  = data.summary.passed;
   document.getElementById('s-failed').textContent  = data.summary.failed;
@@ -227,7 +312,6 @@ function renderAll(data) {
   document.getElementById('s-suites').textContent  = data.suites.length;
   document.getElementById('s-duration').textContent = fmtDuration(data.summary.duration_s || 0);
 
-  // Suites
   const container = document.getElementById('suites-container');
   container.innerHTML = '';
   data.suites.forEach((suite, si) => {
@@ -254,14 +338,17 @@ function buildSuite(suite, si) {
       <span class="suite-chevron">▶</span>
       <span class="suite-name">${suite.name}</span>
       <div class="suite-badges">${passedBadge}${failedBadge}${skipBadge}${timeBadge}</div>
+      <button class="suite-copy-btn" title="Copy all test names in this suite"
+        onclick="event.stopPropagation(); copySuite(${si})">⎘ Copy suite</button>
     </div>
     <div class="suite-body">
       <table>
         <thead>
           <tr>
-            <th style="width:60%">Test Name</th>
+            <th style="width:55%">Test Name</th>
             <th>Status</th>
             <th>Duration</th>
+            <th class="th-actions">Actions</th>
           </tr>
         </thead>
         <tbody id="tbody-${si}"></tbody>
@@ -270,8 +357,6 @@ function buildSuite(suite, si) {
 
   const tbody = div.querySelector(`#tbody-${si}`);
   (suite.tests || []).forEach((test, ti) => {
-    const rowId  = `test-${si}-${ti}`;
-    const detId  = `det-${si}-${ti}`;
     const dotCls = test.status === 'passed' ? 'dot-pass'
                  : test.status === 'failed'  ? 'dot-fail' : 'dot-ignore';
     const stCls  = `status-${test.status}`;
@@ -280,32 +365,50 @@ function buildSuite(suite, si) {
 
     const mainTr = document.createElement('tr');
     mainTr.className = 'test-row';
-    mainTr.id = rowId;
     mainTr.dataset.status = test.status;
     mainTr.dataset.name   = (test.name || '').toLowerCase();
     mainTr.innerHTML = `
-      <td><div class="test-name-cell">
-        <div class="status-dot ${dotCls}"></div>
-        <span class="test-name">${test.name}</span>
-      </div></td>
+      <td>
+        <div class="test-name-cell" onclick="toggleDetail(${si},${ti})">
+          <div class="status-dot ${dotCls}"></div>
+          <span class="test-name">${test.name}</span>
+        </div>
+      </td>
       <td><span class="${stCls} status-text">${stTxt}</span></td>
-      <td class="test-time">${fmtMs(test.duration_ms)}</td>`;
+      <td class="test-time">${fmtMs(test.duration_ms)}</td>
+      <td>
+        <div class="row-actions">
+          <button class="action-btn" title="Copy test path"
+            onclick="copyText('${escAttr(test.name)}', this, 'Test path copied')">⎘ Path</button>
+          <button class="action-btn expand-btn" title="Expand output"
+            onclick="toggleDetail(${si},${ti})">↕ Output</button>
+        </div>
+      </td>`;
 
     const detTr = document.createElement('tr');
     detTr.className = 'test-detail';
-    detTr.id = detId;
     detTr.dataset.status = test.status;
     detTr.dataset.name   = (test.name || '').toLowerCase();
 
     const output = (test.output || '').trim();
-    detTr.innerHTML = `<td colspan="3"><div class="detail-box" id="box-${si}-${ti}">
-      <div class="detail-label">Output</div>
-      ${output
-        ? `<div class="detail-output">${highlightOutput(output)}</div>`
-        : `<div class="detail-empty">No output captured</div>`}
-    </div></td>`;
+    const copyOutputBtn = output
+      ? `<button class="detail-btn" onclick="copyText(${JSON.stringify(output)}, this, 'Output copied')">⎘ Copy output</button>`
+      : '';
+    const copyAllBtn = `<button class="detail-btn"
+      onclick="copyText(${JSON.stringify(formatTestReport(test))}, this, 'Full report copied')">⎘ Copy report</button>`;
 
-    mainTr.addEventListener('click', () => toggleDetail(si, ti));
+    detTr.innerHTML = `<td colspan="4">
+      <div class="detail-box" id="box-${si}-${ti}">
+        <div class="detail-header">
+          <div class="detail-label">Output — ${test.name}</div>
+          <div class="detail-actions">${copyOutputBtn}${copyAllBtn}</div>
+        </div>
+        ${output
+          ? `<div class="detail-output">${highlightOutput(output)}</div>`
+          : `<div class="detail-empty">No output captured</div>`}
+      </div>
+    </td>`;
+
     tbody.appendChild(mainTr);
     tbody.appendChild(detTr);
   });
@@ -313,11 +416,31 @@ function buildSuite(suite, si) {
   return div;
 }
 
-// ── Toggle / filter ─────────────────────────────────────────────────────────
+// ── Copy helpers ─────────────────────────────────────────────────────────────
+
+function escAttr(s) {
+  return s.replace(/'/g, "\\'");
+}
+
+function formatTestReport(test) {
+  let out = `Test: ${test.name}\nStatus: ${test.status}`;
+  if (test.duration_ms) out += `\nDuration: ${fmtMs(test.duration_ms)}`;
+  if (test.output && test.output.trim()) out += `\n\nOutput:\n${test.output.trim()}`;
+  return out;
+}
+
+function copySuite(si) {
+  const suite = ALL_DATA.suites[si];
+  const lines = (suite.tests || []).map(t => `${t.status.padEnd(7)} ${t.name}`);
+  const text  = `Suite: ${suite.name}\n${'─'.repeat(60)}\n${lines.join('\n')}`;
+  const btn   = document.querySelector(`.suite[data-suite="${si}"] .suite-copy-btn`);
+  copyText(text, btn, 'Suite copied');
+}
+
+// ── Toggle / filter ──────────────────────────────────────────────────────────
 
 function toggleSuite(header) {
-  const suite = header.closest('.suite');
-  suite.classList.toggle('open');
+  header.closest('.suite').classList.toggle('open');
 }
 
 function toggleDetail(si, ti) {
@@ -325,51 +448,65 @@ function toggleDetail(si, ti) {
   if (box) box.classList.toggle('visible');
 }
 
-let currentFilterState = 'all';
-let currentSearch = '';
-
 function setFilter(f) {
-  currentFilterState = f;
-  document.querySelectorAll('.filter-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.filter === f);
-  });
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.filter === f));
+  applyFilters();
+}
+
+function clearSearch() {
+  document.getElementById('search-box').value = '';
+  document.getElementById('search-clear').classList.remove('visible');
+  currentSearch = '';
   applyFilters();
 }
 
 function applyFilters() {
   currentSearch = document.getElementById('search-box').value.toLowerCase().trim();
+  const clearBtn = document.getElementById('search-clear');
+  clearBtn.classList.toggle('visible', currentSearch.length > 0);
+
+  let visible = 0, total = 0;
+
   document.querySelectorAll('.test-row').forEach(row => {
     const status = row.dataset.status;
     const name   = row.dataset.name || '';
-    const filterOk = currentFilterState === 'all' || status === currentFilterState;
+    const filterOk = currentFilter === 'all' || status === currentFilter;
     const searchOk = !currentSearch || name.includes(currentSearch);
-    const hidden   = !(filterOk && searchOk);
-    row.classList.toggle('hidden', hidden);
-    // Also hide the corresponding detail row
+    const hide = !(filterOk && searchOk);
+    row.classList.toggle('hidden', hide);
     const detRow = row.nextElementSibling;
-    if (detRow && detRow.classList.contains('test-detail')) {
-      detRow.classList.toggle('hidden', hidden);
-    }
+    if (detRow && detRow.classList.contains('test-detail'))
+      detRow.classList.toggle('hidden', hide);
+    if (!hide) visible++;
+    total++;
   });
 
-  // Auto-expand suites that have matching visible tests
-  if (currentSearch || currentFilterState !== 'all') {
+  // Update search count
+  const countEl = document.getElementById('search-count');
+  if (currentSearch || currentFilter !== 'all') {
+    countEl.textContent = `${visible} / ${total} tests`;
+  } else {
+    countEl.textContent = '';
+  }
+
+  // Auto-expand suites with matches
+  if (currentSearch || currentFilter !== 'all') {
     document.querySelectorAll('.suite').forEach(suite => {
-      const visibleTests = suite.querySelectorAll('.test-row:not(.hidden)');
-      if (visibleTests.length > 0) {
-        suite.classList.add('open');
-      }
+      const vis = suite.querySelectorAll('.test-row:not(.hidden)');
+      if (vis.length > 0) suite.classList.add('open');
     });
   }
+
+  // No results message
+  document.getElementById('no-results').classList.toggle('hidden', visible > 0);
 }
 
-// ── Fetch & init ─────────────────────────────────────────────────────────────
+// ── Fetch ─────────────────────────────────────────────────────────────────────
 
 fetch('test-results.json')
-  .then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  })
+  .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
   .then(data => renderAll(data))
   .catch(err => {
     const banner = document.getElementById('banner');
@@ -380,7 +517,7 @@ fetch('test-results.json')
         padding:24px;text-align:center;color:#8b949e;">
         <p>Could not load test results data.</p>
         <p style="margin-top:8px;font-size:0.80rem">
-          Run the publish workflow to generate results: commit with <code>--publish-tests</code>
+          Run the publish workflow to generate results.
         </p>
       </div>`;
   });

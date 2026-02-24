@@ -58,7 +58,7 @@ jobs:
           echo "run_flame=$F"  >> $GITHUB_OUTPUT
           echo "Tests=$T  Bench=$B  Flame=$F"
 
-  # ── 2. Run tests (FIXED: non-blocking) ─────────────────────────────────────
+  # ── 2. Run tests ───────────────────────────────────────────────────────────
   run-tests:
     runs-on: ubuntu-latest
     needs: parse-trigger
@@ -89,12 +89,16 @@ jobs:
       - name: Build test binaries
         run: cargo test --no-run 2>&1
 
-      - name: "Run all tests (FIXED: continue on failure)"
+      - name: "Run all tests (continue on failure)"
         continue-on-error: true
         run: |
           set +e
-          # --color=never prevents ANSI escape codes from corrupting the output file
-          cargo test --color=never 2>&1 | tee test-raw.txt
+          # --no-fail-fast   → run ALL test binaries even if one fails
+          #                    (without this, a failing lib binary stops cargo
+          #                     before it ever reaches tests/ integration tests)
+          # -- --show-output → dump stdout for BOTH passing and failing tests
+          #                    so the HTML report can show output on every row
+          cargo test --color=never --no-fail-fast -- --show-output 2>&1 | tee test-raw.txt
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT=${TEST_EXIT_CODE}" >> $GITHUB_ENV
 
@@ -118,10 +122,7 @@ jobs:
           import re, json, os, sys
 
           # ── strip ANSI escape codes ────────────────────────────────────────
-          # Handles bold, color, cursor codes etc. that cargo/GitHub may inject
-          # even when --color=never is set at the cargo level.
           RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-
           def strip_ansi(s):
               return RE_ANSI.sub('', s)
 
@@ -140,18 +141,33 @@ jobs:
           raw  = open('test-raw.txt', encoding='utf-8', errors='replace').read()
           text = strip_ansi(raw)
 
-          # Debug: print first 20 lines (repr) so future failures are diagnosable
-          print("=== test-raw.txt preview (first 20 lines) ===")
-          for i, l in enumerate(text.splitlines()[:20], 1):
+          # Debug: print first 30 lines so failures are diagnosable in CI logs
+          print("=== test-raw.txt preview (first 30 lines) ===")
+          for i, l in enumerate(text.splitlines()[:30], 1):
               print(f"  {i:3}: {repr(l)}")
           print("==============================================")
 
-          # ── collect failure stdout snippets ────────────────────────────────
-          fail_out = {}
+          # ── collect ALL stdout blocks (successes AND failures) ─────────────
+          # With --show-output cargo emits:
+          #
+          #   successes:
+          #   ---- test_name stdout ----
+          #   <output>
+          #
+          #   failures:
+          #   ---- test_name stdout ----
+          #   <output>
+          #
+          # We capture every ---- name stdout ---- block regardless of section.
+          test_output = {}
           for m in re.finditer(
-                  r'---- ([\w:]+) stdout ----\n(.*?)(?=\n---- |\n\nfailures:|\ntest result:)',
+                  r'---- ([\w:]+(?:::\w+)*) stdout ----\n(.*?)'
+                  r'(?=\n---- |\n\n(?:successes|failures):\n|\ntest result:|\Z)',
                   text, re.DOTALL):
-              fail_out[m.group(1)] = m.group(2).strip()
+              name_key = m.group(1)
+              content  = m.group(2).strip()
+              if content:                      # skip empty captures
+                  test_output[name_key] = content
 
           # ── parse per-suite blocks ─────────────────────────────────────────
           suites    = []
@@ -159,32 +175,39 @@ jobs:
           cur_tests = []
           cur_dur   = 0.0
 
-          # "Running unittests src/lib.rs (" or "Running tests/foo.rs ("
+          # Matches both:
+          #   "Running unittests src/lib.rs ("
+          #   "Running tests/foo_tests.rs ("
           RE_RUN    = re.compile(r'Running\s+(?:unittests?\s+)?(\S+)\s+\(')
+
+          # Matches individual test result lines
           RE_TEST   = re.compile(
               r'^test\s+([\w:]+(?:::\w+)*)\s+\.\.\.\s+'
               r'(ok|FAILED|ignored)(?:\s+\(([\d.]+)s\))?'
           )
+
+          # Matches the summary line at the end of each binary's output
           RE_RESULT = re.compile(r'test result:.*?finished in ([\d.]+)s')
 
           for line in text.splitlines():
-              # ── new suite header ──
+
+              # ── new test binary header ──
               m = RE_RUN.search(line)
               if m:
                   if cur_name is not None and cur_tests:
                       suites.append(build_suite(cur_name, cur_tests, cur_dur))
                   raw_path = m.group(1)
                   base     = os.path.splitext(os.path.basename(raw_path))[0]
+                  # "lib" and "main" are the crate's own unit tests
                   cur_name  = (base + ' (unit tests)') if base in ('lib', 'main') else base
                   cur_tests = []
                   cur_dur   = 0.0
                   continue
 
-              # ── individual test result ──
+              # ── individual test result line ──
               m = RE_TEST.match(line)
               if m:
-                  # If we see test lines but never got a Running header,
-                  # create a fallback suite so nothing is lost.
+                  # Fallback suite if Running header was somehow missed
                   if cur_name is None:
                       cur_name  = 'lib (unit tests)'
                       cur_tests = []
@@ -196,11 +219,12 @@ jobs:
                       'status':      {'ok': 'passed', 'FAILED': 'failed',
                                       'ignored': 'ignored'}.get(status, 'unknown'),
                       'duration_ms': int(float(dur) * 1000) if dur else 0,
-                      'output':      fail_out.get(tname, ''),
+                      # Look up captured stdout for this test (pass OR fail)
+                      'output':      test_output.get(tname, ''),
                   })
                   continue
 
-              # ── suite summary line ──
+              # ── end-of-binary summary line ──
               m = RE_RESULT.search(line)
               if m:
                   cur_dur = float(m.group(1))
@@ -210,7 +234,7 @@ jobs:
                       cur_tests = []
                       cur_dur   = 0.0
 
-          # flush last suite if result line was missing
+          # flush last suite if the result line was missing
           if cur_name and cur_tests:
               suites.append(build_suite(cur_name, cur_tests, cur_dur))
 
@@ -241,6 +265,7 @@ jobs:
               json.dump(result, f, indent=2)
 
           print(f"Suites:{len(suites)}  Total:{total}  Passed:{passed}  Failed:{failed}")
+          print(f"Output captured for {len(test_output)} tests")
           if failed > 0:
               print("FAILED tests:")
               for s in suites:
@@ -358,16 +383,13 @@ jobs:
                   lower = to_ns(m.group(2), m.group(3))
                   mean  = to_ns(m.group(4), m.group(5))
                   upper = to_ns(m.group(6), m.group(7))
-
-                  key = f"{suite_name}/{name}"
+                  key   = f"{suite_name}/{name}"
                   if key in seen_names:
                       continue
                   seen_names.add(key)
-
                   parts      = name.rsplit('/', 1)
                   group      = parts[0] if len(parts) == 2 else suite_name
                   bench_name = parts[-1]
-
                   benches.append({
                       'suite':     suite_name,
                       'group':     group,
@@ -379,6 +401,7 @@ jobs:
                       'std_ns':    round((upper - lower) / 4, 2),
                   })
 
+          # Fallback: criterion JSON files
           if not benches:
               for est in sorted(glob.glob('target/criterion/**/**/estimates.json',
                                           recursive=True)):
@@ -414,7 +437,6 @@ jobs:
           suite_map = {}
           for b in benches:
               suite_map.setdefault(b['suite'], []).append(b)
-
           suites = [{'name': k, 'benchmarks': v} for k, v in suite_map.items()]
 
           result = {
@@ -503,13 +525,15 @@ jobs:
             local outfile=$3
             echo "--- flamegraph: $target ---"
             cargo flamegraph $kind "$target" -o "flame-output/${outfile}.svg" \
-              -- 2>/dev/null && echo "OK: $outfile" || echo "SKIP: $outfile (perf unavailable or build failed)"
+              -- 2>/dev/null \
+              && echo "OK: $outfile" \
+              || echo "SKIP: $outfile (perf unavailable or build failed)"
           }
 
-          run_flame "--bench" "throughput_benchmark" "throughput_benchmark"
-          run_flame "--bench" "lexer_throughput"      "lexer_throughput"
+          run_flame "--bench" "throughput_benchmark"       "throughput_benchmark"
+          run_flame "--bench" "lexer_throughput"           "lexer_throughput"
           run_flame "--test"  "pipeline_integration_tests" "pipeline_integration_tests"
-          run_flame "--test"  "tokenizer_tests"       "tokenizer_tests"
+          run_flame "--test"  "tokenizer_tests"            "tokenizer_tests"
 
           echo "Generated:"
           ls -lh flame-output/ || echo "(none)"

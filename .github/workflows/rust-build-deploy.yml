@@ -1,4 +1,4 @@
-name: Rust Build & Deploy (Optimized)
+name: Rust Build & Deploy (macOS Only)
 
 on:
   push:
@@ -32,12 +32,8 @@ jobs:
           fi
           
           echo "should_publish=${SHOULD_PUBLISH}" >> $GITHUB_OUTPUT
-          echo "Will publish results: ${SHOULD_PUBLISH}"
 
-  # ========================================
-  # PRIMARY: Full test suite on macOS
-  # ========================================
-  test-and-build-macos:
+  build-and-test:
     runs-on: macos-latest
     needs: parse-commit
     
@@ -64,416 +60,167 @@ jobs:
 
       - name: Display Configuration
         run: |
-          echo "=== DixScript Rust Build - macOS (Primary) ==="
+          echo "=== DixScript Rust Build ==="
           rustc --version
           cargo --version
-          echo "Build Number: ${{ github.run_number }}"
+          echo "Build #${{ github.run_number }}"
 
       - name: Check Formatting
         continue-on-error: true
-        run: |
-          echo "=== Checking Code Formatting ==="
-          cargo fmt -- --check 2>&1 | tee fmt-check.txt || echo "⚠️ Formatting issues found"
+        run: cargo fmt -- --check 2>&1 | tee fmt-check.txt
 
-      - name: Run Clippy (Linter)
+      - name: Run Clippy
+        continue-on-error: true
+        run: cargo clippy --all-targets --all-features -- -D warnings 2>&1 | tee clippy.txt
+
+      - name: Build Debug
+        run: cargo build --verbose 2>&1 | tee build-debug.txt
+
+      - name: Build Release
+        run: cargo build --release --verbose 2>&1 | tee build-release.txt
+
+      - name: Run Tests
         continue-on-error: true
         run: |
-          echo "=== Running Clippy Linter ==="
-          cargo clippy --all-targets --all-features -- -D warnings 2>&1 | tee clippy.txt || echo "⚠️ Clippy warnings found"
-
-      - name: Build (Debug)
-        run: |
-          echo "=== Building Debug ==="
-          cargo build --verbose 2>&1 | tee build-debug.txt
-
-      - name: Build (Release)
-        run: |
-          echo "=== Building Release ==="
-          cargo build --release --verbose 2>&1 | tee build-release.txt
-
-      - name: Run Full Test Suite
-        continue-on-error: true
-        run: |
-          echo "=== Running All Tests ==="
           set +e
           cargo test --verbose 2>&1 | tee test-results.txt
           TEST_EXIT_CODE=$?
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
-          
-          if [ $TEST_EXIT_CODE -ne 0 ]; then
-            echo "⚠️ Some tests failed (exit code ${TEST_EXIT_CODE})"
-            echo "This is OK - workflow continues"
-          else
-            echo "✅ All tests passed!"
-          fi
           exit 0
 
       - name: Run Benchmarks (Dry Run)
         continue-on-error: true
-        run: |
-          echo "=== Running Benchmark Dry Run ==="
-          cargo bench --no-run 2>&1 | tee bench-build.txt || true
+        run: cargo bench --no-run 2>&1 | tee bench-build.txt
 
-      - name: Generate Build Report
+      - name: Generate Report
         if: always()
         run: |
           mkdir -p build-reports
           
-          # Determine test status
           TEST_STATUS="✅ PASSED"
-          if [ "${TEST_EXIT_CODE:-0}" -ne 0 ]; then
-            TEST_STATUS="❌ FAILED (${TEST_EXIT_CODE} tests)"
-          fi
+          [ "${TEST_EXIT_CODE:-0}" -ne 0 ] && TEST_STATUS="⚠️ FAILED"
           
-          cat > build-reports/report-macos.html << 'EOFREPORT'
+          cat > build-reports/report.html << 'EOF'
           <!DOCTYPE html>
           <html>
           <head>
-              <title>DixScript Rust Build Report - macOS</title>
+              <title>DixScript Build #${{ github.run_number }}</title>
               <style>
-                  body { 
-                      font-family: 'Segoe UI', system-ui, sans-serif; 
-                      margin: 20px; 
-                      background: #f5f5f5; 
-                  }
-                  .container { 
-                      max-width: 1200px; 
-                      margin: 0 auto; 
-                      background: white; 
-                      padding: 30px; 
-                      border-radius: 8px; 
-                      box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
-                  }
-                  h1 { 
-                      color: #2c3e50; 
-                      border-bottom: 3px solid #3498db; 
-                      padding-bottom: 10px; 
-                  }
-                  h2 { 
-                      color: #34495e; 
-                      margin-top: 30px; 
-                      border-left: 4px solid #3498db; 
-                      padding-left: 10px; 
-                  }
-                  .info { 
-                      background: #ecf0f1; 
-                      padding: 15px; 
-                      border-radius: 5px; 
-                      margin: 20px 0; 
-                  }
-                  .info-item { margin: 5px 0; }
-                  .info-label { font-weight: bold; color: #2c3e50; }
-                  pre { 
-                      background: #2c3e50; 
-                      color: #ecf0f1; 
-                      padding: 15px; 
-                      border-radius: 5px; 
-                      overflow-x: auto; 
-                      max-height: 500px;
-                      overflow-y: auto;
-                  }
-                  .success { color: #27ae60; font-weight: bold; }
-                  .warning { color: #f39c12; font-weight: bold; }
-                  .error { color: #e74c3c; font-weight: bold; }
-                  .section { 
-                      margin: 20px 0; 
-                      padding: 20px; 
-                      background: #f8f9fa; 
-                      border-radius: 5px; 
-                  }
+                  body { font-family: system-ui; margin: 20px; background: #f5f5f5; }
+                  .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; }
+                  h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+                  h2 { color: #34495e; margin-top: 30px; border-left: 4px solid #3498db; padding-left: 10px; }
+                  .info { background: #ecf0f1; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                  pre { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; overflow-x: auto; max-height: 500px; overflow-y: auto; }
+                  .section { margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 5px; }
               </style>
           </head>
           <body>
               <div class="container">
-                  <h1>🦀 DixScript Rust Build Report - macOS (Primary)</h1>
-          
+                  <h1>🦀 DixScript Rust Build Report</h1>
                   <div class="info">
-                      <div class="info-item"><span class="info-label">Platform:</span> macOS (Primary Development)</div>
-                      <div class="info-item"><span class="info-label">Build Number:</span> ${{ github.run_number }}</div>
-                      <div class="info-item"><span class="info-label">Branch:</span> ${{ github.ref_name }}</div>
-                      <div class="info-item"><span class="info-label">Commit:</span> ${{ github.sha }}</div>
-                      <div class="info-item"><span class="info-label">Test Status:</span> ${TEST_STATUS}</div>
+                      <div><strong>Build:</strong> #${{ github.run_number }}</div>
+                      <div><strong>Branch:</strong> ${{ github.ref_name }}</div>
+                      <div><strong>Commit:</strong> ${{ github.sha }}</div>
+                      <div><strong>Platform:</strong> macOS</div>
+                      <div><strong>Tests:</strong> ${TEST_STATUS}</div>
                   </div>
-          
+                  
                   <div class="section">
-                      <h2>📋 Clippy (Linter) Results</h2>
+                      <h2>📋 Clippy</h2>
                       <pre>
-          EOFREPORT
-          
-          cat clippy.txt 2>/dev/null >> build-reports/report-macos.html || echo "No clippy output" >> build-reports/report-macos.html
-          
-          cat >> build-reports/report-macos.html << 'EOFREPORT'
+          EOF
+          cat clippy.txt >> build-reports/report.html
+          cat >> build-reports/report.html << 'EOF'
                       </pre>
                   </div>
-          
+                  
                   <div class="section">
-                      <h2>✅ Test Results (Full Suite)</h2>
+                      <h2>✅ Tests</h2>
                       <pre>
-          EOFREPORT
-          
-          cat test-results.txt 2>/dev/null >> build-reports/report-macos.html || echo "No test output" >> build-reports/report-macos.html
-          
-          cat >> build-reports/report-macos.html << 'EOFREPORT'
+          EOF
+          cat test-results.txt >> build-reports/report.html
+          cat >> build-reports/report.html << 'EOF'
                       </pre>
                   </div>
-          
+                  
                   <div class="section">
-                      <h2>🚀 Release Build</h2>
+                      <h2>🚀 Build</h2>
                       <pre>
-          EOFREPORT
-          
-          head -n 100 build-release.txt 2>/dev/null >> build-reports/report-macos.html || echo "No build output" >> build-reports/report-macos.html
-          
-          cat >> build-reports/report-macos.html << 'EOFREPORT'
-                      </pre>
-                  </div>
-          
-                  <div class="section">
-                      <h2>📊 Summary</h2>
-                      <pre>
-          EOFREPORT
-          
-          echo "Build Status: ✅ SUCCESS" >> build-reports/report-macos.html
-          echo "Tests: ${TEST_STATUS}" >> build-reports/report-macos.html
-          echo "Warnings: $(grep -c 'warning:' clippy.txt 2>/dev/null || echo '0')" >> build-reports/report-macos.html
-          echo "Platform: macOS (Primary)" >> build-reports/report-macos.html
-          
-          cat >> build-reports/report-macos.html << 'EOFREPORT'
+          EOF
+          head -n 100 build-release.txt >> build-reports/report.html
+          cat >> build-reports/report.html << 'EOF'
                       </pre>
                   </div>
               </div>
           </body>
           </html>
-          EOFREPORT
+          EOF
 
-      - name: Upload macOS Results
+      - name: Upload Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-results-macos-${{ github.run_number }}
+          name: build-results-${{ github.run_number }}
           path: |
             build-reports/
             *.txt
           retention-days: 30
 
-  # ========================================
-  # OPTIONAL: Quick build check on Ubuntu
-  # (Verifies Linux compatibility - no full tests)
-  # ========================================
-  build-check-ubuntu:
-    runs-on: ubuntu-latest
-    needs: parse-commit
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-
-      - name: Cache Cargo
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ubuntu-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Quick Build Check
-        run: |
-          echo "=== Ubuntu Build Check (Sanity) ==="
-          cargo build --release 2>&1 | tee ubuntu-build.txt
-          echo "✅ Build successful on Linux"
-
-      - name: Quick Test Run
-        continue-on-error: true
-        run: |
-          echo "=== Quick Test Check ==="
-          cargo test --lib 2>&1 | tee ubuntu-test.txt || echo "⚠️ Some tests failed (OK for sanity check)"
-
-      - name: Upload Ubuntu Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-results-ubuntu-${{ github.run_number }}
-          path: |
-            ubuntu-*.txt
-          retention-days: 7
-
-  # ========================================
-  # Deploy results (only if --publish flag)
-  # ========================================
   deploy-results:
     runs-on: ubuntu-latest
-    needs: [parse-commit, test-and-build-macos]
+    needs: [parse-commit, build-and-test]
     if: always() && needs.parse-commit.outputs.should_publish == 'true'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download All Artifacts
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: all-artifacts
 
-      - name: Create Deployment Package
+      - name: Create Index
         run: |
-          echo "=== Creating Deployment Package ==="
+          mkdir -p builds/build_${{ github.run_number }}
+          cp -r all-artifacts/* builds/build_${{ github.run_number }}/
           
-          BUILD_DIR="builds/build_${{ github.run_number }}"
-          mkdir -p "$BUILD_DIR"
-          
-          cp -r all-artifacts/* "$BUILD_DIR/" || true
-          
-          cat > "$BUILD_DIR/index.html" << 'EOFINDEX'
+          cat > builds/build_${{ github.run_number }}/index.html << 'EOF'
           <!DOCTYPE html>
           <html>
-          <head>
-              <title>DixScript Rust Build Results</title>
-              <style>
-                  body { 
-                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
-                      margin: 40px; 
-                      background: #f0f0f0; 
-                  }
-                  .container { 
-                      max-width: 900px; 
-                      margin: 0 auto; 
-                      background: white; 
-                      padding: 30px; 
-                      border-radius: 10px; 
-                      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                  }
-                  h1 { color: #333; margin-bottom: 10px; }
-                  .subtitle { color: #666; margin-bottom: 30px; }
-                  .platform { 
-                      margin: 20px 0; 
-                      padding: 20px; 
-                      background: #f9f9f9; 
-                      border-left: 4px solid #3498db; 
-                      border-radius: 4px;
-                  }
-                  .platform.primary {
-                      border-left-color: #27ae60;
-                      background: #e8f5e9;
-                  }
-                  .platform h3 {
-                      margin-top: 0;
-                      color: #2c3e50;
-                  }
-                  .badge {
-                      display: inline-block;
-                      padding: 4px 10px;
-                      border-radius: 12px;
-                      font-size: 0.85em;
-                      font-weight: 600;
-                      margin-left: 10px;
-                  }
-                  .badge.primary {
-                      background: #27ae60;
-                      color: white;
-                  }
-                  .badge.sanity {
-                      background: #3498db;
-                      color: white;
-                  }
-                  a { 
-                      color: #3498db; 
-                      text-decoration: none; 
-                  }
-                  a:hover { text-decoration: underline; }
-                  .meta {
-                      background: #ecf0f1;
-                      padding: 15px;
-                      border-radius: 5px;
-                      margin-bottom: 30px;
-                  }
-                  .meta-item {
-                      margin: 5px 0;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <h1>🦀 DixScript Rust - Build Results</h1>
-                  <p class="subtitle">Optimized CI - macOS Primary + Ubuntu Sanity Check</p>
-          
-                  <div class="meta">
-                      <div class="meta-item"><strong>Build Number:</strong> ${{ github.run_number }}</div>
-                      <div class="meta-item"><strong>Branch:</strong> ${{ github.ref_name }}</div>
-                      <div class="meta-item"><strong>Commit:</strong> ${{ github.sha }}</div>
-                      <div class="meta-item"><strong>Time:</strong> $(date -u)</div>
-                  </div>
-          
-                  <div class="platform primary">
-                      <h3>macOS <span class="badge primary">PRIMARY</span></h3>
-                      <p><strong>Full test suite + benchmarks</strong></p>
-          EOFINDEX
-          
-          if [ -f "$BUILD_DIR/build-results-macos-${{ github.run_number }}/build-reports/report-macos.html" ]; then
-            echo "<a href=\"build-results-macos-${{ github.run_number }}/build-reports/report-macos.html\">📊 View Full Report</a>" >> "$BUILD_DIR/index.html"
-          fi
-          
-          cat >> "$BUILD_DIR/index.html" << 'EOFINDEX'
-                  </div>
-          
-                  <div class="platform">
-                      <h3>Ubuntu <span class="badge sanity">SANITY CHECK</span></h3>
-                      <p><strong>Build verification only</strong></p>
-          EOFINDEX
-          
-          if [ -d "$BUILD_DIR/build-results-ubuntu-${{ github.run_number }}" ]; then
-            echo "<p>✅ Linux build successful</p>" >> "$BUILD_DIR/index.html"
-          fi
-          
-          cat >> "$BUILD_DIR/index.html" << 'EOFINDEX'
-                  </div>
-          
-                  <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
-                  <p style="text-align: center; color: #999; font-size: 0.9em;">
-                      Running 2 platforms instead of 3 saves ~40% CI time ⚡
-                  </p>
-              </div>
+          <head><title>DixScript Build #${{ github.run_number }}</title></head>
+          <body style="font-family: system-ui; margin: 40px;">
+              <h1>🦀 DixScript Build #${{ github.run_number }}</h1>
+              <p><strong>Branch:</strong> ${{ github.ref_name }}</p>
+              <p><strong>Commit:</strong> ${{ github.sha }}</p>
+              <p><a href="build-results-${{ github.run_number }}/build-reports/report.html">📊 View Full Report</a></p>
           </body>
           </html>
-          EOFINDEX
+          EOF
 
-      - name: Deploy to Artifacts Branch
+      - name: Deploy
         run: |
-          git config --global user.name "DixScript Rust CI"
-          git config --global user.email "ci@dixscript-rust.dev"
+          git config --global user.name "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
           
           git fetch origin artifacts || true
-          git branch -D artifacts || true
-          git push origin --delete artifacts || true
-          
           git checkout --orphan artifacts
           git rm -rf . || true
           
-          cp -r builds/build_${{ github.run_number }}/* . || true
+          cp -r builds/build_${{ github.run_number }}/* .
           
           git add .
-          git commit -m "Deploy build results - Build #${{ github.run_number }} [skip ci]"
+          git commit -m "Build #${{ github.run_number }} [skip ci]"
           git push origin artifacts --force
-          
-          echo "✅ Results deployed to artifacts branch"
 
   summary:
     runs-on: ubuntu-latest
-    needs: [parse-commit, test-and-build-macos, build-check-ubuntu]
+    needs: [build-and-test]
     if: always()
     steps:
-      - name: Build Summary
+      - name: Summary
         run: |
-          echo "=== DixScript Rust Build Summary ==="
-          echo "Primary Platform: macOS ✅"
-          echo "Sanity Check: Ubuntu ✅"
-          echo "Windows: Skipped (not needed for pure Rust)"
-          echo "Build Number: ${{ github.run_number }}"
-          echo "Published: ${{ needs.parse-commit.outputs.should_publish }}"
+          echo "=== Build Complete ==="
+          echo "Platform: macOS only"
+          echo "Build: #${{ github.run_number }}"

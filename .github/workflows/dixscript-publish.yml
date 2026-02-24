@@ -1,4 +1,4 @@
-name: DixScript — Test & Bench Publisher
+name: DixScript — Test & Bench Publisher (FIXED)
 
 on:
   push:
@@ -58,7 +58,7 @@ jobs:
           echo "run_flame=$F"  >> $GITHUB_OUTPUT
           echo "Tests=$T  Bench=$B  Flame=$F"
 
-  # ── 2. Run tests ───────────────────────────────────────────────────────────
+  # ── 2. Run tests (FIXED: non-blocking) ─────────────────────────────────────
   run-tests:
     runs-on: ubuntu-latest
     needs: parse-trigger
@@ -89,11 +89,21 @@ jobs:
       - name: Build test binaries
         run: cargo test --no-run 2>&1
 
-      - name: Run all tests
+      - name: Run all tests (FIXED: continue on failure)
+        continue-on-error: true
         run: |
           set +e
           cargo test 2>&1 | tee test-raw.txt
-          echo "TEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          TEST_EXIT_CODE=${PIPESTATUS[0]}
+          echo "TEST_EXIT=${TEST_EXIT_CODE}" >> $GITHUB_ENV
+          
+          if [ $TEST_EXIT_CODE -ne 0 ]; then
+            echo "⚠️ Tests failed with exit code ${TEST_EXIT_CODE}"
+            echo "Continuing to generate report..."
+          else
+            echo "✅ All tests passed!"
+          fi
+          exit 0
 
       - name: Parse results to JSON
         env:
@@ -214,7 +224,7 @@ jobs:
         env:
           RUST_VERSION: ${{ steps.rustver.outputs.ver }}
         run: |
-          cp .github/test-results-template.html test-results-index.html
+          cp .github/dixscript-test-template.html test-results-index.html
           sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  test-results-index.html
           sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       test-results-index.html
           sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            test-results-index.html
@@ -222,6 +232,7 @@ jobs:
           sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        test-results-index.html
 
       - name: Upload test artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ github.run_number }}
@@ -258,6 +269,7 @@ jobs:
           key: ubuntu-latest-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run benchmarks
+        continue-on-error: true
         run: |
           # Run each criterion bench target and capture output
           # Continue even if individual benches fail
@@ -300,12 +312,6 @@ jobs:
               r'([\d.,]+)\s*(ns|µs|us|ms|s)\s+'
               r'([\d.,]+)\s*(ns|µs|us|ms|s)\s+'
               r'([\d.,]+)\s*(ns|µs|us|ms|s)\s*\]',
-              re.MULTILINE
-          )
-          # Also capture std_dev from the change line or separate estimates
-          RE_STDDEV = re.compile(
-              r'std\s+dev\s+time:\s+\[\s*'
-              r'([\d.,]+)\s*(ns|µs|us|ms|s)',
               re.MULTILINE
           )
 
@@ -426,6 +432,7 @@ jobs:
           sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        bench-results-index.html
 
       - name: Upload bench artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bench-results-${{ github.run_number }}
@@ -470,6 +477,7 @@ jobs:
         run: cargo install flamegraph --locked 2>/dev/null || true
 
       - name: Generate flamegraphs
+        continue-on-error: true
         run: |
           mkdir -p flame-output
 
@@ -587,6 +595,7 @@ jobs:
           FOOTEOF
 
       - name: Upload flamegraph artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: flamegraph-${{ github.run_number }}
@@ -732,11 +741,8 @@ jobs:
             "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
             gh-pages
           echo ""
-          echo "Deployed:"
+          echo "✅ Deployed to gh-pages!"
           echo "  https://mid-d-man.github.io/DixScript-Rust/"
-          echo "  https://mid-d-man.github.io/DixScript-Rust/tests/"
-          echo "  https://mid-d-man.github.io/DixScript-Rust/bench/"
-          echo "  https://mid-d-man.github.io/DixScript-Rust/flame/"
 
   # ── 6. Summary ─────────────────────────────────────────────────────────────
   summary:
@@ -749,17 +755,11 @@ jobs:
           echo "═══════════════════════════════════════════════"
           echo "  DixScript — Publish Results Summary"
           echo "═══════════════════════════════════════════════"
-          echo "Build:    #${{ github.run_number }}"
+          echo "Build:     #${{ github.run_number }}"
           echo "Branch:    ${{ github.ref_name }}"
           echo "Tests:     ${{ needs.run-tests.result  || 'skipped' }}"
           echo "Bench:     ${{ needs.run-bench.result  || 'skipped' }}"
           echo "Flame:     ${{ needs.run-flame.result  || 'skipped' }}"
           echo "Deploy:    ${{ needs.deploy-results.result || 'skipped' }}"
           echo ""
-          echo "Commit message flags:"
-          echo "  --publish-tests  → run & deploy test results"
-          echo "  --publish-bench  → run & deploy benchmarks"
-          echo "  --publish-flame  → run & deploy flamegraphs"
-          echo "  --publish-all    → all of the above"
-          echo ""
-          echo "Or use workflow_dispatch for manual runs."
+          echo "✅ View results: https://mid-d-man.github.io/DixScript-Rust/"

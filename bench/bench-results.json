@@ -1,0 +1,102 @@
+{
+  "build": "13",
+  "branch": "master",
+  "commit": "336c3c4d",
+  "date": "2026-02-24T18:35:43+01:00",
+  "summary": {
+    "total": 8,
+    "suites": 2
+  },
+  "suites": [
+    {
+      "name": "throughput_benchmark",
+      "benchmarks": [
+        {
+          "suite": "throughput_benchmark",
+          "group": "lexer_throughput",
+          "name": "small_file",
+          "full_name": "throughput_benchmark/lexer_throughput/small_file",
+          "lower_ns": 161060.0,
+          "mean_ns": 161300.0,
+          "upper_ns": 161630.0,
+          "std_ns": 142.5
+        },
+        {
+          "suite": "throughput_benchmark",
+          "group": "lexer_throughput",
+          "name": "large_synthetic",
+          "full_name": "throughput_benchmark/lexer_throughput/large_synthetic",
+          "lower_ns": 3607900.0,
+          "mean_ns": 3613100.0,
+          "upper_ns": 3618900.0,
+          "std_ns": 2750.0
+        }
+      ]
+    },
+    {
+      "name": "lexer_throughput",
+      "benchmarks": [
+        {
+          "suite": "lexer_throughput",
+          "group": "lexer_performance",
+          "name": "real_mdix_file",
+          "full_name": "lexer_throughput/lexer_performance/real_mdix_file",
+          "lower_ns": 161530.0,
+          "mean_ns": 161780.0,
+          "upper_ns": 161990.0,
+          "std_ns": 115.0
+        },
+        {
+          "suite": "lexer_throughput",
+          "group": "lexer_performance",
+          "name": "small_10kb",
+          "full_name": "lexer_throughput/lexer_performance/small_10kb",
+          "lower_ns": 179210.0,
+          "mean_ns": 179400.0,
+          "upper_ns": 179580.0,
+          "std_ns": 92.5
+        },
+        {
+          "suite": "lexer_throughput",
+          "group": "lexer_performance",
+          "name": "medium_100kb",
+          "full_name": "lexer_throughput/lexer_performance/medium_100kb",
+          "lower_ns": 1787500.0,
+          "mean_ns": 1789200.0,
+          "upper_ns": 1790800.0,
+          "std_ns": 825.0
+        },
+        {
+          "suite": "lexer_throughput",
+          "group": "lexer_performance",
+          "name": "large_1mb",
+          "full_name": "lexer_throughput/lexer_performance/large_1mb",
+          "lower_ns": 17860000.0,
+          "mean_ns": 17981000.0,
+          "upper_ns": 18154000.0,
+          "std_ns": 73500.0
+        },
+        {
+          "suite": "lexer_throughput",
+          "group": "lexer_performance",
+          "name": "string_heavy",
+          "full_name": "lexer_throughput/lexer_performance/string_heavy",
+          "lower_ns": 974270.0,
+          "mean_ns": 975610.0,
+          "upper_ns": 976920.0,
+          "std_ns": 662.5
+        },
+        {
+          "suite": "lexer_throughput",
+          "group": "lexer_performance",
+          "name": "comment_heavy",
+          "full_name": "lexer_throughput/lexer_performance/comment_heavy",
+          "lower_ns": 1068100.0,
+          "mean_ns": 1069400.0,
+          "upper_ns": 1071000.0,
+          "std_ns": 725.0
+        }
+      ]
+    }
+  ]
+}

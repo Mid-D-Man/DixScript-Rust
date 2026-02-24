@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript Flamegraphs — Build #13</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117; color: #e6edf3; padding: 32px 24px; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    header { border-bottom: 2px solid #a371f7; padding-bottom: 16px; margin-bottom: 24px; }
+    header h1 { font-size: 1.7rem; color: #a371f7; }
+    .meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+    .meta-item { background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      padding: 5px 12px; font-size: 0.82rem; }
+    .meta-item strong { color: #79c0ff; }
+    .back-link { display: inline-flex; align-items: center; gap: 6px; color: #8b949e;
+      font-size: 0.80rem; text-decoration: none; margin-bottom: 14px;
+      padding: 5px 12px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; }
+    .card { background: #161b22; border: 1px solid #30363d;
+      border-radius: 8px; margin-bottom: 18px; overflow: hidden; }
+    .card-header { padding: 14px 18px; border-bottom: 1px solid #30363d;
+      display: flex; align-items: center; gap: 10px; }
+    .card-header h2 { font-size: 0.95rem; font-weight: 700; }
+    .card-header p { font-size: 0.80rem; color: #8b949e; margin-left: auto; }
+    .card-body iframe { width: 100%; height: 520px; border: none; background: white; }
+    .no-graph { padding: 28px; text-align: center; color: #484f58; font-size: 0.85rem; }
+    footer { margin-top: 32px; border-top: 1px solid #30363d;
+      padding-top: 14px; color: #484f58; font-size: 0.76rem; text-align: center; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <a class="back-link" href="../tests/">← Test Results</a>
+  <header>
+    <h1>🔥 DixScript — Flamegraphs</h1>
+    <div class="meta">
+      <div class="meta-item"><strong>Build:</strong> #13</div>
+      <div class="meta-item"><strong>Branch:</strong> master</div>
+      <div class="meta-item"><strong>Commit:</strong> 336c3c4d</div>
+      <div class="meta-item"><strong>Date:</strong> Tue Feb 24 17:43:26 UTC 2026</div>
+    </div>
+  </header>
+  <div class="card">
+    <div class="card-header">
+      <h2>🔥 lexer_throughput</h2>
+      <p>Click frames to zoom · Right-click to reset · Scroll to pan</p>
+    </div>
+    <div class="card-body">
+      <iframe src="lexer_throughput.svg" title="lexer_throughput flamegraph"></iframe>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <h2>🔥 throughput_benchmark</h2>
+      <p>Click frames to zoom · Right-click to reset · Scroll to pan</p>
+    </div>
+    <div class="card-body">
+      <iframe src="throughput_benchmark.svg" title="throughput_benchmark flamegraph"></iframe>
+    </div>
+  </div>
+  <footer>DixScript-Rust Flamegraphs — MidManStudio — Build #13</footer>
+</div>
+</body>
+</html>

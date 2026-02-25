@@ -1,19 +1,9 @@
 use std::fmt;
 
 // =============================================================================
-// SectionId — zero-cost Copy replacement for Option<String> section tracking
-//
-// MIGRATION NOTE for parser/analyzer callers:
-//   OLD: token.section.as_deref() == Some("DATA")  =>  token.section == SectionId::Data
-//   OLD: token.section.clone()                      =>  token.section   (Copy, free)
-//   OLD: token.section.is_some()                    =>  token.section.is_some()
-//   OLD: token.section.as_deref().unwrap_or("")     =>  token.section.as_str()
+// SectionId
 // =============================================================================
 
-/// Identifies which top-level section a token was scanned inside.
-///
-/// `Copy` + no heap allocation — replaces `Option<String>` in `Token`.
-/// Matching is exhaustive at compile time (no stringly-typed section names).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SectionId {
     #[default]
@@ -28,7 +18,6 @@ pub enum SectionId {
 }
 
 impl SectionId {
-    /// `&'static str` name of the section, or `""` for `None`.
     #[inline]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -43,7 +32,6 @@ impl SectionId {
         }
     }
 
-    /// `Some(&'static str)` when inside a section, `None` otherwise.
     #[inline]
     pub const fn to_option(self) -> Option<&'static str> {
         match self {
@@ -53,16 +41,11 @@ impl SectionId {
     }
 
     #[inline]
-    pub const fn is_some(self) -> bool {
-        !matches!(self, SectionId::None)
-    }
+    pub const fn is_some(self) -> bool { !matches!(self, SectionId::None) }
 
     #[inline]
-    pub const fn is_none(self) -> bool {
-        matches!(self, SectionId::None)
-    }
+    pub const fn is_none(self) -> bool { matches!(self, SectionId::None) }
 
-    /// Parse from the `&'static str` returned by `TokenType::get_section_context`.
     #[inline]
     pub fn from_context_str(s: &str) -> Self {
         match s {
@@ -89,56 +72,140 @@ impl fmt::Display for SectionId {
 // =============================================================================
 
 /// Token types for DixScript v1.0.0
+///
+/// ## Lifetime design
+/// Variants whose string content is always one of a fixed compile-time-known
+/// set — keywords, operator spellings, data-type names — now hold
+/// `&'static str`.  No heap allocation, no `.clone()`, `Copy`-compatible
+/// for those variants.
+///
+/// Variants whose string content comes from *user source* (identifiers,
+/// string literals, comments, error text, etc.) keep `String` (owned),
+/// because their content is not known until scan time.
+///
+/// ### Parser migration note
+/// Match arms that previously bound `k: String` and called `k.as_str()`
+/// must be updated to `k: &'static str` and use `k` / `*k` directly:
+///   `TokenType::Keyword(k) if k.as_str() == "if"` →
+///   `TokenType::Keyword(k) if *k == "if"`          (or just `k == "if"`)
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenType {
-    // Core primitive types
-    Keyword(String),        // NOTE: String kept intentionally for parser compat.
-    Identifier(String),
-    Integer(i32),
-    Float(f32),
-    Double(f64),
-    ScientificNotation(f64),
-    String(String),
-    Bool(bool),
+    // -----------------------------------------------------------------------
+    // Static-string variants — content is always a compile-time constant
+    // -----------------------------------------------------------------------
 
-    // Enhanced string types
-    InterpolatedString(String),
+    /// A language keyword.  Always one of the fixed keyword strings.
+    /// e.g. "if", "return", "let", "int", "null" …
+    Keyword(&'static str),
+
+    /// A multi-character symbol that is not one of the typed operator
+    /// categories below, and whose spelling is compile-time fixed.
+    MultiCharSymbol(&'static str),
+
+    /// Arithmetic operator: "+", "-", "*", "/", "%", "**", "++", "--", "%%", "%&", "&%"
+    ArithmeticOp(&'static str),
+
+    /// Arithmetic-assignment operator: "+=", "-=", "*=", "/=", "%=", "**="
+    ArithmeticAssignOp(&'static str),
+
+    /// Comparison operator: "==", "!=", "<", ">", "<=", ">="
+    ComparisonOp(&'static str),
+
+    /// Logical operator: "&&", "||"
+    LogicalOp(&'static str),
+
+    /// Bitwise operator: "&", "|", "^", "~", "<<", ">>", …
+    BitwiseOp(&'static str),
+
+    /// A `<type>` annotation keyword: "int", "float", "string", …
+    /// Kept separate from Keyword so the parser can distinguish annotation
+    /// context from control-flow context cheaply.
+    DataType(&'static str),
+
+    // -----------------------------------------------------------------------
+    // Core primitive types — content comes from user source
+    // -----------------------------------------------------------------------
+
+    /// User-defined identifier.  Source-derived — owned String.
+    Identifier(String),
+
+    /// A 32-bit signed integer literal.
+    Integer(i32),
+
+    /// A 32-bit float literal (ends with `f` / `F` suffix).
+    Float(f32),
+
+    /// A 64-bit double literal (no suffix).
+    Double(f64),
+
+    /// A number in scientific notation without `f` suffix → f64.
+    ScientificNotation(f64),
+
+    /// A double-quoted string literal.  Source-derived.
+    String(String),
+
+    /// A single-quoted string literal.  Source-derived.
     StringSingle(String),
 
-    // Symbols and operators
-    Symbol(char),
-    MultiCharSymbol(String),
+    /// A `$"..."` interpolated string (QUICKFUNCS / advanced sections).
+    InterpolatedString(String),
 
-    // Special data types
+    /// A boolean literal — always `true` or `false`.
+    Bool(bool),
+
+    // -----------------------------------------------------------------------
+    // Symbols
+    // -----------------------------------------------------------------------
+
+    /// A single punctuation character that is not an operator.
+    Symbol(char),
+
+    // -----------------------------------------------------------------------
+    // Special data types — source-derived strings
+    // -----------------------------------------------------------------------
+
+    /// A `#RGB` / `#RRGGBB` / `#RGBA` / `#RRGGBBAA` colour literal.
     HexColor(String),
+
+    /// A hex *integer* literal (`0xFF`).  Stored as the numeric value.
     HexLiteral(i32),
+
+    /// A `YYYY-MM-DD` date literal.
     Date(String),
+
+    /// A `YYYY-MM-DDThh:mm:ssZ` / `±HH:MM` timestamp literal.
     Timestamp(String),
 
-    // Table/Group syntax tokens
+    // -----------------------------------------------------------------------
+    // Table / group syntax
+    // -----------------------------------------------------------------------
+
     TablePath(String),
     DoubleColon,
     Arrow,
     SwitchCase,
 
-    // Function and control flow tokens
+    // -----------------------------------------------------------------------
+    // Function / control-flow markers
+    // -----------------------------------------------------------------------
+
     FunctionPrefix,
     ControlFlowColon,
 
-    // Prefixed constructor tokens
+    // -----------------------------------------------------------------------
+    // Prefixed constructors — value field currently always ""
+    // (kept as String for forward compatibility; parser owns the content)
+    // -----------------------------------------------------------------------
+
     PrefixedConstructor { prefix: String, value: String },
     BlobConstructor(String),
     TupleConstructor(String),
     RegexConstructor(String),
 
-    // Operator categories
-    ArithmeticOp(String),
-    ArithmeticAssignOp(String),
-    ComparisonOp(String),
-    LogicalOp(String),
-    BitwiseOp(String),
+    // -----------------------------------------------------------------------
+    // Section keywords — unit variants, no payload
+    // -----------------------------------------------------------------------
 
-    // Section keywords
     SectionConfig,
     SectionImports,
     SectionDLM,
@@ -147,51 +214,59 @@ pub enum TokenType {
     SectionData,
     SectionSecurity,
 
-    // Access and scope tokens
+    // -----------------------------------------------------------------------
+    // Access / scope — source-derived
+    // -----------------------------------------------------------------------
+
     ConfigAccess(String),
     EnumAccess { enum_name: String, value: String },
     ObjectAccess(Vec<String>),
     ScopeDeclaration(String),
 
-    // Built-in function categories
+    // -----------------------------------------------------------------------
+    // Built-in function categories — source-derived
+    // -----------------------------------------------------------------------
+
     StaticFunction { class: String, method: String },
     DixFunction(String),
     BuiltinMethod(String),
 
-    // Data type tokens
-    DataType(String),
+    // -----------------------------------------------------------------------
+    // Diagnostic / special tokens
+    // -----------------------------------------------------------------------
 
-    // Comments and special tokens
     Comment(String),
     Error(String),
     EndOfFile,
-
-    // Context-sensitive tokens
     ParseContext(String),
 }
 
+// =============================================================================
+// TokenType methods
+// =============================================================================
+
 impl TokenType {
     // ------------------------------------------------------------------
-    // Zero-allocation singleton constructors for unit-like variants
+    // Zero-allocation unit-variant constructors
     // ------------------------------------------------------------------
-    #[inline] pub fn double_colon()        -> Self { TokenType::DoubleColon }
-    #[inline] pub fn arrow()               -> Self { TokenType::Arrow }
-    #[inline] pub fn switch_case()         -> Self { TokenType::SwitchCase }
-    #[inline] pub fn function_prefix()     -> Self { TokenType::FunctionPrefix }
-    #[inline] pub fn control_flow_colon()  -> Self { TokenType::ControlFlowColon }
-    #[inline] pub fn end_of_file()         -> Self { TokenType::EndOfFile }
-    #[inline] pub fn section_config()      -> Self { TokenType::SectionConfig }
-    #[inline] pub fn section_imports()     -> Self { TokenType::SectionImports }
-    #[inline] pub fn section_dlm()         -> Self { TokenType::SectionDLM }
-    #[inline] pub fn section_enums()       -> Self { TokenType::SectionEnums }
-    #[inline] pub fn section_quickfuncs()  -> Self { TokenType::SectionQuickFuncs }
-    #[inline] pub fn section_data()        -> Self { TokenType::SectionData }
-    #[inline] pub fn section_security()    -> Self { TokenType::SectionSecurity }
-    #[inline] pub fn bool_true()           -> Self { TokenType::Bool(true) }
-    #[inline] pub fn bool_false()          -> Self { TokenType::Bool(false) }
-    #[inline] pub fn get_symbol(c: char)   -> Self { TokenType::Symbol(c) }
+    #[inline] pub fn double_colon()       -> Self { TokenType::DoubleColon }
+    #[inline] pub fn arrow()              -> Self { TokenType::Arrow }
+    #[inline] pub fn switch_case()        -> Self { TokenType::SwitchCase }
+    #[inline] pub fn function_prefix()    -> Self { TokenType::FunctionPrefix }
+    #[inline] pub fn control_flow_colon() -> Self { TokenType::ControlFlowColon }
+    #[inline] pub fn end_of_file()        -> Self { TokenType::EndOfFile }
+    #[inline] pub fn section_config()     -> Self { TokenType::SectionConfig }
+    #[inline] pub fn section_imports()    -> Self { TokenType::SectionImports }
+    #[inline] pub fn section_dlm()        -> Self { TokenType::SectionDLM }
+    #[inline] pub fn section_enums()      -> Self { TokenType::SectionEnums }
+    #[inline] pub fn section_quickfuncs() -> Self { TokenType::SectionQuickFuncs }
+    #[inline] pub fn section_data()       -> Self { TokenType::SectionData }
+    #[inline] pub fn section_security()   -> Self { TokenType::SectionSecurity }
+    #[inline] pub fn bool_true()          -> Self { TokenType::Bool(true) }
+    #[inline] pub fn bool_false()         -> Self { TokenType::Bool(false) }
+    #[inline] pub fn get_symbol(c: char)  -> Self { TokenType::Symbol(c) }
 
-    /// Whether this is any section-opening keyword.
+    /// Whether this token opens a top-level section.
     pub fn is_section_keyword(&self) -> bool {
         matches!(
             self,
@@ -205,10 +280,9 @@ impl TokenType {
         )
     }
 
-    /// The `SectionId` this token opens, if any.
-    /// Used by the lexer to update `current_section` — returns `&'static str`
-    /// so the lexer can call `SectionId::from_context_str` without allocation.
-    pub fn get_section_context(&self) -> Option<&str> {
+    /// The section this token introduces, as a `&'static str` context tag.
+    /// Used by the lexer to update `current_section` with zero allocation.
+    pub fn get_section_context(&self) -> Option<&'static str> {
         match self {
             TokenType::SectionConfig     => Some("CONFIG"),
             TokenType::SectionDLM        => Some("DLM"),
@@ -217,16 +291,32 @@ impl TokenType {
             TokenType::SectionQuickFuncs => Some("QUICKFUNCS"),
             TokenType::SectionData       => Some("DATA"),
             TokenType::SectionSecurity   => Some("SECURITY"),
+            // A keyword token that happens to carry a section prefix
+            // (legacy path — kept for forward compatibility)
             TokenType::Keyword(k) if k.starts_with('@') => Some(&k[1..]),
             _ => None,
         }
     }
 }
 
+// =============================================================================
+// Display
+// =============================================================================
+
 impl fmt::Display for TokenType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            // --- static-str variants (no .clone() needed) ---
             TokenType::Keyword(k)                        => write!(f, "Keyword({})", k),
+            TokenType::MultiCharSymbol(ms)               => write!(f, "MultiCharSymbol({})", ms),
+            TokenType::ArithmeticOp(ao)                  => write!(f, "ArithmeticOp({})", ao),
+            TokenType::ArithmeticAssignOp(aao)           => write!(f, "ArithmeticAssignOp({})", aao),
+            TokenType::ComparisonOp(co)                  => write!(f, "ComparisonOp({})", co),
+            TokenType::LogicalOp(lo)                     => write!(f, "LogicalOp({})", lo),
+            TokenType::BitwiseOp(bo)                     => write!(f, "BitwiseOp({})", bo),
+            TokenType::DataType(dt)                      => write!(f, "DataType(<{}>)", dt),
+
+            // --- owned-string variants ---
             TokenType::Identifier(i)                     => write!(f, "Identifier({})", i),
             TokenType::Integer(i)                        => write!(f, "Integer({})", i),
             TokenType::Float(fl)                         => write!(f, "Float({})", fl),
@@ -237,8 +327,6 @@ impl fmt::Display for TokenType {
             TokenType::Bool(b)                           => write!(f, "Bool({})", b),
             TokenType::InterpolatedString(ist)           => write!(f, "InterpolatedString($\"{}\")", ist),
             TokenType::Symbol(s)                         => write!(f, "Symbol({})", s),
-            TokenType::MultiCharSymbol(ms)               => write!(f, "MultiCharSymbol({})", ms),
-            TokenType::BitwiseOp(bo)                     => write!(f, "BitwiseOp({})", bo),
             TokenType::HexColor(hc)                      => write!(f, "HexColor({})", hc),
             TokenType::HexLiteral(hl)                    => write!(f, "HexLiteral(0x{:X})", hl),
             TokenType::Date(d)                           => write!(f, "Date({})", d),
@@ -255,10 +343,6 @@ impl fmt::Display for TokenType {
             TokenType::BlobConstructor(bc)               => write!(f, "BlobConstructor(b:{})", bc),
             TokenType::TupleConstructor(tc)              => write!(f, "TupleConstructor(t:{})", tc),
             TokenType::RegexConstructor(rc)              => write!(f, "RegexConstructor(r:{})", rc),
-            TokenType::ArithmeticOp(ao)                  => write!(f, "ArithmeticOp({})", ao),
-            TokenType::ArithmeticAssignOp(aao)           => write!(f, "ArithmeticAssignOp({})", aao),
-            TokenType::ComparisonOp(co)                  => write!(f, "ComparisonOp({})", co),
-            TokenType::LogicalOp(lo)                     => write!(f, "LogicalOp({})", lo),
             TokenType::SectionConfig                     => write!(f, "SectionConfig(@CONFIG)"),
             TokenType::SectionDLM                        => write!(f, "SectionDLM(@DLM)"),
             TokenType::SectionEnums                      => write!(f, "SectionEnums(@ENUMS)"),
@@ -277,7 +361,6 @@ impl fmt::Display for TokenType {
             }
             TokenType::DixFunction(df)                   => write!(f, "DixFunction(Dix.{})", df),
             TokenType::BuiltinMethod(bm)                 => write!(f, "BuiltinMethod(.{})", bm),
-            TokenType::DataType(dt)                      => write!(f, "DataType(<{}>)", dt),
             TokenType::Comment(c)                        => write!(f, "Comment({})", c),
             TokenType::Error(e)                          => write!(f, "Error({})", e),
             TokenType::EndOfFile                         => write!(f, "EndOfFile"),
@@ -290,15 +373,14 @@ impl fmt::Display for TokenType {
 // Token
 // =============================================================================
 
-/// A single lexical token with position and section context.
-///
-/// `section` is now a `SectionId` (Copy, 1 byte) instead of `Option<String>`.
-/// This eliminates a heap allocation + clone on every token in the hot path.
+/// A single lexical token with source position and section context.
 #[derive(Debug, Clone)]
 pub struct Token {
     pub token_type: TokenType,
     pub line:       usize,
     pub column:     usize,
+    /// Which top-level section this token was scanned inside.
+    /// `Copy` (`SectionId` is 1 byte) — no heap allocation.
     pub section:    SectionId,
 }
 
@@ -318,45 +400,51 @@ impl Token {
         }
     }
 
-    /// Human-readable value of the token (allocates — use for display/error paths only).
+    /// Human-readable token value.  Allocates — use only in display / error paths.
     pub fn get_token_value(&self) -> String {
         match &self.token_type {
-            TokenType::Keyword(k)                        => k.clone(),
-            TokenType::Identifier(i)                     => i.clone(),
-            TokenType::Integer(i)                        => i.to_string(),
-            TokenType::Float(f)                          => f.to_string(),
-            TokenType::Double(d)                         => d.to_string(),
-            TokenType::ScientificNotation(sn)            => format!("{:e}", sn),
-            TokenType::String(s)                         => s.clone(),
-            TokenType::StringSingle(ss)                  => ss.clone(),
-            TokenType::Bool(b)                           => b.to_string().to_lowercase(),
-            TokenType::Symbol(s)                         => s.to_string(),
-            TokenType::MultiCharSymbol(ms)               => ms.clone(),
-            TokenType::HexColor(hc)                      => hc.clone(),
-            TokenType::HexLiteral(hl)                    => format!("0x{:X}", hl),
-            TokenType::Date(d)                           => d.clone(),
-            TokenType::Timestamp(t)                      => t.clone(),
-            TokenType::InterpolatedString(ist)           => ist.clone(),
-            TokenType::TablePath(tp)                     => tp.clone(),
+            // static-str variants: to_string() is cheap (~pointer copy into String)
+            TokenType::Keyword(k)              => k.to_string(),
+            TokenType::MultiCharSymbol(ms)     => ms.to_string(),
+            TokenType::ArithmeticOp(ao)        => ao.to_string(),
+            TokenType::ArithmeticAssignOp(aao) => aao.to_string(),
+            TokenType::ComparisonOp(co)        => co.to_string(),
+            TokenType::LogicalOp(lo)           => lo.to_string(),
+            TokenType::BitwiseOp(bo)           => bo.to_string(),
+            TokenType::DataType(dt)            => dt.to_string(),
+
+            // owned-string variants: clone
+            TokenType::Identifier(i)          => i.clone(),
+            TokenType::Integer(i)             => i.to_string(),
+            TokenType::Float(f)               => f.to_string(),
+            TokenType::Double(d)              => d.to_string(),
+            TokenType::ScientificNotation(sn) => format!("{:e}", sn),
+            TokenType::String(s)              => s.clone(),
+            TokenType::StringSingle(ss)       => ss.clone(),
+            TokenType::Bool(b)               => b.to_string().to_lowercase(),
+            TokenType::Symbol(s)              => s.to_string(),
+            TokenType::HexColor(hc)           => hc.clone(),
+            TokenType::HexLiteral(hl)         => format!("0x{:X}", hl),
+            TokenType::Date(d)               => d.clone(),
+            TokenType::Timestamp(t)           => t.clone(),
+            TokenType::InterpolatedString(ist) => ist.clone(),
+            TokenType::TablePath(tp)          => tp.clone(),
             TokenType::PrefixedConstructor { prefix, value } => format!("{}:{}", prefix, value),
-            TokenType::BlobConstructor(bc)               => format!("b:{}", bc),
-            TokenType::TupleConstructor(tc)              => format!("t:{}", tc),
-            TokenType::RegexConstructor(rc)              => format!("r:{}", rc),
-            TokenType::ArithmeticOp(ao)                  => ao.clone(),
-            TokenType::ArithmeticAssignOp(aao)           => aao.clone(),
-            TokenType::ComparisonOp(co)                  => co.clone(),
-            TokenType::LogicalOp(lo)                     => lo.clone(),
-            TokenType::DoubleColon                       => "::".to_string(),
-            TokenType::Arrow                             => "=>".to_string(),
-            TokenType::SwitchCase                        => "->".to_string(),
-            TokenType::FunctionPrefix                    => "~".to_string(),
-            TokenType::ControlFlowColon                  => ":".to_string(),
-            TokenType::ConfigAccess(ca)                  => format!("config.{}", ca),
-            TokenType::EnumAccess { enum_name, value }   => format!("{}.{}", enum_name, value),
-            TokenType::Comment(c)                        => c.clone(),
-            TokenType::Error(e)                          => e.clone(),
-            TokenType::EndOfFile                         => "EOF".to_string(),
-            _                                            => self.token_type.to_string(),
+            TokenType::BlobConstructor(bc)    => format!("b:{}", bc),
+            TokenType::TupleConstructor(tc)   => format!("t:{}", tc),
+            TokenType::RegexConstructor(rc)   => format!("r:{}", rc),
+            TokenType::ArithmeticOp(ao)       => ao.to_string(),
+            TokenType::DoubleColon            => "::".to_string(),
+            TokenType::Arrow                  => "=>".to_string(),
+            TokenType::SwitchCase             => "->".to_string(),
+            TokenType::FunctionPrefix         => "~".to_string(),
+            TokenType::ControlFlowColon       => ":".to_string(),
+            TokenType::ConfigAccess(ca)       => format!("config.{}", ca),
+            TokenType::EnumAccess { enum_name, value } => format!("{}.{}", enum_name, value),
+            TokenType::Comment(c)             => c.clone(),
+            TokenType::Error(e)               => e.clone(),
+            TokenType::EndOfFile              => "EOF".to_string(),
+            _                                 => self.token_type.to_string(),
         }
     }
 }
@@ -400,4 +488,4 @@ impl TokenExtensions for Token {
             false
         }
     }
-    }
+        }

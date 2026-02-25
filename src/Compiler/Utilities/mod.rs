@@ -1,9 +1,12 @@
+// src/Compiler/Utilities/mod.rs
+
 //! Compiler utilities
 
 pub mod identifier_pattern_analyzer;
 pub mod security_utilities;
 pub mod symbol_table;
 pub mod path_builder;
+pub mod comment_filter;
 
 pub use identifier_pattern_analyzer::{
     IdentifierPatternAnalyzer,
@@ -21,3 +24,4 @@ pub use symbol_table::{
     QuickFunctionInfo,
 };
 pub use path_builder::PathBuilder;
+pub use comment_filter::CommentFilter;

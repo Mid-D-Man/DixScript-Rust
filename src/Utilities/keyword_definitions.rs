@@ -1,357 +1,422 @@
-use std::collections::HashSet;
-use std::sync::LazyLock;
+// src/Utilities/keyword_definitions.rs
+//
+// Context-aware keyword management for DixScript v1.0.0.
+//
+// ## Why PHF instead of LazyLock<HashSet<String>>
+//
+// The previous implementation paid three runtime costs on every cold path:
+//   1. A `OnceLock`/`LazyLock` check on the first call to each category.
+//   2. Heap allocation of a `HashSet<String>` per category.
+//   3. Heap allocation of every keyword `String` inside each set.
+//
+// `phf::Map<&'static str, ()>` eliminates all three:
+//   - The map lives entirely in the binary's read-only data segment.
+//   - Zero runtime initialisation — no lock, no `Vec`, no `String`.
+//   - Lookups are O(1) via compile-time-generated perfect hashing.
+//
+// ## Lookup pattern
+//
+// PHF maps are case-sensitive.  All keys are stored lowercase.
+// Callers pass arbitrary-case identifiers; methods lowercase once before
+// the lookup (`word.to_lowercase()` allocates one `String`).  This is
+// acceptable because keyword checks are never in the lexer hot path —
+// they run in semantic analysis and error reporting.
+//
+// ## Sharing with the lexer's PHF
+//
+// The lexer has its own `phf::Map<&'static str, fn() -> TokenType>` for
+// tokenisation.  These two maps cannot be merged: different value types,
+// different purpose.  Both use PHF; neither depends on the other.
 
-/// Context-aware keyword management for DixScript v1.0.0
-/// Uses Rust naming conventions (snake_case methods)
+use phf::{phf_map, Map};
+
+// =============================================================================
+// Module-level static PHF maps
+// =============================================================================
+
+/// Control-flow, logical, literal, scope, declaration, and import keywords
+/// that are NEVER valid identifiers in any context.
+static TRULY_RESERVED: Map<&'static str, ()> = phf_map! {
+    // Control flow
+    "if"         => (),
+    "elif"       => (),
+    "else"       => (),
+    "chk"        => (),
+    "miss"       => (),
+    "then"       => (),
+    "return"     => (),
+    // Logical operators (word form)
+    "and"        => (),
+    "or"         => (),
+    "not"        => (),
+    // Literals
+    "true"       => (),
+    "false"      => (),
+    "null"       => (),
+    // Scope
+    "global"     => (),
+    // Variable declaration
+    "const"      => (),
+    "let"        => (),
+    "mut"        => (),
+    // Imports
+    "from"       => (),
+    "from_cloud" => (),
+    "verify"     => (),
+};
+
+/// Data-type annotation keywords.  These appear inside `<…>` and as
+/// function-parameter type annotations.  They *can* be property names in
+/// `@DATA` but not variable/parameter names in `@QUICKFUNCS`.
+static DATA_TYPE_KEYWORDS: Map<&'static str, ()> = phf_map! {
+    "int"       => (),
+    "float"     => (),
+    "double"    => (),
+    "string"    => (),
+    "bool"      => (),
+    "array"     => (),
+    "tuple"     => (),
+    "hex"       => (),
+    "blob"      => (),
+    "regex"     => (),
+    "object"    => (),
+    "timestamp" => (),
+    "date"      => (),
+    "enum"      => (),
+    "any"       => (),
+};
+
+/// All language-level keywords (truly-reserved ∪ data-type).
+/// Used by `is_keyword()` as a single O(1) lookup instead of two sequential
+/// map checks.
+static ALL_LANGUAGE_KEYWORDS: Map<&'static str, ()> = phf_map! {
+    // --- truly reserved ---
+    "if"         => (), "elif"       => (), "else"  => (),
+    "chk"        => (), "miss"       => (), "then"  => (),
+    "return"     => (), "and"        => (), "or"    => (),
+    "not"        => (), "true"       => (), "false" => (),
+    "null"       => (), "global"     => (), "const" => (),
+    "let"        => (), "mut"        => (), "from"  => (),
+    "from_cloud" => (), "verify"     => (),
+    // --- data-type ---
+    "int"       => (), "float"     => (), "double"    => (),
+    "string"    => (), "bool"      => (), "array"     => (),
+    "tuple"     => (), "hex"       => (), "blob"      => (),
+    "regex"     => (), "object"    => (), "timestamp" => (),
+    "date"      => (), "enum"      => (), "any"       => (),
+};
+
+/// Keys recognised inside `@CONFIG( … )`.
+static CONFIG_SECTION_KEYWORDS: Map<&'static str, ()> = phf_map! {
+    "version"            => (),
+    "encoding"           => (),
+    "author"             => (),
+    "created"            => (),
+    "features"           => (),
+    "debug_mode"         => (),
+    "error_handling"     => (),
+    "compatibility_mode" => (),
+};
+
+/// Block keys recognised inside `@SECURITY( … )`.
+static SECURITY_SECTION_KEYWORDS: Map<&'static str, ()> = phf_map! {
+    "encryption" => (),
+    "validation" => (),
+    "keystore"   => (),
+    "override"   => (),
+    "metadata"   => (),
+};
+
+/// Module identifiers recognised inside `@DLM( … )`.
+static DLM_KEYWORDS: Map<&'static str, ()> = phf_map! {
+    // Module types
+    "dcompressor" => (),
+    "dauditor"    => (),
+    "dencryptor"  => (),
+    // DCompressor subtypes
+    "gzip"        => (),
+    "bzip2"       => (),
+    "lzma"        => (),
+    // DAuditor subtypes
+    "diy"         => (),
+    "enhanced"    => (),
+    // DEncryptor subtypes
+    "xor"         => (),
+    "aes128"      => (),
+    "aes256"      => (),
+    "chacha20"    => (),
+};
+
+/// Value-side keywords for `@CONFIG` entries (not keys, values).
+static CONFIG_VALUE_KEYWORDS: Map<&'static str, ()> = phf_map! {
+    // Error handling strategies
+    "halt"        => (),
+    "continue"    => (),
+    "recover"     => (),
+    // Compatibility modes
+    "strict"      => (),
+    "best_effort" => (),
+    "permissive"  => (),
+    // Debug modes
+    "off"         => (),
+    "regular"     => (),
+    "verbose"     => (),
+    // Feature values
+    "basic"       => (),
+    "advanced"    => (),
+    "quickfuncs"  => (),
+    "enums"       => (),
+    "dlm"         => (),
+    "data"        => (),
+};
+
+/// Identifiers with special meaning in specific expression contexts
+/// (not reserved, but treated specially by the parser).
+static CONTEXTUAL_IDENTIFIERS: Map<&'static str, ()> = phf_map! {
+    "config" => (),
+    "dix"    => (),
+};
+
+/// Combined map covering every keyword from every category.
+/// Used by `is_keyword()` so it never needs to check multiple maps.
+static ALL_KEYWORDS_COMBINED: Map<&'static str, ()> = phf_map! {
+    // --- truly reserved ---
+    "if" => (), "elif" => (), "else" => (), "chk" => (), "miss" => (),
+    "then" => (), "return" => (), "and" => (), "or" => (), "not" => (),
+    "true" => (), "false" => (), "null" => (), "global" => (),
+    "const" => (), "let" => (), "mut" => (), "from" => (),
+    "from_cloud" => (), "verify" => (),
+    // --- data type ---
+    "int" => (), "float" => (), "double" => (), "string" => (), "bool" => (),
+    "array" => (), "tuple" => (), "hex" => (), "blob" => (), "regex" => (),
+    "object" => (), "timestamp" => (), "date" => (), "enum" => (), "any" => (),
+    // --- config keys ---
+    "version" => (), "encoding" => (), "author" => (), "created" => (),
+    "features" => (), "debug_mode" => (), "error_handling" => (),
+    "compatibility_mode" => (),
+    // --- config values ---
+    "halt" => (), "continue" => (), "recover" => (), "strict" => (),
+    "best_effort" => (), "permissive" => (), "off" => (), "regular" => (),
+    "verbose" => (), "basic" => (), "advanced" => (), "quickfuncs" => (),
+    "enums" => (), "dlm" => (), "data" => (),
+    // --- security ---
+    "encryption" => (), "validation" => (), "keystore" => (),
+    "override" => (), "metadata" => (),
+    // --- dlm (lowercased) ---
+    "dcompressor" => (), "dauditor" => (), "dencryptor" => (),
+    "gzip" => (), "bzip2" => (), "lzma" => (), "diy" => (), "enhanced" => (),
+    "xor" => (), "aes128" => (), "aes256" => (), "chacha20" => (),
+};
+
+// =============================================================================
+// Helper — case-insensitive PHF lookup
+// =============================================================================
+
+/// Look up `word` (any case) in a `phf::Map<&'static str, ()>` whose
+/// keys are all lowercase.  Allocates one `String` for the lowercase
+/// conversion, then does an O(1) PHF lookup.
+///
+/// The `Borrow<str>` bound on `Map<&'static str, ()>` means we can pass
+/// `&str` directly to `contains_key` — the lifetime difference is erased
+/// by the Borrow impl.
+#[inline]
+fn map_contains_ci(map: &Map<&'static str, ()>, word: &str) -> bool {
+    let lower = word.to_lowercase();
+    map.contains_key(&*lower)
+}
+
+// =============================================================================
+// Public API — Keywords struct
+// =============================================================================
+
+/// Context-aware keyword management for DixScript v1.0.0.
 pub struct Keywords;
 
 impl Keywords {
-    /// TRULY RESERVED KEYWORDS - Never allowed as identifiers anywhere
-    pub fn truly_reserved_keywords() -> &'static HashSet<String> {
-        static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::new();
-            // Control flow
-            set.insert("if".to_string());
-            set.insert("elif".to_string());
-            set.insert("else".to_string());
-            set.insert("chk".to_string());
-            set.insert("miss".to_string());
-            set.insert("then".to_string());
-            set.insert("return".to_string());
+    // ------------------------------------------------------------------
+    // Map accessors — return the static PHF maps directly.
+    // Callers that previously iterated with .iter().any(…) should now
+    // use .contains_key(…) for O(1) lookup, or use the boolean helpers
+    // below which already do that internally.
+    // ------------------------------------------------------------------
 
-            // Logical operators
-            set.insert("and".to_string());
-            set.insert("or".to_string());
-            set.insert("not".to_string());
-
-            // Literals
-            set.insert("true".to_string());
-            set.insert("false".to_string());
-            set.insert("null".to_string());
-
-            // Scope keywords
-            set.insert("global".to_string());
-
-            // Variable declaration keywords
-            set.insert("const".to_string());
-            set.insert("let".to_string());
-            set.insert("mut".to_string());
-
-            // Imports keywords
-            set.insert("from".to_string());
-            set.insert("from_cloud".to_string());
-            set.insert("verify".to_string());
-
-            set
-        });
-        &KEYWORDS
+    /// Keywords that are never valid identifiers anywhere.
+    #[inline]
+    pub fn truly_reserved_keywords() -> &'static Map<&'static str, ()> {
+        &TRULY_RESERVED
     }
 
-    /// DATA TYPE KEYWORDS - Only special in type annotations
-    pub fn data_type_keywords() -> &'static HashSet<String> {
-        static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::new();
-            set.insert("int".to_string());
-            set.insert("float".to_string());
-            set.insert("double".to_string());
-            set.insert("string".to_string());
-            set.insert("bool".to_string());
-            set.insert("array".to_string());
-            set.insert("tuple".to_string());
-            set.insert("hex".to_string());
-            set.insert("blob".to_string());
-            set.insert("regex".to_string());
-            set.insert("object".to_string());
-            set.insert("timestamp".to_string());
-            set.insert("date".to_string());
-            set.insert("enum".to_string());
-            set.insert("any".to_string());
-            set
-        });
-        &KEYWORDS
+    /// Keywords that are only special in type annotations.
+    #[inline]
+    pub fn data_type_keywords() -> &'static Map<&'static str, ()> {
+        &DATA_TYPE_KEYWORDS
     }
 
-    /// ALL LANGUAGE KEYWORDS - Combined set
-    pub fn language_keywords() -> &'static HashSet<String> {
-        static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::new();
-            for kw in Keywords::truly_reserved_keywords().iter() {
-                set.insert(kw.clone());
-            }
-            for kw in Keywords::data_type_keywords().iter() {
-                set.insert(kw.clone());
-            }
-            set
-        });
-        &KEYWORDS
+    /// All language keywords (truly-reserved ∪ data-type).
+    #[inline]
+    pub fn language_keywords() -> &'static Map<&'static str, ()> {
+        &ALL_LANGUAGE_KEYWORDS
     }
 
-    /// CONFIG SECTION KEYWORDS
-    pub fn config_section_keywords() -> &'static HashSet<String> {
-        static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::new();
-            set.insert("version".to_string());
-            set.insert("encoding".to_string());
-            set.insert("author".to_string());
-            set.insert("created".to_string());
-            set.insert("features".to_string());
-            set.insert("debug_mode".to_string());
-            set.insert("error_handling".to_string());
-            set.insert("compatibility_mode".to_string());
-            set
-        });
-        &KEYWORDS
+    /// Keys valid inside `@CONFIG(…)`.
+    #[inline]
+    pub fn config_section_keywords() -> &'static Map<&'static str, ()> {
+        &CONFIG_SECTION_KEYWORDS
     }
 
-    /// SECURITY SECTION KEYWORDS
-    pub fn security_section_keywords() -> &'static HashSet<String> {
-        static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::new();
-            set.insert("encryption".to_string());
-            set.insert("validation".to_string());
-            set.insert("keystore".to_string());
-            set.insert("override".to_string());
-            set.insert("metadata".to_string());
-            set
-        });
-        &KEYWORDS
+    /// Block keys valid inside `@SECURITY(…)`.
+    #[inline]
+    pub fn security_section_keywords() -> &'static Map<&'static str, ()> {
+        &SECURITY_SECTION_KEYWORDS
     }
 
-    /// DLM MODULE KEYWORDS
-    pub fn dlm_keywords() -> &'static HashSet<String> {
-        static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::new();
-            // Module types
-            set.insert("DCompressor".to_string());
-            set.insert("DAuditor".to_string());
-            set.insert("DEncryptor".to_string());
-
-            // DCompressor subtypes
-            set.insert("gzip".to_string());
-            set.insert("bzip2".to_string());
-            set.insert("lzma".to_string());
-
-            // DAuditor subtypes
-            set.insert("diy".to_string());
-            set.insert("enhanced".to_string());
-
-            // DEncryptor subtypes
-            set.insert("xor".to_string());
-            set.insert("aes128".to_string());
-            set.insert("aes256".to_string());
-            set.insert("chacha20".to_string());
-            set
-        });
-        &KEYWORDS
+    /// Module identifiers valid inside `@DLM(…)`.
+    #[inline]
+    pub fn dlm_keywords() -> &'static Map<&'static str, ()> {
+        &DLM_KEYWORDS
     }
 
-    /// CONFIG VALUE KEYWORDS
-    pub fn config_value_keywords() -> &'static HashSet<String> {
-        static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::new();
-            // Error handling strategies
-            set.insert("halt".to_string());
-            set.insert("continue".to_string());
-            set.insert("recover".to_string());
-
-            // Compatibility modes
-            set.insert("strict".to_string());
-            set.insert("best_effort".to_string());
-            set.insert("permissive".to_string());
-
-            // Debug modes
-            set.insert("off".to_string());
-            set.insert("regular".to_string());
-            set.insert("verbose".to_string());
-
-            // Feature values
-            set.insert("basic".to_string());
-            set.insert("advanced".to_string());
-            set.insert("quickfuncs".to_string());
-            set.insert("enums".to_string());
-            set.insert("dlm".to_string());
-            set.insert("data".to_string());
-            set
-        });
-        &KEYWORDS
+    /// Value-side keywords for `@CONFIG` entries.
+    #[inline]
+    pub fn config_value_keywords() -> &'static Map<&'static str, ()> {
+        &CONFIG_VALUE_KEYWORDS
     }
 
-    /// CONTEXTUAL IDENTIFIERS
-    pub fn contextual_identifiers() -> &'static HashSet<String> {
-        static KEYWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-            let mut set = HashSet::new();
-            set.insert("config".to_string());
-            set.insert("Dix".to_string());
-            set
-        });
-        &KEYWORDS
+    /// Identifiers with special expression-context meaning.
+    #[inline]
+    pub fn contextual_identifiers() -> &'static Map<&'static str, ()> {
+        &CONTEXTUAL_IDENTIFIERS
     }
 
-    /// Context-aware keyword check
+    // ------------------------------------------------------------------
+    // Boolean helpers — these are the recommended call sites.
+    // All comparisons are case-insensitive.
+    // ------------------------------------------------------------------
+
+    /// `true` if `word` is a data-type annotation keyword
+    /// ("int", "float", "string", …).
+    #[inline]
+    pub fn is_data_type_keyword(word: &str) -> bool {
+        map_contains_ci(&DATA_TYPE_KEYWORDS, word)
+    }
+
+    /// `true` if `word` is any keyword in any category.
+    /// Single O(1) PHF lookup into the combined map.
+    #[inline]
+    pub fn is_keyword(word: &str) -> bool {
+        map_contains_ci(&ALL_KEYWORDS_COMBINED, word)
+    }
+
+    /// `true` if `word` is a contextual identifier (`config`, `Dix`).
+    #[inline]
+    pub fn is_contextual_identifier(word: &str) -> bool {
+        map_contains_ci(&CONTEXTUAL_IDENTIFIERS, word)
+    }
+
+    /// `true` if `word` is a control-flow keyword
+    /// ("if", "elif", "else", "chk", "miss", "then", "return", "log").
+    pub fn is_control_flow_keyword(word: &str) -> bool {
+        matches!(
+            word.to_lowercase().as_str(),
+            "if" | "elif" | "else" | "chk" | "miss" | "then" | "return" | "log"
+        )
+    }
+
+    /// `true` if `word` is a top-level section keyword (`@CONFIG`, `@DATA`, …).
+    pub fn is_section_keyword(word: &str) -> bool {
+        matches!(
+            word.to_uppercase().as_str(),
+            "@CONFIG" | "@DLM" | "@ENUMS" | "@IMPORTS"
+            | "@QUICKFUNCS" | "@DATA" | "@SECURITY"
+        )
+    }
+
+    /// Returns all valid section keyword strings.
+    pub fn get_valid_section_keywords() -> &'static [&'static str] {
+        &[
+            "@CONFIG", "@IMPORTS", "@DLM", "@ENUMS",
+            "@QUICKFUNCS", "@DATA", "@SECURITY",
+        ]
+    }
+
+    // ------------------------------------------------------------------
+    // Context-aware reservation check
+    // ------------------------------------------------------------------
+
+    /// `true` if `word` must not be used as an identifier in `context`.
+    ///
+    /// `context` is the section name: `"QUICKFUNCS"`, `"DATA"`,
+    /// `"CONFIG"`, `"SECURITY"`, `"DLM"`, etc.
     pub fn is_reserved_in_context(word: &str, context: &str) -> bool {
-        // Case-insensitive comparison
-        let word_lower = word.to_lowercase();
         let context_upper = context.to_uppercase();
 
-        // Truly reserved keywords are ALWAYS reserved
-        if Keywords::truly_reserved_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-        {
+        // Truly-reserved keywords block everywhere.
+        if map_contains_ci(&TRULY_RESERVED, word) {
             return true;
         }
 
-        // Data type keywords CANNOT be used as variable/parameter names in QUICKFUNCS
-        if Keywords::data_type_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-        {
-            if context_upper == "QUICKFUNCS" {
-                return true; // RESERVED
-            }
-            // In DATA section, they can be property names
-            if context_upper == "DATA" {
-                return false;
-            }
-            return false;
+        // Data-type keywords are reserved as variable/parameter names in
+        // QUICKFUNCS, but allowed as property names in DATA.
+        if map_contains_ci(&DATA_TYPE_KEYWORDS, word) {
+            return context_upper == "QUICKFUNCS";
         }
 
-        // Section-specific keywords
+        // Section-specific keyword sets.
         match context_upper.as_str() {
             "CONFIG" => {
-                Keywords::config_section_keywords()
-                    .iter()
-                    .any(|k| k.to_lowercase() == word_lower)
-                    || Keywords::config_value_keywords()
-                    .iter()
-                    .any(|k| k.to_lowercase() == word_lower)
+                map_contains_ci(&CONFIG_SECTION_KEYWORDS, word)
+                    || map_contains_ci(&CONFIG_VALUE_KEYWORDS, word)
             }
-            "SECURITY" => Keywords::security_section_keywords()
-                .iter()
-                .any(|k| k.to_lowercase() == word_lower),
-            "DLM" => Keywords::dlm_keywords()
-                .iter()
-                .any(|k| k.to_lowercase() == word_lower),
-            "QUICKFUNCS" | "DATA" => false,
-            _ => false,
+            "SECURITY" => map_contains_ci(&SECURITY_SECTION_KEYWORDS, word),
+            "DLM"      => map_contains_ci(&DLM_KEYWORDS, word),
+            _          => false,
         }
     }
 
-    /// Check if word can be used as identifier in context
+    /// Inverse of `is_reserved_in_context`.
+    #[inline]
     pub fn can_be_identifier_in_context(word: &str, context: &str) -> bool {
         !Keywords::is_reserved_in_context(word, context)
     }
 
-    /// Check if word is a contextual identifier
-    pub fn is_contextual_identifier(word: &str) -> bool {
-        Keywords::contextual_identifiers()
-            .iter()
-            .any(|k| k.to_lowercase() == word.to_lowercase())
-    }
+    // ------------------------------------------------------------------
+    // Diagnostics
+    // ------------------------------------------------------------------
 
-    /// Check if word is a data type keyword
-    pub fn is_data_type_keyword(word: &str) -> bool {
-        Keywords::data_type_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word.to_lowercase())
-    }
-
-    /// Check if word is any kind of keyword
-    pub fn is_keyword(word: &str) -> bool {
-        let word_lower = word.to_lowercase();
-        Keywords::language_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-            || Keywords::config_section_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-            || Keywords::security_section_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-            || Keywords::dlm_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-            || Keywords::config_value_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-    }
-
-    /// Get keyword category
+    /// Category label for `word`, used in error messages.
     pub fn get_keyword_category(word: &str) -> &'static str {
-        let word_lower = word.to_lowercase();
-
-        if Keywords::truly_reserved_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-        {
-            return "Reserved Keyword";
-        }
-        if Keywords::data_type_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-        {
-            return "Data Type Keyword (can be identifier)";
-        }
-        if Keywords::config_section_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-        {
-            return "Config Keyword";
-        }
-        if Keywords::security_section_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-        {
-            return "Security Keyword";
-        }
-        if Keywords::dlm_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-        {
-            return "DLM Keyword";
-        }
-        if Keywords::config_value_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-        {
-            return "Config Value Keyword";
-        }
-        if Keywords::contextual_identifiers()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-        {
-            return "Contextual Identifier";
-        }
-
+        if map_contains_ci(&TRULY_RESERVED, word)           { return "Reserved Keyword"; }
+        if map_contains_ci(&DATA_TYPE_KEYWORDS, word)       { return "Data Type Keyword (can be identifier)"; }
+        if map_contains_ci(&CONFIG_SECTION_KEYWORDS, word)  { return "Config Keyword"; }
+        if map_contains_ci(&SECURITY_SECTION_KEYWORDS, word){ return "Security Keyword"; }
+        if map_contains_ci(&DLM_KEYWORDS, word)             { return "DLM Keyword"; }
+        if map_contains_ci(&CONFIG_VALUE_KEYWORDS, word)    { return "Config Value Keyword"; }
+        if map_contains_ci(&CONTEXTUAL_IDENTIFIERS, word)   { return "Contextual Identifier"; }
         "Unknown"
     }
 
-    /// Get helpful error message
+    /// Human-readable error message explaining why `word` cannot be used
+    /// as an identifier in `context`.
     pub fn get_keyword_usage_error(word: &str, context: &str) -> String {
-        let word_lower = word.to_lowercase();
-
-        if Keywords::truly_reserved_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-        {
+        if map_contains_ci(&TRULY_RESERVED, word) {
             return format!(
                 "'{}' is a reserved keyword and cannot be used as an identifier",
                 word
             );
         }
 
-        if Keywords::data_type_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-        {
+        if map_contains_ci(&DATA_TYPE_KEYWORDS, word) {
             if context == "QUICKFUNCS" {
-                let capitalized = format!(
-                    "{}{}",
-                    word.chars().next().unwrap().to_uppercase(),
-                    &word[1..]
-                );
+                let capitalized = {
+                    let mut c = word.chars();
+                    match c.next() {
+                        None    => String::new(),
+                        Some(f) => f.to_uppercase().to_string() + c.as_str(),
+                    }
+                };
                 return format!(
-                    "'{}' is a data type keyword and cannot be used as a variable or parameter name. Use a different name like 'my{}' or '{}Value'",
+                    "'{}' is a data type keyword and cannot be used as a variable or \
+                     parameter name. Consider: 'my{}' or '{}Value'",
                     word, capitalized, word
                 );
             }
@@ -361,65 +426,18 @@ impl Keywords {
             );
         }
 
-        if Keywords::config_section_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-            && context == "CONFIG"
-        {
-            return format!(
-                "'{}' is a CONFIG section keyword and cannot be used here",
-                word
-            );
-        }
+        let context_upper = context.to_uppercase();
 
-        if Keywords::security_section_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-            && context == "SECURITY"
-        {
-            return format!(
-                "'{}' is a SECURITY section keyword and cannot be used here",
-                word
-            );
+        if map_contains_ci(&CONFIG_SECTION_KEYWORDS, word) && context_upper == "CONFIG" {
+            return format!("'{}' is a CONFIG section keyword and cannot be used here", word);
         }
-
-        if Keywords::dlm_keywords()
-            .iter()
-            .any(|k| k.to_lowercase() == word_lower)
-            && context == "DLM"
-        {
+        if map_contains_ci(&SECURITY_SECTION_KEYWORDS, word) && context_upper == "SECURITY" {
+            return format!("'{}' is a SECURITY section keyword and cannot be used here", word);
+        }
+        if map_contains_ci(&DLM_KEYWORDS, word) && context_upper == "DLM" {
             return format!("'{}' is a DLM keyword and cannot be used here", word);
         }
 
-        format!("'{}' can be used as an identifier in {} section", word, context)
+        format!("'{}' can be used as an identifier in the {} section", word, context)
     }
-
-    /// Check if word is a section keyword
-    pub fn is_section_keyword(word: &str) -> bool {
-        matches!(
-            word.to_uppercase().as_str(),
-            "@CONFIG" | "@DLM" | "@ENUMS" | "@IMPORTS" | "@QUICKFUNCS" | "@DATA" | "@SECURITY"
-        )
-    }
-
-    /// Get valid section keywords
-    pub fn get_valid_section_keywords() -> Vec<&'static str> {
-        vec![
-            "@CONFIG",
-            "@IMPORTS",
-            "@DLM",
-            "@ENUMS",
-            "@QUICKFUNCS",
-            "@DATA",
-            "@SECURITY",
-        ]
-    }
-
-    /// Check if word is a control flow keyword
-    pub fn is_control_flow_keyword(word: &str) -> bool {
-        matches!(
-            word.to_lowercase().as_str(),
-            "if" | "elif" | "else" | "chk" | "miss" | "then" | "return" | "log"
-        )
-    }
-}
+        }

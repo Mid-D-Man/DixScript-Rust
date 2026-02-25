@@ -5,86 +5,29 @@ use crate::ErrorManager::Helpers::*;
 use crate::Utilities::MID_Logger;
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// Debug and test configuration cached from OperationalSettings at module construction.
-///
-/// Cached once so hot-path code never needs to acquire a lock just to decide
-/// whether to format a log message or run a diagnostic pass.
-///
-/// ## `is_testing`
-/// Set at **compile time** via `cfg!(test)` — automatically `true` when running
-/// under `cargo test`, `false` in every other build (dev, release, bench).
-/// This means features like `analyze_token_sequences` have zero runtime cost in
-/// production: the branch is compiled away entirely.
-///
-/// Do NOT manually set `is_testing = true` in application code.
-/// If you need a "dry-run" or "validation-only" mode at runtime, add a separate
-/// `OperationalSettings` flag instead.
+/// Debug configuration cached at module construction
+/// Used by DLM modules to avoid repeated debug mode checks
 #[derive(Debug, Clone, Copy)]
 pub struct DebugConfig {
-    /// True when debug_mode is Regular or Verbose.
-    /// Gates format!() calls and diagnostic output.
     pub is_enabled: bool,
-
-    /// True when debug_mode is Verbose.
-    /// Gates extra-verbose diagnostic output.
     pub is_verbose: bool,
-
-    /// True when compiled under `cargo test`.
-    /// Gates test-only diagnostic passes (e.g. lexer static-call hints,
-    /// token sequence analysis) that have real O(n) cost but are only
-    /// useful when verifying tokenizer output, not in production.
-    ///
-    /// This is a compile-time constant — `cfg!(test)` — so the branch is
-    /// eliminated entirely by the optimizer in release/bench/dev builds.
-    pub is_testing: bool,
 }
 
 impl DebugConfig {
-    pub fn from_debug_mode(mode: crate::Compiler::Core::Config::DebugMode) -> Self {
-        DebugConfig {
-            is_enabled: matches!(
-                mode,
-                crate::Compiler::Core::Config::DebugMode::Regular
-                | crate::Compiler::Core::Config::DebugMode::Verbose
-            ),
-            is_verbose: matches!(
-                mode,
-                crate::Compiler::Core::Config::DebugMode::Verbose
-            ),
-            // cfg!(test) is resolved at compile time to a bool literal.
-            // In test builds: true. In all other builds: false.
-            // The optimizer eliminates any branch guarded by this in non-test builds.
-            is_testing: cfg!(test),
-        }
-    }
-
-    /// Convenience: returns a DebugConfig with everything off.
-    /// Used in non-interactive paths (e.g. FFI, WASM) where no settings are available.
-    pub const fn silent() -> Self {
-        DebugConfig {
-            is_enabled: false,
-            is_verbose: false,
-            is_testing: false,
-        }
-    }
-
-    /// Convenience: returns a DebugConfig with everything on.
-    /// Use only in unit tests that explicitly need all diagnostic passes.
-    ///
-    /// Example:
-    /// ```rust no
-    /// #[cfg(test)]
-    /// fn test_static_call_detection() {
-    ///     let config = DebugConfig::full();
-    ///     assert!(config.is_testing);
-    /// }
-    /// ```
-    #[cfg(test)]
-    pub const fn full() -> Self {
-        DebugConfig {
-            is_enabled: true,
-            is_verbose: true,
-            is_testing: true,
+    pub fn from_debug_mode(mode: DebugMode) -> Self {
+        match mode {
+            DebugMode::Off => DebugConfig {
+                is_enabled: false,
+                is_verbose: false,
+            },
+            DebugMode::Regular => DebugConfig {
+                is_enabled: true,
+                is_verbose: false,
+            },
+            DebugMode::Verbose => DebugConfig {
+                is_enabled: true,
+                is_verbose: true,
+            },
         }
     }
 }

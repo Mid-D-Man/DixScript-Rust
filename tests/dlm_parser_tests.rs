@@ -8,6 +8,7 @@ use dixscript::Compiler::AST::{DLMSection, DLMModuleType, DLMModuleSubtype};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 use std::time::Instant;
 
+
 // ==================== PERFORMANCE BASELINES ====================
 
 const BASELINE_SMALL_INPUT_MS: u128 = 5;

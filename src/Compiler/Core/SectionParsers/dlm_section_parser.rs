@@ -4,6 +4,7 @@ use crate::Compiler::AST::{DLMSection, DLMModule, Position, DLMModuleType, DLMMo
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::ErrorManager::{ErrorManager, ParseErrorType};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
+use crate::Compiler::Core::Tokenizer::token::SectionId;
 
 /// DLM Section Parser v1.0.0 - Section-Scoped Error Handling with Dynamic Iterations
 ///
@@ -441,7 +442,7 @@ impl<'a> DlmSectionParser<'a> {
                 token_type: TokenType::EndOfFile,
                 line: 1,
                 column: 1,
-                section: None,
+                section: SectionId::None,
             };
             &EOF_TOKEN
         })

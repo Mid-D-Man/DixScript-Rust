@@ -91,15 +91,7 @@ harness = false
 name    = "lexer_throughput"
 harness = false
 
-[[test]]
-name = "config_tests"
-path = "tests/config_tests.rs"
 
-[[bin]]
-name  = "simple_bench"
-path  = "benches/simple_bench.rs"
-test  = false
-bench = false
 
 # =============================================================================
 # Feature flags

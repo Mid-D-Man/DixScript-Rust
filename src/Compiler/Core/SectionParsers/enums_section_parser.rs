@@ -4,6 +4,7 @@ use crate::Compiler::AST::{EnumsSection, EnumDeclaration, EnumField, Position};
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::ErrorManager::{ErrorManager, ParseErrorType};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
+use crate::Compiler::Core::Tokenizer::token::SectionId;
 use crate::Utilities::{Keywords, estimate_enum_fields_count};
 
 /// Enums Section Parser v1.0.1 - Dynamic Max Iterations
@@ -585,7 +586,7 @@ impl<'a> EnumsSectionParser<'a> {
                 token_type: TokenType::EndOfFile,
                 line: 1,
                 column: 1,
-                section: None,
+                section: SectionId::None,
             };
             &EOF_TOKEN
         })

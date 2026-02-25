@@ -6,6 +6,8 @@ use crate::ErrorManager::{ErrorManager, ParseErrorType};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Utilities::estimate_properties_count;
 use std::collections::HashSet;
+use itertools::Itertools;
+use crate::Compiler::Core::Tokenizer::token::SectionId;
 
 /// ImportsSection Parser v1.0.0 - Dynamic Max Iterations
 ///
@@ -650,7 +652,7 @@ impl<'a> ImportsSectionParser<'a> {
                 token_type: TokenType::EndOfFile,
                 line: 1,
                 column: 1,
-                section: None,
+                section: SectionId::None,
             };
             &EOF_TOKEN
         })

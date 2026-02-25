@@ -4,6 +4,7 @@ use crate::Compiler::AST::{SecuritySection, SecurityEntry, SecurityField, Positi
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::ErrorManager::{ErrorManager, ParseErrorType};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
+use crate::Compiler::Core::Tokenizer::token::SectionId;
 
 /// Security Section Parser v1.0.0 - Section-Scoped Error Handling with Dynamic Iterations
 ///
@@ -723,7 +724,7 @@ impl<'a> SecuritySectionParser<'a> {
                 token_type: TokenType::EndOfFile,
                 line: 1,
                 column: 1,
-                section: None,
+                section: SectionId::None,
             };
             &EOF_TOKEN
         })

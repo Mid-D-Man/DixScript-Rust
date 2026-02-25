@@ -6,6 +6,7 @@ use crate::Compiler::AST::{
 };
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
+use crate::Compiler::Core::Tokenizer::token::SectionId;
 use crate::Compiler::Utilities::{
     IdentifierPatternAnalyzer, IdentifierPattern, IdentifierPatternType
 };
@@ -2851,7 +2852,7 @@ impl<'a> DataSectionParser<'a> {
                 token_type: TokenType::EndOfFile,
                 line: 1,
                 column: 1,
-                section: None,
+                section: SectionId::None,
             };
             &EOF_TOKEN
         })

@@ -9,6 +9,7 @@ use crate::ErrorManager::{ErrorManager, ParseErrorType};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Utilities::{Keywords, estimate_statements_count, estimate_properties_count};
 use std::collections::HashMap;
+use crate::Compiler::Core::Tokenizer::token::SectionId;
 
 /// QuickFunctions Section Parser v1.0.0 - Simplified identifier handling
 /// All dotted identifiers become QualifiedIdentifier - analyzer resolves them
@@ -2789,7 +2790,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 token_type: TokenType::EndOfFile,
                 line: 1,
                 column: 1,
-                section: None,
+                section: SectionId::None,
             };
             &EOF_TOKEN
         })

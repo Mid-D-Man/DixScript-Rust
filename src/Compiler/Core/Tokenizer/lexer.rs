@@ -1,15 +1,18 @@
-//! DixScript Lexer v1.0.1 — Optimised Rust Port
+//! DixScript Lexer v1.0.2 — Static-string operators + test-gated diagnostics
 //!
-//! ## Changes from v1.0.0
-//! - `Tokenizer<'src>` borrows `input: &'src str` (no String clone on construction)
-//! - Accepts `&'src OperationalSettings` — lexer now aware of error-handling strategy
-//!   (ConfigSectionHandler must call this AFTER stripping @CONFIG from the source)
-//! - `current_section: SectionId` (Copy, 1 byte) instead of `Option<String>` clone
-//! - `DebugConfig` cached at construction — format! in debug paths only runs when enabled
-//! - Version check cached as `version_allows_all_tokens: bool` — eliminates per-token RwLock
-//! - Multi-line comment close (`*/`) found via `memchr::memmem` (SIMD) instead of char loop
-//! - `analyze_token_sequences` gated on `debug_config.is_enabled`
-//! - Bug fix: StaticCallInfo.section now uses the token's section, not the final section
+//! ## Changes from v1.0.1
+//! - PHF keyword closures: `Keyword("if".to_string())` → `Keyword("if")`
+//!   All keyword/operator variants that hold compile-time-fixed strings now
+//!   carry `&'static str` instead of heap-allocated `String`, matching the
+//!   updated `TokenType` definition.
+//! - `ArithmeticOp`, `ArithmeticAssignOp`, `ComparisonOp`, `LogicalOp`,
+//!   `BitwiseOp` construction sites updated identically.
+//! - `analyze_token_sequences` and `analyze_potential_builtin_calls` are now
+//!   gated on `debug_config.is_testing` instead of `debug_config.is_enabled`.
+//!   These passes verify tokeniser output structure and have real O(n) cost;
+//!   they must never run in dev/release/bench builds.  `is_testing` is a
+//!   compile-time constant (`cfg!(test)`) so the branch is eliminated by the
+//!   optimiser in all non-test builds.
 
 use phf::phf_map;
 use memchr::memchr;
@@ -29,78 +32,61 @@ const MAX_RECOVERY_ATTEMPTS:   usize = 10;
 // =============================================================================
 // Perfect-hash keyword table
 //
-// NOTE ON KEYWORD ALLOCATION:
-// Each closure still calls `"keyword".to_string()` because `TokenType::Keyword`
-// holds a `String` for parser compatibility (changing to `&'static str` would
-// require updating every match arm in every parser file).
-// The allocation is ~30 ns per keyword token — acceptable for a non-inner-loop
-// call.  If you later change `Keyword(String)` → `Keyword(&'static str)`, just
-// remove the `.to_string()` calls here and in the closures.
+// Every closure now returns a `&'static str` variant instead of
+// `String::from(...)`.  The allocation savings are small per-token (~30 ns)
+// but add up across large files and eliminate false positives in heap
+// profilers.
+//
+// `Bool` entries are unchanged — they carry `bool`, not a string.
 // =============================================================================
 
 static KEYWORDS: phf::Map<&'static str, fn() -> TokenType> = phf_map! {
     // 2 chars
-    "if" => || TokenType::Keyword("if".to_string()),
-    "or" => || TokenType::Keyword("or".to_string()),
+    "if" => || TokenType::Keyword("if"),
+    "or" => || TokenType::Keyword("or"),
     // 3 chars
-    "and" => || TokenType::Keyword("and".to_string()),
-    "not" => || TokenType::Keyword("not".to_string()),
-    "int" => || TokenType::Keyword("int".to_string()),
-    "hex" => || TokenType::Keyword("hex".to_string()),
-    "chk" => || TokenType::Keyword("chk".to_string()),
-    "let" => || TokenType::Keyword("let".to_string()),
-    "mut" => || TokenType::Keyword("mut".to_string()),
-    "any" => || TokenType::Keyword("any".to_string()),
+    "and" => || TokenType::Keyword("and"),
+    "not" => || TokenType::Keyword("not"),
+    "int" => || TokenType::Keyword("int"),
+    "hex" => || TokenType::Keyword("hex"),
+    "chk" => || TokenType::Keyword("chk"),
+    "let" => || TokenType::Keyword("let"),
+    "mut" => || TokenType::Keyword("mut"),
+    "any" => || TokenType::Keyword("any"),
     // 4 chars
     "true"  => || TokenType::Bool(true),
-    "null"  => || TokenType::Keyword("null".to_string()),
-    "else"  => || TokenType::Keyword("else".to_string()),
-    "elif"  => || TokenType::Keyword("elif".to_string()),
-    "then"  => || TokenType::Keyword("then".to_string()),
-    "enum"  => || TokenType::Keyword("enum".to_string()),
-    "date"  => || TokenType::Keyword("date".to_string()),
-    "bool"  => || TokenType::Keyword("bool".to_string()),
-    "blob"  => || TokenType::Keyword("blob".to_string()),
-    "miss"  => || TokenType::Keyword("miss".to_string()),
-    "from"  => || TokenType::Keyword("from".to_string()),
+    "null"  => || TokenType::Keyword("null"),
+    "else"  => || TokenType::Keyword("else"),
+    "elif"  => || TokenType::Keyword("elif"),
+    "then"  => || TokenType::Keyword("then"),
+    "enum"  => || TokenType::Keyword("enum"),
+    "date"  => || TokenType::Keyword("date"),
+    "bool"  => || TokenType::Keyword("bool"),
+    "blob"  => || TokenType::Keyword("blob"),
+    "miss"  => || TokenType::Keyword("miss"),
+    "from"  => || TokenType::Keyword("from"),
     // 5 chars
     "false" => || TokenType::Bool(false),
-    "float" => || TokenType::Keyword("float".to_string()),
-    "tuple" => || TokenType::Keyword("tuple".to_string()),
-    "regex" => || TokenType::Keyword("regex".to_string()),
-    "array" => || TokenType::Keyword("array".to_string()),
-    "const" => || TokenType::Keyword("const".to_string()),
+    "float" => || TokenType::Keyword("float"),
+    "tuple" => || TokenType::Keyword("tuple"),
+    "regex" => || TokenType::Keyword("regex"),
+    "array" => || TokenType::Keyword("array"),
+    "const" => || TokenType::Keyword("const"),
     // 6 chars
-    "string" => || TokenType::Keyword("string".to_string()),
-    "double" => || TokenType::Keyword("double".to_string()),
-    "object" => || TokenType::Keyword("object".to_string()),
-    "return" => || TokenType::Keyword("return".to_string()),
-    "global" => || TokenType::Keyword("global".to_string()),
-    "verify" => || TokenType::Keyword("verify".to_string()),
+    "string" => || TokenType::Keyword("string"),
+    "double" => || TokenType::Keyword("double"),
+    "object" => || TokenType::Keyword("object"),
+    "return" => || TokenType::Keyword("return"),
+    "global" => || TokenType::Keyword("global"),
+    "verify" => || TokenType::Keyword("verify"),
     // 9 chars
-    "timestamp" => || TokenType::Keyword("timestamp".to_string()),
+    "timestamp" => || TokenType::Keyword("timestamp"),
     // 10 chars
-    "from_cloud" => || TokenType::Keyword("from_cloud".to_string()),
+    "from_cloud" => || TokenType::Keyword("from_cloud"),
 };
 
 // =============================================================================
-// NOTE ON REGEX CACHING:
-// The lexer itself does NOT use the `regex` crate in its hot path — it uses
-// `memchr` (SIMD) for all scanning.  Regex compilation is only done in
-// `ConfigSchema` (version format, timestamp validation).  Those callsites
-// already hit the same Regex object repeatedly; cache them with lazy_static
-// in config_schema.rs if not already done.
-//
-// Example pattern for config_schema.rs:
-//   lazy_static::lazy_static! {
-//       static ref VERSION_RE: regex::Regex =
-//           regex::Regex::new(r"^(x_\d+\.\d+|\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)?)$")
-//               .expect("VERSION_RE compile failed");
-//   }
-// =============================================================================
-
-// =============================================================================
-// TokenizerState — byte-indexed position tracking
+// TokenizerState
 // =============================================================================
 
 #[derive(Debug, Clone, Copy)]
@@ -118,11 +104,8 @@ impl TokenizerState {
     }
 
     #[inline]
-    fn is_at_end(&self) -> bool {
-        self.position >= self.input_length
-    }
+    fn is_at_end(&self) -> bool { self.position >= self.input_length }
 
-    /// O(1) ASCII peek.
     #[inline]
     fn peek(&self, input: &str) -> char {
         if self.is_at_end() { '\0' }
@@ -142,7 +125,6 @@ impl TokenizerState {
         else { input.as_bytes()[pos] as char }
     }
 
-    /// Advance one byte; O(1).
     #[inline]
     fn advance(&mut self, input: &str) -> char {
         if self.is_at_end() { return '\0'; }
@@ -153,7 +135,6 @@ impl TokenizerState {
         current
     }
 
-    /// Zero-copy slice of `input[start..start+length]`.
     #[inline]
     fn slice<'a>(&self, input: &'a str, start: usize, length: usize) -> &'a str {
         let bytes = input.as_bytes();
@@ -166,30 +147,13 @@ impl TokenizerState {
 // Tokenizer
 // =============================================================================
 
-/// Lexer for DixScript source text.
-///
-/// ## Lifetime `'src`
-/// The tokenizer borrows the *cleaned* source string (i.e. after
-/// `ConfigSectionHandler` has stripped `@CONFIG`) and the `OperationalSettings`
-/// extracted from that config.  Both must outlive the `tokenize()` call.
-/// The returned `TokenizationResult` owns all its data, so it can outlive
-/// the tokenizer and the source string.
 pub struct Tokenizer<'src> {
     input:    &'src str,
     settings: &'src OperationalSettings,
 
-    // Cached at construction — no per-token RwLock acquisition.
-    // True when the current DixScript version supports every token type
-    // (i.e. no version-specific token restrictions are active).
     version_allows_all_tokens: bool,
-
-    // DebugConfig is copied from ErrorManager once so hot-path format!()
-    // calls are guarded cheaply:  if self.debug_config.is_enabled { ... }
     debug_config: DebugConfig,
-
     error_manager: ErrorManager,
-
-    // SectionId is Copy (1 byte).  No clone, no heap allocation.
     current_section: SectionId,
 
     prefixed_constructors_found: Vec<PrefixedConstructorInfo>,
@@ -198,28 +162,18 @@ pub struct Tokenizer<'src> {
 }
 
 impl<'src> Tokenizer<'src> {
-    /// Create a new tokenizer.
-    ///
-    /// `input`    — the *cleaned* source string (ConfigSectionHandler must have
-    ///              stripped `@CONFIG` before calling this).
-    /// `settings` — operational settings extracted from `@CONFIG`.
     pub fn new(input: &'src str, settings: &'src OperationalSettings) -> Self {
         let estimated_tokens = (input.len() / 10).max(INITIAL_TOKEN_POOL_SIZE);
+        let error_manager    = ErrorManager::get_shared_instance();
+        let debug_config     = DebugConfig::from_debug_mode(error_manager.get_debug_mode());
 
-        let error_manager = ErrorManager::get_shared_instance();
-
-        // Cache debug config once so hot-path code never needs to lock.
-        let debug_config = DebugConfig::from_debug_mode(error_manager.get_debug_mode());
-
-        // Cache version check: acquire the RwLock ONCE here, not once per token.
-        // For v1.0.0 (and all 1.x), every token type is valid.
         let version_allows_all_tokens = VersionManager::instance()
             .read()
             .map(|vm| {
                 let v = vm.get_current_version();
                 v == "1.0.0" || v.starts_with("1.")
             })
-            .unwrap_or(true); // Fail open: if we can't read, assume all tokens valid
+            .unwrap_or(true);
 
         Tokenizer {
             input,
@@ -246,15 +200,12 @@ impl<'src> Tokenizer<'src> {
 
         loop {
             self.skip_whitespace(&mut state);
-
             if state.is_at_end() { break; }
 
             match self.scan_token(&mut state) {
                 Ok(Some(token)) => {
                     recovery_attempts = 0;
 
-                    // Version check — only branched when version has restrictions
-                    // (i.e. almost never for v1.x).
                     if !self.version_allows_all_tokens
                         && !self.is_token_supported_slow(&token)
                     {
@@ -267,7 +218,7 @@ impl<'src> Tokenizer<'src> {
                     self.token_pool.push(token);
                 }
 
-                Ok(None) => { /* whitespace / already consumed — continue */ }
+                Ok(None) => {}
 
                 Err(err_msg) => {
                     self.handle_tokenization_error(
@@ -285,10 +236,7 @@ impl<'src> Tokenizer<'src> {
                                 LexicalErrorType::InvalidCharacter,
                                 "Maximum recovery attempts exceeded — aborting tokenization"
                                     .to_string(),
-                                state.line,
-                                state.column,
-                                None,
-                                None,
+                                state.line, state.column, None, None,
                             );
                             break;
                         }
@@ -299,9 +247,7 @@ impl<'src> Tokenizer<'src> {
                     if self.should_continue() {
                         let error_token = Token::new(
                             TokenType::Error(err_msg.clone()),
-                            state.line,
-                            state.column,
-                            self.current_section,
+                            state.line, state.column, self.current_section,
                         );
                         self.token_pool.push(error_token);
                         if !self.skip_to_next_valid_token(&mut state) { break; }
@@ -310,20 +256,21 @@ impl<'src> Tokenizer<'src> {
             }
         }
 
-        // EOF
         self.token_pool.push(Token::eof(state.line, state.column));
 
-        // analyze_token_sequences is a diagnostic hint pass (parser handles
-        // static-call resolution authoritatively).  Only run in debug builds
-        // to avoid the O(n) post-scan overhead in production.
-        if self.debug_config.is_enabled {
+        // Diagnostic passes that verify tokeniser output structure.
+        // `is_testing` is cfg!(test) — a compile-time constant.
+        // The branch and everything inside it is eliminated by the
+        // optimiser in dev / release / bench builds.  It only runs
+        // under `cargo test`.
+        if self.debug_config.is_testing {
             self.analyze_token_sequences();
         }
 
         let metadata = self.create_metadata();
 
         TokenizationResult {
-            tokens:               self.token_pool,
+            tokens:                self.token_pool,
             metadata,
             prefixed_constructors: self.prefixed_constructors_found,
             static_calls:          self.static_calls_found,
@@ -337,10 +284,10 @@ impl<'src> Tokenizer<'src> {
     #[inline]
     fn handle_tokenization_error(
         &self,
-        err_msg: &str,
-        state:                &mut TokenizerState,
-        recovery_attempts:    &mut usize,
-        last_error_position:  &mut usize,
+        err_msg:             &str,
+        state:               &mut TokenizerState,
+        recovery_attempts:   &mut usize,
+        last_error_position: &mut usize,
     ) {
         if state.position == *last_error_position {
             *recovery_attempts += 1;
@@ -351,20 +298,12 @@ impl<'src> Tokenizer<'src> {
         self.error_manager.add_lexical_error(
             LexicalErrorType::InvalidCharacter,
             err_msg.to_string(),
-            state.line,
-            state.column,
-            None,
-            None,
+            state.line, state.column, None, None,
         );
     }
 
     fn handle_unsupported_token(&self, token: &Token) {
-        // Only format the version string if debug is on — the version lookup
-        // itself is now free (cached), but the format! still allocates.
         let msg = if self.debug_config.is_enabled {
-            // We cached version_allows_all_tokens, but we still need the
-            // string for the error message.  Accept the one-off RwLock here;
-            // this path is cold (unsupported token in a non-1.x build).
             let v = VersionManager::instance()
                 .read()
                 .map(|vm| vm.get_current_version().to_string())
@@ -376,11 +315,7 @@ impl<'src> Tokenizer<'src> {
 
         self.error_manager.add_lexical_error(
             LexicalErrorType::InvalidCharacter,
-            msg,
-            token.line,
-            token.column,
-            None,
-            None,
+            msg, token.line, token.column, None, None,
         );
     }
 
@@ -414,25 +349,13 @@ impl<'src> Tokenizer<'src> {
     }
 
     // ------------------------------------------------------------------
-    // Strategy helpers (delegate to error_manager + settings)
+    // Strategy helpers
     // ------------------------------------------------------------------
 
-    #[inline]
-    fn should_terminate(&self) -> bool {
-        self.error_manager.should_terminate_parsing()
-    }
+    #[inline] fn should_terminate(&self) -> bool { self.error_manager.should_terminate_parsing() }
+    #[inline] fn supports_recovery(&self) -> bool { !self.should_terminate() || self.should_continue() }
+    #[inline] fn should_continue(&self) -> bool { self.error_manager.has_errors() && !self.should_terminate() }
 
-    #[inline]
-    fn supports_recovery(&self) -> bool {
-        !self.should_terminate() || self.should_continue()
-    }
-
-    #[inline]
-    fn should_continue(&self) -> bool {
-        self.error_manager.has_errors() && !self.should_terminate()
-    }
-
-    /// Slow path: called only when `version_allows_all_tokens == false`.
     #[inline]
     fn is_token_supported_slow(&self, token: &Token) -> bool {
         VersionManager::instance()
@@ -442,7 +365,7 @@ impl<'src> Tokenizer<'src> {
     }
 
     // ------------------------------------------------------------------
-    // Whitespace skip (byte-level, no char conversion)
+    // Whitespace
     // ------------------------------------------------------------------
 
     #[inline]
@@ -461,7 +384,7 @@ impl<'src> Tokenizer<'src> {
     fn is_hex_digit(&self, c: char) -> bool { c.is_ascii_hexdigit() }
 
     // ------------------------------------------------------------------
-    // Section context — O(1) because SectionId is Copy
+    // Section context
     // ------------------------------------------------------------------
 
     #[inline]
@@ -523,7 +446,7 @@ impl<'src> Tokenizer<'src> {
             }
         }
 
-        // 6. Numeric literals (including negative numbers)
+        // 6. Numeric literals
         if current.is_ascii_digit()
             || (current == '-' && state.peek_next(self.input).is_ascii_digit())
         {
@@ -560,8 +483,8 @@ impl<'src> Tokenizer<'src> {
     fn scan_single_line_comment(&self, state: &mut TokenizerState) -> Token {
         let start_column = state.column;
         let start_line   = state.line;
-        state.advance(self.input);  // /
-        state.advance(self.input);  // /
+        state.advance(self.input); // /
+        state.advance(self.input); // /
         let comment_start = state.position;
         let bytes = self.input.as_bytes();
         if let Some(offset) = memchr(b'\n', &bytes[state.position..]) {
@@ -581,35 +504,30 @@ impl<'src> Tokenizer<'src> {
         Token::new(TokenType::Comment(content), start_line, start_column, self.current_section)
     }
 
-    /// Multi-line comment — uses `memchr::memmem` (SIMD) to find `*/`
-    /// instead of the original character-by-character loop.
     fn scan_multi_line_comment(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line   = state.line;
-        state.advance(self.input);  // /
-        state.advance(self.input);  // *
+        state.advance(self.input); // /
+        state.advance(self.input); // *
         let comment_start = state.position;
         let bytes = self.input.as_bytes();
 
         if let Some(offset) = memchr::memmem::find(&bytes[state.position..], b"*/") {
             let end_abs = state.position + offset;
-
-            // Count newlines in the comment body to keep line/col accurate.
             let comment_bytes = &bytes[comment_start..end_abs];
             let newline_count = memchr::memchr_iter(b'\n', comment_bytes).count();
             let content = std::str::from_utf8(comment_bytes).unwrap_or("").to_string();
 
             if newline_count > 0 {
                 state.line += newline_count;
-                // Column = distance from last newline to end of `*/`
                 let last_nl = memchr::memchr_iter(b'\n', comment_bytes)
                     .last()
                     .unwrap_or(0);
-                state.column = (end_abs - (comment_start + last_nl)) + 2; // +2 for */
+                state.column = (end_abs - (comment_start + last_nl)) + 2;
             } else {
                 state.column += (end_abs - comment_start) + 2;
             }
-            state.position = end_abs + 2; // skip */
+            state.position = end_abs + 2;
 
             return Ok(Some(Token::new(
                 TokenType::Comment(content),
@@ -617,7 +535,6 @@ impl<'src> Tokenizer<'src> {
             )));
         }
 
-        // Unterminated
         self.error_manager.add_lexical_error(
             LexicalErrorType::UnterminatedString,
             "Unterminated multi-line comment".to_string(),
@@ -639,7 +556,7 @@ impl<'src> Tokenizer<'src> {
     }
 
     // ------------------------------------------------------------------
-    // Section keyword  @CONFIG  @DATA  etc.
+    // Section keywords
     // ------------------------------------------------------------------
 
     fn try_scan_section_keyword(&self, state: &mut TokenizerState) -> Option<Token> {
@@ -681,7 +598,7 @@ impl<'src> Tokenizer<'src> {
     }
 
     // ------------------------------------------------------------------
-    // String literals — SIMD via memchr3
+    // String literals
     // ------------------------------------------------------------------
 
     fn scan_string_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
@@ -810,9 +727,9 @@ impl<'src> Tokenizer<'src> {
     #[inline]
     fn process_escape_sequence(&self, escaped: char) -> char {
         match escaped {
-            'n'  => '\n', 't'  => '\t', 'r'  => '\r',
-            '\\' => '\\', '"'  => '"',  '\'' => '\'',
-            '{'  => '{',  '}'  => '}',  '0'  => '\0',
+            'n'  => '\n', 't' => '\t', 'r' => '\r',
+            '\\' => '\\', '"' => '"',  '\'' => '\'',
+            '{'  => '{',  '}' => '}',  '0'  => '\0',
             _    => escaped,
         }
     }
@@ -1020,6 +937,9 @@ impl<'src> Tokenizer<'src> {
 
     // ------------------------------------------------------------------
     // Multi-character operators
+    //
+    // All operator string payloads are now `&'static str` literals.
+    // No `.to_string()` calls — zero heap allocation for operator tokens.
     // ------------------------------------------------------------------
 
     fn try_scan_multi_char_operator(&self, state: &mut TokenizerState) -> Option<Token> {
@@ -1032,51 +952,54 @@ impl<'src> Tokenizer<'src> {
         // Three-char operators first
         if state.position + 2 < state.input_length {
             let third = state.peek_at(self.input, 2);
-            let three_char = match (current, next, third) {
-                ('*', '*', '=') => Some(TokenType::ArithmeticAssignOp("**=".to_string())),
-                ('<', '<', '=') => Some(TokenType::BitwiseOp("<<=".to_string())),
-                ('>', '>', '=') => Some(TokenType::BitwiseOp(">>=".to_string())),
-                ('>', '_', '<') => Some(TokenType::BitwiseOp(">_<".to_string())),
+            let three_char: Option<TokenType> = match (current, next, third) {
+                ('*', '*', '=') => Some(TokenType::ArithmeticAssignOp("**=")),
+                ('<', '<', '=') => Some(TokenType::BitwiseOp("<<=")),
+                ('>', '>', '=') => Some(TokenType::BitwiseOp(">>=")),
+                ('>', '_', '<') => Some(TokenType::BitwiseOp(">_<")),
                 _ => None,
             };
             if let Some(tt) = three_char {
-                state.advance(self.input); state.advance(self.input); state.advance(self.input);
+                state.advance(self.input);
+                state.advance(self.input);
+                state.advance(self.input);
                 return Some(Token::new(tt, start_line, start_column, self.current_section));
             }
         }
 
         // Two-char operators
-        let two_char = match (current, next) {
+        let two_char: Option<TokenType> = match (current, next) {
             ('=', '>') => Some(TokenType::Arrow),
             (':', ':') => Some(TokenType::DoubleColon),
             ('-', '>') => Some(TokenType::SwitchCase),
-            ('*', '*') => Some(TokenType::ArithmeticOp("**".to_string())),
-            ('%', '%') => Some(TokenType::ArithmeticOp("%%".to_string())),
-            ('%', '&') => Some(TokenType::ArithmeticOp("%&".to_string())),
-            ('&', '%') => Some(TokenType::ArithmeticOp("&%".to_string())),
-            ('+', '+') => Some(TokenType::ArithmeticOp("++".to_string())),
-            ('-', '-') => Some(TokenType::ArithmeticOp("--".to_string())),
-            ('+', '=') => Some(TokenType::ArithmeticAssignOp("+=".to_string())),
-            ('-', '=') => Some(TokenType::ArithmeticAssignOp("-=".to_string())),
-            ('*', '=') => Some(TokenType::ArithmeticAssignOp("*=".to_string())),
-            ('/', '=') => Some(TokenType::ArithmeticAssignOp("/=".to_string())),
-            ('%', '=') => Some(TokenType::ArithmeticAssignOp("%=".to_string())),
-            ('=', '=') => Some(TokenType::ComparisonOp("==".to_string())),
-            ('!', '=') => Some(TokenType::ComparisonOp("!=".to_string())),
-            ('<', '=') => Some(TokenType::ComparisonOp("<=".to_string())),
-            ('>', '=') => Some(TokenType::ComparisonOp(">=".to_string())),
-            ('&', '&') => Some(TokenType::LogicalOp("&&".to_string())),
-            ('|', '|') => Some(TokenType::LogicalOp("||".to_string())),
-            ('<', '<') => Some(TokenType::BitwiseOp("<<".to_string())),
-            ('>', '>') => Some(TokenType::BitwiseOp(">>".to_string())),
-            ('~', '?') => Some(TokenType::BitwiseOp("~?".to_string())),
-            ('&', '=') => Some(TokenType::BitwiseOp("&=".to_string())),
-            ('|', '=') => Some(TokenType::BitwiseOp("|=".to_string())),
-            ('^', '=') => Some(TokenType::BitwiseOp("^=".to_string())),
+            ('*', '*') => Some(TokenType::ArithmeticOp("**")),
+            ('%', '%') => Some(TokenType::ArithmeticOp("%%")),
+            ('%', '&') => Some(TokenType::ArithmeticOp("%&")),
+            ('&', '%') => Some(TokenType::ArithmeticOp("&%")),
+            ('+', '+') => Some(TokenType::ArithmeticOp("++")),
+            ('-', '-') => Some(TokenType::ArithmeticOp("--")),
+            ('+', '=') => Some(TokenType::ArithmeticAssignOp("+=")),
+            ('-', '=') => Some(TokenType::ArithmeticAssignOp("-=")),
+            ('*', '=') => Some(TokenType::ArithmeticAssignOp("*=")),
+            ('/', '=') => Some(TokenType::ArithmeticAssignOp("/=")),
+            ('%', '=') => Some(TokenType::ArithmeticAssignOp("%=")),
+            ('=', '=') => Some(TokenType::ComparisonOp("==")),
+            ('!', '=') => Some(TokenType::ComparisonOp("!=")),
+            ('<', '=') => Some(TokenType::ComparisonOp("<=")),
+            ('>', '=') => Some(TokenType::ComparisonOp(">=")),
+            ('&', '&') => Some(TokenType::LogicalOp("&&")),
+            ('|', '|') => Some(TokenType::LogicalOp("||")),
+            ('<', '<') => Some(TokenType::BitwiseOp("<<")),
+            ('>', '>') => Some(TokenType::BitwiseOp(">>")),
+            ('~', '?') => Some(TokenType::BitwiseOp("~?")),
+            ('&', '=') => Some(TokenType::BitwiseOp("&=")),
+            ('|', '=') => Some(TokenType::BitwiseOp("|=")),
+            ('^', '=') => Some(TokenType::BitwiseOp("^=")),
             _ => None,
         };
         if let Some(tt) = two_char {
-            state.advance(self.input); state.advance(self.input);
+            state.advance(self.input);
+            state.advance(self.input);
             return Some(Token::new(tt, start_line, start_column, self.current_section));
         }
         None
@@ -1098,7 +1021,7 @@ impl<'src> Tokenizer<'src> {
         }
         let identifier = state.slice(self.input, start_pos, state.position - start_pos);
 
-        // Perfect-hash lookup — O(1) with zero collisions
+        // Perfect-hash lookup — O(1)
         if let Some(ctor) = KEYWORDS.get(identifier) {
             return Token::new(ctor(), start_line, start_column, self.current_section);
         }
@@ -1144,24 +1067,31 @@ impl<'src> Tokenizer<'src> {
         Token::new(token_type, start_line, start_column, self.current_section)
     }
 
+    // ------------------------------------------------------------------
+    // Single characters
+    //
+    // Single-char operator payloads are now `&'static str` literals.
+    // ------------------------------------------------------------------
+
     fn scan_single_character(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line   = state.line;
         let symbol       = state.advance(self.input);
 
         let token_type = match symbol {
-            '+'                                          => TokenType::ArithmeticOp("+".to_string()),
-            '-'                                          => TokenType::ArithmeticOp("-".to_string()),
-            '*'                                          => TokenType::ArithmeticOp("*".to_string()),
-            '/'                                          => TokenType::ArithmeticOp("/".to_string()),
-            '%'                                          => TokenType::ArithmeticOp("%".to_string()),
-            '^'                                          => TokenType::BitwiseOp("^".to_string()),
-            '&'                                          => TokenType::BitwiseOp("&".to_string()),
-            '|'                                          => TokenType::BitwiseOp("|".to_string()),
-            '<' | '>' | '=' | '!'                        => TokenType::Symbol(symbol),
+            '+' => TokenType::ArithmeticOp("+"),
+            '-' => TokenType::ArithmeticOp("-"),
+            '*' => TokenType::ArithmeticOp("*"),
+            '/' => TokenType::ArithmeticOp("/"),
+            '%' => TokenType::ArithmeticOp("%"),
+            '^' => TokenType::BitwiseOp("^"),
+            '&' => TokenType::BitwiseOp("&"),
+            '|' => TokenType::BitwiseOp("|"),
+            '<' | '>' | '=' | '!' => TokenType::Symbol(symbol),
             _ if !symbol.is_control() && !symbol.is_whitespace() => TokenType::Symbol(symbol),
             _ => {
-                // Only format the detailed message when debug is enabled
+                // Format the detailed message only when debug is enabled —
+                // the format! still allocates, but this is a cold error path.
                 let msg = if self.debug_config.is_enabled {
                     format!(
                         "Unexpected character: '{}' (0x{:X})",
@@ -1187,15 +1117,14 @@ impl<'src> Tokenizer<'src> {
     }
 
     // ------------------------------------------------------------------
-    // Post-pass: static-call hints (debug only)
+    // Post-pass: static-call hints
     //
-    // RATIONALE: The parser and builtin_call_resolver both detect Identifier.Method
-    // patterns with full context.  Running this O(n) pass in production adds ~5 %
-    // overhead on large files for zero benefit.  Gate it on debug_config.is_enabled
-    // so it only fires when someone is actually debugging tokenisation output.
+    // Gated on `is_testing` (compile-time cfg!(test) constant).
+    // This pass is a tokeniser-output verification tool, not a
+    // production diagnostic.  It has real O(n) cost and must never run
+    // in dev / release / bench builds.
     //
-    // BUG FIX: was using self.current_section (the FINAL section after the whole
-    // file is scanned) for all entries.  Now uses token1.section correctly.
+    // BUG FIX (carried forward): uses token1.section, not self.current_section.
     // ------------------------------------------------------------------
 
     fn analyze_token_sequences(&mut self) {
@@ -1224,7 +1153,7 @@ impl<'src> Tokenizer<'src> {
                     method_name: method_name.clone(),
                     line:        self.token_pool[i].line,
                     column:      self.token_pool[i].column,
-                    section:     t1_section,  // use token's own section, not final section
+                    section:     t1_section,
                     token_index: i,
                 });
             }
@@ -1243,8 +1172,12 @@ impl<'src> Tokenizer<'src> {
     // ------------------------------------------------------------------
 
     fn create_metadata(&self) -> TokenizationMetadata {
-        let sections_detected       = self.get_sections_from_tokens();
-        let potential_builtin_calls = if self.debug_config.is_enabled {
+        let sections_detected = self.get_sections_from_tokens();
+
+        // `analyze_potential_builtin_calls` is a test-verification pass —
+        // same reasoning as `analyze_token_sequences`.  Returns 0 in all
+        // non-test builds because the branch is compiled away entirely.
+        let potential_builtin_calls = if self.debug_config.is_testing {
             self.analyze_potential_builtin_calls()
         } else { 0 };
 
@@ -1303,24 +1236,24 @@ impl<'src> Tokenizer<'src> {
 
 #[derive(Debug, Clone)]
 pub struct TokenizationResult {
-    pub tokens:               Vec<Token>,
-    pub metadata:             TokenizationMetadata,
+    pub tokens:                Vec<Token>,
+    pub metadata:              TokenizationMetadata,
     pub prefixed_constructors: Vec<PrefixedConstructorInfo>,
     pub static_calls:          Vec<StaticCallInfo>,
 }
 
 #[derive(Debug, Clone)]
 pub struct TokenizationMetadata {
-    pub version:                    String,
-    pub total_lines:                usize,
-    pub total_tokens:               usize,
-    pub sections_detected:          Vec<String>,
-    pub prefixed_constructors_found: usize,
-    pub blob_constructors:          usize,
-    pub tuple_constructors:         usize,
-    pub regex_constructors:         usize,
-    pub static_calls_found:         usize,
-    pub potential_builtin_calls:    usize,
+    pub version:                      String,
+    pub total_lines:                  usize,
+    pub total_tokens:                 usize,
+    pub sections_detected:            Vec<String>,
+    pub prefixed_constructors_found:  usize,
+    pub blob_constructors:            usize,
+    pub tuple_constructors:           usize,
+    pub regex_constructors:           usize,
+    pub static_calls_found:           usize,
+    pub potential_builtin_calls:      usize,
 }
 
 #[derive(Debug, Clone)]
@@ -1329,7 +1262,7 @@ pub struct PrefixedConstructorInfo {
     pub prefix:           String,
     pub line:             usize,
     pub column:           usize,
-    pub section:          SectionId,  // was Option<String>
+    pub section:          SectionId,
 }
 
 #[derive(Debug, Clone)]
@@ -1338,6 +1271,6 @@ pub struct StaticCallInfo {
     pub method_name:  String,
     pub line:         usize,
     pub column:       usize,
-    pub section:      SectionId,  // was Option<String>; now correctly per-token
+    pub section:      SectionId,
     pub token_index:  usize,
-}
+    }

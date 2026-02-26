@@ -92,12 +92,12 @@ enum ParsedSection {
 ///
 /// **Ownership notes**
 /// - `tokens`               — owned; the parser filters and slices this vec.
-/// - `config_section`       — owned; already processed before this parser runs.
+/// - `config_section`       — borrowed; already processed before this parser runs so just clone.
 /// - `operational_settings` — borrowed for `'a`; parser must not outlive settings.
 /// - Section parsers        — receive `&[Token]` slices from per-section vecs.
 pub struct GeneralParser<'a> {
     tokens:               Vec<Token>,
-    config_section:       ConfigSection,
+    config_section:      &'a ConfigSection,
     operational_settings: &'a OperationalSettings,
 
     /// Cached at construction time from `operational_settings.debug_mode`.
@@ -124,7 +124,7 @@ impl<'a> GeneralParser<'a> {
     /// - `operational_settings` is **borrowed** for `'a`.
     pub fn new(
         tokens:               Vec<Token>,
-        config_section:       ConfigSection,
+        config_section:      &'a ConfigSection,
         operational_settings: &'a OperationalSettings,
     ) -> Result<Self, ParseException> {
         let error_manager = ErrorManager::get_shared_instance();

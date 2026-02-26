@@ -397,11 +397,11 @@ mod tests {
 
     #[test]
     fn test_get_data_type_from_token() {
-        let token = TokenType::Keyword("int".to_string());
+        let token = TokenType::Keyword("int");
         let data_type = TypeSystemManager::get_data_type_from_token(&token);
         assert_eq!(data_type, Some(DataType::Int));
 
-        let token2 = TokenType::Keyword("unknown".to_string());
+        let token2 = TokenType::Keyword("unknown");
         let data_type2 = TypeSystemManager::get_data_type_from_token(&token2);
         assert_eq!(data_type2, None);
     }

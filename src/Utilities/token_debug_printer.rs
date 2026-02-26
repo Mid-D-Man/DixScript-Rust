@@ -58,7 +58,7 @@ impl TokenDebugPrinter {
                     pc.constructor_type,
                     pc.line,
                     pc.column,
-                    pc.section.as_deref().unwrap_or("unknown")
+                    pc.section
                 ));
             }
         }
@@ -73,7 +73,7 @@ impl TokenDebugPrinter {
                     sc.method_name,
                     sc.line,
                     sc.column,
-                    sc.section.as_deref().unwrap_or("unknown")
+                    sc.section
                 ));
             }
         }
@@ -163,7 +163,7 @@ impl TokenDebugPrinter {
 
         // Section
         if self.show_sections {
-            if let Some(ref section) = token.section {
+            if let Some(ref section) = token.section.as_str() {
                 parts.push(format!("({})", section));
             }
         }

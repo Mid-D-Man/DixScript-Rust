@@ -262,7 +262,7 @@ impl DixLoader {
         self.error_manager.update_settings(operational_settings.clone());
 
         // Step 2: Tokenization
-        let tokenizer = Tokenizer::new(config_result.cleaned_input_string.clone());
+        let tokenizer = Tokenizer::new(&config_result.cleaned_input_string,&operational_settings);
         let tok_result = tokenizer.tokenize();
 
         if !tok_result.tokens.is_empty()
@@ -279,8 +279,8 @@ impl DixLoader {
         // Step 3: Parsing
         let parser = GeneralParser::new(
             tok_result.tokens,
-            config_result.config_section.clone(),
-            operational_settings.clone(),
+            &config_result.config_section,
+            &operational_settings,
         )
             .map_err(|e| format!("Parser init failed: {}", e.message()))?;
 

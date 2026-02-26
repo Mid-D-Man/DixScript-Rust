@@ -469,15 +469,15 @@ impl<'a> SecuritySectionParser<'a> {
                 position: value_position,
             }),
             // FIX: Use .as_str() for String comparisons
-            TokenType::Keyword(k) if k.as_str() == "true" => Some(Value::Boolean {
+            TokenType::Keyword(k) if k == "true" => Some(Value::Boolean {
                 value: true,
                 position: value_position,
             }),
-            TokenType::Keyword(k) if k.as_str() == "false" => Some(Value::Boolean {
+            TokenType::Keyword(k) if k == "false" => Some(Value::Boolean {
                 value: false,
                 position: value_position,
             }),
-            TokenType::Keyword(k) if k.as_str() == "auto" => Some(Value::String {
+            TokenType::Keyword(k) if k == "auto" => Some(Value::String {
                 value: "auto".to_string(),
                 position: value_position,
             }),
@@ -509,7 +509,7 @@ impl<'a> SecuritySectionParser<'a> {
     fn match_arrow(&mut self) -> bool {
         // Try MultiCharSymbol "->"
         if let TokenType::MultiCharSymbol(ms) = &self.current().token_type {
-            if ms.as_str() == "->" {  // FIX: Use .as_str()
+            if ms == "->" {  // FIX: Use .as_str()
                 self.advance();
                 self.log_verbose("Consumed arrow operator '->'");
                 return true;

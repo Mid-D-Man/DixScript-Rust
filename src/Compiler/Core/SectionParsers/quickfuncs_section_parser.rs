@@ -1,74 +1,68 @@
 // src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs
+//
+// QuickFunctions Section Parser v1.0.0
+//
+// SPEC (BENF grammar):
+//   QuickFuncsSection ::= "@QUICKFUNCS(" QuickFunc* ")"
+//   QuickFunc         ::= "~" Identifier TypeAnnotation? ScopeDeclaration? FunctionSignature FunctionBody
+//   TypeAnnotation    ::= "<" DataType ">"
+//   ScopeDeclaration  ::= "=>" ScopeTarget ("," ScopeTarget)*
+//   ScopeTarget       ::= "global" | QualifiedIdentifier
+//   FunctionSignature ::= "(" ParameterList? ")"
+//   ParameterList     ::= Parameter ("," Parameter)*
+//   Parameter         ::= Identifier TypeAnnotation? ("=" DefaultValue)?
+//   FunctionBody      ::= "{" Statement* ReturnStatement "}"
+//
+// All dotted identifier chains (A.B.C) become QualifiedIdentifier.
+// The semantic analyzer resolves them (enum access, static call, property access, import, etc.).
+// Error strategies: Halt = stop immediately; Continue = collect all errors; Recover = sync and resume.
 
 use crate::Compiler::AST::{
     QuickFuncsSection, QuickFunction, QuickFuncParam, QuickFuncStatement, SwitchCase,
     Position, DataType, Expression, Value, ObjectProperty, DeclarationType,
 };
-use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
-use crate::ErrorManager::{ErrorManager, ParseErrorType};
+use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
+use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
+use crate::Compiler::Core::Tokenizer::token::SectionId;
 use crate::Utilities::{Keywords, estimate_statements_count, estimate_properties_count};
 use std::collections::HashMap;
-use crate::Compiler::Core::Tokenizer::token::SectionId;
-
-/// QuickFunctions Section Parser v1.0.0 - Simplified identifier handling
-/// All dotted identifiers become QualifiedIdentifier - analyzer resolves them
-/// Syntax: ~name<returnType> => scope (params) { body }
-pub struct QuickFuncsSectionParser<'a> {
-    tokens: &'a [Token],
-    operational_settings: &'a OperationalSettings,
-    error_manager: ErrorManager,
-
-    // Parse state
-    position: usize,
-    last_position: usize,
-    stuck_count: usize,
-    iteration_count: usize,
-}
-
-// ==================== CONSTANTS AND CONFIGURATION ====================
 
 const MAX_ITERATIONS_PER_TOKEN: usize = 3;
 const ABSOLUTE_MAX_ITERATIONS: usize = 1_000_000;
 const MAX_STUCK_COUNT: usize = 3;
 
-// ==================== OPERATOR PRECEDENCE TABLE ====================
-
 lazy_static::lazy_static! {
     static ref OPERATOR_PRECEDENCE: HashMap<&'static str, (i32, bool)> = {
         let mut m = HashMap::new();
-        m.insert("**", (13, true));
-        m.insert("*", (12, false));
-        m.insert("/", (12, false));
-        m.insert("%", (12, false));
-        m.insert("%%", (12, false));
-        m.insert("%&", (12, false));
-        m.insert("&%", (12, false));
-        m.insert("+", (11, false));
-        m.insert("-", (11, false));
-        m.insert("<<", (10, false));
-        m.insert(">>", (10, false));
-        m.insert(">", (9, false));
-        m.insert("<", (9, false));
-        m.insert(">=", (9, false));
-        m.insert("<=", (9, false));
-        m.insert("==", (8, false));
-        m.insert("!=", (8, false));
-        m.insert("&", (7, false));
-        m.insert("^", (6, false));
-        m.insert("|", (5, false));
-        m.insert("&&", (4, false));
-        m.insert("and", (4, false));
-        m.insert("||", (3, false));
-        m.insert("or", (3, false));
+        m.insert("**",  (13, true));
+        m.insert("*",   (12, false));
+        m.insert("/",   (12, false));
+        m.insert("%",   (12, false));
+        m.insert("%%",  (12, false));
+        m.insert("%&",  (12, false));
+        m.insert("&%",  (12, false));
+        m.insert("+",   (11, false));
+        m.insert("-",   (11, false));
+        m.insert("<<",  (10, false));
+        m.insert(">>",  (10, false));
+        m.insert(">",   (9,  false));
+        m.insert("<",   (9,  false));
+        m.insert(">=",  (9,  false));
+        m.insert("<=",  (9,  false));
+        m.insert("==",  (8,  false));
+        m.insert("!=",  (8,  false));
+        m.insert("&",   (7,  false));
+        m.insert("^",   (6,  false));
+        m.insert("|",   (5,  false));
+        m.insert("&&",  (4,  false));
+        m.insert("and", (4,  false));
+        m.insert("||",  (3,  false));
+        m.insert("or",  (3,  false));
         m
     };
 
-    static ref VALID_UNARY_OPERATORS: Vec<&'static str> = {
-        vec!["!", "not", "-", "+", "~?"]
-    };
-
-    // Interpolated string patterns — compiled ONCE, reused forever
+    // Compiled once at first use, reused forever — zero per-call allocation.
     static ref INTERP_PLACEHOLDER_RE: regex::Regex =
         regex::Regex::new(r"\{([^}]+)\}").expect("INTERP_PLACEHOLDER_RE compile failed");
 
@@ -79,25 +73,39 @@ lazy_static::lazy_static! {
         regex::Regex::new(r"^(\w+)\.(\w+)$").expect("INTERP_PROPERTY_RE compile failed");
 }
 
+pub struct QuickFuncsSectionParser<'a> {
+    tokens: &'a [Token],
+    operational_settings: &'a OperationalSettings,
+    error_manager: ErrorManager,
+    debug_config: DebugConfig,
+    position: usize,
+    last_position: usize,
+    stuck_count: usize,
+    iteration_count: usize,
+}
+
+// =============================================================================
+// Construction
+// =============================================================================
+
 impl<'a> QuickFuncsSectionParser<'a> {
-    // ==================== CONSTRUCTOR ====================
-
-    /// Create a new QuickFunctions section parser
-    pub fn new(
-        tokens: &'a [Token],
-        operational_settings: &'a OperationalSettings,
-    ) -> Self {
+    pub fn new(tokens: &'a [Token], operational_settings: &'a OperationalSettings) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
+        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
 
-        error_manager.log_debug(&format!(
-            "Initializing QuickFunctions parser v1.0.0 with {} tokens",
-            tokens.len()
-        ));
+        if debug_config.is_enabled {
+            error_manager.log_debug(&format!(
+                "QuickFunctions parser: {} tokens, strategy: {:?}",
+                tokens.len(),
+                operational_settings.error_handling_strategy
+            ));
+        }
 
         QuickFuncsSectionParser {
             tokens,
             operational_settings,
             error_manager,
+            debug_config,
             position: 0,
             last_position: usize::MAX,
             stuck_count: 0,
@@ -105,44 +113,45 @@ impl<'a> QuickFuncsSectionParser<'a> {
         }
     }
 
-    // ==================== MAIN PARSE METHOD ====================
+    // =============================================================================
+    // Main entry point
+    // =============================================================================
 
-    /// Parse the QUICKFUNCS section
     pub fn parse_section(&mut self) -> Option<QuickFuncsSection> {
-        self.log_debug("Starting QUICKFUNCS section parse");
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug("QuickFunctions: beginning section parse");
+        }
 
         let section_start_token = self.current().clone();
         let section_start_pos = Position::from_token(&section_start_token);
 
-        let estimated_functions = usize::max(2, self.tokens.len() / 50);
-        let mut functions = Vec::with_capacity(estimated_functions);
+        let mut functions = Vec::with_capacity(usize::max(2, self.tokens.len() / 50));
 
-        // Expect opening parenthesis
         if self.check_symbol('(') {
             self.advance();
-            self.log_debug("Consumed opening parenthesis");
         }
 
         let max_iterations = (self.tokens.len() * MAX_ITERATIONS_PER_TOKEN)
             .min(ABSOLUTE_MAX_ITERATIONS);
 
-        while !self.is_at_end()
-            && !self.check_symbol(')')
-            && self.iteration_count < max_iterations
-        {
+        while !self.is_at_end() && !self.check_symbol(')') && self.iteration_count < max_iterations {
             self.skip_whitespace();
             if self.is_at_end() || self.check_symbol(')') {
                 break;
             }
 
             self.iteration_count += 1;
-
             let position_before = self.position;
 
             if self.check_symbol('~') {
                 match self.parse_function() {
                     Some(func) => {
-                        self.log_debug(&format!("Parsed function: {}", func.name));
+                        if self.debug_config.is_enabled {
+                            self.error_manager.log_debug(&format!(
+                                "QuickFunctions: parsed '{}'",
+                                func.name
+                            ));
+                        }
                         functions.push(func);
                     }
                     None => {
@@ -156,20 +165,20 @@ impl<'a> QuickFuncsSectionParser<'a> {
             } else {
                 let current = self.current().clone();
 
-                if let TokenType::Symbol(';' | ',') = current.token_type {
-                    self.log_verbose(&format!("Skipping stray symbol '{}'",
-                                              current.get_token_value()));
+                if matches!(current.token_type, TokenType::Symbol(';' | ',')) {
                     self.advance();
                     continue;
                 }
 
                 self.error_manager.add_parse_error(
                     ParseErrorType::UnexpectedToken,
-                    format!("Expected '~' to start function, found {}",
-                            current.get_token_value()),
+                    format!(
+                        "Expected '~' to start function definition, found {}",
+                        current.get_token_value()
+                    ),
                     current.line,
                     current.column,
-                    None,
+                    Some("Each QuickFunction must begin with '~'".to_string()),
                     self.get_source_line(&current),
                 );
 
@@ -183,34 +192,32 @@ impl<'a> QuickFuncsSectionParser<'a> {
             }
 
             if position_before == self.position && !self.is_at_end() {
-                self.log_verbose(&format!("Forced advancement from position {}",
-                                          self.position));
                 self.advance();
             }
         }
 
-        self.error_manager.log_info(&format!(
-            "Successfully parsed {} functions",
-            functions.len()
-        ));
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "QuickFunctions: section complete, {} functions",
+                functions.len()
+            ));
+        }
 
         Some(QuickFuncsSection::new(functions, section_start_pos))
     }
 
-    // ==================== FUNCTION STRUCTURE PARSING ====================
+    // =============================================================================
+    // Function structure parsing
+    // =============================================================================
 
-    /// Parse complete function definition
-    /// Syntax: ~name<returnType> => scope (params) { body }
+    /// Parse a complete function definition: `~name<type> => scope (params) { body }`
     fn parse_function(&mut self) -> Option<QuickFunction> {
-        let function_start_token = self.current().clone();
-        let function_start_position = Position::from_token(&function_start_token);
+        let function_start_pos = Position::from_token(self.current());
 
-        // Expect '~'
         if !self.expect_symbol('~') {
             return None;
         }
 
-        // Parse function name
         let name_token = self.current().clone();
         let function_name = match &name_token.token_type {
             TokenType::Identifier(id) => id.clone(),
@@ -220,7 +227,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
                     "Expected function name after '~'".to_string(),
                     name_token.line,
                     name_token.column,
-                    None,
+                    Some("Provide a valid identifier as the function name".to_string()),
                     self.get_source_line(&name_token),
                 );
                 return None;
@@ -230,58 +237,50 @@ impl<'a> QuickFuncsSectionParser<'a> {
         self.advance();
         self.skip_whitespace();
 
-        self.log_debug(&format!("Parsing function: {}", function_name));
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!("QuickFunctions: parsing '{}'", function_name));
+        }
 
-        // Parse return type
-        let return_type = if self.check_symbol('<') {
-            self.parse_return_type()
-        } else {
-            None
-        };
-
+        let return_type = if self.check_symbol('<') { self.parse_return_type() } else { None };
         self.skip_whitespace();
 
-        // Parse scope declaration
         let scope_list = if self.check_arrow() {
             self.parse_scope_declaration()
         } else {
             Some(vec!["global".to_string()])
         };
-
         self.skip_whitespace();
 
-        // Parse parameters
         let parameters = if self.check_symbol('(') {
             self.parse_parameters()
         } else {
             Vec::new()
         };
-
         self.skip_whitespace();
 
-        // Parse body
-        let body = if self.check_symbol('{') {
-            self.parse_statement_block()
-        } else {
+        if !self.check_symbol('{') {
             self.error_manager.add_parse_error(
                 ParseErrorType::MissingToken,
-                "Expected '{' to start function body".to_string(),
+                format!("Expected '{{' to open body of function '{}'", function_name),
                 self.current().line,
                 self.current().column,
-                None,
+                Some("Add '{' after the parameter list".to_string()),
                 self.get_source_line(self.current()),
             );
             return None;
-        };
+        }
 
-        self.error_manager.log_info(&format!(
-            "Function {} complete: return={:?}, scope={:?}, params={}, stmts={}",
-            function_name,
-            return_type,
-            scope_list,
-            parameters.len(),
-            body.len()
-        ));
+        let body = self.parse_statement_block();
+
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "QuickFunctions: '{}' done — return={:?}, params={}, stmts={}",
+                function_name,
+                return_type,
+                parameters.len(),
+                body.len()
+            ));
+        }
 
         Some(QuickFunction::new(
             function_name,
@@ -289,7 +288,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
             scope_list,
             parameters,
             body,
-            function_start_position,
+            function_start_pos,
         ))
     }
 
@@ -297,32 +296,48 @@ impl<'a> QuickFuncsSectionParser<'a> {
         self.parse_type_annotation()
     }
 
-    /// Parse scope declaration: => global, => data.users, => data.users, data.posts
+    /// Parse `=> global` or `=> data.users, data.posts`.
     fn parse_scope_declaration(&mut self) -> Option<Vec<String>> {
         let mut scopes = Vec::new();
 
         if !self.check_arrow() {
             return Some(scopes);
         }
-
-        // Consume arrow
-        self.advance();
+        self.advance(); // consume '=>'
 
         loop {
             self.skip_whitespace();
-
             let token = self.current().clone();
 
-            let scope_path = if let TokenType::Keyword(kw) = &token.token_type {
-                if kw.as_str() == "global" {
-                    self.advance();
-                    Some("global".to_string())
-                } else if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") {
-                    self.parse_dotted_path()
-                } else {
+            let scope_path = match &token.token_type {
+                // Keyword: only "global" or contextually-allowed keywords are valid
+                TokenType::Keyword(kw) => {
+                    // *kw: &'static str — compare directly, no .as_str() needed
+                    if *kw == "global" {
+                        self.advance();
+                        Some("global".to_string())
+                    } else if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") {
+                        self.parse_dotted_path()
+                    } else {
+                        self.error_manager.add_parse_error(
+                            ParseErrorType::UnexpectedToken,
+                            format!("Cannot use reserved keyword '{}' in scope path", kw),
+                            token.line,
+                            token.column,
+                            None,
+                            self.get_source_line(&token),
+                        );
+                        None
+                    }
+                }
+                TokenType::Identifier(_) => self.parse_dotted_path(),
+                _ => {
                     self.error_manager.add_parse_error(
                         ParseErrorType::UnexpectedToken,
-                        format!("Cannot use language keyword '{}' in scope path", kw),
+                        format!(
+                            "Expected scope identifier or 'global' after '=>', found {}",
+                            token.get_token_value()
+                        ),
                         token.line,
                         token.column,
                         None,
@@ -330,19 +345,6 @@ impl<'a> QuickFuncsSectionParser<'a> {
                     );
                     None
                 }
-            } else if let TokenType::Identifier(_) = &token.token_type {
-                self.parse_dotted_path()
-            } else {
-                self.error_manager.add_parse_error(
-                    ParseErrorType::UnexpectedToken,
-                    format!("Expected scope identifier or 'global' after '=>', found {}",
-                            token.get_token_value()),
-                    token.line,
-                    token.column,
-                    None,
-                    self.get_source_line(&token),
-                );
-                None
             };
 
             if let Some(path) = scope_path {
@@ -352,7 +354,6 @@ impl<'a> QuickFuncsSectionParser<'a> {
             }
 
             self.skip_whitespace();
-
             if self.check_symbol(',') {
                 self.advance();
             } else {
@@ -360,38 +361,36 @@ impl<'a> QuickFuncsSectionParser<'a> {
             }
         }
 
-        self.log_verbose(&format!("Parsed {} scope(s): {:?}",
-                                  scopes.len(), scopes));
+        if self.debug_config.is_verbose {
+            self.error_manager.log_debug(&format!(
+                "QuickFunctions: scopes = {:?}",
+                scopes
+            ));
+        }
 
         Some(scopes)
     }
 
-    /// Parse function parameter list
-    /// Syntax: (x<int>, y<float> = 42, z = getValue())
+    /// Parse `(x<int>, y<float> = 42, z)`.
     fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
-        let estimated_params = usize::max(2, self.tokens.len() / 100);
-        let mut parameters = Vec::with_capacity(estimated_params);
+        let mut parameters = Vec::with_capacity(usize::max(2, self.tokens.len() / 100));
 
         if !self.expect_symbol('(') {
             return parameters;
         }
-
         self.skip_whitespace();
 
         if self.check_symbol(')') {
             self.advance();
-            self.log_verbose("Empty parameter list");
             return parameters;
         }
 
         loop {
             self.skip_whitespace();
+            let param_start_pos = Position::from_token(self.current());
 
-            let param_start_token = self.current().clone();
-            let param_position = Position::from_token(&param_start_token);
-
-            // Parse parameter name
-            let param_name = match &self.current().token_type {
+            // -- parameter name -----------------------------------------------
+            let param_name_opt = match &self.current().token_type {
                 TokenType::Identifier(id) => {
                     let name = id.clone();
                     self.advance();
@@ -400,123 +399,126 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 TokenType::Keyword(kw)
                 if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
                     {
-                        let name = kw.clone();
+                        // kw: &&'static str — .to_string() gives owned String
+                        let name = kw.to_string();
                         self.advance();
-                        self.log_verbose(&format!("Accepted keyword '{}' as parameter name", name));
+                        if self.debug_config.is_verbose {
+                            self.error_manager.log_debug(&format!(
+                                "QuickFunctions: keyword '{}' accepted as parameter name",
+                                name
+                            ));
+                        }
                         Some(name)
                     }
                 _ => {
+                    let cur = self.current().clone();
                     self.error_manager.add_parse_error(
                         ParseErrorType::MissingToken,
                         "Expected parameter name".to_string(),
-                        self.current().line,
-                        self.current().column,
+                        cur.line,
+                        cur.column,
                         None,
-                        self.get_source_line(self.current()),
+                        self.get_source_line(&cur),
                     );
                     None
                 }
             };
 
-            if param_name.is_none() {
+            if param_name_opt.is_none() {
                 break;
             }
-
-            let param_name = param_name.unwrap();
+            let param_name = param_name_opt.unwrap();
             self.skip_whitespace();
 
+            // -- optional type annotation <type> ------------------------------
             let mut param_type: Option<DataType> = None;
             let mut default_value: Option<Expression> = None;
 
-            // Parse type annotation INLINE (to handle default values inside <...>)
             if self.check_symbol('<') {
-                self.log_verbose(&format!("Parsing type annotation for parameter '{}'", param_name));
-                self.advance();  // consume '<'
+                self.advance(); // consume '<'
                 self.skip_whitespace();
 
                 let type_token = self.current().clone();
 
-                // Parse the type keyword
-                param_type = match &type_token.token_type {
-                    TokenType::Keyword(kw) | TokenType::Identifier(kw) => {
-                        match kw.to_lowercase().as_str() {
-                            "int" => Some(DataType::Int),
-                            "float" => Some(DataType::Float),
-                            "double" => Some(DataType::Double),
-                            "string" => Some(DataType::String),
-                            "bool" => Some(DataType::Bool),
-                            "array" => Some(DataType::Array),
-                            "object" => Some(DataType::Object),
-                            "tuple" => Some(DataType::Tuple),
-                            "hex" => Some(DataType::Hex),
-                            "blob" => Some(DataType::Blob),
-                            "regex" => Some(DataType::Regex),
-                            "date" => Some(DataType::Date),
-                            "timestamp" => Some(DataType::Timestamp),
-                            "enum" => Some(DataType::Enum),
-                            "any" => Some(DataType::Any),
-                            _ => None,
-                        }
-                    }
+                // Extract type string without OR-pattern (Keyword is &'static str, Identifier is String)
+                let type_lower = match &type_token.token_type {
+                    TokenType::Keyword(kw) => Some(kw.to_lowercase()),
+                    TokenType::Identifier(id) => Some(id.to_lowercase()),
                     _ => None,
                 };
 
-                if param_type.is_some() {
-                    self.log_verbose(&format!("Found type: {:?}", param_type));
-                    self.advance();  // consume type keyword
-                    self.skip_whitespace();
+                param_type = if let Some(ref s) = type_lower {
+                    let dt = Self::str_to_data_type(s);
+                    if dt.is_none() {
+                        self.error_manager.add_parse_error(
+                            ParseErrorType::InvalidType,
+                            format!("Invalid parameter type '{}'", s),
+                            type_token.line,
+                            type_token.column,
+                            None,
+                            self.get_source_line(&type_token),
+                        );
+                    }
+                    dt
                 } else {
                     self.error_manager.add_parse_error(
                         ParseErrorType::InvalidType,
-                        format!("Invalid parameter type: {}", type_token.get_token_value()),
+                        format!(
+                            "Expected type keyword inside '<>', found {}",
+                            type_token.get_token_value()
+                        ),
                         type_token.line,
                         type_token.column,
                         None,
                         self.get_source_line(&type_token),
                     );
-                    self.advance();  // skip invalid token
-                    self.skip_whitespace();
-                }
+                    None
+                };
 
-                // CHECK FOR '=' BEFORE THE CLOSING '>' (default value inside type annotation)
+                if type_lower.is_some() {
+                    self.advance(); // consume the type token
+                } else {
+                    self.advance(); // skip invalid token
+                }
+                self.skip_whitespace();
+
+                // Default value may appear inside <type = expr>
                 if self.check_symbol('=') {
-                    self.log_verbose("Found '=' inside type annotation for default value");
                     self.advance();
                     self.skip_whitespace();
                     default_value = Some(self.parse_expression(0));
                     self.skip_whitespace();
                 }
 
-                // Expect closing '>'
                 if !self.expect_symbol('>') {
-                    self.log_verbose("Missing '>' after type annotation");
                     break;
                 }
             }
 
             self.skip_whitespace();
 
-            // ALSO check for '=' OUTSIDE the type annotation (default value after type)
+            // Default value outside the type annotation: name = expr
             if self.check_symbol('=') && default_value.is_none() {
-                self.log_verbose(&format!("Found '=' outside type annotation for parameter '{}'", param_name));
                 self.advance();
                 self.skip_whitespace();
                 default_value = Some(self.parse_expression(0));
                 self.skip_whitespace();
             }
 
-            parameters.push(QuickFuncParam::new(
-                param_name.clone(),
-                param_type,
-                default_value.clone(),
-                param_position,
-            ));
+            if self.debug_config.is_verbose {
+                self.error_manager.log_debug(&format!(
+                    "QuickFunctions: param '{}' type={:?} has_default={}",
+                    param_name,
+                    param_type,
+                    default_value.is_some()
+                ));
+            }
 
-            self.log_verbose(&format!(
-                "Added parameter: {} <{:?}> = {:?}",
+            parameters.push(QuickFuncParam::new(
                 param_name,
                 param_type,
-                default_value.as_ref().map(|_| "expression")
+                default_value,
+                param_start_pos,
             ));
 
             if self.check_symbol(',') {
@@ -530,24 +532,21 @@ impl<'a> QuickFuncsSectionParser<'a> {
             return parameters;
         }
 
-        self.log_verbose(&format!("Parsed {} parameters total", parameters.len()));
         parameters
     }
 
-    /// Parse statement block
-    /// Syntax: { statement1 statement2 ... }
+    // =============================================================================
+    // Statement block
+    // =============================================================================
+
     fn parse_statement_block(&mut self) -> Vec<QuickFuncStatement> {
-        let estimated_stmts = estimate_statements_count(self.tokens.len());
-        let mut statements = Vec::with_capacity(estimated_stmts);
+        let mut statements = Vec::with_capacity(estimate_statements_count(self.tokens.len()));
 
         if !self.expect_symbol('{') {
             return statements;
         }
 
-        self.log_verbose(&format!("Parsing statement block starting at position {}",
-                                  self.position));
-
-        let mut brace_depth = 1;
+        let mut brace_depth: usize = 1;
         let max_iterations = (self.tokens.len() * MAX_ITERATIONS_PER_TOKEN)
             .min(ABSOLUTE_MAX_ITERATIONS);
 
@@ -556,16 +555,14 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
             if let TokenType::Symbol('}') = self.current().token_type {
                 brace_depth -= 1;
+                self.advance();
                 if brace_depth == 0 {
-                    self.log_verbose(&format!("Found closing brace at position {}",
-                                              self.position));
-                    self.advance();
                     break;
                 }
+                continue;
             }
 
             self.iteration_count += 1;
-
             let position_before = self.position;
 
             if let Some(stmt) = self.parse_statement() {
@@ -577,9 +574,6 @@ impl<'a> QuickFuncsSectionParser<'a> {
             }
 
             if position_before == self.position && !self.is_at_end() {
-                self.log_verbose(&format!("Forced advancement from position {}",
-                                          self.position));
-
                 if let TokenType::Symbol('}') = self.current().token_type {
                     brace_depth -= 1;
                     self.advance();
@@ -592,20 +586,18 @@ impl<'a> QuickFuncsSectionParser<'a> {
             }
         }
 
+        // Drain any remaining unmatched close braces at this depth
         if brace_depth > 0 && self.check_symbol('}') {
-            self.log_verbose(&format!("Consuming remaining closing brace at position {}",
-                                      self.position));
             self.advance();
         }
 
-        self.log_verbose(&format!("Parsed {} statements in block", statements.len()));
         statements
     }
 
-    // ==================== STATEMENT PARSING ====================
+    // =============================================================================
+    // Statement parsing
+    // =============================================================================
 
-    /// Parse statement with support for let/const variable declarations
-    /// Syntax: let x = 5, let mut y<int> = 10, const z = 15, x += 5
     fn parse_statement(&mut self) -> Option<QuickFuncStatement> {
         self.skip_whitespace();
         if self.is_at_end() {
@@ -613,244 +605,203 @@ impl<'a> QuickFuncsSectionParser<'a> {
         }
 
         let token = self.current().clone();
-        let statement_position = Position::from_token(&token);
-        let start_position = self.position;
+        let stmt_pos = Position::from_token(&token);
 
-        self.log_verbose(&format!("ParseStatement starting at position {}, token: {}",
-                                  start_position, token.get_token_value()));
-
-        // Check for closing brace
         if let TokenType::Symbol('}') = token.token_type {
-            self.log_verbose("Found closing brace - not consuming (belongs to parent scope)");
             return None;
         }
 
-        // Return statement
+        // -- keyword-led statements -------------------------------------------
         if let TokenType::Keyword(kw) = &token.token_type {
-            if kw.as_str() == "return" {
+            // kw: &&'static str — compare with *kw, no .as_str() needed
+            if *kw == "return" {
+                return self.parse_return_statement(stmt_pos);
+            }
+            if *kw == "if" {
+                return self.parse_if_statement();
+            }
+            if *kw == "chk" {
+                return self.parse_switch_statement();
+            }
+            if *kw == "log" {
+                return self.parse_log_statement(stmt_pos);
+            }
+            if *kw == "let" {
+                return Some(self.parse_variable_declaration(DeclarationType::Let, stmt_pos));
+            }
+            if *kw == "const" {
+                return Some(self.parse_variable_declaration(DeclarationType::Const, stmt_pos));
+            }
+
+            // Contextually-allowed keyword used as a variable name
+            if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") {
+                let var_name = kw.to_string(); // &&'static str -> String
+                let saved = self.position;
                 self.advance();
                 self.skip_whitespace();
 
-                let expr = if !self.check_symbol(';') && !self.check_symbol('}') {
-                    self.parse_expression(0)
-                } else {
-                    Expression::Value {
-                        value: Value::Null { position: statement_position },
-                        position: statement_position,
+                match &self.current().token_type {
+                    TokenType::Symbol('=') => {
+                        self.advance();
+                        self.skip_whitespace();
+                        let expr = self.parse_expression(0);
+                        self.skip_whitespace();
+                        if self.check_symbol(';') { self.advance(); }
+                        return Some(QuickFuncStatement::Assignment {
+                            variable: var_name,
+                            value: expr,
+                            position: stmt_pos,
+                        });
                     }
-                };
-
-                self.skip_whitespace();
-                if self.check_symbol(';') {
-                    self.advance();
+                    TokenType::ArithmeticAssignOp(op) => {
+                        let operator = op.to_string(); // &&'static str -> String
+                        self.advance();
+                        self.skip_whitespace();
+                        let expr = self.parse_expression(0);
+                        self.skip_whitespace();
+                        if self.check_symbol(';') { self.advance(); }
+                        return Some(QuickFuncStatement::ArithmeticAssignment {
+                            variable: var_name,
+                            operator,
+                            value: expr,
+                            position: stmt_pos,
+                        });
+                    }
+                    _ => {
+                        self.position = saved;
+                    }
                 }
-
-                return Some(QuickFuncStatement::Return {
-                    value: expr,
-                    position: statement_position,
-                });
-            }
-
-            // If statement
-            if kw.as_str() == "if" {
-                return self.parse_if_statement();
-            }
-
-            // Switch statement
-            if kw.as_str() == "chk" {
-                return self.parse_switch_statement();
-            }
-
-            // Log statement
-            if kw.as_str() == "log" {
-                return self.parse_log_statement(statement_position);
-            }
-
-            // Let declaration
-            if kw.as_str() == "let" {
-                return Some(self.parse_variable_declaration(
-                    DeclarationType::Let,
-                    statement_position
-                ));
-            }
-
-            // Const declaration
-            if kw.as_str() == "const" {
-                return Some(self.parse_variable_declaration(
-                    DeclarationType::Const,
-                    statement_position
-                ));
             }
         }
 
-        // Log statement (identifier variant)
+        // -- identifier-led: "log" as identifier, assignment, arith-assign ----
         if let TokenType::Identifier(id) = &token.token_type {
             if id.eq_ignore_ascii_case("log") {
-                return self.parse_log_statement(statement_position);
+                return self.parse_log_statement(stmt_pos);
             }
-        }
 
-        // Assignment or expression statement
-        if let TokenType::Identifier(var_name) = &token.token_type {
-            let var_name = var_name.clone();
-            let saved_position = self.position;
-
+            let var_name = id.clone();
+            let saved = self.position;
             self.advance();
             self.skip_whitespace();
 
-            let next_token = self.current();
-
-            // Regular assignment
-            if let TokenType::Symbol('=') = next_token.token_type {
-                self.advance();
-                self.skip_whitespace();
-                let expr = self.parse_expression(0);
-                self.skip_whitespace();
-                if self.check_symbol(';') {
-                    self.advance();
-                }
-                return Some(QuickFuncStatement::Assignment {
-                    variable: var_name,
-                    value: expr,
-                    position: statement_position,
-                });
-            }
-
-            // Arithmetic assignment
-            if let TokenType::ArithmeticAssignOp(op) = &next_token.token_type {
-                let operator = op.clone();
-                self.advance();
-                self.skip_whitespace();
-                let expr = self.parse_expression(0);
-                self.skip_whitespace();
-                if self.check_symbol(';') {
-                    self.advance();
-                }
-                return Some(QuickFuncStatement::ArithmeticAssignment {
-                    variable: var_name,
-                    operator,
-                    value: expr,
-                    position: statement_position,
-                });
-            }
-
-            // Bitwise assignment
-            if let TokenType::BitwiseOp(op) = &next_token.token_type {
-                if op.ends_with('=') {
-                    let operator = op.clone();
+            match &self.current().token_type {
+                TokenType::Symbol('=') => {
                     self.advance();
                     self.skip_whitespace();
                     let expr = self.parse_expression(0);
                     self.skip_whitespace();
-                    if self.check_symbol(';') {
-                        self.advance();
-                    }
+                    if self.check_symbol(';') { self.advance(); }
+                    return Some(QuickFuncStatement::Assignment {
+                        variable: var_name,
+                        value: expr,
+                        position: stmt_pos,
+                    });
+                }
+                TokenType::ArithmeticAssignOp(op) => {
+                    let operator = op.to_string(); // &&'static str -> String
+                    self.advance();
+                    self.skip_whitespace();
+                    let expr = self.parse_expression(0);
+                    self.skip_whitespace();
+                    if self.check_symbol(';') { self.advance(); }
                     return Some(QuickFuncStatement::ArithmeticAssignment {
                         variable: var_name,
                         operator,
                         value: expr,
-                        position: statement_position,
+                        position: stmt_pos,
                     });
                 }
-            }
-
-            // Not assignment, parse as expression
-            self.position = saved_position;
-        }
-
-        // Keyword assignment (contextual keywords)
-        if let TokenType::Keyword(kw) = &token.token_type {
-            if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") {
-                let var_name = kw.clone();
-                let saved_position = self.position;
-
-                self.advance();
-                self.skip_whitespace();
-
-                let next_token = self.current();
-
-                if let TokenType::Symbol('=') = next_token.token_type {
+                TokenType::BitwiseOp(op) if op.ends_with('=') => {
+                    let operator = op.to_string(); // &&'static str -> String
                     self.advance();
                     self.skip_whitespace();
                     let expr = self.parse_expression(0);
                     self.skip_whitespace();
-                    if self.check_symbol(';') {
-                        self.advance();
-                    }
-                    self.log_verbose(&format!("Accepted keyword '{}' as variable name",
-                                              var_name));
-                    return Some(QuickFuncStatement::Assignment {
+                    if self.check_symbol(';') { self.advance(); }
+                    return Some(QuickFuncStatement::ArithmeticAssignment {
                         variable: var_name,
+                        operator,
                         value: expr,
-                        position: statement_position,
+                        position: stmt_pos,
                     });
                 }
-
-                self.position = saved_position;
+                _ => {
+                    self.position = saved;
+                }
             }
         }
 
-        // Fallback: expression statement
-        let fallback_expr = self.parse_expression(0);
+        // -- fallback: expression statement -----------------------------------
+        let expr = self.parse_expression(0);
         self.skip_whitespace();
-        if self.check_symbol(';') {
-            self.advance();
-        }
+        if self.check_symbol(';') { self.advance(); }
         Some(QuickFuncStatement::ExpressionStatement {
-            expression: fallback_expr,
-            position: statement_position,
+            expression: expr,
+            position: stmt_pos,
         })
+    }
+
+    fn parse_return_statement(&mut self, pos: Position) -> Option<QuickFuncStatement> {
+        self.advance(); // consume 'return'
+        self.skip_whitespace();
+
+        let expr = if !self.check_symbol(';') && !self.check_symbol('}') {
+            self.parse_expression(0)
+        } else {
+            Expression::Value {
+                value: Value::Null { position: pos },
+                position: pos,
+            }
+        };
+
+        self.skip_whitespace();
+        if self.check_symbol(';') { self.advance(); }
+
+        Some(QuickFuncStatement::Return { value: expr, position: pos })
     }
 
     fn parse_log_statement(&mut self, position: Position) -> Option<QuickFuncStatement> {
-        self.advance();
+        self.advance(); // consume 'log' (keyword or identifier)
         self.skip_whitespace();
 
         if !self.check_symbol(':') {
+            let cur = self.current().clone();
             self.error_manager.add_parse_error(
                 ParseErrorType::MissingToken,
-                "Expected ':' after 'log' keyword".to_string(),
-                self.current().line,
-                self.current().column,
+                "Expected ':' after 'log'".to_string(),
+                cur.line,
+                cur.column,
                 None,
-                self.get_source_line(self.current()),
+                self.get_source_line(&cur),
             );
             return None;
         }
-
         self.advance();
         self.skip_whitespace();
 
-        let log_expr = self.parse_expression(0);
+        let expr = self.parse_expression(0);
         self.skip_whitespace();
+        if self.check_symbol(';') { self.advance(); }
 
-        if self.check_symbol(';') {
-            self.advance();
-        }
-
-        Some(QuickFuncStatement::Log {
-            value: log_expr,
-            position,
-        })
+        Some(QuickFuncStatement::Log { value: expr, position })
     }
 
-    /// Parse variable declaration
-    /// Syntax: let [mut] identifier [<type>] = expression
+    /// Parse `let [mut] name[<type>] = expr` or `const name[<type>] = expr`.
     fn parse_variable_declaration(
         &mut self,
         decl_type: DeclarationType,
-        start_position: Position
+        start_pos: Position,
     ) -> QuickFuncStatement {
-        self.advance();
+        self.advance(); // consume 'let' / 'const'
         self.skip_whitespace();
 
-        // Check for 'mut' modifier
+        // 'mut' is only valid after 'let'
         let is_mutable = if decl_type == DeclarationType::Let {
             if let TokenType::Keyword(kw) = &self.current().token_type {
-                if kw.as_str() == "mut" {
+                if *kw == "mut" {
                     self.advance();
                     self.skip_whitespace();
-                    self.log_verbose("Parsed 'mut' modifier");
                     true
                 } else {
                     false
@@ -859,16 +810,17 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 false
             }
         } else {
-            // Check for invalid mut on const
+            // Detect and reject `const mut`
             if let TokenType::Keyword(kw) = &self.current().token_type {
-                if kw.as_str() == "mut" {
+                if *kw == "mut" {
+                    let cur = self.current().clone();
                     self.error_manager.add_parse_error(
                         ParseErrorType::InvalidOperation,
-                        "'const' declarations cannot be mutable - remove 'mut' or use 'let'".to_string(),
-                        self.current().line,
-                        self.current().column,
-                        None,
-                        self.get_source_line(self.current()),
+                        "'const' declarations cannot be mutable — use 'let mut' instead".to_string(),
+                        cur.line,
+                        cur.column,
+                        Some("Replace 'const' with 'let mut'".to_string()),
+                        self.get_source_line(&cur),
                     );
                     self.advance();
                     self.skip_whitespace();
@@ -877,64 +829,65 @@ impl<'a> QuickFuncsSectionParser<'a> {
             false
         };
 
-        // Parse variable name
+        // Variable name
         let var_name = match &self.current().token_type {
             TokenType::Identifier(id) => {
                 let name = id.clone();
                 self.advance();
-                Some(name)
+                name
             }
             TokenType::Keyword(kw)
             if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
                 {
-                    let name = kw.clone();  // FIX: Clone before advancing
+                    let name = kw.to_string(); // &&'static str -> String
                     self.advance();
-                    self.log_verbose(&format!("Accepted keyword '{}' as variable name", name));
-                    Some(name)
+                    name
                 }
             _ => {
+                let cur = self.current().clone();
                 self.error_manager.add_parse_error(
                     ParseErrorType::MissingToken,
-                    format!("Expected variable name after '{}'",
-                            if decl_type == DeclarationType::Let { "let" } else { "const" }),
-                    self.current().line,
-                    self.current().column,
+                    format!(
+                        "Expected variable name after '{}'",
+                        if decl_type == DeclarationType::Let { "let" } else { "const" }
+                    ),
+                    cur.line,
+                    cur.column,
                     None,
-                    self.get_source_line(self.current()),
+                    self.get_source_line(&cur),
                 );
-                None
+                // Error-recovery: emit a placeholder declaration so parsing continues.
+                return QuickFuncStatement::ExpressionStatement {
+                    expression: Expression::Value {
+                        value: Value::Null { position: start_pos },
+                        position: start_pos,
+                    },
+                    position: start_pos,
+                };
             }
         };
 
-        let var_name = var_name.unwrap_or_else(|| "unknown".to_string());
         self.skip_whitespace();
 
-        // Parse type annotation
-        let var_type = if self.check_symbol('<') {
-            self.parse_type_annotation()
-        } else {
-            None
-        };
-
+        let var_type = if self.check_symbol('<') { self.parse_type_annotation() } else { None };
         self.skip_whitespace();
 
-        // Expect '='
         if !self.check_symbol('=') {
+            let cur = self.current().clone();
             self.error_manager.add_parse_error(
                 ParseErrorType::MissingToken,
                 format!("Expected '=' after variable declaration '{}'", var_name),
-                self.current().line,
-                self.current().column,
+                cur.line,
+                cur.column,
                 None,
-                self.get_source_line(self.current()),
+                self.get_source_line(&cur),
             );
-
             return QuickFuncStatement::ExpressionStatement {
                 expression: Expression::Value {
-                    value: Value::Null { position: start_position },
-                    position: start_position,
+                    value: Value::Null { position: start_pos },
+                    position: start_pos,
                 },
-                position: start_position,
+                position: start_pos,
             };
         }
 
@@ -943,10 +896,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
         let init_expr = self.parse_expression(0);
         self.skip_whitespace();
-
-        if self.check_symbol(';') {
-            self.advance();
-        }
+        if self.check_symbol(';') { self.advance(); }
 
         QuickFuncStatement::VariableDeclaration {
             declaration_type: decl_type,
@@ -954,27 +904,27 @@ impl<'a> QuickFuncsSectionParser<'a> {
             variable_name: var_name,
             data_type: var_type,
             value: init_expr,
-            position: start_position,
+            position: start_pos,
         }
     }
 
-    /// Parse if statement
-    /// Syntax: if: condition { statements } elif: condition { statements } else { statements }
-    fn parse_if_statement(&mut self) -> Option<QuickFuncStatement> {
-        let if_start_token = self.current().clone();
-        let if_position = Position::from_token(&if_start_token);
+    // =============================================================================
+    // Control flow — if / elif / else
+    // =============================================================================
 
-        self.advance();
+    fn parse_if_statement(&mut self) -> Option<QuickFuncStatement> {
+        let if_pos = Position::from_token(self.current());
+        self.advance(); // consume 'if'
 
         if !self.expect_symbol(':') {
             return Some(QuickFuncStatement::If {
                 condition: Expression::Value {
-                    value: Value::Boolean { value: false, position: if_position },
-                    position: if_position,
+                    value: Value::Boolean { value: false, position: if_pos },
+                    position: if_pos,
                 },
                 then_branch: Vec::new(),
                 else_branch: None,
-                position: if_position,
+                position: if_pos,
             });
         }
 
@@ -982,36 +932,33 @@ impl<'a> QuickFuncsSectionParser<'a> {
         let condition = self.parse_expression(0);
         self.skip_whitespace();
 
-        // Check for single-line syntax
+        // Support single-line `if: cond then stmt`
         let is_single_line = if let TokenType::Keyword(kw) = &self.current().token_type {
-            kw.as_str() == "then"
+            *kw == "then" // &&'static str comparison — no .as_str() needed
         } else {
             false
         };
 
         let then_branch = if is_single_line {
-            self.advance();
+            self.advance(); // consume 'then'
             self.skip_whitespace();
-            if let Some(stmt) = self.parse_statement() {
-                vec![stmt]
-            } else {
-                Vec::new()
-            }
+            if let Some(stmt) = self.parse_statement() { vec![stmt] } else { Vec::new() }
         } else {
             if !self.check_symbol('{') {
+                let cur = self.current().clone();
                 self.error_manager.add_parse_error(
                     ParseErrorType::MissingToken,
                     "Expected '{' or 'then' after if condition".to_string(),
-                    self.current().line,
-                    self.current().column,
+                    cur.line,
+                    cur.column,
                     None,
-                    self.get_source_line(self.current()),
+                    self.get_source_line(&cur),
                 );
                 return Some(QuickFuncStatement::If {
                     condition,
                     then_branch: Vec::new(),
                     else_branch: None,
-                    position: if_position,
+                    position: if_pos,
                 });
             }
             self.parse_statement_block()
@@ -1019,38 +966,43 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
         self.skip_whitespace();
 
-        // Parse elif chain
-        let mut elif_chain = Vec::new();
+        // Collect elif branches
+        let mut elif_chain: Vec<QuickFuncStatement> = Vec::new();
 
-        while !self.is_at_end() {
-            if let TokenType::Keyword(kw) = &self.current().token_type {
-                if kw.as_str() != "elif" {  // FIX: Use .as_str()
-                    break;
-                }
+        loop {
+            self.skip_whitespace();
+
+            let is_elif = if let TokenType::Keyword(kw) = &self.current().token_type {
+                *kw == "elif" // &&'static str — direct comparison
             } else {
+                false
+            };
+
+            if !is_elif {
                 break;
             }
 
-            let elif_position = Position::from_token(self.current());
-            self.advance();
+            let elif_pos = Position::from_token(self.current());
+            self.advance(); // consume 'elif'
             self.skip_whitespace();
 
             if !self.expect_symbol(':') {
                 break;
             }
-
             self.skip_whitespace();
-            let elif_condition = self.parse_expression(0);
+
+            let elif_cond = self.parse_expression(0);
             self.skip_whitespace();
 
             if !self.check_symbol('{') {
+                let cur = self.current().clone();
                 self.error_manager.add_parse_error(
                     ParseErrorType::MissingToken,
                     "Expected '{' after elif condition".to_string(),
-                    self.current().line,
-                    self.current().column,
+                    cur.line,
+                    cur.column,
                     None,
-                    self.get_source_line(self.current()),
+                    self.get_source_line(&cur),
                 );
                 break;
             }
@@ -1059,77 +1011,78 @@ impl<'a> QuickFuncsSectionParser<'a> {
             self.skip_whitespace();
 
             elif_chain.push(QuickFuncStatement::If {
-                condition: elif_condition,
+                condition: elif_cond,
                 then_branch: elif_body,
                 else_branch: None,
-                position: elif_position,
+                position: elif_pos,
             });
         }
 
-        // Parse else branch
-        let mut final_else_branch = None;
-        if !self.is_at_end() {
-            if let TokenType::Keyword(kw) = &self.current().token_type {
-                if kw.as_str() == "else" {
-                    self.advance();
-                    self.skip_whitespace();
+        // Optional else branch
+        let mut final_else: Option<Vec<QuickFuncStatement>> = None;
 
-                    if !self.check_symbol('{') {
-                        self.error_manager.add_parse_error(
-                            ParseErrorType::MissingToken,
-                            "Expected '{' after else".to_string(),
-                            self.current().line,
-                            self.current().column,
-                            None,
-                            self.get_source_line(self.current()),
-                        );
-                    } else {
-                        final_else_branch = Some(self.parse_statement_block());
-                    }
-                }
+        let is_else = if let TokenType::Keyword(kw) = &self.current().token_type {
+            *kw == "else" // &&'static str — direct comparison
+        } else {
+            false
+        };
+
+        if is_else {
+            self.advance(); // consume 'else'
+            self.skip_whitespace();
+
+            if self.check_symbol('{') {
+                final_else = Some(self.parse_statement_block());
+            } else {
+                let cur = self.current().clone();
+                self.error_manager.add_parse_error(
+                    ParseErrorType::MissingToken,
+                    "Expected '{' after 'else'".to_string(),
+                    cur.line,
+                    cur.column,
+                    None,
+                    self.get_source_line(&cur),
+                );
             }
         }
 
-        // Build elif chain from bottom up
-        let mut current_else_branch = final_else_branch;
-
+        // Build elif → else chain from bottom up
+        let mut current_else = final_else;
         for elif in elif_chain.into_iter().rev() {
-            // FIX: Destructure once instead of multiple pattern matches
             if let QuickFuncStatement::If { condition, then_branch, position, .. } = elif {
-                let elif_with_else = QuickFuncStatement::If {
+                current_else = Some(vec![QuickFuncStatement::If {
                     condition,
                     then_branch,
-                    else_branch: current_else_branch,
+                    else_branch: current_else,
                     position,
-                };
-                current_else_branch = Some(vec![elif_with_else]);
+                }]);
             }
         }
 
         Some(QuickFuncStatement::If {
             condition,
             then_branch,
-            else_branch: current_else_branch,
-            position: if_position,
+            else_branch: current_else,
+            position: if_pos,
         })
     }
+    // =============================================================================
+    // Control flow — switch / chk
+    // =============================================================================
 
-    /// Parse switch statement
-    /// Syntax: chk: expression { -> case1 { statements } -> miss { statements } }
     fn parse_switch_statement(&mut self) -> Option<QuickFuncStatement> {
-        let switch_position = Position::from_token(self.current());
-
-        self.advance();
+        let switch_pos = Position::from_token(self.current());
+        self.advance(); // consume 'chk'
 
         if !self.expect_symbol(':') {
             return Some(QuickFuncStatement::Switch {
                 expression: Expression::Value {
-                    value: Value::Null { position: switch_position },
-                    position: switch_position,
+                    value: Value::Null { position: switch_pos },
+                    position: switch_pos,
                 },
                 cases: Vec::new(),
                 default_case: None,
-                position: switch_position,
+                position: switch_pos,
             });
         }
 
@@ -1142,12 +1095,12 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 expression: expr,
                 cases: Vec::new(),
                 default_case: None,
-                position: switch_position,
+                position: switch_pos,
             });
         }
 
         let mut cases = Vec::new();
-        let mut default_case = None;
+        let mut default_case: Option<SwitchCase> = None;
 
         while !self.is_at_end() && !self.check_symbol('}') {
             self.skip_whitespace();
@@ -1155,19 +1108,17 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 break;
             }
 
-            let case_position = Position::from_token(self.current());
+            let case_pos = Position::from_token(self.current());
 
-            // Expect '->'
-            let found_case_arrow = self.match_arrow();
-
-            if !found_case_arrow {
+            if !self.match_arrow() {
+                let cur = self.current().clone();
                 self.error_manager.add_parse_error(
                     ParseErrorType::UnexpectedToken,
-                    "Expected '->' to start switch case".to_string(),
-                    self.current().line,
-                    self.current().column,
-                    None,
-                    self.get_source_line(self.current()),
+                    "Expected '->' to begin switch case".to_string(),
+                    cur.line,
+                    cur.column,
+                    Some("Each case must start with '->'".to_string()),
+                    self.get_source_line(&cur),
                 );
                 self.advance();
                 continue;
@@ -1175,29 +1126,28 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
             self.skip_whitespace();
 
-            // Check for miss (default case)
-            if let TokenType::Keyword(kw) = &self.current().token_type {
-                if kw.as_str() == "miss" {
-                    self.advance();
-                    self.skip_whitespace();
+            // Check for `miss` (default case)
+            let is_miss = if let TokenType::Keyword(kw) = &self.current().token_type {
+                *kw == "miss" // &&'static str — direct comparison
+            } else {
+                false
+            };
 
-                    let default_stmts = self.parse_case_body();
-                    default_case = Some(SwitchCase::new(
-                        Value::Null { position: case_position },
-                        default_stmts,
-                        case_position,
-                    ));
-
-                    self.skip_whitespace();
-                    continue;
-                }
+            if is_miss {
+                self.advance(); // consume 'miss'
+                self.skip_whitespace();
+                let stmts = self.parse_case_body();
+                default_case = Some(SwitchCase::new(
+                    Value::Null { position: case_pos },
+                    stmts,
+                    case_pos,
+                ));
+            } else {
+                let case_val = self.parse_value();
+                self.skip_whitespace();
+                let stmts = self.parse_case_body();
+                cases.push(SwitchCase::new(case_val, stmts, case_pos));
             }
-
-            let case_value = self.parse_case_value();
-            self.skip_whitespace();
-
-            let case_stmts = self.parse_case_body();
-            cases.push(SwitchCase::new(case_value, case_stmts, case_position));
 
             self.skip_whitespace();
         }
@@ -1207,7 +1157,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 expression: expr,
                 cases: Vec::new(),
                 default_case: None,
-                position: switch_position,
+                position: switch_pos,
             });
         }
 
@@ -1215,79 +1165,64 @@ impl<'a> QuickFuncsSectionParser<'a> {
             expression: expr,
             cases,
             default_case,
-            position: switch_position,
+            position: switch_pos,
         })
     }
 
-    fn parse_case_value(&mut self) -> Value {
-        self.parse_value()
-    }
-
     fn parse_case_body(&mut self) -> Vec<QuickFuncStatement> {
-        let mut statements = Vec::new();
-
         self.skip_whitespace();
 
-        // Check for 'then' keyword
-        if let TokenType::Keyword(kw) = &self.current().token_type {
-            if kw.as_str() == "then" {
-                self.advance();
-                self.skip_whitespace();
+        // `then` keyword — single statement
+        let is_then = if let TokenType::Keyword(kw) = &self.current().token_type {
+            *kw == "then" // &&'static str
+        } else {
+            false
+        };
 
-                if let Some(stmt) = self.parse_statement() {
-                    statements.push(stmt);
-                }
-
-                return statements;
-            }
+        if is_then {
+            self.advance();
+            self.skip_whitespace();
+            return if let Some(stmt) = self.parse_statement() { vec![stmt] } else { Vec::new() };
         }
 
-        // Check for '=>' arrow
+        // `=>` arrow — single statement
         if self.check_arrow() {
             self.advance();
             self.skip_whitespace();
-
-            if let Some(stmt) = self.parse_statement() {
-                statements.push(stmt);
-            }
-
-            return statements;
+            return if let Some(stmt) = self.parse_statement() { vec![stmt] } else { Vec::new() };
         }
 
-        // Check for block
+        // block body
         if self.check_symbol('{') {
             return self.parse_statement_block();
         }
 
+        let cur = self.current().clone();
         self.error_manager.add_parse_error(
             ParseErrorType::MissingToken,
             "Expected 'then', '=>', or '{' after switch case value".to_string(),
-            self.current().line,
-            self.current().column,
+            cur.line,
+            cur.column,
             None,
-            self.get_source_line(self.current()),
+            self.get_source_line(&cur),
         );
 
-        statements
+        Vec::new()
     }
 
-    // ==================== PRATT EXPRESSION PARSING ====================
+    // =============================================================================
+    // Pratt expression parser
+    // =============================================================================
 
-    /// Parse expression using Pratt's algorithm
-    /// All dotted identifiers become QualifiedIdentifier - analyzer resolves them
     fn parse_expression(&mut self, min_precedence: i32) -> Expression {
         self.skip_whitespace();
 
         if self.is_at_end() {
-            self.log_verbose("ParseExpression: At end of tokens");
             return Expression::Value {
                 value: Value::Null { position: Position::UNKNOWN },
                 position: Position::UNKNOWN,
             };
         }
-
-        self.log_verbose(&format!("ParseExpression: Parsing left operand at position {}",
-                                  self.position));
 
         let mut left = self.parse_unary_or_primary();
         self.skip_whitespace();
@@ -1295,15 +1230,14 @@ impl<'a> QuickFuncsSectionParser<'a> {
         while !self.is_at_end() {
             let current_token = self.current().clone();
 
-            // Check for ternary operator
+            // Ternary operator
             if let TokenType::Symbol('?') = current_token.token_type {
-                let ternary_precedence = 2;
-
-                if ternary_precedence < min_precedence {
+                let ternary_prec = 2;
+                if ternary_prec < min_precedence {
                     break;
                 }
 
-                let ternary_position = Position::from_token(&current_token);
+                let ternary_pos = Position::from_token(&current_token);
                 self.advance();
                 self.skip_whitespace();
 
@@ -1311,13 +1245,14 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 self.skip_whitespace();
 
                 if !self.check_symbol(':') {
+                    let cur = self.current().clone();
                     self.error_manager.add_parse_error(
                         ParseErrorType::MissingToken,
                         "Expected ':' in ternary expression".to_string(),
-                        self.current().line,
-                        self.current().column,
+                        cur.line,
+                        cur.column,
                         None,
-                        self.get_source_line(self.current()),
+                        self.get_source_line(&cur),
                     );
                     return left;
                 }
@@ -1331,14 +1266,12 @@ impl<'a> QuickFuncsSectionParser<'a> {
                     condition: Box::new(left),
                     true_value: Box::new(true_branch),
                     false_value: Box::new(false_branch),
-                    position: ternary_position,
+                    position: ternary_pos,
                 };
-
                 self.skip_whitespace();
                 continue;
             }
 
-            // Try to get operator info
             let (op, prec, right_assoc) = match self.try_get_operator_precedence(&current_token) {
                 Some(info) => info,
                 None => break,
@@ -1348,14 +1281,14 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 break;
             }
 
-            let op_position = Position::from_token(&current_token);
+            let op_pos = Position::from_token(&current_token);
             self.advance();
             self.skip_whitespace();
 
-            let next_min_prec = if right_assoc { prec } else { prec + 1 };
-            let right = self.parse_expression(next_min_prec);
+            let next_min = if right_assoc { prec } else { prec + 1 };
+            let right = self.parse_expression(next_min);
 
-            left = self.create_binary_expression(left, &op, right, op_position);
+            left = self.create_binary_expression(left, &op, right, op_pos);
             self.skip_whitespace();
         }
 
@@ -1364,40 +1297,31 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
     fn try_get_operator_precedence(&self, token: &Token) -> Option<(String, i32, bool)> {
         match &token.token_type {
+            // All of these are now &&'static str — use directly
             TokenType::ArithmeticOp(op) => {
-                OPERATOR_PRECEDENCE.get(op.as_str()).map(|&(prec, ra)| {
-                    (op.clone(), prec, ra)
-                })
+                OPERATOR_PRECEDENCE.get(op as &str).map(|&(prec, ra)| (op.to_string(), prec, ra))
             }
             TokenType::BitwiseOp(op) => {
-                if op.ends_with('=') || op.as_str() == "~?" {
+                // Bitwise-assign (e.g. "&=") and the null-coalesce "~?" are not binary ops here
+                if op.ends_with('=') || *op == "~?" {
                     return None;
                 }
-                OPERATOR_PRECEDENCE.get(op.as_str()).map(|&(prec, ra)| {
-                    (op.clone(), prec, ra)
-                })
+                OPERATOR_PRECEDENCE.get(op as &str).map(|&(prec, ra)| (op.to_string(), prec, ra))
             }
             TokenType::ComparisonOp(op) => {
-                OPERATOR_PRECEDENCE.get(op.as_str()).map(|&(prec, ra)| {
-                    (op.clone(), prec, ra)
-                })
+                OPERATOR_PRECEDENCE.get(op as &str).map(|&(prec, ra)| (op.to_string(), prec, ra))
             }
             TokenType::LogicalOp(op) => {
-                OPERATOR_PRECEDENCE.get(op.as_str()).map(|&(prec, ra)| {
-                    (op.clone(), prec, ra)
-                })
+                OPERATOR_PRECEDENCE.get(op as &str).map(|&(prec, ra)| (op.to_string(), prec, ra))
             }
             TokenType::Symbol(sym) => {
-                let sym_str = sym.to_string();
-                OPERATOR_PRECEDENCE.get(sym_str.as_str()).map(|&(prec, ra)| {
-                    (sym_str, prec, ra)
-                })
+                let s = sym.to_string();
+                OPERATOR_PRECEDENCE.get(s.as_str()).map(|&(prec, ra)| (s, prec, ra))
             }
             TokenType::Keyword(kw) => {
-                let kw_lower = kw.to_lowercase();
-                OPERATOR_PRECEDENCE.get(kw_lower.as_str()).map(|&(prec, ra)| {
-                    (kw_lower, prec, ra)
-                })
+                // kw: &&'static str — lowercase is already the canonical form for "and"/"or"
+                let lower = kw.to_lowercase();
+                OPERATOR_PRECEDENCE.get(lower.as_str()).map(|&(prec, ra)| (lower, prec, ra))
             }
             _ => None,
         }
@@ -1411,38 +1335,30 @@ impl<'a> QuickFuncsSectionParser<'a> {
         position: Position,
     ) -> Expression {
         match op {
-            "+" | "-" | "*" | "/" | "%" | "**" | "%%" | "%&" | "&%" => {
-                Expression::ArithmeticOp {
-                    left: Box::new(left),
-                    operator: op.to_string(),
-                    right: Box::new(right),
-                    position,
-                }
-            }
-            ">" | "<" | ">=" | "<=" | "==" | "!=" => {
-                Expression::ComparisonOp {
-                    left: Box::new(left),
-                    operator: op.to_string(),
-                    right: Box::new(right),
-                    position,
-                }
-            }
-            "&&" | "||" | "and" | "or" => {
-                Expression::LogicalOp {
-                    left: Box::new(left),
-                    operator: op.to_string(),
-                    right: Box::new(right),
-                    position,
-                }
-            }
-            "&" | "|" | "^" | "<<" | ">>" => {
-                Expression::BitwiseOp {
-                    left: Box::new(left),
-                    operator: op.to_string(),
-                    right: Box::new(right),
-                    position,
-                }
-            }
+            "+" | "-" | "*" | "/" | "%" | "**" | "%%" | "%&" | "&%" => Expression::ArithmeticOp {
+                left: Box::new(left),
+                operator: op.to_string(),
+                right: Box::new(right),
+                position,
+            },
+            ">" | "<" | ">=" | "<=" | "==" | "!=" => Expression::ComparisonOp {
+                left: Box::new(left),
+                operator: op.to_string(),
+                right: Box::new(right),
+                position,
+            },
+            "&&" | "||" | "and" | "or" => Expression::LogicalOp {
+                left: Box::new(left),
+                operator: op.to_string(),
+                right: Box::new(right),
+                position,
+            },
+            "&" | "|" | "^" | "<<" | ">>" => Expression::BitwiseOp {
+                left: Box::new(left),
+                operator: op.to_string(),
+                right: Box::new(right),
+                position,
+            },
             _ => Expression::ArithmeticOp {
                 left: Box::new(left),
                 operator: op.to_string(),
@@ -1452,7 +1368,10 @@ impl<'a> QuickFuncsSectionParser<'a> {
         }
     }
 
-    /// Parse unary operators and primary expressions
+    // =============================================================================
+    // Unary / primary dispatch
+    // =============================================================================
+
     fn parse_unary_or_primary(&mut self) -> Expression {
         self.skip_whitespace();
         if self.is_at_end() {
@@ -1463,147 +1382,154 @@ impl<'a> QuickFuncsSectionParser<'a> {
         }
 
         let token = self.current().clone();
-        let unary_position = Position::from_token(&token);
+        let unary_pos = Position::from_token(&token);
 
-        // Check for unary operators
-        let unary_op = match &token.token_type {
-            TokenType::Symbol(sym) if VALID_UNARY_OPERATORS.contains(&sym.to_string().as_str()) => {
-                Some(sym.to_string())
-            }
-            TokenType::ArithmeticOp(op) if op.as_str() == "+" || op.as_str() == "-" => {
-                Some(op.clone())
-            }
-            TokenType::Keyword(kw) if VALID_UNARY_OPERATORS.contains(&kw.as_str()) => {
-                Some(kw.clone())
-            }
-            TokenType::BitwiseOp(op) if op.as_str() == "~?" => {
-                Some(op.clone())
-            }
+        // Detect unary operator — replace Vec contains check with direct matches!
+        let unary_op: Option<String> = match &token.token_type {
+            TokenType::Symbol('!') => Some("!".to_string()),
+            TokenType::Symbol('-') => Some("-".to_string()),
+            TokenType::Symbol('+') => Some("+".to_string()),
+            TokenType::ArithmeticOp(op) if *op == "+" || *op == "-" => Some(op.to_string()),
+            TokenType::Keyword(kw) if *kw == "not" => Some("not".to_string()),
+            TokenType::BitwiseOp(op) if *op == "~?" => Some("~?".to_string()),
             _ => None,
         };
 
         if let Some(op) = unary_op {
             self.advance();
             self.skip_whitespace();
-
             let operand = self.parse_primary_base();
-
             let unary_expr = Expression::UnaryOp {
                 operator: op,
                 operand: Box::new(operand),
-                position: unary_position,
+                position: unary_pos,
             };
-
             return self.apply_postfix_operations(unary_expr);
         }
 
         self.parse_primary_with_postfix()
     }
 
-    /// Apply postfix operations - creates QualifiedIdentifier for all dotted patterns
+    // =============================================================================
+    // Postfix: dot-access, index-access, building QualifiedIdentifier chains
+    // =============================================================================
+
     fn apply_postfix_operations(&mut self, mut expr: Expression) -> Expression {
-        let mut parts = Vec::new();
+        // Collect initial identifier part for chain detection
+        let mut parts: Vec<String> = match &expr {
+            Expression::Identifier { name, .. } => vec![name.clone()],
+            _ => Vec::new(),
+        };
 
-        if let Expression::Identifier { name, .. } = &expr {
-            parts.push(name.clone());
-        }
-
-        while !self.is_at_end() {
+        loop {
             self.skip_whitespace();
 
-            let token = self.current().clone();
+            match self.current().token_type {
+                TokenType::Symbol('.') => {
+                    let dot_pos = Position::from_token(self.current());
+                    self.advance();
+                    self.skip_whitespace();
 
-            if let TokenType::Symbol('.') = token.token_type {
-                let dot_position = Position::from_token(&token);
-                self.advance();
-                self.skip_whitespace();
-
-                let member_name = match &self.current().token_type {
-                    TokenType::Identifier(id) => {
-                        let name = id.clone();
-                        self.advance();
-                        Some(name)
-                    }
-                    TokenType::Keyword(kw)
-                    if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
-                        {
-                            let name = kw.clone();  // FIX: Clone before advancing
+                    let member_opt: Option<String> = match &self.current().token_type {
+                        TokenType::Identifier(id) => {
+                            let name = id.clone();
                             self.advance();
-                            self.log_verbose(&format!("Accepted keyword '{}' as member name after '.'", name));
                             Some(name)
                         }
-                    _ => {
-                        self.error_manager.add_parse_error(
-                            ParseErrorType::UnexpectedToken,
-                            "Expected identifier or data type keyword after '.'".to_string(),
-                            self.current().line,
-                            self.current().column,
-                            None,
-                            self.get_source_line(self.current()),
-                        );
-                        None
-                    }
-                };
+                        TokenType::Keyword(kw)
+                        if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
+                            {
+                                let name = kw.to_string(); // &&'static str -> String
+                                self.advance();
+                                Some(name)
+                            }
+                        _ => {
+                            let cur = self.current().clone();
+                            self.error_manager.add_parse_error(
+                                ParseErrorType::UnexpectedToken,
+                                "Expected identifier after '.'".to_string(),
+                                cur.line,
+                                cur.column,
+                                None,
+                                self.get_source_line(&cur),
+                            );
+                            None
+                        }
+                    };
 
-                if member_name.is_none() {
-                    break;
+                    if let Some(member) = member_opt {
+                        if !parts.is_empty() {
+                            parts.push(member);
+                        } else {
+                            expr = Expression::PropertyAccess {
+                                object: Box::new(expr),
+                                property: member,
+                                position: dot_pos,
+                            };
+                        }
+                    } else {
+                        break;
+                    }
                 }
 
-                let member = member_name.unwrap();
-                self.skip_whitespace();
+                TokenType::Symbol('[') => {
+                    let bracket_pos = Position::from_token(self.current());
+                    self.advance();
+                    self.skip_whitespace();
+                    let index_expr = self.parse_expression(0);
+                    self.skip_whitespace();
+                    if !self.expect_symbol(']') { break; }
 
-                if !parts.is_empty() {
-                    parts.push(member);
-                } else {
-                    expr = Expression::PropertyAccess {
+                    // Flush any accumulated parts first
+                    if parts.len() >= 2 {
+                        let pos = expr.position();
+                        expr = Expression::QualifiedIdentifier {
+                            parts: std::mem::take(&mut parts),
+                            arguments: None,
+                            position: pos,
+                        };
+                    } else {
+                        parts.clear();
+                    }
+
+                    expr = Expression::IndexAccess {
                         object: Box::new(expr),
-                        property: member,
-                        position: dot_position,
+                        index: Box::new(index_expr),
+                        position: bracket_pos,
                     };
                 }
-            } else if let TokenType::Symbol('[') = token.token_type {
-                let bracket_position = Position::from_token(&token);
-                self.advance();
-                self.skip_whitespace();
 
-                let index_expr = self.parse_expression(0);
-                self.skip_whitespace();
-
-                if !self.expect_symbol(']') {
-                    break;
+                TokenType::Symbol('(') if !parts.is_empty() => {
+                    // A call on a chain: Math.round(x) → QualifiedIdentifier with args
+                    let pos = expr.position();
+                    let args = self.parse_function_arguments();
+                    return Expression::QualifiedIdentifier {
+                        parts,
+                        arguments: Some(args),
+                        position: pos,
+                    };
                 }
 
-                expr = Expression::IndexAccess {
-                    object: Box::new(expr),
-                    index: Box::new(index_expr),
-                    position: bracket_position,
-                };
-
-                parts.clear();
-            } else {
-                break;
+                _ => break,
             }
         }
 
-        // If we collected multiple parts, create QualifiedIdentifier
+        // Flush remaining chain
         if parts.len() >= 2 {
-            let position = expr.position();
-
+            let pos = expr.position();
             self.skip_whitespace();
             if self.check_symbol('(') {
                 let args = self.parse_function_arguments();
-
                 return Expression::QualifiedIdentifier {
                     parts,
                     arguments: Some(args),
-                    position,
+                    position: pos,
                 };
             }
-
             return Expression::QualifiedIdentifier {
                 parts,
                 arguments: None,
-                position,
+                position: pos,
             };
         }
 
@@ -1611,19 +1537,14 @@ impl<'a> QuickFuncsSectionParser<'a> {
     }
 
     fn parse_primary_with_postfix(&mut self) -> Expression {
-        self.skip_whitespace();
-        if self.is_at_end() {
-            return Expression::Value {
-                value: Value::Null { position: Position::UNKNOWN },
-                position: Position::UNKNOWN,
-            };
-        }
-
         let expr = self.parse_primary_base();
         self.apply_postfix_operations(expr)
     }
 
-    /// Parse primary expressions - simplified, no identifier resolution
+    // =============================================================================
+    // Primary expressions
+    // =============================================================================
+
     fn parse_primary_base(&mut self) -> Expression {
         self.skip_whitespace();
         if self.is_at_end() {
@@ -1634,141 +1555,135 @@ impl<'a> QuickFuncsSectionParser<'a> {
         }
 
         let token = self.current().clone();
-        let token_position = Position::from_token(&token);
+        let tok_pos = Position::from_token(&token);
 
         match &token.token_type {
             TokenType::Integer(i) => {
                 let val = *i;
                 self.advance();
                 Expression::Value {
-                    value: Value::Integer { value: val, position: token_position },
-                    position: token_position,
+                    value: Value::Integer { value: val, position: tok_pos },
+                    position: tok_pos,
                 }
             }
             TokenType::Float(f) => {
                 let val = *f;
                 self.advance();
                 Expression::Value {
-                    value: Value::Float { value: val, position: token_position },
-                    position: token_position,
+                    value: Value::Float { value: val, position: tok_pos },
+                    position: tok_pos,
                 }
             }
             TokenType::Double(d) => {
                 let val = *d;
                 self.advance();
                 Expression::Value {
-                    value: Value::Double { value: val, position: token_position },
-                    position: token_position,
+                    value: Value::Double { value: val, position: tok_pos },
+                    position: tok_pos,
                 }
             }
             TokenType::String(s) => {
                 let val = s.clone();
                 self.advance();
                 Expression::Value {
-                    value: Value::String { value: val, position: token_position },
-                    position: token_position,
+                    value: Value::String { value: val, position: tok_pos },
+                    position: tok_pos,
                 }
             }
             TokenType::InterpolatedString(template) => {
-                let raw_content = template.clone();
+                let raw = template.clone();
                 self.advance();
-
-                let (final_template, expressions) = self.parse_interpolated_string_content(&raw_content, token_position);
-
+                let (tpl, exprs) = self.parse_interpolated_string_content(&raw, tok_pos);
                 Expression::Value {
                     value: Value::InterpolatedString {
-                        template: final_template,
-                        expressions,
-                        position: token_position,
+                        template: tpl,
+                        expressions: exprs,
+                        position: tok_pos,
                     },
-                    position: token_position,
+                    position: tok_pos,
                 }
             }
             TokenType::Bool(b) => {
                 let val = *b;
                 self.advance();
                 Expression::Value {
-                    value: Value::Boolean { value: val, position: token_position },
-                    position: token_position,
+                    value: Value::Boolean { value: val, position: tok_pos },
+                    position: tok_pos,
+                }
+            }
+            // null keyword — Keyword is &&'static str, compare directly
+            TokenType::Keyword(kw) if *kw == "null" => {
+                self.advance();
+                Expression::Value {
+                    value: Value::Null { position: tok_pos },
+                    position: tok_pos,
                 }
             }
             TokenType::Identifier(id) => {
                 let name = id.clone();
-                let identifier_position = Position::from_token(&token);
-
                 self.advance();
                 self.skip_whitespace();
-
                 if self.check_symbol('(') {
                     let args = self.parse_function_arguments();
                     return Expression::QuickFuncCall {
                         name,
                         arguments: args,
-                        position: identifier_position,
+                        position: tok_pos,
                     };
                 }
-
-                Expression::Identifier {
-                    name,
-                    position: identifier_position,
-                }
+                Expression::Identifier { name, position: tok_pos }
             }
             TokenType::Symbol('(') => {
-                let saved_position = self.position;
-
+                let saved = self.position;
                 if self.is_lambda_expression() {
                     return self.parse_lambda_expression();
                 }
-
-                self.position = saved_position;
-
+                self.position = saved;
                 self.advance();
                 self.skip_whitespace();
-                let expr = self.parse_expression(0);
+                let inner = self.parse_expression(0);
                 self.skip_whitespace();
-
                 if !self.expect_symbol(')') {
                     return Expression::Value {
-                        value: Value::Null { position: token_position },
-                        position: token_position,
+                        value: Value::Null { position: tok_pos },
+                        position: tok_pos,
                     };
                 }
-
                 Expression::Parenthesized {
-                    expression: Box::new(expr),
-                    position: token_position,
+                    expression: Box::new(inner),
+                    position: tok_pos,
                 }
             }
             TokenType::Symbol('[') => {
                 let arr = self.parse_array_literal();
-                Expression::Value {
-                    value: arr,
-                    position: token_position,
-                }
+                Expression::Value { value: arr, position: tok_pos }
             }
             TokenType::Symbol('{') => {
                 let obj = self.parse_object_literal();
-                Expression::Value {
-                    value: obj,
-                    position: token_position,
-                }
+                Expression::Value { value: obj, position: tok_pos }
             }
             TokenType::TupleConstructor(_) => self.parse_tuple_constructor(),
-            TokenType::BlobConstructor(_) => self.parse_blob_constructor(),
+            TokenType::BlobConstructor(_)  => self.parse_blob_constructor(),
             TokenType::RegexConstructor(_) => self.parse_regex_constructor(),
             _ => {
-                self.log_verbose(&format!("Unexpected token in primary expression: {}",
-                                          token.get_token_value()));
+                if self.debug_config.is_verbose {
+                    self.error_manager.log_debug(&format!(
+                        "QuickFunctions: unexpected primary token {}",
+                        token.get_token_value()
+                    ));
+                }
                 self.advance();
                 Expression::Value {
-                    value: Value::Null { position: token_position },
-                    position: token_position,
+                    value: Value::Null { position: tok_pos },
+                    position: tok_pos,
                 }
             }
         }
     }
 
-    // ==================== VALUE AND LITERAL PARSING ====================
+    // =============================================================================
+    // Value / literal parsing
+    // =============================================================================
 
     fn parse_value(&mut self) -> Value {
         self.skip_whitespace();
@@ -1777,111 +1692,73 @@ impl<'a> QuickFuncsSectionParser<'a> {
         }
 
         let token = self.current().clone();
-        let value_position = Position::from_token(&token);
+        let val_pos = Position::from_token(&token);
 
         match &token.token_type {
-            TokenType::Integer(i) => {
-                let val = *i;
+            TokenType::Integer(i)  => { let v = *i; self.advance(); Value::Integer { value: v, position: val_pos } }
+            TokenType::Float(f)    => { let v = *f; self.advance(); Value::Float   { value: v, position: val_pos } }
+            TokenType::Double(d)   => { let v = *d; self.advance(); Value::Double  { value: v, position: val_pos } }
+            TokenType::String(s)   => { let v = s.clone(); self.advance(); Value::String  { value: v, position: val_pos } }
+            TokenType::Bool(b)     => { let v = *b; self.advance(); Value::Boolean { value: v, position: val_pos } }
+            // Keyword is &&'static str — compare directly with *kw
+            TokenType::Keyword(kw) if *kw == "null" => {
                 self.advance();
-                Value::Integer { value: val, position: value_position }
-            }
-            TokenType::Float(f) => {
-                let val = *f;
-                self.advance();
-                Value::Float { value: val, position: value_position }
-            }
-            TokenType::Double(d) => {
-                let val = *d;
-                self.advance();
-                Value::Double { value: val, position: value_position }
-            }
-            TokenType::String(s) => {
-                let val = s.clone();
-                self.advance();
-                Value::String { value: val, position: value_position }
-            }
-            TokenType::Bool(b) => {
-                let val = *b;
-                self.advance();
-                Value::Boolean { value: val, position: value_position }
-            }
-            TokenType::Keyword(kw) if kw.as_str() == "null" => {
-                self.advance();
-                Value::Null { position: value_position }
+                Value::Null { position: val_pos }
             }
             TokenType::Identifier(id) => {
-                let val = id.clone();
+                let v = id.clone();
                 self.advance();
-                Value::Identifier { value: val, position: value_position }
+                Value::Identifier { value: v, position: val_pos }
             }
             TokenType::Symbol('[') => self.parse_array_literal(),
             TokenType::Symbol('{') => self.parse_object_literal(),
             TokenType::HexColor(hc) => {
-                let val = hc.clone();
-                self.advance();
-                Value::HexColor { value: val, position: value_position }
+                let v = hc.clone(); self.advance();
+                Value::HexColor { value: v, position: val_pos }
             }
             TokenType::Date(d) => {
-                let val = d.clone();
-                self.advance();
-                Value::Date { value: val, position: value_position }
+                let v = d.clone(); self.advance();
+                Value::Date { value: v, position: val_pos }
             }
             TokenType::Timestamp(t) => {
-                let val = t.clone();
-                self.advance();
-                Value::Timestamp { value: val, position: value_position }
+                let v = t.clone(); self.advance();
+                Value::Timestamp { value: v, position: val_pos }
             }
             TokenType::InterpolatedString(template) => {
-                let raw_content = template.clone();
+                let raw = template.clone();
                 self.advance();
-
-                let (final_template, expressions) = self.parse_interpolated_string_content(&raw_content, value_position);
-
-                Value::InterpolatedString {
-                    template: final_template,
-                    expressions,
-                    position: value_position,
-                }
+                let (tpl, exprs) = self.parse_interpolated_string_content(&raw, val_pos);
+                Value::InterpolatedString { template: tpl, expressions: exprs, position: val_pos }
             }
             _ => {
-                self.log_verbose(&format!("ParseValue: Unexpected token type {}, treating as identifier",
-                                          token.get_token_value()));
-                let val = token.get_token_value();
+                let v = token.get_token_value();
                 self.advance();
-                Value::Identifier { value: val, position: value_position }
+                Value::Identifier { value: v, position: val_pos }
             }
         }
     }
 
     fn parse_array_literal(&mut self) -> Value {
-        let array_position = Position::from_token(self.current());
+        let arr_pos = Position::from_token(self.current());
 
         if !self.expect_symbol('[') {
-            return Value::Array {
-                values: Vec::new(),
-                position: array_position,
-            };
+            return Value::Array { values: Vec::new(), position: arr_pos };
         }
 
-        let estimated_items = usize::max(4, self.tokens.len() / 40);
-        let mut items = Vec::with_capacity(estimated_items);
+        let mut items = Vec::with_capacity(usize::max(4, self.tokens.len() / 40));
 
         while !self.is_at_end() && !self.check_symbol(']') {
             self.skip_whitespace();
-            if self.check_symbol(']') {
-                break;
-            }
+            if self.check_symbol(']') { break; }
 
             let expr = self.parse_expression(0);
-
             let item = match expr {
                 Expression::Value { value, .. } => value,
-                _ => Value::Expression {
-                    expr: Box::new(expr),
+                other => Value::Expression {
+                    expr: Box::new(other),
                     position: Position::from_token(self.current()),
                 },
             };
-
             items.push(item);
             self.skip_whitespace();
 
@@ -1892,432 +1769,319 @@ impl<'a> QuickFuncsSectionParser<'a> {
             }
         }
 
-        if self.check_symbol(']') {
-            self.advance();
-        }
+        if self.check_symbol(']') { self.advance(); }
 
-        self.log_verbose(&format!("Parsed array with {} item(s)", items.len()));
-        Value::Array {
-            values: items,
-            position: array_position,
-        }
+        Value::Array { values: items, position: arr_pos }
     }
 
     fn parse_object_literal(&mut self) -> Value {
-        let object_position = Position::from_token(self.current());
-        self.log_verbose(&format!("ParseObjectLiteral starting at position {}", self.position));
+        let obj_pos = Position::from_token(self.current());
 
         if !self.expect_symbol('{') {
-            return Value::Object {
-                properties: Vec::new(),
-                position: object_position,
-            };
+            return Value::Object { properties: Vec::new(), position: obj_pos };
         }
 
-        let estimated_props = estimate_properties_count(self.tokens.len());
-        let mut properties = Vec::with_capacity(estimated_props);
+        let mut properties = Vec::with_capacity(estimate_properties_count(self.tokens.len()));
 
         while !self.is_at_end() && !self.check_symbol('}') {
             self.skip_whitespace();
-            if self.check_symbol('}') {
-                break;
-            }
+            if self.check_symbol('}') { break; }
 
-            let prop_position = Position::from_token(self.current());
+            let prop_pos = Position::from_token(self.current());
 
-            // Parse property name
-            let property_name = match &self.current().token_type {
+            // Property name: identifier, contextual keyword, or quoted string
+            let prop_name_opt: Option<String> = match &self.current().token_type {
                 TokenType::Identifier(id) => {
-                    let name = id.clone();
-                    self.advance();
-                    Some(name)
+                    let name = id.clone(); self.advance(); Some(name)
                 }
                 TokenType::Keyword(kw)
                 if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
                     {
-                        let name = kw.clone();
-                        self.advance();
-                        Some(name)
+                        let name = kw.to_string(); self.advance(); Some(name)
                     }
                 TokenType::String(s) => {
-                    let name = s.clone();
-                    self.advance();
-                    Some(name)
+                    let name = s.clone(); self.advance(); Some(name)
                 }
                 _ => {
+                    let cur = self.current().clone();
                     self.error_manager.add_parse_error(
                         ParseErrorType::UnexpectedToken,
-                        format!("Expected property name, found {}",
-                                self.current().get_token_value()),
-                        self.current().line,
-                        self.current().column,
-                        None,
-                        self.get_source_line(self.current()),
+                        format!("Expected property name, found {}", cur.get_token_value()),
+                        cur.line, cur.column, None,
+                        self.get_source_line(&cur),
                     );
                     self.advance();
                     None
                 }
             };
 
-            if property_name.is_none() {
-                continue;
-            }
+            let prop_name = match prop_name_opt {
+                Some(n) => n,
+                None => continue,
+            };
 
-            let prop_name = property_name.unwrap();
             self.skip_whitespace();
 
-            // Expect ':' or '='
             if !self.check_symbol(':') && !self.check_symbol('=') {
+                let cur = self.current().clone();
                 self.error_manager.add_parse_error(
                     ParseErrorType::MissingToken,
-                    format!("Expected ':' or '=' after property name '{}'", prop_name),
-                    self.current().line,
-                    self.current().column,
-                    None,
-                    self.get_source_line(self.current()),
+                    format!("Expected ':' or '=' after property '{}'", prop_name),
+                    cur.line, cur.column, None,
+                    self.get_source_line(&cur),
                 );
-
+                // Recover: skip to next comma or closing brace
                 while !self.is_at_end() && !self.check_symbol(',') && !self.check_symbol('}') {
                     self.advance();
                 }
                 continue;
             }
 
-            self.advance();
+            self.advance(); // consume ':' or '='
             self.skip_whitespace();
 
-            let value_expression = self.parse_expression(0);
-            let property_value = self.convert_expression_to_value(value_expression);
+            let val_expr = self.parse_expression(0);
+            let prop_value = self.convert_expression_to_value(val_expr);
 
-            properties.push(ObjectProperty::new(prop_name, property_value, prop_position));
-
+            properties.push(ObjectProperty::new(prop_name, prop_value, prop_pos));
             self.skip_whitespace();
 
             if self.check_symbol(',') {
                 self.advance();
                 self.skip_whitespace();
-
-                if self.check_symbol('}') {
-                    break;
-                }
+                if self.check_symbol('}') { break; }
             } else if self.check_symbol('}') {
                 break;
             } else {
+                let cur = self.current().clone();
                 self.error_manager.add_parse_error(
                     ParseErrorType::MissingToken,
-                    format!("Expected ',' or '}}' in object literal, found {}",
-                            self.current().get_token_value()),
-                    self.current().line,
-                    self.current().column,
-                    None,
-                    self.get_source_line(self.current()),
+                    format!("Expected ',' or '}}' in object literal, found {}", cur.get_token_value()),
+                    cur.line, cur.column, None,
+                    self.get_source_line(&cur),
                 );
                 break;
             }
         }
 
-        if self.check_symbol('}') {
-            self.advance();
+        if self.check_symbol('}') { self.advance(); }
+
+        Value::Object { properties, position: obj_pos }
+    }
+
+    fn parse_tuple_constructor(&mut self) -> Expression {
+        let pos = Position::from_token(self.current());
+        self.advance();
+        self.skip_whitespace();
+
+        if !self.expect_symbol('(') {
+            return Expression::Value { value: Value::Null { position: pos }, position: pos };
         }
 
-        Value::Object {
-            properties,
-            position: object_position,
+        let mut args = Vec::new();
+
+        while !self.is_at_end() && !self.check_symbol(')') {
+            self.skip_whitespace();
+            if self.check_symbol(')') { break; }
+            let expr = self.parse_expression(0);
+            args.push(Value::Expression {
+                expr: Box::new(expr),
+                position: Position::from_token(self.current()),
+            });
+            self.skip_whitespace();
+            if self.check_symbol(',') { self.advance(); } else { break; }
+        }
+
+        if !self.expect_symbol(')') {
+            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+        }
+
+        Expression::Value {
+            value: Value::PrefixedConstructor { prefix: "t".to_string(), arguments: args, position: pos },
+            position: pos,
         }
     }
 
+    fn parse_blob_constructor(&mut self) -> Expression {
+        let pos = Position::from_token(self.current());
+        self.advance();
+        self.skip_whitespace();
+
+        if !self.expect_symbol('(') {
+            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+        }
+
+        let _data = self.parse_expression(0);
+        self.skip_whitespace();
+
+        if !self.expect_symbol(')') {
+            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+        }
+
+        Expression::Value {
+            value: Value::PrefixedConstructor {
+                prefix: "b".to_string(),
+                arguments: vec![Value::String { value: "blob_data".to_string(), position: pos }],
+                position: pos,
+            },
+            position: pos,
+        }
+    }
+
+    fn parse_regex_constructor(&mut self) -> Expression {
+        let pos = Position::from_token(self.current());
+        self.advance();
+        self.skip_whitespace();
+
+        if !self.expect_symbol('(') {
+            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+        }
+
+        let _pattern = self.parse_expression(0);
+        self.skip_whitespace();
+
+        if !self.expect_symbol(')') {
+            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+        }
+
+        Expression::Value {
+            value: Value::PrefixedConstructor {
+                prefix: "r".to_string(),
+                arguments: vec![Value::String { value: "regex_pattern".to_string(), position: pos }],
+                position: pos,
+            },
+            position: pos,
+        }
+    }
+
+    // =============================================================================
+    // Interpolated string
+    // =============================================================================
+
     fn parse_interpolated_string_content(
         &self,
-        raw_content: &str,
+        raw: &str,
         position: Position,
     ) -> (String, Vec<Expression>) {
         let mut expressions = Vec::new();
         let mut template = String::new();
-        let mut expression_index = 0;
-
+        let mut idx = 0;
         let mut last_end = 0;
 
-        // Reuse the lazy-static compiled regex — zero allocation cost here
-        for cap in INTERP_PLACEHOLDER_RE.captures_iter(raw_content) {
-            let match_start = cap.get(0).unwrap().start();
-            let match_end = cap.get(0).unwrap().end();
+        for cap in INTERP_PLACEHOLDER_RE.captures_iter(raw) {
+            let m0 = cap.get(0).unwrap();
             let expr_text = cap.get(1).unwrap().as_str();
 
-            // Literal text before this expression
-            template.push_str(&raw_content[last_end..match_start]);
-
-            // Parse the expression content
-            let parsed_expr = self.parse_interpolated_expression(expr_text, position);
-            expressions.push(parsed_expr);
-
-            // Placeholder index
-            template.push_str(&format!("{{{}}}", expression_index));
-            expression_index += 1;
-
-            last_end = match_end;
+            template.push_str(&raw[last_end..m0.start()]);
+            expressions.push(self.parse_interpolated_expression(expr_text, position));
+            template.push_str(&format!("{{{}}}", idx));
+            idx += 1;
+            last_end = m0.end();
         }
 
-        // Remaining literal text
-        template.push_str(&raw_content[last_end..]);
-
+        template.push_str(&raw[last_end..]);
         (template, expressions)
     }
 
-    fn parse_interpolated_expression(&self, expr_text: &str, position: Position) -> Expression {
-        let trimmed = expr_text.trim();
+    fn parse_interpolated_expression(&self, text: &str, position: Position) -> Expression {
+        let trimmed = text.trim();
 
-        // Integer literal
-        if let Ok(val) = trimmed.parse::<i32>() {
+        if let Ok(v) = trimmed.parse::<i32>() {
             return Expression::Value {
-                value: Value::Integer { value: val, position },
+                value: Value::Integer { value: v, position },
                 position,
             };
         }
 
-        // Float literal (f/F suffix)
         if trimmed.ends_with('f') || trimmed.ends_with('F') {
-            let num_part = &trimmed[..trimmed.len() - 1];
-            if let Ok(val) = num_part.parse::<f32>() {
+            if let Ok(v) = trimmed[..trimmed.len() - 1].parse::<f32>() {
                 return Expression::Value {
-                    value: Value::Float { value: val, position },
+                    value: Value::Float { value: v, position },
                     position,
                 };
             }
         }
 
-        // Double literal
+        // Only attempt f64 parse on purely numeric strings to avoid treating "obj.prop" as double
         if trimmed.contains('.') {
-            // Guard: must not match a property-access pattern like "obj.prop"
-            // Only try f64 parse when it looks purely numeric
-            let is_numeric_double = trimmed
-                .chars()
-                .all(|c| c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-');
-            if is_numeric_double {
-                if let Ok(val) = trimmed.parse::<f64>() {
+            let is_numeric = trimmed.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'));
+            if is_numeric {
+                if let Ok(v) = trimmed.parse::<f64>() {
                     return Expression::Value {
-                        value: Value::Double { value: val, position },
+                        value: Value::Double { value: v, position },
                         position,
                     };
                 }
             }
         }
 
-        // Boolean
         if trimmed.eq_ignore_ascii_case("true") {
-            return Expression::Value {
-                value: Value::Boolean { value: true, position },
-                position,
-            };
+            return Expression::Value { value: Value::Boolean { value: true, position }, position };
         }
         if trimmed.eq_ignore_ascii_case("false") {
-            return Expression::Value {
-                value: Value::Boolean { value: false, position },
-                position,
-            };
+            return Expression::Value { value: Value::Boolean { value: false, position }, position };
         }
 
-        // Quoted string
         if (trimmed.starts_with('"') && trimmed.ends_with('"'))
             || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
         {
-            let string_content = &trimmed[1..trimmed.len() - 1];
             return Expression::Value {
-                value: Value::String {
-                    value: string_content.to_string(),
-                    position,
-                },
+                value: Value::String { value: trimmed[1..trimmed.len() - 1].to_string(), position },
                 position,
             };
         }
 
-        // Method call: obj.method()  — reuse lazy-static regex
         if let Some(cap) = INTERP_METHOD_CALL_RE.captures(trimmed) {
-            let parts = vec![cap[1].to_string(), cap[2].to_string()];
             return Expression::QualifiedIdentifier {
-                parts,
+                parts: vec![cap[1].to_string(), cap[2].to_string()],
                 arguments: Some(Vec::new()),
                 position,
             };
         }
 
-        // Property access: obj.property  — reuse lazy-static regex
         if let Some(cap) = INTERP_PROPERTY_RE.captures(trimmed) {
-            let parts = vec![cap[1].to_string(), cap[2].to_string()];
             return Expression::QualifiedIdentifier {
-                parts,
+                parts: vec![cap[1].to_string(), cap[2].to_string()],
                 arguments: None,
                 position,
             };
         }
 
-        // Default: treat as identifier
-        Expression::Identifier {
-            name: trimmed.to_string(),
-            position,
-        }
+        Expression::Identifier { name: trimmed.to_string(), position }
     }
 
-    fn parse_tuple_constructor(&mut self) -> Expression {
-        let tuple_position = Position::from_token(self.current());
-        self.advance();
-        self.skip_whitespace();
-
-        if !self.expect_symbol('(') {
-            return Expression::Value {
-                value: Value::Null { position: tuple_position },
-                position: tuple_position,
-            };
-        }
-
-        let mut tuple_expressions = Vec::new();
-
-        while !self.is_at_end() && !self.check_symbol(')') {
-            self.skip_whitespace();
-            if self.check_symbol(')') {
-                break;
-            }
-
-            let expr = self.parse_expression(0);
-            tuple_expressions.push(Value::Expression {
-                expr: Box::new(expr),
-                position: Position::from_token(self.current()),
-            });
-
-            self.skip_whitespace();
-
-            if self.check_symbol(',') {
-                self.advance();
-            } else {
-                break;
-            }
-        }
-
-        if !self.expect_symbol(')') {
-            return Expression::Value {
-                value: Value::Null { position: tuple_position },
-                position: tuple_position,
-            };
-        }
-
-        Expression::Value {
-            value: Value::PrefixedConstructor {
-                prefix: "t".to_string(),
-                arguments: tuple_expressions,
-                position: tuple_position,
-            },
-            position: tuple_position,
-        }
-    }
-
-    fn parse_blob_constructor(&mut self) -> Expression {
-        let blob_position = Position::from_token(self.current());
-        self.advance();
-        self.skip_whitespace();
-
-        if !self.expect_symbol('(') {
-            return Expression::Value {
-                value: Value::Null { position: blob_position },
-                position: blob_position,
-            };
-        }
-
-        let _blob_value = self.parse_expression(0);
-        self.skip_whitespace();
-
-        if !self.expect_symbol(')') {
-            return Expression::Value {
-                value: Value::Null { position: blob_position },
-                position: blob_position,
-            };
-        }
-
-        let blob_args = vec![Value::String {
-            value: "blob_data".to_string(),
-            position: blob_position,
-        }];
-
-        Expression::Value {
-            value: Value::PrefixedConstructor {
-                prefix: "b".to_string(),
-                arguments: blob_args,
-                position: blob_position,
-            },
-            position: blob_position,
-        }
-    }
-
-    fn parse_regex_constructor(&mut self) -> Expression {
-        let regex_position = Position::from_token(self.current());
-        self.advance();
-        self.skip_whitespace();
-
-        if !self.expect_symbol('(') {
-            return Expression::Value {
-                value: Value::Null { position: regex_position },
-                position: regex_position,
-            };
-        }
-
-        let _regex_pattern = self.parse_expression(0);
-        self.skip_whitespace();
-
-        if !self.expect_symbol(')') {
-            return Expression::Value {
-                value: Value::Null { position: regex_position },
-                position: regex_position,
-            };
-        }
-
-        let regex_args = vec![Value::String {
-            value: "regex_pattern".to_string(),
-            position: regex_position,
-        }];
-
-        Expression::Value {
-            value: Value::PrefixedConstructor {
-                prefix: "r".to_string(),
-                arguments: regex_args,
-                position: regex_position,
-            },
-            position: regex_position,
-        }
-    }
+    // =============================================================================
+    // Function arguments
+    // =============================================================================
 
     fn parse_function_arguments(&mut self) -> Vec<Expression> {
-        let estimated_args = usize::max(2, self.tokens.len() / 50);
-        let mut arguments = Vec::with_capacity(estimated_args);
+        let mut args = Vec::with_capacity(usize::max(2, self.tokens.len() / 50));
 
         if !self.expect_symbol('(') {
-            return arguments;
+            return args;
         }
-
         self.skip_whitespace();
 
         if self.check_symbol(')') {
             self.advance();
-            return arguments;
+            return args;
         }
 
         loop {
             self.skip_whitespace();
-
-            let arg = self.parse_expression(0);
-            arguments.push(arg);
-
+            args.push(self.parse_expression(0));
             self.skip_whitespace();
 
             if self.check_symbol(',') {
                 self.advance();
                 self.skip_whitespace();
-
                 if self.check_symbol(')') {
+                    let cur = self.current().clone();
                     self.error_manager.add_parse_error(
                         ParseErrorType::UnexpectedToken,
                         "Trailing comma in function arguments".to_string(),
-                        self.current().line,
-                        self.current().column,
-                        None,
-                        self.get_source_line(self.current()),
+                        cur.line, cur.column, None,
+                        self.get_source_line(&cur),
                     );
                     break;
                 }
@@ -2327,188 +2091,165 @@ impl<'a> QuickFuncsSectionParser<'a> {
         }
 
         if !self.expect_symbol(')') {
+            let cur = self.current().clone();
             self.error_manager.add_parse_error(
                 ParseErrorType::MissingToken,
                 "Expected ')' after function arguments".to_string(),
-                self.current().line,
-                self.current().column,
-                None,
-                self.get_source_line(self.current()),
+                cur.line, cur.column, None,
+                self.get_source_line(&cur),
             );
         }
 
-        arguments
+        args
     }
 
     fn convert_expression_to_value(&self, expr: Expression) -> Value {
-        let expr_position = expr.position();
-
+        let pos = expr.position();
         match expr {
             Expression::Value { value, .. } => value,
-            Expression::Identifier { name, .. } => Value::Identifier {
-                value: name,
-                position: expr_position,
-            },
-            Expression::QualifiedIdentifier { parts, .. } => Value::Identifier {
-                value: parts.join("."),
-                position: expr_position,
-            },
-            _ => Value::Expression {
-                expr: Box::new(expr),
-                position: expr_position,
-            },
+            Expression::Identifier { name, .. } => Value::Identifier { value: name, position: pos },
+            Expression::QualifiedIdentifier { parts, .. } => {
+                Value::Identifier { value: parts.join("."), position: pos }
+            }
+            other => Value::Expression { expr: Box::new(other), position: pos },
         }
     }
 
-    // ==================== LAMBDA EXPRESSION PARSING ====================
+    // =============================================================================
+    // Lambda expressions
+    // =============================================================================
 
     fn is_lambda_expression(&self) -> bool {
         if !self.check_symbol('(') {
             return false;
         }
 
-        let mut look_ahead = self.position;
-        let mut paren_depth = 0;
+        let mut look = self.position;
+        let mut depth: i32 = 0;
 
-        while look_ahead < self.tokens.len() {
-            let token = &self.tokens[look_ahead];
-
-            if let TokenType::Symbol(sym) = token.token_type {
-                if sym == '(' {
-                    paren_depth += 1;
-                } else if sym == ')' {
-                    paren_depth -= 1;
-                    if paren_depth == 0 {
-                        look_ahead += 1;
-
-                        while look_ahead < self.tokens.len()
-                            && self.tokens[look_ahead].get_token_value().trim().is_empty()
-                        {
-                            look_ahead += 1;
+        while look < self.tokens.len() {
+            match self.tokens[look].token_type {
+                TokenType::Symbol('(') => depth += 1,
+                TokenType::Symbol(')') => {
+                    depth -= 1;
+                    if depth == 0 {
+                        look += 1;
+                        // Skip whitespace-like tokens
+                        while look < self.tokens.len() {
+                            let v = self.tokens[look].get_token_value();
+                            if v.trim().is_empty() { look += 1; } else { break; }
                         }
-
-                        if look_ahead < self.tokens.len() {
-                            let next_token = &self.tokens[look_ahead];
-                            return matches!(next_token.token_type, TokenType::Arrow)
-                                || matches!(&next_token.token_type, TokenType::Symbol('='));
+                        if look < self.tokens.len() {
+                            return matches!(
+                                self.tokens[look].token_type,
+                                TokenType::Arrow | TokenType::Symbol('=')
+                            );
                         }
-
                         return false;
                     }
                 }
+                _ => {}
             }
-
-            look_ahead += 1;
+            look += 1;
         }
-
         false
     }
 
     fn parse_lambda_expression(&mut self) -> Expression {
-        let lambda_position = Position::from_token(self.current());
-        self.log_verbose(&format!("Parsing lambda expression at position {}", self.position));
-
+        let lambda_pos = Position::from_token(self.current());
         let parameters = self.parse_lambda_parameters();
-
         self.skip_whitespace();
 
-        if !self.check_arrow() {
-            if self.check_symbol('=') {
-                self.advance();
-                if !self.expect_symbol('>') {
-                    self.error_manager.add_parse_error(
-                        ParseErrorType::MissingToken,
-                        "Expected '=>' after lambda parameters".to_string(),
-                        self.current().line,
-                        self.current().column,
-                        None,
-                        self.get_source_line(self.current()),
-                    );
-                    return Expression::Value {
-                        value: Value::Null { position: lambda_position },
-                        position: lambda_position,
-                    };
-                }
-            } else {
+        // Consume `=>` (Arrow token) or `=` `>` two-symbol fallback
+        if matches!(self.current().token_type, TokenType::Arrow) {
+            self.advance();
+        } else if self.check_symbol('=') {
+            self.advance();
+            if !self.expect_symbol('>') {
+                let cur = self.current().clone();
                 self.error_manager.add_parse_error(
                     ParseErrorType::MissingToken,
                     "Expected '=>' after lambda parameters".to_string(),
-                    self.current().line,
-                    self.current().column,
-                    None,
-                    self.get_source_line(self.current()),
+                    cur.line, cur.column, None,
+                    self.get_source_line(&cur),
                 );
-                return Expression::Value {
-                    value: Value::Null { position: lambda_position },
-                    position: lambda_position,
-                };
+                return Expression::Value { value: Value::Null { position: lambda_pos }, position: lambda_pos };
             }
         } else {
-            self.advance();
+            let cur = self.current().clone();
+            self.error_manager.add_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected '=>' after lambda parameters".to_string(),
+                cur.line, cur.column, None,
+                self.get_source_line(&cur),
+            );
+            return Expression::Value { value: Value::Null { position: lambda_pos }, position: lambda_pos };
         }
 
         self.skip_whitespace();
-
-        let body = self.parse_lambda_body();
-
-        // FIX: Get length before move
-        let param_count = parameters.len();
-
-        let lambda_value = Value::Lambda {
-            parameters,
-            body: Box::new(body),
-            position: lambda_position,
+        let body = if self.check_symbol('{') {
+            self.parse_lambda_block_body()
+        } else {
+            self.parse_expression(0)
         };
 
-        self.log_verbose(&format!("Parsed lambda with {} parameters", param_count));
+        let param_count = parameters.len();
+        let result = Expression::Value {
+            value: Value::Lambda {
+                parameters,
+                body: Box::new(body),
+                position: lambda_pos,
+            },
+            position: lambda_pos,
+        };
 
-        Expression::Value {
-            value: lambda_value,
-            position: lambda_position,
+        if self.debug_config.is_verbose {
+            self.error_manager.log_debug(&format!(
+                "QuickFunctions: lambda with {} params",
+                param_count
+            ));
         }
+
+        result
     }
 
     fn parse_lambda_parameters(&mut self) -> Vec<String> {
-        let mut parameters = Vec::new();
+        let mut params = Vec::new();
 
         if !self.expect_symbol('(') {
-            return parameters;
+            return params;
         }
-
         self.skip_whitespace();
 
         if self.check_symbol(')') {
             self.advance();
-            self.log_verbose("Lambda: empty parameter list");
-            return parameters;
+            return params;
         }
 
         loop {
             self.skip_whitespace();
 
             if let TokenType::Identifier(id) = &self.current().token_type {
-                let param_name = id.clone();
+                let name = id.clone();
                 self.advance();
                 self.skip_whitespace();
 
-                // Skip type annotation if present
+                // Skip optional type annotation
                 if self.check_symbol('<') {
                     self.advance();
                     self.skip_whitespace();
-
-                    if matches!(self.current().token_type, TokenType::Keyword(_) | TokenType::Identifier(_)) {
+                    if matches!(
+                        self.current().token_type,
+                        TokenType::Keyword(_) | TokenType::Identifier(_)
+                    ) {
                         self.advance();
                     }
-
                     self.skip_whitespace();
-                    if !self.expect_symbol('>') {
-                        break;
-                    }
+                    if !self.expect_symbol('>') { break; }
                     self.skip_whitespace();
                 }
 
-                parameters.push(param_name);
-                self.log_verbose(&format!("Lambda parameter: {}", parameters.last().unwrap()));
+                params.push(name);
 
                 if self.check_symbol(',') {
                     self.advance();
@@ -2516,284 +2257,249 @@ impl<'a> QuickFuncsSectionParser<'a> {
                     break;
                 }
             } else {
+                let cur = self.current().clone();
                 self.error_manager.add_parse_error(
                     ParseErrorType::UnexpectedToken,
                     "Expected parameter name in lambda".to_string(),
-                    self.current().line,
-                    self.current().column,
-                    None,
-                    self.get_source_line(self.current()),
+                    cur.line, cur.column, None,
+                    self.get_source_line(&cur),
                 );
                 break;
             }
         }
 
         if !self.expect_symbol(')') {
+            let cur = self.current().clone();
             self.error_manager.add_parse_error(
                 ParseErrorType::MissingToken,
                 "Expected ')' after lambda parameters".to_string(),
-                self.current().line,
-                self.current().column,
-                None,
-                self.get_source_line(self.current()),
+                cur.line, cur.column, None,
+                self.get_source_line(&cur),
             );
         }
 
-        parameters
-    }
-
-    fn parse_lambda_body(&mut self) -> Expression {
-        self.skip_whitespace();
-
-        if self.check_symbol('{') {
-            return self.parse_lambda_block_body();
-        }
-
-        self.log_verbose("Parsing lambda expression body");
-        self.parse_expression(0)
+        params
     }
 
     fn parse_lambda_block_body(&mut self) -> Expression {
-        let block_position = Position::from_token(self.current());
-        self.log_verbose("Parsing lambda block body");
+        let pos = Position::from_token(self.current());
 
         if !self.expect_symbol('{') {
-            return Expression::Value {
-                value: Value::Null { position: block_position },
-                position: block_position,
-            };
+            return Expression::Value { value: Value::Null { position: pos }, position: pos };
         }
 
-        let mut statements = Vec::new();
+        let mut stmt_count = 0usize;
 
         while !self.is_at_end() && !self.check_symbol('}') {
             self.skip_whitespace();
-            if self.check_symbol('}') {
-                break;
+            if self.check_symbol('}') { break; }
+            if self.parse_statement().is_some() {
+                stmt_count += 1;
             }
-
-            if let Some(stmt) = self.parse_statement() {
-                // FIX: Get type name before move
-                let type_name = std::any::type_name_of_val(&stmt);
-                statements.push(stmt);
-                self.log_verbose(&format!("Lambda block: parsed {}", type_name));
-            }
-
             self.skip_whitespace();
         }
 
         if !self.expect_symbol('}') {
+            let cur = self.current().clone();
             self.error_manager.add_parse_error(
                 ParseErrorType::MissingToken,
-                "Expected '}' to close lambda block body".to_string(),
-                self.current().line,
-                self.current().column,
-                None,
-                self.get_source_line(self.current()),
+                "Expected '}' to close lambda block".to_string(),
+                cur.line, cur.column, None,
+                self.get_source_line(&cur),
             );
         }
 
-        self.log_verbose(&format!("Lambda block complete with {} statements",
-                                  statements.len()));
-
+        // Represent the block as an opaque identifier value — the AST enhancer owns resolution.
         Expression::Value {
             value: Value::Identifier {
-                value: format!("<lambda_block:{}_stmts>", statements.len()),
-                position: block_position,
+                value: format!("<lambda_block:{}_stmts>", stmt_count),
+                position: pos,
             },
-            position: block_position,
+            position: pos,
         }
     }
 
-    // ==================== HELPER METHODS ====================
+    // =============================================================================
+    // Helpers
+    // =============================================================================
+
+    /// Convert a type-keyword string to the corresponding DataType variant.
+    fn str_to_data_type(s: &str) -> Option<DataType> {
+        match s {
+            "int"       => Some(DataType::Int),
+            "float"     => Some(DataType::Float),
+            "double"    => Some(DataType::Double),
+            "string"    => Some(DataType::String),
+            "bool"      => Some(DataType::Bool),
+            "array"     => Some(DataType::Array),
+            "object"    => Some(DataType::Object),
+            "tuple"     => Some(DataType::Tuple),
+            "hex"       => Some(DataType::Hex),
+            "blob"      => Some(DataType::Blob),
+            "regex"     => Some(DataType::Regex),
+            "date"      => Some(DataType::Date),
+            "timestamp" => Some(DataType::Timestamp),
+            "enum"      => Some(DataType::Enum),
+            "any"       => Some(DataType::Any),
+            _           => None,
+        }
+    }
 
     fn parse_type_annotation(&mut self) -> Option<DataType> {
         if !self.check_symbol('<') {
             return None;
         }
-
-        self.advance();
+        self.advance(); // consume '<'
         self.skip_whitespace();
 
         let type_token = self.current().clone();
 
-        let data_type = match &type_token.token_type {
-            TokenType::Keyword(kw) | TokenType::Identifier(kw) => {
-                match kw.to_lowercase().as_str() {
-                    "int" => Some(DataType::Int),
-                    "float" => Some(DataType::Float),
-                    "double" => Some(DataType::Double),
-                    "string" => Some(DataType::String),
-                    "bool" => Some(DataType::Bool),
-                    "array" => Some(DataType::Array),
-                    "object" => Some(DataType::Object),
-                    "tuple" => Some(DataType::Tuple),
-                    "hex" => Some(DataType::Hex),
-                    "blob" => Some(DataType::Blob),
-                    "regex" => Some(DataType::Regex),
-                    "date" => Some(DataType::Date),
-                    "timestamp" => Some(DataType::Timestamp),
-                    "enum" => Some(DataType::Enum),
-                    "any" => Some(DataType::Any),
-                    _ => None,
-                }
-            }
+        let type_str = match &type_token.token_type {
+            TokenType::Keyword(kw)    => Some(kw.to_lowercase()),
+            TokenType::Identifier(id) => Some(id.to_lowercase()),
             _ => None,
         };
 
-        if data_type.is_some() {
-            self.advance();
+        let dt = if let Some(ref s) = type_str {
+            let result = Self::str_to_data_type(s);
+            if result.is_none() {
+                self.error_manager.add_parse_error(
+                    ParseErrorType::InvalidType,
+                    format!("Invalid type annotation '{}'", s),
+                    type_token.line, type_token.column, None,
+                    self.get_source_line(&type_token),
+                );
+            }
+            result
         } else {
             self.error_manager.add_parse_error(
                 ParseErrorType::InvalidType,
-                format!("Invalid type annotation: {}", type_token.get_token_value()),
-                type_token.line,
-                type_token.column,
-                None,
+                format!("Expected type name inside '<>', found {}", type_token.get_token_value()),
+                type_token.line, type_token.column, None,
                 self.get_source_line(&type_token),
             );
-            self.advance();
+            None
+        };
+
+        if type_str.is_some() {
+            self.advance(); // consume the type token
+        } else {
+            self.advance(); // skip invalid
         }
 
         self.skip_whitespace();
 
-        // Don't return early on error - try to recover
+        // Recover from a missing '>' by scanning forward
         if !self.check_symbol('>') {
+            let cur = self.current().clone();
             self.error_manager.add_parse_error(
                 ParseErrorType::MissingToken,
                 "Expected '>' to close type annotation".to_string(),
-                self.current().line,
-                self.current().column,
-                None,
-                self.get_source_line(self.current()),
+                cur.line, cur.column, None,
+                self.get_source_line(&cur),
             );
-
-            // Try to find the '>' and consume it for error recovery
-            let mut depth = 1;
+            let mut depth: i32 = 1;
             while !self.is_at_end() && depth > 0 {
-                if self.check_symbol('<') {
-                    depth += 1;
-                } else if self.check_symbol('>') {
-                    depth -= 1;
-                    if depth == 0 {
-                        self.advance(); // Consume the '>'
-                        break;
-                    }
+                match self.current().token_type {
+                    TokenType::Symbol('<') => depth += 1,
+                    TokenType::Symbol('>') => { depth -= 1; if depth == 0 { self.advance(); break; } }
+                    _ => {}
                 }
                 self.advance();
             }
         } else {
-            self.advance(); // Consume the '>'
+            self.advance(); // consume '>'
         }
 
-        if data_type.is_some() {
-            self.log_verbose(&format!("Parsed type annotation: {:?}", data_type));
-        }
-
-        data_type
+        dt
     }
 
     fn parse_dotted_path(&mut self) -> Option<String> {
-        let mut path = String::new();
-
-        if let TokenType::Identifier(id) | TokenType::Keyword(id) = &self.current().token_type {
-            path = id.clone();
-            self.advance();
-        } else {
-            return None;
-        }
+        let mut path = match &self.current().token_type {
+            TokenType::Identifier(id) => { let p = id.clone(); self.advance(); p }
+            TokenType::Keyword(kw)    => { let p = kw.to_string(); self.advance(); p }
+            _ => return None,
+        };
 
         while self.check_symbol('.') {
             self.advance();
             self.skip_whitespace();
 
-            if let TokenType::Identifier(id) = &self.current().token_type {
-                path.push('.');
-                path.push_str(id);
-                self.advance();
-            } else if let TokenType::Keyword(kw) = &self.current().token_type {
-                if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") {
+            match &self.current().token_type {
+                TokenType::Identifier(id) => {
                     path.push('.');
-                    path.push_str(kw);
+                    path.push_str(id);
                     self.advance();
-                } else {
+                }
+                TokenType::Keyword(kw) if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") => {
+                    let segment = kw.to_string(); // &&'static str -> String
+                    path.push('.');
+                    path.push_str(&segment);
+                    self.advance();
+                }
+                _ => {
+                    let cur = self.current().clone();
                     self.error_manager.add_parse_error(
                         ParseErrorType::UnexpectedToken,
-                        format!("Cannot use language keyword '{}' in path", kw),
-                        self.current().line,
-                        self.current().column,
-                        None,
-                        self.get_source_line(self.current()),
+                        "Expected identifier after '.' in path".to_string(),
+                        cur.line, cur.column, None,
+                        self.get_source_line(&cur),
                     );
                     break;
                 }
-            } else {
-                self.error_manager.add_parse_error(
-                    ParseErrorType::UnexpectedToken,
-                    "Expected identifier after '.' in path".to_string(),
-                    self.current().line,
-                    self.current().column,
-                    None,
-                    self.get_source_line(self.current()),
-                );
-                break;
             }
         }
 
         Some(path)
     }
 
+    /// Consume a `->`  switch-case arrow (distinct from `=>` scope arrow).
     fn match_arrow(&mut self) -> bool {
         if let TokenType::MultiCharSymbol(ms) = &self.current().token_type {
-            if ms.as_str() == "->" {
+            if *ms == "->" {
                 self.advance();
                 return true;
             }
         }
-
         if matches!(self.current().token_type, TokenType::SwitchCase) {
             self.advance();
             return true;
         }
-
-        if let TokenType::Symbol('-') = self.current().token_type {
+        // Two-symbol fallback: '-' '>'
+        if matches!(self.current().token_type, TokenType::Symbol('-')) {
             if self.position + 1 < self.tokens.len() {
-                if let TokenType::Symbol('>') = self.tokens[self.position + 1].token_type {
+                if matches!(self.tokens[self.position + 1].token_type, TokenType::Symbol('>')) {
                     self.advance();
                     self.advance();
                     return true;
                 }
             }
         }
-
         false
     }
 
+    /// Check for `=>` scope/lambda arrow without consuming.
     fn check_arrow(&self) -> bool {
         if let TokenType::MultiCharSymbol(ms) = &self.current().token_type {
-            return ms.as_str() == "=>";
+            // ms: &&'static str — compare directly
+            return *ms == "=>";
         }
-
-        if matches!(self.current().token_type, TokenType::Arrow) {
-            return true;
-        }
-
-        false
+        matches!(self.current().token_type, TokenType::Arrow)
     }
 
-    // ==================== TOKEN NAVIGATION ====================
+    // =============================================================================
+    // Token navigation
+    // =============================================================================
 
     #[inline]
     fn current(&self) -> &Token {
-        self.tokens.get(self.position).unwrap_or_else(|| {
-            static EOF_TOKEN: Token = Token {
-                token_type: TokenType::EndOfFile,
-                line: 1,
-                column: 1,
-                section: SectionId::None,
-            };
-            &EOF_TOKEN
-        })
+        static EOF_TOKEN: Token = Token {
+            token_type: TokenType::EndOfFile,
+            line: 1,
+            column: 1,
+            section: SectionId::None,
+        };
+        self.tokens.get(self.position).unwrap_or(&EOF_TOKEN)
     }
 
     #[inline]
@@ -2820,13 +2526,12 @@ impl<'a> QuickFuncsSectionParser<'a> {
             self.advance();
             true
         } else {
+            let cur = self.current().clone();
             self.error_manager.add_parse_error(
                 ParseErrorType::MissingToken,
                 format!("Expected '{}'", symbol),
-                self.current().line,
-                self.current().column,
-                None,
-                self.get_source_line(self.current()),
+                cur.line, cur.column, None,
+                self.get_source_line(&cur),
             );
             false
         }
@@ -2834,68 +2539,34 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
     fn skip_whitespace(&mut self) {
         while !self.is_at_end() {
-            let token = self.current();
-
-            if matches!(
-                token.token_type,
-                TokenType::String(_) | TokenType::StringSingle(_) | TokenType::InterpolatedString(_)
-            ) {
-                break;
-            }
-
-            if matches!(token.token_type, TokenType::Comment(_)) {
-                self.advance();
-                continue;
-            }
-
-            let value = token.get_token_value();
-
-            if value.trim().is_empty() || value == "\n" || value == "\r" || value == "\t" {
-                self.advance();
-            } else {
-                break;
+            match &self.current().token_type {
+                // Never skip string tokens — they are content
+                TokenType::String(_)
+                | TokenType::StringSingle(_)
+                | TokenType::InterpolatedString(_) => break,
+                // Strip comments
+                TokenType::Comment(_) => { self.advance(); continue; }
+                _ => {
+                    let v = self.current().get_token_value();
+                    if v.trim().is_empty() || v == "\n" || v == "\r" || v == "\t" {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
             }
         }
     }
 
     fn get_source_line(&self, token: &Token) -> Option<String> {
-        let line_tokens: Vec<&Token> = self.tokens
-            .iter()
-            .filter(|t| t.line == token.line)
-            .collect();
-
-        if line_tokens.is_empty() {
-            return None;
+        let mut source = String::new();
+        let mut col = 0usize;
+        for t in self.tokens.iter().filter(|t| t.line == token.line) {
+            while col < t.column { source.push(' '); col += 1; }
+            let v = t.get_token_value();
+            col += v.len();
+            source.push_str(&v);
         }
-
-        let mut source_line = String::new();
-        let mut current_column = 0;
-
-        for t in line_tokens {
-            while current_column < t.column {
-                source_line.push(' ');
-                current_column += 1;
-            }
-
-            let token_value = t.get_token_value();
-            source_line.push_str(&token_value);
-            current_column += token_value.len();
-        }
-
-        Some(source_line)
-    }
-
-    // ==================== LOGGING ====================
-
-    fn log_debug(&self, message: &str) {
-        if self.operational_settings.debug_mode != DebugMode::Off {
-            self.error_manager.log_debug(message);
-        }
-    }
-
-    fn log_verbose(&self, message: &str) {
-        if self.operational_settings.debug_mode == DebugMode::Verbose {
-            self.error_manager.log_info(message);
-        }
+        if source.is_empty() { None } else { Some(source) }
     }
 }

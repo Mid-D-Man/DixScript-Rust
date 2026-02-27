@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Fri Feb 27 11:29:34 UTC 2026
+Generated: Fri Feb 27 16:15:55 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 5e25cf23f14c766c06b455f168994104d5a807ec
+Commit: 6cbe2ed69a164eec44e921c757ac19ff9e55c03b
 Branch: master
 ==================================
 
@@ -213,6 +213,7 @@ src/lib.rs
 
 Test Files:
 ===========
+tests/config_test.rs
 tests/integration/mod.rs
 tests/unit/mod.rs
 
@@ -230,5 +231,5 @@ rustfmt.toml
 Total Rust Files:
 ================
 Source: 203
-Tests: 2
+Tests: 3
 Benches: 2

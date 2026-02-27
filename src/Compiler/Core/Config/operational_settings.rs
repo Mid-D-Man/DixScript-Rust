@@ -1,6 +1,5 @@
 //! Operational settings extracted from configuration
 
-// IMPORTANT: Use the enums from AST data_types, not duplicates
 pub use crate::Compiler::AST::data_types::{
     ErrorHandlingStrategy,
     CompatibilityMode,
@@ -13,17 +12,9 @@ pub struct OperationalSettings {
     pub error_handling_strategy: ErrorHandlingStrategy,
     pub compatibility_mode: CompatibilityMode,
     pub debug_mode: DebugMode,
-
-    /// If true, skip imports resolution in semantic analysis (already being resolved by parent)
     pub skip_imports_resolution: bool,
-
-    /// Source file path for resolving relative imports
     pub source_file_path: Option<String>,
-
-    /// List of enabled features (e.g., "advanced", "basic", "quickfuncs", "enums", etc.)
     pub enabled_features: Vec<String>,
-
-    /// DixScript version
     pub version: String,
 }
 
@@ -42,15 +33,10 @@ impl Default for OperationalSettings {
 }
 
 impl OperationalSettings {
-    /// Create new operational settings with defaults
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Check if advanced mode is enabled
-    /// Advanced mode is enabled if:
-    /// 1. Features contains "advanced", OR
-    /// 2. Features contains any specific advanced section (quickfuncs, enums, imports, dlm)
     pub fn is_advanced_mode(&self) -> bool {
         self.enabled_features.iter().any(|f| {
             f.eq_ignore_ascii_case("advanced")
@@ -61,14 +47,10 @@ impl OperationalSettings {
         })
     }
 
-    /// Check if a specific feature is enabled
     pub fn is_feature_enabled(&self, feature: &str) -> bool {
-        // If advanced mode, all features are enabled (except "basic" which is exclusive)
         if self.is_advanced_mode() && !feature.eq_ignore_ascii_case("basic") {
             return true;
         }
-
-        // Check if feature is explicitly listed
         self.enabled_features.iter().any(|f| {
             f.eq_ignore_ascii_case(feature) || f.eq_ignore_ascii_case("basic")
         })

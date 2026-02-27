@@ -73,6 +73,7 @@ fn test_empty_input_returns_defaults() {
     assert!(!result.warnings.is_empty());
 }
 
+
 #[test]
 fn test_no_config_section_returns_defaults() {
     let mut handler = ConfigSectionHandler::new(None);

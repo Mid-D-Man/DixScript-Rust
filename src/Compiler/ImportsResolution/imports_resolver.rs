@@ -1,73 +1,59 @@
 // src/Compiler/ImportsResolution/imports_resolver.rs
+//! Recursive import resolution with cycle detection and optional cloud download.
+//!
+//! Cloud download support requires the `cloud_imports` cargo feature.
+//! Local file imports work without any optional features.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::fs;
-use std::pin::Pin;
-use std::future::Future;
 use crate::Compiler::AST::*;
 use crate::Compiler::Core::{
-    OperationalSettings,
-    ErrorHandlingStrategy,
-    DebugMode,
     ConfigSectionHandler,
+    DebugMode,
+    ErrorHandlingStrategy,
+    GeneralAstEnhancer,
+    GeneralParser,
+    GeneralSemanticAnalyzer,
+    OperationalSettings,
 };
 use crate::Compiler::Core::Tokenizer::Tokenizer;
-use crate::Compiler::Core::{GeneralParser, GeneralSemanticAnalyzer, GeneralAstEnhancer};
-use crate::Compiler::Utilities::{SymbolTable, QuickFunctionInfo, FunctionSignature, ParameterInfo};
-use crate::ErrorManager::{ErrorManager, ImportsResolutionErrorType};
-use super::{CloudFileCache, CloudProviderFactory, HashVerifier};
+use crate::Compiler::Utilities::{FunctionSignature, ParameterInfo, QuickFunctionInfo, SymbolTable};
+use crate::ErrorManager::{DebugConfig, ErrorManager, ImportsResolutionErrorType};
+use super::HashVerifier;
 
-/// ImportsResolver v1.0.0 - CORRECTED LIFETIME MANAGEMENT
-///
-/// CRITICAL: This resolver BORROWS SymbolTable from GeneralSemanticAnalyzer
-/// It does NOT own the symbol table - it mutates the parent's table.
-///
-/// Flow for each import (including nested):
-/// 1. Parse imported file
-/// 2. Create NEW GeneralSemanticAnalyzer with NEW SymbolTable (for that file)
-/// 3. Run semantic analysis (validates, populates that file's symbol table)
-/// 4. Run AST enhancement (resolves qualified identifiers)
-/// 5. Extract global functions/enums from ENHANCED AST
-/// 6. Register extracted symbols in PARENT's SymbolTable (via &mut reference)
-///
-/// This ensures:
-/// - Each file's analysis is isolated
-/// - Nested imports work correctly (recursion creates new analyzers)
-/// - Parent gets access to all imported symbols
-/// - No symbol table cloning/merging needed
+#[cfg(feature = "cloud_imports")]
+use super::{CloudFileCache, CloudProviderFactory};
+
 pub struct ImportsResolver<'a> {
-    // BORROWED from GeneralSemanticAnalyzer (not owned!)
     symbol_table: &'a mut SymbolTable,
     operational_settings: &'a OperationalSettings,
-
-    // Owned state
     error_manager: ErrorManager,
+    debug_config: DebugConfig,
+    #[cfg(feature = "cloud_imports")]
     cloud_cache: CloudFileCache,
-
-    // Cycle detection state
     visiting: HashSet<String>,
     visited: HashSet<String>,
     import_stack: Vec<String>,
 }
 
 impl<'a> ImportsResolver<'a> {
-    /// Create new ImportsResolver with borrowed references
-    ///
-    /// # Arguments
-    /// * `symbol_table` - Mutable reference to parent's symbol table
-    /// * `operational_settings` - Reference to compiler settings
     pub fn new(
         symbol_table: &'a mut SymbolTable,
         operational_settings: &'a OperationalSettings,
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
+        let debug_config = DebugConfig::from_debug_mode(error_manager.get_debug_mode());
+
+        #[cfg(feature = "cloud_imports")]
         let cloud_cache = CloudFileCache::new(error_manager.clone());
 
         ImportsResolver {
             symbol_table,
             operational_settings,
             error_manager,
+            debug_config,
+            #[cfg(feature = "cloud_imports")]
             cloud_cache,
             visiting: HashSet::new(),
             visited: HashSet::new(),
@@ -75,311 +61,250 @@ impl<'a> ImportsResolver<'a> {
         }
     }
 
-    /// Resolve all imports from parsed AST
-    /// Returns true if successful, false if errors occurred
-    pub async fn resolve_imports(
+    pub fn resolve_imports(
         &mut self,
         parsed_imports: &HashMap<String, (String, DixScript)>,
     ) -> bool {
         if parsed_imports.is_empty() {
-            self.log_debug("No imports to resolve");
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug("[ImportsResolver] No imports to resolve");
+            }
             return true;
         }
 
-        self.log_info(&format!("Resolving {} imports", parsed_imports.len()));
+        self.error_manager.log_info(&format!(
+            "[ImportsResolver] Resolving {} imports",
+            parsed_imports.len()
+        ));
 
-        // Log cache statistics
-        if self.operational_settings.debug_mode != DebugMode::Off {
-            let cache_stats = self.cloud_cache.get_statistics();
-            self.log_debug(&format!("Cache statistics: {}", cache_stats));
+        #[cfg(feature = "cloud_imports")]
+        if self.debug_config.is_enabled {
+            let stats = self.cloud_cache.get_statistics();
+            self.error_manager.log_debug(&format!("[ImportsResolver] Cache statistics: {}", stats));
         }
 
-        // Clear state (in case resolver is reused)
         self.visiting.clear();
         self.visited.clear();
         self.import_stack.clear();
 
-        // Resolve each import recursively
         let mut success = true;
 
         for (alias, (absolute_path, ast)) in parsed_imports {
-            self.log_debug(&format!("Resolving import '{}' from '{}'", alias, absolute_path));
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(&format!(
+                    "[ImportsResolver] Resolving import '{}' from '{}'",
+                    alias, absolute_path
+                ));
+            }
 
-            if !self.resolve_import_recursive(alias, ast, absolute_path).await {
-                self.log_error(&format!("Failed to resolve import '{}'", alias));
+            if !self.resolve_import_recursive(alias, ast, absolute_path) {
+                self.error_manager.log_error(&format!(
+                    "[ImportsResolver] Failed to resolve import '{}'",
+                    alias
+                ));
 
-                if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt {
+                if self.operational_settings.error_handling_strategy
+                    == ErrorHandlingStrategy::Halt
+                {
                     return false;
                 }
-
                 success = false;
             }
         }
 
-        let errors_count = self.error_manager.get_imports_resolution_errors().len();
-
-        if errors_count > 0 {
-            self.log_warning(&format!(
-                "Imports resolution completed with {} errors",
-                errors_count
+        let error_count = self.error_manager.get_imports_resolution_errors().len();
+        if error_count > 0 {
+            self.error_manager.log_warning(&format!(
+                "[ImportsResolver] Resolution completed with {} errors",
+                error_count
             ));
-
             if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt {
                 return false;
             }
         } else {
-            self.log_info("Successfully resolved imports");
+            self.error_manager
+                .log_info("[ImportsResolver] Successfully resolved imports");
         }
 
         success
     }
 
-    /// Recursively resolve a single import (DFS with cycle detection).
-    ///
-    /// FIX E0733: Recursive async fns require `Box::pin` indirection to avoid
-    /// an infinitely-sized future. We return a boxed, pinned future explicitly.
-    fn resolve_import_recursive<'b>(
-        &'b mut self,
-        alias: &'b str,
-        ast: &'b DixScript,
-        absolute_path: &'b str,
-    ) -> Pin<Box<dyn Future<Output = bool> + 'b>> {
-        Box::pin(async move {
-            // STEP 1: Normalize path for consistent comparison
-            let normalized_path = if Self::is_cloud_url(absolute_path) {
-                Self::strip_query_parameters(absolute_path)
-            } else {
-                match std::fs::canonicalize(absolute_path) {
-                    Ok(path) => path.to_string_lossy().to_string(),
-                    Err(_) => absolute_path.to_string(),
-                }
-            };
-
-            // STEP 2: Check if currently visiting this file (CYCLE!)
-            if self.visiting.contains(&normalized_path) {
-                let cycle_path = self.build_cycle_path(&normalized_path);
-                let cycle_chain = self.build_cycle_chain_list(&normalized_path);
-
-                self.error_manager.add_imports_resolution_error(
-                    ImportsResolutionErrorType::CircularDependency,
-                    format!("Circular dependency detected: {}", cycle_path),
-                    alias.to_string(),
-                    Some(absolute_path.to_string()),
-                    Some(normalized_path.clone()),
-                    Some(cycle_chain),
-                    0, 0, None,
-                );
-
-                return false;
+    fn resolve_import_recursive(
+        &mut self,
+        alias: &str,
+        ast: &DixScript,
+        absolute_path: &str,
+    ) -> bool {
+        let normalized_path = if Self::is_cloud_url(absolute_path) {
+            Self::strip_query_parameters(absolute_path)
+        } else {
+            match std::fs::canonicalize(absolute_path) {
+                Ok(p) => p.to_string_lossy().to_string(),
+                Err(_) => absolute_path.to_string(),
             }
+        };
 
-            // STEP 3: Check if already fully resolved (optimization)
-            if self.visited.contains(&normalized_path) {
-                self.log_debug(&format!("Import '{}' already resolved, skipping", alias));
-                return true;
+        if self.visiting.contains(&normalized_path) {
+            let cycle_path = self.build_cycle_path(&normalized_path);
+            let cycle_chain = self.build_cycle_chain_list(&normalized_path);
+
+            self.error_manager.add_imports_resolution_error(
+                ImportsResolutionErrorType::CircularDependency,
+                format!("Circular dependency detected: {}", cycle_path),
+                alias.to_string(),
+                Some(absolute_path.to_string()),
+                Some(normalized_path.clone()),
+                Some(cycle_chain),
+                0,
+                0,
+                None,
+            );
+            return false;
+        }
+
+        if self.visited.contains(&normalized_path) {
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(&format!(
+                    "[ImportsResolver] Import '{}' already resolved, skipping",
+                    alias
+                ));
             }
+            return true;
+        }
 
-            // STEP 4: Mark as visiting and add to stack
-            self.visiting.insert(normalized_path.clone());
-            self.import_stack.push(normalized_path.clone());
+        self.visiting.insert(normalized_path.clone());
+        self.import_stack.push(normalized_path.clone());
 
-            self.log_debug(&format!("Processing import '{}' at '{}'", alias, normalized_path));
+        let result = self.resolve_import_inner(alias, ast, &normalized_path);
 
-            // STEP 5-9: Actual resolution logic (wrapped in cleanup)
-            let result = self.resolve_import_inner(alias, ast, &normalized_path).await;
+        self.import_stack.pop();
+        self.visiting.remove(&normalized_path);
+        self.visited.insert(normalized_path);
 
-            // STEP 10: Cleanup - mark as fully processed
-            self.import_stack.pop();
-            self.visiting.remove(&normalized_path);
-            self.visited.insert(normalized_path);
-
-            result
-        })
+        result
     }
 
-    /// Inner resolution logic (after cycle detection).
-    ///
-    /// Also boxed because it calls `resolve_import_recursive` which is boxed,
-    /// completing the mutual-recursion chain without infinite future sizing.
-    fn resolve_import_inner<'b>(
-        &'b mut self,
-        alias: &'b str,
-        ast: &'b DixScript,
-        normalized_path: &'b str,
-    ) -> Pin<Box<dyn Future<Output = bool> + 'b>> {
-        Box::pin(async move {
-            // STEP 5: Resolve nested imports if any
-            let mut local_imports = HashMap::new();
+    fn resolve_import_inner(
+        &mut self,
+        alias: &str,
+        ast: &DixScript,
+        normalized_path: &str,
+    ) -> bool {
+        // Type inferred from try_get_namespace return type — no explicit annotation needed.
+        let mut local_imports = HashMap::new();
 
-            if let Some(ref imports_section) = ast.imports {
-                let nested_count = imports_section.imports.len();
-                self.log_debug(&format!(
-                    "Import '{}' has {} nested imports",
-                    alias, nested_count
-                ));
+        if let Some(ref imports_section) = ast.imports {
+            let nested_base_dir = if Self::is_cloud_url(normalized_path) {
+                Self::get_cloud_url_directory(normalized_path)
+            } else {
+                Path::new(normalized_path)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| ".".to_string())
+            };
 
-                // Get base directory for nested imports
-                let nested_base_dir = if Self::is_cloud_url(normalized_path) {
-                    Self::get_cloud_url_directory(normalized_path)
+            let nested_imports: Vec<ImportDeclaration> = imports_section.imports.clone();
+
+            for nested_import in &nested_imports {
+                let nested_path = if nested_import.is_cloud_import {
+                    nested_import.path.clone()
                 } else {
-                    Path::new(normalized_path)
-                        .parent()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_else(|| ".".to_string())
+                    Self::resolve_path(&nested_base_dir, &nested_import.path)
                 };
 
-                // Collect import info first to avoid borrow issues in the loop
-                let nested_imports: Vec<ImportDeclaration> =
-                    imports_section.imports.clone();
-
-                for nested_import in &nested_imports {
-                    // Resolve nested import path (cloud or local)
-                    let nested_path = if nested_import.is_cloud_import {
-                        nested_import.path.clone()
-                    } else {
-                        Self::resolve_path(&nested_base_dir, &nested_import.path)
-                    };
-
-                    // Check if already resolved
-                    if self.visited.contains(&nested_path) {
-                        if let Some(existing_ns) =
-                            self.symbol_table.try_get_namespace(&nested_import.alias)
-                        {
-                            local_imports
-                                .insert(nested_import.alias.clone(), existing_ns.clone());
-                            continue;
-                        } else {
-                            self.error_manager.add_imports_resolution_error(
-                                ImportsResolutionErrorType::GeneralError,
-                                format!(
-                                    "Internal error: Namespace '{}' marked as visited but not in symbol table",
-                                    nested_import.alias
-                                ),
-                                nested_import.alias.clone(),
-                                Some(nested_import.path.clone()),
-                                Some(nested_path.clone()),
-                                None, 0, 0, None,
-                            );
-                            return false;
-                        }
-                    }
-
-                    // Parse nested import
-                    let nested_ast =
-                        match self.parse_imported_file(nested_import, &nested_path).await {
-                            Ok(ast) => ast,
-                            Err(_) => return false,
-                        };
-
-                    // Recursively resolve nested import (Box::pin handles recursion)
-                    if !self
-                        .resolve_import_recursive(
-                            &nested_import.alias,
-                            &nested_ast,
-                            &nested_path,
-                        )
-                        .await
-                    {
-                        return false;
-                    }
-
-                    // Add to local imports
-                    if let Some(nested_ns) =
+                if self.visited.contains(&nested_path) {
+                    if let Some(existing_ns) =
                         self.symbol_table.try_get_namespace(&nested_import.alias)
                     {
                         local_imports
-                            .insert(nested_import.alias.clone(), nested_ns.clone());
+                            .insert(nested_import.alias.clone(), existing_ns.clone());
+                        continue;
+                    } else {
+                        self.error_manager.add_imports_resolution_error(
+                            ImportsResolutionErrorType::GeneralError,
+                            format!(
+                                "Internal: namespace '{}' marked visited but absent from symbol table",
+                                nested_import.alias
+                            ),
+                            nested_import.alias.clone(),
+                            Some(nested_import.path.clone()),
+                            Some(nested_path.clone()),
+                            None,
+                            0,
+                            0,
+                            None,
+                        );
+                        return false;
                     }
                 }
-            }
 
-            // STEP 6: Extract GLOBAL-SCOPED functions only
-            let functions =
-                Self::extract_global_functions(ast.quick_functions.as_ref(), alias);
+                let nested_ast =
+                    match self.parse_imported_file(nested_import, &nested_path) {
+                        Ok(a) => a,
+                        Err(_) => return false,
+                    };
 
-            if self.operational_settings.debug_mode != DebugMode::Off {
-                if let Some(ref qf_section) = ast.quick_functions {
-                    let total_funcs = qf_section.functions.len();
-                    let exported_funcs = functions.len();
-                    let skipped_funcs = total_funcs - exported_funcs;
+                if !self.resolve_import_recursive(
+                    &nested_import.alias,
+                    &nested_ast,
+                    &nested_path,
+                ) {
+                    return false;
+                }
 
-                    self.log_debug(&format!(
-                        "Extracted {}/{} functions from '{}' ({} scoped functions not exported)",
-                        exported_funcs, total_funcs, alias, skipped_funcs
-                    ));
+                if let Some(ns) =
+                    self.symbol_table.try_get_namespace(&nested_import.alias)
+                {
+                    local_imports.insert(nested_import.alias.clone(), ns.clone());
                 }
             }
+        }
 
-            // STEP 7: Extract all enums (enums are always exported)
-            let enums = Self::extract_enums(ast.enums.as_ref());
+        let functions = Self::extract_global_functions(ast.quick_functions.as_ref(), alias);
+        let enums = Self::extract_enums(ast.enums.as_ref());
 
-            if self.operational_settings.debug_mode != DebugMode::Off {
-                if ast.enums.is_some() {
-                    self.log_debug(&format!(
-                        "Extracted {} enums from '{}'",
-                        enums.len(),
-                        alias
-                    ));
-                }
+        if self.debug_config.is_enabled {
+            if let Some(ref qf) = ast.quick_functions {
+                let skipped = qf.functions.len().saturating_sub(functions.len());
+                self.error_manager.log_debug(&format!(
+                    "[ImportsResolver] Extracted {}/{} functions from '{}' ({} scoped, not exported)",
+                    functions.len(),
+                    qf.functions.len(),
+                    alias,
+                    skipped
+                ));
             }
+        }
 
-            // STEP 8: Register namespace in PARENT's SymbolTable
-            self.symbol_table.register_namespace(
-                alias.to_string(),
-                normalized_path.to_string(),
-                functions.clone(),
-                enums.clone(),
-                local_imports.clone(),
-            );
+        self.symbol_table.register_namespace(
+            alias.to_string(),
+            normalized_path.to_string(),
+            functions.clone(),
+            enums.clone(),
+            local_imports.clone(),
+        );
 
-            self.log_debug(&format!(
-                "Registered namespace '{}' with {} functions, {} enums, {} local imports",
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "[ImportsResolver] Registered namespace '{}' with {} functions, {} enums, {} local imports",
                 alias,
                 functions.len(),
                 enums.len(),
                 local_imports.len()
             ));
+        }
 
-            true
-        })
+        true
     }
 
-    /// Parse an imported file - SUPPORTS BOTH LOCAL AND CLOUD
-    /// Runs FULL pipeline (Parse → Semantic Analysis → AST Enhancement)
-    ///
-    /// CRITICAL: Each imported file gets its OWN GeneralSemanticAnalyzer with OWN SymbolTable
-    async fn parse_imported_file(
+    fn parse_imported_file(
         &mut self,
         import: &ImportDeclaration,
         resolved_path: &str,
     ) -> Result<DixScript, String> {
-        // STEP 1: Get file content (cloud or local)
-        let content = if import.is_cloud_import {
-            self.log_debug(&format!("Downloading cloud import: {}", import.path));
-            self.download_cloud_file(&import.path, &import.alias).await?
-        } else {
-            self.log_debug(&format!("Reading local import: {}", resolved_path));
+        let content = self.read_import_content(import, resolved_path)?;
 
-            fs::read_to_string(resolved_path).map_err(|e| {
-                self.error_manager.add_imports_resolution_error(
-                    ImportsResolutionErrorType::FileNotFound,
-                    format!("Failed to read file: {}", e),
-                    import.alias.clone(),
-                    Some(import.path.clone()),
-                    Some(resolved_path.to_string()),
-                    None, 0, 0, None,
-                );
-                format!("Failed to read file: {}", e)
-            })?
-        };
-
-        // STEP 2: Verify hash if provided
         if let Some(ref verify_hash) = import.verify_hash {
-            self.log_debug(&format!(
-                "Verifying hash for '{}': {}",
-                import.alias, verify_hash
-            ));
-
             HashVerifier::verify_hash(&content, verify_hash, &import.alias, resolved_path)
                 .map_err(|e| {
                     self.error_manager.add_imports_resolution_error(
@@ -388,29 +313,42 @@ impl<'a> ImportsResolver<'a> {
                         import.alias.clone(),
                         Some(import.path.clone()),
                         Some(resolved_path.to_string()),
-                        None, 0, 0, None,
+                        None,
+                        0,
+                        0,
+                        None,
                     );
                     format!("Hash verification failed: {}", e)
                 })?;
 
-            self.log_debug(&format!(
-                "Hash verification passed for '{}'",
-                import.alias
-            ));
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(&format!(
+                    "[ImportsResolver] Hash verification passed for '{}'",
+                    import.alias
+                ));
+            }
         }
 
         if content.trim().is_empty() {
-            self.log_warning(&format!("Imported file '{}' is empty", resolved_path));
+            self.error_manager.log_warning(&format!(
+                "[ImportsResolver] Imported file '{}' is empty",
+                resolved_path
+            ));
             return Ok(DixScript::new());
         }
 
-        // STEP 3: Process CONFIG section
-        let config_handler = ConfigSectionHandler::new(None);
+        let mut config_handler = ConfigSectionHandler::new(None);
         let config_result = config_handler.process_config_section(&content);
 
-        // STEP 4: Tokenize
-        self.log_debug("Tokenizing imported file");
-        let tokenizer = Tokenizer::new(config_result.cleaned_input_string.clone());
+        if self.debug_config.is_enabled {
+            self.error_manager
+                .log_debug("[ImportsResolver] Tokenizing imported file");
+        }
+
+        let tokenizer = Tokenizer::new(
+            &config_result.cleaned_input_string,
+            self.operational_settings,
+        );
         let token_result = tokenizer.tokenize();
 
         if token_result.tokens.is_empty() {
@@ -420,22 +358,27 @@ impl<'a> ImportsResolver<'a> {
                 import.alias.clone(),
                 Some(import.path.clone()),
                 Some(resolved_path.to_string()),
-                None, 0, 0, None,
+                None,
+                0,
+                0,
+                None,
             );
             return Err("Tokenization produced no tokens".to_string());
         }
 
-        // STEP 5: Create operational settings for imported file
-        let mut import_operational_settings = self.operational_settings.clone();
-        import_operational_settings.source_file_path = Some(resolved_path.to_string());
-        import_operational_settings.skip_imports_resolution = false;
+        let mut import_settings = self.operational_settings.clone();
+        import_settings.source_file_path = Some(resolved_path.to_string());
+        import_settings.skip_imports_resolution = false;
 
-        // STEP 6: Parse
-        self.log_debug("Parsing imported file");
+        if self.debug_config.is_enabled {
+            self.error_manager
+                .log_debug("[ImportsResolver] Parsing imported file");
+        }
+
         let general_parser = GeneralParser::new(
             token_result.tokens,
-            config_result.config_section.clone(),
-            import_operational_settings.clone(),
+            &config_result.config_section,
+            &import_settings,
         )
             .map_err(|e| {
                 self.error_manager.add_imports_resolution_error(
@@ -444,88 +387,78 @@ impl<'a> ImportsResolver<'a> {
                     import.alias.clone(),
                     Some(import.path.clone()),
                     Some(resolved_path.to_string()),
-                    None, 0, 0, None,
+                    None,
+                    0,
+                    0,
+                    None,
                 );
                 format!("Failed to create parser: {}", e)
             })?;
 
         let mut ast = general_parser.parse().map_err(|e| {
             let parse_errors = self.error_manager.get_parse_errors();
-
-            if !parse_errors.is_empty() {
-                let first_error = &parse_errors[0];
+            if let Some(first) = parse_errors.first() {
                 self.error_manager.add_imports_resolution_error(
                     ImportsResolutionErrorType::ParseError,
-                    format!(
-                        "Parse errors in imported file: {}",
-                        first_error.message
-                    ),
+                    format!("Parse errors in imported file: {}", first.message),
                     import.alias.clone(),
                     Some(import.path.clone()),
                     Some(resolved_path.to_string()),
                     None,
-                    first_error.line as i32,
-                    first_error.column as i32,
+                    first.line as i32,
+                    first.column as i32,
                     None,
                 );
             }
-
             format!("Parse errors in imported file: {}", e)
         })?;
 
         ast.config = Some(config_result.config_section);
 
-        // STEP 7: Run semantic analysis
-        self.log_debug(&format!(
-            "Running semantic analysis on imported file '{}' (with nested import resolution)",
-            import.alias
-        ));
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "[ImportsResolver] Running semantic analysis on imported file '{}'",
+                import.alias
+            ));
+        }
 
-        let semantic_analyzer =
-            GeneralSemanticAnalyzer::new(&ast, &import_operational_settings);
+        let semantic_analyzer = GeneralSemanticAnalyzer::new(&ast, &import_settings);
         let semantic_result = semantic_analyzer.analyze();
 
         if !semantic_result.is_success {
-            let error_summary = if !semantic_result.errors.is_empty() {
-                let first_error = &semantic_result.errors[0];
-                format!("{}: {}", first_error.error_type, first_error.message)
-            } else {
-                "Unknown semantic error".to_string()
-            };
+            let summary = semantic_result
+                .errors
+                .first()
+                .map(|e| format!("{}: {}", e.error_type, e.message))
+                .unwrap_or_else(|| "Unknown semantic error".to_string());
 
             self.error_manager.add_imports_resolution_error(
                 ImportsResolutionErrorType::ParseError,
                 format!(
                     "Semantic analysis failed for '{}': {} (total: {} errors)",
                     import.alias,
-                    error_summary,
+                    summary,
                     semantic_result.errors.len()
                 ),
                 import.alias.clone(),
                 Some(import.path.clone()),
                 Some(resolved_path.to_string()),
-                None, 0, 0, None,
+                None,
+                0,
+                0,
+                None,
             );
+            return Err(format!("Semantic analysis failed for '{}'", import.alias));
+        }
 
-            return Err(format!(
-                "Semantic analysis failed for '{}'",
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "[ImportsResolver] Running AST enhancement on imported file '{}'",
                 import.alias
             ));
         }
 
-        self.log_debug(&format!(
-            "Semantic analysis passed for '{}' ({} warnings)",
-            import.alias,
-            semantic_result.warnings.len()
-        ));
-
-        // STEP 8: Run AST enhancement
-        self.log_debug(&format!(
-            "Running AST enhancement on imported file '{}'",
-            import.alias
-        ));
-
-        let ast_enhancer = GeneralAstEnhancer::new(&import_operational_settings);
+        let ast_enhancer = GeneralAstEnhancer::new(&import_settings);
         let enhancement_result = ast_enhancer.enhance(&ast, Some(&semantic_result));
 
         if !enhancement_result.is_success {
@@ -540,87 +473,138 @@ impl<'a> ImportsResolver<'a> {
                 import.alias.clone(),
                 Some(import.path.clone()),
                 Some(resolved_path.to_string()),
-                None, 0, 0, None,
+                None,
+                0,
+                0,
+                None,
             );
-
-            return Err(format!(
-                "AST enhancement failed for '{}'",
-                import.alias
-            ));
+            return Err(format!("AST enhancement failed for '{}'", import.alias));
         }
 
-        // STEP 9: Return the ENHANCED AST
         let enhanced_ast = enhancement_result.enhanced_ast;
 
-        self.log_debug(&format!(
-            "Successfully processed imported file '{}' (enhanced {} functions)",
-            import.alias,
-            enhanced_ast
-                .quick_functions
-                .as_ref()
-                .map(|qf| qf.functions.len())
-                .unwrap_or(0)
-        ));
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "[ImportsResolver] Processed imported file '{}' ({} functions)",
+                import.alias,
+                enhanced_ast
+                    .quick_functions
+                    .as_ref()
+                    .map(|qf| qf.functions.len())
+                    .unwrap_or(0)
+            ));
+        }
 
         Ok(enhanced_ast)
     }
 
-    /// Download cloud file with caching support
-    async fn download_cloud_file(
+    fn read_import_content(
+        &mut self,
+        import: &ImportDeclaration,
+        resolved_path: &str,
+    ) -> Result<String, String> {
+        if import.is_cloud_import {
+            self.read_cloud_content(import)
+        } else {
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(&format!(
+                    "[ImportsResolver] Reading local import: {}",
+                    resolved_path
+                ));
+            }
+            fs::read_to_string(resolved_path).map_err(|e| {
+                self.error_manager.add_imports_resolution_error(
+                    ImportsResolutionErrorType::FileNotFound,
+                    format!("Failed to read file: {}", e),
+                    import.alias.clone(),
+                    Some(import.path.clone()),
+                    Some(resolved_path.to_string()),
+                    None,
+                    0,
+                    0,
+                    None,
+                );
+                format!("Failed to read file: {}", e)
+            })
+        }
+    }
+
+    #[cfg(feature = "cloud_imports")]
+    fn read_cloud_content(&mut self, import: &ImportDeclaration) -> Result<String, String> {
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "[ImportsResolver] Downloading cloud import: {}",
+                import.path
+            ));
+        }
+        self.download_cloud_file_sync(&import.path, &import.alias)
+    }
+
+    #[cfg(not(feature = "cloud_imports"))]
+    fn read_cloud_content(&mut self, import: &ImportDeclaration) -> Result<String, String> {
+        Err(format!(
+            "Cloud imports require the 'cloud_imports' cargo feature. \
+             Import '{}' at '{}' cannot be resolved.",
+            import.alias, import.path
+        ))
+    }
+
+    #[cfg(feature = "cloud_imports")]
+    fn download_cloud_file_sync(
         &mut self,
         cloud_url: &str,
         alias: &str,
     ) -> Result<String, String> {
         let url_for_cache = Self::strip_query_parameters(cloud_url);
 
-        // Check cache first
         if self.cloud_cache.is_cached(&url_for_cache) {
-            self.log_debug(&format!("Using cached version of '{}'", url_for_cache));
-
-            if let Some(cached_content) =
-                self.cloud_cache.get_cached_content(&url_for_cache)
-            {
-                return Ok(cached_content);
+            if let Some(content) = self.cloud_cache.get_cached_content(&url_for_cache) {
+                return Ok(content);
             }
-
-            self.log_debug("Cache read failed, downloading fresh copy");
+            if self.debug_config.is_enabled {
+                self.error_manager
+                    .log_debug("[ImportsResolver] Cache read failed, downloading fresh copy");
+            }
         }
 
-        // Get cloud provider
-        let provider =
-            CloudProviderFactory::get_provider(cloud_url, &self.error_manager)
-                .map_err(|e| {
-                    self.error_manager.add_imports_resolution_error(
-                        ImportsResolutionErrorType::CloudImportNotSupported,
-                        e.clone(),
-                        alias.to_string(),
-                        Some(cloud_url.to_string()),
-                        Some(cloud_url.to_string()),
-                        None, 0, 0, None,
-                    );
-                    e
-                })?;
+        let provider = CloudProviderFactory::get_provider(cloud_url, &self.error_manager)
+            .map_err(|e| {
+                self.error_manager.add_imports_resolution_error(
+                    ImportsResolutionErrorType::CloudImportNotSupported,
+                    e.clone(),
+                    alias.to_string(),
+                    Some(cloud_url.to_string()),
+                    Some(cloud_url.to_string()),
+                    None,
+                    0,
+                    0,
+                    None,
+                );
+                e
+            })?;
 
-        // Download file
-        let content = provider.download_file_async(cloud_url).await.map_err(|e| {
-            self.error_manager.add_imports_resolution_error(
-                ImportsResolutionErrorType::FileNotFound,
-                format!("Cloud download failed: {}", e),
-                alias.to_string(),
-                Some(cloud_url.to_string()),
-                Some(cloud_url.to_string()),
-                None, 0, 0, None,
-            );
-            format!("Cloud download failed: {}", e)
-        })?;
+        let content = tokio::runtime::Runtime::new()
+            .map_err(|e| format!("Failed to create async runtime: {}", e))?
+            .block_on(provider.download_file_async(cloud_url))
+            .map_err(|e| {
+                self.error_manager.add_imports_resolution_error(
+                    ImportsResolutionErrorType::FileNotFound,
+                    format!("Cloud download failed: {}", e),
+                    alias.to_string(),
+                    Some(cloud_url.to_string()),
+                    Some(cloud_url.to_string()),
+                    None,
+                    0,
+                    0,
+                    None,
+                );
+                format!("Cloud download failed: {}", e)
+            })?;
 
-        // Cache the downloaded content
         self.cloud_cache.cache_file(&url_for_cache, &content);
-
         Ok(content)
     }
 
-    /// Extract ONLY global-scoped functions (scoped functions are internal)
     fn extract_global_functions(
         section: Option<&QuickFuncsSection>,
         _namespace_name: &str,
@@ -632,12 +616,7 @@ impl<'a> ImportsResolver<'a> {
             None => return functions,
         };
 
-        if section.functions.is_empty() {
-            return functions;
-        }
-
         for func in &section.functions {
-            // Check if function is globally scoped
             let is_global = match &func.scope_list {
                 None => true,
                 Some(scopes)
@@ -653,15 +632,14 @@ impl<'a> ImportsResolver<'a> {
                 continue;
             }
 
-            // Build function signature
             let parameters: Vec<ParameterInfo> = func
                 .parameters
                 .iter()
-                .map(|param| ParameterInfo {
-                    name: param.name.clone(),
-                    param_type: param.data_type,
-                    has_default_value: param.default_value.is_some(),
-                    default_value: param.default_value.clone(),
+                .map(|p| ParameterInfo {
+                    name: p.name.clone(),
+                    param_type: p.data_type,
+                    has_default_value: p.default_value.is_some(),
+                    default_value: p.default_value.clone(),
                 })
                 .collect();
 
@@ -679,17 +657,13 @@ impl<'a> ImportsResolver<'a> {
 
             functions.insert(
                 func.name.clone(),
-                QuickFunctionInfo {
-                    signature,
-                    ast: func.clone(),
-                },
+                QuickFunctionInfo { signature, ast: func.clone() },
             );
         }
 
         functions
     }
 
-    /// Extract all enums (enums are always exported)
     fn extract_enums(
         section: Option<&EnumsSection>,
     ) -> HashMap<String, HashMap<String, i32>> {
@@ -700,13 +674,9 @@ impl<'a> ImportsResolver<'a> {
             None => return enums,
         };
 
-        if section.enums.is_empty() {
-            return enums;
-        }
-
         for enum_decl in &section.enums {
             let mut field_map = HashMap::new();
-            let mut auto_value = 0;
+            let mut auto_value = 0i32;
 
             for field in &enum_decl.fields {
                 if let Some(value) = field.value {
@@ -724,8 +694,6 @@ impl<'a> ImportsResolver<'a> {
         enums
     }
 
-    // ==================== HELPER METHODS ====================
-
     #[inline]
     fn is_cloud_url(path: &str) -> bool {
         path.starts_with("http://") || path.starts_with("https://")
@@ -733,75 +701,63 @@ impl<'a> ImportsResolver<'a> {
 
     #[inline]
     fn strip_query_parameters(url: &str) -> String {
-        if let Some(query_index) = url.find('?') {
-            url[..query_index].to_string()
-        } else {
-            url.to_string()
+        match url.find('?') {
+            Some(idx) => url[..idx].to_string(),
+            None => url.to_string(),
         }
     }
 
     fn get_cloud_url_directory(cloud_url: &str) -> String {
-        let url_without_query = Self::strip_query_parameters(cloud_url);
-
-        if let Some(last_slash) = url_without_query.rfind('/') {
-            url_without_query[..=last_slash].to_string()
-        } else {
-            url_without_query
+        let without_query = Self::strip_query_parameters(cloud_url);
+        match without_query.rfind('/') {
+            Some(idx) => without_query[..=idx].to_string(),
+            None => without_query,
         }
     }
 
     fn resolve_path(base_directory: &str, relative_path: &str) -> String {
-        let combined = Path::new(base_directory).join(relative_path);
-        combined.to_string_lossy().to_string()
+        Path::new(base_directory)
+            .join(relative_path)
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn extract_readable_path(path: &str) -> String {
+        if Self::is_cloud_url(path) {
+            path.split("://")
+                .nth(1)
+                .and_then(|s| s.split('/').next())
+                .unwrap_or(path)
+                .to_string()
+        } else {
+            Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(path)
+                .to_string()
+        }
     }
 
     fn build_cycle_path(&self, cycle_target: &str) -> String {
-        let mut stack: Vec<String> = self.import_stack.iter().cloned().collect();
-        stack.push(cycle_target.to_string());
-
-        let readable_paths: Vec<String> = stack
+        let mut chain: Vec<String> = self
+            .import_stack
             .iter()
-            .map(|p| {
-                if Self::is_cloud_url(p) {
-                    url::Url::parse(p)
-                        .map(|u| u.host_str().unwrap_or(p).to_string())
-                        .unwrap_or_else(|_| p.clone())
-                } else {
-                    Path::new(p)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or(p)
-                        .to_string()
-                }
-            })
+            .map(|p| Self::extract_readable_path(p))
             .collect();
-
-        readable_paths.join(" → ")
+        chain.push(Self::extract_readable_path(cycle_target));
+        chain.join(" -> ")
     }
 
     fn build_cycle_chain_list(&self, cycle_target: &str) -> Vec<String> {
-        let mut stack: Vec<String> = self.import_stack.iter().cloned().collect();
-        stack.push(cycle_target.to_string());
-
-        stack
+        let mut chain: Vec<String> = self
+            .import_stack
             .iter()
-            .map(|p| {
-                if Self::is_cloud_url(p) {
-                    url::Url::parse(p)
-                        .map(|u| u.host_str().unwrap_or(p).to_string())
-                        .unwrap_or_else(|_| p.clone())
-                } else {
-                    Path::new(p)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or(p)
-                        .to_string()
-                }
-            })
-            .collect()
+            .map(|p| Self::extract_readable_path(p))
+            .collect();
+        chain.push(Self::extract_readable_path(cycle_target));
+        chain
     }
 
-    /// Get statistics about import resolution
     pub fn get_statistics(&self) -> ImportResolutionStats {
         let total_functions: usize = self
             .symbol_table
@@ -832,37 +788,8 @@ impl<'a> ImportsResolver<'a> {
             files_visited: self.visited.len(),
         }
     }
-
-    // ==================== LOGGING ====================
-
-    #[inline]
-    fn log_debug(&self, message: &str) {
-        if self.operational_settings.debug_mode != DebugMode::Off {
-            self.error_manager
-                .log_debug(&format!("[ImportsResolver] {}", message));
-        }
-    }
-
-    #[inline]
-    fn log_info(&self, message: &str) {
-        self.error_manager
-            .log_info(&format!("[ImportsResolver] {}", message));
-    }
-
-    #[inline]
-    fn log_warning(&self, message: &str) {
-        self.error_manager
-            .log_warning(&format!("[ImportsResolver] {}", message));
-    }
-
-    #[inline]
-    fn log_error(&self, message: &str) {
-        self.error_manager
-            .log_error(&format!("[ImportsResolver] {}", message));
-    }
 }
 
-/// Statistics about import resolution
 #[derive(Debug, Clone)]
 pub struct ImportResolutionStats {
     pub total_namespaces: usize,
@@ -876,7 +803,7 @@ impl std::fmt::Display for ImportResolutionStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Namespaces: {}, Functions: {}, Enums: {}, Nested Imports: {}, Files Visited: {}",
+            "Namespaces: {}, Functions: {}, Enums: {}, Nested: {}, Files: {}",
             self.total_namespaces,
             self.total_functions_imported,
             self.total_enums_imported,

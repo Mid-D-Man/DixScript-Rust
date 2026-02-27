@@ -1,24 +1,15 @@
 // src/Compiler/ImportsResolution/hash_verifier.rs
+//! SHA-256 and SHA-512 hash verification for import file integrity.
 
-use sha2::{Sha256, Sha512, Digest};
+use sha2::{Digest, Sha256, Sha512};
 use std::fmt;
 
-/// Hash verification utility for import file integrity
-///
-/// Supports SHA256 and SHA512 algorithms
-/// v1.0.0 - No external packages (uses sha2 crate)
 pub struct HashVerifier;
 
 impl HashVerifier {
-    /// Verify that file content matches expected hash
+    /// Verify file content against an expected hash string.
     ///
-    /// Expected format: "algorithm:hexstring" (e.g., "sha256:abc123...")
-    ///
-    /// # Errors
-    /// - Invalid hash format
-    /// - Unsupported algorithm
-    /// - Invalid hex string
-    /// - Hash mismatch
+    /// Expected format: `"algorithm:hexstring"` — e.g. `"sha256:abc123..."`.
     pub fn verify_hash(
         content: &str,
         expected_hash: &str,
@@ -45,7 +36,6 @@ impl HashVerifier {
             ));
         }
 
-        // Parse hash format: "algorithm:hexstring"
         let parts: Vec<&str> = expected_hash.splitn(2, ':').collect();
         if parts.len() != 2 {
             return Err(HashVerificationError::new(
@@ -61,13 +51,12 @@ impl HashVerifier {
         }
 
         let algorithm = parts[0].to_lowercase();
-        let expected_hex_hash = parts[1].to_lowercase();
+        let expected_hex = parts[1].to_lowercase();
 
-        // Validate algorithm
         if algorithm != "sha256" && algorithm != "sha512" {
             return Err(HashVerificationError::new(
                 &format!(
-                    "Unsupported hash algorithm '{}'. Supported algorithms: sha256, sha512",
+                    "Unsupported hash algorithm '{}'. Supported: sha256, sha512",
                     algorithm
                 ),
                 alias,
@@ -77,10 +66,9 @@ impl HashVerifier {
             ));
         }
 
-        // Validate hex string format
-        if !Self::is_valid_hex_string(&expected_hex_hash) {
+        if !Self::is_valid_hex_string(&expected_hex) {
             return Err(HashVerificationError::new(
-                &format!("Invalid hex string in hash: '{}'", expected_hex_hash),
+                &format!("Invalid hex string in hash: '{}'", expected_hex),
                 alias,
                 file_path,
                 expected_hash,
@@ -88,15 +76,14 @@ impl HashVerifier {
             ));
         }
 
-        // Validate hex string length
         let expected_length = if algorithm == "sha256" { 64 } else { 128 };
-        if expected_hex_hash.len() != expected_length {
+        if expected_hex.len() != expected_length {
             return Err(HashVerificationError::new(
                 &format!(
                     "Invalid {} hash length: expected {} hex chars, got {}",
                     algorithm,
                     expected_length,
-                    expected_hex_hash.len()
+                    expected_hex.len()
                 ),
                 alias,
                 file_path,
@@ -105,11 +92,9 @@ impl HashVerifier {
             ));
         }
 
-        // Compute actual hash
         let actual_hash = Self::compute_hash(content, &algorithm);
 
-        // Compare (case-insensitive)
-        if !actual_hash.eq_ignore_ascii_case(&expected_hex_hash) {
+        if !actual_hash.eq_ignore_ascii_case(&expected_hex) {
             return Err(HashVerificationError::new(
                 &format!("Hash verification failed for '{}'", alias),
                 alias,
@@ -122,46 +107,35 @@ impl HashVerifier {
         Ok(())
     }
 
-    /// Compute hash of content using specified algorithm
-    fn compute_hash(content: &str, algorithm: &str) -> String {
-        let content_bytes = content.as_bytes();
-
-        let hash_bytes = if algorithm == "sha256" {
-            let mut hasher = Sha256::new();
-            hasher.update(content_bytes);
-            hasher.finalize().to_vec()
-        } else if algorithm == "sha512" {
-            let mut hasher = Sha512::new();
-            hasher.update(content_bytes);
-            hasher.finalize().to_vec()
-        } else {
-            panic!("Unsupported algorithm: {}", algorithm);
-        };
-
-        // Convert to lowercase hex string
-        hash_bytes
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>()
-    }
-
-    /// Check if string is valid hexadecimal
-    fn is_valid_hex_string(hex: &str) -> bool {
-        !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit())
-    }
-
-    /// Compute hash for a file (for generating verify hashes)
-    /// Utility method for developers
+    /// Compute the hash of `content` using the named algorithm.
     pub fn compute_file_hash(content: &str, algorithm: &str) -> Result<String, String> {
         if algorithm != "sha256" && algorithm != "sha512" {
             return Err(format!("Unsupported algorithm: {}", algorithm));
         }
-
         Ok(Self::compute_hash(content, algorithm))
+    }
+
+    fn compute_hash(content: &str, algorithm: &str) -> String {
+        match algorithm {
+            "sha256" => {
+                let mut h = Sha256::new();
+                h.update(content.as_bytes());
+                h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+            }
+            "sha512" => {
+                let mut h = Sha512::new();
+                h.update(content.as_bytes());
+                h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+            }
+            other => unreachable!("compute_hash called with unsupported algorithm: {}", other),
+        }
+    }
+
+    fn is_valid_hex_string(hex: &str) -> bool {
+        !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit())
     }
 }
 
-/// Exception thrown when hash verification fails
 #[derive(Debug, Clone)]
 pub struct HashVerificationError {
     pub message: String,

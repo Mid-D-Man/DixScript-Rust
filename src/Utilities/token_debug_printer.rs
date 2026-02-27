@@ -1,5 +1,4 @@
 use crate::Compiler::Core::Tokenizer::{Token, TokenType, TokenizationResult};
-use std::fmt::Write;
 
 /// Debug printer for DixScript tokens
 /// Shows exact token types and positions for debugging lexer output
@@ -85,16 +84,13 @@ impl TokenDebugPrinter {
     pub fn print_to_file(&mut self, result: &TokenizationResult, filename: &str) -> Result<String, String> {
         let content = self.print(result);
 
-        // Find project root
         let mut project_dir = std::env::current_dir()
             .map_err(|e| format!("Failed to get current directory: {}", e))?;
 
-        // Look for Cargo.toml
         loop {
             if project_dir.join("Cargo.toml").exists() {
                 break;
             }
-
             match project_dir.parent() {
                 Some(parent) => project_dir = parent.to_path_buf(),
                 None => break,
@@ -127,16 +123,13 @@ impl TokenDebugPrinter {
 
         for (idx, token) in tokens.iter().enumerate() {
             if token.line != current_line {
-                // Print accumulated line
                 self.print_line(current_line, &line_tokens);
                 line_tokens.clear();
                 current_line = token.line;
             }
-
             line_tokens.push((idx, token));
         }
 
-        // Print last line
         if !line_tokens.is_empty() {
             self.print_line(current_line, &line_tokens);
         }
@@ -153,17 +146,14 @@ impl TokenDebugPrinter {
     fn write_token(&mut self, idx: usize, token: &Token) {
         let mut parts = vec![format!("[{}]", idx)];
 
-        // Token type
         parts.push(self.format_token_type(&token.token_type));
 
-        // Position
         if self.show_positions {
             parts.push(format!("@L{}:C{}", token.line, token.column));
         }
 
-        // Section
         if self.show_sections {
-            if let Some(ref section) = token.section.as_str() {
+            if let Some(section) = token.section.to_option() {
                 parts.push(format!("({})", section));
             }
         }

@@ -145,7 +145,7 @@ impl<'a> ImportsSectionAnalyzer<'a> {
         }
 
         if lower.starts_with("http://")
-            && !self.is_local_address(url)
+            && !Self::is_local_address(url)
         {
             self.error_manager.log_warning(&format!(
                 "[ImportsAnalyzer] Cloud import '{}' uses insecure HTTP. \

@@ -1,474 +1,349 @@
 // src/Compiler/Core/SectionAnalyzers/imports_section_analyzer.rs
+//! Semantic validation of the @IMPORTS section.
+//!
+//! Validates aliases, paths, cloud URL structure, and hash format before
+//! the resolver attempts any file I/O or network access.
 
 use std::collections::HashSet;
-use std::path::Path;
-use crate::Compiler::AST::{ImportsSection, ImportDeclaration, Position};
-use crate::Compiler::Core::{OperationalSettings, DebugMode};
+use crate::Compiler::AST::{ImportsSection, ImportDeclaration};
 use crate::Compiler::Utilities::SymbolTable;
-use crate::ErrorManager::{ErrorManager, SemanticErrorType};
+use crate::Compiler::Core::OperationalSettings;
+use crate::ErrorManager::ErrorManager;
 
-/// ImportsSectionAnalyzer v1.0.0
-/// 
-/// Validates import declarations BEFORE resolution
-/// SUPPORTS: Cloud imports with HTTP/HTTPS
-/// 
-/// Responsibilities:
-/// 1. Validate alias uniqueness
-/// 2. Check alias conflicts with built-ins, functions, enums
-/// 3. Validate local import paths (file exists, .mdix extension, not self-import)
-/// 4. Validate cloud import paths (HTTP/HTTPS URLs, .mdix extension)
-/// 5. Validate verify hash format (sha256/sha512:hexstring)
-/// 6. Report errors through ErrorManager
 pub struct ImportsSectionAnalyzer<'a> {
-    error_manager: ErrorManager,
-    operational_settings: &'a OperationalSettings,
     symbol_table: &'a SymbolTable,
-    current_file_path: &'a str,
+    operational_settings: &'a OperationalSettings,
+    current_file_path: String,
+    error_manager: ErrorManager,
+    can_log_debug: bool,
+    can_log_verbose: bool,
 }
 
 impl<'a> ImportsSectionAnalyzer<'a> {
-    /// Create new ImportsSectionAnalyzer
     pub fn new(
         symbol_table: &'a SymbolTable,
         operational_settings: &'a OperationalSettings,
-        current_file_path: &'a str,
+        current_file_path: &str,
     ) -> Self {
-        let error_manager = ErrorManager::get_shared_instance();
-        
+        use crate::Compiler::Core::DebugMode;
+        let can_log_debug = operational_settings.debug_mode != DebugMode::Off;
+        let can_log_verbose = operational_settings.debug_mode == DebugMode::Verbose;
+
         ImportsSectionAnalyzer {
-            error_manager,
-            operational_settings,
             symbol_table,
-            current_file_path,
+            operational_settings,
+            current_file_path: current_file_path.to_string(),
+            error_manager: ErrorManager::get_shared_instance(),
+            can_log_debug,
+            can_log_verbose,
         }
     }
-    
-    /// Analyze IMPORTS section for semantic correctness
-    /// This runs BEFORE ImportsResolver to catch early errors
+
     pub fn analyze(&mut self, imports_section: Option<&ImportsSection>) {
-        let imports_section = match imports_section {
-            Some(section) => section,
-            None => {
-                self.log_debug("No IMPORTS section to analyze");
+        let section = match imports_section {
+            Some(s) if !s.imports.is_empty() => s,
+            _ => {
+                self.log_debug("No imports to validate");
                 return;
             }
         };
-        
-        self.log_debug(&format!(
-            "Analyzing {} import declarations",
-            imports_section.imports.len()
-        ));
-        
-        let mut seen_aliases = HashSet::new();
-        let mut seen_paths = HashSet::new();
-        
-        for import in &imports_section.imports {
-            self.analyze_import_declaration(import, &mut seen_aliases, &mut seen_paths);
+
+        self.log_debug(&format!("Validating {} import declarations", section.imports.len()));
+
+        let mut seen_aliases: HashSet<String> = HashSet::new();
+        let mut seen_paths: HashSet<String> = HashSet::new();
+
+        for import in &section.imports {
+            self.validate_alias(import, &mut seen_aliases);
+            self.validate_path(import, &mut seen_paths);
+
+            if let Some(ref hash) = import.verify_hash {
+                self.validate_hash_format(import, hash);
+            }
         }
-        
-        self.log_debug("IMPORTS section analysis complete");
+
+        self.log_debug("IMPORTS semantic validation complete");
     }
-    
-    /// Analyze a single import declaration
-    fn analyze_import_declaration(
-        &mut self,
-        import: &ImportDeclaration,
-        seen_aliases: &mut HashSet<String>,
-        seen_paths: &mut HashSet<String>,
-    ) {
-        self.log_debug(&format!("Analyzing import '{}'", import.alias));
-        
-        // 1. Validate alias uniqueness
-        if seen_aliases.contains(&import.alias) {
-            self.add_error(
-                SemanticErrorType::DuplicateDefinition,
-                &format!(
-                    "Duplicate import alias '{}' - each alias must be unique",
-                    import.alias
-                ),
-                import.position,
-            );
-        } else {
-            seen_aliases.insert(import.alias.clone());
-        }
-        
-        // 2. Check alias doesn't conflict with built-ins
-        if self.symbol_table.is_builtin_static_object(&import.alias) {
-            self.add_error(
-                SemanticErrorType::NameConflict,
-                &format!(
-                    "Import alias '{}' conflicts with built-in object",
-                    import.alias
-                ),
-                import.position,
-            );
-        }
-        
-        // 3. Check alias doesn't conflict with existing functions
-        if self.symbol_table.has_function(&import.alias) {
-            self.add_error(
-                SemanticErrorType::NameConflict,
-                &format!(
-                    "Import alias '{}' conflicts with existing function",
-                    import.alias
-                ),
-                import.position,
-            );
-        }
-        
-        // 4. Check alias doesn't conflict with existing enums
-        if self.symbol_table.has_enum(&import.alias) {
-            self.add_error(
-                SemanticErrorType::NameConflict,
-                &format!(
-                    "Import alias '{}' conflicts with existing enum",
-                    import.alias
-                ),
-                import.position,
-            );
-        }
-        
-        // 5. Validate path based on import type
-        if import.is_cloud_import {
-            self.validate_cloud_import_path(import);
-        } else {
-            self.validate_local_import_path(import, seen_paths);
-        }
-        
-        // 6. Validate verify hash if present
-        if let Some(ref verify_hash) = import.verify_hash {
-            self.validate_verify_hash(import, verify_hash);
-        }
-        
-        self.log_debug(&format!("Import '{}' validated successfully", import.alias));
-    }
-    
-    /// Validate local import path
-    fn validate_local_import_path(
-        &mut self,
-        import: &ImportDeclaration,
-        seen_paths: &mut HashSet<String>,
-    ) {
-        let path = &import.path;
-        
-        // Check for duplicate paths (same file imported multiple times)
-        if seen_paths.contains(path) {
-            self.add_warning(
-                &format!(
-                    "File '{}' is imported multiple times with different aliases",
-                    path
-                ),
-                import.position,
-            );
-        } else {
-            seen_paths.insert(path.clone());
-        }
-        
-        // Resolve relative to current file
-        let resolved_path = match self.resolve_local_path(path) {
-            Ok(p) => p,
-            Err(e) => {
-                self.add_error(
-                    SemanticErrorType::InvalidReference,
-                    &format!("Invalid import path '{}': {}", path, e),
-                    import.position,
-                );
-                return;
-            }
-        };
-        
-        // Check if file exists
-        if !std::path::Path::new(&resolved_path).exists() {
-            self.add_error(
-                SemanticErrorType::InvalidReference,
-                &format!(
-                    "Import file not found: '{}' (resolved to: {})",
-                    path, resolved_path
-                ),
-                import.position,
-            );
-            return;
-        }
-        
-        // Warn if importing self (circular)
-        if let Ok(current_canonical) = std::fs::canonicalize(self.current_file_path) {
-            if let Ok(import_canonical) = std::fs::canonicalize(&resolved_path) {
-                if current_canonical == import_canonical {
-                    self.add_error(
-                        SemanticErrorType::InvalidReference,
-                        &format!(
-                            "Cannot import self: '{}' resolves to current file",
-                            path
-                        ),
-                        import.position,
-                    );
-                    return;
-                }
-            }
-        }
-        
-        // Check file extension (already validated in parser, but double-check)
-        if !path.to_lowercase().ends_with(".mdix") {
-            self.add_error(
-                SemanticErrorType::InvalidReference,
-                &format!("Import path must have .mdix extension: '{}'", path),
-                import.position,
-            );
-        }
-        
-        self.log_debug(&format!("Local import path '{}' resolved to: {}", path, resolved_path));
-    }
-    
-    /// Validate cloud import path - supports HTTP/HTTPS URLs and query parameters
-    fn validate_cloud_import_path(&mut self, import: &ImportDeclaration) {
-        let path = &import.path;
-        
-        // Strip query parameters before validation
-        let path_without_query = if let Some(query_index) = path.find('?') {
-            let stripped = &path[..query_index];
-            self.log_debug(&format!("Stripped query parameters from URL: {}", stripped));
-            stripped
-        } else {
-            path.as_str()
-        };
-        
-        // Phase 1: HTTP/HTTPS URLs (NOW SUPPORTED)
-        if path.starts_with("https://") || path.starts_with("http://") {
-            // Check .mdix extension (use path WITHOUT query parameters)
-            if !path_without_query.to_lowercase().ends_with(".mdix") {
-                self.add_error(
-                    SemanticErrorType::InvalidReference,
-                    &format!(
-                        "Cloud import path must have .mdix extension: '{}'",
-                        path_without_query
-                    ),
-                    import.position,
-                );
-                return;
-            }
-            
-            // Validate URL format (basic check)
-            match url::Url::parse(path) {
-                Ok(uri) => {
-                    if uri.scheme() != "http" && uri.scheme() != "https" {
-                        self.add_error(
-                            SemanticErrorType::InvalidReference,
-                            &format!(
-                                "Cloud import URL must use HTTP or HTTPS scheme: '{}'",
-                                path
-                            ),
-                            import.position,
-                        );
-                        return;
-                    }
-                }
-                Err(e) => {
-                    self.add_error(
-                        SemanticErrorType::InvalidReference,
-                        &format!(
-                            "Invalid cloud import URL format: '{}' - {}",
-                            path, e
-                        ),
-                        import.position,
-                    );
-                    return;
-                }
-            }
-            
-            // Warn if using HTTP (not HTTPS)
-            if path.starts_with("http://") 
-                && !path.contains("localhost") 
-                && !path.contains("127.0.0.1") 
-            {
-                self.add_warning(
-                    &format!(
-                        "⚠️ SECURITY WARNING: Using insecure HTTP for cloud import. \
-                         Use HTTPS for production: {}",
-                        path
-                    ),
-                    import.position,
-                );
-            }
-            
-            self.log_debug(&format!(
-                "Cloud import path validated (HTTP/HTTPS): {}",
-                path_without_query
+
+    fn validate_alias(&self, import: &ImportDeclaration, seen: &mut HashSet<String>) {
+        let alias = &import.alias;
+
+        if alias.is_empty() {
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Import alias cannot be empty (path: '{}')",
+                import.path
             ));
             return;
         }
-        
-        // Phase 2+: Future cloud storage schemes (not yet supported)
-        if path.starts_with("s3://") 
-            || path.starts_with("azure://") 
-            || path.starts_with("gs://") 
-        {
-            self.add_error(
-                SemanticErrorType::InvalidReference,
-                &format!(
-                    "Cloud storage schemes (s3://, azure://, gs://) are not yet supported in v1.0.0. \
-                     Use direct HTTPS URLs instead: '{}'",
-                    path
-                ),
-                import.position,
-            );
-            return;
+
+        // Alias must be a valid identifier: starts with letter or underscore, alphanumeric/underscore only
+        if !Self::is_valid_identifier(alias) {
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Invalid import alias '{}': must be a valid identifier \
+                 (letters, digits, underscores; must not start with a digit)",
+                alias
+            ));
         }
-        
-        // Invalid cloud import format
-        self.add_error(
-            SemanticErrorType::InvalidReference,
-            &format!(
-                "Cloud import must be a valid HTTPS or HTTP URL. \
-                 Expected: https://example.com/path/to/file.mdix, got: '{}'",
-                path
-            ),
-            import.position,
-        );
+
+        if !seen.insert(alias.clone()) {
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Duplicate import alias '{}': each alias must be unique \
+                 within the file",
+                alias
+            ));
+        }
+
+        // Warn if alias shadows a builtin static object
+        if self.symbol_table.is_builtin_static_object(alias) {
+            self.error_manager.log_warning(&format!(
+                "[ImportsAnalyzer] Import alias '{}' shadows a built-in static object",
+                alias
+            ));
+        }
     }
-    
-    /// Validate verify hash format
-    fn validate_verify_hash(
-        &mut self,
-        import: &ImportDeclaration,
-        hash: &str,
-    ) {
-        if hash.trim().is_empty() {
-            self.add_warning(
-                "Empty verify hash - hash verification will be skipped",
-                import.position,
-            );
+
+    fn validate_path(&self, import: &ImportDeclaration, seen: &mut HashSet<String>) {
+        let path = &import.path;
+
+        if path.is_empty() {
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Import path for alias '{}' cannot be empty",
+                import.alias
+            ));
             return;
         }
-        
-        // Expected format: "sha256:HEXSTRING" or "sha512:HEXSTRING"
+
+        if import.is_cloud_import {
+            self.validate_cloud_url(import);
+        } else {
+            self.validate_local_path(import);
+        }
+
+        // Warn on duplicate paths (same file imported under multiple aliases)
+        if !seen.insert(path.clone()) {
+            self.error_manager.log_warning(&format!(
+                "[ImportsAnalyzer] Path '{}' is imported more than once \
+                 (aliases may diverge in future refactors)",
+                path
+            ));
+        }
+    }
+
+    fn validate_cloud_url(&self, import: &ImportDeclaration) {
+        let url = &import.path;
+
+        // Use string-based checks — the `url` crate is optional (cloud_imports feature).
+        let lower = url.to_lowercase();
+
+        if !lower.starts_with("http://") && !lower.starts_with("https://") {
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Cloud import '{}' must use http:// or https://. \
+                 Got: '{}'",
+                import.alias, url
+            ));
+            return;
+        }
+
+        if lower.starts_with("http://")
+            && !self.is_local_address(url)
+        {
+            self.error_manager.log_warning(&format!(
+                "[ImportsAnalyzer] Cloud import '{}' uses insecure HTTP. \
+                 Use HTTPS for non-local URLs.",
+                import.alias
+            ));
+        }
+
+        // Must have at least a hostname after the scheme
+        let after_scheme = if lower.starts_with("https://") {
+            &url[8..]
+        } else {
+            &url[7..]
+        };
+
+        if after_scheme.is_empty() || after_scheme.starts_with('/') {
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Cloud import '{}' has no hostname in URL '{}'",
+                import.alias, url
+            ));
+            return;
+        }
+
+        // Hostname must not be empty (catches "http:///path")
+        let hostname = after_scheme.split('/').next().unwrap_or("");
+        if hostname.is_empty() {
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Cloud import '{}' has an empty hostname in URL '{}'",
+                import.alias, url
+            ));
+            return;
+        }
+
+        // Path component must be present and end in .mdix
+        if let Some(path_start) = after_scheme.find('/') {
+            let path_part = &after_scheme[path_start..];
+            // Strip query string for extension check
+            let path_no_query = path_part.split('?').next().unwrap_or(path_part);
+            if !path_no_query.to_lowercase().ends_with(".mdix") {
+                self.error_manager.log_warning(&format!(
+                    "[ImportsAnalyzer] Cloud import '{}' URL '{}' does not end in .mdix. \
+                     Ensure the URL points directly to a .mdix file.",
+                    import.alias, url
+                ));
+            }
+        } else {
+            self.error_manager.log_warning(&format!(
+                "[ImportsAnalyzer] Cloud import '{}' URL '{}' has no path component. \
+                 Ensure the URL points to a specific .mdix file.",
+                import.alias, url
+            ));
+        }
+
+        self.log_verbose(&format!(
+            "Cloud import '{}' URL basic structure OK: {}",
+            import.alias, url
+        ));
+    }
+
+    fn validate_local_path(&self, import: &ImportDeclaration) {
+        let path = &import.path;
+
+        // Reject paths that look like URLs but weren't flagged as cloud imports
+        let lower = path.to_lowercase();
+        if lower.starts_with("http://") || lower.starts_with("https://") {
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Import '{}' path '{}' looks like a URL but was not \
+                 declared with 'from_cloud'. Use 'from_cloud' for HTTP/HTTPS imports.",
+                import.alias, path
+            ));
+            return;
+        }
+
+        // Path must end in .mdix
+        if !lower.ends_with(".mdix") {
+            self.error_manager.log_warning(&format!(
+                "[ImportsAnalyzer] Import '{}' path '{}' does not end in .mdix",
+                import.alias, path
+            ));
+        }
+
+        // Reject null bytes and other clearly invalid characters
+        if path.contains('\0') {
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Import '{}' path '{}' contains a null byte",
+                import.alias, path
+            ));
+        }
+
+        // Warn on absolute paths that might break portability
+        let is_absolute = path.starts_with('/') || (path.len() >= 2 && path.as_bytes()[1] == b':');
+        if is_absolute {
+            self.error_manager.log_warning(&format!(
+                "[ImportsAnalyzer] Import '{}' uses an absolute path '{}'. \
+                 Relative paths are preferred for portability.",
+                import.alias, path
+            ));
+        }
+
+        self.log_verbose(&format!(
+            "Local import '{}' path basic structure OK: {}",
+            import.alias, path
+        ));
+    }
+
+    fn validate_hash_format(&self, import: &ImportDeclaration, hash: &str) {
+        if hash.is_empty() {
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Import '{}' has an empty verify hash. \
+                 Remove the 'verify' clause or provide a valid hash.",
+                import.alias
+            ));
+            return;
+        }
+
         let parts: Vec<&str> = hash.splitn(2, ':').collect();
         if parts.len() != 2 {
-            self.add_error(
-                SemanticErrorType::InvalidLiteral,
-                &format!(
-                    "Verify hash must be in format 'algorithm:hash', got: '{}'",
-                    hash
-                ),
-                import.position,
-            );
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Import '{}' verify hash '{}' is malformed. \
+                 Expected format: 'algorithm:hexstring' (e.g. 'sha256:abc123...')",
+                import.alias, hash
+            ));
             return;
         }
-        
+
         let algorithm = parts[0].to_lowercase();
-        let hash_value = parts[1];
-        
-        // Validate algorithm
-        if algorithm != "sha256" && algorithm != "sha512" {
-            self.add_error(
-                SemanticErrorType::InvalidLiteral,
-                &format!(
-                    "Unsupported hash algorithm '{}' - supported: sha256, sha512",
-                    algorithm
-                ),
-                import.position,
-            );
-            return;
+        let hex = parts[1];
+
+        match algorithm.as_str() {
+            "sha256" => {
+                if hex.len() != 64 {
+                    self.error_manager.log_error(&format!(
+                        "[ImportsAnalyzer] Import '{}' sha256 hash must be 64 hex characters, \
+                         got {}",
+                        import.alias,
+                        hex.len()
+                    ));
+                }
+            }
+            "sha512" => {
+                if hex.len() != 128 {
+                    self.error_manager.log_error(&format!(
+                        "[ImportsAnalyzer] Import '{}' sha512 hash must be 128 hex characters, \
+                         got {}",
+                        import.alias,
+                        hex.len()
+                    ));
+                }
+            }
+            other => {
+                self.error_manager.log_error(&format!(
+                    "[ImportsAnalyzer] Import '{}' uses unsupported hash algorithm '{}'. \
+                     Supported: sha256, sha512",
+                    import.alias, other
+                ));
+                return;
+            }
         }
-        
-        // Validate hash format (hex string)
-        let expected_length = if algorithm == "sha256" { 64 } else { 128 };
-        if hash_value.len() != expected_length {
-            self.add_error(
-                SemanticErrorType::InvalidLiteral,
-                &format!(
-                    "Invalid {} hash length: expected {} hex chars, got {}",
-                    algorithm, expected_length, hash_value.len()
-                ),
-                import.position,
-            );
-            return;
-        }
-        
-        if !Self::is_hex_string(hash_value) {
-            self.add_error(
-                SemanticErrorType::InvalidLiteral,
-                "Invalid hash format: must be hexadecimal string",
-                import.position,
-            );
-            return;
-        }
-        
-        self.log_debug(&format!(
-            "Verify hash validated: {}:{}...",
-            algorithm,
-            &hash_value[..8]
-        ));
-    }
-    
-    // ==================== HELPER METHODS ====================
-    
-    /// Resolve local import path relative to current file
-    fn resolve_local_path(&self, relative_path: &str) -> Result<String, String> {
-        let current_dir = Path::new(self.current_file_path)
-            .parent()
-            .ok_or_else(|| "Cannot determine current file directory".to_string())?;
-        
-        let combined = current_dir.join(relative_path);
-        
-        combined
-            .to_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| "Invalid path characters".to_string())
-    }
-    
-    /// Check if string is valid hexadecimal
-    fn is_hex_string(s: &str) -> bool {
-        !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit())
-    }
-    
-    // ==================== ERROR HANDLING ====================
-    
-    fn add_error(
-        &mut self,
-        error_type: SemanticErrorType,
-        message: &str,
-        position: Position,
-    ) {
-        self.error_manager.add_semantic_error(
-            error_type,
-            message.to_string(),
-            position.line as i32,
-            position.column as i32,
-            Some("IMPORTS".to_string()),
-            None,
-        );
-    }
-    
-    fn add_warning(&self, message: &str, position: Position) {
-        if self.operational_settings.debug_mode != DebugMode::Off {
-            self.error_manager.log_warning(&format!(
-                "[Line {}:{}] {}",
-                position.line,
-                position.column,
-                message
+
+        if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            self.error_manager.log_error(&format!(
+                "[ImportsAnalyzer] Import '{}' verify hash '{}' contains non-hex characters",
+                import.alias, hash
             ));
         }
     }
-    
-    // ==================== LOGGING ====================
-    
+
+    fn is_valid_identifier(s: &str) -> bool {
+        if s.is_empty() {
+            return false;
+        }
+        let mut chars = s.chars();
+        let first = chars.next().unwrap();
+        if !first.is_alphabetic() && first != '_' {
+            return false;
+        }
+        chars.all(|c| c.is_alphanumeric() || c == '_')
+    }
+
+    fn is_local_address(url: &str) -> bool {
+        let lower = url.to_lowercase();
+        lower.contains("localhost")
+            || lower.contains("127.0.0.1")
+            || lower.contains("::1")
+            || lower.contains("0.0.0.0")
+    }
+
+    #[inline]
     fn log_debug(&self, message: &str) {
-        if self.operational_settings.debug_mode >= DebugMode::Regular {
-            self.error_manager.log_debug(&format!("[IMPORTS Analyzer] {}", message));
+        if self.can_log_debug {
+            self.error_manager.log_debug(message);
+        }
+    }
+
+    #[inline]
+    fn log_verbose(&self, message: &str) {
+        if self.can_log_verbose {
+            self.error_manager.log_debug(message);
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_is_hex_string() {
-        assert!(ImportsSectionAnalyzer::is_hex_string("0123456789abcdef"));
-        assert!(ImportsSectionAnalyzer::is_hex_string("ABCDEF"));
-        assert!(!ImportsSectionAnalyzer::is_hex_string("xyz"));
-        assert!(!ImportsSectionAnalyzer::is_hex_string(""));
-        assert!(!ImportsSectionAnalyzer::is_hex_string("12 34"));
-    }
-  }

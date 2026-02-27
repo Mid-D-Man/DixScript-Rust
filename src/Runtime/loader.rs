@@ -253,7 +253,7 @@ impl DixLoader {
         source_file_path: &str,
     ) -> Result<DixScript, String> {
         // Step 1: Process CONFIG section
-        let config_handler = ConfigSectionHandler::new(None);
+        let mut config_handler = ConfigSectionHandler::new(None);
         let config_result = config_handler.process_config_section(source_text);
 
         let mut operational_settings = config_result.operational_settings;

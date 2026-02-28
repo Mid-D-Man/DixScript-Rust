@@ -284,6 +284,17 @@ jobs:
             target/
           key: ubuntu-latest-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
 
+      # ── Compilation check ────────────────────────────────────────────────
+      # Runs BEFORE the timed bench step so any compile errors are visible in
+      # the CI log rather than silently swallowed by the "|| true" below.
+      # If this step fails, the individual bench names that errored are shown
+      # (e.g. "error[E0412]: cannot find type `GeneralSemanticAnalyzer`").
+      - name: Check all benchmark targets compile
+        run: |
+          echo "=== Verifying benchmark compilation ==="
+          cargo bench --no-run --color=always 2>&1
+          echo "All bench targets compiled successfully"
+
       - name: Run benchmarks
         continue-on-error: true
         run: |
@@ -447,12 +458,21 @@ jobs:
 
   # ── 4. Flamegraph ──────────────────────────────────────────────────────────
   #
-  # samply fails on hosted runners because perf_event_open is blocked by default.
-  # GitHub Actions ubuntu runners DO support sudo, so we lower perf_event_paranoid
-  # to -1 and kptr_restrict to 0, install the real Linux perf binary from
-  # linux-tools-generic, then use cargo-flamegraph which wraps perf directly.
+  # cargo flamegraph uses perf under the hood. Two things must be true:
+  #   1. perf_event_paranoid = -1  (lowered via sudo below)
+  #   2. A perf binary compatible with the running kernel must exist at the
+  #      path cargo-flamegraph looks for it: /usr/lib/linux-tools/<uname -r>/perf
   #
-  # Profile: --profile bench (strip=false, debug=true) so all symbol names resolve.
+  # GitHub-hosted ubuntu runners often have linux-tools for a DIFFERENT kernel
+  # version than the one actually running. The install step below finds whatever
+  # perf is available and creates symlinks in BOTH expected locations.
+  #
+  # lto = false in [profile.bench] (Cargo.toml) is required: ThinLTO merges
+  # compilation units in ways that confuse perf's DWARF stack unwinder, producing
+  # [unknown] frames. With lto = false each crate keeps its own debug sections.
+  #
+  # --no-inline suppresses addr2line's per-frame inline expansion which can
+  # hang for minutes on optimised binaries.
   #
   run-flame:
     runs-on: ubuntu-latest
@@ -477,7 +497,6 @@ jobs:
           key: ubuntu-latest-cargo-flame-${{ hashFiles('**/Cargo.lock') }}
 
       # Lower perf restrictions. sudo is available on all hosted ubuntu runners.
-      # Without this, perf_event_open returns EACCES and nothing is recorded.
       - name: Configure perf permissions
         run: |
           echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
@@ -485,23 +504,44 @@ jobs:
           echo "perf_event_paranoid=$(cat /proc/sys/kernel/perf_event_paranoid)"
           echo "kptr_restrict=$(cat /proc/sys/kernel/kptr_restrict)"
 
-      # linux-tools-generic ships the userspace perf binary.
-      # linux-tools-$(uname -r) ships the kernel-matched one but may not exist
-      # for the exact runner kernel version, so we fall back gracefully and
-      # symlink whichever binary we find to /usr/local/bin/perf.
-      - name: Install perf
+      # Install perf and create symlinks in both locations cargo-flamegraph checks:
+      #   /usr/local/bin/perf          — found via PATH
+      #   /usr/lib/linux-tools/<ver>/perf — found by the perf wrapper script
+      #
+      # The kernel-version-specific symlink is the critical one: the `perf`
+      # shell wrapper in linux-tools-common resolves its binary via that path,
+      # so symlinking only to /usr/local/bin is not enough.
+      - name: Install perf and create kernel-version symlink
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y linux-tools-common linux-tools-generic 2>/dev/null || true
           sudo apt-get install -y linux-tools-$(uname -r) 2>/dev/null || true
 
+          KERNEL_VER=$(uname -r)
           PERF_BIN=$(find /usr/lib/linux-tools -name "perf" -type f 2>/dev/null | sort | tail -1)
-          if [ -n "$PERF_BIN" ] && ! command -v perf &>/dev/null; then
+
+          if [ -n "$PERF_BIN" ]; then
+            echo "Found perf binary: $PERF_BIN"
+
+            # Symlink 1: PATH access
             sudo ln -sf "$PERF_BIN" /usr/local/bin/perf
-            echo "Symlinked $PERF_BIN -> /usr/local/bin/perf"
+
+            # Symlink 2: kernel-version-specific path that cargo-flamegraph's
+            # perf wrapper resolves to.  This is the fix for the "perf not found
+            # for kernel X.Y.Z" message that causes silent flamegraph failure.
+            sudo mkdir -p "/usr/lib/linux-tools/${KERNEL_VER}"
+            if [ ! -f "/usr/lib/linux-tools/${KERNEL_VER}/perf" ]; then
+              sudo ln -sf "$PERF_BIN" "/usr/lib/linux-tools/${KERNEL_VER}/perf"
+              echo "Symlinked perf → /usr/lib/linux-tools/${KERNEL_VER}/perf"
+            fi
+          else
+            echo "WARNING: no perf binary found under /usr/lib/linux-tools"
           fi
 
-          perf --version || echo "WARNING: perf not available — flamegraphs will be skipped"
+          echo ""
+          echo "perf version check:"
+          perf --version || echo "WARNING: perf not available via PATH"
+          ls -la "/usr/lib/linux-tools/${KERNEL_VER}/" 2>/dev/null || echo "kernel-specific dir empty"
 
       - name: Install cargo-flamegraph
         run: |
@@ -541,26 +581,31 @@ jobs:
           #   TARGET  = criterion bench binary name  (matches --bench <n> in Cargo.toml)
           #   OUTNAME = output SVG base name (no extension)
           #
-          # The trailing `-- --bench` passes criterion's own flag so it runs in
-          # benchmark mode rather than test mode.
+          # --no-inline: skip per-frame addr2line inline expansion which can hang
+          #              for minutes on optimised binaries. The flamegraph is still
+          #              accurate at the function level.
+          #
+          # Full output (no | tail -5) so build and perf errors are visible in CI.
           run_flame() {
             local target="$1"
             local outfile="$2"
 
+            echo ""
             echo "--- flamegraph: $target ---"
 
             cargo flamegraph \
               --profile bench \
               --bench "$target" \
               --output "flame-output/${outfile}.svg" \
+              --no-inline \
               -- --bench \
-              2>&1 | tail -5 || true
+              2>&1 || true
 
             if [ -f "flame-output/${outfile}.svg" ] && \
                [ "$(wc -c < "flame-output/${outfile}.svg")" -gt 512 ]; then
               echo "OK: ${outfile}.svg ($(wc -c < "flame-output/${outfile}.svg") bytes)"
             else
-              echo "SKIP: $outfile (empty or missing SVG)"
+              echo "SKIP: $outfile (empty or missing SVG — check perf output above)"
               rm -f "flame-output/${outfile}.svg"
             fi
           }
@@ -622,14 +667,12 @@ jobs:
             <div class="no-graph">
               <p>No flamegraphs were generated.</p>
               <p style="font-size:0.78rem;margin-top:8px">
-                The workflow lowers <code>perf_event_paranoid</code> to -1 via sudo and uses
-                <code>cargo-flamegraph</code> with Linux perf. If graphs are still missing,
-                check the <strong>Configure perf permissions</strong> and
-                <strong>Generate flamegraphs</strong> step logs —
-                <code>perf</code> or <code>cargo-flamegraph</code> may have failed to install,
-                or the runner kernel version may lack a matching <code>linux-tools</code> package.
-                For guaranteed results, run on a self-hosted runner with
-                <code>perf_event_paranoid&nbsp;≤&nbsp;1</code>.
+                Check the <strong>Install perf and create kernel-version symlink</strong>
+                and <strong>Generate flamegraphs</strong> step logs for the specific error.
+                Common causes: (1) perf binary found via PATH but kernel-version symlink
+                missing — the install step now creates both; (2) <code>lto</code> was set
+                to <code>"thin"</code> in <code>[profile.bench]</code> which breaks DWARF
+                stack unwinding — ensure <code>lto = false</code> in Cargo.toml.
               </p>
             </div>
           </div>

@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Sat Feb 28 05:27:53 UTC 2026
+Generated: Sat Feb 28 06:07:35 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: b6797d932278c151a1bae5dd948a5c4785b8c550
+Commit: 3c416f7d7d0397fc3b7b149d1a2df325d69b20d3
 Branch: master
 ==================================
 
@@ -220,6 +220,7 @@ tests/unit/mod.rs
 Benchmark Files:
 ===============
 benches/config_throughput.rs
+benches/general_parser_benchmark.rs
 benches/lexer_throughput.rs
 benches/throughput_benchmark.rs
 
@@ -233,4 +234,4 @@ Total Rust Files:
 ================
 Source: 203
 Tests: 3
-Benches: 3
+Benches: 4

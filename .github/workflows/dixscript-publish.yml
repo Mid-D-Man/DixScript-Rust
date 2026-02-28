@@ -482,15 +482,31 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p flame-output
-          export CARGO_PROFILE_RELEASE_DEBUG=true
+
+          # IMPORTANT: --profile bench is required.
+          #
+          # The release profile has strip=true and debug=false (see Cargo.toml),
+          # so flamegraph/perf cannot resolve any symbol names and every frame
+          # appears as [unknown].
+          #
+          # The bench profile has strip=false and debug=true, which is exactly
+          # what perf needs for readable DWARF-backed flamegraphs.
+          #
+          # FIX 1: Added --profile bench to every cargo flamegraph invocation.
+          #
+          # FIX 2: Moved 2>/dev/null before the && so it is a shell-level
+          # redirect on the cargo process itself. Previously it appeared after
+          # the -- separator, which passes it as a literal string argument to
+          # the benchmark binary rather than redirecting stderr at the shell.
 
           run_flame() {
             local kind=$1
             local target=$2
             local outfile=$3
             echo "--- flamegraph: $target ---"
-            cargo flamegraph $kind "$target" -o "flame-output/${outfile}.svg" \
-              -- 2>/dev/null \
+            cargo flamegraph --profile bench $kind "$target" \
+              -o "flame-output/${outfile}.svg" \
+              2>/dev/null \
               && echo "OK: $outfile" \
               || echo "SKIP: $outfile (perf unavailable or build failed)"
           }

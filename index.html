@@ -9,7 +9,7 @@
       color: #e6edf3; display: flex; align-items: center;
       justify-content: center; min-height: 100vh; padding: 24px; }
     .card { background: #161b22; border: 1px solid #30363d;
-      border-radius: 12px; padding: 36px 40px; max-width: 460px; width: 100%; }
+      border-radius: 12px; padding: 36px 40px; max-width: 480px; width: 100%; }
     h1 { font-size: 1.6rem; color: #79c0ff; margin-bottom: 6px; }
     p { color: #8b949e; font-size: 0.85rem; margin-bottom: 24px; }
     .links { display: flex; flex-direction: column; gap: 10px; }
@@ -28,15 +28,19 @@
     <p>MidManStudio — CI Result Dashboard</p>
     <div class="links">
       <a href="tests/">
-        <span class="icon">✅</span>
+        <span class="icon">&#x2705;</span>
         <div><div>Test Results</div><div class="desc">cargo test — per-suite breakdown with output</div></div>
       </a>
       <a href="bench/">
-        <span class="icon">📊</span>
-        <div><div>Benchmarks</div><div class="desc">criterion — throughput and latency</div></div>
+        <span class="icon">&#x1F4CA;</span>
+        <div><div>Parser Benchmarks</div><div class="desc">criterion — lexer, config, parser throughput</div></div>
+      </a>
+      <a href="semantics/">
+        <span class="icon">&#x1F9E0;</span>
+        <div><div>Semantics Benchmarks</div><div class="desc">criterion — section analyzers &amp; full pipeline</div></div>
       </a>
       <a href="flame/">
-        <span class="icon">🔥</span>
+        <span class="icon">&#x1F525;</span>
         <div><div>Flamegraphs</div><div class="desc">samply — profiling for hot paths</div></div>
       </a>
     </div>

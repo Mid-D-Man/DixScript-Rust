@@ -1,0 +1,19 @@
+{
+  "build": "70",
+  "branch": "master",
+  "commit": "f2e36ace",
+  "date": "2026-02-28T18:39:06+01:00",
+  "parser_baseline": {
+    "full_pipeline_small": 57260,
+    "full_pipeline_medium": 243940,
+    "real_file_full_pipeline": 3840000,
+    "all_sections_small": 22570,
+    "all_sections_medium_150props": 141510,
+    "all_sections_large_500props": 290320
+  },
+  "summary": {
+    "total": 0,
+    "suites": 0
+  },
+  "suites": []
+}

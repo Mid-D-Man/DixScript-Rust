@@ -296,6 +296,8 @@ jobs:
             cargo bench --bench config_throughput --color=never 2>&1 || true
             echo "=== general_parser_benchmark ==="
             cargo bench --bench general_parser_benchmark --color=never 2>&1 || true
+            echo "=== semantics_benchmark ==="
+            cargo bench --bench semantics_benchmark --color=never 2>&1 || true
           } | tee bench-raw.txt
 
       - name: Parse benchmark results to JSON
@@ -444,16 +446,6 @@ jobs:
           retention-days: 30
 
   # ── 4. Flamegraph ──────────────────────────────────────────────────────────
-  #
-  # GitHub Actions hosted runners block perf_event_open by default (CAP_PERFMON
-  # is not granted).  cargo-flamegraph relies on Linux perf and will silently
-  # produce empty or corrupt SVGs.  We use samply instead, which traces via
-  # the unprivileged DWARF-based profiler and converts to a flamegraph SVG
-  # through inferno.
-  #
-  # Profile used: --profile bench (strip=false, debug=true) so all symbol
-  # names resolve correctly.  Never use --release for profiling.
-  #
   run-flame:
     runs-on: ubuntu-latest
     needs: parse-trigger
@@ -476,8 +468,6 @@ jobs:
             target/
           key: ubuntu-latest-cargo-flame-${{ hashFiles('**/Cargo.lock') }}
 
-      # samply uses the unprivileged perf_event_open interface available on
-      # hosted runners.  inferno converts its output to an SVG flamegraph.
       - name: Install samply and inferno
         run: |
           cargo install samply  --locked 2>/dev/null || \
@@ -488,8 +478,6 @@ jobs:
           samply  --version 2>/dev/null || echo "samply not available"
           inferno-flamegraph --version 2>/dev/null || echo "inferno not available"
 
-      # Build all bench/test targets with the bench profile first so samply
-      # does not measure compile time.
       - name: Pre-build bench and test targets (bench profile)
         continue-on-error: true
         run: |
@@ -498,6 +486,7 @@ jobs:
             --bench lexer_throughput \
             --bench config_throughput \
             --bench general_parser_benchmark \
+            --bench semantics_benchmark \
             2>&1 || true
 
       - name: Generate flamegraphs
@@ -505,7 +494,6 @@ jobs:
         run: |
           mkdir -p flame-output
 
-          # Locate samply and inferno-flamegraph on PATH or in cargo bin.
           export PATH="$HOME/.cargo/bin:$PATH"
 
           SAMPLY=$(command -v samply 2>/dev/null)
@@ -517,14 +505,6 @@ jobs:
             exit 0
           fi
 
-          # run_flame KIND TARGET OUTNAME
-          #   KIND   = --bench | --test
-          #   TARGET = criterion bench name or integration test name
-          #   OUTNAME = base filename (no extension)
-          #
-          # samply record --save-only writes a profile.json in the current dir.
-          # inferno-flamegraph reads collapsed stacks from stdin; samply can
-          # export as collapsed via `samply export --format=collapsed`.
           run_flame() {
             local kind="$1"
             local target="$2"
@@ -532,8 +512,6 @@ jobs:
 
             echo "--- flamegraph: $target ---"
 
-            # Run samply with --save-only to avoid opening the browser UI.
-            # Then export the profile as collapsed stacks and pipe to inferno.
             $SAMPLY record \
               --save-only \
               --output "flame-output/${outfile}.profile.json" \
@@ -558,7 +536,6 @@ jobs:
                 echo "SKIP: $outfile (empty or missing SVG)"
                 rm -f "flame-output/${outfile}.svg"
               fi
-              # Remove the raw profile to keep artifact size down.
               rm -f "flame-output/${outfile}.profile.json"
             else
               echo "SKIP: $outfile (samply produced no profile)"
@@ -569,6 +546,7 @@ jobs:
           run_flame "--bench" "lexer_throughput"           "lexer_throughput"
           run_flame "--bench" "config_throughput"          "config_throughput"
           run_flame "--bench" "general_parser_benchmark"   "general_parser_benchmark"
+          run_flame "--bench" "semantics_benchmark"        "semantics_benchmark"
 
           echo "Generated flamegraphs:"
           ls -lh flame-output/*.svg 2>/dev/null || echo "(none produced)"

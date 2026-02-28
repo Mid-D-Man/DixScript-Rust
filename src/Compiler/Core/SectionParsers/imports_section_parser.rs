@@ -1,3 +1,4 @@
+// src/Compiler/Core/SectionParsers/imports_section_parser.rs
 //! Parser for the `@IMPORTS(...)` section.
 //!
 //! ```text
@@ -18,9 +19,6 @@ const MAX_ITERATIONS_PER_TOKEN: usize = 3;
 const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
 const MAX_STUCK_COUNT: usize = 3;
 
-/// Built-in static object names that are not in the PHF keyword maps but
-/// must not be used as import aliases.  Small fixed set — O(n) slice scan
-/// is acceptable; this is a cold validation path, not a hot loop.
 static BUILTIN_OBJECT_NAMES: &[&str] = &[
     "Math", "DateTime", "Array", "Random", "Enum", "Guid", "IpAddress",
 ];
@@ -107,7 +105,6 @@ impl<'a> ImportsSectionParser<'a> {
 
             match self.parse_import_declaration() {
                 Some(import) => {
-                    // Duplicate-alias check: linear scan over the small vec is fine.
                     let is_dup = imports.iter().any(|i| i.alias == import.alias);
                     if is_dup {
                         let current = self.current().clone();
@@ -123,7 +120,7 @@ impl<'a> ImportsSectionParser<'a> {
                             return self.partial_or_none(section_start_pos);
                         }
                     } else {
-                        if debug_config_check!(self.debug_config) {
+                        if self.debug_config.is_enabled {
                             self.error_manager.log_debug(&format!(
                                 "IMPORTS: parsed '{}'",
                                 import.alias
@@ -146,7 +143,6 @@ impl<'a> ImportsSectionParser<'a> {
                 break;
             } else if !self.is_at_end() {
                 if matches!(self.current().token_type, TokenType::Identifier(_)) {
-                    // Next import without comma — valid in v1.0.0.
                     continue;
                 }
                 let current = self.current().clone();
@@ -324,8 +320,6 @@ impl<'a> ImportsSectionParser<'a> {
     }
 
     fn validate_alias(&mut self, alias: &str) -> bool {
-        // Truly-reserved keywords and data-type keywords (QUICKFUNCS context
-        // blocks both — that's the strictest context, which is what we want here).
         if Keywords::is_reserved_in_context(alias, "QUICKFUNCS") {
             let current = self.current().clone();
             self.report_error(
@@ -336,7 +330,6 @@ impl<'a> ImportsSectionParser<'a> {
             return false;
         }
 
-        // Contextual identifiers: "config", "Dix".
         if Keywords::is_contextual_identifier(alias) {
             let current = self.current().clone();
             self.report_error(
@@ -347,7 +340,6 @@ impl<'a> ImportsSectionParser<'a> {
             return false;
         }
 
-        // Built-in static object names not present in the PHF maps.
         if BUILTIN_OBJECT_NAMES.iter().any(|&n| n.eq_ignore_ascii_case(alias)) {
             let current = self.current().clone();
             self.report_error(
@@ -358,7 +350,6 @@ impl<'a> ImportsSectionParser<'a> {
             return false;
         }
 
-        // Basic identifier validity.
         if !is_valid_identifier(alias) {
             let current = self.current().clone();
             self.report_error(
@@ -400,7 +391,10 @@ impl<'a> ImportsSectionParser<'a> {
                     let current = self.current().clone();
                     self.report_error(
                         ParseErrorType::InvalidLiteral,
-                        &format!("Cloud import path must end with '.mdix', got: {}", path_without_query),
+                        &format!(
+                            "Cloud import path must end with '.mdix', got: {}",
+                            path_without_query
+                        ),
                         &current,
                     );
                     return false;
@@ -663,6 +657,9 @@ fn is_valid_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     match chars.next() {
         None => false,
-        Some(c) => (c.is_alphabetic() || c == '_') && chars.all(|c| c.is_alphanumeric() || c == '_'),
+        Some(c) => {
+            (c.is_alphabetic() || c == '_')
+                && chars.all(|c| c.is_alphanumeric() || c == '_')
+        }
     }
 }

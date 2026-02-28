@@ -91,7 +91,9 @@ harness = false
 name    = "lexer_throughput"
 harness = false
 
-
+[[bench]]
+name    = "config_throughput"
+harness = false
 
 # =============================================================================
 # Feature flags

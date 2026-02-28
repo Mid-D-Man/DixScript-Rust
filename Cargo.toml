@@ -122,7 +122,7 @@ debug          = false     # explicit: strip wins anyway, keep this consistent
 
 # --- Benchmarking: same opt level as release but symbols preserved
 #
-# This is what was missing: flamegraph/perf need DWARF info.
+# This is what was missing from the workflow: flamegraph/perf need DWARF info.
 # With strip = true in release, every function showed up as the binary blob
 # [lexer_throughput-cec1e10d392a4a97] making flamegraphs unreadable.
 # Use: cargo flamegraph --profile bench --bench lexer_throughput

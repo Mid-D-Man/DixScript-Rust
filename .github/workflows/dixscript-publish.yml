@@ -15,6 +15,7 @@ on:
         options:
           - tests
           - bench
+          - semantics
           - flame
           - all
 
@@ -30,33 +31,37 @@ jobs:
   parse-trigger:
     runs-on: ubuntu-latest
     outputs:
-      run_tests: ${{ steps.decide.outputs.run_tests }}
-      run_bench: ${{ steps.decide.outputs.run_bench }}
-      run_flame:  ${{ steps.decide.outputs.run_flame }}
+      run_tests:     ${{ steps.decide.outputs.run_tests }}
+      run_bench:     ${{ steps.decide.outputs.run_bench }}
+      run_semantics: ${{ steps.decide.outputs.run_semantics }}
+      run_flame:     ${{ steps.decide.outputs.run_flame }}
     steps:
       - name: Decide what to publish
         id: decide
         run: |
-          T=false; B=false; F=false
+          T=false; B=false; S=false; F=false
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             case "${{ github.event.inputs.publish_type }}" in
-              tests) T=true ;;
-              bench) B=true ;;
-              flame)  F=true ;;
-              all)   T=true; B=true; F=true ;;
+              tests)     T=true ;;
+              bench)     B=true ;;
+              semantics) S=true ;;
+              flame)     F=true ;;
+              all)       T=true; B=true; S=true; F=true ;;
             esac
           else
             MSG="${{ github.event.head_commit.message }}"
-            echo "$MSG" | grep -qiE '\-\-publish-(tests|all)' && T=true || true
-            echo "$MSG" | grep -qiE '\-\-publish-(bench|all)' && B=true || true
-            echo "$MSG" | grep -qiE '\-\-publish-(flame|all)' && F=true || true
+            echo "$MSG" | grep -qiE '\-\-publish-(tests|all)'     && T=true || true
+            echo "$MSG" | grep -qiE '\-\-publish-(bench|all)'     && B=true || true
+            echo "$MSG" | grep -qiE '\-\-publish-(semantics|all)' && S=true || true
+            echo "$MSG" | grep -qiE '\-\-publish-(flame|all)'     && F=true || true
           fi
 
-          echo "run_tests=$T" >> $GITHUB_OUTPUT
-          echo "run_bench=$B" >> $GITHUB_OUTPUT
-          echo "run_flame=$F"  >> $GITHUB_OUTPUT
-          echo "Tests=$T  Bench=$B  Flame=$F"
+          echo "run_tests=$T"     >> $GITHUB_OUTPUT
+          echo "run_bench=$B"     >> $GITHUB_OUTPUT
+          echo "run_semantics=$S" >> $GITHUB_OUTPUT
+          echo "run_flame=$F"     >> $GITHUB_OUTPUT
+          echo "Tests=$T  Bench=$B  Semantics=$S  Flame=$F"
 
   # ── 2. Run tests ───────────────────────────────────────────────────────────
   run-tests:
@@ -257,7 +262,7 @@ jobs:
             test-raw.txt
           retention-days: 30
 
-  # ── 3. Run benchmarks ──────────────────────────────────────────────────────
+  # ── 3. Run benchmarks (parser / throughput) ────────────────────────────────
   run-bench:
     runs-on: ubuntu-latest
     needs: parse-trigger
@@ -443,17 +448,213 @@ jobs:
             bench-raw.txt
           retention-days: 30
 
-  # ── 4. Flamegraph ──────────────────────────────────────────────────────────
-  #
-  # GitHub Actions hosted runners block perf_event_open by default (CAP_PERFMON
-  # is not granted).  cargo-flamegraph relies on Linux perf and will silently
-  # produce empty or corrupt SVGs.  We use samply instead, which traces via
-  # the unprivileged DWARF-based profiler and converts to a flamegraph SVG
-  # through inferno.
-  #
-  # Profile used: --profile bench (strip=false, debug=true) so all symbol
-  # names resolve correctly.  Never use --release for profiling.
-  #
+  # ── 4. Run semantic analysis benchmarks ────────────────────────────────────
+  run-semantics:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_semantics == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Get Rust version
+        id: rustver
+        run: echo "ver=$(rustc --version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-semantics-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run semantics benchmarks
+        continue-on-error: true
+        run: |
+          {
+            echo "=== semantics_benchmark ==="
+            cargo bench --bench semantics_benchmark --color=never 2>&1 || true
+          } | tee semantics-raw.txt
+
+      - name: Parse semantics results to JSON
+        env:
+          BUILD_NUM:  ${{ github.run_number }}
+          BRANCH:     ${{ github.ref_name }}
+          COMMIT:     ${{ github.sha }}
+          BUILD_DATE: ${{ github.event.head_commit.timestamp }}
+        run: |
+          python3 - << 'PYEOF'
+          import re, json, os, glob, sys
+
+          RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+          def strip_ansi(s): return RE_ANSI.sub('', s)
+
+          def to_ns(val_str, unit):
+              v = float(val_str.replace(',', ''))
+              u = unit.strip().rstrip('/')
+              return v * {'ns': 1, 'µs': 1e3, 'us': 1e3,
+                          'ms': 1e6, 's': 1e9}.get(u, 1)
+
+          raw  = open('semantics-raw.txt', encoding='utf-8', errors='replace').read()
+          text = strip_ansi(raw)
+
+          benches    = []
+          seen_names = set()
+
+          RE_CRIT = re.compile(
+              r'^([\w /\-]+?)\s{2,}time:\s+\[\s*'
+              r'([\d.,]+)\s*(ns|µs|us|ms|s)\s+'
+              r'([\d.,]+)\s*(ns|µs|us|ms|s)\s+'
+              r'([\d.,]+)\s*(ns|µs|us|ms|s)\s*\]',
+              re.MULTILINE
+          )
+
+          # Parser bench results for comparison — read from bench-results.json if it exists
+          parser_ref = {}
+          # Map benchmark names from parser bench that directly compare
+          # full_pipeline_small, full_pipeline_medium, real_file_full_pipeline
+          # We embed the known numbers from the last run as a reference baseline.
+          PARSER_BASELINE = {
+              'full_pipeline_small':  57260,   # ns (from last bench run)
+              'full_pipeline_medium': 243940,
+              'real_file_full_pipeline': 3840000,
+              'all_sections_small':   22570,
+              'all_sections_medium_150props': 141510,
+              'all_sections_large_500props':  290320,
+          }
+
+          sections = re.split(r'^=== (\w+) ===$', text, flags=re.MULTILINE)
+          pairs = []
+          if len(sections) >= 3:
+              i = 1
+              while i + 1 < len(sections):
+                  pairs.append((sections[i], sections[i + 1]))
+                  i += 2
+          else:
+              pairs = [('semantics_benchmark', text)]
+
+          for suite_name, body in pairs:
+              for m in RE_CRIT.finditer(body):
+                  name  = m.group(1).strip()
+                  lower = to_ns(m.group(2), m.group(3))
+                  mean  = to_ns(m.group(4), m.group(5))
+                  upper = to_ns(m.group(6), m.group(7))
+                  key   = f"{suite_name}/{name}"
+                  if key in seen_names:
+                      continue
+                  seen_names.add(key)
+                  parts      = name.rsplit('/', 1)
+                  group      = parts[0] if len(parts) == 2 else suite_name
+                  bench_name = parts[-1]
+
+                  # Attach parser baseline for delta calculation in the HTML report
+                  baseline_ns = PARSER_BASELINE.get(bench_name)
+
+                  entry = {
+                      'suite':       suite_name,
+                      'group':       group,
+                      'name':        bench_name,
+                      'full_name':   f'{suite_name}/{name}',
+                      'lower_ns':    round(lower, 2),
+                      'mean_ns':     round(mean,  2),
+                      'upper_ns':    round(upper, 2),
+                      'std_ns':      round((upper - lower) / 4, 2),
+                  }
+                  if baseline_ns is not None:
+                      entry['parser_baseline_ns'] = baseline_ns
+                      # semantics overhead as % of parser cost where comparable
+                      if 'semantics_only' in bench_name:
+                          # Find the matching pipeline name
+                          pipeline_key = bench_name.replace('semantics_only_', 'full_pipeline_')
+                          pb = PARSER_BASELINE.get(pipeline_key)
+                          if pb and pb > 0:
+                              entry['semantics_pct_of_pipeline'] = round(mean / pb * 100, 1)
+                  benches.append(entry)
+
+          if not benches:
+              for est in sorted(glob.glob('target/criterion/**/**/estimates.json',
+                                          recursive=True)):
+                  try:
+                      data = json.load(open(est, encoding='utf-8'))
+                      parts = est.replace('target/criterion/', '').split('/')
+                      if len(parts) < 3: continue
+                      suite_name = parts[0]
+                      bench_name = parts[1]
+                      if bench_name in ('new', 'base', 'baseline'): continue
+                      mn = data.get('mean', {})
+                      ci = mn.get('confidence_interval', {})
+                      sd = data.get('std_dev', {}).get('point_estimate', 0)
+                      key = f"{suite_name}/{bench_name}"
+                      if key in seen_names: continue
+                      seen_names.add(key)
+                      benches.append({
+                          'suite':     suite_name,
+                          'group':     suite_name,
+                          'name':      bench_name,
+                          'full_name': key,
+                          'lower_ns':  round(ci.get('lower_bound', mn.get('point_estimate', 0)), 2),
+                          'mean_ns':   round(mn.get('point_estimate', 0), 2),
+                          'upper_ns':  round(ci.get('upper_bound', mn.get('point_estimate', 0)), 2),
+                          'std_ns':    round(sd, 2),
+                      })
+                  except Exception as e:
+                      print(f"Warn {est}: {e}", file=sys.stderr)
+
+          suite_map = {}
+          for b in benches:
+              suite_map.setdefault(b['suite'], []).append(b)
+          suites = [{'name': k, 'benchmarks': v} for k, v in suite_map.items()]
+
+          result = {
+              'build':            os.environ.get('BUILD_NUM', '0'),
+              'branch':           os.environ.get('BRANCH',    'unknown'),
+              'commit':           os.environ.get('COMMIT',    'unknown')[:8],
+              'date':             os.environ.get('BUILD_DATE', ''),
+              'parser_baseline':  PARSER_BASELINE,
+              'summary':          {'total': len(benches), 'suites': len(suites)},
+              'suites':           suites,
+          }
+
+          with open('semantics-results.json', 'w') as f:
+              json.dump(result, f, indent=2)
+
+          print(f"Suites:{len(suites)}  Benchmarks:{len(benches)}")
+          for s in suites:
+              for b in s['benchmarks']:
+                  pct = f"  ({b['semantics_pct_of_pipeline']}% of pipeline)" if 'semantics_pct_of_pipeline' in b else ''
+                  print(f"  {s['name']}/{b['name']}: {b['mean_ns']:.1f} ns{pct}")
+          PYEOF
+
+      - name: Build HTML report
+        env:
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+        run: |
+          cp .github/bench-results-template.html semantics-results-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  semantics-results-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       semantics-results-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            semantics-results-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     semantics-results-index.html
+          sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        semantics-results-index.html
+
+      - name: Upload semantics artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantics-results-${{ github.run_number }}
+          path: |
+            semantics-results.json
+            semantics-results-index.html
+            semantics-raw.txt
+          retention-days: 30
+
+  # ── 5. Flamegraph ──────────────────────────────────────────────────────────
   run-flame:
     runs-on: ubuntu-latest
     needs: parse-trigger
@@ -476,8 +677,6 @@ jobs:
             target/
           key: ubuntu-latest-cargo-flame-${{ hashFiles('**/Cargo.lock') }}
 
-      # samply uses the unprivileged perf_event_open interface available on
-      # hosted runners.  inferno converts its output to an SVG flamegraph.
       - name: Install samply and inferno
         run: |
           cargo install samply  --locked 2>/dev/null || \
@@ -488,8 +687,6 @@ jobs:
           samply  --version 2>/dev/null || echo "samply not available"
           inferno-flamegraph --version 2>/dev/null || echo "inferno not available"
 
-      # Build all bench/test targets with the bench profile first so samply
-      # does not measure compile time.
       - name: Pre-build bench and test targets (bench profile)
         continue-on-error: true
         run: |
@@ -498,6 +695,7 @@ jobs:
             --bench lexer_throughput \
             --bench config_throughput \
             --bench general_parser_benchmark \
+            --bench semantics_benchmark \
             2>&1 || true
 
       - name: Generate flamegraphs
@@ -505,7 +703,6 @@ jobs:
         run: |
           mkdir -p flame-output
 
-          # Locate samply and inferno-flamegraph on PATH or in cargo bin.
           export PATH="$HOME/.cargo/bin:$PATH"
 
           SAMPLY=$(command -v samply 2>/dev/null)
@@ -517,14 +714,6 @@ jobs:
             exit 0
           fi
 
-          # run_flame KIND TARGET OUTNAME
-          #   KIND   = --bench | --test
-          #   TARGET = criterion bench name or integration test name
-          #   OUTNAME = base filename (no extension)
-          #
-          # samply record --save-only writes a profile.json in the current dir.
-          # inferno-flamegraph reads collapsed stacks from stdin; samply can
-          # export as collapsed via `samply export --format=collapsed`.
           run_flame() {
             local kind="$1"
             local target="$2"
@@ -532,8 +721,6 @@ jobs:
 
             echo "--- flamegraph: $target ---"
 
-            # Run samply with --save-only to avoid opening the browser UI.
-            # Then export the profile as collapsed stacks and pipe to inferno.
             $SAMPLY record \
               --save-only \
               --output "flame-output/${outfile}.profile.json" \
@@ -558,7 +745,6 @@ jobs:
                 echo "SKIP: $outfile (empty or missing SVG)"
                 rm -f "flame-output/${outfile}.svg"
               fi
-              # Remove the raw profile to keep artifact size down.
               rm -f "flame-output/${outfile}.profile.json"
             else
               echo "SKIP: $outfile (samply produced no profile)"
@@ -569,6 +755,7 @@ jobs:
           run_flame "--bench" "lexer_throughput"           "lexer_throughput"
           run_flame "--bench" "config_throughput"          "config_throughput"
           run_flame "--bench" "general_parser_benchmark"   "general_parser_benchmark"
+          run_flame "--bench" "semantics_benchmark"        "semantics_benchmark"
 
           echo "Generated flamegraphs:"
           ls -lh flame-output/*.svg 2>/dev/null || echo "(none produced)"
@@ -659,15 +846,16 @@ jobs:
           path: flame-output/
           retention-days: 30
 
-  # ── 5. Deploy to gh-pages ──────────────────────────────────────────────────
+  # ── 6. Deploy to gh-pages ──────────────────────────────────────────────────
   deploy-results:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, run-tests, run-bench, run-flame]
+    needs: [parse-trigger, run-tests, run-bench, run-semantics, run-flame]
     if: |
       always() &&
-      (needs.run-tests.result  == 'success' ||
-       needs.run-bench.result  == 'success' ||
-       needs.run-flame.result  == 'success')
+      (needs.run-tests.result     == 'success' ||
+       needs.run-bench.result     == 'success' ||
+       needs.run-semantics.result == 'success' ||
+       needs.run-flame.result     == 'success')
 
     steps:
       - uses: actions/checkout@v4
@@ -685,6 +873,13 @@ jobs:
         with:
           name: bench-results-${{ github.run_number }}
           path: deploy/bench/
+
+      - name: Download semantics results
+        if: needs.run-semantics.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: semantics-results-${{ github.run_number }}
+          path: deploy/semantics/
 
       - name: Download flamegraph artifacts
         if: needs.run-flame.result == 'success'
@@ -728,6 +923,16 @@ jobs:
             echo "Bench results deployed"
           fi
 
+          # ── semantics ──────────────────────────────────────────────────────
+          if [ -d "deploy/semantics" ]; then
+            mkdir -p "$WORK/semantics" "$WORK/semantics/builds/build_${BUILD_NUM}"
+            cp deploy/semantics/semantics-results.json       "$WORK/semantics/semantics-results.json"
+            cp deploy/semantics/semantics-results-index.html "$WORK/semantics/index.html"
+            cp deploy/semantics/semantics-results.json       "$WORK/semantics/builds/build_${BUILD_NUM}/semantics-results.json"
+            cp deploy/semantics/semantics-results-index.html "$WORK/semantics/builds/build_${BUILD_NUM}/index.html"
+            echo "Semantics results deployed"
+          fi
+
           # ── flame ──────────────────────────────────────────────────────────
           if [ -d "deploy/flame" ]; then
             mkdir -p "$WORK/flame" "$WORK/flame/builds/build_${BUILD_NUM}"
@@ -749,7 +954,7 @@ jobs:
                 color: #e6edf3; display: flex; align-items: center;
                 justify-content: center; min-height: 100vh; padding: 24px; }
               .card { background: #161b22; border: 1px solid #30363d;
-                border-radius: 12px; padding: 36px 40px; max-width: 460px; width: 100%; }
+                border-radius: 12px; padding: 36px 40px; max-width: 480px; width: 100%; }
               h1 { font-size: 1.6rem; color: #79c0ff; margin-bottom: 6px; }
               p { color: #8b949e; font-size: 0.85rem; margin-bottom: 24px; }
               .links { display: flex; flex-direction: column; gap: 10px; }
@@ -768,15 +973,19 @@ jobs:
               <p>MidManStudio — CI Result Dashboard</p>
               <div class="links">
                 <a href="tests/">
-                  <span class="icon">✅</span>
+                  <span class="icon">&#x2705;</span>
                   <div><div>Test Results</div><div class="desc">cargo test — per-suite breakdown with output</div></div>
                 </a>
                 <a href="bench/">
-                  <span class="icon">📊</span>
-                  <div><div>Benchmarks</div><div class="desc">criterion — throughput and latency</div></div>
+                  <span class="icon">&#x1F4CA;</span>
+                  <div><div>Parser Benchmarks</div><div class="desc">criterion — lexer, config, parser throughput</div></div>
+                </a>
+                <a href="semantics/">
+                  <span class="icon">&#x1F9E0;</span>
+                  <div><div>Semantics Benchmarks</div><div class="desc">criterion — section analyzers &amp; full pipeline</div></div>
                 </a>
                 <a href="flame/">
-                  <span class="icon">🔥</span>
+                  <span class="icon">&#x1F525;</span>
                   <div><div>Flamegraphs</div><div class="desc">samply — profiling for hot paths</div></div>
                 </a>
               </div>
@@ -799,10 +1008,10 @@ jobs:
           echo "Deployed to gh-pages"
           echo "  https://mid-d-man.github.io/DixScript-Rust/"
 
-  # ── 6. Summary ─────────────────────────────────────────────────────────────
+  # ── 7. Summary ─────────────────────────────────────────────────────────────
   summary:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, run-tests, run-bench, run-flame, deploy-results]
+    needs: [parse-trigger, run-tests, run-bench, run-semantics, run-flame, deploy-results]
     if: always()
     steps:
       - name: Print summary
@@ -812,9 +1021,10 @@ jobs:
           echo "======================================================="
           echo "Build:     #${{ github.run_number }}"
           echo "Branch:    ${{ github.ref_name }}"
-          echo "Tests:     ${{ needs.run-tests.result  || 'skipped' }}"
-          echo "Bench:     ${{ needs.run-bench.result  || 'skipped' }}"
-          echo "Flame:     ${{ needs.run-flame.result  || 'skipped' }}"
+          echo "Tests:     ${{ needs.run-tests.result      || 'skipped' }}"
+          echo "Bench:     ${{ needs.run-bench.result      || 'skipped' }}"
+          echo "Semantics: ${{ needs.run-semantics.result  || 'skipped' }}"
+          echo "Flame:     ${{ needs.run-flame.result      || 'skipped' }}"
           echo "Deploy:    ${{ needs.deploy-results.result || 'skipped' }}"
           echo ""
           echo "View results: https://mid-d-man.github.io/DixScript-Rust/"

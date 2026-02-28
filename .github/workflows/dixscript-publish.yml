@@ -93,11 +93,6 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          # --no-fail-fast   → run ALL test binaries even if one fails
-          #                    (without this, a failing lib binary stops cargo
-          #                     before it ever reaches tests/ integration tests)
-          # -- --show-output → dump stdout for BOTH passing and failing tests
-          #                    so the HTML report can show output on every row
           cargo test --color=never --no-fail-fast -- --show-output 2>&1 | tee test-raw.txt
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT=${TEST_EXIT_CODE}" >> $GITHUB_ENV
@@ -121,12 +116,10 @@ jobs:
           python3 - << 'PYEOF'
           import re, json, os, sys
 
-          # ── strip ANSI escape codes ────────────────────────────────────────
           RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
           def strip_ansi(s):
               return RE_ANSI.sub('', s)
 
-          # ── helpers ────────────────────────────────────────────────────────
           def build_suite(name, tests, dur_s=0.0):
               return {
                   'name':       name,
@@ -137,28 +130,14 @@ jobs:
                   'tests':      tests,
               }
 
-          # ── load & clean output ────────────────────────────────────────────
           raw  = open('test-raw.txt', encoding='utf-8', errors='replace').read()
           text = strip_ansi(raw)
 
-          # Debug: print first 30 lines so failures are diagnosable in CI logs
           print("=== test-raw.txt preview (first 30 lines) ===")
           for i, l in enumerate(text.splitlines()[:30], 1):
               print(f"  {i:3}: {repr(l)}")
           print("==============================================")
 
-          # ── collect ALL stdout blocks (successes AND failures) ─────────────
-          # With --show-output cargo emits:
-          #
-          #   successes:
-          #   ---- test_name stdout ----
-          #   <output>
-          #
-          #   failures:
-          #   ---- test_name stdout ----
-          #   <output>
-          #
-          # We capture every ---- name stdout ---- block regardless of section.
           test_output = {}
           for m in re.finditer(
                   r'---- ([\w:]+(?:::\w+)*) stdout ----\n(.*?)'
@@ -166,48 +145,35 @@ jobs:
                   text, re.DOTALL):
               name_key = m.group(1)
               content  = m.group(2).strip()
-              if content:                      # skip empty captures
+              if content:
                   test_output[name_key] = content
 
-          # ── parse per-suite blocks ─────────────────────────────────────────
           suites    = []
           cur_name  = None
           cur_tests = []
           cur_dur   = 0.0
 
-          # Matches both:
-          #   "Running unittests src/lib.rs ("
-          #   "Running tests/foo_tests.rs ("
           RE_RUN    = re.compile(r'Running\s+(?:unittests?\s+)?(\S+)\s+\(')
-
-          # Matches individual test result lines
           RE_TEST   = re.compile(
               r'^test\s+([\w:]+(?:::\w+)*)\s+\.\.\.\s+'
               r'(ok|FAILED|ignored)(?:\s+\(([\d.]+)s\))?'
           )
-
-          # Matches the summary line at the end of each binary's output
           RE_RESULT = re.compile(r'test result:.*?finished in ([\d.]+)s')
 
           for line in text.splitlines():
-
-              # ── new test binary header ──
               m = RE_RUN.search(line)
               if m:
                   if cur_name is not None and cur_tests:
                       suites.append(build_suite(cur_name, cur_tests, cur_dur))
                   raw_path = m.group(1)
                   base     = os.path.splitext(os.path.basename(raw_path))[0]
-                  # "lib" and "main" are the crate's own unit tests
                   cur_name  = (base + ' (unit tests)') if base in ('lib', 'main') else base
                   cur_tests = []
                   cur_dur   = 0.0
                   continue
 
-              # ── individual test result line ──
               m = RE_TEST.match(line)
               if m:
-                  # Fallback suite if Running header was somehow missed
                   if cur_name is None:
                       cur_name  = 'lib (unit tests)'
                       cur_tests = []
@@ -219,12 +185,10 @@ jobs:
                       'status':      {'ok': 'passed', 'FAILED': 'failed',
                                       'ignored': 'ignored'}.get(status, 'unknown'),
                       'duration_ms': int(float(dur) * 1000) if dur else 0,
-                      # Look up captured stdout for this test (pass OR fail)
                       'output':      test_output.get(tname, ''),
                   })
                   continue
 
-              # ── end-of-binary summary line ──
               m = RE_RESULT.search(line)
               if m:
                   cur_dur = float(m.group(1))
@@ -234,11 +198,9 @@ jobs:
                       cur_tests = []
                       cur_dur   = 0.0
 
-          # flush last suite if the result line was missing
           if cur_name and cur_tests:
               suites.append(build_suite(cur_name, cur_tests, cur_dur))
 
-          # ── summary ────────────────────────────────────────────────────────
           total   = sum(s['passed'] + s['failed'] + s['ignored'] for s in suites)
           passed  = sum(s['passed']  for s in suites)
           failed  = sum(s['failed']  for s in suites)
@@ -331,6 +293,8 @@ jobs:
             cargo bench --bench throughput_benchmark --color=never 2>&1 || true
             echo "=== lexer_throughput ==="
             cargo bench --bench lexer_throughput --color=never 2>&1 || true
+            echo "=== config_throughput ==="
+            cargo bench --bench config_throughput --color=never 2>&1 || true
           } | tee bench-raw.txt
 
       - name: Parse benchmark results to JSON
@@ -401,7 +365,6 @@ jobs:
                       'std_ns':    round((upper - lower) / 4, 2),
                   })
 
-          # Fallback: criterion JSON files
           if not benches:
               for est in sorted(glob.glob('target/criterion/**/**/estimates.json',
                                           recursive=True)):
@@ -532,6 +495,7 @@ jobs:
 
           run_flame "--bench" "throughput_benchmark"       "throughput_benchmark"
           run_flame "--bench" "lexer_throughput"           "lexer_throughput"
+          run_flame "--bench" "config_throughput"          "config_throughput"
           run_flame "--test"  "pipeline_integration_tests" "pipeline_integration_tests"
           run_flame "--test"  "tokenizer_tests"            "tokenizer_tests"
 
@@ -545,217 +509,78 @@ jobs:
           COMMIT="${GITHUB_SHA:0:8}"
           DATE="$(date -u)"
 
-          cat > flame-output/index.html << 'FLAMEEOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>DixScript Flamegraphs</title>
-            <style>
-              * { box-sizing: border-box; margin: 0; padding: 0; }
-              body { font-family: 'Segoe UI', system-ui, sans-serif;
-                background: #0d1117; color: #e6edf3; padding: 32px 24px; }
-              .container { max-width: 1100px; margin: 0 auto; }
-              header { border-bottom: 2px solid #a371f7; padding-bottom: 16px; margin-bottom: 24px; }
-              header h1 { font-size: 1.7rem; color: #a371f7; }
-              .meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
-              .meta-item { background: #161b22; border: 1px solid #30363d; border-radius: 6px;
-                padding: 5px 12px; font-size: 0.82rem; }
-              .meta-item strong { color: #79c0ff; }
-              /* ── Nav ── */
-              .nav-links { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
-              .nav-link { display: inline-flex; align-items: center; gap: 5px; color: #8b949e;
-                font-size: 0.80rem; text-decoration: none; padding: 5px 12px;
-                background: #161b22; border: 1px solid #30363d; border-radius: 6px;
-                transition: color 0.15s, border-color 0.15s; }
-              .nav-link:hover { color: #e6edf3; border-color: #8b949e; }
-              /* ── Toolbar ── */
-              .toolbar { display: flex; align-items: center; justify-content: space-between;
-                flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
-              .toolbar-title { font-size: 1rem; font-weight: 700;
-                border-left: 3px solid #a371f7; padding-left: 10px; }
-              .search-wrap { position: relative; }
-              .search-box { background: #21262d; border: 1px solid #30363d; color: #e6edf3;
-                padding: 6px 32px 6px 12px; border-radius: 6px; font-size: 0.82rem; outline: none;
-                transition: border-color 0.15s, box-shadow 0.15s; width: 240px; }
-              .search-box:focus { border-color: #a371f7; box-shadow: 0 0 0 3px rgba(163,113,247,0.15); }
-              .search-box::placeholder { color: #484f58; }
-              .search-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-                background: none; border: none; color: #484f58; cursor: pointer;
-                font-size: 0.85rem; display: none; }
-              .search-clear.visible { display: block; }
-              .search-clear:hover { color: #8b949e; }
-              /* ── Cards ── */
-              .cards-grid { display: flex; flex-direction: column; gap: 18px; }
-              .card { background: #161b22; border: 1px solid #30363d;
-                border-radius: 8px; overflow: hidden;
-                transition: border-color 0.15s; }
-              .card:hover { border-color: #a371f7; }
-              .card.hidden { display: none; }
-              .card-header { padding: 14px 18px; border-bottom: 1px solid #30363d;
-                display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-              .card-header h2 { font-size: 0.95rem; font-weight: 700; flex: 1; min-width: 0; }
-              .card-hint { font-size: 0.78rem; color: #484f58; }
-              .card-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
-              /* ── Buttons ── */
-              .btn { display: inline-flex; align-items: center; gap: 5px;
-                border-radius: 6px; font-size: 0.78rem; cursor: pointer;
-                padding: 5px 12px; transition: all 0.15s; text-decoration: none;
-                font-family: inherit; }
-              .btn-download { background: #0f2a1a; border: 1px solid #2ea043; color: #3fb950; }
-              .btn-download:hover { background: #1a3d26; border-color: #3fb950; }
-              .btn-open { background: #1c2128; border: 1px solid #30363d; color: #8b949e; }
-              .btn-open:hover { border-color: #a371f7; color: #a371f7; }
-              /* ── Height controls ── */
-              .height-row { display: flex; gap: 6px; align-items: center; }
-              .height-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e;
-                padding: 3px 10px; border-radius: 5px; font-size: 0.72rem; cursor: pointer;
-                transition: all 0.15s; }
-              .height-btn:hover { border-color: #a371f7; color: #a371f7; }
-              .height-btn.active { border-color: #a371f7; color: #a371f7;
-                background: rgba(163,113,247,0.1); }
-              /* ── Iframe ── */
-              .card-body { position: relative; }
-              .card-body iframe { width: 100%; border: none; background: white;
-                display: block; transition: height 0.2s ease; }
-              /* ── No graph ── */
-              .no-graph { padding: 32px; text-align: center; color: #484f58; font-size: 0.85rem; }
-              .no-graph code { background: #21262d; padding: 2px 6px; border-radius: 4px;
-                font-size: 0.80rem; color: #8b949e; }
-              /* ── No results ── */
-              .no-results { text-align: center; padding: 32px; color: #484f58;
-                font-size: 0.85rem; display: none; }
-              footer { margin-top: 40px; border-top: 1px solid #30363d;
-                padding-top: 14px; color: #484f58; font-size: 0.76rem; text-align: center; }
-              /* ── Toast ── */
-              .toast { position: fixed; bottom: 24px; right: 24px; background: #161b22;
-                border: 1px solid #3fb950; color: #3fb950; padding: 10px 18px;
-                border-radius: 8px; font-size: 0.82rem; font-weight: 600; z-index: 9999;
-                transform: translateY(80px); opacity: 0; transition: all 0.25s ease;
-                pointer-events: none; }
-              .toast.show { transform: translateY(0); opacity: 1; }
-            </style>
-          </head>
-          <body>
-          <div class="container">
-            <div class="nav-links">
-              <a class="nav-link" href="../tests/">✅ Test Results</a>
-              <a class="nav-link" href="../bench/">📊 Benchmarks</a>
-            </div>
-            <header>
-              <h1>🔥 DixScript — Flamegraphs</h1>
-              <div class="meta">
-                <div class="meta-item"><strong>Build:</strong> #BUILD_NUM_TOKEN</div>
-                <div class="meta-item"><strong>Branch:</strong> BRANCH_TOKEN</div>
-                <div class="meta-item"><strong>Commit:</strong> COMMIT_TOKEN</div>
-                <div class="meta-item"><strong>Date:</strong> DATE_TOKEN</div>
-              </div>
-            </header>
-            <div class="toolbar">
-              <div class="toolbar-title">Flamegraphs</div>
-              <div class="search-wrap">
-                <input class="search-box" id="search-box" placeholder="🔍 Filter flamegraphs…"
-                       oninput="applySearch()" />
-                <button class="search-clear" id="search-clear" onclick="clearSearch()">✕</button>
-              </div>
-            </div>
-            <div class="cards-grid" id="cards-grid">
-          FLAMEEOF
+          mkdir -p flame-output
 
-          # Replace the placeholder tokens with actual values in the static header
-          sed -i "s/BUILD_NUM_TOKEN/${BUILD_NUM}/g" flame-output/index.html
-          sed -i "s/BRANCH_TOKEN/${BRANCH}/g"       flame-output/index.html
-          sed -i "s/COMMIT_TOKEN/${COMMIT}/g"        flame-output/index.html
-          sed -i "s|DATE_TOKEN|${DATE}|g"            flame-output/index.html
-
+          # ── Generate card HTML for each SVG ──────────────────────────────
+          CARDS_FILE="$(mktemp)"
           SVG_COUNT=0
+
           for svg in flame-output/*.svg; do
             [ -f "$svg" ] || continue
             SVG_COUNT=$((SVG_COUNT + 1))
             name=$(basename "$svg" .svg)
-            cat >> flame-output/index.html << CARDEOF
-              <div class="card" data-name="${name}">
-                <div class="card-header">
-                  <h2>🔥 ${name}</h2>
-                  <span class="card-hint">Click frames to zoom · Right-click to reset</span>
-                  <div class="card-actions">
-                    <div class="height-row">
-                      <span style="font-size:0.72rem;color:#484f58">Height:</span>
-                      <button class="height-btn" onclick="setHeight('${name}', 320)">S</button>
-                      <button class="height-btn active" onclick="setHeight('${name}', 520)">M</button>
-                      <button class="height-btn" onclick="setHeight('${name}', 800)">L</button>
-                      <button class="height-btn" onclick="setHeight('${name}', 1100)">XL</button>
-                    </div>
-                    <a class="btn btn-download" href="${name}.svg" download="${name}.svg"
-                       title="Download SVG">⬇ Download SVG</a>
-                    <a class="btn btn-open" href="${name}.svg" target="_blank"
-                       title="Open in new tab">↗ Open</a>
-                  </div>
+            cat >> "$CARDS_FILE" << CARDEOF
+          <div class="card" data-name="${name}">
+            <div class="card-header">
+              <h2>🔥 ${name}</h2>
+              <span class="card-hint">Click frames to zoom · Right-click to reset</span>
+              <div class="card-actions">
+                <div class="height-row">
+                  <span style="font-size:0.72rem;color:#484f58">Height:</span>
+                  <button class="height-btn" onclick="setHeight('${name}', 320)">S</button>
+                  <button class="height-btn active" onclick="setHeight('${name}', 520)">M</button>
+                  <button class="height-btn" onclick="setHeight('${name}', 800)">L</button>
+                  <button class="height-btn" onclick="setHeight('${name}', 1100)">XL</button>
                 </div>
-                <div class="card-body">
-                  <iframe id="frame-${name}" src="${name}.svg"
-                          title="${name} flamegraph" style="height:520px"></iframe>
-                </div>
+                <a class="btn btn-download" href="${name}.svg" download="${name}.svg">⬇ Download SVG</a>
+                <a class="btn btn-open" href="${name}.svg" target="_blank">↗ Open</a>
               </div>
+            </div>
+            <div class="card-body">
+              <iframe id="frame-${name}" src="${name}.svg"
+                      title="${name} flamegraph" style="height:520px"></iframe>
+            </div>
+          </div>
           CARDEOF
           done
 
           if [ "$SVG_COUNT" -eq 0 ]; then
-            cat >> flame-output/index.html << NOEOF
-              <div class="card">
-                <div class="no-graph">
-                  ⚠ No flamegraphs were generated.<br>
-                  <span style="font-size:0.78rem;margin-top:8px;display:block">
-                    This usually means <code>perf</code> is unavailable on this runner,
-                    or all bench/test targets failed to build. Check the workflow logs.
-                  </span>
-                </div>
-              </div>
+            cat > "$CARDS_FILE" << NOEOF
+          <div class="card">
+            <div class="no-graph">
+              ⚠ No flamegraphs were generated.<br>
+              <span style="font-size:0.78rem;margin-top:8px;display:block">
+                This usually means <code>perf</code> is unavailable on this runner,
+                or all bench/test targets failed to build. Check the workflow logs.
+              </span>
+            </div>
+          </div>
           NOEOF
           fi
 
-          cat >> flame-output/index.html << 'FOOTEOF'
-            </div><!-- /cards-grid -->
-            <div class="no-results" id="no-results">No flamegraphs match your search.</div>
-            <footer>DixScript-Rust Flamegraphs — MidManStudio</footer>
-          </div>
-          <div class="toast" id="toast"></div>
-          <script>
-            function setHeight(name, px) {
-              const frame = document.getElementById('frame-' + name);
-              if (frame) frame.style.height = px + 'px';
-              // Update active button
-              const card = document.querySelector('[data-name="' + name + '"]');
-              if (card) {
-                card.querySelectorAll('.height-btn').forEach(b => {
-                  b.classList.toggle('active', parseInt(b.textContent === 'S' ? 320
-                    : b.textContent === 'M' ? 520
-                    : b.textContent === 'L' ? 800 : 1100) === px);
-                });
-              }
-            }
-            function applySearch() {
-              const q = document.getElementById('search-box').value.toLowerCase().trim();
-              document.getElementById('search-clear').classList.toggle('visible', q.length > 0);
-              let visible = 0;
-              document.querySelectorAll('.cards-grid .card[data-name]').forEach(card => {
-                const match = !q || card.dataset.name.toLowerCase().includes(q);
-                card.classList.toggle('hidden', !match);
-                if (match) visible++;
-              });
-              document.getElementById('no-results').style.display =
-                (visible === 0 && document.querySelectorAll('.card[data-name]').length > 0)
-                  ? 'block' : 'none';
-            }
-            function clearSearch() {
-              document.getElementById('search-box').value = '';
-              applySearch();
-            }
-          </script>
-          </body>
-          </html>
-          FOOTEOF
+          # ── Inject cards into template via Python ─────────────────────────
+          cp .github/flame-results-template.html flame-output/index.html
+
+          python3 - "$CARDS_FILE" << 'PYEOF'
+          import sys
+
+          cards_path = sys.argv[1]
+          cards = open(cards_path, encoding='utf-8').read()
+
+          html_path = 'flame-output/index.html'
+          content = open(html_path, encoding='utf-8').read()
+          content = content.replace('CARDS_PLACEHOLDER', cards)
+          open(html_path, 'w', encoding='utf-8').write(content)
+          print(f"Injected {len(cards)} bytes of card HTML into index.html")
+          PYEOF
+
+          rm -f "$CARDS_FILE"
+
+          # ── Replace build metadata placeholders ───────────────────────────
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${BUILD_NUM}/g" flame-output/index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${BRANCH}/g"       flame-output/index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${COMMIT}/g"       flame-output/index.html
+          sed -i "s|DATE_PLACEHOLDER|${DATE}|g"           flame-output/index.html
 
       - name: Upload flamegraph artifacts
         if: always()

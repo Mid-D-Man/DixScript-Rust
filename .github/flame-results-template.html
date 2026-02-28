@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript — Flamegraphs · Build #BUILD_NUM_PLACEHOLDER</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117; color: #e6edf3; padding: 32px 24px; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    header { border-bottom: 2px solid #a371f7; padding-bottom: 16px; margin-bottom: 24px; }
+    header h1 { font-size: 1.7rem; color: #a371f7; }
+    .meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+    .meta-item { background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      padding: 5px 12px; font-size: 0.82rem; }
+    .meta-item strong { color: #79c0ff; }
+
+    /* ── Nav ── */
+    .nav-links { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+    .nav-link { display: inline-flex; align-items: center; gap: 5px; color: #8b949e;
+      font-size: 0.80rem; text-decoration: none; padding: 5px 12px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      transition: color 0.15s, border-color 0.15s; }
+    .nav-link:hover { color: #e6edf3; border-color: #8b949e; }
+
+    /* ── Toolbar ── */
+    .toolbar { display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+    .toolbar-title { font-size: 1rem; font-weight: 700;
+      border-left: 3px solid #a371f7; padding-left: 10px; }
+    .search-wrap { position: relative; }
+    .search-box { background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+      padding: 6px 32px 6px 12px; border-radius: 6px; font-size: 0.82rem; outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s; width: 240px; }
+    .search-box:focus { border-color: #a371f7; box-shadow: 0 0 0 3px rgba(163,113,247,0.15); }
+    .search-box::placeholder { color: #484f58; }
+    .search-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: #484f58; cursor: pointer;
+      font-size: 0.85rem; display: none; }
+    .search-clear.visible { display: block; }
+    .search-clear:hover { color: #8b949e; }
+
+    /* ── Cards ── */
+    .cards-grid { display: flex; flex-direction: column; gap: 18px; }
+    .card { background: #161b22; border: 1px solid #30363d;
+      border-radius: 8px; overflow: hidden; transition: border-color 0.15s; }
+    .card:hover { border-color: #a371f7; }
+    .card.hidden { display: none; }
+    .card-header { padding: 14px 18px; border-bottom: 1px solid #30363d;
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .card-header h2 { font-size: 0.95rem; font-weight: 700; flex: 1; min-width: 0; }
+    .card-hint { font-size: 0.78rem; color: #484f58; }
+    .card-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+
+    /* ── Buttons ── */
+    .btn { display: inline-flex; align-items: center; gap: 5px;
+      border-radius: 6px; font-size: 0.78rem; cursor: pointer;
+      padding: 5px 12px; transition: all 0.15s; text-decoration: none;
+      font-family: inherit; }
+    .btn-download { background: #0f2a1a; border: 1px solid #2ea043; color: #3fb950; }
+    .btn-download:hover { background: #1a3d26; border-color: #3fb950; }
+    .btn-open { background: #1c2128; border: 1px solid #30363d; color: #8b949e; }
+    .btn-open:hover { border-color: #a371f7; color: #a371f7; }
+
+    /* ── Height controls ── */
+    .height-row { display: flex; gap: 6px; align-items: center; }
+    .height-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e;
+      padding: 3px 10px; border-radius: 5px; font-size: 0.72rem; cursor: pointer;
+      transition: all 0.15s; }
+    .height-btn:hover { border-color: #a371f7; color: #a371f7; }
+    .height-btn.active { border-color: #a371f7; color: #a371f7;
+      background: rgba(163,113,247,0.1); }
+
+    /* ── Iframe ── */
+    .card-body { position: relative; }
+    .card-body iframe { width: 100%; border: none; background: white;
+      display: block; transition: height 0.2s ease; }
+
+    /* ── No graph ── */
+    .no-graph { padding: 32px; text-align: center; color: #484f58; font-size: 0.85rem; }
+    .no-graph code { background: #21262d; padding: 2px 6px; border-radius: 4px;
+      font-size: 0.80rem; color: #8b949e; }
+
+    /* ── No results ── */
+    .no-results { text-align: center; padding: 32px; color: #484f58;
+      font-size: 0.85rem; display: none; }
+
+    footer { margin-top: 40px; border-top: 1px solid #30363d;
+      padding-top: 14px; color: #484f58; font-size: 0.76rem; text-align: center; }
+
+    /* ── Toast ── */
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #161b22;
+      border: 1px solid #3fb950; color: #3fb950; padding: 10px 18px;
+      border-radius: 8px; font-size: 0.82rem; font-weight: 600; z-index: 9999;
+      transform: translateY(80px); opacity: 0; transition: all 0.25s ease;
+      pointer-events: none; }
+    .toast.show { transform: translateY(0); opacity: 1; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="nav-links">
+    <a class="nav-link" href="../tests/">✅ Test Results</a>
+    <a class="nav-link" href="../bench/">📊 Benchmarks</a>
+  </div>
+
+  <header>
+    <h1>🔥 DixScript — Flamegraphs</h1>
+    <p style="color:#8b949e;margin-top:5px">MidManStudio | DixScript-Rust · perf profiling</p>
+    <div class="meta">
+      <div class="meta-item"><strong>Build:</strong> #BUILD_NUM_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Branch:</strong> BRANCH_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Commit:</strong> COMMIT_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Date:</strong> DATE_PLACEHOLDER</div>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="toolbar-title">Flamegraphs</div>
+    <div class="search-wrap">
+      <input class="search-box" id="search-box" placeholder="🔍 Filter flamegraphs…"
+             oninput="applySearch()" />
+      <button class="search-clear" id="search-clear" onclick="clearSearch()">✕</button>
+    </div>
+  </div>
+
+  <div class="cards-grid" id="cards-grid">
+    CARDS_PLACEHOLDER
+  </div>
+
+  <div class="no-results" id="no-results">No flamegraphs match your search.</div>
+
+  <footer>DixScript-Rust Flamegraphs — MidManStudio — Build #BUILD_NUM_PLACEHOLDER</footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+  function setHeight(name, px) {
+    const frame = document.getElementById('frame-' + name);
+    if (frame) frame.style.height = px + 'px';
+    const card = document.querySelector('[data-name="' + name + '"]');
+    if (card) {
+      card.querySelectorAll('.height-btn').forEach(b => {
+        const map = { 'S': 320, 'M': 520, 'L': 800, 'XL': 1100 };
+        b.classList.toggle('active', map[b.textContent] === px);
+      });
+    }
+  }
+
+  function applySearch() {
+    const q = document.getElementById('search-box').value.toLowerCase().trim();
+    document.getElementById('search-clear').classList.toggle('visible', q.length > 0);
+    let visible = 0;
+    document.querySelectorAll('.cards-grid .card[data-name]').forEach(card => {
+      const match = !q || card.dataset.name.toLowerCase().includes(q);
+      card.classList.toggle('hidden', !match);
+      if (match) visible++;
+    });
+    const total = document.querySelectorAll('.card[data-name]').length;
+    document.getElementById('no-results').style.display =
+      (visible === 0 && total > 0) ? 'block' : 'none';
+  }
+
+  function clearSearch() {
+    document.getElementById('search-box').value = '';
+    applySearch();
+  }
+</script>
+</body>
+    </html>

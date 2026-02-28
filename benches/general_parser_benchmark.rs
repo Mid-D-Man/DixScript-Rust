@@ -1,23 +1,14 @@
+// benches/general_parser_benchmark.rs
 //! General Parser Benchmark — DixScript v1.0.0
 //!
 //! Three benchmark groups:
 //!
-//! 1. `section_parsers`  — each section in isolation (speed + throughput).
-//!                         Look here to answer "how long does @ENUMS take vs @DATA?".
-//! 2. `combined_sections`— all sections together via GeneralParser (small / medium / large).
-//! 3. `pipeline_e2e`     — full front-end: ConfigHandler → Tokenizer → GeneralParser.
-//!
-//! ## Reading results
-//! Criterion prints mean ± std-dev for each benchmark.
-//! Groups marked with `.throughput(Bytes)` additionally show MB/s.
-//! The "Average section time" you care about is the mean from `section_parsers`.
-//!
-//! ## Run
-//!   cargo bench --bench general_parser_benchmark
-//!   cargo flamegraph --profile bench --bench general_parser_benchmark
+//! 1. `section_parsers`   — each section in isolation (speed + throughput).
+//! 2. `combined_sections` — all sections together via GeneralParser (small / medium / large).
+//! 3. `pipeline_e2e`      — full front-end: ConfigHandler → Tokenizer → GeneralParser.
 
 use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput,
+    black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
 };
 use dixscript::Compiler::AST::ConfigSection;
 use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
@@ -31,11 +22,7 @@ use std::time::Duration;
 
 // =============================================================================
 // Static section inputs
-// Each constant ends with a minimal `@DATA( x = 1 )` so the tokeniser has a
-// second section to stop at — it keeps the extracted section boundaries clean.
 // =============================================================================
-
-// ── @CONFIG ──────────────────────────────────────────────────────────────────
 
 const CONFIG_FULL: &str = r#"@CONFIG(
     version            -> "1.0.0",
@@ -54,8 +41,6 @@ const CONFIG_PARTIAL: &str = r#"@CONFIG(
 )
 @DATA( x = 1 )"#;
 
-// ── @ENUMS ───────────────────────────────────────────────────────────────────
-
 const ENUMS_SMALL: &str = r#"@ENUMS(
     Status   { ACTIVE = 1, INACTIVE = 2, PENDING = 3 }
     LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3 }
@@ -73,8 +58,6 @@ const ENUMS_LARGE: &str = r#"@ENUMS(
     Direction  { NORTH = 1, SOUTH = 2, EAST = 3, WEST = 4 }
 )
 @DATA( x = 1 )"#;
-
-// ── @QUICKFUNCS ──────────────────────────────────────────────────────────────
 
 const QUICKFUNCS_SIMPLE: &str = r#"@QUICKFUNCS(
     ~add<int>(a<int>, b<int>) {
@@ -138,16 +121,12 @@ const QUICKFUNCS_COMPLEX: &str = r#"@QUICKFUNCS(
 )
 @DATA( x = 1 )"#;
 
-// ── @DLM ──────────────────────────────────────────────────────────────────────
-
 const DLM_INPUT: &str = r#"@DLM(
     DAuditor.enhanced,
     DCompressor.gzip,
     DEncryptor.aes256
 )
 @DATA( x = 1 )"#;
-
-// ── @IMPORTS ──────────────────────────────────────────────────────────────────
 
 const IMPORTS_INPUT: &str = r#"@IMPORTS(
     Utils    from "common/utils.mdix",
@@ -157,16 +136,12 @@ const IMPORTS_INPUT: &str = r#"@IMPORTS(
 )
 @DATA( x = 1 )"#;
 
-// ── @SECURITY ─────────────────────────────────────────────────────────────────
-
 const SECURITY_INPUT: &str = r#"@SECURITY(
     encryption -> { mode = "password", algorithm = "aes256-gcm" },
     keystore   -> { auto_generate = true, backup_count = 3 },
     validation -> { strict = true }
 )
 @DATA( x = 1 )"#;
-
-// ── Combined inputs ───────────────────────────────────────────────────────────
 
 const COMBINED_SMALL: &str = r#"@CONFIG(
     version        -> "1.0.0",
@@ -196,7 +171,6 @@ const COMBINED_SMALL: &str = r#"@CONFIG(
 // Input generators
 // =============================================================================
 
-/// Generate a synthetic `@DATA` section with `properties` entries of varied types.
 fn generate_data_section(properties: usize) -> String {
     let mut s = String::with_capacity(properties * 38);
     s.push_str("@DATA(\n");
@@ -224,7 +198,6 @@ fn generate_data_section(properties: usize) -> String {
     s
 }
 
-/// Build a complete multi-section mdix file for the combined benchmarks.
 fn build_combined_input(data_props: usize) -> String {
     let data_section = generate_data_section(data_props);
     format!(
@@ -239,8 +212,8 @@ fn build_combined_input(data_props: usize) -> String {
 {data_section}
 "#,
         ENUMS_LARGE = &ENUMS_LARGE[..ENUMS_LARGE.rfind("@DATA").unwrap_or(ENUMS_LARGE.len())],
-        QUICKFUNCS_COMPLEX =
-            &QUICKFUNCS_COMPLEX[..QUICKFUNCS_COMPLEX.rfind("@DATA").unwrap_or(QUICKFUNCS_COMPLEX.len())],
+        QUICKFUNCS_COMPLEX = &QUICKFUNCS_COMPLEX
+            [..QUICKFUNCS_COMPLEX.rfind("@DATA").unwrap_or(QUICKFUNCS_COMPLEX.len())],
         data_section = data_section,
     )
 }
@@ -249,19 +222,11 @@ fn build_combined_input(data_props: usize) -> String {
 // Helpers
 // =============================================================================
 
-/// Tokenise `input` with default settings and return the token vec.
 fn tokenize_input(input: &str, settings: &OperationalSettings) -> Vec<Token> {
     Tokenizer::new(input, settings).tokenize().tokens
 }
 
-/// Extract the token slice that a section parser expects for `section_name`
-/// (e.g. "ENUMS", "DATA").  Returns: `( ... body ... ) EOF`.
-///
-/// The lexer emits section-keyword tokens (`SectionEnums`, etc.) which carry
-/// a `get_section_context()` string.  We find that token, then collect from
-/// the following `(` to the matching `)`, then append an EOF sentinel.
 fn extract_section_tokens(all_tokens: &[Token], section_name: &str) -> Vec<Token> {
-    // Locate the @SECTION keyword token.
     let kw_pos = all_tokens
         .iter()
         .position(|t| {
@@ -272,7 +237,6 @@ fn extract_section_tokens(all_tokens: &[Token], section_name: &str) -> Vec<Token
         })
         .unwrap_or(0);
 
-    // Find the opening '(' after the keyword.
     let open_pos = all_tokens[kw_pos..]
         .iter()
         .position(|t| matches!(t.token_type, TokenType::Symbol('(')))
@@ -280,8 +244,7 @@ fn extract_section_tokens(all_tokens: &[Token], section_name: &str) -> Vec<Token
         .unwrap_or(kw_pos + 1)
         .min(all_tokens.len() - 1);
 
-    // Walk to the matching closing ')'.
-    let mut depth     = 0i32;
+    let mut depth = 0i32;
     let mut close_pos = all_tokens.len().saturating_sub(1);
     for (i, tok) in all_tokens[open_pos..].iter().enumerate() {
         match &tok.token_type {
@@ -299,12 +262,11 @@ fn extract_section_tokens(all_tokens: &[Token], section_name: &str) -> Vec<Token
 
     let mut section_tokens = all_tokens[open_pos..=close_pos].to_vec();
     let last_line = section_tokens.last().map(|t| t.line).unwrap_or(1);
-    let last_col  = section_tokens.last().map(|t| t.column + 1).unwrap_or(1);
+    let last_col = section_tokens.last().map(|t| t.column + 1).unwrap_or(1);
     section_tokens.push(Token::eof(last_line, last_col));
     section_tokens
 }
 
-/// Run the config handler and return `(ConfigSection, cleaned_source, OperationalSettings)`.
 fn run_config_handler(input: &str) -> (ConfigSection, String, OperationalSettings) {
     let mut handler = ConfigSectionHandler::new(None);
     let r = handler.process_config_section(input);
@@ -314,9 +276,8 @@ fn run_config_handler(input: &str) -> (ConfigSection, String, OperationalSetting
 // =============================================================================
 // Benchmark 1 — individual section parsers
 //
-// Each benchmark measures only the section parser itself.  Tokenisation of the
-// input is done once before the timed loop; the resulting token slice is
-// borrowed (not cloned) on each iteration, so no allocation overhead leaks in.
+// Tokens are pre-built once outside the timed loop.
+// Section parsers receive &[Token] slices so zero allocation in the hot path.
 // =============================================================================
 
 fn bench_section_parsers(c: &mut Criterion) {
@@ -327,7 +288,6 @@ fn bench_section_parsers(c: &mut Criterion) {
     let settings = OperationalSettings::default();
 
     // ── @CONFIG ──────────────────────────────────────────────────────────────
-    // ConfigSectionHandler is the config-phase equivalent of a section parser.
     for (label, input) in &[("full_7keys", CONFIG_FULL), ("partial_2keys", CONFIG_PARTIAL)] {
         group.throughput(Throughput::Bytes(input.len() as u64));
         group.bench_with_input(BenchmarkId::new("config", label), input, |b, s| {
@@ -339,8 +299,10 @@ fn bench_section_parsers(c: &mut Criterion) {
     }
 
     // ── @ENUMS ───────────────────────────────────────────────────────────────
-    let enums_small_toks = extract_section_tokens(&tokenize_input(ENUMS_SMALL, &settings), "ENUMS");
-    let enums_large_toks = extract_section_tokens(&tokenize_input(ENUMS_LARGE, &settings), "ENUMS");
+    let enums_small_toks =
+        extract_section_tokens(&tokenize_input(ENUMS_SMALL, &settings), "ENUMS");
+    let enums_large_toks =
+        extract_section_tokens(&tokenize_input(ENUMS_LARGE, &settings), "ENUMS");
 
     group.throughput(Throughput::Bytes(ENUMS_SMALL.len() as u64));
     group.bench_function("enums_small_2decls", |b| {
@@ -382,8 +344,8 @@ fn bench_section_parsers(c: &mut Criterion) {
 
     // ── @DATA (small / medium / large) ───────────────────────────────────────
     for (label, n_props) in &[("small_30", 30usize), ("medium_150", 150), ("large_500", 500)] {
-        let data_src   = generate_data_section(*n_props);
-        let data_toks  = extract_section_tokens(&tokenize_input(&data_src, &settings), "DATA");
+        let data_src = generate_data_section(*n_props);
+        let data_toks = extract_section_tokens(&tokenize_input(&data_src, &settings), "DATA");
         let byte_count = data_src.len() as u64;
 
         group.throughput(Throughput::Bytes(byte_count));
@@ -420,7 +382,7 @@ fn bench_section_parsers(c: &mut Criterion) {
         });
     });
 
-    // ── @SECURITY ─────────────────────────────────────────────────────────────
+    // ── @SECURITY ────────────────────────────────────────────────────────────
     let sec_toks =
         extract_section_tokens(&tokenize_input(SECURITY_INPUT, &settings), "SECURITY");
     group.throughput(Throughput::Bytes(SECURITY_INPUT.len() as u64));
@@ -437,10 +399,9 @@ fn bench_section_parsers(c: &mut Criterion) {
 // =============================================================================
 // Benchmark 2 — all sections together via GeneralParser
 //
-// GeneralParser owns the token vec, so tokens must be cloned per iteration.
-// The clone cost is real but unavoidable given the parser's ownership model.
-// Use `iter_batched` to keep the clone out of Criterion's hot path if it
-// ever becomes significant (not expected at these sizes).
+// GeneralParser owns Vec<Token> and comment-filters it in new().
+// Use iter_batched so the clone happens in the (unmeasured) setup phase,
+// not inside the timed routine.  This isolates pure parse cost.
 // =============================================================================
 
 fn bench_combined_sections(c: &mut Criterion) {
@@ -453,15 +414,18 @@ fn bench_combined_sections(c: &mut Criterion) {
     // ── Small (CONFIG + 2 ENUMS + 2 QF + small DATA) ─────────────────────────
     {
         let (cfg, cleaned, _) = run_config_handler(COMBINED_SMALL);
-        let toks              = tokenize_input(&cleaned, &settings);
+        let toks = tokenize_input(&cleaned, &settings);
         group.throughput(Throughput::Bytes(COMBINED_SMALL.len() as u64));
         group.bench_function("all_sections_small", |b| {
-            b.iter(|| {
-                let t = toks.clone();
-                let p = GeneralParser::new(black_box(t), black_box(&cfg), &settings)
-                    .expect("parser init");
-                black_box(p.parse())
-            });
+            b.iter_batched(
+                || toks.clone(),
+                |t| {
+                    let p = GeneralParser::new(black_box(t), black_box(&cfg), &settings)
+                        .expect("parser init");
+                    black_box(p.parse())
+                },
+                BatchSize::SmallInput,
+            );
         });
     }
 
@@ -469,15 +433,18 @@ fn bench_combined_sections(c: &mut Criterion) {
     {
         let medium_src = build_combined_input(150);
         let (cfg, cleaned, _) = run_config_handler(&medium_src);
-        let toks              = tokenize_input(&cleaned, &settings);
+        let toks = tokenize_input(&cleaned, &settings);
         group.throughput(Throughput::Bytes(medium_src.len() as u64));
         group.bench_function("all_sections_medium_150props", |b| {
-            b.iter(|| {
-                let t = toks.clone();
-                let p = GeneralParser::new(black_box(t), black_box(&cfg), &settings)
-                    .expect("parser init");
-                black_box(p.parse())
-            });
+            b.iter_batched(
+                || toks.clone(),
+                |t| {
+                    let p = GeneralParser::new(black_box(t), black_box(&cfg), &settings)
+                        .expect("parser init");
+                    black_box(p.parse())
+                },
+                BatchSize::SmallInput,
+            );
         });
     }
 
@@ -485,15 +452,18 @@ fn bench_combined_sections(c: &mut Criterion) {
     {
         let large_src = build_combined_input(500);
         let (cfg, cleaned, _) = run_config_handler(&large_src);
-        let toks              = tokenize_input(&cleaned, &settings);
+        let toks = tokenize_input(&cleaned, &settings);
         group.throughput(Throughput::Bytes(large_src.len() as u64));
         group.bench_function("all_sections_large_500props", |b| {
-            b.iter(|| {
-                let t = toks.clone();
-                let p = GeneralParser::new(black_box(t), black_box(&cfg), &settings)
-                    .expect("parser init");
-                black_box(p.parse())
-            });
+            b.iter_batched(
+                || toks.clone(),
+                |t| {
+                    let p = GeneralParser::new(black_box(t), black_box(&cfg), &settings)
+                        .expect("parser init");
+                    black_box(p.parse())
+                },
+                BatchSize::LargeInput,
+            );
         });
     }
 
@@ -508,8 +478,9 @@ fn bench_combined_sections(c: &mut Criterion) {
 //   → Tokenizer           (lex remaining source)
 //   → GeneralParser       (parse all sections)
 //
-// Each phase is also benched in isolation inside this group so you can see
-// the per-phase share of total time.
+// The pipeline allocates fresh strings and vecs on every call, so b.iter
+// is correct here — there is nothing to hoist out of the loop.
+// The tokenize-only sub-benchmarks use b.iter for the same reason.
 // =============================================================================
 
 fn bench_pipeline_e2e(c: &mut Criterion) {
@@ -519,19 +490,14 @@ fn bench_pipeline_e2e(c: &mut Criterion) {
 
     let settings = OperationalSettings::default();
 
-    // ── Phase breakdowns (tokenize only, no parse) ────────────────────────────
-    for (label, src) in &[
-        ("small",  COMBINED_SMALL),
-        ("medium", QUICKFUNCS_COMPLEX),
-    ] {
+    // ── Tokenize-only baselines ───────────────────────────────────────────────
+    for (label, src) in &[("small", COMBINED_SMALL), ("medium", QUICKFUNCS_COMPLEX)] {
         group.throughput(Throughput::Bytes(src.len() as u64));
         group.bench_with_input(
             BenchmarkId::new("phase_tokenize_only", label),
             src,
             |b, s| {
-                b.iter(|| {
-                    black_box(Tokenizer::new(black_box(s), &settings).tokenize())
-                });
+                b.iter(|| black_box(Tokenizer::new(black_box(s), &settings).tokenize()));
             },
         );
     }
@@ -540,15 +506,13 @@ fn bench_pipeline_e2e(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(COMBINED_SMALL.len() as u64));
     group.bench_function("full_pipeline_small", |b| {
         b.iter(|| {
-            // Phase 1
             let mut handler = ConfigSectionHandler::new(None);
-            let cfg_result  = handler.process_config_section(black_box(COMBINED_SMALL));
+            let cfg_result = handler.process_config_section(black_box(COMBINED_SMALL));
 
-            // Phase 2
             let s_local = cfg_result.operational_settings.clone();
-            let tok_result = Tokenizer::new(&cfg_result.cleaned_input_string, &s_local).tokenize();
+            let tok_result =
+                Tokenizer::new(&cfg_result.cleaned_input_string, &s_local).tokenize();
 
-            // Phase 3
             let parser = GeneralParser::new(
                 tok_result.tokens,
                 &cfg_result.config_section,
@@ -566,7 +530,7 @@ fn bench_pipeline_e2e(c: &mut Criterion) {
         group.bench_function("full_pipeline_medium", |b| {
             b.iter(|| {
                 let mut handler = ConfigSectionHandler::new(None);
-                let cfg_result  = handler.process_config_section(black_box(&medium_src));
+                let cfg_result = handler.process_config_section(black_box(&medium_src));
 
                 let s_local = cfg_result.operational_settings.clone();
                 let tok_result =
@@ -584,24 +548,19 @@ fn bench_pipeline_e2e(c: &mut Criterion) {
     }
 
     // ── Real .mdix file (from disk) ───────────────────────────────────────────
-    // Matches the pattern from lexer_throughput.rs so results are comparable.
     if let Ok(real_src) =
         std::fs::read_to_string("mdix_files/advanced/all_datatypes_test.mdix")
     {
         group.throughput(Throughput::Bytes(real_src.len() as u64));
 
-        // Tokenize-only baseline
         group.bench_function("real_file_tokenize_only", |b| {
-            b.iter(|| {
-                black_box(Tokenizer::new(black_box(&real_src), &settings).tokenize())
-            });
+            b.iter(|| black_box(Tokenizer::new(black_box(&real_src), &settings).tokenize()));
         });
 
-        // Full pipeline on the real file
         group.bench_function("real_file_full_pipeline", |b| {
             b.iter(|| {
                 let mut handler = ConfigSectionHandler::new(None);
-                let cfg_result  = handler.process_config_section(black_box(&real_src));
+                let cfg_result = handler.process_config_section(black_box(&real_src));
 
                 let s_local = cfg_result.operational_settings.clone();
                 let tok_result =

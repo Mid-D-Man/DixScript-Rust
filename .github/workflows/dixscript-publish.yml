@@ -295,6 +295,8 @@ jobs:
             cargo bench --bench lexer_throughput --color=never 2>&1 || true
             echo "=== config_throughput ==="
             cargo bench --bench config_throughput --color=never 2>&1 || true
+            echo "=== general_parser_benchmark ==="
+            cargo bench --bench general_parser_benchmark --color=never 2>&1 || true
           } | tee bench-raw.txt
 
       - name: Parse benchmark results to JSON
@@ -493,11 +495,12 @@ jobs:
               || echo "SKIP: $outfile (perf unavailable or build failed)"
           }
 
-          run_flame "--bench" "throughput_benchmark"       "throughput_benchmark"
-          run_flame "--bench" "lexer_throughput"           "lexer_throughput"
-          run_flame "--bench" "config_throughput"          "config_throughput"
-          run_flame "--test"  "pipeline_integration_tests" "pipeline_integration_tests"
-          run_flame "--test"  "tokenizer_tests"            "tokenizer_tests"
+          run_flame "--bench" "throughput_benchmark"        "throughput_benchmark"
+          run_flame "--bench" "lexer_throughput"            "lexer_throughput"
+          run_flame "--bench" "config_throughput"           "config_throughput"
+          run_flame "--bench" "general_parser_benchmark"    "general_parser_benchmark"
+          run_flame "--test"  "pipeline_integration_tests"  "pipeline_integration_tests"
+          run_flame "--test"  "tokenizer_tests"             "tokenizer_tests"
 
           echo "Generated:"
           ls -lh flame-output/ || echo "(none)"

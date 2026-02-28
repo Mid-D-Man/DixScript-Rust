@@ -95,6 +95,10 @@ harness = false
 name    = "config_throughput"
 harness = false
 
+[[bench]]
+name    = "general_parser_benchmark"
+harness = false
+
 # =============================================================================
 # Feature flags
 # =============================================================================

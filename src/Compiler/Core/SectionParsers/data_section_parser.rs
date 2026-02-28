@@ -30,6 +30,7 @@ pub struct DataSectionParser<'a> {
     last_position: usize,
     stuck_count: usize,
     iteration_count: usize,
+    max_iterations: usize,
     has_seen_grouped_data: bool,
     current_object_nesting_depth: usize,
     current_function_call_depth: usize,
@@ -42,38 +43,40 @@ const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
 const MAX_STUCK_COUNT: usize = 3;
 
 impl<'a> DataSectionParser<'a> {
-    pub fn new(
-        tokens: &'a [Token],
-        operational_settings: &'a OperationalSettings,
-    ) -> Self {
-        let error_manager = ErrorManager::get_shared_instance();
-        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
+   pub fn new(
+    tokens: &'a [Token],
+    operational_settings: &'a OperationalSettings,
+) -> Self {
+    let error_manager = ErrorManager::get_shared_instance();
+    let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
 
-        if debug_config.is_enabled {
-            let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
-            let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
-            error_manager.log_debug(&format!(
-                "DATA section parser: {} tokens, strategy: {:?}, max_iter: {}",
-                tokens.len(),
-                operational_settings.error_handling_strategy,
-                max_iterations
-            ));
-        }
+    let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
+    let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
 
-        DataSectionParser {
-            tokens,
-            operational_settings,
-            error_manager,
-            debug_config,
-            position: 0,
-            last_position: usize::MAX,
-            stuck_count: 0,
-            iteration_count: 0,
-            has_seen_grouped_data: false,
-            current_object_nesting_depth: 0,
-            current_function_call_depth: 0,
-        }
+    if debug_config.is_enabled {
+        error_manager.log_debug(&format!(
+            "DATA section parser: {} tokens, strategy: {:?}, max_iter: {}",
+            tokens.len(),
+            operational_settings.error_handling_strategy,
+            max_iterations
+        ));
     }
+
+    DataSectionParser {
+        tokens,
+        operational_settings,
+        error_manager,
+        debug_config,
+        position: 0,
+        last_position: usize::MAX,
+        stuck_count: 0,
+        iteration_count: 0,
+        max_iterations,
+        has_seen_grouped_data: false,
+        current_object_nesting_depth: 0,
+        current_function_call_depth: 0,
+    }
+}
 
     pub fn parse_section(&mut self) -> Option<DataSection> {
         self.log_debug("Starting DATA section parse");
@@ -190,18 +193,18 @@ impl<'a> DataSectionParser<'a> {
     }
 
     fn should_terminate_loop(&self) -> bool {
-        let dynamic_limit = self.tokens.len() * MAX_ITERATIONS_PER_TOKEN;
-        let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
-        if self.iteration_count >= max_iterations {
-            self.error_manager.log_error(&format!(
-                "Maximum iterations ({}) exceeded — emergency loop termination \
-                 (token-based: {}, absolute cap: {})",
-                max_iterations, dynamic_limit, ABSOLUTE_MAX_ITERATIONS
-            ));
-            return true;
-        }
-        false
+    if self.iteration_count >= self.max_iterations {
+        self.error_manager.log_error(&format!(
+            "Maximum iterations ({}) exceeded — emergency loop termination \
+             (token-based: {}, absolute cap: {})",
+            self.max_iterations,
+            self.tokens.len() * MAX_ITERATIONS_PER_TOKEN,
+            ABSOLUTE_MAX_ITERATIONS
+        ));
+        return true;
     }
+    false
+}
 
     fn recover_from_stuck(&mut self) -> bool {
         if self.is_at_end() {

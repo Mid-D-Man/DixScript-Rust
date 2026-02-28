@@ -1,4 +1,4 @@
-name: DixScript — Test & Bench Publisher (FIXED)
+name: DixScript — Test & Bench Publisher
 
 on:
   push:
@@ -89,7 +89,7 @@ jobs:
       - name: Build test binaries
         run: cargo test --no-run 2>&1
 
-      - name: "Run all tests (continue on failure)"
+      - name: Run all tests (continue on failure)
         continue-on-error: true
         run: |
           set +e
@@ -98,10 +98,9 @@ jobs:
           echo "TEST_EXIT=${TEST_EXIT_CODE}" >> $GITHUB_ENV
 
           if [ $TEST_EXIT_CODE -ne 0 ]; then
-            echo "⚠️ Tests failed with exit code ${TEST_EXIT_CODE}"
-            echo "Continuing to generate report..."
+            echo "Tests failed with exit code ${TEST_EXIT_CODE} — continuing to generate report"
           else
-            echo "✅ All tests passed!"
+            echo "All tests passed"
           fi
           exit 0
 
@@ -445,6 +444,16 @@ jobs:
           retention-days: 30
 
   # ── 4. Flamegraph ──────────────────────────────────────────────────────────
+  #
+  # GitHub Actions hosted runners block perf_event_open by default (CAP_PERFMON
+  # is not granted).  cargo-flamegraph relies on Linux perf and will silently
+  # produce empty or corrupt SVGs.  We use samply instead, which traces via
+  # the unprivileged DWARF-based profiler and converts to a flamegraph SVG
+  # through inferno.
+  #
+  # Profile used: --profile bench (strip=false, debug=true) so all symbol
+  # names resolve correctly.  Never use --release for profiling.
+  #
   run-flame:
     runs-on: ubuntu-latest
     needs: parse-trigger
@@ -467,59 +476,102 @@ jobs:
             target/
           key: ubuntu-latest-cargo-flame-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Setup perf
+      # samply uses the unprivileged perf_event_open interface available on
+      # hosted runners.  inferno converts its output to an SVG flamegraph.
+      - name: Install samply and inferno
         run: |
-          sudo apt-get install -y linux-tools-common linux-tools-generic \
-            "linux-tools-$(uname -r)" 2>/dev/null || \
-          sudo apt-get install -y linux-tools-common linux-tools-generic || true
-          echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
-          echo 0   | sudo tee /proc/sys/kernel/kptr_restrict
+          cargo install samply  --locked 2>/dev/null || \
+          cargo install samply           2>/dev/null || true
+          cargo install inferno --locked 2>/dev/null || \
+          cargo install inferno          2>/dev/null || true
+          echo "Tool versions:"
+          samply  --version 2>/dev/null || echo "samply not available"
+          inferno-flamegraph --version 2>/dev/null || echo "inferno not available"
 
-      - name: Install flamegraph
-        run: cargo install flamegraph --locked 2>/dev/null || true
+      # Build all bench/test targets with the bench profile first so samply
+      # does not measure compile time.
+      - name: Pre-build bench and test targets (bench profile)
+        continue-on-error: true
+        run: |
+          cargo build --profile bench \
+            --bench throughput_benchmark \
+            --bench lexer_throughput \
+            --bench config_throughput \
+            --bench general_parser_benchmark \
+            2>&1 || true
 
       - name: Generate flamegraphs
         continue-on-error: true
         run: |
           mkdir -p flame-output
 
-          # IMPORTANT: --profile bench is required.
-          #
-          # The release profile has strip=true and debug=false (see Cargo.toml),
-          # so flamegraph/perf cannot resolve any symbol names and every frame
-          # appears as [unknown].
-          #
-          # The bench profile has strip=false and debug=true, which is exactly
-          # what perf needs for readable DWARF-backed flamegraphs.
-          #
-          # FIX 1: Added --profile bench to every cargo flamegraph invocation.
-          #
-          # FIX 2: Moved 2>/dev/null before the && so it is a shell-level
-          # redirect on the cargo process itself. Previously it appeared after
-          # the -- separator, which passes it as a literal string argument to
-          # the benchmark binary rather than redirecting stderr at the shell.
+          # Locate samply and inferno-flamegraph on PATH or in cargo bin.
+          export PATH="$HOME/.cargo/bin:$PATH"
 
+          SAMPLY=$(command -v samply 2>/dev/null)
+          INFERNO=$(command -v inferno-flamegraph 2>/dev/null)
+
+          if [ -z "$SAMPLY" ] || [ -z "$INFERNO" ]; then
+            echo "samply or inferno-flamegraph not found — skipping flamegraph generation"
+            echo "SAMPLY='$SAMPLY'  INFERNO='$INFERNO'"
+            exit 0
+          fi
+
+          # run_flame KIND TARGET OUTNAME
+          #   KIND   = --bench | --test
+          #   TARGET = criterion bench name or integration test name
+          #   OUTNAME = base filename (no extension)
+          #
+          # samply record --save-only writes a profile.json in the current dir.
+          # inferno-flamegraph reads collapsed stacks from stdin; samply can
+          # export as collapsed via `samply export --format=collapsed`.
           run_flame() {
-            local kind=$1
-            local target=$2
-            local outfile=$3
+            local kind="$1"
+            local target="$2"
+            local outfile="$3"
+
             echo "--- flamegraph: $target ---"
-            cargo flamegraph --profile bench $kind "$target" \
-              -o "flame-output/${outfile}.svg" \
-              2>/dev/null \
-              && echo "OK: $outfile" \
-              || echo "SKIP: $outfile (perf unavailable or build failed)"
+
+            # Run samply with --save-only to avoid opening the browser UI.
+            # Then export the profile as collapsed stacks and pipe to inferno.
+            $SAMPLY record \
+              --save-only \
+              --output "flame-output/${outfile}.profile.json" \
+              -- cargo bench --profile bench $kind "$target" -- --bench \
+              2>/dev/null
+
+            if [ -f "flame-output/${outfile}.profile.json" ]; then
+              $SAMPLY export \
+                --format collapsed \
+                --input "flame-output/${outfile}.profile.json" \
+                2>/dev/null \
+              | $INFERNO \
+                --title "$target" \
+                --subtitle "DixScript-Rust · bench profile" \
+                > "flame-output/${outfile}.svg" \
+                2>/dev/null
+
+              if [ -f "flame-output/${outfile}.svg" ] && \
+                 [ "$(wc -c < "flame-output/${outfile}.svg")" -gt 512 ]; then
+                echo "OK: $outfile"
+              else
+                echo "SKIP: $outfile (empty or missing SVG)"
+                rm -f "flame-output/${outfile}.svg"
+              fi
+              # Remove the raw profile to keep artifact size down.
+              rm -f "flame-output/${outfile}.profile.json"
+            else
+              echo "SKIP: $outfile (samply produced no profile)"
+            fi
           }
 
-          run_flame "--bench" "throughput_benchmark"        "throughput_benchmark"
-          run_flame "--bench" "lexer_throughput"            "lexer_throughput"
-          run_flame "--bench" "config_throughput"           "config_throughput"
-          run_flame "--bench" "general_parser_benchmark"    "general_parser_benchmark"
-          run_flame "--test"  "pipeline_integration_tests"  "pipeline_integration_tests"
-          run_flame "--test"  "tokenizer_tests"             "tokenizer_tests"
+          run_flame "--bench" "throughput_benchmark"       "throughput_benchmark"
+          run_flame "--bench" "lexer_throughput"           "lexer_throughput"
+          run_flame "--bench" "config_throughput"          "config_throughput"
+          run_flame "--bench" "general_parser_benchmark"   "general_parser_benchmark"
 
-          echo "Generated:"
-          ls -lh flame-output/ || echo "(none)"
+          echo "Generated flamegraphs:"
+          ls -lh flame-output/*.svg 2>/dev/null || echo "(none produced)"
 
       - name: Build flamegraph index HTML
         run: |
@@ -530,7 +582,6 @@ jobs:
 
           mkdir -p flame-output
 
-          # ── Generate card HTML for each SVG ──────────────────────────────
           CARDS_FILE="$(mktemp)"
           SVG_COUNT=0
 
@@ -567,25 +618,25 @@ jobs:
             cat > "$CARDS_FILE" << NOEOF
           <div class="card">
             <div class="no-graph">
-              ⚠ No flamegraphs were generated.<br>
-              <span style="font-size:0.78rem;margin-top:8px;display:block">
-                This usually means <code>perf</code> is unavailable on this runner,
-                or all bench/test targets failed to build. Check the workflow logs.
-              </span>
+              <p>No flamegraphs were generated.</p>
+              <p style="font-size:0.78rem;margin-top:8px">
+                GitHub Actions hosted runners block <code>perf</code> system calls.
+                This workflow uses <code>samply</code> as a drop-in replacement.
+                If graphs are still missing, check the <strong>Generate flamegraphs</strong>
+                step logs — samply or inferno may have failed to install.
+                For guaranteed results, run on a self-hosted runner with
+                <code>CAP_PERFMON</code> or <code>perf_event_paranoid&nbsp;≤&nbsp;1</code>.
+              </p>
             </div>
           </div>
           NOEOF
           fi
 
-          # ── Inject cards into template via Python ─────────────────────────
           cp .github/flame-results-template.html flame-output/index.html
 
           python3 - "$CARDS_FILE" << 'PYEOF'
           import sys
-
-          cards_path = sys.argv[1]
-          cards = open(cards_path, encoding='utf-8').read()
-
+          cards = open(sys.argv[1], encoding='utf-8').read()
           html_path = 'flame-output/index.html'
           content = open(html_path, encoding='utf-8').read()
           content = content.replace('CARDS_PLACEHOLDER', cards)
@@ -595,7 +646,6 @@ jobs:
 
           rm -f "$CARDS_FILE"
 
-          # ── Replace build metadata placeholders ───────────────────────────
           sed -i "s/BUILD_NUM_PLACEHOLDER/${BUILD_NUM}/g" flame-output/index.html
           sed -i "s/BRANCH_PLACEHOLDER/${BRANCH}/g"       flame-output/index.html
           sed -i "s/COMMIT_PLACEHOLDER/${COMMIT}/g"       flame-output/index.html
@@ -665,7 +715,7 @@ jobs:
             cp deploy/tests/test-results-index.html "$WORK/tests/index.html"
             cp deploy/tests/test-results.json       "$WORK/tests/builds/build_${BUILD_NUM}/test-results.json"
             cp deploy/tests/test-results-index.html "$WORK/tests/builds/build_${BUILD_NUM}/index.html"
-            echo "✓ Test results deployed"
+            echo "Test results deployed"
           fi
 
           # ── bench ──────────────────────────────────────────────────────────
@@ -675,7 +725,7 @@ jobs:
             cp deploy/bench/bench-results-index.html "$WORK/bench/index.html"
             cp deploy/bench/bench-results.json       "$WORK/bench/builds/build_${BUILD_NUM}/bench-results.json"
             cp deploy/bench/bench-results-index.html "$WORK/bench/builds/build_${BUILD_NUM}/index.html"
-            echo "✓ Bench results deployed"
+            echo "Bench results deployed"
           fi
 
           # ── flame ──────────────────────────────────────────────────────────
@@ -683,7 +733,7 @@ jobs:
             mkdir -p "$WORK/flame" "$WORK/flame/builds/build_${BUILD_NUM}"
             cp -r deploy/flame/* "$WORK/flame/"
             cp -r deploy/flame/* "$WORK/flame/builds/build_${BUILD_NUM}/"
-            echo "✓ Flamegraphs deployed"
+            echo "Flamegraphs deployed"
           fi
 
           # ── root landing ───────────────────────────────────────────────────
@@ -714,8 +764,8 @@ jobs:
           </head>
           <body>
             <div class="card">
-              <h1>🦀 DixScript-Rust</h1>
-              <p>MidManStudio · CI Result Dashboard</p>
+              <h1>DixScript-Rust</h1>
+              <p>MidManStudio — CI Result Dashboard</p>
               <div class="links">
                 <a href="tests/">
                   <span class="icon">✅</span>
@@ -723,11 +773,11 @@ jobs:
                 </a>
                 <a href="bench/">
                   <span class="icon">📊</span>
-                  <div><div>Benchmarks</div><div class="desc">criterion — throughput & latency</div></div>
+                  <div><div>Benchmarks</div><div class="desc">criterion — throughput and latency</div></div>
                 </a>
                 <a href="flame/">
                   <span class="icon">🔥</span>
-                  <div><div>Flamegraphs</div><div class="desc">perf — profiling for hot paths</div></div>
+                  <div><div>Flamegraphs</div><div class="desc">samply — profiling for hot paths</div></div>
                 </a>
               </div>
             </div>
@@ -746,7 +796,7 @@ jobs:
             "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
             gh-pages
           echo ""
-          echo "✅ Deployed to gh-pages!"
+          echo "Deployed to gh-pages"
           echo "  https://mid-d-man.github.io/DixScript-Rust/"
 
   # ── 6. Summary ─────────────────────────────────────────────────────────────
@@ -757,9 +807,9 @@ jobs:
     steps:
       - name: Print summary
         run: |
-          echo "═══════════════════════════════════════════════"
+          echo "======================================================="
           echo "  DixScript — Publish Results Summary"
-          echo "═══════════════════════════════════════════════"
+          echo "======================================================="
           echo "Build:     #${{ github.run_number }}"
           echo "Branch:    ${{ github.ref_name }}"
           echo "Tests:     ${{ needs.run-tests.result  || 'skipped' }}"
@@ -767,4 +817,4 @@ jobs:
           echo "Flame:     ${{ needs.run-flame.result  || 'skipped' }}"
           echo "Deploy:    ${{ needs.deploy-results.result || 'skipped' }}"
           echo ""
-          echo "✅ View results: https://mid-d-man.github.io/DixScript-Rust/"
+          echo "View results: https://mid-d-man.github.io/DixScript-Rust/"

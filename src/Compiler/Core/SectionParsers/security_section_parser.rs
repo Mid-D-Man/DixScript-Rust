@@ -1,3 +1,4 @@
+// src/Compiler/Core/SectionParsers/security_section_parser.rs
 //! Parser for the `@SECURITY(...)` section.
 //!
 //! ```text
@@ -6,19 +7,29 @@
 //! SecurityBlockKey ::= "encryption" | "validation" | "keystore" | "override" | "metadata"
 //! SecurityFieldList ::= SecurityField ("," SecurityField)*
 //! SecurityField    ::= Identifier "=" SecurityValue
-//! SecurityValue    ::= StringLiteral | Integer | Boolean | HexLiteral | "auto"
+//! SecurityValue    ::= StringLiteral | Integer | Boolean | "auto" | HexLiteral
 //! ```
 
 use crate::Compiler::AST::{SecuritySection, SecurityEntry, SecurityField, Position, Value};
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
-use crate::ErrorManager::{ErrorManager, ParseErrorType,DebugConfig};
+use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::Core::Tokenizer::token::SectionId;
 
 const MAX_ITERATIONS_PER_TOKEN: usize = 3;
 const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
 const MAX_STUCK_COUNT: usize = 3;
-const PROGRESS_CHECK_INTERVAL: usize = 100;
+
+/// Check a security block key without any heap allocation.
+/// Uses `eq_ignore_ascii_case` — O(n) on key length, but zero allocation.
+#[inline]
+fn is_valid_block_key(key: &str) -> bool {
+    key.eq_ignore_ascii_case("encryption")
+        || key.eq_ignore_ascii_case("validation")
+        || key.eq_ignore_ascii_case("keystore")
+        || key.eq_ignore_ascii_case("override")
+        || key.eq_ignore_ascii_case("metadata")
+}
 
 pub struct SecuritySectionParser<'a> {
     tokens: &'a [Token],
@@ -35,43 +46,47 @@ pub struct SecuritySectionParser<'a> {
 
 impl<'a> SecuritySectionParser<'a> {
     pub fn new(tokens: &'a [Token], operational_settings: &'a OperationalSettings) -> Self {
-    let error_manager = ErrorManager::get_shared_instance();
-    let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
+        let error_manager = ErrorManager::get_shared_instance();
+        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
 
-    let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
-    let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
+        let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
+        let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
 
-    if debug_config.is_enabled {
-        error_manager.log_debug(&format!(
-            "SECURITY parser: {} tokens, strategy: {:?}",
-            tokens.len(),
-            operational_settings.error_handling_strategy
-        ));
+        if debug_config.is_enabled {
+            error_manager.log_debug(&format!(
+                "SECURITY parser: {} tokens, strategy: {:?}",
+                tokens.len(),
+                operational_settings.error_handling_strategy
+            ));
+        }
+
+        SecuritySectionParser {
+            tokens,
+            operational_settings,
+            error_manager,
+            debug_config,
+            position: 0,
+            last_position: usize::MAX,
+            stuck_count: 0,
+            iteration_count: 0,
+            max_iterations,
+            has_encountered_errors: false,
+        }
     }
-
-    SecuritySectionParser {
-        tokens,
-        operational_settings,
-        error_manager,
-        debug_config,
-        position: 0,
-        last_position: usize::MAX,
-        stuck_count: 0,
-        iteration_count: 0,
-        max_iterations,
-        has_encountered_errors: false,
-    }
-}
 
     pub fn parse_section(&mut self) -> Option<SecuritySection> {
         let section_start_pos = Position::from_token(self.current());
         self.reset_parse_state();
 
-        let mut security_entries = Vec::with_capacity(usize::max(3, self.tokens.len() / 20));
+        let mut entries: Vec<SecurityEntry> = Vec::with_capacity(4);
 
         if !self.match_and_consume_symbol('(') {
             let current = self.current().clone();
-            self.report_error(ParseErrorType::MissingToken, "Expected '(' to start SECURITY section", &current);
+            self.report_error(
+                ParseErrorType::MissingToken,
+                "Expected '(' to start SECURITY section",
+                &current,
+            );
             if self.should_halt_section() {
                 return self.partial_or_none(section_start_pos);
             }
@@ -80,17 +95,20 @@ impl<'a> SecuritySectionParser<'a> {
             }
         }
 
+        if self.is_current_symbol(')') {
+            self.advance();
+            return Some(SecuritySection::new(entries, section_start_pos));
+        }
+
         while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
-            if self.iteration_count % PROGRESS_CHECK_INTERVAL == 0 {
-                self.track_progress();
-                if self.is_stuck() {
-                    if !self.force_advance() {
-                        break;
-                    }
-                    continue;
+            self.track_progress();
+
+            if self.is_stuck() {
+                if !self.force_advance() {
+                    break;
                 }
+                continue;
             }
-            self.iteration_count += 1;
 
             if self.is_current_symbol(',') {
                 self.advance();
@@ -99,31 +117,30 @@ impl<'a> SecuritySectionParser<'a> {
 
             match self.parse_security_entry() {
                 Some(entry) => {
-                    if self.debug_config.is_verbose {
+                    if self.debug_config.is_enabled {
                         self.error_manager.log_debug(&format!(
-                            "SECURITY: parsed entry '{}'", entry.block_key
+                            "SECURITY: parsed entry '{}'",
+                            entry.block_key
                         ));
                     }
-                    security_entries.push(entry);
+                    entries.push(entry);
                 }
                 None => {
                     if self.should_halt_section() {
                         return self.partial_or_none(section_start_pos);
                     }
-                    if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Recover {
-                        if !self.recover_to_entry_boundary() {
-                            self.ensure_progress();
-                        }
-                    } else {
-                        self.ensure_progress();
-                    }
+                    self.ensure_progress();
                 }
             }
         }
 
         if !self.match_and_consume_symbol(')') {
             let current = self.current().clone();
-            self.report_error(ParseErrorType::MissingToken, "Expected ')' to close SECURITY section", &current);
+            self.report_error(
+                ParseErrorType::MissingToken,
+                "Expected ')' to close SECURITY section",
+                &current,
+            );
             if self.should_halt_section() {
                 return self.partial_or_none(section_start_pos);
             }
@@ -132,95 +149,73 @@ impl<'a> SecuritySectionParser<'a> {
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
                 "SECURITY section done: {} entries, errors: {}",
-                security_entries.len(),
+                entries.len(),
                 self.has_encountered_errors
             ));
         }
 
-        Some(SecuritySection::new(security_entries, section_start_pos))
+        Some(SecuritySection::new(entries, section_start_pos))
     }
 
     fn parse_security_entry(&mut self) -> Option<SecurityEntry> {
         let entry_start_pos = Position::from_token(self.current());
-        let block_key = self.parse_identifier_or_keyword(
-            "Expected security block key (encryption, validation, keystore, override, metadata)",
-        )?;
 
-        if !self.match_arrow() {
+        let block_key = self.parse_block_key()?;
+
+        if !self.match_switch_case() {
             let current = self.current().clone();
-            let msg = format!("Expected '->' after security block key '{}'", block_key);
+            let msg = format!(
+                "Expected '->' after security block key '{}', found {}",
+                block_key,
+                current.get_token_value()
+            );
             self.report_error(ParseErrorType::MissingToken, &msg, &current);
             if self.should_halt_section() {
-                return None;
-            }
-            if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Recover {
-                if !self.recover_to_arrow() {
-                    return None;
-                }
-            } else {
                 return None;
             }
         }
 
         if !self.match_and_consume_symbol('{') {
             let current = self.current().clone();
-            let msg = format!("Expected '{{' in security entry '{}'", block_key);
+            let msg = format!("Expected '{{' to open security block '{}'", block_key);
             self.report_error(ParseErrorType::MissingToken, &msg, &current);
             if self.should_halt_section() {
                 return None;
             }
-            if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Recover {
-                if !self.recover_to_symbol('{', 10) {
-                    return None;
-                }
-            } else {
+            if !self.recover_to_symbol('{', 10) {
                 return None;
             }
         }
 
-        let mut fields = Vec::with_capacity(usize::max(4, self.tokens.len() / 50));
+        let mut fields: Vec<SecurityField> = Vec::with_capacity(4);
 
         while !self.is_at_end() && !self.is_current_symbol('}') && !self.should_terminate_loop() {
-            if self.iteration_count % PROGRESS_CHECK_INTERVAL == 0 {
-                self.track_progress();
-                if self.is_stuck() {
-                    if !self.force_advance() {
-                        break;
-                    }
-                    continue;
-                }
-            }
-            self.iteration_count += 1;
+            self.track_progress();
 
-            match self.parse_security_field() {
-                Some(field) => fields.push(field),
-                None => {
-                    if self.should_halt_section() {
-                        return None;
-                    }
+            if self.is_stuck() {
+                if !self.force_advance() {
+                    break;
                 }
+                continue;
             }
 
             if self.is_current_symbol(',') {
                 self.advance();
-            } else if self.is_current_symbol('}') {
-                break;
-            } else if !self.is_at_end() {
-                let current = self.current().clone();
-                let msg = format!(
-                    "Expected ',' or '}}' in '{}', found {}",
-                    block_key,
-                    current.get_token_value()
-                );
-                self.report_error(ParseErrorType::UnexpectedToken, &msg, &current);
-                if self.should_halt_section() {
-                    return None;
-                }
-                if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Recover {
-                    if !self.recover_in_fields() {
-                        self.ensure_progress();
+                continue;
+            }
+
+            match self.parse_security_field() {
+                Some(field) => {
+                    if self.debug_config.is_verbose {
+                        self.error_manager
+                            .log_debug(&format!("  SECURITY field: {}", field.key));
                     }
-                } else {
+                    fields.push(field);
+                }
+                None => {
+                    if self.should_halt_section() {
+                        return None;
+                    }
                     self.ensure_progress();
                 }
             }
@@ -238,22 +233,83 @@ impl<'a> SecuritySectionParser<'a> {
         Some(SecurityEntry::new(block_key, fields, entry_start_pos))
     }
 
-    fn parse_security_field(&mut self) -> Option<SecurityField> {
-        let field_start_pos = Position::from_token(self.current());
-        let key = self.parse_identifier_or_keyword("Expected field key identifier")?;
+    fn parse_block_key(&mut self) -> Option<String> {
+        let key = match &self.current().token_type {
+            TokenType::Identifier(id) => {
+                let k = id.clone();
+                self.advance();
+                k
+            }
+            // Block keys may be tokenized as Keyword if they appear in any keyword map
+            TokenType::Keyword(kw) => {
+                let k = kw.to_string();
+                self.advance();
+                k
+            }
+            _ => {
+                let current = self.current().clone();
+                self.report_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!(
+                        "Expected security block key (encryption, validation, keystore, override, metadata), found {}",
+                        current.get_token_value()
+                    ),
+                    &current,
+                );
+                return None;
+            }
+        };
 
-        if !self.match_and_consume_symbol('=') {
+        // Zero-allocation validation via eq_ignore_ascii_case
+        if !is_valid_block_key(&key) {
             let current = self.current().clone();
-            let msg = format!("Expected '=' after field key '{}'", key);
-            self.report_error(ParseErrorType::MissingToken, &msg, &current);
+            let msg = format!(
+                "Unknown security block key '{}'. Valid keys: encryption, validation, keystore, override, metadata",
+                key
+            );
+            self.report_error(ParseErrorType::InvalidIdentifier, &msg, &current);
             if self.should_halt_section() {
                 return None;
             }
-            if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Recover {
-                if !self.recover_to_symbol('=', 10) {
-                    return None;
-                }
-            } else {
+            // Permissive/Recover: accept the unknown key and continue
+        }
+
+        Some(key)
+    }
+
+    fn parse_security_field(&mut self) -> Option<SecurityField> {
+        let field_start_pos = Position::from_token(self.current());
+
+        let key = match &self.current().token_type {
+            TokenType::Identifier(id) => {
+                let k = id.clone();
+                self.advance();
+                k
+            }
+            TokenType::Keyword(kw) => {
+                let k = kw.to_string();
+                self.advance();
+                k
+            }
+            _ => {
+                let current = self.current().clone();
+                self.report_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!(
+                        "Expected field name in security block, found {}",
+                        current.get_token_value()
+                    ),
+                    &current,
+                );
+                return None;
+            }
+        };
+
+        if !self.match_and_consume_symbol('=') {
+            let current = self.current().clone();
+            let msg = format!("Expected '=' after security field '{}'", key);
+            self.report_error(ParseErrorType::MissingToken, &msg, &current);
+            if self.should_halt_section() {
                 return None;
             }
         }
@@ -262,94 +318,100 @@ impl<'a> SecuritySectionParser<'a> {
             Some(v) => v,
             None => {
                 let current = self.current().clone();
-                let msg = format!("Expected value for field '{}'", key);
+                let msg = format!(
+                    "Expected value for security field '{}', found {}",
+                    key,
+                    current.get_token_value()
+                );
                 self.report_error(ParseErrorType::UnexpectedToken, &msg, &current);
-                if self.should_halt_section() {
-                    return None;
-                }
-                Value::Error {
-                    message: format!("Missing value for key '{}'", key),
-                    position: field_start_pos,
-                }
+                return None;
             }
         };
 
         Some(SecurityField::new(key, value, field_start_pos))
     }
 
-    fn parse_identifier_or_keyword(&mut self, context: &str) -> Option<String> {
-        match &self.current().token_type {
-            TokenType::Identifier(id) => {
-                let key = id.clone();
-                self.advance();
-                Some(key)
-            }
-            TokenType::Keyword(k) => {
-                let key = k.to_string();
-                self.advance();
-                Some(key)
-            }
-            _ => {
-                let current = self.current().clone();
-                self.report_error(ParseErrorType::UnexpectedToken, context, &current);
-                None
-            }
-        }
-    }
-
+    /// Parse a value allowed inside a security block.
+    /// No allocations on successful paths except for the String clone of
+    /// string literal content, which is unavoidable.
     fn parse_security_value(&mut self) -> Option<Value> {
-        let pos = Position::from_token(self.current());
-
-        let value = match &self.current().token_type {
-            TokenType::Integer(i)     => Some(Value::Integer { value: *i, position: pos }),
-            TokenType::String(s)      => Some(Value::String  { value: s.clone(), position: pos }),
-            TokenType::StringSingle(s) => Some(Value::String { value: s.clone(), position: pos }),
-            TokenType::Bool(b)        => Some(Value::Boolean { value: *b, position: pos }),
-            TokenType::HexLiteral(h)  => Some(Value::Integer { value: *h, position: pos }),
-
-            TokenType::Keyword(k) if *k == "true"  => Some(Value::Boolean { value: true,  position: pos }),
-            TokenType::Keyword(k) if *k == "false" => Some(Value::Boolean { value: false, position: pos }),
-            TokenType::Keyword(k) if *k == "auto"  => Some(Value::String  { value: "auto".to_string(), position: pos }),
-
-            TokenType::Identifier(id) if *id == "auto"  => Some(Value::String  { value: "auto".to_string(),  position: pos }),
-            TokenType::Identifier(id) if *id == "true"  => Some(Value::Boolean { value: true,  position: pos }),
-            TokenType::Identifier(id) if *id == "false" => Some(Value::Boolean { value: false, position: pos }),
-
+        match &self.current().token_type {
+            TokenType::String(s) => {
+                let v = Value::String(s.clone());
+                self.advance();
+                Some(v)
+            }
+            TokenType::StringSingle(s) => {
+                let v = Value::String(s.clone());
+                self.advance();
+                Some(v)
+            }
+            TokenType::Integer(i) => {
+                let v = Value::Integer(*i);
+                self.advance();
+                Some(v)
+            }
+            TokenType::Float(fl) => {
+                let v = Value::Float(*fl);
+                self.advance();
+                Some(v)
+            }
+            TokenType::Double(d) => {
+                let v = Value::Double(*d);
+                self.advance();
+                Some(v)
+            }
+            // Tokenizer emits Bool(true/false) directly
+            TokenType::Bool(b) => {
+                let v = Value::Boolean(*b);
+                self.advance();
+                Some(v)
+            }
+            TokenType::HexLiteral(h) => {
+                let v = Value::HexLiteral(*h);
+                self.advance();
+                Some(v)
+            }
+            TokenType::HexColor(h) => {
+                let v = Value::HexColor(h.clone());
+                self.advance();
+                Some(v)
+            }
+            // "auto" is not in any keyword PHF map, arrives as Identifier
+            TokenType::Identifier(id) if id.eq_ignore_ascii_case("auto") => {
+                let v = Value::String("auto".to_string());
+                self.advance();
+                Some(v)
+            }
+            // "true"/"false"/"null" are Keyword(&'static str) — compare with == per finalization
+            TokenType::Keyword(k) if *k == "true" => {
+                let v = Value::Boolean(true);
+                self.advance();
+                Some(v)
+            }
+            TokenType::Keyword(k) if *k == "false" => {
+                let v = Value::Boolean(false);
+                self.advance();
+                Some(v)
+            }
+            TokenType::Keyword(k) if *k == "null" => {
+                let v = Value::Null;
+                self.advance();
+                Some(v)
+            }
             _ => None,
-        };
-
-        if value.is_some() {
-            self.advance();
         }
-
-        value
     }
 
-    fn match_arrow(&mut self) -> bool {
-        match &self.current().token_type {
-            TokenType::MultiCharSymbol(ms) if *ms == "->" => {
-                self.advance();
-                return true;
-            }
-            _ => {}
-        }
-
+    /// Consume a `->` (SwitchCase) token.
+    #[inline]
+    fn match_switch_case(&mut self) -> bool {
         if matches!(self.current().token_type, TokenType::SwitchCase) {
             self.advance();
-            return true;
+            true
+        } else {
+            false
         }
-
-        if let TokenType::Symbol('-') = self.current().token_type {
-            if self.position + 1 < self.tokens.len() {
-                if let TokenType::Symbol('>') = self.tokens[self.position + 1].token_type {
-                    self.advance();
-                    self.advance();
-                    return true;
-                }
-            }
-        }
-
-        false
     }
 
     fn report_error(&mut self, error_type: ParseErrorType, message: &str, token: &Token) {
@@ -365,6 +427,7 @@ impl<'a> SecuritySectionParser<'a> {
         );
     }
 
+    #[inline]
     fn should_halt_section(&self) -> bool {
         self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt
             && self.has_encountered_errors
@@ -395,46 +458,20 @@ impl<'a> SecuritySectionParser<'a> {
         false
     }
 
-    fn recover_to_arrow(&mut self) -> bool {
-        if self.operational_settings.error_handling_strategy != ErrorHandlingStrategy::Recover {
-            return false;
-        }
-        for _ in 0..10 {
-            if self.is_at_end() {
-                return false;
+    /// Reconstruct the source line for an error token — cold path only.
+    fn reconstruct_source_line(&self, token: &Token) -> Option<String> {
+        let mut source = String::new();
+        let mut col = 0usize;
+        for t in self.tokens.iter().filter(|t| t.line == token.line) {
+            while col < t.column {
+                source.push(' ');
+                col += 1;
             }
-            if self.match_arrow() {
-                return true;
-            }
-            self.advance();
+            let v = t.get_token_value();
+            col += v.len();
+            source.push_str(&v);
         }
-        false
-    }
-
-    fn recover_to_entry_boundary(&mut self) -> bool {
-        if self.operational_settings.error_handling_strategy != ErrorHandlingStrategy::Recover {
-            return false;
-        }
-        for _ in 0..50 {
-            if self.is_at_end() || self.is_current_symbol('}') || self.is_current_symbol(')') {
-                return true;
-            }
-            self.advance();
-        }
-        false
-    }
-
-    fn recover_in_fields(&mut self) -> bool {
-        if self.operational_settings.error_handling_strategy != ErrorHandlingStrategy::Recover {
-            return false;
-        }
-        for _ in 0..50 {
-            if self.is_at_end() || self.is_current_symbol(',') || self.is_current_symbol('}') {
-                return true;
-            }
-            self.advance();
-        }
-        false
+        if source.is_empty() { None } else { Some(source) }
     }
 
     #[inline]
@@ -476,23 +513,6 @@ impl<'a> SecuritySectionParser<'a> {
         }
     }
 
-    fn reconstruct_source_line(&self, token: &Token) -> Option<String> {
-        let mut source = String::new();
-        let mut col = 0usize;
-
-        for t in self.tokens.iter().filter(|t| t.line == token.line) {
-            while col < t.column {
-                source.push(' ');
-                col += 1;
-            }
-            let v = t.get_token_value();
-            col += v.len();
-            source.push_str(&v);
-        }
-
-        if source.is_empty() { None } else { Some(source) }
-    }
-
     fn reset_parse_state(&mut self) {
         self.last_position = usize::MAX;
         self.stuck_count = 0;
@@ -501,6 +521,7 @@ impl<'a> SecuritySectionParser<'a> {
     }
 
     fn track_progress(&mut self) {
+        self.iteration_count += 1;
         if self.position == self.last_position {
             self.stuck_count += 1;
         } else {
@@ -515,15 +536,15 @@ impl<'a> SecuritySectionParser<'a> {
     }
 
     fn should_terminate_loop(&self) -> bool {
-    if self.iteration_count >= self.max_iterations {
-        self.error_manager.log_error(&format!(
-            "SECURITY parser exceeded {} iterations — possible infinite loop",
-            self.max_iterations
-        ));
-        return true;
+        if self.iteration_count >= self.max_iterations {
+            self.error_manager.log_error(&format!(
+                "SECURITY parser exceeded {} iterations — possible infinite loop",
+                self.max_iterations
+            ));
+            return true;
+        }
+        false
     }
-    false
-}
 
     fn force_advance(&mut self) -> bool {
         if self.is_at_end() {

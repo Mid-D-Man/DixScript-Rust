@@ -29,34 +29,39 @@ pub struct SecuritySectionParser<'a> {
     last_position: usize,
     stuck_count: usize,
     iteration_count: usize,
+    max_iterations: usize,
     has_encountered_errors: bool,
 }
 
 impl<'a> SecuritySectionParser<'a> {
     pub fn new(tokens: &'a [Token], operational_settings: &'a OperationalSettings) -> Self {
-        let error_manager = ErrorManager::get_shared_instance();
-        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
+    let error_manager = ErrorManager::get_shared_instance();
+    let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
 
-        if debug_config.is_enabled {
-            error_manager.log_debug(&format!(
-                "SECURITY parser: {} tokens, strategy: {:?}",
-                tokens.len(),
-                operational_settings.error_handling_strategy
-            ));
-        }
+    let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
+    let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
 
-        SecuritySectionParser {
-            tokens,
-            operational_settings,
-            error_manager,
-            debug_config,
-            position: 0,
-            last_position: usize::MAX,
-            stuck_count: 0,
-            iteration_count: 0,
-            has_encountered_errors: false,
-        }
+    if debug_config.is_enabled {
+        error_manager.log_debug(&format!(
+            "SECURITY parser: {} tokens, strategy: {:?}",
+            tokens.len(),
+            operational_settings.error_handling_strategy
+        ));
     }
+
+    SecuritySectionParser {
+        tokens,
+        operational_settings,
+        error_manager,
+        debug_config,
+        position: 0,
+        last_position: usize::MAX,
+        stuck_count: 0,
+        iteration_count: 0,
+        max_iterations,
+        has_encountered_errors: false,
+    }
+}
 
     pub fn parse_section(&mut self) -> Option<SecuritySection> {
         let section_start_pos = Position::from_token(self.current());
@@ -510,16 +515,15 @@ impl<'a> SecuritySectionParser<'a> {
     }
 
     fn should_terminate_loop(&self) -> bool {
-        let limit = (self.tokens.len() * MAX_ITERATIONS_PER_TOKEN).min(ABSOLUTE_MAX_ITERATIONS);
-        if self.iteration_count >= limit {
-            self.error_manager.log_error(&format!(
-                "SECURITY parser exceeded {} iterations — possible infinite loop",
-                limit
-            ));
-            return true;
-        }
-        false
+    if self.iteration_count >= self.max_iterations {
+        self.error_manager.log_error(&format!(
+            "SECURITY parser exceeded {} iterations — possible infinite loop",
+            self.max_iterations
+        ));
+        return true;
     }
+    false
+}
 
     fn force_advance(&mut self) -> bool {
         if self.is_at_end() {

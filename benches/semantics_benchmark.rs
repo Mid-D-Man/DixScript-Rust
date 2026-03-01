@@ -230,6 +230,10 @@ fn build_combined_input(data_props: usize) -> String {
 
 /// Run the full front-end (ConfigHandler → Tokenizer → GeneralParser) and return
 /// the finished AST plus the operational settings extracted from @CONFIG.
+///
+/// `GeneralParser::parse()` returns `Result<DixScript, ParseException>`.
+/// We `.expect()` here so that any parse failure surfaces immediately as a
+/// panic in the benchmark setup phase rather than silently producing bad data.
 fn parse_to_ast(source: &str) -> (DixScript, OperationalSettings) {
     let mut handler = ConfigSectionHandler::new(None);
     let cfg = handler.process_config_section(source);
@@ -237,7 +241,8 @@ fn parse_to_ast(source: &str) -> (DixScript, OperationalSettings) {
     let toks = Tokenizer::new(&cfg.cleaned_input_string, &settings).tokenize();
     let parser = GeneralParser::new(toks.tokens, &cfg.config_section, &settings)
         .expect("parser init");
-    let ast = parser.parse();
+    // parse() returns Result<DixScript, ParseException> — unwrap for bench setup
+    let ast = parser.parse().expect("parse failed in bench setup");
     (ast, settings)
 }
 
@@ -476,7 +481,8 @@ fn bench_full_pipeline(c: &mut Criterion) {
             let toks = Tokenizer::new(&cfg.cleaned_input_string, &s).tokenize();
             let parser = GeneralParser::new(toks.tokens, &cfg.config_section, &s)
                 .expect("parser init");
-            let ast = parser.parse();
+            // parse() returns Result — unwrap inside timed loop (cost is negligible)
+            let ast = parser.parse().expect("parse failed");
 
             let analyzer = GeneralSemanticAnalyzer::new(&ast, &s);
             black_box(analyzer.analyze())
@@ -496,7 +502,7 @@ fn bench_full_pipeline(c: &mut Criterion) {
                 let toks = Tokenizer::new(&cfg.cleaned_input_string, &s).tokenize();
                 let parser = GeneralParser::new(toks.tokens, &cfg.config_section, &s)
                     .expect("parser init");
-                let ast = parser.parse();
+                let ast = parser.parse().expect("parse failed");
 
                 let analyzer = GeneralSemanticAnalyzer::new(&ast, &s);
                 black_box(analyzer.analyze())
@@ -531,7 +537,7 @@ fn bench_full_pipeline(c: &mut Criterion) {
                 let toks = Tokenizer::new(&cfg.cleaned_input_string, &s).tokenize();
                 let parser = GeneralParser::new(toks.tokens, &cfg.config_section, &s)
                     .expect("parser init");
-                let ast = parser.parse();
+                let ast = parser.parse().expect("parse failed");
 
                 let analyzer = GeneralSemanticAnalyzer::new(&ast, &s);
                 black_box(analyzer.analyze())

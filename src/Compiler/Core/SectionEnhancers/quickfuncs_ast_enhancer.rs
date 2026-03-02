@@ -1,115 +1,112 @@
 // src/Compiler/Core/SectionEnhancers/quickfuncs_ast_enhancer.rs
-
-//! Enhances QuickFunctions section with compile-time completions
-//! Primary tasks:
-//! 1. Generate parameter defaults from type annotations
-//! 2. Resolve qualified identifiers using semantic analysis results
+//! Enhances the @QUICKFUNCS section with compile-time completions.
+//!
+//! Applies parameter default values from type annotations and resolves
+//! QualifiedIdentifier nodes using semantic analysis metadata.
+//! The resolver is constructed once per section, not once per function,
+//! keeping cost O(q) rather than O(f·q).
 
 use crate::Compiler::AST::*;
-use crate::Compiler::Core::SectionEnhancers::QualifiedIdentifierResolver;
 use crate::Compiler::Core::SectionAnalyzers::SectionAnalysisResult;
+use crate::Compiler::Core::SectionEnhancers::QualifiedIdentifierResolver;
 use crate::Compiler::Core::OperationalSettings;
 use crate::Compiler::Extensions::TypeSystemManager;
-use crate::ErrorManager::ErrorManager;
-use std::time::{Duration, Instant};
+use crate::ErrorManager::{DebugConfig, ErrorManager};
 
-/// Enhances QuickFunctions section with compile-time completions
-pub struct QuickFunctionsAstEnhancer {
-    operational_settings: OperationalSettings,
+pub struct QuickFunctionsAstEnhancer<'a> {
+    operational_settings: &'a OperationalSettings,
     error_manager: ErrorManager,
+    debug_config: DebugConfig,
     enhancement_count: usize,
-    start_time: Option<Instant>,
 }
 
-impl QuickFunctionsAstEnhancer {
-    /// Create new QuickFunctions AST enhancer
-    pub fn new(operational_settings: OperationalSettings) -> Self {
+impl<'a> QuickFunctionsAstEnhancer<'a> {
+    pub fn new(operational_settings: &'a OperationalSettings) -> Self {
         QuickFunctionsAstEnhancer {
-            operational_settings,
+            debug_config: DebugConfig::from_debug_mode(operational_settings.debug_mode),
             error_manager: ErrorManager::get_shared_instance(),
+            operational_settings,
             enhancement_count: 0,
-            start_time: None,
         }
     }
 
-    /// Enhance QuickFunctions section with compile-time completions AND qualified identifier resolution
     pub fn enhance(
         &mut self,
         section: &QuickFuncsSection,
         analysis_result: Option<&SectionAnalysisResult>,
     ) -> QuickFuncsSection {
-        self.start_time = Some(Instant::now());
-
-        self.error_manager.log_debug(&format!(
-            "Processing {} functions",
-            section.functions.len()
-        ));
-
-        let mut enhanced_functions = Vec::with_capacity(section.functions.len());
-
-        // EXPLICIT ITERATION: Use .iter() to make borrowing crystal clear
-        for function in section.functions.iter() {
-            let enhanced_function = self.enhance_function(function, analysis_result);
-            enhanced_functions.push(enhanced_function);
-        }
-
-        let duration = self.start_time.unwrap().elapsed();
-
-        self.error_manager.log_info(&format!(
-            "Enhanced {} functions",
-            section.functions.len()
-        ));
-        self.error_manager.log_info(&format!(
-            "Applied {} parameter defaults",
-            self.enhancement_count
-        ));
-
-        // analysis_result is Option<&T> which is Copy, can be used again
-        if let Some(ref result) = analysis_result {
-            self.error_manager.log_info(&format!(
-                "Resolved {} qualified identifiers",
-                result.qualified_id_resolutions.len()
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "Enhancing {} functions", section.functions.len()
             ));
         }
 
-        self.error_manager.log_debug(&format!(
-            "Enhancement time: {:.2}ms",
-            duration.as_secs_f64() * 1000.0
-        ));
+        // Build the resolver once for the entire section. Creating it per-function
+        // would clone the resolution map f times, making cost O(f²·q) rather than O(f·q).
+        let resolver = analysis_result
+            .filter(|r| !r.qualified_id_resolutions.is_empty())
+            .map(|r| {
+                if self.debug_config.is_verbose {
+                    for (key, resolution) in &r.qualified_id_resolutions {
+                        self.error_manager.log_debug(&format!(
+                            "Resolution available: {} -> {}",
+                            key.parts.join("."),
+                            resolution.resolved_type
+                        ));
+                    }
+                }
+                QualifiedIdentifierResolver::new(
+                    r.qualified_id_resolutions.clone(),
+                    self.debug_config,
+                )
+            });
+
+        let mut enhanced_functions = Vec::with_capacity(section.functions.len());
+        for function in &section.functions {
+            enhanced_functions.push(self.enhance_function(function, resolver.as_ref()));
+        }
+
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info(&format!(
+                "Enhanced {} functions, {} parameter defaults applied",
+                section.functions.len(),
+                self.enhancement_count
+            ));
+            if let Some(r) = analysis_result {
+                self.error_manager.log_info(&format!(
+                    "Resolved {} qualified identifiers",
+                    r.qualified_id_resolutions.len()
+                ));
+            }
+        }
 
         QuickFuncsSection::new(enhanced_functions, section.position)
     }
 
-    /// Enhance a single function
     fn enhance_function(
         &mut self,
         function: &QuickFunction,
-        analysis_result: Option<&SectionAnalysisResult>,
+        resolver: Option<&QualifiedIdentifierResolver>,
     ) -> QuickFunction {
-        self.error_manager.log_debug(&format!("Enhancing function: {}", function.name));
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!("Enhancing function: {}", function.name));
+        }
 
-        // 1. Apply parameter defaults - clone parameters because apply_defaults_to_parameters takes ownership
-        let enhanced_parameters = TypeSystemManager::apply_defaults_to_parameters(
-            function.parameters.clone()
-        );
-        let defaults_applied = self.count_defaults_applied(&function.parameters, &enhanced_parameters);
+        let enhanced_parameters =
+            TypeSystemManager::apply_defaults_to_parameters(function.parameters.clone());
+
+        let defaults_applied =
+            self.count_defaults_applied(&function.parameters, &enhanced_parameters);
         self.enhancement_count += defaults_applied;
 
-        // 2. Resolve qualified identifiers in function body (if analysis result available)
-        let enhanced_body = if let Some(result) = analysis_result {
-            if !result.qualified_id_resolutions.is_empty() {
-                self.resolve_qualified_identifiers_in_body(&function.body, result)
-            } else {
-                function.body.clone()
-            }
-        } else {
-            function.body.clone()
+        let enhanced_body = match resolver {
+            Some(r) => r.resolve_statements(&function.body),
+            None => function.body.clone(),
         };
 
-        if defaults_applied > 0 {
+        if defaults_applied > 0 && self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
-                "Applied {} default(s) to function '{}'",
-                defaults_applied, function.name
+                "Applied {} default(s) to '{}'", defaults_applied, function.name
             ));
         }
 
@@ -123,66 +120,19 @@ impl QuickFunctionsAstEnhancer {
         )
     }
 
-    /// Resolve qualified identifiers in function body using analysis results
-    fn resolve_qualified_identifiers_in_body(
-        &self,
-        body: &[QuickFuncStatement],
-        analysis_result: &SectionAnalysisResult,
-    ) -> Vec<QuickFuncStatement> {
-        self.error_manager.log_debug("[QF-Enhancer] Starting qualified identifier resolution");
-        self.error_manager.log_debug(&format!(
-            "[QF-Enhancer] Total resolutions available: {}",
-            analysis_result.qualified_id_resolutions.len()
-        ));
-
-        // Log all available resolutions (verbose mode)
-        if self.operational_settings.debug_mode == crate::Compiler::Core::DebugMode::Verbose {
-            for (key, resolution) in &analysis_result.qualified_id_resolutions {
-                self.error_manager.log_debug(&format!(
-                    "[QF-Enhancer] Resolution available: {} -> {}",
-                    key.parts.join("."), resolution.resolved_type
-                ));
-            }
-        }
-
-        let resolver = QualifiedIdentifierResolver::new(
-            analysis_result.qualified_id_resolutions.clone()
-        );
-
-        let enhanced_statements: Vec<QuickFuncStatement> = body
-            .iter()
-            .map(|stmt| resolver.resolve_statement(stmt))
-            .collect();
-
-        self.error_manager.log_debug("[QF-Enhancer] Qualified identifier resolution complete");
-
-        enhanced_statements
-    }
-
-    /// Count how many defaults were applied (for stats)
     fn count_defaults_applied(
         &self,
         original: &[QuickFuncParam],
         enhanced: &[QuickFuncParam],
     ) -> usize {
-        let mut count = 0;
-
-        for i in 0..original.len() {
-            if original[i].default_value.is_none() && enhanced[i].default_value.is_some() {
-                count += 1;
-            }
-        }
-
-        count
+        original
+            .iter()
+            .zip(enhanced.iter())
+            .filter(|(o, e)| o.default_value.is_none() && e.default_value.is_some())
+            .count()
     }
 
-    /// Get total number of enhancements applied
     pub fn get_enhancement_count(&self) -> usize {
         self.enhancement_count
     }
-
-    /// Get enhancement duration
-    pub fn get_enhancement_duration(&self) -> Duration {
-        self.start_time.map(|t| t.elapsed()).unwrap_or_default()
-    }
-}
+                                                     }

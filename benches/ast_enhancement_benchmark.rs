@@ -17,6 +17,7 @@ use dixscript::Compiler::AST::{
 };
 use dixscript::Compiler::Core::{
     Config::{ConfigSectionHandler, OperationalSettings},
+    DebugMode,
     GeneralAstEnhancer, GeneralParser, GeneralSemanticAnalyzer, SectionAnalysisResult,
     SemanticAnalysisResult,
     SectionEnhancers::{
@@ -25,7 +26,7 @@ use dixscript::Compiler::Core::{
     },
     Tokenizer::Tokenizer,
 };
-use dixscript::ErrorManager::{DebugConfig, DebugMode};
+use dixscript::ErrorManager::DebugConfig;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -289,7 +290,13 @@ fn build_function(
 
         resolutions.insert(
             QualifiedIdentifierKey { position: pos, parts: parts.clone(), is_call },
-            QualifiedIdentifierResolution { resolved_type, context: None, parts, is_call, position: pos },
+            QualifiedIdentifierResolution {
+                resolved_type,
+                context: None,
+                parts,
+                is_call,
+                position: pos,
+            },
         );
 
         if qi_idx + 1 < qi_count {
@@ -360,12 +367,15 @@ fn build_section(
 // Full-pipeline helpers
 // =============================================================================
 
-fn parse_and_analyze(source: &str) -> (dixscript::Compiler::AST::DixScript, OperationalSettings, SemanticAnalysisResult) {
+fn parse_and_analyze(
+    source: &str,
+) -> (dixscript::Compiler::AST::DixScript, OperationalSettings, SemanticAnalysisResult) {
     let mut handler = ConfigSectionHandler::new(None);
     let cfg = handler.process_config_section(source);
     let settings = cfg.operational_settings.clone();
     let toks = Tokenizer::new(&cfg.cleaned_input_string, &settings).tokenize();
-    let parser = GeneralParser::new(toks.tokens, &cfg.config_section, &settings).expect("parser init");
+    let parser = GeneralParser::new(toks.tokens, &cfg.config_section, &settings)
+        .expect("parser init");
     let ast = parser.parse().expect("parse failed");
     let semantic_result = GeneralSemanticAnalyzer::new(&ast, &settings).analyze();
     (ast, settings, semantic_result)
@@ -475,7 +485,6 @@ fn bench_resolver_microbench(c: &mut Criterion) {
         b.iter(|| black_box(resolver.resolve_expression(black_box(&no_hit))));
     });
 
-    // Map-size sensitivity — 3 sizes only
     for &entries_per_type in &[1usize, 50, 200] {
         let (sized_resolver, sized_exprs) = build_resolver(entries_per_type);
         group.throughput(Throughput::Elements(1));
@@ -516,7 +525,6 @@ fn bench_enhancer_qi_density(c: &mut Criterion) {
         });
     }
 
-    // No-analysis baseline
     let (section_no_qi, _) = build_section(DENSITY_FIXED_FUNC_COUNT, 0, 500_000);
     group.bench_function("no_analysis_baseline", |b| {
         b.iter(|| {
@@ -565,7 +573,6 @@ fn bench_object_access(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(6));
     group.sample_size(150);
 
-    // Depth scaling
     for &(depth, label) in OBJECT_DEPTH_CASES {
         let pos = Position::new(1_000_000 + depth, 1);
         let (resolver, expr) = build_object_property_resolver(depth, pos);
@@ -575,7 +582,6 @@ fn bench_object_access(c: &mut Criterion) {
         });
     }
 
-    // Property vs method call
     {
         let pos = Position::new(2_000_001, 1);
         let (resolver, expr) = build_object_property_resolver(2, pos);
@@ -593,13 +599,14 @@ fn bench_object_access(c: &mut Criterion) {
         });
     }
 
-    // Enhancer: object density
     let settings = OperationalSettings::default();
     for &(obj_count, label) in OBJECT_COUNT_CASES {
         let total_qi = obj_count * OBJECT_FIXED_PROPS_PER_OBJ;
-        let (section, analysis) =
-            build_object_access_section(obj_count, OBJECT_FIXED_PROPS_PER_OBJ, obj_count * 10_000 + 4_000_000);
-
+        let (section, analysis) = build_object_access_section(
+            obj_count,
+            OBJECT_FIXED_PROPS_PER_OBJ,
+            obj_count * 10_000 + 4_000_000,
+        );
         group.throughput(Throughput::Elements(total_qi as u64));
         group.bench_function(label, |b| {
             b.iter(|| {
@@ -652,7 +659,8 @@ fn bench_full_enhancement_pipeline(c: &mut Criterion) {
             let cfg = handler.process_config_section(black_box(SMALL_SOURCE));
             let s = cfg.operational_settings.clone();
             let toks = Tokenizer::new(&cfg.cleaned_input_string, &s).tokenize();
-            let parser = GeneralParser::new(toks.tokens, &cfg.config_section, &s).expect("parser init");
+            let parser = GeneralParser::new(toks.tokens, &cfg.config_section, &s)
+                .expect("parser init");
             let ast = parser.parse().expect("parse failed");
             let semantic_result = GeneralSemanticAnalyzer::new(&ast, &s).analyze();
             let enhancer = GeneralAstEnhancer::new(&s);
@@ -660,13 +668,17 @@ fn bench_full_enhancement_pipeline(c: &mut Criterion) {
         });
     });
 
-    if let Ok(real_src) = std::fs::read_to_string("mdix_files/advanced/all_datatypes_test.mdix") {
+    if let Ok(real_src) =
+        std::fs::read_to_string("mdix_files/advanced/all_datatypes_test.mdix")
+    {
         let (real_ast, real_settings, real_semantic) = parse_and_analyze(&real_src);
         group.throughput(Throughput::Bytes(real_src.len() as u64));
         group.bench_function("real_file_enhancement_only", |b| {
             b.iter_batched(
                 || GeneralAstEnhancer::new(&real_settings),
-                |enhancer| black_box(enhancer.enhance(black_box(&real_ast), Some(&real_semantic))),
+                |enhancer| {
+                    black_box(enhancer.enhance(black_box(&real_ast), Some(&real_semantic)))
+                },
                 BatchSize::SmallInput,
             );
         });

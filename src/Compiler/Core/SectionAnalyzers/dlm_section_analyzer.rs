@@ -5,7 +5,8 @@ use crate::Compiler::AST::{DLMSection, DLMModule, DLMModuleType, DLMModuleSubtyp
 use crate::Compiler::Utilities::SymbolTable;
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::ErrorManager::{ErrorManager, SemanticErrorType, DebugConfig};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
+use lazy_static::lazy_static;
 
 use super::{SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo};
 
@@ -16,6 +17,39 @@ const ERROR_INVALID_MODULE_SUBTYPE: &str = "INVALID_MODULE_SUBTYPE";
 const WARN_NO_SUBTYPE:             &str = "DLM_WARN001";
 const WARN_SUBOPTIMAL_ORDERING:    &str = "DLM_WARN002";
 const WARN_XOR_LOW_SECURITY:       &str = "DLM_WARN003";
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Lazy Static Validation Sets — Zero Runtime Initialization Cost
+// ═════════════════════════════════════════════════════════════════════════════
+
+lazy_static! {
+    /// Valid subtypes for DCompressor module
+    static ref VALID_COMPRESSOR_SUBTYPES: FxHashSet<DLMModuleSubtype> = {
+        let mut s = FxHashSet::default();
+        s.insert(DLMModuleSubtype::Gzip);
+        s.insert(DLMModuleSubtype::Bzip2);
+        s.insert(DLMModuleSubtype::Lzma);
+        s
+    };
+    
+    /// Valid subtypes for DAuditor module
+    static ref VALID_AUDITOR_SUBTYPES: FxHashSet<DLMModuleSubtype> = {
+        let mut s = FxHashSet::default();
+        s.insert(DLMModuleSubtype::Diy);
+        s.insert(DLMModuleSubtype::Enhanced);
+        s
+    };
+    
+    /// Valid subtypes for DEncryptor module
+    static ref VALID_ENCRYPTOR_SUBTYPES: FxHashSet<DLMModuleSubtype> = {
+        let mut s = FxHashSet::default();
+        s.insert(DLMModuleSubtype::Xor);
+        s.insert(DLMModuleSubtype::Aes128);
+        s.insert(DLMModuleSubtype::Aes256);
+        s.insert(DLMModuleSubtype::Chacha20);
+        s
+    };
+}
 
 pub struct DlmSectionAnalyzer<'a> {
     operational_settings: &'a OperationalSettings,
@@ -92,24 +126,30 @@ impl<'a> DlmSectionAnalyzer<'a> {
         result
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // Duplicate Detection — Uses Tuple Key (Zero Allocation!)
+    // ═════════════════════════════════════════════════════════════════════════
+
     fn check_duplicate_modules(
         &mut self,
         modules: &[DLMModule],
         result: &mut SectionAnalysisResult,
-    ) -> (FxHashSet<String>, bool) {
-        let mut seen: FxHashSet<String> = FxHashSet::default();
-        let mut duplicates: FxHashSet<String> = FxHashSet::default();
+    ) -> (FxHashSet<(DLMModuleType, Option<DLMModuleSubtype>)>, bool) {
+        let mut seen = FxHashSet::default();
+        let mut duplicates = FxHashSet::default();
         let mut has_encryptor = false;
 
         for module in modules {
             let key = Self::module_key(module);
-            if !seen.insert(key.clone()) {
-                duplicates.insert(key.clone());
+            if !seen.insert(key) {
+                duplicates.insert(key);
+                // Only format String for error message (cold path)
+                let display_key = Self::format_module_key(module);
                 self.add_error(
                     result,
                     "DLM001",
                     ERROR_DUPLICATE_MODULE,
-                    &format!("Module '{}' is defined multiple times", key),
+                    &format!("Module '{}' is defined multiple times", display_key),
                     "Each DLM module (type + subtype) can only appear once",
                     Some(module.position),
                 );
@@ -121,6 +161,10 @@ impl<'a> DlmSectionAnalyzer<'a> {
 
         (duplicates, has_encryptor)
     }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Module Validation
+    // ═════════════════════════════════════════════════════════════════════════
 
     fn validate_module(&mut self, module: &DLMModule, result: &mut SectionAnalysisResult) {
         if self.debug_config.is_verbose {
@@ -186,10 +230,14 @@ impl<'a> DlmSectionAnalyzer<'a> {
         }
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // Ordering Validation
+    // ═════════════════════════════════════════════════════════════════════════
+
     fn validate_ordering(
         &mut self,
         modules: &[DLMModule],
-        duplicates: &FxHashSet<String>,
+        duplicates: &FxHashSet<(DLMModuleType, Option<DLMModuleSubtype>)>,
         result: &mut SectionAnalysisResult,
     ) {
         let compressor_idx = modules.iter()
@@ -216,10 +264,14 @@ impl<'a> DlmSectionAnalyzer<'a> {
         }
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // Security Implications Validation
+    // ═════════════════════════════════════════════════════════════════════════
+
     fn validate_security_implications(
         &mut self,
         modules: &[DLMModule],
-        duplicates: &FxHashSet<String>,
+        duplicates: &FxHashSet<(DLMModuleType, Option<DLMModuleSubtype>)>,
         result: &mut SectionAnalysisResult,
     ) {
         for module in modules.iter().filter(|m| !duplicates.contains(&Self::module_key(m))) {
@@ -251,36 +303,37 @@ impl<'a> DlmSectionAnalyzer<'a> {
         }
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // Helper Functions — All Inline for Performance
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// Module key for deduplication — returns tuple (zero allocation!)
     #[inline]
-    fn module_key(module: &DLMModule) -> String {
+    fn module_key(module: &DLMModule) -> (DLMModuleType, Option<DLMModuleSubtype>) {
+        (module.module_type, module.subtype)
+    }
+
+    /// Format module key for display in error messages (only called on error path)
+    #[inline]
+    fn format_module_key(module: &DLMModule) -> String {
         match module.subtype {
             Some(s) => format!("{:?}.{:?}", module.module_type, s),
             None    => format!("{:?}", module.module_type),
         }
     }
 
+    /// Check if subtype is valid for module type — uses lazy_static sets (O(1))
     #[inline]
     fn is_valid_subtype(module_type: DLMModuleType, subtype: DLMModuleSubtype) -> bool {
         match module_type {
-            DLMModuleType::DCompressor => matches!(
-                subtype,
-                DLMModuleSubtype::Gzip | DLMModuleSubtype::Bzip2 | DLMModuleSubtype::Lzma
-            ),
-            DLMModuleType::DAuditor => matches!(
-                subtype,
-                DLMModuleSubtype::Diy | DLMModuleSubtype::Enhanced
-            ),
-            DLMModuleType::DEncryptor => matches!(
-                subtype,
-                DLMModuleSubtype::Xor
-                    | DLMModuleSubtype::Aes128
-                    | DLMModuleSubtype::Aes256
-                    | DLMModuleSubtype::Chacha20
-            ),
-            DLMModuleType::ParseError => false,
+            DLMModuleType::DCompressor => VALID_COMPRESSOR_SUBTYPES.contains(&subtype),
+            DLMModuleType::DAuditor    => VALID_AUDITOR_SUBTYPES.contains(&subtype),
+            DLMModuleType::DEncryptor  => VALID_ENCRYPTOR_SUBTYPES.contains(&subtype),
+            DLMModuleType::ParseError  => false,
         }
     }
 
+    /// Get valid subtypes as a display string (only called on error path)
     #[inline]
     fn valid_subtypes_str(module_type: DLMModuleType) -> &'static str {
         match module_type {
@@ -291,6 +344,7 @@ impl<'a> DlmSectionAnalyzer<'a> {
         }
     }
 
+    /// Get subtype description
     #[inline]
     fn subtype_description(subtype: DLMModuleSubtype) -> &'static str {
         match subtype {
@@ -307,6 +361,7 @@ impl<'a> DlmSectionAnalyzer<'a> {
         }
     }
 
+    /// Get encryption security level description
     #[inline]
     fn encryption_security_level(subtype: DLMModuleSubtype) -> &'static str {
         match subtype {
@@ -318,11 +373,16 @@ impl<'a> DlmSectionAnalyzer<'a> {
         }
     }
 
+    /// Check if should halt based on error handling strategy
     #[inline]
     fn should_halt(&self, result: &SectionAnalysisResult) -> bool {
         !result.errors.is_empty()
             && self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt
     }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Error/Warning Management
+    // ═════════════════════════════════════════════════════════════════════════
 
     fn add_error(
         &mut self,

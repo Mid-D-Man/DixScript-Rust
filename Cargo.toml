@@ -103,6 +103,10 @@ harness = false
 name    = "semantics_benchmark"
 harness = false
 
+[[bench]]
+name    = "ast_enhancement_benchmark"
+harness = false
+
 # =============================================================================
 # Feature flags
 # =============================================================================

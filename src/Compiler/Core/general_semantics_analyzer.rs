@@ -1,5 +1,15 @@
 // src/Compiler/Core/general_semantics_analyzer.rs
 //! Central semantic analysis orchestrator — runs all section analyzers in dependency order.
+//!
+//! Orchestrates semantic validation in 8 phases:
+//! 1. Version compatibility
+//! 2. Imports semantic validation
+//! 3. Imports resolution  
+//! 4. Foundation (ENUMS)
+//! 5. Functions (QUICKFUNCS)
+//! 6. Independent (DLM)
+//! 7. Data-driven (DATA)
+//! 8. Generated (SECURITY)
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -24,23 +34,35 @@ pub struct GeneralSemanticAnalyzer<'a> {
     symbol_table: SymbolTable,
     error_manager: ErrorManager,
     debug_config: DebugConfig,
-    enums_analyzer: Option<EnumsSectionAnalyzer<'a>>,
-    dlm_analyzer: Option<DlmSectionAnalyzer<'a>>,
-    security_analyzer: Option<SecuritySectionAnalyzer<'a>>,
-    quickfuncs_analyzer: Option<QuickFuncsSectionAnalyzer<'a>>,
-    data_analyzer: Option<DataSectionAnalyzer<'a>>,
+    
     analysis_result: SemanticAnalysisResult,
     stopwatch: Instant,
     skip_validation: bool,
+    
+    // Cached feature flags (computed once at construction)
+    has_imports_enabled: bool,
+    has_enums_enabled: bool,
+    has_quickfuncs_enabled: bool,
+    has_dlm_enabled: bool,
 }
 
 impl<'a> GeneralSemanticAnalyzer<'a> {
+    /// Create a new semantic analyzer for the given AST and operational settings.
+    ///
+    /// Feature flags are cached at construction time for O(1) access during analysis.
     pub fn new(
         ast: &'a DixScript,
         operational_settings: &'a OperationalSettings,
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
-        let debug_config = DebugConfig::from_debug_mode(error_manager.get_debug_mode());
+        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
+
+        // Cache feature flags once — avoids repeated string comparisons
+        let is_advanced = operational_settings.is_advanced_mode();
+        let has_imports_enabled = is_advanced || operational_settings.is_feature_enabled("imports");
+        let has_enums_enabled = is_advanced || operational_settings.is_feature_enabled("enums");
+        let has_quickfuncs_enabled = is_advanced || operational_settings.is_feature_enabled("quickfuncs");
+        let has_dlm_enabled = is_advanced || operational_settings.is_feature_enabled("dlm");
 
         GeneralSemanticAnalyzer {
             ast,
@@ -48,32 +70,26 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             symbol_table: SymbolTable::new(),
             error_manager,
             debug_config,
-            enums_analyzer: None,
-            dlm_analyzer: None,
-            security_analyzer: None,
-            quickfuncs_analyzer: None,
-            data_analyzer: None,
             analysis_result: SemanticAnalysisResult::new(),
             stopwatch: Instant::now(),
             skip_validation: false,
+            has_imports_enabled,
+            has_enums_enabled,
+            has_quickfuncs_enabled,
+            has_dlm_enabled,
         }
     }
 
+    /// Run complete semantic analysis pipeline.
+    ///
+    /// Returns `SemanticAnalysisResult` with errors, warnings, and populated symbol table.
     pub fn analyze(mut self) -> SemanticAnalysisResult {
-        self.error_manager
-            .log_info("Starting General Semantic Analysis v1.0.0");
-
         if self.debug_config.is_enabled {
+            self.error_manager.log_info("Starting General Semantic Analysis v1.0.0");
             self.error_manager.log_debug(&format!(
-                "Error Handling Strategy: {:?}",
-                self.operational_settings.error_handling_strategy
-            ));
-            self.error_manager.log_debug(&format!(
-                "Compatibility Mode: {:?}",
-                self.operational_settings.compatibility_mode
-            ));
-            self.error_manager.log_debug(&format!(
-                "Advanced Mode: {}",
+                "Error Handling: {:?} | Compat: {:?} | Advanced: {}",
+                self.operational_settings.error_handling_strategy,
+                self.operational_settings.compatibility_mode,
                 self.operational_settings.is_advanced_mode()
             ));
         }
@@ -111,12 +127,9 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.analyze_phase8_generated();
 
         if self.debug_config.is_enabled {
-            self.error_manager.log_debug(&format!(
-                "Semantic analysis complete. Success: {}",
-                self.analysis_result.is_success
-            ));
-            self.error_manager.log_debug(&format!(
-                "Total errors: {}, Warnings: {}",
+            self.error_manager.log_info(&format!(
+                "Semantic analysis complete: {} — errors: {}, warnings: {}",
+                if self.analysis_result.is_success { "SUCCESS" } else { "FAILURE" },
                 self.analysis_result.errors.len(),
                 self.analysis_result.warnings.len()
             ));
@@ -125,8 +138,14 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.finalize_result()
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // PHASE 1: Version Compatibility Check
+    // ═════════════════════════════════════════════════════════════════════════
+
     fn analyze_phase1_version(&mut self) -> bool {
-        self.error_manager.log_info("Phase 1: version compatibility check");
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info("Phase 1: version compatibility check");
+        }
 
         let validation = VersionConstraints::new().validate_script(self.ast);
 
@@ -161,6 +180,10 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         true
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // PHASE 2: Imports Semantic Validation
+    // ═════════════════════════════════════════════════════════════════════════
+
     fn analyze_phase2_imports_semantic(&mut self) -> bool {
         let imports = match &self.ast.imports {
             Some(s) if !s.imports.is_empty() => s,
@@ -173,12 +196,12 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        self.error_manager
-            .log_info("Phase 2: IMPORTS semantic analysis");
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info("Phase 2: IMPORTS semantic analysis");
+        }
 
-        if !self.operational_settings.is_feature_enabled("imports")
-            && !self.operational_settings.is_advanced_mode()
-        {
+        // Use cached feature flag instead of string comparison
+        if !self.has_imports_enabled {
             self.error_manager
                 .log_error("IMPORTS section found but imports feature not enabled");
             self.analysis_result.errors.push(SemanticErrorInfo {
@@ -244,6 +267,10 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         true
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // PHASE 3: Imports Resolution
+    // ═════════════════════════════════════════════════════════════════════════
+
     fn analyze_phase3_imports_resolution(&mut self) -> bool {
         if self.operational_settings.skip_imports_resolution {
             if self.debug_config.is_enabled {
@@ -265,15 +292,14 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         };
 
         if self.debug_config.is_enabled {
-            self.error_manager.log_debug(&format!(
+            self.error_manager.log_info(&format!(
                 "Phase 3: resolving {} imports",
                 imports.imports.len()
             ));
         }
 
-        if !self.operational_settings.is_feature_enabled("imports")
-            && !self.operational_settings.is_advanced_mode()
-        {
+        // Use cached feature flag
+        if !self.has_imports_enabled {
             self.error_manager
                 .log_error("IMPORTS section found but imports feature not enabled");
             self.analysis_result.errors.push(SemanticErrorInfo {
@@ -326,12 +352,20 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
                 .log_debug(&format!("Imports resolved: {}", stats));
         }
 
-        self.error_manager.log_info("Phase 3 complete");
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info("Phase 3 complete");
+        }
         true
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // PHASE 4: Foundation Sections (ENUMS)
+    // ═════════════════════════════════════════════════════════════════════════
+
     fn analyze_phase4_foundation(&mut self) -> bool {
-        self.error_manager.log_info("Phase 4: foundation sections (ENUMS)");
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info("Phase 4: foundation sections (ENUMS)");
+        }
 
         let enums = match &self.ast.enums {
             Some(s) => s,
@@ -343,9 +377,8 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        if !self.operational_settings.is_feature_enabled("enums")
-            && !self.operational_settings.is_advanced_mode()
-        {
+        // Use cached feature flag
+        if !self.has_enums_enabled {
             self.error_manager
                 .log_error("ENUMS section found but enums feature not enabled");
             self.analysis_result.errors.push(SemanticErrorInfo {
@@ -363,15 +396,9 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             return true;
         }
 
-        if self.enums_analyzer.is_none() {
-            self.enums_analyzer = Some(EnumsSectionAnalyzer::new(self.operational_settings));
-        }
-
-        let result = self
-            .enums_analyzer
-            .as_mut()
-            .unwrap()
-            .analyze(enums, &mut self.symbol_table);
+        // Create analyzer on-demand (no need to cache as Option)
+        let mut analyzer = EnumsSectionAnalyzer::new(self.operational_settings);
+        let result = analyzer.analyze(enums, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -380,11 +407,13 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
                 result.errors.len(),
                 result.warnings.len()
             ));
-            for e in &result.errors {
-                self.error_manager.log_error(&format!(
-                    "  ENUMS [{}] {}: {}",
-                    e.error_id, e.error_type, e.message
-                ));
+            if self.debug_config.is_verbose {
+                for e in &result.errors {
+                    self.error_manager.log_error(&format!(
+                        "  ENUMS [{}] {}: {}",
+                        e.error_id, e.error_type, e.message
+                    ));
+                }
             }
         }
 
@@ -398,9 +427,15 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         true
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // PHASE 5: Function Definitions (QUICKFUNCS)
+    // ═════════════════════════════════════════════════════════════════════════
+
     fn analyze_phase5_functions(&mut self) -> bool {
-        self.error_manager
-            .log_info("Phase 5: function definitions (QUICKFUNCS)");
+        if self.debug_config.is_enabled {
+            self.error_manager
+                .log_info("Phase 5: function definitions (QUICKFUNCS)");
+        }
 
         let quickfuncs = match &self.ast.quick_functions {
             Some(s) => s,
@@ -412,9 +447,8 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        if !self.operational_settings.is_feature_enabled("quickfuncs")
-            && !self.operational_settings.is_advanced_mode()
-        {
+        // Use cached feature flag
+        if !self.has_quickfuncs_enabled {
             self.error_manager
                 .log_error("QUICKFUNCS section found but quickfuncs feature not enabled");
             self.analysis_result.errors.push(SemanticErrorInfo {
@@ -433,16 +467,9 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             return true;
         }
 
-        if self.quickfuncs_analyzer.is_none() {
-            self.quickfuncs_analyzer =
-                Some(QuickFuncsSectionAnalyzer::new(self.operational_settings));
-        }
-
-        let result = self
-            .quickfuncs_analyzer
-            .as_mut()
-            .unwrap()
-            .analyze(quickfuncs, &mut self.symbol_table);
+        // Create analyzer on-demand
+        let mut analyzer = QuickFuncsSectionAnalyzer::new(self.operational_settings);
+        let result = analyzer.analyze(quickfuncs, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -452,14 +479,16 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
                 result.warnings.len(),
                 result.qualified_id_resolutions.len()
             ));
-            for e in &result.errors {
-                self.error_manager.log_error(&format!(
-                    "  QUICKFUNCS [{}] {}: {}",
-                    e.error_id, e.error_type, e.message
-                ));
-                if !e.suggestion.is_empty() {
-                    self.error_manager
-                        .log_error(&format!("    -> {}", e.suggestion));
+            if self.debug_config.is_verbose {
+                for e in &result.errors {
+                    self.error_manager.log_error(&format!(
+                        "  QUICKFUNCS [{}] {}: {}",
+                        e.error_id, e.error_type, e.message
+                    ));
+                    if !e.suggestion.is_empty() {
+                        self.error_manager
+                            .log_error(&format!("    -> {}", e.suggestion));
+                    }
                 }
             }
         }
@@ -474,9 +503,15 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         true
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // PHASE 6: Independent Sections (DLM)
+    // ═════════════════════════════════════════════════════════════════════════
+
     fn analyze_phase6_independent(&mut self) {
-        self.error_manager
-            .log_info("Phase 6: independent sections (DLM)");
+        if self.debug_config.is_enabled {
+            self.error_manager
+                .log_info("Phase 6: independent sections (DLM)");
+        }
 
         let dlm = match &self.ast.dlm {
             Some(s) => s,
@@ -488,15 +523,9 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        if self.dlm_analyzer.is_none() {
-            self.dlm_analyzer = Some(DlmSectionAnalyzer::new(self.operational_settings));
-        }
-
-        let result = self
-            .dlm_analyzer
-            .as_mut()
-            .unwrap()
-            .analyze(dlm, &mut self.symbol_table);
+        // Create analyzer on-demand
+        let mut analyzer = DlmSectionAnalyzer::new(self.operational_settings);
+        let result = analyzer.analyze(dlm, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -510,8 +539,14 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.add_section_result("DLM", result);
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // PHASE 7: Data-Driven Sections (DATA)
+    // ═════════════════════════════════════════════════════════════════════════
+
     fn analyze_phase7_data_driven(&mut self) -> bool {
-        self.error_manager.log_info("Phase 7: DATA section");
+        if self.debug_config.is_enabled {
+            self.error_manager.log_info("Phase 7: DATA section");
+        }
 
         let data = match &self.ast.data {
             Some(s) => s,
@@ -521,15 +556,9 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        if self.data_analyzer.is_none() {
-            self.data_analyzer = Some(DataSectionAnalyzer::new(self.operational_settings));
-        }
-
-        let result = self
-            .data_analyzer
-            .as_mut()
-            .unwrap()
-            .analyze(data, &mut self.symbol_table);
+        // Create analyzer on-demand
+        let mut analyzer = DataSectionAnalyzer::new(self.operational_settings);
+        let result = analyzer.analyze(data, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -538,45 +567,47 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
                 result.errors.len(),
                 result.warnings.len()
             ));
-            for e in &result.errors {
-                self.error_manager.log_error(&format!(
-                    "  DATA [{}] {}: {}",
-                    e.error_id, e.error_type, e.message
-                ));
-                if !e.suggestion.is_empty() {
-                    self.error_manager
-                        .log_error(&format!("    -> {}", e.suggestion));
+            if self.debug_config.is_verbose {
+                for e in &result.errors {
+                    self.error_manager.log_error(&format!(
+                        "  DATA [{}] {}: {}",
+                        e.error_id, e.error_type, e.message
+                    ));
+                    if !e.suggestion.is_empty() {
+                        self.error_manager
+                            .log_error(&format!("    -> {}", e.suggestion));
+                    }
                 }
-            }
-            for w in &result.warnings {
-                self.error_manager.log_warning(&format!(
-                    "  DATA WARN [{}]: {}",
-                    w.warning_id, w.message
-                ));
+                for w in &result.warnings {
+                    self.error_manager.log_warning(&format!(
+                        "  DATA WARN [{}]: {}",
+                        w.warning_id, w.message
+                    ));
+                }
             }
         }
 
         let phase_ok = result.is_success;
-        self.add_section_result("DATA", result);
 
-        if let Some(ref da) = self.data_analyzer {
-            let (short_name_idx, type_idx) = da.get_indexes();
+        // Extract indexes from analyzer before it goes out of scope
+        let (short_name_idx, type_idx) = analyzer.get_indexes();
 
-            if !short_name_idx.is_empty() {
-                self.analysis_result.short_name_index = Some(
-                    short_name_idx
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect(),
-                );
-            }
-
-            if !type_idx.is_empty() {
-                self.analysis_result.type_index = Some(
-                    type_idx.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-                );
-            }
+        if !short_name_idx.is_empty() {
+            self.analysis_result.short_name_index = Some(
+                short_name_idx
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            );
         }
+
+        if !type_idx.is_empty() {
+            self.analysis_result.type_index = Some(
+                type_idx.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            );
+        }
+
+        self.add_section_result("DATA", result);
 
         if !phase_ok && self.should_terminate() {
             self.analysis_result.is_success = false;
@@ -586,9 +617,15 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         true
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // PHASE 8: Generated Sections (SECURITY)
+    // ═════════════════════════════════════════════════════════════════════════
+
     fn analyze_phase8_generated(&mut self) {
-        self.error_manager
-            .log_info("Phase 8: generated sections (SECURITY)");
+        if self.debug_config.is_enabled {
+            self.error_manager
+                .log_info("Phase 8: generated sections (SECURITY)");
+        }
 
         let requires_security = self
             .ast
@@ -626,16 +663,9 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        if self.security_analyzer.is_none() {
-            self.security_analyzer =
-                Some(SecuritySectionAnalyzer::new(self.operational_settings));
-        }
-
-        let result = self
-            .security_analyzer
-            .as_mut()
-            .unwrap()
-            .analyze(security, &mut self.symbol_table);
+        // Create analyzer on-demand
+        let mut analyzer = SecuritySectionAnalyzer::new(self.operational_settings);
+        let result = analyzer.analyze(security, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -649,9 +679,17 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.add_section_result("SECURITY", result);
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // HELPER METHODS
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// Register all enums from symbol table with the builtin enum system.
     fn register_enums_with_builtin_system(&mut self) {
-        self.error_manager
-            .log_info("Registering enums with builtin system");
+        if self.debug_config.is_enabled {
+            self.error_manager
+                .log_info("Registering enums with builtin system");
+        }
+
         enum_object::clear_enums();
 
         let enum_count = self.symbol_table.enums.len();
@@ -677,6 +715,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         }
     }
 
+    /// Initialize builtin registries (static objects and Dix functions).
     fn initialize_builtin_registries(&mut self) {
         for name in &["Math", "Dix", "DateTime", "Array", "Random", "Enum", "Guid", "Ip"] {
             self.symbol_table.add_builtin_static_object(name.to_string());
@@ -704,6 +743,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         }
     }
 
+    /// Add section analysis result to overall result.
     fn add_section_result(&mut self, section_name: &str, result: SectionAnalysisResult) {
         if !result.is_success && self.debug_config.is_enabled {
             self.error_manager.log_warning(&format!(
@@ -718,19 +758,23 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             .insert(section_name.to_string(), result);
     }
 
+    /// Check if analysis should terminate based on error handling strategy.
     #[inline]
     fn should_terminate(&self) -> bool {
         !self.analysis_result.errors.is_empty()
             && self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt
     }
 
+    /// Finalize analysis result and return it.
     fn finalize_result(mut self) -> SemanticAnalysisResult {
         self.analysis_result.is_success = self.analysis_result.errors.is_empty();
         self.analysis_result.analysis_duration = self.stopwatch.elapsed();
 
         let ms = self.analysis_result.analysis_duration.as_secs_f64() * 1000.0;
-        self.error_manager
-            .log_info(&format!("Analysis duration: {:.2}ms", ms));
+        if self.debug_config.is_enabled {
+            self.error_manager
+                .log_info(&format!("Analysis duration: {:.2}ms", ms));
+        }
 
         self.analysis_result.symbol_table = Some(self.symbol_table);
         self.analysis_result

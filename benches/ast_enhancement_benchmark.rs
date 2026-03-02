@@ -18,7 +18,11 @@
 //! 3. `enhancer_function_count` — Fixed 10 QIs per function, varying function count:
 //!    1 / 5 / 10 / 25 / 50. Verifies linear scaling.
 //!
-//! 4. `full_enhancement_pipeline` — GeneralAstEnhancer end-to-end on pre-parsed and
+//! 4. `object_access`           — ObjectPropertyAccess and instance method call resolution
+//!    in isolation: single-level, nested, method calls, deep chains, and density scaling.
+//!    Derives per-access cost and compares property vs method-call overhead.
+//!
+//! 5. `full_enhancement_pipeline` — GeneralAstEnhancer end-to-end on pre-parsed and
 //!    pre-analyzed ASTs. Paired with parse+analyze baselines so enhancement overhead
 //!    can be derived: enhance_cost = full_pipeline - semantics_bench/full_pipeline.
 //!
@@ -74,8 +78,25 @@ const FUNC_COUNT_CASES: &[(usize, &str)] = &[
     (50, "50funcs"),
 ];
 
+/// Object property access depth / label pairs.
+const OBJECT_DEPTH_CASES: &[(usize, &str)] = &[
+    (1, "depth_1_single"),
+    (2, "depth_2_nested"),
+    (3, "depth_3_deep"),
+    (4, "depth_4_very_deep"),
+];
+
+/// Object count / label pairs for the object density bench (fixed 3 properties each).
+const OBJECT_COUNT_CASES: &[(usize, &str)] = &[
+    (1,  "1obj"),
+    (5,  "5objs"),
+    (10, "10objs"),
+    (20, "20objs"),
+];
+
 const DENSITY_FIXED_FUNC_COUNT: usize = 5;
 const SCALING_FIXED_QI_PER_FUNC: usize = 10;
+const OBJECT_FIXED_PROPS_PER_OBJ: usize = 3;
 
 // =============================================================================
 // QI pattern table — 8 representative resolution scenarios
@@ -133,6 +154,256 @@ fn make_qi_at(
 }
 
 // =============================================================================
+// Object access helpers
+// =============================================================================
+
+/// Build an ObjectPropertyAccess expression with the given parts at `pos`.
+fn make_object_property(parts: Vec<String>, pos: Position) -> Expression {
+    Expression::QualifiedIdentifier {
+        parts,
+        arguments: None,
+        position: pos,
+    }
+}
+
+/// Build an ObjectPropertyAccess method call expression with the given parts at `pos`.
+fn make_object_method(parts: Vec<String>, pos: Position) -> Expression {
+    Expression::QualifiedIdentifier {
+        parts,
+        arguments: Some(vec![]),
+        position: pos,
+    }
+}
+
+/// Build a resolver and matching sample expression for a single ObjectPropertyAccess
+/// chain of the given depth. Parts are: obj0, field1, field2, ... up to `depth`.
+/// Returns (resolver, expression, key).
+fn build_object_property_resolver(
+    depth: usize,
+    pos: Position,
+) -> (QualifiedIdentifierResolver, Expression) {
+    assert!(depth >= 1);
+    let mut parts: Vec<String> = vec!["obj0".to_string()];
+    for i in 1..depth {
+        parts.push(format!("field{}", i));
+    }
+
+    let expr = make_object_property(parts.clone(), pos);
+    let key = QualifiedIdentifierKey { position: pos, parts: parts.clone(), is_call: false };
+    let resolution = QualifiedIdentifierResolution {
+        resolved_type: QualifiedIdentifierType::ObjectPropertyAccess,
+        context: None,
+        parts: parts.clone(),
+        is_call: false,
+        position: pos,
+    };
+
+    let mut map = HashMap::with_capacity(1);
+    map.insert(key, resolution);
+    (QualifiedIdentifierResolver::new(map), expr)
+}
+
+/// Build a resolver and matching sample expression for an ObjectPropertyAccess
+/// method call (obj.method()).
+fn build_object_method_resolver(pos: Position) -> (QualifiedIdentifierResolver, Expression) {
+    let parts = vec!["obj0".to_string(), "compute".to_string()];
+    let expr = make_object_method(parts.clone(), pos);
+    let key = QualifiedIdentifierKey { position: pos, parts: parts.clone(), is_call: true };
+    let resolution = QualifiedIdentifierResolution {
+        resolved_type: QualifiedIdentifierType::ObjectPropertyAccess,
+        context: None,
+        parts: parts.clone(),
+        is_call: true,
+        position: pos,
+    };
+
+    let mut map = HashMap::with_capacity(1);
+    map.insert(key, resolution);
+    (QualifiedIdentifierResolver::new(map), expr)
+}
+
+/// Build a function whose body contains `obj_count * props_per_obj` ObjectPropertyAccess
+/// expressions — `props_per_obj` property accesses on each of `obj_count` distinct objects.
+/// Returns the section and matching SectionAnalysisResult.
+fn build_object_access_section(
+    obj_count: usize,
+    props_per_obj: usize,
+    pos_base: usize,
+) -> (QuickFuncsSection, SectionAnalysisResult) {
+    let total_qi = obj_count * props_per_obj;
+    let mut resolutions: HashMap<QualifiedIdentifierKey, QualifiedIdentifierResolution> =
+        HashMap::with_capacity(total_qi);
+    let mut body: Vec<QuickFuncStatement> = Vec::with_capacity(total_qi.max(1));
+
+    let mut stmt_idx = 0usize;
+    for obj_idx in 0..obj_count {
+        for prop_idx in 0..props_per_obj {
+            let pos = Position::new(pos_base + stmt_idx + 1, stmt_idx + 1);
+            let parts = vec![
+                format!("obj{}", obj_idx),
+                format!("field{}", prop_idx),
+            ];
+            let is_last = stmt_idx + 1 == total_qi;
+            let is_call = false;
+
+            let expr = make_object_property(parts.clone(), pos);
+            resolutions.insert(
+                QualifiedIdentifierKey { position: pos, parts: parts.clone(), is_call },
+                QualifiedIdentifierResolution {
+                    resolved_type: QualifiedIdentifierType::ObjectPropertyAccess,
+                    context: None,
+                    parts,
+                    is_call,
+                    position: pos,
+                },
+            );
+
+            if is_last {
+                body.push(QuickFuncStatement::Return {
+                    value: expr,
+                    position: Position::UNKNOWN,
+                });
+            } else {
+                body.push(QuickFuncStatement::VariableDeclaration {
+                    declaration_type: DeclarationType::Let,
+                    is_mutable: false,
+                    variable_name: format!("v{}", stmt_idx),
+                    data_type: None,
+                    value: expr,
+                    position: Position::UNKNOWN,
+                });
+            }
+            stmt_idx += 1;
+        }
+    }
+
+    if body.is_empty() {
+        body.push(QuickFuncStatement::Return {
+            value: Expression::Value {
+                value: Value::Integer { value: 0, position: Position::UNKNOWN },
+                position: Position::UNKNOWN,
+            },
+            position: Position::UNKNOWN,
+        });
+    }
+
+    let func = QuickFunction {
+        name: "obj_access_func".to_string(),
+        return_type: Some(DataType::Any),
+        scope_list: Some(vec!["global".to_string()]),
+        parameters: vec![QuickFuncParam {
+            name: "x".to_string(),
+            data_type: Some(DataType::Int),
+            default_value: None,
+            position: Position::UNKNOWN,
+        }],
+        body,
+        position: Position::UNKNOWN,
+    };
+
+    let section = QuickFuncsSection::new(vec![func], Position::UNKNOWN);
+    let mut analysis = SectionAnalysisResult::new("QUICKFUNCS");
+    analysis.is_success = true;
+    analysis.qualified_id_resolutions = resolutions;
+
+    (section, analysis)
+}
+
+/// Build a function whose body mixes property access and method calls on `obj_count`
+/// objects — one property access and one method call per object.
+fn build_mixed_object_access_section(
+    obj_count: usize,
+    pos_base: usize,
+) -> (QuickFuncsSection, SectionAnalysisResult) {
+    let total_qi = obj_count * 2;
+    let mut resolutions: HashMap<QualifiedIdentifierKey, QualifiedIdentifierResolution> =
+        HashMap::with_capacity(total_qi);
+    let mut body: Vec<QuickFuncStatement> = Vec::with_capacity(total_qi.max(1));
+
+    for obj_idx in 0..obj_count {
+        // Property access
+        let prop_pos = Position::new(pos_base + obj_idx * 2 + 1, obj_idx * 2 + 1);
+        let prop_parts = vec![format!("obj{}", obj_idx), "name".to_string()];
+        let prop_expr = make_object_property(prop_parts.clone(), prop_pos);
+        resolutions.insert(
+            QualifiedIdentifierKey { position: prop_pos, parts: prop_parts.clone(), is_call: false },
+            QualifiedIdentifierResolution {
+                resolved_type: QualifiedIdentifierType::ObjectPropertyAccess,
+                context: None,
+                parts: prop_parts,
+                is_call: false,
+                position: prop_pos,
+            },
+        );
+        body.push(QuickFuncStatement::VariableDeclaration {
+            declaration_type: DeclarationType::Let,
+            is_mutable: false,
+            variable_name: format!("prop{}", obj_idx),
+            data_type: None,
+            value: prop_expr,
+            position: Position::UNKNOWN,
+        });
+
+        // Method call
+        let call_pos = Position::new(pos_base + obj_idx * 2 + 2, obj_idx * 2 + 2);
+        let call_parts = vec![format!("obj{}", obj_idx), "toString".to_string()];
+        let call_expr = make_object_method(call_parts.clone(), call_pos);
+        resolutions.insert(
+            QualifiedIdentifierKey { position: call_pos, parts: call_parts.clone(), is_call: true },
+            QualifiedIdentifierResolution {
+                resolved_type: QualifiedIdentifierType::ObjectPropertyAccess,
+                context: None,
+                parts: call_parts,
+                is_call: true,
+                position: call_pos,
+            },
+        );
+
+        if obj_idx + 1 == obj_count {
+            body.push(QuickFuncStatement::Return {
+                value: call_expr,
+                position: Position::UNKNOWN,
+            });
+        } else {
+            body.push(QuickFuncStatement::VariableDeclaration {
+                declaration_type: DeclarationType::Let,
+                is_mutable: false,
+                variable_name: format!("call{}", obj_idx),
+                data_type: None,
+                value: call_expr,
+                position: Position::UNKNOWN,
+            });
+        }
+    }
+
+    if body.is_empty() {
+        body.push(QuickFuncStatement::Return {
+            value: Expression::Value {
+                value: Value::Integer { value: 0, position: Position::UNKNOWN },
+                position: Position::UNKNOWN,
+            },
+            position: Position::UNKNOWN,
+        });
+    }
+
+    let func = QuickFunction {
+        name: "mixed_obj_access_func".to_string(),
+        return_type: Some(DataType::Any),
+        scope_list: Some(vec!["global".to_string()]),
+        parameters: vec![],
+        body,
+        position: Position::UNKNOWN,
+    };
+
+    let section = QuickFuncsSection::new(vec![func], Position::UNKNOWN);
+    let mut analysis = SectionAnalysisResult::new("QUICKFUNCS");
+    analysis.is_success = true;
+    analysis.qualified_id_resolutions = resolutions;
+
+    (section, analysis)
+}
+
+// =============================================================================
 // Construction helpers
 // =============================================================================
 
@@ -148,7 +419,6 @@ fn build_resolver(entries_per_type: usize)
 
     for type_idx in 0..8usize {
         for entry in 0..entries_per_type {
-            // Each entry gets a unique position so positions do not collide.
             let pos = Position::new(type_idx * 100_000 + entry + 1, 1);
             let (expr, resolved_type, parts, is_call) = make_qi_at(type_idx, pos);
 
@@ -172,9 +442,7 @@ fn build_resolver(entries_per_type: usize)
     (QualifiedIdentifierResolver::new(map), sample_exprs)
 }
 
-/// Build one QuickFunction whose body contains `qi_count` QI expressions
-/// (let-declarations for all but the last, which is the return).
-/// Returns the function and the matching resolution map entries.
+/// Build one QuickFunction whose body contains `qi_count` QI expressions.
 fn build_function(
     name: &str,
     qi_count: usize,
@@ -185,7 +453,6 @@ fn build_function(
     let mut body: Vec<QuickFuncStatement> = Vec::with_capacity(qi_count.max(1));
 
     for qi_idx in 0..qi_count {
-        // Unique (line, col) per QI guarantees distinct HashMap keys.
         let pos = Position::new(pos_base + qi_idx + 1, qi_idx + 1);
         let (expr, resolved_type, parts, is_call) = make_qi_at(qi_idx, pos);
 
@@ -244,9 +511,7 @@ fn build_function(
     (func, resolutions)
 }
 
-/// Build a (QuickFuncsSection, SectionAnalysisResult) pair with `func_count`
-/// functions each containing `qi_per_func` QI expressions.
-/// `pos_base` must be globally unique across calls to avoid key collisions.
+/// Build a (QuickFuncsSection, SectionAnalysisResult) pair.
 fn build_section(
     func_count: usize,
     qi_per_func: usize,
@@ -257,7 +522,6 @@ fn build_section(
     let mut functions: Vec<QuickFunction> = Vec::with_capacity(func_count);
 
     for fi in 0..func_count {
-        // Space functions 10-slots apart so position ranges never overlap.
         let func_pos_base = pos_base + fi * (qi_per_func + 10);
         let (func, func_resolutions) =
             build_function(&format!("func_{}", fi), qi_per_func, func_pos_base);
@@ -275,7 +539,7 @@ fn build_section(
 }
 
 // =============================================================================
-// Full-pipeline helpers  (mirrors semantics_benchmark.rs conventions)
+// Full-pipeline helpers
 // =============================================================================
 
 fn parse_to_ast(source: &str) -> (DixScript, OperationalSettings) {
@@ -289,8 +553,6 @@ fn parse_to_ast(source: &str) -> (DixScript, OperationalSettings) {
     (ast, settings)
 }
 
-/// Run parse → semantic analysis and return all three so the caller can
-/// use the semantic result for the enhancement phase.
 fn parse_and_analyze(
     source: &str,
 ) -> (DixScript, OperationalSettings, SemanticAnalysisResult) {
@@ -303,7 +565,6 @@ fn parse_and_analyze(
 // Static DixScript source inputs
 // =============================================================================
 
-/// Small source: CONFIG + 2 ENUMS + 3 QFs with inline enum QI accesses + tiny DATA.
 const SMALL_SOURCE: &str = r#"@CONFIG(
     version        -> "1.0.0",
     encoding       -> "utf-8",
@@ -329,8 +590,6 @@ const SMALL_SOURCE: &str = r#"@CONFIG(
 )
 @DATA( x = 1 )"#;
 
-/// Medium source: CONFIG + 4 ENUMS + 8 QFs with inter-calls, Math.* calls,
-/// and enum QI accesses — representative of real-world QuickFuncs usage.
 const MEDIUM_SOURCE: &str = r#"@CONFIG(
     version        -> "1.0.0",
     encoding       -> "utf-8",
@@ -394,10 +653,8 @@ fn bench_resolver_microbench(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(8));
     group.sample_size(200);
 
-    // Resolver with 5 entries per type (40 total) — realistic production density.
     let (resolver_5, sample_exprs) = build_resolver(5);
 
-    // Per-type resolution: one iteration = one expression resolved.
     let type_labels = [
         "local_enum_access",
         "local_enum_access_alt",
@@ -417,7 +674,6 @@ fn bench_resolver_microbench(c: &mut Criterion) {
         });
     }
 
-    // No-hit fallback (property) — expression absent from map → build_property_access_chain.
     {
         let no_hit = Expression::QualifiedIdentifier {
             parts:     vec!["mystery".to_string(), "field".to_string()],
@@ -430,7 +686,6 @@ fn bench_resolver_microbench(c: &mut Criterion) {
         });
     }
 
-    // No-hit fallback (call) — absent from map → QuickFuncCall fallback.
     {
         let no_hit_call = Expression::QualifiedIdentifier {
             parts:     vec!["mystery".to_string(), "doThing".to_string()],
@@ -443,7 +698,6 @@ fn bench_resolver_microbench(c: &mut Criterion) {
         });
     }
 
-    // Statement-level: return statement containing one QI.
     {
         let return_stmt = QuickFuncStatement::Return {
             value:    sample_exprs[0].clone(),
@@ -455,14 +709,13 @@ fn bench_resolver_microbench(c: &mut Criterion) {
         });
     }
 
-    // Statement-level: let declaration containing one QI (static method path).
     {
         let decl_stmt = QuickFuncStatement::VariableDeclaration {
             declaration_type: DeclarationType::Let,
             is_mutable:       false,
             variable_name:    "v".to_string(),
             data_type:        None,
-            value:            sample_exprs[4].clone(), // StaticObjectAccess
+            value:            sample_exprs[4].clone(),
             position:         Position::UNKNOWN,
         };
         group.throughput(Throughput::Elements(1));
@@ -471,8 +724,6 @@ fn bench_resolver_microbench(c: &mut Criterion) {
         });
     }
 
-    // Deep conditional: ternary with QIs in condition and both branches — 3 QIs total.
-    // Uses a dedicated resolver so every lookup is a hit.
     {
         let pos_cond  = Position::new(8_000_001, 1);
         let pos_true  = Position::new(8_000_002, 1);
@@ -509,8 +760,6 @@ fn bench_resolver_microbench(c: &mut Criterion) {
         });
     }
 
-    // Map-size sensitivity: same probe expression, different resolver map densities.
-    // Shows whether HashMap lookup cost grows with total entry count.
     for &entries_per_type in &[1usize, 10, 50, 200] {
         let (sized_resolver, sized_exprs) = build_resolver(entries_per_type);
         let probe = &sized_exprs[0];
@@ -545,8 +794,6 @@ fn bench_enhancer_qi_density(c: &mut Criterion) {
 
         group.throughput(Throughput::Elements(total_qi as u64));
         group.bench_function(label, |b| {
-            // Enhancer is created once per benchmark; enhance() takes &mut self
-            // so we can call it repeatedly without re-allocation.
             let mut enhancer = QuickFunctionsAstEnhancer::new(settings.clone());
             b.iter(|| {
                 black_box(enhancer.enhance(
@@ -557,9 +804,6 @@ fn bench_enhancer_qi_density(c: &mut Criterion) {
         });
     }
 
-    // Also benchmark the enhancer with NO analysis result (None path) at each density.
-    // This isolates the parameter-defaults-only cost so QI resolution cost can be
-    // derived: qi_resolution_cost = with_analysis - without_analysis.
     for &(qi_per_func, label) in QI_DENSITY_CASES {
         let (section, _) = build_section(DENSITY_FIXED_FUNC_COUNT, qi_per_func, 500_000);
 
@@ -586,7 +830,6 @@ fn bench_enhancer_function_count(c: &mut Criterion) {
     let settings = OperationalSettings::default();
 
     for &(func_count, label) in FUNC_COUNT_CASES {
-        // Use a large pos_base multiplier so no two function-count cases share positions.
         let (section, analysis_result) =
             build_section(func_count, SCALING_FIXED_QI_PER_FUNC, func_count * 50_000);
         let total_qi = func_count * SCALING_FIXED_QI_PER_FUNC;
@@ -607,19 +850,204 @@ fn bench_enhancer_function_count(c: &mut Criterion) {
 }
 
 // =============================================================================
-// Benchmark 4 — Full enhancement pipeline
+// Benchmark 4 — Object access
+// =============================================================================
+
+fn bench_object_access(c: &mut Criterion) {
+    let mut group = c.benchmark_group("object_access");
+    group.measurement_time(Duration::from_secs(8));
+    group.sample_size(200);
+
+    // ── Single expression resolution at varying chain depth ──────────────────
+
+    for &(depth, label) in OBJECT_DEPTH_CASES {
+        let pos = Position::new(1_000_000 + depth, 1);
+        let (resolver, expr) = build_object_property_resolver(depth, pos);
+
+        group.throughput(Throughput::Elements(1));
+        group.bench_function(label, |b| {
+            b.iter(|| black_box(resolver.resolve_expression(black_box(&expr))));
+        });
+    }
+
+    // ── Property access vs method call — head-to-head ────────────────────────
+
+    {
+        let prop_pos = Position::new(2_000_001, 1);
+        let (prop_resolver, prop_expr) = build_object_property_resolver(2, prop_pos);
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("property_access_2part", |b| {
+            b.iter(|| black_box(prop_resolver.resolve_expression(black_box(&prop_expr))));
+        });
+    }
+
+    {
+        let method_pos = Position::new(2_000_002, 1);
+        let (method_resolver, method_expr) = build_object_method_resolver(method_pos);
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("method_call_2part", |b| {
+            b.iter(|| black_box(method_resolver.resolve_expression(black_box(&method_expr))));
+        });
+    }
+
+    // ── No-hit fallback — object property path absent from map ───────────────
+
+    {
+        let no_hit_pos = Position::new(2_999_999, 1);
+        let (resolver, _) = build_object_property_resolver(2, no_hit_pos);
+        // Different position — guaranteed miss.
+        let miss_expr = make_object_property(
+            vec!["ghost".to_string(), "missing".to_string()],
+            Position::new(3_000_000, 1),
+        );
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("no_hit_object_property", |b| {
+            b.iter(|| black_box(resolver.resolve_expression(black_box(&miss_expr))));
+        });
+    }
+
+    // ── Statement-level: return containing an object property access ─────────
+
+    {
+        let ret_pos = Position::new(3_100_001, 1);
+        let (resolver, expr) = build_object_property_resolver(2, ret_pos);
+        let return_stmt = QuickFuncStatement::Return {
+            value: expr,
+            position: Position::UNKNOWN,
+        };
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("statement_return_object_property", |b| {
+            b.iter(|| black_box(resolver.resolve_statement(black_box(&return_stmt))));
+        });
+    }
+
+    // ── Statement-level: let containing an object method call ────────────────
+
+    {
+        let let_pos = Position::new(3_200_001, 1);
+        let (resolver, expr) = build_object_method_resolver(let_pos);
+        let let_stmt = QuickFuncStatement::VariableDeclaration {
+            declaration_type: DeclarationType::Let,
+            is_mutable: false,
+            variable_name: "result".to_string(),
+            data_type: None,
+            value: expr,
+            position: Position::UNKNOWN,
+        };
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("statement_let_object_method", |b| {
+            b.iter(|| black_box(resolver.resolve_statement(black_box(&let_stmt))));
+        });
+    }
+
+    // ── Enhancer: varying object count, fixed 3 properties each ─────────────
+
+    let settings = OperationalSettings::default();
+    for &(obj_count, label) in OBJECT_COUNT_CASES {
+        let total_qi = obj_count * OBJECT_FIXED_PROPS_PER_OBJ;
+        let (section, analysis) =
+            build_object_access_section(obj_count, OBJECT_FIXED_PROPS_PER_OBJ, obj_count * 10_000 + 4_000_000);
+
+        group.throughput(Throughput::Elements(total_qi as u64));
+        group.bench_function(label, |b| {
+            let mut enhancer = QuickFunctionsAstEnhancer::new(settings.clone());
+            b.iter(|| {
+                black_box(enhancer.enhance(
+                    black_box(&section),
+                    Some(black_box(&analysis)),
+                ))
+            });
+        });
+    }
+
+    // ── Enhancer: mixed property + method calls per object ───────────────────
+    // Compare against property-only at equivalent QI count.
+    // 5 objects × 2 QIs each = 10 total, same as 5obj × 2prop for fair comparison.
+
+    for obj_count in [1usize, 5, 10] {
+        let total_qi = obj_count * 2;
+        let (section, analysis) =
+            build_mixed_object_access_section(obj_count, obj_count * 10_000 + 5_000_000);
+
+        group.throughput(Throughput::Elements(total_qi as u64));
+        group.bench_function(
+            &format!("mixed_prop_and_method_{}obj", obj_count),
+            |b| {
+                let mut enhancer = QuickFunctionsAstEnhancer::new(settings.clone());
+                b.iter(|| {
+                    black_box(enhancer.enhance(
+                        black_box(&section),
+                        Some(black_box(&analysis)),
+                    ))
+                });
+            },
+        );
+    }
+
+    // ── Map-size sensitivity scoped to ObjectPropertyAccess hits ─────────────
+    // Adds extra non-object entries to the map to test lookup isolation.
+
+    for &extra_entries in &[0usize, 20, 100] {
+        let obj_pos = Position::new(6_000_001, 1);
+        let obj_parts = vec!["target".to_string(), "field".to_string()];
+        let obj_expr = make_object_property(obj_parts.clone(), obj_pos);
+
+        let mut map: HashMap<QualifiedIdentifierKey, QualifiedIdentifierResolution> =
+            HashMap::with_capacity(1 + extra_entries);
+
+        map.insert(
+            QualifiedIdentifierKey { position: obj_pos, parts: obj_parts.clone(), is_call: false },
+            QualifiedIdentifierResolution {
+                resolved_type: QualifiedIdentifierType::ObjectPropertyAccess,
+                context: None,
+                parts: obj_parts,
+                is_call: false,
+                position: obj_pos,
+            },
+        );
+
+        // Fill with enum-type noise entries at distinct positions.
+        for noise_idx in 0..extra_entries {
+            let noise_pos = Position::new(6_100_000 + noise_idx + 1, 1);
+            let noise_parts = vec!["Status".to_string(), format!("FIELD_{}", noise_idx)];
+            map.insert(
+                QualifiedIdentifierKey {
+                    position: noise_pos,
+                    parts: noise_parts.clone(),
+                    is_call: false,
+                },
+                QualifiedIdentifierResolution {
+                    resolved_type: QualifiedIdentifierType::LocalEnumAccess,
+                    context: None,
+                    parts: noise_parts,
+                    is_call: false,
+                    position: noise_pos,
+                },
+            );
+        }
+
+        let noisy_resolver = QualifiedIdentifierResolver::new(map);
+        group.throughput(Throughput::Elements(1));
+        group.bench_with_input(
+            BenchmarkId::new("obj_hit_with_noise", 1 + extra_entries),
+            &obj_expr,
+            |b, expr| {
+                b.iter(|| black_box(noisy_resolver.resolve_expression(black_box(expr))));
+            },
+        );
+    }
+
+    group.finish();
+}
+
+// =============================================================================
+// Benchmark 5 — Full enhancement pipeline
 // =============================================================================
 
 fn bench_full_enhancement_pipeline(c: &mut Criterion) {
     let mut group = c.benchmark_group("full_enhancement_pipeline");
     group.measurement_time(Duration::from_secs(10));
     group.sample_size(80);
-
-    // ── Enhancement-only baselines (AST already parsed and analyzed) ─────────
-    // Compare these against semantics_benchmark/full_pipeline_* results to
-    // determine what fraction of total compile time is spent in enhancement.
-    //
-    //   enhance_overhead% = (enhancement_only / full_pipeline) * 100
 
     {
         let (ast, settings, semantic_result) = parse_and_analyze(SMALL_SOURCE);
@@ -648,8 +1076,6 @@ fn bench_full_enhancement_pipeline(c: &mut Criterion) {
             );
         });
     }
-
-    // ── Full pipeline: parse → analyze → enhance ─────────────────────────────
 
     group.throughput(Throughput::Bytes(SMALL_SOURCE.len() as u64));
     group.bench_function("full_pipeline_small", |b| {
@@ -683,7 +1109,6 @@ fn bench_full_enhancement_pipeline(c: &mut Criterion) {
         });
     });
 
-    // ── Real .mdix file ───────────────────────────────────────────────────────
     if let Ok(real_src) =
         std::fs::read_to_string("mdix_files/advanced/all_datatypes_test.mdix")
     {
@@ -728,6 +1153,7 @@ criterion_group!(
     bench_resolver_microbench,
     bench_enhancer_qi_density,
     bench_enhancer_function_count,
+    bench_object_access,
     bench_full_enhancement_pipeline,
 );
 criterion_main!(benches);

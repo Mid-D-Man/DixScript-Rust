@@ -106,7 +106,9 @@ harness = false
 [[bench]]
 name    = "ast_enhancement_benchmark"
 harness = false
-
+[[bench]]
+name    = "value_resolution_benchmark"
+harness = false
 # =============================================================================
 # Feature flags
 # =============================================================================

@@ -306,6 +306,8 @@ jobs:
             cargo bench --bench semantics_benchmark --color=never 2>&1 || true
             echo "=== ast_enhancement_benchmark ==="
             cargo bench --bench ast_enhancement_benchmark --color=never 2>&1 || true
+            echo "=== value_resolution_benchmark ==="
+            cargo bench --bench value_resolution_benchmark --color=never 2>&1 || true
           } | tee bench-raw.txt
 
       - name: Parse benchmark results to JSON
@@ -527,6 +529,7 @@ jobs:
             --bench general_parser_benchmark \
             --bench semantics_benchmark \
             --bench ast_enhancement_benchmark \
+            --bench value_resolution_benchmark \
             2>&1 || true
 
       - name: Generate flamegraphs
@@ -569,12 +572,13 @@ jobs:
             fi
           }
 
-          run_flame "throughput_benchmark"     "throughput_benchmark"
-          run_flame "lexer_throughput"         "lexer_throughput"
-          run_flame "config_throughput"        "config_throughput"
-          run_flame "general_parser_benchmark" "general_parser_benchmark"
-          run_flame "semantics_benchmark"      "semantics_benchmark"
-          run_flame "ast_enhancement_benchmark" "ast_enhancement_benchmark"
+          run_flame "throughput_benchmark"        "throughput_benchmark"
+          run_flame "lexer_throughput"            "lexer_throughput"
+          run_flame "config_throughput"           "config_throughput"
+          run_flame "general_parser_benchmark"    "general_parser_benchmark"
+          run_flame "semantics_benchmark"         "semantics_benchmark"
+          run_flame "ast_enhancement_benchmark"   "ast_enhancement_benchmark"
+          run_flame "value_resolution_benchmark"  "value_resolution_benchmark"
 
           echo ""
           echo "Generated flamegraphs:"

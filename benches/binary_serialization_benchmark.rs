@@ -10,6 +10,7 @@
 //! 1. `serialization_speed`    — raw encode time per format, small + medium payloads
 //! 2. `compression_pipeline`   — encode + compress time per format × algorithm
 
+
 use criterion::{
     black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
 };

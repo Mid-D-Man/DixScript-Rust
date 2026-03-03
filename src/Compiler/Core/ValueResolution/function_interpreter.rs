@@ -1298,50 +1298,50 @@ fn evaluate_expression(
     }
 
     fn evaluate_comparison_op(
-        &mut self,
-        left: &Expression,
-        operator: &str,
-        right: &Expression,
-        position: Position,
-        context: &mut ExecutionContext,
-        scope_context: &FxHashMap<String, String>,
-        namespace: Option<&ImportedNamespace>,
-    ) -> Result<DixValue, InterpreterError> {
-        let left_val =
-            self.evaluate_expression(left, context, scope_context, namespace)?;
-        let right_val =
-            self.evaluate_expression(right, context, scope_context, namespace)?;
+    &mut self,
+    left: &Expression,
+    operator: &str,
+    right: &Expression,
+    position: Position,
+    context: &mut ExecutionContext,
+    scope_context: &FxHashMap<String, String>,
+    namespace: Option<&ImportedNamespace>,
+) -> Result<DixValue, InterpreterError> {
+    let left_val =
+        self.evaluate_expression(left, context, scope_context, namespace)?;
+    let right_val =
+        self.evaluate_expression(right, context, scope_context, namespace)?;
 
-        let result = match operator {
-            "==" => Ok(left_val.equal_to(&right_val)),
-            "!=" => Ok(!left_val.equal_to(&right_val)),
-            "<" => left_val.less_than(&right_val).map_err(|e| {
-                InterpreterError::InvalidOperation { message: e, position }
-            })?,
-            ">" => left_val.greater_than(&right_val).map_err(|e| {
-                InterpreterError::InvalidOperation { message: e, position }
-            })?,
-            "<=" => {
-                let less = left_val
-                    .less_than(&right_val)
-                    .map_err(|e| InterpreterError::InvalidOperation { message: e, position })?;
-                Ok(less || left_val.equal_to(&right_val))
-            }
-            ">=" => {
-                let greater = left_val
-                    .greater_than(&right_val)
-                    .map_err(|e| InterpreterError::InvalidOperation { message: e, position })?;
-                Ok(greater || left_val.equal_to(&right_val))
-            }
-            _ => {
-                return Err(InterpreterError::InvalidOperation {
-                    message: format!("Unknown comparison operator: {}", operator),
-                    position,
-                })
-            }
-        };
+    let result: Result<bool, InterpreterError> = match operator {
+        "==" => Ok(left_val.equal_to(&right_val)),
+        "!=" => Ok(!left_val.equal_to(&right_val)),
+        "<" => left_val.less_than(&right_val).map_err(|e| {
+            InterpreterError::InvalidOperation { message: e, position }
+        }),
+        ">" => left_val.greater_than(&right_val).map_err(|e| {
+            InterpreterError::InvalidOperation { message: e, position }
+        }),
+        "<=" => {
+            let less = left_val
+                .less_than(&right_val)
+                .map_err(|e| InterpreterError::InvalidOperation { message: e, position })?;
+            Ok(less || left_val.equal_to(&right_val))
+        }
+        ">=" => {
+            let greater = left_val
+                .greater_than(&right_val)
+                .map_err(|e| InterpreterError::InvalidOperation { message: e, position })?;
+            Ok(greater || left_val.equal_to(&right_val))
+        }
+        _ => {
+            return Err(InterpreterError::InvalidOperation {
+                message: format!("Unknown comparison operator: {}", operator),
+                position,
+            })
+        }
+    };
 
-        Ok(DixValue::from_bool(result.map_err(|e: InterpreterError| e)?))
+    Ok(DixValue::from_bool(result?))
     }
 
     fn evaluate_logical_op(

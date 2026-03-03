@@ -13,16 +13,17 @@
 //!    (mirrors the parser and semantics bench shapes for apples-to-apples comparison).
 //!
 //! 3. `full_pipeline_with_resolution` — complete front-end cost:
-//!    ConfigHandler → Tokenizer → GeneralParser → GeneralSemanticAnalyzer → ValueResolver.
+//!    ConfigHandler → Tokenizer → GeneralParser → GeneralSemanticAnalyzer →
+//!    GeneralAstEnhancer → ValueResolver.
 //!    Compare with `full_pipeline_with_semantics` to quantify resolution overhead.
 
 use criterion::{
-    black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
+    black_box, criterion_group, criterion_main, BatchSize, Criterion, Throughput,
 };
 use dixscript::Compiler::AST::DixScript;
 use dixscript::Compiler::Core::{
     Config::{ConfigSectionHandler, OperationalSettings},
-    GeneralParser, GeneralSemanticAnalyzer,
+    GeneralAstEnhancer, GeneralParser, GeneralSemanticAnalyzer,
     Tokenizer::Tokenizer,
     ValueResolution::{ValueResolver, ValueResolutionResult},
 };
@@ -247,7 +248,6 @@ fn generate_func_heavy(n_enemies: usize) -> String {
             "\n        createEnemy(\"{name}_{i}\", {health}, {damage}),"
         ));
     }
-    // trim trailing comma
     if s.ends_with(',') {
         s.pop();
     }
@@ -259,9 +259,16 @@ fn generate_func_heavy(n_enemies: usize) -> String {
 // Pipeline helpers
 // =============================================================================
 
-/// Run ConfigHandler → Tokenizer → GeneralParser → GeneralSemanticAnalyzer.
-/// Returns the finished AST and a populated SymbolTable.
-fn parse_and_analyze(source: &str) -> (DixScript, SymbolTable, OperationalSettings) {
+/// Run the full front-end pipeline through AST enhancement and return the
+/// enhanced AST plus its populated SymbolTable.
+///
+/// Phase order: ConfigHandler → Tokenizer → GeneralParser →
+/// GeneralSemanticAnalyzer → GeneralAstEnhancer.
+///
+/// `ValueResolver` in the isolation benchmarks receives the enhanced AST so
+/// that qualified-identifier annotations produced by the enhancer are present,
+/// matching real-world resolver inputs.
+fn parse_analyze_and_enhance(source: &str) -> (DixScript, SymbolTable, OperationalSettings) {
     let mut handler = ConfigSectionHandler::new(None);
     let cfg = handler.process_config_section(source);
     let settings = cfg.operational_settings.clone();
@@ -269,12 +276,25 @@ fn parse_and_analyze(source: &str) -> (DixScript, SymbolTable, OperationalSettin
     let parser =
         GeneralParser::new(toks.tokens, &cfg.config_section, &settings).expect("parser init");
     let ast = parser.parse().expect("parse failed in bench setup");
-    let analyzer = GeneralSemanticAnalyzer::new(&ast, &settings);
-    let sem_result = analyzer.analyze().expect("semantic analysis failed");
-    (ast, sem_result.symbol_table, settings)
+
+    // Semantic analysis — returns SemanticAnalysisResult directly (not Result<…>).
+    let sem_result = GeneralSemanticAnalyzer::new(&ast, &settings).analyze();
+
+    // Clone the symbol table before the enhancer borrows sem_result.
+    let symbol_table = sem_result
+        .symbol_table
+        .clone()
+        .expect("symbol table missing after semantic analysis");
+
+    // AST enhancement — resolves qualified identifiers and applies parameter
+    // defaults.  The enhanced AST is what ValueResolver should operate on.
+    let enhancer = GeneralAstEnhancer::new(&settings);
+    let enhancement = enhancer.enhance(&ast, Some(&sem_result));
+
+    (enhancement.enhanced_ast, symbol_table, settings)
 }
 
-/// Run the full 5-stage pipeline including resolution.
+/// Run the complete 5-stage pipeline including AST enhancement and resolution.
 fn run_full_pipeline(source: &str) -> ValueResolutionResult {
     let mut handler = ConfigSectionHandler::new(None);
     let cfg = handler.process_config_section(source);
@@ -282,17 +302,30 @@ fn run_full_pipeline(source: &str) -> ValueResolutionResult {
     let toks = Tokenizer::new(&cfg.cleaned_input_string, &s).tokenize();
     let parser = GeneralParser::new(toks.tokens, &cfg.config_section, &s).expect("parser init");
     let ast = parser.parse().expect("parse failed");
-    let analyzer = GeneralSemanticAnalyzer::new(&ast, &s);
-    let sem = analyzer.analyze().expect("semantic analysis failed");
-    let resolver = ValueResolver::new(ast, &sem.symbol_table, DebugMode::Off);
+
+    // Semantic analysis — returns SemanticAnalysisResult directly.
+    let sem_result = GeneralSemanticAnalyzer::new(&ast, &s).analyze();
+
+    let symbol_table = sem_result
+        .symbol_table
+        .clone()
+        .expect("symbol table missing after semantic analysis");
+
+    // AST enhancement between semantics and resolution.
+    let enhancer = GeneralAstEnhancer::new(&s);
+    let enhancement = enhancer.enhance(&ast, Some(&sem_result));
+
+    let resolver =
+        ValueResolver::new(enhancement.enhanced_ast, &symbol_table, DebugMode::Off);
     resolver.resolve()
 }
 
 // =============================================================================
 // Benchmark 1 — resolver in isolation by input complexity
 //
-// AST + SymbolTable are pre-built once in setup; only ValueResolver::resolve()
-// is timed.  iter_batched is required because resolve() consumes self.
+// The enhanced AST + SymbolTable are pre-built once in setup; only
+// ValueResolver::resolve() is timed.  iter_batched is required because
+// resolve() consumes self.
 // =============================================================================
 
 fn bench_resolver_by_complexity(c: &mut Criterion) {
@@ -302,7 +335,7 @@ fn bench_resolver_by_complexity(c: &mut Criterion) {
 
     // ── No function calls (phases 1 + 2 + 5 only) ────────────────────────────
     {
-        let (ast, st, settings) = parse_and_analyze(NO_FUNCS_INPUT);
+        let (ast, st, _) = parse_analyze_and_enhance(NO_FUNCS_INPUT);
         group.throughput(Throughput::Bytes(NO_FUNCS_INPUT.len() as u64));
         group.bench_function("no_funcs", |b| {
             b.iter_batched(
@@ -315,7 +348,7 @@ fn bench_resolver_by_complexity(c: &mut Criterion) {
 
     // ── Simple function calls (flat call graph) ───────────────────────────────
     {
-        let (ast, st, _) = parse_and_analyze(SIMPLE_FUNCS_INPUT);
+        let (ast, st, _) = parse_analyze_and_enhance(SIMPLE_FUNCS_INPUT);
         group.throughput(Throughput::Bytes(SIMPLE_FUNCS_INPUT.len() as u64));
         group.bench_function("simple_funcs", |b| {
             b.iter_batched(
@@ -328,7 +361,7 @@ fn bench_resolver_by_complexity(c: &mut Criterion) {
 
     // ── Complex function calls (inter-function deps, object return types) ─────
     {
-        let (ast, st, _) = parse_and_analyze(COMPLEX_FUNCS_INPUT);
+        let (ast, st, _) = parse_analyze_and_enhance(COMPLEX_FUNCS_INPUT);
         group.throughput(Throughput::Bytes(COMPLEX_FUNCS_INPUT.len() as u64));
         group.bench_function("complex_funcs", |b| {
             b.iter_batched(
@@ -359,7 +392,7 @@ fn bench_combined_resolution(c: &mut Criterion) {
     // ── Small: 50 literal properties, no funcs ────────────────────────────────
     {
         let src = generate_flat_literals(50);
-        let (ast, st, _) = parse_and_analyze(&src);
+        let (ast, st, _) = parse_analyze_and_enhance(&src);
         group.throughput(Throughput::Bytes(src.len() as u64));
         group.bench_function("literals_50props", |b| {
             b.iter_batched(
@@ -373,7 +406,7 @@ fn bench_combined_resolution(c: &mut Criterion) {
     // ── Medium: 20 enemies (20 object-returning calls, 60 leaf calls) ─────────
     {
         let src = generate_func_heavy(20);
-        let (ast, st, _) = parse_and_analyze(&src);
+        let (ast, st, _) = parse_analyze_and_enhance(&src);
         group.throughput(Throughput::Bytes(src.len() as u64));
         group.bench_function("enemy_20calls", |b| {
             b.iter_batched(
@@ -387,7 +420,7 @@ fn bench_combined_resolution(c: &mut Criterion) {
     // ── Large: 60 enemies ────────────────────────────────────────────────────
     {
         let src = generate_func_heavy(60);
-        let (ast, st, _) = parse_and_analyze(&src);
+        let (ast, st, _) = parse_analyze_and_enhance(&src);
         group.throughput(Throughput::Bytes(src.len() as u64));
         group.bench_function("enemy_60calls", |b| {
             b.iter_batched(
@@ -406,13 +439,13 @@ fn bench_combined_resolution(c: &mut Criterion) {
 //
 // Measures total wall time a caller sees:
 //   ConfigSectionHandler → Tokenizer → GeneralParser
-//   → GeneralSemanticAnalyzer → ValueResolver
+//   → GeneralSemanticAnalyzer → GeneralAstEnhancer → ValueResolver
 //
 // Resolution-only baselines allow deriving:
 //   resolution % = resolution_only / full_pipeline * 100
 //
 // Compare against `full_pipeline_with_semantics` (semantics_benchmark) to
-// understand the marginal cost of adding value resolution.
+// understand the marginal cost of adding AST enhancement and value resolution.
 // =============================================================================
 
 fn bench_full_pipeline_with_resolution(c: &mut Criterion) {
@@ -420,9 +453,9 @@ fn bench_full_pipeline_with_resolution(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(10));
     group.sample_size(80);
 
-    // ── Resolution-only baselines ─────────────────────────────────────────────
+    // ── Resolution-only baselines (enhanced AST pre-built, only resolve) ──────
     {
-        let (ast_no, st_no, _) = parse_and_analyze(NO_FUNCS_INPUT);
+        let (ast_no, st_no, _) = parse_analyze_and_enhance(NO_FUNCS_INPUT);
         group.throughput(Throughput::Bytes(NO_FUNCS_INPUT.len() as u64));
         group.bench_function("resolution_only_no_funcs", |b| {
             b.iter_batched(
@@ -433,7 +466,7 @@ fn bench_full_pipeline_with_resolution(c: &mut Criterion) {
         });
     }
     {
-        let (ast_cx, st_cx, _) = parse_and_analyze(COMPLEX_FUNCS_INPUT);
+        let (ast_cx, st_cx, _) = parse_analyze_and_enhance(COMPLEX_FUNCS_INPUT);
         group.throughput(Throughput::Bytes(COMPLEX_FUNCS_INPUT.len() as u64));
         group.bench_function("resolution_only_complex_funcs", |b| {
             b.iter_batched(
@@ -478,7 +511,7 @@ fn bench_full_pipeline_with_resolution(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(real_src.len() as u64));
 
         {
-            let (real_ast, real_st, _) = parse_and_analyze(&real_src);
+            let (real_ast, real_st, _) = parse_analyze_and_enhance(&real_src);
             group.bench_function("real_file_resolution_only", |b| {
                 b.iter_batched(
                     || ValueResolver::new(real_ast.clone(), &real_st, DebugMode::Off),

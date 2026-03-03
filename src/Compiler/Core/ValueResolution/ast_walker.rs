@@ -1,24 +1,23 @@
 // src/Compiler/Core/ValueResolution/ast_walker.rs
-//!
 //! ASTWalker — discovers every QuickFunction call inside @DATA.
 //!
 //! Responsibilities:
-//!   • Recursively visits all Values and Expressions in every DATA entry.
-//!   • Detects `namespace.function` patterns and splits them using the
+//!   - Recursively visits all Values and Expressions in every DATA entry.
+//!   - Detects `namespace.function` patterns and splits them using the
 //!     SymbolTable's imported-namespace registry.
-//!   • Maintains accurate scope context via ScopeTracker.
-//!   • Resets scope between top-level entries (prevents state bleeding).
+//!   - Maintains accurate scope context via ScopeTracker.
+//!   - Resets scope between top-level entries to prevent state bleeding.
 //!
 //! Improvements over C# version:
-//!   • All debug logging is gated by a cached `DebugConfig` — `format!(…)`
+//!   - All debug logging is gated by a cached `DebugConfig` — `format!(…)`
 //!     is never evaluated when debug mode is off.
-//!   • Handles Value variants the C# walker skipped: NestedArray, Range, Lambda.
-//!   • `ParentEntry` reference removed; `entry_path` is the sole stable
+//!   - Handles Value variants the C# walker skipped: NestedArray, Range, Lambda.
+//!   - `ParentEntry` reference removed; `entry_path` is the sole stable
 //!     identifier (the C# comment already flagged it as the reliable key).
-//!   • Namespace splitting uses a single `find('.')` + length check instead
-//!     of allocating a `Split` array.
+//!   - Namespace splitting uses a single `find('.')` + length check instead
+//!     of allocating a split array.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::Compiler::AST::{
     DataEntry, DataSection, Expression, ObjectProperty, Position,
@@ -26,9 +25,9 @@ use crate::Compiler::AST::{
 };
 use crate::Compiler::Core::DebugMode;
 use crate::Compiler::Utilities::SymbolTable;
-use crate::ErrorManager::ErrorManager;
+use crate::ErrorManager::{DebugConfig, ErrorManager};
 
-use super::supporting_classes::{DebugConfig, FunctionCallInfo, ScopeTracker};
+use super::supporting_classes::{FunctionCallInfo, ScopeTracker};
 
 /// Traverses @DATA and collects every QuickFunction call site.
 ///
@@ -37,18 +36,13 @@ use super::supporting_classes::{DebugConfig, FunctionCallInfo, ScopeTracker};
 pub struct ASTWalker<'a> {
     error_manager: ErrorManager,
     symbol_table: &'a SymbolTable,
-    /// Accumulator for discovered calls (moved out at the end of `find_all`).
     found_calls: Vec<FunctionCallInfo>,
     scope_tracker: ScopeTracker,
-    /// Path string of the top-level DATA entry currently being visited.
     current_entry_path: String,
-    /// Cached debug flags — single bool checks, no repeated enum comparison.
     debug_config: DebugConfig,
 }
 
 impl<'a> ASTWalker<'a> {
-    /// Create a walker.  `debug_mode` is cached internally — subsequent
-    /// log-site checks are a plain bool read.
     pub fn new(
         error_manager: ErrorManager,
         symbol_table: &'a SymbolTable,
@@ -57,18 +51,17 @@ impl<'a> ASTWalker<'a> {
         ASTWalker {
             error_manager,
             symbol_table,
-            found_calls: Vec::new(),
+            // 16 is a reasonable starting estimate; grows as needed.
+            found_calls: Vec::with_capacity(16),
             scope_tracker: ScopeTracker::new(),
             current_entry_path: String::new(),
-            debug_config: DebugConfig::from_mode(debug_mode),
+            debug_config: DebugConfig::from_debug_mode(debug_mode),
         }
     }
 
-    // ==================== PUBLIC API ====================
-
     /// Walk the entire DATA section and return all discovered function calls.
     ///
-    /// The result vec is moved out (zero-copy via `mem::take`); `found_calls`
+    /// The result vec is moved out via `mem::take` — zero-copy; `found_calls`
     /// is left empty and ready for a subsequent call if needed.
     pub fn find_all(&mut self, data_section: &DataSection) -> Vec<FunctionCallInfo> {
         self.found_calls.clear();
@@ -81,7 +74,6 @@ impl<'a> ASTWalker<'a> {
         }
 
         for (i, entry) in data_section.entries.iter().enumerate() {
-            // CRITICAL: reset scope before each top-level entry
             self.scope_tracker.reset_to_root();
 
             if self.debug_config.is_verbose {
@@ -94,7 +86,6 @@ impl<'a> ASTWalker<'a> {
             self.visit_data_entry(entry);
         }
 
-        // ── summary logging ──
         if self.debug_config.is_enabled {
             self.error_manager.log_info(&format!(
                 "Found {} function calls in DATA section",
@@ -102,13 +93,11 @@ impl<'a> ASTWalker<'a> {
             ));
         }
 
-        // Warning is always emitted — it signals a potential problem
         if self.found_calls.is_empty() {
             self.error_manager
                 .log_warning("[ASTWalker] Found ZERO function calls!");
         } else if self.debug_config.is_verbose {
-            // Only build the grouped map when verbose is actually on
-            let mut groups: HashMap<String, usize> = HashMap::new();
+            let mut groups: FxHashMap<String, usize> = FxHashMap::default();
             for call in &self.found_calls {
                 *groups.entry(call.fully_qualified_name()).or_insert(0) += 1;
             }
@@ -120,11 +109,8 @@ impl<'a> ASTWalker<'a> {
             }
         }
 
-        // Move the vec out — zero allocation
         std::mem::take(&mut self.found_calls)
     }
-
-    // ==================== DATA ENTRY VISITORS ====================
 
     fn visit_data_entry(&mut self, entry: &DataEntry) {
         self.current_entry_path = get_entry_path(entry);
@@ -171,7 +157,6 @@ impl<'a> ASTWalker<'a> {
         path: &TablePath,
         properties: &[PropertyAssignment],
     ) {
-        // Enter scope for each path segment directly — no ToString + Split needed
         for segment in &path.segments {
             self.scope_tracker.enter_scope(segment);
         }
@@ -180,7 +165,7 @@ impl<'a> ASTWalker<'a> {
 
         let current_path = self.scope_tracker.get_current_path();
 
-        // PASS 1: Register all properties so they are visible during value visits
+        // Pass 1: register all properties so they are visible during value visits.
         for assignment in properties {
             let full_path = format!("{}.{}", current_path, assignment.name);
             self.scope_tracker
@@ -194,7 +179,7 @@ impl<'a> ASTWalker<'a> {
             }
         }
 
-        // PASS 2: Visit property values
+        // Pass 2: visit property values.
         for assignment in properties {
             self.scope_tracker.enter_scope(&assignment.name);
 
@@ -209,7 +194,6 @@ impl<'a> ASTWalker<'a> {
             self.scope_tracker.exit_scope();
         }
 
-        // Exit all path segments
         for _ in &path.segments {
             self.scope_tracker.exit_scope();
         }
@@ -255,8 +239,6 @@ impl<'a> ASTWalker<'a> {
         self.scope_tracker.exit_scope();
     }
 
-    // ==================== VALUE VISITORS ====================
-
     fn visit_value(&mut self, value: &Value) {
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!(
@@ -288,7 +270,6 @@ impl<'a> ASTWalker<'a> {
                 self.visit_array(values);
             }
 
-            // Improvement: NestedArray was unhandled in C# — same traversal as Array
             Value::NestedArray { values, .. } => {
                 self.visit_array(values);
             }
@@ -303,11 +284,7 @@ impl<'a> ASTWalker<'a> {
                 }
             }
 
-            Value::PrefixedConstructor {
-                prefix,
-                arguments,
-                ..
-            } => {
+            Value::PrefixedConstructor { prefix, arguments, .. } => {
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "      Found PrefixedConstructor: {}",
@@ -326,18 +303,16 @@ impl<'a> ASTWalker<'a> {
                 }
             }
 
-            // Improvement: Range holds two Values — recurse into both
             Value::Range { start, end, .. } => {
                 self.visit_value(start);
                 self.visit_value(end);
             }
 
-            // Improvement: Lambda body is an Expression — recurse
             Value::Lambda { body, .. } => {
                 self.visit_expression(body);
             }
 
-            // Terminal values — no nested function calls possible
+            // Terminal values — no nested function calls possible.
             Value::Integer { .. }
             | Value::Float { .. }
             | Value::Double { .. }
@@ -352,14 +327,10 @@ impl<'a> ASTWalker<'a> {
             | Value::Identifier { .. }
             | Value::ParseError { .. }
             | Value::Error { .. }
-            | Value::Unknown { .. } => {
-                // nothing to traverse
-            }
+            | Value::Unknown { .. } => {}
         }
     }
 
-    /// Core handler: records a QuickFuncCall found as a Value and recurses
-    /// into its argument expressions.
     fn handle_value_quick_func_call(
         &mut self,
         raw_name: &str,
@@ -393,7 +364,6 @@ impl<'a> ASTWalker<'a> {
             scope_context: self.scope_tracker.get_scope_variables_snapshot(),
         });
 
-        // Arguments may themselves contain nested function calls — recurse
         for arg in arguments {
             self.visit_expression(arg);
         }
@@ -427,22 +397,20 @@ impl<'a> ASTWalker<'a> {
     fn visit_object_literal(&mut self, properties: &[ObjectProperty]) {
         let current_path = self.scope_tracker.get_current_path();
 
-        // PASS 1: Register all properties
+        // Pass 1: register all properties.
         for prop in properties {
             let full_path = format!("{}.{}", current_path, prop.key);
             self.scope_tracker
                 .register_variable(&prop.key, &full_path);
         }
 
-        // PASS 2: Visit values
+        // Pass 2: visit values.
         for prop in properties {
             self.scope_tracker.enter_scope(&prop.key);
             self.visit_value(&prop.value);
             self.scope_tracker.exit_scope();
         }
     }
-
-    // ==================== EXPRESSION VISITORS ====================
 
     fn visit_expression(&mut self, expr: &Expression) {
         if self.debug_config.is_verbose {
@@ -453,11 +421,7 @@ impl<'a> ASTWalker<'a> {
         }
 
         match expr {
-            Expression::QuickFuncCall {
-                name,
-                arguments,
-                position,
-            } => {
+            Expression::QuickFuncCall { name, arguments, position } => {
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
                         "        Found QuickFuncCall in expression: {}",
@@ -486,10 +450,8 @@ impl<'a> ASTWalker<'a> {
                     position: *position,
                     scope_context: self.scope_tracker.get_scope_variables_snapshot(),
                 });
-
-                // NOTE: C# does not recurse into arguments here — preserved exactly.
-                // ImportedFunctionCall below DOES recurse; the asymmetry is from the
-                // original and may warrant a separate review.
+                // NOTE: arguments are not recursed here — preserved from C# original.
+                // ImportedFunctionCall below does recurse; the asymmetry is intentional.
             }
 
             Expression::ImportedFunctionCall {
@@ -540,12 +502,7 @@ impl<'a> ASTWalker<'a> {
                 self.visit_expression(operand);
             }
 
-            Expression::Conditional {
-                condition,
-                true_value,
-                false_value,
-                ..
-            } => {
+            Expression::Conditional { condition, true_value, false_value, .. } => {
                 self.visit_expression(condition);
                 self.visit_expression(true_value);
                 self.visit_expression(false_value);
@@ -566,24 +523,18 @@ impl<'a> ASTWalker<'a> {
                 }
             }
 
-            Expression::InstanceMethodCall {
-                instance,
-                arguments,
-                ..
-            } => {
+            Expression::InstanceMethodCall { instance, arguments, .. } => {
                 self.visit_expression(instance);
                 for arg in arguments {
                     self.visit_expression(arg);
                 }
             }
 
-            // Terminal — no nested calls to discover
             Expression::Identifier { .. }
             | Expression::Value { .. }
             | Expression::EnumAccess { .. }
             | Expression::ConfigAccess { .. } => {}
 
-            // Catch-all for any variants not explicitly handled above
             other => {
                 if self.debug_config.is_verbose {
                     self.error_manager.log_debug(&format!(
@@ -595,18 +546,14 @@ impl<'a> ASTWalker<'a> {
         }
     }
 
-    // ==================== NAMESPACE SPLITTING ====================
-
     /// If `raw_name` is `"ns.func"` and `ns` is a known imported namespace,
-    /// return `("func", Some("ns"))`.  Otherwise return `(raw_name, None)`.
-    ///
+    /// return `("func", Some("ns"))`. Otherwise return `(raw_name, None)`.
     /// Uses a single `find('.')` rather than allocating a split array.
     fn split_namespace(&self, raw_name: &str) -> (String, Option<String>) {
         if let Some(dot_pos) = raw_name.find('.') {
             let prefix = &raw_name[..dot_pos];
             let suffix = &raw_name[dot_pos + 1..];
 
-            // Only split on exactly one dot + known namespace
             if !suffix.contains('.')
                 && self.symbol_table.is_imported_namespace(prefix)
             {
@@ -618,9 +565,6 @@ impl<'a> ASTWalker<'a> {
     }
 }
 
-// ==================== MODULE-LEVEL HELPERS ====================
-
-/// Extract the entry-path string from a DataEntry variant.
 fn get_entry_path(entry: &DataEntry) -> String {
     match entry {
         DataEntry::SimpleProperty { name, .. } => name.clone(),
@@ -688,5 +632,6 @@ fn expr_variant_name(expr: &Expression) -> &'static str {
         Expression::Parenthesized { .. } => "Parenthesized",
         Expression::Conditional { .. } => "Conditional",
         Expression::TypeCast { .. } => "TypeCast",
+        Expression::BitwiseOp { .. } => "BitwiseOp",
     }
-  }
+}

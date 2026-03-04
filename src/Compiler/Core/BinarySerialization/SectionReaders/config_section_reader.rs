@@ -1,239 +1,224 @@
-//! Reads @CONFIG section from binary format
+//! Reads @CONFIG section from binary format.
 
 use std::io::Read;
-use crate::Compiler::AST::{ConfigSection, ConfigEntry, ConfigValue, Position};
+use crate::Compiler::AST::{ConfigSection, ConfigEntry, ConfigValue, Position, Value};
 use crate::Compiler::AST::data_types::{ErrorHandlingStrategy, CompatibilityMode, DebugMode};
-use crate::ErrorManager::ErrorManager;
+use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
 use super::binary_format::SectionId;
 use super::section_offset::SectionOffset;
 use super::binary_serialization_context::BinarySerializationContext;
 use super::binary_serialization_error::BinarySerializationError;
 use super::value_decoder::ValueDecoder;
-use crate::Compiler::AST::Value;
 
-/// Reads @CONFIG section from binary format
+/// Reads @CONFIG section from binary format.
 /// Format: [Section ID: 4][Section Length: 4][Entry Count: 4][Entries...]
 /// Each entry: [Key Length: 4][Key UTF-8][Value Type: 1][Value Data]
 pub struct ConfigSectionReader<'a> {
     context: &'a mut BinarySerializationContext,
     value_decoder: &'a mut ValueDecoder,
-    error_manager: ErrorManager,
 }
 
 impl<'a> ConfigSectionReader<'a> {
-    /// Create new config section reader
     pub fn new(
         context: &'a mut BinarySerializationContext,
         value_decoder: &'a mut ValueDecoder,
     ) -> Self {
-        ConfigSectionReader {
-            context,
-            value_decoder,
-            error_manager: ErrorManager::get_shared_instance(),
-        }
+        ConfigSectionReader { context, value_decoder }
     }
 
-    /// Read @CONFIG section from binary
     pub fn read_section<R: Read>(
         &mut self,
         reader: &mut R,
         offset: &SectionOffset,
     ) -> Result<ConfigSection, BinarySerializationError> {
-        self.context.log_info(&format!(
-            "Reading @CONFIG section from offset {}",
-            offset.offset
-        ));
-
-        // Read and validate section ID
-        let mut id_buf = [0u8; 4];
-        reader.read_exact(&mut id_buf)
-            .map_err(|e| BinarySerializationError::read_error(e.to_string(), "ConfigSection"))?;
-        let section_id = u32::from_le_bytes(id_buf);
-
-        if section_id != SectionId::Config as u32 {
-            return Err(BinarySerializationError::invalid_section_id(
-                section_id,
-                "ConfigSection",
+        if self.context.debug_config.is_enabled {
+            self.context.log_info(&format!(
+                "Reading @CONFIG section from offset {}",
+                offset.offset
             ));
         }
 
-        // Read section length
+        let mut id_buf = [0u8; 4];
+        reader
+            .read_exact(&mut id_buf)
+            .map_err(|e| self.read_err(e.to_string(), "ConfigSection"))?;
+        let section_id = u32::from_le_bytes(id_buf);
+        if section_id != SectionId::Config as u32 {
+            return Err(BinarySerializationError::invalid_section_id(section_id, "ConfigSection"));
+        }
+
         let mut len_buf = [0u8; 4];
-        reader.read_exact(&mut len_buf)
-            .map_err(|e| BinarySerializationError::read_error(e.to_string(), "ConfigSection"))?;
+        reader
+            .read_exact(&mut len_buf)
+            .map_err(|e| self.read_err(e.to_string(), "ConfigSection"))?;
         let section_length = i32::from_le_bytes(len_buf);
-        self.context.log_debug(&format!("Section length: {} bytes", section_length));
+        if self.context.debug_config.is_verbose {
+            self.context
+                .log_verbose(&format!("  section length: {} bytes", section_length));
+        }
 
-        // Read entry count
         let mut count_buf = [0u8; 4];
-        reader.read_exact(&mut count_buf)
-            .map_err(|e| BinarySerializationError::read_error(e.to_string(), "ConfigSection"))?;
+        reader
+            .read_exact(&mut count_buf)
+            .map_err(|e| self.read_err(e.to_string(), "ConfigSection"))?;
         let entry_count = i32::from_le_bytes(count_buf);
-        self.context.log_info(&format!("Reading {} config entries", entry_count));
 
-        // Read all entries
+        if self.context.debug_config.is_enabled {
+            self.context
+                .log_info(&format!("  reading {} config entries", entry_count));
+        }
+
         let mut entries = Vec::with_capacity(entry_count as usize);
         for _ in 0..entry_count {
             let entry = self.read_config_entry(reader)?;
             entries.push(entry);
+            if self.context.error_manager.should_terminate_parsing() {
+                return Err(BinarySerializationError::invalid_state(
+                    "Terminating CONFIG read due to accumulated errors",
+                    "ConfigSection",
+                ));
+            }
         }
 
-        self.context.log_info(&format!("✅ @CONFIG section read: {} entries", entry_count));
+        if self.context.debug_config.is_enabled {
+            self.context.log_info(&format!("@CONFIG read: {} entries", entry_count));
+        }
 
         Ok(ConfigSection::new(entries, Position::UNKNOWN))
     }
 
-    /// Read individual config entry
-    /// Format: [Key Length: 4][Key UTF-8][Value]
     fn read_config_entry<R: Read>(
         &mut self,
         reader: &mut R,
     ) -> Result<ConfigEntry, BinarySerializationError> {
-        // Read key length
         let mut len_buf = [0u8; 4];
-        reader.read_exact(&mut len_buf)
-            .map_err(|e| BinarySerializationError::read_error(e.to_string(), "ConfigEntry"))?;
+        reader
+            .read_exact(&mut len_buf)
+            .map_err(|e| self.read_err(e.to_string(), "ConfigEntry"))?;
         let key_length = i32::from_le_bytes(len_buf) as usize;
 
-        // Read key
         let mut key_bytes = vec![0u8; key_length];
-        reader.read_exact(&mut key_bytes)
-            .map_err(|e| BinarySerializationError::read_error(e.to_string(), "ConfigEntry"))?;
+        reader
+            .read_exact(&mut key_bytes)
+            .map_err(|e| self.read_err(e.to_string(), "ConfigEntry"))?;
         let key = String::from_utf8(key_bytes)
-            .map_err(|e| BinarySerializationError::read_error(e.to_string(), "ConfigEntry"))?;
+            .map_err(|e| self.read_err(e.to_string(), "ConfigEntry"))?;
 
-        // Read value
-        let ast_value = self.value_decoder.decode_value(reader,self.context)
-            .map_err(|e| BinarySerializationError::read_error(e.to_string(), "ConfigEntry"))?;
+        let ast_value = self
+            .value_decoder
+            .decode_value(reader, self.context)
+            .map_err(|e| self.read_err(e.to_string(), "ConfigEntry"))?;
 
-        // Convert AST Value to ConfigValue
-        let config_value = self.convert_ast_value_to_config_value(&key, &ast_value)?;
+        let config_value = self.ast_to_config_value(&key, &ast_value)?;
 
-        self.context.log_debug(&format!("  Config entry: {} = {}", key, config_value));
+        if self.context.debug_config.is_verbose {
+            self.context
+                .log_verbose(&format!("  config entry: {} = {}", key, config_value));
+        }
 
         Ok(ConfigEntry::new(key, config_value, Position::UNKNOWN))
     }
 
-    /// Convert AST Value to ConfigValue based on key name
-    fn convert_ast_value_to_config_value(
-        &self,
+    fn ast_to_config_value(
+        &mut self,
         key: &str,
         ast_value: &Value,
     ) -> Result<ConfigValue, BinarySerializationError> {
-        // Special handling for known config keys with specific types
         match key.to_lowercase().as_str() {
-            "error_handling" => self.parse_error_handling_value(ast_value),
-            "compatibility_mode" => self.parse_compatibility_value(ast_value),
-            "debug_mode" => self.parse_debug_value(ast_value),
-            "features" => self.parse_feature_value(ast_value),
+            "error_handling" => self.parse_error_handling(ast_value),
+            "compatibility_mode" => self.parse_compatibility(ast_value),
+            "debug_mode" => self.parse_debug_mode(ast_value),
+            "features" => self.parse_features(ast_value),
             "created" => match ast_value {
                 Value::Timestamp { value, .. } => Ok(ConfigValue::Timestamp(value.clone())),
                 Value::Date { value, .. } => Ok(ConfigValue::Date(value.clone())),
-                _ => self.convert_generic_value(ast_value),
+                _ => self.generic_convert(ast_value),
             },
-            _ => self.convert_generic_value(ast_value),
+            _ => self.generic_convert(ast_value),
         }
     }
 
-    fn parse_error_handling_value(
-        &self,
-        ast_value: &Value,
-    ) -> Result<ConfigValue, BinarySerializationError> {
-        if let Value::String { value, .. } = ast_value {
+    fn parse_error_handling(&self, v: &Value) -> Result<ConfigValue, BinarySerializationError> {
+        if let Value::String { value, .. } = v {
             let strategy = match value.to_lowercase().as_str() {
-                "halt" => ErrorHandlingStrategy::Halt,
                 "continue" => ErrorHandlingStrategy::Continue,
                 "recover" => ErrorHandlingStrategy::Recover,
                 _ => ErrorHandlingStrategy::Halt,
             };
             Ok(ConfigValue::ErrorHandling(strategy))
         } else {
-            Err(BinarySerializationError::new(
-                crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::InvalidFormat,
-                "error_handling must be a string",
-                self.context.get_current_scope(),
-            ))
+            Err(self.format_err("error_handling must be a string"))
         }
     }
 
-    fn parse_compatibility_value(
-        &self,
-        ast_value: &Value,
-    ) -> Result<ConfigValue, BinarySerializationError> {
-        if let Value::String { value, .. } = ast_value {
+    fn parse_compatibility(&self, v: &Value) -> Result<ConfigValue, BinarySerializationError> {
+        if let Value::String { value, .. } = v {
             let mode = match value.to_lowercase().as_str() {
-                "strict" => CompatibilityMode::Strict,
                 "best_effort" => CompatibilityMode::BestEffort,
                 "permissive" => CompatibilityMode::Permissive,
                 _ => CompatibilityMode::Strict,
             };
             Ok(ConfigValue::Compatibility(mode))
         } else {
-            Err(BinarySerializationError::new(
-                crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::InvalidFormat,
-                "compatibility_mode must be a string",
-                self.context.get_current_scope(),
-            ))
+            Err(self.format_err("compatibility_mode must be a string"))
         }
     }
 
-    fn parse_debug_value(
-        &self,
-        ast_value: &Value,
-    ) -> Result<ConfigValue, BinarySerializationError> {
-        if let Value::String { value, .. } = ast_value {
+    fn parse_debug_mode(&self, v: &Value) -> Result<ConfigValue, BinarySerializationError> {
+        if let Value::String { value, .. } = v {
             let mode = match value.to_lowercase().as_str() {
-                "off" => DebugMode::Off,
                 "regular" => DebugMode::Regular,
                 "verbose" => DebugMode::Verbose,
                 _ => DebugMode::Off,
             };
             Ok(ConfigValue::Debug(mode))
         } else {
-            Err(BinarySerializationError::new(
-                crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::InvalidFormat,
-                "debug_mode must be a string",
-                self.context.get_current_scope(),
-            ))
+            Err(self.format_err("debug_mode must be a string"))
         }
     }
 
-    fn parse_feature_value(
-        &self,
-        ast_value: &Value,
-    ) -> Result<ConfigValue, BinarySerializationError> {
-        if let Value::String { value, .. } = ast_value {
-            let features: Vec<String> = value
+    fn parse_features(&self, v: &Value) -> Result<ConfigValue, BinarySerializationError> {
+        if let Value::String { value, .. } = v {
+            let features = value
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
             Ok(ConfigValue::Features(features))
         } else {
-            Err(BinarySerializationError::new(
-                crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::InvalidFormat,
-                "features must be a string",
-                self.context.get_current_scope(),
-            ))
+            Err(self.format_err("features must be a string"))
         }
     }
 
-    fn convert_generic_value(
-        &self,
-        ast_value: &Value,
-    ) -> Result<ConfigValue, BinarySerializationError> {
-        match ast_value {
+    fn generic_convert(&self, v: &Value) -> Result<ConfigValue, BinarySerializationError> {
+        match v {
             Value::String { value, .. } => Ok(ConfigValue::String(value.clone())),
             Value::Integer { value, .. } => Ok(ConfigValue::Integer(*value)),
             Value::Float { value, .. } => Ok(ConfigValue::Float(*value)),
             Value::Boolean { value, .. } => Ok(ConfigValue::Boolean(*value)),
             Value::Date { value, .. } => Ok(ConfigValue::Date(value.clone())),
             Value::Timestamp { value, .. } => Ok(ConfigValue::Timestamp(value.clone())),
-            _ => Err(BinarySerializationError::new(
-                crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::InvalidFormat,
-                format!("Unsupported config value type: {:?}", ast_value),
-                self.context.get_current_scope(),
-            )),
+            _ => Err(self.format_err(&format!("Unsupported config value type: {:?}", v))),
         }
     }
-      }
+
+    fn read_err(&self, message: String, location: &str) -> BinarySerializationError {
+        let e = BinarySerializationError::read_error(message, location);
+        self.context
+            .error_manager
+            .add_binary_serialization_error(e.error_type, e.message.clone(), None, None, None, None);
+        e
+    }
+
+    fn format_err(&self, message: &str) -> BinarySerializationError {
+        let e = BinarySerializationError::new(
+            BinarySerializationErrorType::InvalidFormat,
+            message,
+            self.context.get_current_scope(),
+        );
+        self.context
+            .error_manager
+            .add_binary_serialization_error(e.error_type, e.message.clone(), None, None, None, None);
+        e
+    }
+}

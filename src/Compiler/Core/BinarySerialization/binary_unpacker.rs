@@ -1,301 +1,394 @@
-//! Main binary deserialization orchestrator - unpacks binary format into DixScript AST
+//! Main binary deserialization orchestrator — unpacks binary format into DixScript AST.
 
 use std::time::Instant;
 use std::io::Cursor;
 use crate::Compiler::AST::DixScript;
+use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
 use super::{
-    binary_format::{HEADER_SIZE, FOOTER_SIZE, SectionFlags},
+    binary_format::{HEADER_SIZE, FOOTER_SIZE, SectionFlags, SectionId},
     binary_header::BinaryHeader,
     section_offset::SectionOffset,
     checksum_validator::ChecksumValidator,
-    binary_serialization_context::BinarySerializationContext,
+    binary_serialization_context::{BinarySerializationContext, BinaryDeserializationStatistics},
     binary_serialization_result::BinaryDeserializationResult,
     binary_serialization_error::BinarySerializationError,
-    ConfigSectionReader,
-    EnumsSectionReader,
-    DataSectionReader,
-    SecuritySectionReader,
-    ImportsSectionReader,
+    SectionReaders::{ConfigSectionReader, EnumsSectionReader, DataSectionReader, SecuritySectionReader},
     ValueDecoder,
 };
+use crate::Compiler::AST::{ConfigSection, EnumsSection, DataSection, SecuritySection};
 
-// Import AST types
-use crate::Compiler::AST::{
-    ConfigSection,
-    EnumsSection,
-    DataSection,
-    SecuritySection,
-    ImportsSection,
-};
+/// When false, all sections are decoded sequentially.
+const CONCURRENT_DESERIALIZATION_ENABLED: bool = true;
 
-/// Main binary unpacker - orchestrates deserialization into DixScript AST
+/// Decoded section variants assembled into the final AST.
+enum DecodedSection {
+    Config(ConfigSection),
+    Enums(EnumsSection),
+    Data(DataSection),
+    Security(SecuritySection),
+}
+
+type SectionDecodeResult = Result<Option<DecodedSection>, BinarySerializationError>;
+
+/// Deserializes binary .mdix format into a DixScript AST.
 pub struct BinaryUnpacker {
     context: BinarySerializationContext,
 }
 
 impl BinaryUnpacker {
-    /// Create new unpacker
     pub fn new() -> Self {
         BinaryUnpacker {
             context: BinarySerializationContext::new(),
         }
     }
 
-    /// Unpack binary data into DixScript AST
+    /// Unpack binary data into a DixScript AST.
     pub fn unpack(&mut self, binary_data: &[u8]) -> BinaryDeserializationResult {
-        let start_time = Instant::now();
-
-        self.context.log_info("Starting binary deserialization...");
-
+        let start = Instant::now();
         let binary_size = binary_data.len();
 
-        // Unpack the binary data
+        if self.context.debug_config.is_enabled {
+            self.context.log_info(&format!(
+                "Starting deserialization: {} bytes",
+                binary_size
+            ));
+        }
+
         match self.unpack_internal(binary_data) {
             Ok(ast) => {
-                let duration = start_time.elapsed();
-                self.context.log_info(&format!(
-                    "Binary deserialization completed: {} bytes in {:.2}ms",
-                    binary_size,
-                    duration.as_secs_f64() * 1000.0
-                ));
+                let duration = start.elapsed();
+                if self.context.debug_config.is_enabled {
+                    self.context.log_info(&format!(
+                        "Deserialization complete: {} bytes in {:.2}ms",
+                        binary_size,
+                        duration.as_secs_f64() * 1000.0
+                    ));
+                }
 
-                // Convert statistics
-                let mut deser_stats = super::binary_serialization_context::BinaryDeserializationStatistics::new();
+                let mut deser_stats = BinaryDeserializationStatistics::new();
                 deser_stats.total_sections = self.context.statistics.total_sections;
                 deser_stats.total_values = self.context.statistics.total_values;
                 deser_stats.total_bytes = binary_size;
                 deser_stats.value_counts = self.context.statistics.value_counts.clone();
 
-                BinaryDeserializationResult::success(
-                    ast,
-                    binary_size,
-                    duration,
-                    deser_stats,
-                )
+                BinaryDeserializationResult::success(ast, binary_size, duration, deser_stats)
             }
             Err(e) => {
-                let duration = start_time.elapsed();
-                self.context.log_info(&format!(
-                    "Binary deserialization failed: {} in {:.2}ms",
-                    e,
-                    duration.as_secs_f64() * 1000.0
+                let duration = start.elapsed();
+                self.context.error_manager.log_error(&format!(
+                    "[BinaryUnpacker] Deserialization failed: {}",
+                    e
                 ));
-
-                BinaryDeserializationResult::failure(
-                    vec![e.to_string()],
-                    Vec::new(),
-                    duration,
-                )
+                BinaryDeserializationResult::failure(vec![e.to_string()], Vec::new(), duration)
             }
         }
     }
 
-    /// Internal unpacking implementation
     fn unpack_internal(&mut self, binary_data: &[u8]) -> Result<DixScript, BinarySerializationError> {
-        // Validate minimum size
         if binary_data.len() < HEADER_SIZE + FOOTER_SIZE {
-            return Err(BinarySerializationError::corrupted_data(
-                format!("File too small: {} bytes (minimum {} required)",
-                        binary_data.len(),
-                        HEADER_SIZE + FOOTER_SIZE
-                )
+            let e = BinarySerializationError::corrupted_data(format!(
+                "File too small: {} bytes (minimum {} required)",
+                binary_data.len(),
+                HEADER_SIZE + FOOTER_SIZE
             ));
+            self.context.add_error(e.error_type, e.message.clone());
+            return Err(e);
         }
 
-        // Validate checksum
-        let data_without_checksum = ChecksumValidator::validate_and_extract(binary_data)
-            .map_err(BinarySerializationError::corrupted_data)?;
+        let data = ChecksumValidator::validate_and_extract(binary_data)
+            .map_err(|msg| {
+                let e = BinarySerializationError::checksum_mismatch();
+                self.context.add_error(e.error_type, msg.clone());
+                BinarySerializationError::corrupted_data(msg)
+            })?;
 
-        // Read header
-        let mut cursor = Cursor::new(data_without_checksum.as_slice());
-        let header = BinaryHeader::read_from(&mut cursor)
-            .map_err(|e| BinarySerializationError::corrupted_header(e.to_string()))?;
+        let mut cursor = Cursor::new(data.as_slice());
+        let header = BinaryHeader::read_from(&mut cursor).map_err(|e| {
+            let err = BinarySerializationError::corrupted_header(e.to_string());
+            self.context.add_error(err.error_type, err.message.clone());
+            err
+        })?;
 
-        self.context.log_verbose(&format!("Header: {}", header));
+        if self.context.debug_config.is_verbose {
+            self.context.log_verbose(&format!("Header: {}", header));
+        }
 
-        // Read offset table
         cursor.set_position(header.offset_table_position as u64);
         let section_offsets = self.read_offset_table(&mut cursor, header.section_count)?;
 
-        self.context.log_verbose(&format!("Found {} sections", section_offsets.len()));
+        if self.context.debug_config.is_enabled {
+            self.context.log_info(&format!("{} sections found", section_offsets.len()));
+        }
 
-        // Read sections and build AST
-        let ast = self.read_sections(&data_without_checksum, &header, &section_offsets)?;
+        let ast = self.decode_sections(&data, &header, &section_offsets)?;
 
-        // Update statistics
         self.context.statistics.total_bytes = binary_data.len();
         self.context.statistics.total_sections = section_offsets.len();
 
         Ok(ast)
     }
 
-    /// Read offset table
+    // ── Offset table ──────────────────────────────────────────────────────────
+
     fn read_offset_table(
-        &self,
+        &mut self,
         cursor: &mut Cursor<&[u8]>,
         section_count: i32,
     ) -> Result<Vec<SectionOffset>, BinarySerializationError> {
-        let mut offsets = Vec::new();
-
+        let mut offsets = Vec::with_capacity(section_count as usize);
         for i in 0..section_count {
-            let offset = SectionOffset::read_from(cursor)
-                .map_err(|e| BinarySerializationError::read_error(
-                    format!("Failed to read offset {}: {}", i, e),
-                    "OffsetTable"
-                ))?;
-
-            self.context.log_verbose(&format!("  Section {}: {}", i, offset));
+            let offset = SectionOffset::read_from(cursor).map_err(|e| {
+                let err = BinarySerializationError::read_error(
+                    format!("Failed to read offset entry {}: {}", i, e),
+                    "OffsetTable",
+                );
+                self.context.add_error(err.error_type, err.message.clone());
+                err
+            })?;
+            if self.context.debug_config.is_verbose {
+                self.context.log_verbose(&format!("  Offset entry {}: {}", i, offset));
+            }
             offsets.push(offset);
         }
-
         Ok(offsets)
     }
 
-    /// Read all sections and construct AST
-    fn read_sections(
+    // ── Section decoding ──────────────────────────────────────────────────────
+
+    fn decode_sections(
         &mut self,
         data: &[u8],
         header: &BinaryHeader,
         section_offsets: &[SectionOffset],
     ) -> Result<DixScript, BinarySerializationError> {
-        let mut config = None;
-        let mut enums = None;
-        let mut data_section = None;
-        let mut security = None;
-        let mut imports = None;
+        let decodable: Vec<&SectionOffset> = section_offsets
+            .iter()
+            .filter(|o| self.section_should_decode(o.section_id, header))
+            .collect();
 
-        // Read each section
-        for offset in section_offsets {
-            match offset.section_id {
-                super::binary_format::SectionId::Config => {
-                    if header.has_section(SectionFlags::CONFIG) {
-                        config = Some(self.read_config_section(data, offset)?);
-                    }
-                }
-                super::binary_format::SectionId::Enums => {
-                    if header.has_section(SectionFlags::ENUMS) {
-                        enums = Some(self.read_enums_section(data, offset)?);
-                    }
-                }
-                super::binary_format::SectionId::Data => {
-                    if header.has_section(SectionFlags::DATA) {
-                        data_section = Some(self.read_data_section(data, offset)?);
-                    }
-                }
-                super::binary_format::SectionId::Security => {
-                    if header.has_section(SectionFlags::SECURITY) {
-                        security = Some(self.read_security_section(data, offset)?);
-                    }
-                }
-                super::binary_format::SectionId::Imports => {
-                    if header.has_section(SectionFlags::IMPORTS) {
-                        imports = Some(self.read_imports_section(data, offset)?);
-                    }
+        let results = if CONCURRENT_DESERIALIZATION_ENABLED
+            && self.should_use_concurrent(&decodable)
+        {
+            if self.context.debug_config.is_enabled {
+                self.context.log_info("Using concurrent section decoding (rayon)");
+            }
+            self.decode_sections_parallel(data, &decodable)?
+        } else {
+            if self.context.debug_config.is_enabled {
+                let reason = if !CONCURRENT_DESERIALIZATION_ENABLED {
+                    "(CONCURRENT_DESERIALIZATION_ENABLED = false)"
+                } else {
+                    "(insufficient sections)"
+                };
+                self.context
+                    .log_info(&format!("Using sequential section decoding {}", reason));
+            }
+            self.decode_sections_sequential(data, &decodable)?
+        };
+
+        self.assemble_ast(results)
+    }
+
+    fn section_should_decode(&self, id: SectionId, header: &BinaryHeader) -> bool {
+        match id {
+            SectionId::Config => header.has_section(SectionFlags::CONFIG),
+            SectionId::Enums => header.has_section(SectionFlags::ENUMS),
+            SectionId::Data => header.has_section(SectionFlags::DATA),
+            SectionId::Security => header.has_section(SectionFlags::SECURITY),
+            SectionId::Imports => false, // not stored in binary
+        }
+    }
+
+    fn should_use_concurrent(&self, offsets: &[&SectionOffset]) -> bool {
+        offsets.len() >= 2 && !self.context.debug_config.is_verbose
+    }
+
+    // ── Parallel decode ───────────────────────────────────────────────────────
+
+    fn decode_sections_parallel(
+        &mut self,
+        data: &[u8],
+        offsets: &[&SectionOffset],
+    ) -> Result<Vec<(SectionId, SectionDecodeResult)>, BinarySerializationError> {
+        use rayon::prelude::*;
+
+        let results: Vec<(SectionId, SectionDecodeResult)> = offsets
+            .par_iter()
+            .map(|offset| {
+                let id = offset.section_id;
+                let result = Self::decode_single_section(data, offset);
+                (id, result)
+            })
+            .collect();
+
+        self.collect_decode_results(results)
+    }
+
+    // ── Sequential decode ─────────────────────────────────────────────────────
+
+    fn decode_sections_sequential(
+        &mut self,
+        data: &[u8],
+        offsets: &[&SectionOffset],
+    ) -> Result<Vec<(SectionId, SectionDecodeResult)>, BinarySerializationError> {
+        let results: Vec<(SectionId, SectionDecodeResult)> = offsets
+            .iter()
+            .map(|offset| {
+                let id = offset.section_id;
+                let result = Self::decode_single_section(data, offset);
+                (id, result)
+            })
+            .collect();
+
+        self.collect_decode_results(results)
+    }
+
+    // ── Result collection ─────────────────────────────────────────────────────
+
+    fn collect_decode_results(
+        &mut self,
+        results: Vec<(SectionId, SectionDecodeResult)>,
+    ) -> Result<Vec<(SectionId, SectionDecodeResult)>, BinarySerializationError> {
+        let mut first_fatal: Option<BinarySerializationError> = None;
+
+        for (id, ref result) in &results {
+            if let Err(ref e) = result {
+                self.context.error_manager.add_binary_serialization_error(
+                    e.error_type,
+                    e.message.clone(),
+                    None,
+                    None,
+                    None,
+                    None,
+                );
+                if self.context.error_manager.should_terminate_parsing() && first_fatal.is_none() {
+                    first_fatal = Some(BinarySerializationError::new(
+                        e.error_type,
+                        e.message.clone(),
+                        format!("{:?}", id),
+                    ));
                 }
             }
         }
 
-        // Construct DixScript AST
+        if let Some(e) = first_fatal {
+            return Err(e);
+        }
+
+        Ok(results)
+    }
+
+    // ── Single-section decoder (no &self — safe for rayon) ───────────────────
+
+    fn decode_single_section(data: &[u8], offset: &SectionOffset) -> SectionDecodeResult {
+        let section_data = extract_section_data(data, offset)?;
+        let mut cursor = Cursor::new(section_data);
+        let mut ctx = BinarySerializationContext::new();
+
+        match offset.section_id {
+            SectionId::Config => {
+                let mut decoder = ValueDecoder::new();
+                let mut reader = ConfigSectionReader::new(&mut ctx, &mut decoder);
+                let section = reader.read_section(&mut cursor, offset)?;
+                Ok(Some(DecodedSection::Config(section)))
+            }
+            SectionId::Enums => {
+                let mut reader = EnumsSectionReader::new(&mut ctx);
+                let section = reader.read_section(&mut cursor, offset)?;
+                Ok(Some(DecodedSection::Enums(section)))
+            }
+            SectionId::Data => {
+                let mut decoder = ValueDecoder::new();
+                let mut reader = DataSectionReader::new(&mut ctx, &mut decoder);
+                let section = reader.read_section(&mut cursor, offset)?;
+                Ok(Some(DecodedSection::Data(section)))
+            }
+            SectionId::Security => {
+                let mut decoder = ValueDecoder::new();
+                let mut reader = SecuritySectionReader::new(&mut ctx, &mut decoder);
+                let section = reader.read_section(&mut cursor, offset)?;
+                Ok(Some(DecodedSection::Security(section)))
+            }
+            SectionId::Imports => Ok(None),
+        }
+    }
+
+    // ── AST assembly ──────────────────────────────────────────────────────────
+
+    fn assemble_ast(
+        &mut self,
+        results: Vec<(SectionId, SectionDecodeResult)>,
+    ) -> Result<DixScript, BinarySerializationError> {
+        let mut config = None;
+        let mut enums = None;
+        let mut data = None;
+        let mut security = None;
+
+        for (id, result) in results {
+            match result {
+                Ok(Some(DecodedSection::Config(s))) => {
+                    if self.context.debug_config.is_enabled {
+                        self.context.log_info("CONFIG section decoded");
+                    }
+                    config = Some(s);
+                    self.context.statistics.total_sections += 1;
+                }
+                Ok(Some(DecodedSection::Enums(s))) => {
+                    if self.context.debug_config.is_enabled {
+                        self.context.log_info("ENUMS section decoded");
+                    }
+                    enums = Some(s);
+                    self.context.statistics.total_sections += 1;
+                }
+                Ok(Some(DecodedSection::Data(s))) => {
+                    if self.context.debug_config.is_enabled {
+                        self.context.log_info("DATA section decoded");
+                    }
+                    data = Some(s);
+                    self.context.statistics.total_sections += 1;
+                }
+                Ok(Some(DecodedSection::Security(s))) => {
+                    if self.context.debug_config.is_enabled {
+                        self.context.log_info("SECURITY section decoded");
+                    }
+                    security = Some(s);
+                    self.context.statistics.total_sections += 1;
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    // Already reported to ErrorManager in collect_decode_results.
+                }
+            }
+        }
+
         Ok(DixScript {
             config,
-            imports,
-            dlm: None, // DLM section not in binary format
+            imports: None,
+            dlm: None,
             enums,
-            quick_functions: None, // QuickFunctions section not in binary format
-            data: data_section,
+            quick_functions: None,
+            data,
             security,
         })
     }
-
-    /// Read Config section
-    fn read_config_section(
-        &mut self,
-        data: &[u8],
-        offset: &SectionOffset,
-    ) -> Result<ConfigSection, BinarySerializationError> {
-        let section_data = extract_section_data(data, offset)?;
-        let mut cursor = Cursor::new(section_data);
-
-        // Create decoder without context reference
-        let mut value_decoder = ValueDecoder::new();
-        let mut reader = ConfigSectionReader::new(&mut self.context, &mut value_decoder);
-        reader.read_section(&mut cursor, offset)
-    }
-
-    /// Read Enums section
-    fn read_enums_section(
-        &mut self,
-        data: &[u8],
-        offset: &SectionOffset,
-    ) -> Result<EnumsSection, BinarySerializationError> {
-        let section_data = extract_section_data(data, offset)?;
-        let mut cursor = Cursor::new(section_data);
-
-        let mut reader = EnumsSectionReader::new(&mut self.context);
-        reader.read_section(&mut cursor, offset)
-    }
-
-    /// Read Data section
-    fn read_data_section(
-        &mut self,
-        data: &[u8],
-        offset: &SectionOffset,
-    ) -> Result<DataSection, BinarySerializationError> {
-        let section_data = extract_section_data(data, offset)?;
-        let mut cursor = Cursor::new(section_data);
-
-        // Create decoder without context reference
-        let mut value_decoder = ValueDecoder::new();
-        let mut reader = DataSectionReader::new(&mut self.context, &mut value_decoder);
-        reader.read_section(&mut cursor, offset)
-    }
-
-    /// Read Security section
-    fn read_security_section(
-        &mut self,
-        data: &[u8],
-        offset: &SectionOffset,
-    ) -> Result<SecuritySection, BinarySerializationError> {
-        let section_data = extract_section_data(data, offset)?;
-        let mut cursor = Cursor::new(section_data);
-
-        // Create decoder without context reference
-        let mut value_decoder = ValueDecoder::new();
-        let mut reader = SecuritySectionReader::new(&mut self.context, &mut value_decoder);
-        reader.read_section(&mut cursor, offset)
-    }
-
-    /// Read Imports section
-    fn read_imports_section(
-        &mut self,
-        data: &[u8],
-        offset: &SectionOffset,
-    ) -> Result<ImportsSection, BinarySerializationError> {
-        let section_data = extract_section_data(data, offset)?;
-        let mut cursor = Cursor::new(section_data);
-
-        let mut reader = ImportsSectionReader::new(&mut self.context);
-        reader.read_section(&mut cursor, offset)
-    }
 }
 
-/// Extract section data from binary (free function to avoid borrow conflicts)
-/// Extract section data from binary (free function to avoid borrow conflicts)
+/// Extract section bytes as a slice without copying.
 fn extract_section_data<'a>(
     data: &'a [u8],
     offset: &SectionOffset,
 ) -> Result<&'a [u8], BinarySerializationError> {
     let start = offset.offset as usize;
     let end = start + offset.length as usize;
-
     if end > data.len() {
-        return Err(BinarySerializationError::corrupted_data(
-            format!("Section extends beyond file: offset={}, length={}, file_size={}",
-                    offset.offset, offset.length, data.len()
-            )
-        ));
+        return Err(BinarySerializationError::corrupted_data(format!(
+            "Section {} extends beyond file: offset={}, length={}, file_size={}",
+            offset.section_id.name(),
+            offset.offset,
+            offset.length,
+            data.len()
+        )));
     }
-
     Ok(&data[start..end])
 }
 

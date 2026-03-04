@@ -1,36 +1,53 @@
 //! Maintains state during binary serialization/deserialization
 
 use std::collections::HashMap;
-use crate::ErrorManager::{ErrorManager, ErrorTypes::BinarySerializationErrorType};
-use crate::Compiler::AST::Position;
-use super::binary_format::{MAX_NESTING_DEPTH, MAX_STRING_LENGTH, MAX_ARRAY_LENGTH, MAX_OBJECT_PROPERTIES, ValueTypeTag, SectionId};
+use crate::ErrorManager::{ErrorManager, DebugConfig};
+use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
+use super::binary_format::{
+    MAX_NESTING_DEPTH, MAX_STRING_LENGTH, MAX_ARRAY_LENGTH,
+    MAX_OBJECT_PROPERTIES, ValueTypeTag, SectionId,
+};
 
-/// Tracks state during binary serialization/deserialization
+/// Tracks state during binary serialization/deserialization.
 pub struct BinarySerializationContext {
-    error_manager: ErrorManager,
+    pub error_manager: ErrorManager,
+    /// Cached at construction from the shared ErrorManager's debug mode.
+    /// All log-gate decisions flow through this — never read debug_mode directly.
+    pub debug_config: DebugConfig,
     scope_stack: Vec<String>,
     current_nesting_depth: usize,
     pub statistics: BinarySerializationStatistics,
 }
 
 impl BinarySerializationContext {
-    /// Create new context
     pub fn new() -> Self {
+        let error_manager = ErrorManager::get_shared_instance();
+        let debug_mode = error_manager.get_debug_mode();
+        let debug_config = DebugConfig::from_debug_mode(debug_mode);
+
         BinarySerializationContext {
-            error_manager: ErrorManager::get_shared_instance(),
+            error_manager,
+            debug_config,
             scope_stack: Vec::new(),
             current_nesting_depth: 0,
             statistics: BinarySerializationStatistics::new(),
         }
     }
 
-    // ==================== NESTING DEPTH MANAGEMENT ====================
+    /// Merge statistics collected by a parallel section task into this context.
+    pub fn merge_statistics(&mut self, other: BinarySerializationStatistics) {
+        for (k, v) in other.value_counts {
+            *self.statistics.value_counts.entry(k).or_insert(0) += v;
+        }
+        for (k, v) in other.section_sizes {
+            self.statistics.section_sizes.insert(k, v);
+        }
+        self.statistics.total_values += other.total_values;
+    }
 
-    /// Enter nested structure (array, object, tuple)
     pub fn enter_nested(&mut self, structure_type: &str) -> Result<(), String> {
         self.current_nesting_depth += 1;
         self.scope_stack.push(structure_type.to_string());
-
         if self.current_nesting_depth > MAX_NESTING_DEPTH {
             return Err(format!(
                 "Nesting depth {} exceeds maximum {} at {}",
@@ -39,34 +56,26 @@ impl BinarySerializationContext {
                 self.get_current_scope()
             ));
         }
-
         Ok(())
     }
 
-    /// Exit nested structure
     pub fn exit_nested(&mut self) -> Result<(), String> {
         if self.current_nesting_depth == 0 {
             return Err("Cannot exit - not in nested structure".to_string());
         }
-
         self.scope_stack.pop();
         self.current_nesting_depth -= 1;
         Ok(())
     }
 
-    /// Check if we can enter another nested level
     pub fn can_enter_nested(&self) -> bool {
         self.current_nesting_depth < MAX_NESTING_DEPTH
     }
 
-    /// Get current nesting depth
     pub fn nesting_depth(&self) -> usize {
         self.current_nesting_depth
     }
 
-    // ==================== VALIDATION ====================
-
-    /// Validate string length
     pub fn validate_string_length(&self, length: usize) -> Result<(), String> {
         if length > MAX_STRING_LENGTH {
             return Err(format!(
@@ -79,7 +88,6 @@ impl BinarySerializationContext {
         Ok(())
     }
 
-    /// Validate array length
     pub fn validate_array_length(&self, count: usize) -> Result<(), String> {
         if count > MAX_ARRAY_LENGTH {
             return Err(format!(
@@ -92,7 +100,6 @@ impl BinarySerializationContext {
         Ok(())
     }
 
-    /// Validate object property count
     pub fn validate_object_property_count(&self, count: usize) -> Result<(), String> {
         if count > MAX_OBJECT_PROPERTIES {
             return Err(format!(
@@ -105,9 +112,6 @@ impl BinarySerializationContext {
         Ok(())
     }
 
-    // ==================== SCOPE MANAGEMENT ====================
-
-    /// Get current scope path for error reporting
     pub fn get_current_scope(&self) -> String {
         if self.scope_stack.is_empty() {
             "Root".to_string()
@@ -116,9 +120,7 @@ impl BinarySerializationContext {
         }
     }
 
-    // ==================== ERROR REPORTING ====================
-
-    /// Add error to error manager
+    /// Report a non-fatal error to the shared ErrorManager.
     pub fn add_error(&self, error_type: BinarySerializationErrorType, message: String) {
         self.error_manager.add_binary_serialization_error(
             error_type,
@@ -130,19 +132,26 @@ impl BinarySerializationContext {
         );
     }
 
-    /// Log debug message
+    /// Log only when debug is enabled. Caller is responsible for gating
+    /// any format!() calls in hot paths before calling this.
     pub fn log_debug(&self, message: &str) {
-        self.error_manager.log_debug(message);
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(message);
+        }
     }
 
-    /// Log info message
     pub fn log_info(&self, message: &str) {
-        self.error_manager.log_info(&format!("[BinarySerialization] {}", message));
+        if self.debug_config.is_enabled {
+            self.error_manager
+                .log_info(&format!("[BinarySerialization] {}", message));
+        }
     }
 
-    /// Log verbose message
     pub fn log_verbose(&self, message: &str) {
-        self.error_manager.log_debug(&format!("[BinarySerialization] {}", message));
+        if self.debug_config.is_verbose {
+            self.error_manager
+                .log_debug(&format!("[BinarySerialization] {}", message));
+        }
     }
 }
 
@@ -152,9 +161,7 @@ impl Default for BinarySerializationContext {
     }
 }
 
-// ==================== STATISTICS ====================
-
-/// Statistics for serialization operation
+/// Statistics collected during a serialization run.
 #[derive(Debug, Clone)]
 pub struct BinarySerializationStatistics {
     pub total_sections: usize,
@@ -175,17 +182,14 @@ impl BinarySerializationStatistics {
         }
     }
 
-    /// Increment value count for a type tag
     pub fn increment_value_count(&mut self, type_tag: ValueTypeTag) {
         let type_name = type_tag.name().to_string();
         *self.value_counts.entry(type_name).or_insert(0) += 1;
         self.total_values += 1;
     }
 
-    /// Record section size
     pub fn record_section_size(&mut self, section_id: SectionId, size: usize) {
-        let section_name = section_id.name().to_string();
-        self.section_sizes.insert(section_name, size);
+        self.section_sizes.insert(section_id.name().to_string(), size);
     }
 }
 
@@ -205,7 +209,7 @@ impl std::fmt::Display for BinarySerializationStatistics {
     }
 }
 
-/// Statistics for deserialization operation
+/// Statistics collected during a deserialization run.
 #[derive(Debug, Clone)]
 pub struct BinaryDeserializationStatistics {
     pub total_sections: usize,
@@ -224,7 +228,6 @@ impl BinaryDeserializationStatistics {
         }
     }
 
-    /// Increment value count for a type tag
     pub fn increment_value_count(&mut self, type_tag: ValueTypeTag) {
         let type_name = type_tag.name().to_string();
         *self.value_counts.entry(type_name).or_insert(0) += 1;
@@ -246,4 +249,4 @@ impl std::fmt::Display for BinaryDeserializationStatistics {
             self.total_sections, self.total_values, self.total_bytes
         )
     }
-  }
+            }

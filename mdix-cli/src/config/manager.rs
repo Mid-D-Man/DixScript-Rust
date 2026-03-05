@@ -5,7 +5,7 @@
 //! the file does not yet exist, so the CLI works out of the box without any
 //! setup step.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use crate::commands::CliError;
 use super::cli_config::CliConfig;
 
@@ -14,7 +14,7 @@ pub struct ConfigManager;
 impl ConfigManager {
     /// Return the path to the config directory (~/.mdix/).
     pub fn config_dir() -> PathBuf {
-        dirs_next()
+        dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".mdix")
     }
@@ -77,10 +77,3 @@ impl ConfigManager {
         Self::load().list_all()
     }
 }
-
-/// Cross-platform home directory lookup without pulling in the `dirs` crate.
-fn dirs_next() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-                            }

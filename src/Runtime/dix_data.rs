@@ -1,6 +1,6 @@
 // src/Runtime/dix_data.rs
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Utc};
 use crate::Compiler::AST::DixScript;
 use super::dix_value::DixValue;
@@ -10,12 +10,17 @@ use super::dix_value::DixValue;
 /// Core features:
 /// - Flattened HashMap storage (dotted paths like "user.address.city")
 /// - O(1) access by path
+/// - O(1) prefix-child lookup via secondary index
 /// - Section extraction (Config, Enums, Security, DLM)
 /// - Metadata tracking (version, compile time, encryption status)
 #[derive(Debug, Clone)]
 pub struct DixData {
-    /// Flattened data storage - all DATA section values keyed by dotted paths
+    /// Flattened data storage — all DATA section values keyed by dotted paths.
     flattened_data: HashMap<String, DixValue>,
+
+    /// Secondary index: maps each path prefix to its set of direct child segments.
+    /// Built once in from_ast. Turns get_keys() from O(n) scan to O(1) lookup.
+    prefix_index: HashMap<String, HashSet<String>>,
 
     /// CONFIG section as key-value pairs
     pub config: Option<HashMap<String, String>>,
@@ -46,9 +51,9 @@ pub struct DixData {
 }
 
 impl DixData {
-    /// Create DixData from resolved AST
+    /// Create DixData from resolved AST.
     ///
-    /// This is the main constructor used by DixLoader after compilation
+    /// This is the main constructor used by DixLoader after compilation.
     pub fn from_ast(
         ast: DixScript,
         version: String,
@@ -59,25 +64,20 @@ impl DixData {
     ) -> Self {
         let mut flattened_data = HashMap::new();
 
-        // Flatten DATA section
         if let Some(ref data) = ast.data {
             Self::flatten_data_section(data, &mut flattened_data);
         }
 
-        // Extract CONFIG
-        let config = Self::extract_config_section(ast.config.as_ref());
+        let prefix_index = Self::build_prefix_index(&flattened_data);
 
-        // Extract ENUMS
-        let enums = Self::extract_enums_section(ast.enums.as_ref());
-
-        // Extract SECURITY
+        let config   = Self::extract_config_section(ast.config.as_ref());
+        let enums    = Self::extract_enums_section(ast.enums.as_ref());
         let security = Self::extract_security_section(ast.security.as_ref());
-
-        // Extract DLM
-        let dlm = Self::extract_dlm_section(ast.dlm.as_ref());
+        let dlm      = Self::extract_dlm_section(ast.dlm.as_ref());
 
         DixData {
             flattened_data,
+            prefix_index,
             config,
             enums,
             security,
@@ -90,7 +90,7 @@ impl DixData {
         }
     }
 
-    /// Get value by path with type conversion
+    /// Get value by path with type conversion.
     ///
     /// # Examples
     ///! ```
@@ -106,12 +106,11 @@ impl DixData {
             .get(path)
             .ok_or_else(|| format!("Path not found: {}", path))?;
 
-        // Clone the value for conversion (unavoidable - need owned value for TryFrom)
         T::try_from(value.clone())
             .map_err(|e| format!("Type conversion failed for path '{}': {}", path, e))
     }
 
-    /// Get value by path, returning default if not found or conversion fails
+    /// Get value by path, returning default if not found or conversion fails.
     pub fn get_or_default<T>(&self, path: &str, default: T) -> T
     where
         T: TryFrom<DixValue>,
@@ -122,44 +121,35 @@ impl DixData {
             .unwrap_or(default)
     }
 
-    /// Get raw DixValue by path (no conversion)
+    /// Get raw DixValue by path (no conversion).
     pub fn get_value(&self, path: &str) -> Option<&DixValue> {
         self.flattened_data.get(path)
     }
 
-    /// Check if path exists in data
+    /// Check if path exists in data.
     pub fn exists(&self, path: &str) -> bool {
         self.flattened_data.contains_key(path)
     }
 
-    /// Get all keys under a path prefix
+    /// Get the direct child segment names under a path prefix.
+    ///
+    /// O(1) lookup via prefix_index, then O(k) clone where k is the child count.
     ///
     /// # Examples
     ///! ```
-    ///! let user_keys = data.get_keys("user")?; // ["name", "age", "address"]
+    ///! let user_keys = data.get_keys("user");     // ["name", "age", "address"]
+    ///! let top_keys  = data.get_keys("");          // top-level keys
     ///! ```
     pub fn get_keys(&self, path: &str) -> Vec<String> {
-        let prefix = if path.is_empty() {
-            String::new()
-        } else {
-            format!("{}.", path)
-        };
-
-        self.flattened_data
-            .keys()
-            .filter(|k| k.starts_with(&prefix))
-            .map(|k| {
-                let suffix = &k[prefix.len()..];
-                suffix.split('.').next().unwrap_or(suffix).to_string()
-            })
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect()
+        match self.prefix_index.get(path) {
+            Some(children) => children.iter().cloned().collect(),
+            None           => Vec::new(),
+        }
     }
 
-    /// Select multiple values matching a pattern
+    /// Select multiple values matching a wildcard pattern.
     ///
-    /// Pattern uses wildcards: `*` matches any segment
+    /// Pattern uses `*` to match any single segment.
     ///
     /// # Examples
     ///! ```
@@ -186,19 +176,65 @@ impl DixData {
             .collect()
     }
 
-    /// Get total number of data entries
+    /// Get total number of data entries.
     pub fn entry_count(&self) -> usize {
         self.flattened_data.len()
     }
 
-    /// Get all data as HashMap (clone of internal storage)
+    /// Get all data as HashMap (clone of internal storage).
     pub fn to_hashmap(&self) -> HashMap<String, DixValue> {
         self.flattened_data.clone()
     }
 
-    // ===== SECTION EXTRACTION METHODS =====
+    // ── Index construction ────────────────────────────────────────────────────
 
-    /// Extract CONFIG section as HashMap
+    /// Build the prefix index from a completed flattened_data map.
+    /// Called once in from_ast after all keys are inserted.
+    fn build_prefix_index(
+        flattened_data: &HashMap<String, DixValue>,
+    ) -> HashMap<String, HashSet<String>> {
+        let mut index: HashMap<String, HashSet<String>> =
+            HashMap::with_capacity(flattened_data.len());
+        for key in flattened_data.keys() {
+            Self::index_key(&mut index, key);
+        }
+        index
+    }
+
+    /// Walk a single key upward through its dot-segments, registering each
+    /// segment as a direct child of its parent prefix.
+    ///
+    /// "database.primary.host" produces:
+    ///   index["database.primary"] ← "host"
+    ///   index["database"]         ← "primary"
+    ///   index[""]                 ← "database"
+    fn index_key(index: &mut HashMap<String, HashSet<String>>, key: &str) {
+        let mut remaining = key;
+        loop {
+            match remaining.rfind('.') {
+                None => {
+                    // Top-level segment — parent is the empty-string prefix.
+                    index
+                        .entry(String::new())
+                        .or_default()
+                        .insert(remaining.to_string());
+                    break;
+                }
+                Some(dot_pos) => {
+                    let parent = &remaining[..dot_pos];
+                    let child  = &remaining[dot_pos + 1..];
+                    index
+                        .entry(parent.to_string())
+                        .or_default()
+                        .insert(child.to_string());
+                    remaining = parent;
+                }
+            }
+        }
+    }
+
+    // ── Section extraction ────────────────────────────────────────────────────
+
     fn extract_config_section(
         config: Option<&crate::Compiler::AST::ConfigSection>,
     ) -> Option<HashMap<String, String>> {
@@ -213,7 +249,6 @@ impl DixData {
         })
     }
 
-    /// Extract ENUMS section
     fn extract_enums_section(
         enums: Option<&crate::Compiler::AST::EnumsSection>,
     ) -> Option<HashMap<String, HashMap<String, i32>>> {
@@ -236,14 +271,12 @@ impl DixData {
                             (field.name.clone(), value)
                         })
                         .collect();
-
                     (enum_decl.name.clone(), fields)
                 })
                 .collect()
         })
     }
 
-    /// Extract SECURITY section
     fn extract_security_section(
         security: Option<&crate::Compiler::AST::SecuritySection>,
     ) -> Option<HashMap<String, DixValue>> {
@@ -263,7 +296,6 @@ impl DixData {
         })
     }
 
-    /// Extract DLM section
     fn extract_dlm_section(
         dlm: Option<&crate::Compiler::AST::DLMSection>,
     ) -> Option<Vec<String>> {
@@ -276,9 +308,8 @@ impl DixData {
         })
     }
 
-    // ===== DATA FLATTENING =====
+    // ── Data flattening ───────────────────────────────────────────────────────
 
-    /// Flatten DATA section into HashMap with dotted paths
     fn flatten_data_section(
         data: &crate::Compiler::AST::DataSection,
         result: &mut HashMap<String, DixValue>,
@@ -288,7 +319,6 @@ impl DixData {
         }
     }
 
-    /// Flatten a single data entry
     fn flatten_entry(
         entry: &crate::Compiler::AST::DataEntry,
         prefix: &str,
@@ -324,7 +354,6 @@ impl DixData {
 
                 result.insert(array_path.clone(), DixValue::Array(array_values.clone()));
 
-                // Also add indexed access: path[0], path[1], etc.
                 for (i, value) in array_values.iter().enumerate() {
                     result.insert(format!("{}[{}]", array_path, i), value.clone());
                 }
@@ -347,7 +376,6 @@ impl DixData {
         }
     }
 
-    /// Build dotted path from prefix and segment
     fn build_path(prefix: &str, segment: &str) -> String {
         if prefix.is_empty() {
             segment.to_string()
@@ -356,35 +384,33 @@ impl DixData {
         }
     }
 
-    // ===== CONVERSION HELPERS =====
+    // ── Conversion helpers ────────────────────────────────────────────────────
 
-    /// Convert ConfigValue to String
     fn config_value_to_string(value: &crate::Compiler::AST::ConfigValue) -> String {
         use crate::Compiler::AST::ConfigValue;
 
         match value {
-            ConfigValue::String(s) => s.clone(),
-            ConfigValue::Integer(i) => i.to_string(),
-            ConfigValue::Float(f) => f.to_string(),
-            ConfigValue::Boolean(b) => b.to_string(),
-            ConfigValue::Date(d) => d.clone(),
+            ConfigValue::String(s)    => s.clone(),
+            ConfigValue::Integer(i)   => i.to_string(),
+            ConfigValue::Float(f)     => f.to_string(),
+            ConfigValue::Boolean(b)   => b.to_string(),
+            ConfigValue::Date(d)      => d.clone(),
             ConfigValue::Timestamp(t) => t.clone(),
-            _ => String::new(),
+            _                         => String::new(),
         }
     }
 
-    /// Convert AST Value to DixValue
     fn ast_value_to_dix_value(value: &crate::Compiler::AST::Value) -> Option<DixValue> {
         use crate::Compiler::AST::Value;
 
         match value {
-            Value::Null { .. } => Some(DixValue::Null),
+            Value::Null { .. }              => Some(DixValue::Null),
             Value::Boolean { value: b, .. } => Some(DixValue::Bool(*b)),
             Value::Integer { value: i, .. } => Some(DixValue::Int(*i)),
-            Value::Float { value: f, .. } => Some(DixValue::Float(*f)),
-            Value::Double { value: d, .. } => Some(DixValue::Double(*d)),
-            Value::String { value: s, .. } => Some(DixValue::String(s.clone())),
-            Value::Date { value: d, .. } => Some(DixValue::Date(d.clone())),
+            Value::Float { value: f, .. }   => Some(DixValue::Float(*f)),
+            Value::Double { value: d, .. }  => Some(DixValue::Double(*d)),
+            Value::String { value: s, .. }  => Some(DixValue::String(s.clone())),
+            Value::Date { value: d, .. }    => Some(DixValue::Date(d.clone())),
             Value::Timestamp { value: t, .. } => Some(DixValue::Timestamp(t.clone())),
             Value::HexColor { value: c, .. } => Some(DixValue::HexColor(c.clone())),
 
@@ -410,7 +436,7 @@ impl DixData {
                 Some(DixValue::Enum {
                     enum_name: enum_name.clone(),
                     field_name: field_value.clone(),
-                    value: 0, // Actual value would come from symbol table
+                    value: 0,
                 })
             }
 
@@ -443,17 +469,17 @@ impl DixData {
     }
 }
 
-// ===== TryFrom IMPLEMENTATIONS FOR COMMON TYPES =====
+// ── TryFrom implementations for common types ──────────────────────────────────
 
 impl TryFrom<DixValue> for String {
     type Error = String;
 
     fn try_from(value: DixValue) -> Result<Self, Self::Error> {
         match value {
-            DixValue::String(s) => Ok(s),
-            DixValue::Date(d) => Ok(d),
+            DixValue::String(s)    => Ok(s),
+            DixValue::Date(d)      => Ok(d),
             DixValue::Timestamp(t) => Ok(t),
-            DixValue::HexColor(c) => Ok(c),
+            DixValue::HexColor(c)  => Ok(c),
             _ => Err(format!("Cannot convert {} to String", value.type_name())),
         }
     }
@@ -464,8 +490,8 @@ impl TryFrom<DixValue> for i32 {
 
     fn try_from(value: DixValue) -> Result<Self, Self::Error> {
         match value {
-            DixValue::Int(i) => Ok(i),
-            DixValue::Float(f) => Ok(f as i32),
+            DixValue::Int(i)    => Ok(i),
+            DixValue::Float(f)  => Ok(f as i32),
             DixValue::Double(d) => Ok(d as i32),
             _ => Err(format!("Cannot convert {} to i32", value.type_name())),
         }
@@ -477,8 +503,8 @@ impl TryFrom<DixValue> for f64 {
 
     fn try_from(value: DixValue) -> Result<Self, Self::Error> {
         match value {
-            DixValue::Int(i) => Ok(i as f64),
-            DixValue::Float(f) => Ok(f as f64),
+            DixValue::Int(i)    => Ok(i as f64),
+            DixValue::Float(f)  => Ok(f as f64),
             DixValue::Double(d) => Ok(d),
             _ => Err(format!("Cannot convert {} to f64", value.type_name())),
         }
@@ -523,6 +549,25 @@ mod tests {
     use super::*;
     use crate::Compiler::AST::*;
 
+    /// Helper that builds a DixData directly from a pre-populated flattened map.
+    /// Used only in unit tests that don't go through the full AST pipeline.
+    fn dix_data_from_flat(flattened: HashMap<String, DixValue>) -> DixData {
+        let prefix_index = DixData::build_prefix_index(&flattened);
+        DixData {
+            flattened_data: flattened,
+            prefix_index,
+            config: None,
+            enums: None,
+            security: None,
+            dlm: None,
+            version: "1.0.0".to_string(),
+            compile_time: Utc::now(),
+            is_encrypted: false,
+            is_compressed: false,
+            applied_modules: vec![],
+        }
+    }
+
     #[test]
     fn test_dix_data_creation() {
         let ast = DixScript::new();
@@ -546,18 +591,7 @@ mod tests {
         flattened.insert("name".to_string(), DixValue::String("Alice".to_string()));
         flattened.insert("age".to_string(), DixValue::Int(30));
 
-        let data = DixData {
-            flattened_data: flattened,
-            config: None,
-            enums: None,
-            security: None,
-            dlm: None,
-            version: "1.0.0".to_string(),
-            compile_time: Utc::now(),
-            is_encrypted: false,
-            is_compressed: false,
-            applied_modules: vec![],
-        };
+        let data = dix_data_from_flat(flattened);
 
         let name: String = data.get("name").unwrap();
         assert_eq!(name, "Alice");
@@ -571,18 +605,7 @@ mod tests {
         let mut flattened = HashMap::new();
         flattened.insert("x".to_string(), DixValue::Int(42));
 
-        let data = DixData {
-            flattened_data: flattened,
-            config: None,
-            enums: None,
-            security: None,
-            dlm: None,
-            version: "1.0.0".to_string(),
-            compile_time: Utc::now(),
-            is_encrypted: false,
-            is_compressed: false,
-            applied_modules: vec![],
-        };
+        let data = dix_data_from_flat(flattened);
 
         assert!(data.exists("x"));
         assert!(!data.exists("y"));
@@ -590,20 +613,59 @@ mod tests {
 
     #[test]
     fn test_get_or_default() {
-        let data = DixData {
-            flattened_data: HashMap::new(),
-            config: None,
-            enums: None,
-            security: None,
-            dlm: None,
-            version: "1.0.0".to_string(),
-            compile_time: Utc::now(),
-            is_encrypted: false,
-            is_compressed: false,
-            applied_modules: vec![],
-        };
+        let data = dix_data_from_flat(HashMap::new());
 
         let value: i32 = data.get_or_default("missing", 999);
         assert_eq!(value, 999);
     }
-}
+
+    #[test]
+    fn test_get_keys_top_level() {
+        let mut flattened = HashMap::new();
+        flattened.insert("a".to_string(),   DixValue::Int(1));
+        flattened.insert("b.c".to_string(), DixValue::Int(2));
+        flattened.insert("b.d".to_string(), DixValue::Int(3));
+
+        let data = dix_data_from_flat(flattened);
+
+        let mut top = data.get_keys("");
+        top.sort();
+        assert_eq!(top, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn test_get_keys_nested() {
+        let mut flattened = HashMap::new();
+        flattened.insert("db.host".to_string(), DixValue::String("localhost".to_string()));
+        flattened.insert("db.port".to_string(), DixValue::Int(5432));
+        flattened.insert("db.ssl".to_string(),  DixValue::Bool(true));
+
+        let data = dix_data_from_flat(flattened);
+
+        let mut children = data.get_keys("db");
+        children.sort();
+        assert_eq!(children, vec!["host", "port", "ssl"]);
+    }
+
+    #[test]
+    fn test_get_keys_missing_prefix() {
+        let data = dix_data_from_flat(HashMap::new());
+        let keys = data.get_keys("nonexistent");
+        assert!(keys.is_empty());
+    }
+
+    #[test]
+    fn test_index_key_array_indexed() {
+        // Array-indexed keys like "tags[0]" have no dot; they should appear
+        // as top-level children under the "" prefix.
+        let mut flattened = HashMap::new();
+        flattened.insert("tags".to_string(),    DixValue::Array(vec![]));
+        flattened.insert("tags[0]".to_string(), DixValue::String("prod".to_string()));
+
+        let data = dix_data_from_flat(flattened);
+
+        let mut top = data.get_keys("");
+        top.sort();
+        assert_eq!(top, vec!["tags", "tags[0]"]);
+    }
+        }

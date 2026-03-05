@@ -235,7 +235,7 @@ fn bench_data_access_scaling(c: &mut Criterion) {
 
     for n in [10usize, 100, 1_000, 10_000] {
         let data = build_flat_data(n);
-        let key = format!("key_{}", n / 2); // mid-point key
+        let key = format!("key_{}", n / 2);
 
         group.bench_with_input(BenchmarkId::new("get_by_index", n), &key, |b, k| {
             b.iter(|| {
@@ -347,13 +347,7 @@ fn bench_converter(c: &mut Criterion) {
         );
     }
 
-    // to_hashmap: build an AST from the medium source then flatten it
     let medium_ast = {
-        let loader = DixLoader::new();
-        let data = loader
-            .load_from_str(SRC_MEDIUM, &DixLoadOptions::new())
-            .expect("must load");
-        // Reconstruct a minimal DixScript for the converter to flatten
         use dixscript::Compiler::AST::{DixScript, DataSection, Position};
         DixScript {
             config: None,
@@ -379,10 +373,18 @@ fn bench_converter(c: &mut Criterion) {
 fn bench_compactor(c: &mut Criterion) {
     let mut group = c.benchmark_group("compactor");
 
-    for (label, src) in [
-        ("minimal", SRC_MINIMAL),
-        ("medium", SRC_MEDIUM),
-        ("heavy", SRC_HEAVY_WITH_FUNCTIONS),
+    // Inject a real comment into each fixture so remove_comments benchmarks
+    // actual comment-stripping work. Without this, the fixtures contain no `//`
+    // outside of string literals and the benchmark measures near-zero work —
+    // the same root cause as the compactor_remove_comments_all_fixtures test failure.
+    let minimal_commented = format!("// bench comment line\n{}", SRC_MINIMAL);
+    let medium_commented  = format!("// bench comment line\n{}", SRC_MEDIUM);
+    let heavy_commented   = format!("// bench comment line\n{}", SRC_HEAVY_WITH_FUNCTIONS);
+
+    for (label, src, src_commented) in [
+        ("minimal", SRC_MINIMAL,              minimal_commented.as_str()),
+        ("medium",  SRC_MEDIUM,               medium_commented.as_str()),
+        ("heavy",   SRC_HEAVY_WITH_FUNCTIONS, heavy_commented.as_str()),
     ] {
         group.throughput(Throughput::Bytes(src.len() as u64));
 
@@ -394,9 +396,10 @@ fn bench_compactor(c: &mut Criterion) {
             b.iter(|| black_box(DixCompactor::compact(black_box(input))))
         });
 
+        // Use the comment-injected variant so we measure real comment removal.
         group.bench_with_input(
             BenchmarkId::new("remove_comments", label),
-            src,
+            src_commented,
             |b, input| b.iter(|| black_box(DixCompactor::remove_comments(black_box(input)))),
         );
     }
@@ -406,12 +409,10 @@ fn bench_compactor(c: &mut Criterion) {
 
 fn bench_format_options(c: &mut Criterion) {
     let converter = DixConverter::new();
-    let loader = DixLoader::new();
     let opts_default  = DixFormatOptions::new();
     let opts_minified = DixFormatOptions::minified();
     let opts_pretty   = DixFormatOptions::pretty();
 
-    // Build a representative AST
     use dixscript::Compiler::AST::{
         ConfigEntry, ConfigSection, ConfigValue, DataEntry, DataSection, DixScript, Position, Value,
     };

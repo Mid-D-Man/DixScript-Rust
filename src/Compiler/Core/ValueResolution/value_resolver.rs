@@ -29,10 +29,7 @@ use super::execution_context::ExecutionContext;
 use super::function_interpreter::{FunctionInterpreter, InterpreterError};
 use super::supporting_classes::{FunctionCallInfo, ResolutionRecord, ValueResolutionResult};
 
-// Absolute ceiling on resolution iterations.
 const MAX_RESOLUTION_ITERATIONS: usize = 10_000;
-
-// Minimum pre-allocated capacity for collections built during resolution.
 const MIN_CAPACITY: usize = 8;
 
 // ==================== RESOLVER ERROR ====================
@@ -209,19 +206,16 @@ impl<'a> ValueResolver<'a> {
 
         let original_ast = self.ast.clone();
 
-        // Phase 1: enum pre-resolution
         if let Err(e) = self.resolve_all_enum_values() {
             return self.create_failed_result(vec![e.to_string()], original_ast);
         }
 
-        // Phase 2: initial data context
         self.build_initial_data_context();
 
         if self.debug_config.is_enabled {
             self.dump_data_context();
         }
 
-        // Phase 3: discover all QuickFunction call sites
         let function_calls = self.find_all_function_calls();
 
         if self.debug_config.is_enabled {
@@ -237,7 +231,6 @@ impl<'a> ValueResolver<'a> {
                 self.error_manager
                     .log_warning("[DIAGNOSTIC] No function calls found in DATA section");
             }
-            // Phase 5 still runs: identifiers may reference sibling literals.
             self.resolve_remaining_identifiers();
             let logs = self.interpreter.take_logs();
             self.log_statements.extend(logs);
@@ -254,14 +247,11 @@ impl<'a> ValueResolver<'a> {
             };
         }
 
-        // Phase 4: iterative resolution
         let (success_count, errors) = self.execute_iterative_resolution(function_calls);
 
-        // Harvest interpreter log: statements (only once, after all execution)
         let interpreter_logs = self.interpreter.take_logs();
         self.log_statements.extend(interpreter_logs);
 
-        // Phase 5: resolve remaining identifiers if phase 4 had no errors
         if errors.is_empty() && success_count > 0 {
             self.resolve_remaining_identifiers();
         }
@@ -457,6 +447,7 @@ impl<'a> ValueResolver<'a> {
         value: &Value,
     ) -> Result<(Value, usize, usize), ResolverError> {
         match value {
+            // Direct enum value reference.
             Value::EnumValue { enum_name, value: enum_field, position } => {
                 if let Some(dot) = enum_name.find('.') {
                     let ns_name = &enum_name[..dot];
@@ -497,54 +488,61 @@ impl<'a> ValueResolver<'a> {
                 Ok((Value::Integer { value: int_val, position: *position }, 1, 0))
             }
 
+            // Expression wrapper — delegate to resolve_enums_in_expr for full recursion.
             Value::Expression { expr, position } => {
-                if let Expression::EnumAccess {
-                    namespace_name,
-                    enum_name,
-                    value: enum_field,
-                    position: ep,
-                } = expr.as_ref()
-                {
-                    if let Some(ns_name) = namespace_name {
-                        let ns = self
-                            .symbol_table
-                            .try_get_namespace(ns_name)
-                            .ok_or_else(|| ResolverError::InvalidEnumAccess {
-                                location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
-                                message: format!("Namespace '{}' not found", ns_name),
-                                position: *ep,
-                            })?;
-                        let fields = ns.enums.get(enum_name).ok_or_else(|| {
-                            ResolverError::InvalidEnumAccess {
-                                location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
-                                message: format!("Enum '{}' not found", enum_name),
-                                position: *ep,
-                            }
-                        })?;
-                        let int_val = fields.get(enum_field.as_str()).ok_or_else(|| {
-                            ResolverError::InvalidEnumAccess {
-                                location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
-                                message: format!("Field '{}' not found", enum_field),
-                                position: *ep,
-                            }
-                        })?;
-                        return Ok((Value::Integer { value: *int_val, position: *ep }, 0, 1));
-                    }
-
-                    let int_val = self
-                        .symbol_table
-                        .try_get_enum_field_value(enum_name, enum_field)
-                        .ok_or_else(|| ResolverError::InvalidEnumAccess {
-                            location: format!("{}.{}", enum_name, enum_field),
-                            message: format!("Enum field '{}' not found", enum_field),
-                            position: *ep,
-                        })?;
-                    return Ok((Value::Integer { value: int_val, position: *ep }, 1, 0));
+                let (new_expr, lc, ic) = self.resolve_enums_in_expr(expr.as_ref())?;
+                if lc + ic > 0 {
+                    Ok((
+                        Value::Expression {
+                            expr: Box::new(new_expr),
+                            position: *position,
+                        },
+                        lc,
+                        ic,
+                    ))
+                } else {
+                    Ok((value.clone(), 0, 0))
                 }
-                Ok((value.clone(), 0, 0))
             }
 
-            Value::Array { values, position } | Value::NestedArray { values, position, .. } => {
+            // QuickFunction call — resolve enums in every argument expression.
+            // This is the primary fix: enums passed as QuickFunc args in @DATA are
+            // now resolved to integers before the ASTWalker collects call sites.
+            Value::QuickFuncCall { function_name, arguments, position } => {
+                let mut new_args = Vec::with_capacity(arguments.len().max(MIN_CAPACITY));
+                let mut any_changed = false;
+                let mut total_lc = 0usize;
+                let mut total_ic = 0usize;
+
+                for arg in arguments {
+                    let (new_arg, lc, ic) = self.resolve_enums_in_expr(arg)?;
+                    total_lc += lc;
+                    total_ic += ic;
+                    if lc + ic > 0 {
+                        new_args.push(new_arg);
+                        any_changed = true;
+                    } else {
+                        new_args.push(arg.clone());
+                    }
+                }
+
+                if any_changed {
+                    Ok((
+                        Value::QuickFuncCall {
+                            function_name: function_name.clone(),
+                            arguments: new_args,
+                            position: *position,
+                        },
+                        total_lc,
+                        total_ic,
+                    ))
+                } else {
+                    Ok((value.clone(), 0, 0))
+                }
+            }
+
+            Value::Array { values, position }
+            | Value::NestedArray { values, position, .. } => {
                 let mut new_values = Vec::with_capacity(values.len().max(MIN_CAPACITY));
                 let mut any_changed = false;
                 let mut total_lc = 0usize;
@@ -612,6 +610,40 @@ impl<'a> ValueResolver<'a> {
                 }
             }
 
+            // Interpolated strings may contain enum accesses in their expressions.
+            Value::InterpolatedString { template, expressions, position } => {
+                let mut new_exprs = Vec::with_capacity(expressions.len().max(MIN_CAPACITY));
+                let mut any_changed = false;
+                let mut total_lc = 0usize;
+                let mut total_ic = 0usize;
+
+                for expr in expressions {
+                    let (ne, lc, ic) = self.resolve_enums_in_expr(expr)?;
+                    total_lc += lc;
+                    total_ic += ic;
+                    if lc + ic > 0 {
+                        new_exprs.push(ne);
+                        any_changed = true;
+                    } else {
+                        new_exprs.push(expr.clone());
+                    }
+                }
+
+                if any_changed {
+                    Ok((
+                        Value::InterpolatedString {
+                            template: template.clone(),
+                            expressions: new_exprs,
+                            position: *position,
+                        },
+                        total_lc,
+                        total_ic,
+                    ))
+                } else {
+                    Ok((value.clone(), 0, 0))
+                }
+            }
+
             _ => Ok((value.clone(), 0, 0)),
         }
     }
@@ -661,6 +693,390 @@ impl<'a> ValueResolver<'a> {
         }
     }
 
+    /// Recursively resolves enum accesses inside any expression node.
+    ///
+    /// Handles:
+    /// - `EnumAccess` (local and imported) → `Value::Integer`
+    /// - `QuickFuncCall` args (covers enums inside calls inside calls)
+    /// - `ImportedFunctionCall` args
+    /// - `Value` wrapper (delegates back to `resolve_enums_in_value`)
+    /// - All binary/unary/conditional expression variants
+    fn resolve_enums_in_expr(
+        &self,
+        expr: &Expression,
+    ) -> Result<(Expression, usize, usize), ResolverError> {
+        match expr {
+            // Local enum: AIType.AGGRESSIVE → Integer(value)
+            Expression::EnumAccess {
+                namespace_name: None,
+                enum_name,
+                value: enum_field,
+                position,
+            } => {
+                let int_val = self
+                    .symbol_table
+                    .try_get_enum_field_value(enum_name, enum_field)
+                    .ok_or_else(|| ResolverError::InvalidEnumAccess {
+                        location: format!("{}.{}", enum_name, enum_field),
+                        message: format!("Enum '{}' field '{}' not found", enum_name, enum_field),
+                        position: *position,
+                    })?;
+                Ok((
+                    Expression::Value {
+                        value: Value::Integer { value: int_val, position: *position },
+                        position: *position,
+                    },
+                    1,
+                    0,
+                ))
+            }
+
+            // Imported enum: Namespace.EnumName.Field → Integer(value)
+            Expression::EnumAccess {
+                namespace_name: Some(ns_name),
+                enum_name,
+                value: enum_field,
+                position,
+            } => {
+                let ns = self
+                    .symbol_table
+                    .try_get_namespace(ns_name)
+                    .ok_or_else(|| ResolverError::InvalidEnumAccess {
+                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
+                        message: format!("Namespace '{}' not found", ns_name),
+                        position: *position,
+                    })?;
+                let fields = ns.enums.get(enum_name.as_str()).ok_or_else(|| {
+                    ResolverError::InvalidEnumAccess {
+                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
+                        message: format!("Enum '{}' not found in namespace '{}'", enum_name, ns_name),
+                        position: *position,
+                    }
+                })?;
+                let int_val = fields.get(enum_field.as_str()).ok_or_else(|| {
+                    ResolverError::InvalidEnumAccess {
+                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
+                        message: format!("Field '{}' not found", enum_field),
+                        position: *position,
+                    }
+                })?;
+                Ok((
+                    Expression::Value {
+                        value: Value::Integer { value: *int_val, position: *position },
+                        position: *position,
+                    },
+                    0,
+                    1,
+                ))
+            }
+
+            // Value wrapper — recurse into the inner value.
+            Expression::Value { value, position } => {
+                let (new_val, lc, ic) = self.resolve_enums_in_value(value)?;
+                if lc + ic > 0 {
+                    Ok((Expression::Value { value: new_val, position: *position }, lc, ic))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            // QuickFunction call — recurse into every argument.
+            // This covers enums inside calls inside calls (arbitrary depth).
+            Expression::QuickFuncCall { name, arguments, position } => {
+                let mut new_args = Vec::with_capacity(arguments.len().max(MIN_CAPACITY));
+                let mut any_changed = false;
+                let mut total_lc = 0usize;
+                let mut total_ic = 0usize;
+
+                for arg in arguments {
+                    let (na, lc, ic) = self.resolve_enums_in_expr(arg)?;
+                    total_lc += lc;
+                    total_ic += ic;
+                    if lc + ic > 0 {
+                        new_args.push(na);
+                        any_changed = true;
+                    } else {
+                        new_args.push(arg.clone());
+                    }
+                }
+
+                if any_changed {
+                    Ok((
+                        Expression::QuickFuncCall {
+                            name: name.clone(),
+                            arguments: new_args,
+                            position: *position,
+                        },
+                        total_lc,
+                        total_ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            // Imported function call — recurse into every argument.
+            Expression::ImportedFunctionCall {
+                namespace_name,
+                function_name,
+                arguments,
+                position,
+            } => {
+                let mut new_args = Vec::with_capacity(arguments.len().max(MIN_CAPACITY));
+                let mut any_changed = false;
+                let mut total_lc = 0usize;
+                let mut total_ic = 0usize;
+
+                for arg in arguments {
+                    let (na, lc, ic) = self.resolve_enums_in_expr(arg)?;
+                    total_lc += lc;
+                    total_ic += ic;
+                    if lc + ic > 0 {
+                        new_args.push(na);
+                        any_changed = true;
+                    } else {
+                        new_args.push(arg.clone());
+                    }
+                }
+
+                if any_changed {
+                    Ok((
+                        Expression::ImportedFunctionCall {
+                            namespace_name: namespace_name.clone(),
+                            function_name: function_name.clone(),
+                            arguments: new_args,
+                            position: *position,
+                        },
+                        total_lc,
+                        total_ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            // Static method call — recurse into arguments.
+            Expression::StaticMethodCall {
+                object_name,
+                method_name,
+                arguments,
+                position,
+            } => {
+                let mut new_args = Vec::with_capacity(arguments.len().max(MIN_CAPACITY));
+                let mut any_changed = false;
+                let mut total_lc = 0usize;
+                let mut total_ic = 0usize;
+
+                for arg in arguments {
+                    let (na, lc, ic) = self.resolve_enums_in_expr(arg)?;
+                    total_lc += lc;
+                    total_ic += ic;
+                    if lc + ic > 0 {
+                        new_args.push(na);
+                        any_changed = true;
+                    } else {
+                        new_args.push(arg.clone());
+                    }
+                }
+
+                if any_changed {
+                    Ok((
+                        Expression::StaticMethodCall {
+                            object_name: object_name.clone(),
+                            method_name: method_name.clone(),
+                            arguments: new_args,
+                            position: *position,
+                        },
+                        total_lc,
+                        total_ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            // Binary arithmetic — recurse both sides.
+            Expression::ArithmeticOp { left, operator, right, position } => {
+                let (nl, lc1, ic1) = self.resolve_enums_in_expr(left)?;
+                let (nr, lc2, ic2) = self.resolve_enums_in_expr(right)?;
+                let total_lc = lc1 + lc2;
+                let total_ic = ic1 + ic2;
+                if total_lc + total_ic > 0 {
+                    Ok((
+                        Expression::ArithmeticOp {
+                            left: Box::new(nl),
+                            operator: operator.clone(),
+                            right: Box::new(nr),
+                            position: *position,
+                        },
+                        total_lc,
+                        total_ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            Expression::BitwiseOp { left, operator, right, position } => {
+                let (nl, lc1, ic1) = self.resolve_enums_in_expr(left)?;
+                let (nr, lc2, ic2) = self.resolve_enums_in_expr(right)?;
+                let total_lc = lc1 + lc2;
+                let total_ic = ic1 + ic2;
+                if total_lc + total_ic > 0 {
+                    Ok((
+                        Expression::BitwiseOp {
+                            left: Box::new(nl),
+                            operator: operator.clone(),
+                            right: Box::new(nr),
+                            position: *position,
+                        },
+                        total_lc,
+                        total_ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            Expression::ComparisonOp { left, operator, right, position } => {
+                let (nl, lc1, ic1) = self.resolve_enums_in_expr(left)?;
+                let (nr, lc2, ic2) = self.resolve_enums_in_expr(right)?;
+                let total_lc = lc1 + lc2;
+                let total_ic = ic1 + ic2;
+                if total_lc + total_ic > 0 {
+                    Ok((
+                        Expression::ComparisonOp {
+                            left: Box::new(nl),
+                            operator: operator.clone(),
+                            right: Box::new(nr),
+                            position: *position,
+                        },
+                        total_lc,
+                        total_ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            Expression::LogicalOp { left, operator, right, position } => {
+                let (nl, lc1, ic1) = self.resolve_enums_in_expr(left)?;
+                let (nr, lc2, ic2) = self.resolve_enums_in_expr(right)?;
+                let total_lc = lc1 + lc2;
+                let total_ic = ic1 + ic2;
+                if total_lc + total_ic > 0 {
+                    Ok((
+                        Expression::LogicalOp {
+                            left: Box::new(nl),
+                            operator: operator.clone(),
+                            right: Box::new(nr),
+                            position: *position,
+                        },
+                        total_lc,
+                        total_ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            Expression::UnaryOp { operator, operand, position } => {
+                let (no, lc, ic) = self.resolve_enums_in_expr(operand)?;
+                if lc + ic > 0 {
+                    Ok((
+                        Expression::UnaryOp {
+                            operator: operator.clone(),
+                            operand: Box::new(no),
+                            position: *position,
+                        },
+                        lc,
+                        ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            Expression::Conditional { condition, true_value, false_value, position } => {
+                let (nc, lc1, ic1) = self.resolve_enums_in_expr(condition)?;
+                let (nt, lc2, ic2) = self.resolve_enums_in_expr(true_value)?;
+                let (nf, lc3, ic3) = self.resolve_enums_in_expr(false_value)?;
+                let total_lc = lc1 + lc2 + lc3;
+                let total_ic = ic1 + ic2 + ic3;
+                if total_lc + total_ic > 0 {
+                    Ok((
+                        Expression::Conditional {
+                            condition: Box::new(nc),
+                            true_value: Box::new(nt),
+                            false_value: Box::new(nf),
+                            position: *position,
+                        },
+                        total_lc,
+                        total_ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            Expression::Parenthesized { expression, position } => {
+                let (ne, lc, ic) = self.resolve_enums_in_expr(expression)?;
+                if lc + ic > 0 {
+                    Ok((
+                        Expression::Parenthesized {
+                            expression: Box::new(ne),
+                            position: *position,
+                        },
+                        lc,
+                        ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            Expression::PropertyAccess { object, property, position } => {
+                let (no, lc, ic) = self.resolve_enums_in_expr(object)?;
+                if lc + ic > 0 {
+                    Ok((
+                        Expression::PropertyAccess {
+                            object: Box::new(no),
+                            property: property.clone(),
+                            position: *position,
+                        },
+                        lc,
+                        ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            Expression::IndexAccess { object, index, position } => {
+                let (no, lc1, ic1) = self.resolve_enums_in_expr(object)?;
+                let (ni, lc2, ic2) = self.resolve_enums_in_expr(index)?;
+                let total_lc = lc1 + lc2;
+                let total_ic = ic1 + ic2;
+                if total_lc + total_ic > 0 {
+                    Ok((
+                        Expression::IndexAccess {
+                            object: Box::new(no),
+                            index: Box::new(ni),
+                            position: *position,
+                        },
+                        total_lc,
+                        total_ic,
+                    ))
+                } else {
+                    Ok((expr.clone(), 0, 0))
+                }
+            }
+
+            // Terminal nodes that cannot contain enum accesses.
+            _ => Ok((expr.clone(), 0, 0)),
+        }
+    }
+
     // ==================== PHASE 2: DATA CONTEXT BUILD ====================
 
     fn build_initial_data_context(&mut self) {
@@ -669,7 +1085,6 @@ impl<'a> ValueResolver<'a> {
             None => return,
         };
 
-        // Reserve space proportional to entry count; each entry expands to ~4 paths.
         let estimated = (data_section.entries.len() * 4).max(MIN_CAPACITY);
         self.data_context.borrow_mut().reserve(estimated);
 
@@ -779,7 +1194,8 @@ impl<'a> ValueResolver<'a> {
             }
         }
     }
-// ==================== PHASE 3: FUNCTION CALL DISCOVERY ====================
+
+    // ==================== PHASE 3: FUNCTION CALL DISCOVERY ====================
 
     fn find_all_function_calls(&self) -> Vec<FunctionCallInfo> {
         let data_section = match &self.ast.data {
@@ -804,6 +1220,8 @@ impl<'a> ValueResolver<'a> {
         walker.find_all(data_section)
     }
 
+
+
     // ==================== PHASE 4: ITERATIVE RESOLUTION ====================
 
     fn execute_iterative_resolution(
@@ -812,7 +1230,6 @@ impl<'a> ValueResolver<'a> {
     ) -> (usize, Vec<String>) {
         let total = function_calls.len();
 
-        // Dynamic iteration ceiling: 3× the call count, clamped to the absolute max.
         let dynamic_limit = (total * 3).max(MIN_CAPACITY * 4);
         let max_iterations = dynamic_limit.min(MAX_RESOLUTION_ITERATIONS);
 
@@ -820,12 +1237,10 @@ impl<'a> ValueResolver<'a> {
         let mut errors: Vec<String> = Vec::new();
         let mut iteration = 0usize;
 
-        // (call, resolved_flag)
         let mut pending: Vec<(FunctionCallInfo, bool)> =
             function_calls.into_iter().map(|c| (c, false)).collect();
 
         loop {
-            // All resolved?
             if pending.iter().all(|(_, r)| *r) {
                 break;
             }
@@ -851,7 +1266,6 @@ impl<'a> ValueResolver<'a> {
                     continue;
                 }
 
-                // Skip if any argument still depends on an unresolved call.
                 if self.has_unresolved_dependencies(&pending[i].0) {
                     continue;
                 }
@@ -959,7 +1373,6 @@ impl<'a> ValueResolver<'a> {
                 }
             }
 
-            // Deadlock: a full pass resolved nothing but work remains.
             if resolved_this_pass == 0 && pending.iter().any(|(_, r)| !r) {
                 let stuck: Vec<String> = pending
                     .iter()
@@ -983,16 +1396,11 @@ impl<'a> ValueResolver<'a> {
         (resolved_count, errors)
     }
 
-    /// Execute a single call.  The QuickFunction is cloned out of the registry
-    /// so the immutable borrow on `self.interpreter` is dropped before
-    /// `execute()` requires a mutable borrow.
     fn execute_call(
         &mut self,
         call: &FunctionCallInfo,
         arguments: Vec<DixValue>,
     ) -> Result<DixValue, InterpreterError> {
-        // Wrap each DixValue in an Expression::Value so the interpreter receives
-        // the same type it always works with.
         let expr_args: Vec<Expression> = arguments
             .iter()
             .map(|dv| Expression::Value {
@@ -1003,7 +1411,6 @@ impl<'a> ValueResolver<'a> {
 
         match &call.namespace_name {
             Some(ns_name) => {
-                // Imported function: clone AST to release the borrow on symbol_table.
                 let func_ast = {
                     let ns = self
                         .symbol_table
@@ -1034,7 +1441,6 @@ impl<'a> ValueResolver<'a> {
             }
 
             None => {
-                // Local function: clone to release the immutable borrow.
                 let function_clone = self
                     .interpreter
                     .find_function(&call.function_name)
@@ -1071,10 +1477,30 @@ impl<'a> ValueResolver<'a> {
     ) -> bool {
         match expr {
             Expression::Identifier { name, .. } => !ctx.contains_key(name.as_str()),
+            // After Phase 1 these should all be Value::Integer already; if not,
+            // they are still resolvable by the interpreter — not a blocking dep.
+            Expression::EnumAccess { .. } => false,
             Expression::QuickFuncCall { .. } | Expression::ImportedFunctionCall { .. } => true,
             Expression::ArithmeticOp { left, right, .. } => {
                 Self::expr_has_unresolved_ref(left, ctx)
                     || Self::expr_has_unresolved_ref(right, ctx)
+            }
+            Expression::BitwiseOp { left, right, .. } => {
+                Self::expr_has_unresolved_ref(left, ctx)
+                    || Self::expr_has_unresolved_ref(right, ctx)
+            }
+            Expression::ComparisonOp { left, right, .. } => {
+                Self::expr_has_unresolved_ref(left, ctx)
+                    || Self::expr_has_unresolved_ref(right, ctx)
+            }
+            Expression::LogicalOp { left, right, .. } => {
+                Self::expr_has_unresolved_ref(left, ctx)
+                    || Self::expr_has_unresolved_ref(right, ctx)
+            }
+            Expression::Conditional { condition, true_value, false_value, .. } => {
+                Self::expr_has_unresolved_ref(condition, ctx)
+                    || Self::expr_has_unresolved_ref(true_value, ctx)
+                    || Self::expr_has_unresolved_ref(false_value, ctx)
             }
             Expression::Value { value, .. } => Self::value_has_unresolved_ref(value, ctx),
             Expression::PropertyAccess { object, .. } => {
@@ -1146,26 +1572,92 @@ impl<'a> ValueResolver<'a> {
         let ctx = self.data_context.borrow();
         let mut out = Vec::with_capacity(call.arguments.len().max(MIN_CAPACITY));
         for arg in &call.arguments {
-            out.push(Self::resolve_expr_to_dix(arg, &ctx, call.position)?);
+            out.push(self.resolve_expr_to_dix(arg, &ctx, call.position)?);
         }
         Ok(out)
     }
 
+    /// Resolve a single expression to a DixValue using the data context.
+    ///
+    /// Now handles `Expression::EnumAccess` as a safety net for any enum that
+    /// Phase 1 missed (e.g. in an expression position not yet covered), so
+    /// resolution never falls through to a Fatal error on a valid enum.
     fn resolve_expr_to_dix(
+        &self,
         expr: &Expression,
         ctx: &FxHashMap<String, DixValue>,
         call_pos: Position,
     ) -> Result<DixValue, ResolverError> {
         match expr {
-            Expression::Value { value, .. } => Self::resolve_value_to_dix(value, ctx, call_pos),
-            Expression::Identifier { name, .. } => ctx.get(name.as_str()).cloned().ok_or_else(|| {
-                ResolverError::Fatal {
+            Expression::Value { value, .. } => {
+                Self::resolve_value_to_dix(value, ctx, call_pos)
+            }
+
+            Expression::Identifier { name, .. } => {
+                ctx.get(name.as_str()).cloned().ok_or_else(|| ResolverError::Fatal {
                     message: format!(
                         "identifier '{}' missing from context at {}",
                         name, call_pos
                     ),
-                }
-            }),
+                })
+            }
+
+            // Safety net: any EnumAccess that survived Phase 1 unresolved is
+            // resolved here before the interpreter sees it.
+            Expression::EnumAccess {
+                namespace_name: None,
+                enum_name,
+                value: enum_field,
+                position,
+            } => {
+                let int_val = self
+                    .symbol_table
+                    .try_get_enum_field_value(enum_name, enum_field)
+                    .ok_or_else(|| ResolverError::InvalidEnumAccess {
+                        location: format!("{}.{}", enum_name, enum_field),
+                        message: format!(
+                            "Enum '{}' field '{}' not found (late resolution)",
+                            enum_name, enum_field
+                        ),
+                        position: *position,
+                    })?;
+                Ok(DixValue::from_int(int_val))
+            }
+
+            Expression::EnumAccess {
+                namespace_name: Some(ns_name),
+                enum_name,
+                value: enum_field,
+                position,
+            } => {
+                let ns = self
+                    .symbol_table
+                    .try_get_namespace(ns_name)
+                    .ok_or_else(|| ResolverError::InvalidEnumAccess {
+                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
+                        message: format!("Namespace '{}' not found (late resolution)", ns_name),
+                        position: *position,
+                    })?;
+                let fields = ns.enums.get(enum_name.as_str()).ok_or_else(|| {
+                    ResolverError::InvalidEnumAccess {
+                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
+                        message: format!(
+                            "Enum '{}' not found in namespace '{}' (late resolution)",
+                            enum_name, ns_name
+                        ),
+                        position: *position,
+                    }
+                })?;
+                let int_val = fields.get(enum_field.as_str()).ok_or_else(|| {
+                    ResolverError::InvalidEnumAccess {
+                        location: format!("{}.{}.{}", ns_name, enum_name, enum_field),
+                        message: format!("Field '{}' not found (late resolution)", enum_field),
+                        position: *position,
+                    }
+                })?;
+                Ok(DixValue::from_int(*int_val))
+            }
+
             _ => Err(ResolverError::Fatal {
                 message: format!("cannot resolve expr to DixValue at {}", call_pos),
             }),
@@ -1208,11 +1700,8 @@ impl<'a> ValueResolver<'a> {
                         Self::resolve_value_to_dix(&prop.value, ctx, call_pos)?,
                     );
                 }
-                // DixValue::from_object takes HashMap; collect via std HashMap.
                 Ok(DixValue::from_object(map.into_iter().collect()))
             }
-            // Blob / Regex / Tuple constructors — pass through as string representation;
-            // the interpreter resolves them during actual execution.
             Value::PrefixedConstructor { prefix, arguments, .. } => {
                 match prefix.to_lowercase().as_str() {
                     "b" => {
@@ -1376,7 +1865,6 @@ impl<'a> ValueResolver<'a> {
     // ==================== PHASE 5: IDENTIFIER RESOLUTION ====================
 
     fn resolve_remaining_identifiers(&mut self) {
-        // AST node count drives the pass limit; minimum 8, absolute ceiling 64.
         let node_estimate = self
             .ast
             .data
@@ -1710,8 +2198,6 @@ impl<'a> ValueResolver<'a> {
 
     // ==================== VALUE ↔ DIX CONVERSIONS ====================
 
-    /// Convert a literal AST Value to DixValue.  Returns `None` for
-    /// non-literal variants (function calls, identifiers, etc.).
     fn try_value_to_dix(value: &Value) -> Option<DixValue> {
         match value {
             Value::Integer { value, .. } => Some(DixValue::from_int(*value)),
@@ -1722,7 +2208,6 @@ impl<'a> ValueResolver<'a> {
             Value::Null { .. } => Some(DixValue::null()),
             Value::HexColor { value, .. } => Some(DixValue::from_hex(value.clone())),
 
-            // Blob / Regex: validate and wrap.
             Value::PrefixedConstructor { prefix, arguments, .. } => {
                 match prefix.to_lowercase().as_str() {
                     "b" => {
@@ -1792,7 +2277,6 @@ impl<'a> ValueResolver<'a> {
             DixType::Null => Value::Null { position },
             DixType::Hex => Value::HexColor { value: dix.as_string(), position },
 
-            // Blob → PrefixedConstructor b:(...)
             DixType::Blob => Value::PrefixedConstructor {
                 prefix: "b".to_string(),
                 arguments: vec![Value::String {
@@ -1802,7 +2286,6 @@ impl<'a> ValueResolver<'a> {
                 position,
             },
 
-            // Regex → PrefixedConstructor r:(...)
             DixType::Regex => Value::PrefixedConstructor {
                 prefix: "r".to_string(),
                 arguments: vec![Value::String {
@@ -1834,7 +2317,6 @@ impl<'a> ValueResolver<'a> {
                 Value::Object { properties, position }
             }
 
-            // Date/Timestamp → String representation (round-trip safe)
             DixType::Date => Value::Date { value: dix.as_string(), position },
             DixType::Timestamp => Value::Timestamp { value: dix.as_string(), position },
 

@@ -1,7 +1,7 @@
 // src/Compiler/Core/general_ast_enhancer.rs
 //! Applies compile-time enhancements to a validated AST.
 //!
-//! Must run after semantic analysis: Parse → Semantic Analysis → AST Enhancement → Value Resolution.
+//! Must run after semantic analysis: Parse -> Semantic Analysis -> AST Enhancement -> Value Resolution.
 //! Semantic analysis produces QualifiedIdentifierResolution metadata that this phase consumes.
 
 use crate::Compiler::AST::DixScript;
@@ -124,4 +124,4 @@ impl<'a> GeneralAstEnhancer<'a> {
 
         self.enhancement_result
     }
-    }
+}

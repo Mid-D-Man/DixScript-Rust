@@ -85,7 +85,7 @@ impl DixLoader {
             Utc::now(),
             file_gen.is_encrypted,
             file_gen.is_compressed,
-            file_gen.applied_modules,
+            file_gen.applied_modules.clone(), // clone to avoid partial move before log_generated_files
         );
 
         self.error_manager.log_info("Text file loaded successfully");
@@ -777,4 +777,4 @@ mod tests {
         let result = loader.load_from_encrypted_bytes(&[], "some_key_content", &DixLoadOptions::new());
         assert!(result.is_err());
     }
-            }
+                }

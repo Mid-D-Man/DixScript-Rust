@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use chrono::Utc;
 use crate::Compiler::Core::Tokenizer::Tokenizer;
-use crate::Compiler::Core::Config::ConfigSectionHandler;
+use crate::Compiler::Core::Config::{ConfigSectionHandler, DebugMode};
 use crate::Compiler::Core::{GeneralParser, GeneralSemanticAnalyzer, GeneralAstEnhancer};
 use crate::Compiler::Core::BinarySerialization::{BinaryPacker, BinaryUnpacker};
 use crate::Compiler::Core::ValueResolution::ValueResolver;
@@ -18,21 +18,16 @@ use super::load_options::DixLoadOptions;
 use super::key_resolver::{KeyFileResolver, KeyFileResolution, KeyFileSource};
 use super::dix_data::DixData;
 
-/// Internal loader for DixScript files
+/// Internal loader for DixScript files.
 ///
-/// Handles:
-/// - Text file loading (.mdix)
-/// - Encrypted file loading (.mdix.enc)
-/// - Full compilation pipeline
-/// - DLM module execution (encryption, compression, auditing)
-/// - Value resolution (QuickFunctions)
+/// Handles plain `.mdix` loading, encrypted `.mdix.enc` loading,
+/// and the full compilation pipeline including DLM execution.
 pub struct DixLoader {
     error_manager: ErrorManager,
     key_resolver: KeyFileResolver,
 }
 
 impl DixLoader {
-    /// Create new loader
     pub fn new() -> Self {
         DixLoader {
             error_manager: ErrorManager::get_shared_instance(),
@@ -40,7 +35,7 @@ impl DixLoader {
         }
     }
 
-    /// Load plain text .mdix file
+    /// Load a plain `.mdix` file through the full compilation pipeline.
     pub fn load_text(
         &self,
         mdix_path: &str,
@@ -48,74 +43,62 @@ impl DixLoader {
     ) -> Result<DixData, String> {
         self.error_manager.log_info(&format!("Loading text file: {}", mdix_path));
 
-        // Check file exists
         if !Path::new(mdix_path).exists() {
-            let error_msg = format!("File not found: {}", mdix_path);
-            self.error_manager.add_runtime_error_with_severity(
+            let msg = format!("File not found: {}", mdix_path);
+            self.error_manager.add_runtime_error(
                 RuntimeErrorType::ResourceNotFound,
-                error_msg.clone(),
+                msg.clone(),
                 Some("DixLoader.load_text".to_string()),
                 0,
                 0,
                 vec![],
                 Some("Check file path".to_string()),
-                ErrorSeverity::Error,
             );
-            return Err(error_msg);
+            return Err(msg);
         }
 
-        // Read source
         let source_text = fs::read_to_string(mdix_path).map_err(|e| {
-            let error_msg = format!("Failed to read file {}: {}", mdix_path, e);
-            self.error_manager.add_runtime_error_with_severity(
+            let msg = format!("Failed to read file {}: {}", mdix_path, e);
+            self.error_manager.add_runtime_error(
                 RuntimeErrorType::InvalidOperation,
-                error_msg.clone(),
+                msg.clone(),
                 Some("DixLoader.load_text".to_string()),
                 0,
                 0,
                 vec![],
                 None,
-                ErrorSeverity::Error,
             );
-            error_msg
+            msg
         })?;
 
-        // Compile source
-        let compilation_result = self.compile_source(&source_text, mdix_path)?;
+        let compiled_ast = self.compile_source(&source_text, mdix_path)?;
+        let file_gen = self.determine_dlm_behavior(&compiled_ast, mdix_path, options)?;
 
-        // Determine DLM behavior
-        let file_gen_result = self.determine_dlm_behavior(
-            &compilation_result,
-            mdix_path,
-            options,
-        )?;
-
-        // Create DixData
         let dix_data = DixData::from_ast(
-            file_gen_result.resolved_ast,
+            file_gen.resolved_ast,
             "1.0.0".to_string(),
             Utc::now(),
-            file_gen_result.is_encrypted,
-            file_gen_result.is_compressed,
-            file_gen_result.applied_modules,
+            file_gen.is_encrypted,
+            file_gen.is_compressed,
+            file_gen.applied_modules,
         );
 
         self.error_manager.log_info("Text file loaded successfully");
 
-        if let Some(ref enc_file) = file_gen_result.generated_enc_file {
-            self.error_manager.log_info(&format!("Generated encrypted file: {}", enc_file));
+        if let Some(ref path) = file_gen.generated_enc_file {
+            self.error_manager.log_info(&format!("Generated encrypted file: {}", path));
         }
-        if let Some(ref key_file) = file_gen_result.generated_key_file {
-            self.error_manager.log_info(&format!("Generated key file: {}", key_file));
+        if let Some(ref path) = file_gen.generated_key_file {
+            self.error_manager.log_info(&format!("Generated key file: {}", path));
         }
-        if let Some(ref audit_file) = file_gen_result.generated_audit_file {
-            self.error_manager.log_info(&format!("Generated audit file: {}", audit_file));
+        if let Some(ref path) = file_gen.generated_audit_file {
+            self.error_manager.log_info(&format!("Generated audit file: {}", path));
         }
 
         Ok(dix_data)
     }
 
-    /// Load encrypted .mdix.enc file
+    /// Load an encrypted `.mdix.enc` file.
     pub fn load_encrypted(
         &self,
         enc_path: &str,
@@ -124,68 +107,56 @@ impl DixLoader {
         self.error_manager.log_info(&format!("Loading encrypted file: {}", enc_path));
 
         if !Path::new(enc_path).exists() {
-            let error_msg = format!("Encrypted file not found: {}", enc_path);
-            self.error_manager.add_runtime_error_with_severity(
+            let msg = format!("Encrypted file not found: {}", enc_path);
+            self.error_manager.add_runtime_error(
                 RuntimeErrorType::ResourceNotFound,
-                error_msg.clone(),
+                msg.clone(),
                 Some("DixLoader.load_encrypted".to_string()),
                 0,
                 0,
                 vec![],
                 None,
-                ErrorSeverity::Error,
             );
-            return Err(error_msg);
+            return Err(msg);
         }
 
         let encrypted_data = fs::read(enc_path).map_err(|e| {
-            let error_msg = format!("Failed to read encrypted file {}: {}", enc_path, e);
-            self.error_manager.add_runtime_error_with_severity(
+            let msg = format!("Failed to read encrypted file {}: {}", enc_path, e);
+            self.error_manager.add_runtime_error(
                 RuntimeErrorType::InvalidOperation,
-                error_msg.clone(),
+                msg.clone(),
                 Some("DixLoader.load_encrypted".to_string()),
                 0,
                 0,
                 vec![],
                 None,
-                ErrorSeverity::Error,
             );
-            error_msg
+            msg
         })?;
 
-        self.error_manager.log_info(&format!(
-            "Encrypted file size: {} bytes",
-            encrypted_data.len()
-        ));
+        self.error_manager.log_info(&format!("Encrypted file size: {} bytes", encrypted_data.len()));
 
-        // Locate the .dxkey file
         let key_resolution = self.key_resolver.resolve_key_file(enc_path, options)?;
 
-        self.error_manager
-            .log_info(&format!("Key source: {:?}", key_resolution.source));
-        self.error_manager
-            .log_info(&format!("Key from: {}", key_resolution.source_description));
+        self.error_manager.log_info(&format!("Key source: {:?}", key_resolution.source));
+        self.error_manager.log_info(&format!("Key from: {}", key_resolution.source_description));
 
-        // Parse key file metadata
         let key_data = self.parse_key_file_content(&key_resolution.content)?;
 
-        // Check password requirement
         if key_data.is_password_mode && options.password.is_none() {
-            let error_msg =
-                "Password required for decryption. \
-                 This file was encrypted in password mode. \
-                 Provide password via DixLoadOptions::with_password()";
-            self.error_manager.add_runtime_error_with_severity(
+            let msg = "Password required for decryption. \
+                       This file was encrypted in password mode. \
+                       Provide a password via DixLoadOptions::with_password().";
+            self.error_manager.add_runtime_error(
                 RuntimeErrorType::InvalidOperation,
-                error_msg.to_string(),
+                msg.to_string(),
                 Some("DixLoader.load_encrypted".to_string()),
                 0,
                 0,
                 vec![],
                 Some("Use DixLoadOptions::with_password()".to_string()),
-                ErrorSeverity::Error,
             );
-            return Err(error_msg.to_string());
+            return Err(msg.to_string());
         }
 
         if key_data.is_password_mode {
@@ -194,41 +165,40 @@ impl DixLoader {
             self.error_manager.log_info("Using keyfile-based decryption");
         }
 
-        // Execute reverse pipeline (decrypt + decompress)
-        let binary_data = self.execute_reverse_pipeline(enc_path, &key_resolution, options, &key_data)?;
+        let binary_data = self.execute_reverse_pipeline(enc_path, &key_resolution, options)?;
 
-        self.error_manager
-            .log_info(&format!("Decrypted data size: {} bytes", binary_data.len()));
+        self.error_manager.log_info(&format!("Decrypted data size: {} bytes", binary_data.len()));
 
-        // Deserialize binary to AST
         let mut unpacker = BinaryUnpacker::new();
         let deser_result = unpacker.unpack(&binary_data);
 
         if !deser_result.is_success {
-            let error_msg = format!("Binary deserialization failed: {:?}", deser_result.errors);
-            self.error_manager.add_runtime_error_with_severity(
+            let msg = format!("Binary deserialization failed: {:?}", deser_result.errors);
+            self.error_manager.add_runtime_error(
                 RuntimeErrorType::InvalidOperation,
-                error_msg.clone(),
+                msg.clone(),
                 Some("DixLoader.load_encrypted".to_string()),
                 0,
                 0,
                 vec![],
                 None,
-                ErrorSeverity::Error,
             );
-            return Err(error_msg);
+            return Err(msg);
         }
 
         let ast = deser_result
             .ast
             .ok_or_else(|| "Deserialization succeeded but AST is None".to_string())?;
 
+        let is_encrypted  = key_data.applied_modules.iter().any(|m| m.contains("Encryptor"));
+        let is_compressed = key_data.applied_modules.iter().any(|m| m.contains("Compressor"));
+
         let dix_data = DixData::from_ast(
             ast,
             key_data.version,
             key_data.compile_time,
-            key_data.applied_modules.iter().any(|m| m.contains("Encryptor")),
-            key_data.applied_modules.iter().any(|m| m.contains("Compressor")),
+            is_encrypted,
+            is_compressed,
             key_data.applied_modules,
         );
 
@@ -236,53 +206,43 @@ impl DixLoader {
         Ok(dix_data)
     }
 
-    // ===== PRIVATE METHODS =====
+    // ── Compilation pipeline ──────────────────────────────────────────────────
 
-    /// Compile source text to resolved AST
-    ///
-    /// Pipeline:
-    /// 1. CONFIG processing
-    /// 2. Tokenization
-    /// 3. Parsing
-    /// 4. Semantic analysis
-    /// 4.5. AST Enhancement (post-semantic — required by Rust borrow rules)
-    /// 5. Value resolution (QuickFunctions)
+    /// Full compilation: config → tokenize → parse → semantics →
+    /// AST enhancement → value resolution.
     fn compile_source(
         &self,
         source_text: &str,
         source_file_path: &str,
     ) -> Result<DixScript, String> {
-        // Step 1: Process CONFIG section
+        // Step 1: CONFIG
         let mut config_handler = ConfigSectionHandler::new(None);
         let config_result = config_handler.process_config_section(source_text);
 
         let mut operational_settings = config_result.operational_settings;
         operational_settings.source_file_path = Some(source_file_path.to_string());
-
         self.error_manager.update_settings(operational_settings.clone());
 
-        // Step 2: Tokenization
-        let tokenizer = Tokenizer::new(&config_result.cleaned_input_string,&operational_settings);
+        // Step 2: Tokenize
+        let tokenizer = Tokenizer::new(&config_result.cleaned_input_string, &operational_settings);
         let tok_result = tokenizer.tokenize();
 
-        if !tok_result.tokens.is_empty()
-            && tok_result.tokens.iter().any(|t| {
+        if tok_result.tokens.iter().any(|t| {
             matches!(
-                    t.token_type,
-                    crate::Compiler::Core::Tokenizer::TokenType::Error(_)
-                )
-        })
-        {
+                t.token_type,
+                crate::Compiler::Core::Tokenizer::TokenType::Error(_)
+            )
+        }) {
             return Err("Tokenization failed - invalid tokens found".to_string());
         }
 
-        // Step 3: Parsing
+        // Step 3: Parse
         let parser = GeneralParser::new(
             tok_result.tokens,
             &config_result.config_section,
             &operational_settings,
         )
-            .map_err(|e| format!("Parser init failed: {}", e.message()))?;
+        .map_err(|e| format!("Parser init failed: {}", e.message()))?;
 
         let ast = parser
             .parse()
@@ -293,14 +253,12 @@ impl DixLoader {
         let semantic_result = semantic_analyzer.analyze();
 
         if !semantic_result.is_success {
-            let error_messages: Vec<String> =
-                semantic_result.errors.iter().map(|e| e.message.clone()).collect();
-            return Err(format!("Semantic analysis failed: {:?}", error_messages));
+            let msgs: Vec<String> = semantic_result.errors.iter().map(|e| e.message.clone()).collect();
+            return Err(format!("Semantic analysis failed: {:?}", msgs));
         }
 
-        // Step 4.5: AST Enhancement
-        self.error_manager
-            .log_info("Running AST Enhancement (post-semantic)");
+        // Step 4.5: AST enhancement
+        self.error_manager.log_info("Running AST enhancement");
         let enhancer = GeneralAstEnhancer::new(&operational_settings);
         let enhancement_result = enhancer.enhance(&ast, Some(&semantic_result));
 
@@ -318,19 +276,14 @@ impl DixLoader {
 
         let mut resolved_ast = enhancement_result.enhanced_ast;
 
-        // Step 5: Value resolution (if QuickFunctions exist)
-        let has_local_functions = resolved_ast.quick_functions.is_some();
+        // Step 5: Value resolution
+        let has_local_functions  = resolved_ast.quick_functions.is_some();
         let has_imported_functions = semantic_result
             .symbol_table
             .as_ref()
             .map(|st| st.namespaces.values().any(|ns| !ns.functions.is_empty()))
             .unwrap_or(false);
         let has_data_section = resolved_ast.data.is_some();
-
-        self.error_manager.log_info(&format!(
-            "Value resolution check: local_funcs={}, imported_funcs={}, data={}",
-            has_local_functions, has_imported_functions, has_data_section
-        ));
 
         if (has_local_functions || has_imported_functions)
             && has_data_section
@@ -347,9 +300,8 @@ impl DixLoader {
             let resolution_result = value_resolver.resolve();
 
             if !resolution_result.is_success {
-                let error_messages: Vec<String> =
-                    resolution_result.errors.iter().map(|e| e.clone()).collect();
-                return Err(format!("Value resolution failed: {:?}", error_messages));
+                let msgs: Vec<String> = resolution_result.errors.iter().map(|e| e.clone()).collect();
+                return Err(format!("Value resolution failed: {:?}", msgs));
             }
 
             self.error_manager.log_info(&format!(
@@ -361,14 +313,14 @@ impl DixLoader {
                 .resolved_ast
                 .ok_or_else(|| "Resolution succeeded but AST is None".to_string())?;
         } else {
-            self.error_manager
-                .log_info("Skipping value resolution (no functions or no data)");
+            self.error_manager.log_info("Skipping value resolution (no functions or no data)");
         }
 
         Ok(resolved_ast)
     }
 
-    /// Determine DLM behavior and execute if needed
+    // ── DLM dispatch ─────────────────────────────────────────────────────────
+
     fn determine_dlm_behavior(
         &self,
         ast: &DixScript,
@@ -385,41 +337,30 @@ impl DixLoader {
             generated_audit_file: None,
         };
 
-        if ast.dlm.is_none() {
-            self.error_manager
-                .log_info("No DLM modules - returning resolved AST only");
-            return Ok(result);
-        }
+        let dlm_section = match ast.dlm.as_ref() {
+            Some(d) if !d.modules.is_empty() => d,
+            _ => {
+                self.error_manager.log_info("No DLM modules - returning resolved AST only");
+                return Ok(result);
+            }
+        };
 
-        let dlm_section = ast.dlm.as_ref().unwrap();
+        let has_auditor    = dlm_section.modules.iter().any(|m| m.module_type == DLMModuleType::DAuditor);
+        let has_compressor = dlm_section.modules.iter().any(|m| m.module_type == DLMModuleType::DCompressor);
+        let has_encryptor  = dlm_section.modules.iter().any(|m| m.module_type == DLMModuleType::DEncryptor);
 
-        let has_auditor = dlm_section
-            .modules
-            .iter()
-            .any(|m| m.module_type == DLMModuleType::DAuditor);
-        let has_compressor = dlm_section
-            .modules
-            .iter()
-            .any(|m| m.module_type == DLMModuleType::DCompressor);
-        let has_encryptor = dlm_section
-            .modules
-            .iter()
-            .any(|m| m.module_type == DLMModuleType::DEncryptor);
-
-        // Auditor only — generate .mdix.au file, no binary output
+        // Auditor-only path
         if has_auditor && !has_compressor && !has_encryptor {
-            self.error_manager
-                .log_info("DAuditor only - generating .mdix.au file");
+            self.error_manager.log_info("DAuditor only - generating .mdix.au file");
             let audit_file = self.generate_audit_only(ast, source_file_path, options)?;
             result.applied_modules.push("DAuditor".to_string());
             result.generated_audit_file = Some(audit_file);
             return Ok(result);
         }
 
-        // Compressor / Encryptor — generate binary files
+        // Compressor/Encryptor path — produces .mdix.enc + .mdix.key
         if has_compressor || has_encryptor {
-            self.error_manager
-                .log_info("DCompressor/DEncryptor detected - generating binary files");
+            self.error_manager.log_info("DCompressor/DEncryptor detected - generating binary files");
 
             let output_dir = options
                 .output_directory
@@ -431,11 +372,9 @@ impl DixLoader {
                         .unwrap_or(".")
                 });
 
-            fs::create_dir_all(output_dir).map_err(|e| {
-                format!("Failed to create output directory {}: {}", output_dir, e)
-            })?;
+            fs::create_dir_all(output_dir)
+                .map_err(|e| format!("Failed to create output directory {}: {}", output_dir, e))?;
 
-            // Ensure valid SECURITY section
             let mut ast_with_security = ast.clone();
             ast_with_security.security = Some(
                 SecurityUtilities::ensure_valid_security_section(
@@ -444,41 +383,36 @@ impl DixLoader {
                 ),
             );
 
-            // Binary serialization
             let mut packer = BinaryPacker::new();
             let ser_result = packer.pack(&ast_with_security);
 
             if !ser_result.is_success {
-                return Err(format!(
-                    "Binary serialization failed: {:?}",
-                    ser_result.errors
-                ));
+                return Err(format!("Binary serialization failed: {:?}", ser_result.errors));
             }
-
-            let binary_data = ser_result.binary_data;
 
             self.error_manager.log_info(&format!(
                 "Binary serialization complete: {} bytes",
-                binary_data.len()
+                ser_result.binary_data.len()
             ));
 
-            // Execute DLM pipeline
-            let debug_mode = crate::Compiler::Core::DebugMode::Off;
-            let dlm_executor =
-                DLMPipelineExecutor::new(source_file_path, output_dir, debug_mode);
+            let dlm_executor = DLMPipelineExecutor::new(
+                source_file_path,
+                output_dir,
+                DebugMode::Off,
+            );
 
-            let dlm_result = dlm_executor.execute(&mut ast_with_security, binary_data);
+            let dlm_result = dlm_executor.execute(&mut ast_with_security, ser_result.binary_data);
 
             if !dlm_result.is_success {
                 return Err(format!("DLM pipeline failed: {:?}", dlm_result.errors));
             }
 
-            result.is_compressed = has_compressor;
-            result.is_encrypted = has_encryptor;
-            result.applied_modules = dlm_result.executed_modules;
-            result.generated_enc_file = dlm_result.encrypted_file_path;
-            result.generated_key_file = dlm_result.key_file_path;
-            result.generated_audit_file = dlm_result.audit_file_path;
+            result.is_compressed         = has_compressor;
+            result.is_encrypted          = has_encryptor;
+            result.applied_modules       = dlm_result.executed_modules;
+            result.generated_enc_file    = dlm_result.encrypted_file_path;
+            result.generated_key_file    = dlm_result.key_file_path;
+            result.generated_audit_file  = dlm_result.audit_file_path;
 
             self.error_manager.log_info(&format!(
                 "DLM pipeline complete: {} modules executed",
@@ -489,7 +423,6 @@ impl DixLoader {
         Ok(result)
     }
 
-    /// Generate audit file only (DAuditor without encryption/compression)
     fn generate_audit_only(
         &self,
         ast: &DixScript,
@@ -506,9 +439,8 @@ impl DixLoader {
                     .unwrap_or(".")
             });
 
-        fs::create_dir_all(output_dir).map_err(|e| {
-            format!("Failed to create output directory {}: {}", output_dir, e)
-        })?;
+        fs::create_dir_all(output_dir)
+            .map_err(|e| format!("Failed to create output directory {}: {}", output_dir, e))?;
 
         let dlm_section = ast.dlm.as_ref().unwrap();
         let auditor_module = dlm_section
@@ -526,11 +458,8 @@ impl DixLoader {
                 output_dir.to_string(),
                 ast.clone(),
             )),
-            _ => {
-                return Err(format!(
-                    "Unknown auditor subtype: {:?}",
-                    auditor_module.subtype
-                ))
+            Some(other) => {
+                return Err(format!("Unknown auditor subtype: {:?}", other));
             }
         };
 
@@ -542,22 +471,22 @@ impl DixLoader {
             .finalize_audit()
             .map_err(|e| format!("Failed to finalize audit: {}", e))?;
 
-        self.error_manager.log_info(&format!(
-            "Audit file created: {}",
-            audit_result.audit_file_path
-        ));
-
+        self.error_manager.log_info(&format!("Audit file created: {}", audit_result.audit_file_path));
         Ok(audit_result.audit_file_path)
     }
 
-    /// Parse .dxkey JSON content into our internal metadata type.
+    // ── Key file parsing ──────────────────────────────────────────────────────
+
+    /// Parse `.mdix.key` content into the loader's internal metadata type.
     ///
-    /// Writes to a temp file, delegates to KeyFileManager for parsing,
-    /// then maps the structured result to what the loader needs.
+    /// Writes to a temp file, delegates to `KeyFileManager`, then maps
+    /// the structured `KeyFileData` to what the loader needs.
     fn parse_key_file_content(&self, key_content: &str) -> Result<LoaderKeyMetadata, String> {
         let temp_dir = std::env::temp_dir();
-        let temp_key_file =
-            temp_dir.join(format!("temp_dxkey_{}.dxkey", uuid::Uuid::new_v4()));
+        let temp_key_file = temp_dir.join(format!(
+            "temp_mdixkey_{}.mdix.key",
+            uuid::Uuid::new_v4()
+        ));
 
         fs::write(&temp_key_file, key_content)
             .map_err(|e| format!("Failed to write temp key file: {}", e))?;
@@ -567,50 +496,51 @@ impl DixLoader {
             temp_dir.to_string_lossy().to_string(),
         );
 
-        let km_metadata = key_manager
+        let km = key_manager
             .read_key_file(temp_key_file.to_str().unwrap_or(""))
             .map_err(|e| format!("Failed to parse key file content: {}", e))?;
 
         if let Err(e) = fs::remove_file(&temp_key_file) {
-            self.error_manager
-                .log_warning(&format!("Failed to clean up temp key file: {}", e));
+            self.error_manager.log_warning(&format!("Failed to clean up temp key file: {}", e));
         }
 
-        let is_password_mode = km_metadata
-            .encryption
+        // Determine password mode from presence of KDF parameters
+        let is_password_mode = km.key_data.encryption
             .as_ref()
-            .map(|enc| enc.salt.is_some() && enc.kdf_algorithm.is_some())
+            .map(|enc| enc.kdf.is_some())
             .unwrap_or(false);
 
         let mut applied_modules = Vec::new();
-        if km_metadata.compression.is_some() {
+        if km.key_data.compression.is_some() {
             applied_modules.push("Compressor".to_string());
         }
-        if km_metadata.encryption.is_some() {
+        if km.key_data.encryption.is_some() {
             applied_modules.push("Encryptor".to_string());
         }
-        if km_metadata.audit.is_some() {
+        // No dedicated audit field on KeyFileData; detect via pipeline module list
+        if km.pipeline.modules_used.iter().any(|m| m.to_lowercase().contains("dauditor")) {
             applied_modules.push("Auditor".to_string());
         }
 
         Ok(LoaderKeyMetadata {
-            version: km_metadata.version,
+            version: km.config.version,
             compile_time: Utc::now(),
             applied_modules,
             is_password_mode,
         })
     }
 
+    // ── Reverse pipeline ──────────────────────────────────────────────────────
+
     /// Execute reverse DLM pipeline (decrypt + decompress).
     ///
-    /// For non-file key sources (DirectContent / Url), the key content is
-    /// written to a temp file so DLMReverseExecutor can read it normally.
+    /// For non-file key sources (DirectContent / Url) the key content is
+    /// written to a temp file so `DLMReverseExecutor` can read it normally.
     fn execute_reverse_pipeline(
         &self,
         enc_path: &str,
         resolved_key: &KeyFileResolution,
         options: &DixLoadOptions,
-        _key_data: &LoaderKeyMetadata,
     ) -> Result<Vec<u8>, String> {
         let (key_file_path, using_temp) = match &resolved_key.source {
             KeyFileSource::FilePath | KeyFileSource::AutoDetected => {
@@ -622,8 +552,10 @@ impl DixLoader {
             }
             KeyFileSource::DirectContent | KeyFileSource::Url => {
                 let temp_dir = std::env::temp_dir();
-                let temp_key_path =
-                    temp_dir.join(format!("temp_key_{}.dxkey", uuid::Uuid::new_v4()));
+                let temp_key_path = temp_dir.join(format!(
+                    "temp_key_{}.mdix.key",
+                    uuid::Uuid::new_v4()
+                ));
 
                 fs::write(&temp_key_path, &resolved_key.content)
                     .map_err(|e| format!("Failed to write temp key file: {}", e))?;
@@ -637,17 +569,15 @@ impl DixLoader {
             }
         };
 
-        let debug_mode = crate::Compiler::Core::DebugMode::Off;
         let reverse_executor = DLMReverseExecutor::new(
             enc_path,
             &key_file_path,
             options.password.clone(),
-            debug_mode,
+            DebugMode::Off,
         );
 
         let reverse_result = reverse_executor.execute();
 
-        // Cleanup temp key file
         if using_temp {
             if let Err(e) = fs::remove_file(&key_file_path) {
                 self.error_manager.log_warning(&format!(
@@ -660,10 +590,7 @@ impl DixLoader {
         }
 
         if !reverse_result.is_success {
-            return Err(format!(
-                "Reverse pipeline failed: {:?}",
-                reverse_result.errors
-            ));
+            return Err(format!("Reverse pipeline failed: {:?}", reverse_result.errors));
         }
 
         Ok(reverse_result.restored_data)
@@ -676,7 +603,7 @@ impl Default for DixLoader {
     }
 }
 
-// ===== INTERNAL RESULT TYPES =====
+// ── Internal result types ─────────────────────────────────────────────────────
 
 struct DLMFileGeneration {
     resolved_ast: DixScript,
@@ -694,8 +621,6 @@ struct LoaderKeyMetadata {
     applied_modules: Vec<String>,
     is_password_mode: bool,
 }
-
-// ===== TESTS =====
 
 #[cfg(test)]
 mod tests {

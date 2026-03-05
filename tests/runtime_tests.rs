@@ -162,7 +162,6 @@ fn load_from_str_minimal() {
     let data = result.expect("minimal source must compile");
     println!("  entry_count = {}", data.entry_count());
 
-    // Spot-check values
     let app_name: String = data.get("app_name").expect("app_name must exist");
     assert_eq!(app_name, "BenchApp", "app_name mismatch");
 
@@ -197,14 +196,12 @@ fn load_from_str_medium_with_enums() {
         keys
     });
 
-    // Flat props
     let app_name: String = data.get("app_name").expect("app_name");
     assert_eq!(app_name, "BenchApp");
 
     let port: i32 = data.get("port").expect("port");
     assert_eq!(port, 9090);
 
-    // Nested table props
     let db_host: String = data.get("database.primary.host").expect("database.primary.host");
     assert_eq!(db_host, "db.local");
 
@@ -214,7 +211,6 @@ fn load_from_str_medium_with_enums() {
     let cache_ttl: i32 = data.get("cache.redis.ttl").expect("cache.redis.ttl");
     assert_eq!(cache_ttl, 3600);
 
-    // Group array
     assert!(data.exists("allowed_origins"), "allowed_origins array must exist");
     assert!(data.exists("allowed_origins[0]"), "allowed_origins[0] must exist");
 
@@ -251,12 +247,10 @@ fn load_from_str_heavy_with_quickfuncs() {
             let max_players: i32 = data.get("max_players").expect("max_players");
             assert_eq!(max_players, 100);
 
-            // QuickFuncs should have resolved enemies and servers into arrays
             let enemies_exist = data.exists("enemies");
             let servers_exist = data.exists("servers");
             println!("  enemies array exists={} servers array exists={}", enemies_exist, servers_exist);
 
-            // Individual indexed access (resolved function calls)
             if data.exists("enemies[0]") {
                 println!("  enemies[0] = {:?}", data.get_value("enemies[0]"));
             } else {
@@ -266,9 +260,7 @@ fn load_from_str_heavy_with_quickfuncs() {
             println!("  game_version={} max_players={}", game_version, max_players);
         }
         Err(e) => {
-            // QuickFuncs may not be implemented yet in the Rust port — log but don't panic
             println!("  WARN: load failed (QuickFuncs resolver pending?): {}", e);
-            // Not a hard failure — this is diagnostic
         }
     }
 }
@@ -385,8 +377,6 @@ fn data_access_get_or_default_miss() {
 
 #[test]
 fn data_access_all_medium_keys() {
-    // Comprehensive dump — shows exactly what keys are available, which is the
-    // main diagnostic for figuring out why a benchmark or access is failing.
     let data = build_medium_data();
     let mut keys: Vec<String> = data.to_hashmap().keys().cloned().collect();
     keys.sort();
@@ -396,7 +386,6 @@ fn data_access_all_medium_keys() {
         println!("  {:45} = {:?}", k, data.get_value(k).unwrap());
     }
 
-    // Minimal sanity assertions
     assert!(keys.len() > 5, "medium fixture should produce more than 5 keys");
     assert!(keys.contains(&"app_name".to_string()));
     assert!(keys.contains(&"database.primary.host".to_string()));
@@ -434,9 +423,6 @@ fn data_access_scaling_get_keys_prefix() {
             "[data_access_scaling] n={:6}  get_keys(\"\") returned {} keys  ({:.3} µs)",
             n, keys.len(), us
         );
-        // get_keys returns *unique top-level segments*, so count may differ from n
-        // (e.g., "key_1" and "key_10" both start with "key_" but are different top-level keys).
-        // Just ensure we get something back.
         assert!(!keys.is_empty(), "get_keys should return at least one key for n={}", n);
     }
 }
@@ -545,7 +531,7 @@ fn data_builder_with_group_array() {
     let data = result.expect("builder must succeed");
     println!("  entry_count={}", data.entry_count());
 
-    assert!(data.exists("allowed_origins"), "allowed_origins array must exist");
+    assert!(data.exists("allowed_origins"),    "allowed_origins array must exist");
     assert!(data.exists("allowed_origins[0]"), "allowed_origins[0] must exist");
     assert!(data.exists("allowed_origins[1]"), "allowed_origins[1] must exist");
     assert!(data.exists("allowed_origins[2]"), "allowed_origins[2] must exist");
@@ -573,7 +559,6 @@ fn data_builder_large_flat_100_keys() {
     println!("  entry_count={}", data.entry_count());
     assert_eq!(data.entry_count(), 100, "should have exactly 100 entries");
 
-    // Spot-check a few
     for i in [0_i32, 49, 99] {
         let v: i32 = data.get(&format!("key_{}", i)).expect("key must exist");
         assert_eq!(v, i, "key_{} should equal {}", i, i);
@@ -587,12 +572,13 @@ fn data_builder_large_flat_100_keys() {
 
 #[test]
 fn data_builder_two_tier_enforcement() {
-    // Adding a flat property AFTER grouped data should panic.
     let result = std::panic::catch_unwind(|| {
         let _ = DixDataBuilder::new()
             .data(|d| {
-                d.with_table_properties("db", |t| { t.with_string("host", "localhost"); });
-                d.with_int("late_flat", 1); // should panic
+                d.with_table_properties("user", |t| {
+                    t.with_string("name", "Bob");
+                });
+                d.with_int("late_flat", 1);
             })
             .build();
     });
@@ -635,11 +621,11 @@ fn converter_from_hashmap_types() {
     let converter = DixConverter::new();
 
     let mut map = HashMap::new();
-    map.insert("name".to_string(),    DixValue::String("Alice".to_string()));
-    map.insert("age".to_string(),     DixValue::Int(30));
-    map.insert("score".to_string(),   DixValue::Double(9.5));
-    map.insert("active".to_string(),  DixValue::Bool(true));
-    map.insert("ratio".to_string(),   DixValue::Float(0.5_f32));
+    map.insert("name".to_string(),   DixValue::String("Alice".to_string()));
+    map.insert("age".to_string(),    DixValue::Int(30));
+    map.insert("score".to_string(),  DixValue::Double(9.5));
+    map.insert("active".to_string(), DixValue::Bool(true));
+    map.insert("ratio".to_string(),  DixValue::Float(0.5_f32));
 
     let t = Instant::now();
     let result = converter.from_hashmap(map);
@@ -659,7 +645,6 @@ fn converter_to_hashmap_medium() {
 
     let converter = DixConverter::new();
 
-    // Minimal AST — same shape used in the bench
     let ast = DixScript {
         config: None,
         imports: None,
@@ -678,13 +663,11 @@ fn converter_to_hashmap_medium() {
     let us = elapsed_us(t);
 
     println!("[converter_to_hashmap_medium] {:.2} µs  keys={}", us, map.len());
-    // Empty DATA section → empty map
     assert_eq!(map.len(), 0);
 }
 
 #[test]
 fn converter_to_hashmap_roundtrip() {
-    // Build via DixDataBuilder → flatten with to_hashmap → convert back → check
     let original = DixDataBuilder::new()
         .data(|d| {
             d.with_string("app", "TestApp");
@@ -701,7 +684,6 @@ fn converter_to_hashmap_roundtrip() {
         k
     });
 
-    // Verify the round-tripped values
     let app = map.get("app").expect("app").as_string().unwrap_or("").to_string();
     assert_eq!(app, "TestApp");
 
@@ -764,7 +746,6 @@ fn compactor_compact_all_fixtures() {
             label, src.len(), compacted.len(), ratio * 100.0, us
         );
 
-        // Compact removes trailing whitespace and collapses blank lines — should be ≤ original
         assert!(
             compacted.len() <= src.len(),
             "{}: compact output must be ≤ original size", label
@@ -774,30 +755,59 @@ fn compactor_compact_all_fixtures() {
 
 #[test]
 fn compactor_remove_comments_all_fixtures() {
+    // Root cause of the previous failure: SRC_MEDIUM contains
+    // "https://app.example.com" — the `//` sits inside a string literal, so
+    // remove_comments CORRECTLY preserves it. Asserting `!contains("//")` over
+    // the whole output was wrong because it would require stripping string contents.
+    //
+    // Fix: inject a real sentinel comment into each fixture, verify that specific
+    // comment disappears, and verify that string-embedded `//` (HTTPS URLs) survive.
+
     for (label, src) in [
         ("minimal", SRC_MINIMAL),
         ("medium",  SRC_MEDIUM),
         ("heavy",   SRC_HEAVY_WITH_FUNCTIONS),
     ] {
+        let sentinel = format!("// SENTINEL_{}\n", label.to_uppercase());
+        let src_with_comment = format!("{}{}", sentinel, src);
+
         let t = Instant::now();
-        let stripped = DixCompactor::remove_comments(src);
+        let stripped = DixCompactor::remove_comments(&src_with_comment);
         let us = elapsed_us(t);
 
         println!(
             "[compactor_remove_comments] {:10} | {} → {} bytes  ({:.2} µs)",
-            label, src.len(), stripped.len(), us
+            label, src_with_comment.len(), stripped.len(), us
         );
 
+        // 1. The injected sentinel line must be gone.
         assert!(
-            !stripped.contains("//"),
-            "{}: remove_comments must strip // comments", label
+            !stripped.contains(&sentinel),
+            "{}: sentinel comment must be stripped", label
         );
+
+        // 2. Output must be strictly shorter (we removed at least the sentinel line).
+        assert!(
+            stripped.len() < src_with_comment.len(),
+            "{}: stripped output must be shorter than input with comment", label
+        );
+
+        // 3. String-embedded `//` (HTTPS URLs) must survive intact.
+        if label == "medium" {
+            assert!(
+                stripped.contains("https://app.example.com"),
+                "medium: HTTPS URL inside string literal must be preserved"
+            );
+            assert!(
+                stripped.contains("https://admin.example.com"),
+                "medium: HTTPS URL inside string literal must be preserved"
+            );
+        }
     }
 }
 
 #[test]
 fn compactor_preserves_string_contents() {
-    // Strings with spaces/slashes must survive minification intact.
     let src = r#"@DATA( url = "https://example.com/api/v2" note = "hello   world" )"#;
     let minified = DixCompactor::minify(src);
     println!("[compactor_preserves_string_contents] minified: {}", minified);
@@ -857,9 +867,9 @@ fn format_options_to_mdix_all_styles() {
     };
 
     for (label, opts) in [
-        ("default",   DixFormatOptions::new()),
-        ("minified",  DixFormatOptions::minified()),
-        ("pretty",    DixFormatOptions::pretty()),
+        ("default",  DixFormatOptions::new()),
+        ("minified", DixFormatOptions::minified()),
+        ("pretty",   DixFormatOptions::pretty()),
     ] {
         let t = Instant::now();
         let result = converter.to_mdix(&ast, Some(&opts));
@@ -871,14 +881,12 @@ fn format_options_to_mdix_all_styles() {
                     "[format_options_to_mdix] {:10} | {} bytes  ({:.2} µs)",
                     label, s.len(), us
                 );
-                // All styles should produce non-empty output with DATA
                 assert!(!s.is_empty(), "{}: output must not be empty", label);
 
                 if label == "minified" {
                     assert!(!s.contains('\n'), "minified must have no newlines");
                 }
                 if label == "pretty" {
-                    // pretty uses 4-space indent and includes CONFIG
                     assert!(s.contains("@CONFIG"), "pretty should include CONFIG section");
                 }
             }
@@ -954,33 +962,29 @@ fn dix_value_as_int_miss() {
 
 #[test]
 fn dix_value_numeric_coercion() {
-    // Float and Double should coerce to int via as_int()
     assert_eq!(DixValue::Float(3.9_f32).as_int(), Some(3));
     assert_eq!(DixValue::Double(7.1).as_int(), Some(7));
-
-    // Int should coerce to float via as_float()
     assert!((DixValue::Int(5).as_float().unwrap() - 5.0).abs() < f64::EPSILON);
-
     println!("[dix_value_numeric_coercion] all coercions passed");
 }
 
 #[test]
 fn dix_value_type_name_all_variants() {
     let cases: &[(DixValue, &str)] = &[
-        (DixValue::Null,                                          "null"),
-        (DixValue::Bool(true),                                    "bool"),
-        (DixValue::Int(1),                                        "int"),
-        (DixValue::Float(1.0_f32),                               "float"),
-        (DixValue::Double(1.0),                                   "double"),
-        (DixValue::String("x".to_string()),                       "string"),
-        (DixValue::Date("2025-01-01".to_string()),                "date"),
-        (DixValue::Timestamp("2025-01-01T00:00:00Z".to_string()), "timestamp"),
-        (DixValue::HexColor("#FF0000".to_string()),               "hexcolor"),
-        (DixValue::Blob("data".to_string()),                      "blob"),
-        (DixValue::Regex(".*".to_string()),                       "regex"),
-        (DixValue::Array(vec![]),                                  "array"),
-        (DixValue::Object(HashMap::new()),                         "object"),
-        (DixValue::Tuple(vec![]),                                  "tuple"),
+        (DixValue::Null,                                           "null"),
+        (DixValue::Bool(true),                                     "bool"),
+        (DixValue::Int(1),                                         "int"),
+        (DixValue::Float(1.0_f32),                                 "float"),
+        (DixValue::Double(1.0),                                    "double"),
+        (DixValue::String("x".to_string()),                        "string"),
+        (DixValue::Date("2025-01-01".to_string()),                 "date"),
+        (DixValue::Timestamp("2025-01-01T00:00:00Z".to_string()),  "timestamp"),
+        (DixValue::HexColor("#FF0000".to_string()),                "hexcolor"),
+        (DixValue::Blob("data".to_string()),                       "blob"),
+        (DixValue::Regex(".*".to_string()),                        "regex"),
+        (DixValue::Array(vec![]),                                   "array"),
+        (DixValue::Object(HashMap::new()),                          "object"),
+        (DixValue::Tuple(vec![]),                                   "tuple"),
         (DixValue::Enum { enum_name: "E".into(), field_name: "A".into(), value: 0 }, "enum"),
     ];
 
@@ -996,12 +1000,11 @@ fn dix_value_type_name_all_variants() {
 
 #[test]
 fn dix_value_display_format() {
-    // Verify Display impl for each variant — useful for log output
     let cases: Vec<(DixValue, &str)> = vec![
-        (DixValue::Null,                       "null"),
-        (DixValue::Bool(true),                 "true"),
-        (DixValue::Int(42),                    "42"),
-        (DixValue::String("hi".to_string()),   "\"hi\""),
+        (DixValue::Null,                      "null"),
+        (DixValue::Bool(true),                "true"),
+        (DixValue::Int(42),                   "42"),
+        (DixValue::String("hi".to_string()),  "\"hi\""),
     ];
 
     for (v, expected) in &cases {
@@ -1013,7 +1016,6 @@ fn dix_value_display_format() {
 
 #[test]
 fn dix_value_from_trait_impls() {
-    // Ensure all From<T> impls work as expected
     let v_bool:   DixValue = true.into();
     let v_int:    DixValue = 42_i32.into();
     let v_float:  DixValue = 1.5_f32.into();
@@ -1037,7 +1039,6 @@ fn dix_value_from_trait_impls() {
 
 #[test]
 fn integration_builder_then_flatten_then_access() {
-    // Build → to_hashmap → verify all values survive the round-trip
     let data = DixDataBuilder::new()
         .config(|c| { c.with_version("1.0.0"); c.with_author("test"); })
         .data(|d| {
@@ -1079,7 +1080,6 @@ fn integration_builder_then_flatten_then_access() {
 fn integration_load_then_get_keys_then_select() {
     let data = build_medium_data();
 
-    // get_keys on a prefix
     let mut db_keys = data.get_keys("database.primary");
     db_keys.sort();
     println!("[integration_load_then_get_keys_then_select]");
@@ -1087,9 +1087,7 @@ fn integration_load_then_get_keys_then_select() {
 
     assert!(!db_keys.is_empty(), "database.primary should have sub-keys");
 
-    // select_many — grab all bool values under feature_flags
     let flags: Vec<bool> = data.select_many("feature_flags.*");
     println!("  feature_flags.* values ({} found): {:?}", flags.len(), flags);
-    // medium fixture has 3 feature flags
     assert_eq!(flags.len(), 3, "should find 3 feature flag booleans");
-  }
+}

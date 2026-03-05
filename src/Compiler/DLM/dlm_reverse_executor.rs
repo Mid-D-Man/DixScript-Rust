@@ -1,31 +1,31 @@
-// src/Compiler/DLM/dlm_reverse_executor.rs
-//! Reverse orchestrator for DLM pipeline during loading
-//! Executes modules in reverse order: Decryptor → Decompressor
+//! Reverse orchestrator for DLM pipeline during loading.
+//!
+//! Execution order: Decryptor → Decompressor.
+//! Reads the `.mdix.key` file (now `.mdix` format via `MdixKeyParser`) to
+//! reconstruct module configuration, then restores the original binary data.
 
 use crate::Compiler::DLM::{
     Auditor::{IAuditor, DiyAuditor},
     Compressor::{ICompressor, GzipCompressor, Bzip2Compressor, LzmaCompressor},
     Encryptor::{IEncryptor, XorEncryptor, Aes128Encryptor, Aes256Encryptor, Chacha20Encryptor},
-    KeyManagement::{KeyFileManager, KeyFileMetadata},
+    KeyManagement::{KeyFileManager, KeyFileData},
     dlm_pipeline_result::DLMReverseResult,
 };
-use crate::ErrorManager::{ErrorManager, DebugConfig};
+use crate::ErrorManager::{ErrorManager, DebugConfig, DlmErrorType, ErrorSeverity};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::fs;
 
-/// DLM reverse pipeline executor for decryption/decompression
 pub struct DLMReverseExecutor {
-    error_manager: ErrorManager,
-    debug_config: DebugConfig,
-    encrypted_file_path: PathBuf,
-    key_file_path: PathBuf,
-    password: Option<String>,
+    error_manager:        ErrorManager,
+    debug_config:         DebugConfig,
+    encrypted_file_path:  PathBuf,
+    key_file_path:        PathBuf,
+    password:             Option<String>,
 }
 
 impl DLMReverseExecutor {
-    /// Create new DLM reverse executor
     pub fn new(
         encrypted_file_path: impl AsRef<Path>,
         key_file_path: impl AsRef<Path>,
@@ -33,29 +33,39 @@ impl DLMReverseExecutor {
         debug_mode: crate::Compiler::Core::Config::DebugMode,
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
-        let debug_config = DebugConfig::from_debug_mode(debug_mode);
+        let debug_config  = DebugConfig::from_debug_mode(debug_mode);
 
         DLMReverseExecutor {
             error_manager,
             debug_config,
             encrypted_file_path: encrypted_file_path.as_ref().to_path_buf(),
-            key_file_path: key_file_path.as_ref().to_path_buf(),
+            key_file_path:       key_file_path.as_ref().to_path_buf(),
             password,
         }
     }
 
-    /// Execute the reverse pipeline
+    // ── Main entry point ──────────────────────────────────────────────────────
+
     pub fn execute(&self) -> DLMReverseResult {
         let start_time = Instant::now();
 
-        self.error_manager.log_info("=== DLM REVERSE PIPELINE STARTED ===");
+        self.error_manager.log_info("DLM reverse pipeline started");
 
         // Read encrypted file
         let encrypted_data = match fs::read(&self.encrypted_file_path) {
             Ok(data) => data,
             Err(e) => {
+                let msg = format!("Failed to read encrypted file: {}", e);
+                self.error_manager.add_dlm_error(
+                    DlmErrorType::ModuleExecutionFailed,
+                    msg.clone(),
+                    Some(self.file_label()),
+                    None,
+                    Some("Ensure the .mdix.enc file exists".to_string()),
+                    ErrorSeverity::Fatal,
+                );
                 let mut result = DLMReverseResult::new(0);
-                result.errors.push(format!("Failed to read encrypted file: {}", e));
+                result.errors.push(msg);
                 result.total_duration = start_time.elapsed();
                 return result;
             }
@@ -63,14 +73,16 @@ impl DLMReverseExecutor {
 
         let mut result = DLMReverseResult::new(encrypted_data.len());
 
-        self.error_manager.log_info(&format!(
-            "Read encrypted file: {} bytes",
-            encrypted_data.len()
-        ));
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "[DLMReverseExecutor] Read {} bytes from encrypted file",
+                encrypted_data.len(),
+            ));
+        }
 
         // Parse key file
-        let pipeline_metadata = match self.parse_key_file() {
-            Ok(meta) => meta,
+        let key_data = match self.load_key_file() {
+            Ok(kd) => kd,
             Err(e) => {
                 result.errors.push(e);
                 result.total_duration = start_time.elapsed();
@@ -80,9 +92,17 @@ impl DLMReverseExecutor {
 
         // Instantiate modules
         let (mut encryptor, compressor, mut auditor) =
-            match self.instantiate_modules(&pipeline_metadata) {
+            match self.instantiate_modules(&key_data) {
                 Ok(modules) => modules,
                 Err(e) => {
+                    self.error_manager.add_dlm_error(
+                        DlmErrorType::ModuleExecutionFailed,
+                        e.clone(),
+                        Some(self.file_label()),
+                        None,
+                        None,
+                        ErrorSeverity::Fatal,
+                    );
                     result.errors.push(e);
                     result.total_duration = start_time.elapsed();
                     return result;
@@ -91,50 +111,79 @@ impl DLMReverseExecutor {
 
         let mut processed_data = encrypted_data;
 
-        // Execute Decryptor (if present)
+        // Phase 1: decrypt
         if let Some(ref mut enc) = encryptor {
-            // Set password if provided
+            // Set password if provided (password mode)
             if let Some(ref password) = self.password {
                 if let Err(e) = enc.set_password(password) {
-                    result.errors.push(format!("Failed to set password: {}", e));
-                    result.total_duration = start_time.elapsed();
-
+                    self.error_manager.add_dlm_error(
+                        DlmErrorType::ModuleExecutionFailed,
+                        e.clone(),
+                        Some(self.file_label()),
+                        Some(enc.module_name().to_string()),
+                        Some("Check the password is correct".to_string()),
+                        ErrorSeverity::Fatal,
+                    );
                     if let Some(ref mut aud) = auditor {
                         aud.log_decryption_attempt(
                             false,
                             &format!("Password setup failed: {}", e),
                             result.encrypted_size,
                             0,
-                            start_time.elapsed().as_millis() as f64,
+                            start_time.elapsed().as_secs_f64() * 1000.0,
                         );
                         let _ = aud.finalize_audit();
                     }
-
+                    result.errors.push(e);
+                    result.total_duration = start_time.elapsed();
                     return result;
                 }
             }
 
-            match self.execute_decryption(enc.as_ref(), &processed_data, &mut result) {
+            let phase_start = Instant::now();
+            match enc.decrypt(&processed_data) {
                 Ok(decrypted) => {
+                    let duration_ms = phase_start.elapsed().as_secs_f64() * 1000.0;
+
                     if let Some(ref mut aud) = auditor {
                         aud.log_decryption_attempt(
                             true,
-                            &format!("Decryption successful using {}", enc.algorithm()),
+                            &format!("Decrypted with {}", enc.algorithm()),
                             result.encrypted_size,
                             decrypted.len(),
-                            start_time.elapsed().as_millis() as f64,
+                            duration_ms,
                         );
                     }
+
+                    result.executed_modules.push(enc.module_name().to_string());
+
+                    self.error_manager.log_info(&format!(
+                        "Decryption complete: {} -> {} bytes",
+                        result.encrypted_size,
+                        decrypted.len(),
+                    ));
+
                     processed_data = decrypted;
                 }
                 Err(e) => {
+                    let duration_ms = phase_start.elapsed().as_secs_f64() * 1000.0;
+
+                    self.error_manager.add_dlm_error(
+                        DlmErrorType::ModuleExecutionFailed,
+                        e.clone(),
+                        Some(self.file_label()),
+                        Some(enc.module_name().to_string()),
+                        Some("Verify the password or key file is correct".to_string()),
+                        ErrorSeverity::Fatal,
+                    );
+
                     if let Some(ref mut aud) = auditor {
                         aud.log_decryption_attempt(
                             false,
                             &format!("Decryption failed: {}", e),
                             result.encrypted_size,
                             0,
-                            start_time.elapsed().as_millis() as f64,
+                            duration_ms,
                         );
                         let _ = aud.finalize_audit();
                     }
@@ -146,13 +195,47 @@ impl DLMReverseExecutor {
             }
         }
 
-        // Execute Decompressor (if present)
+        // Phase 2: decompress
         if let Some(ref comp) = compressor {
-            match self.execute_decompression(comp.as_ref(), &processed_data, &mut result) {
+            let pre_size    = processed_data.len();
+            let phase_start = Instant::now();
+            match comp.decompress(&processed_data) {
                 Ok(decompressed) => {
+                    let duration_ms = phase_start.elapsed().as_secs_f64() * 1000.0;
+
+                    result.executed_modules.push(comp.module_name().to_string());
+
+                    self.error_manager.log_info(&format!(
+                        "Decompression complete: {} -> {} bytes",
+                        pre_size,
+                        decompressed.len(),
+                    ));
+
+                    // Log to auditor as a step if present
+                    if let Some(ref mut aud) = auditor {
+                        aud.log_step(
+                            comp.module_name(),
+                            &format!("Decompressed with {}", comp.algorithm()),
+                            pre_size,
+                            decompressed.len(),
+                            duration_ms,
+                        );
+                    }
+
                     processed_data = decompressed;
                 }
                 Err(e) => {
+                    self.error_manager.add_dlm_error(
+                        DlmErrorType::ModuleExecutionFailed,
+                        e.clone(),
+                        Some(self.file_label()),
+                        Some(comp.module_name().to_string()),
+                        Some("The data may be corrupted or use an unexpected compression format".to_string()),
+                        ErrorSeverity::Fatal,
+                    );
+                    if let Some(ref mut aud) = auditor {
+                        let _ = aud.finalize_audit();
+                    }
                     result.errors.push(e);
                     result.total_duration = start_time.elapsed();
                     return result;
@@ -163,211 +246,209 @@ impl DLMReverseExecutor {
         // Finalize auditor
         if let Some(ref mut aud) = auditor {
             if let Err(e) = aud.finalize_audit() {
+                self.error_manager.add_dlm_error(
+                    DlmErrorType::ModuleExecutionFailed,
+                    e.clone(),
+                    Some(self.file_label()),
+                    Some("DAuditor".to_string()),
+                    None,
+                    ErrorSeverity::Warning,
+                );
                 result.warnings.push(format!("Audit finalization warning: {}", e));
             }
         }
 
-        result.restored_data = processed_data;
-        result.restored_size = result.restored_data.len();
-        result.is_success = true;
+        result.restored_data  = processed_data;
+        result.restored_size  = result.restored_data.len();
+        result.is_success     = true;
         result.total_duration = start_time.elapsed();
 
-        self.error_manager.log_info("=== DLM REVERSE PIPELINE COMPLETE ===");
+        self.error_manager.log_info(&format!(
+            "DLM reverse pipeline complete: {} modules, {} -> {} bytes, {:.2}ms",
+            result.executed_modules.len(),
+            result.encrypted_size,
+            result.restored_size,
+            result.total_duration.as_secs_f64() * 1000.0,
+        ));
 
         result
     }
 
-    /// Parse .mdix.key file - returns typed KeyFileMetadata
-    fn parse_key_file(&self) -> Result<KeyFileMetadata, String> {
-        self.error_manager.log_info("Parsing .mdix.key file...");
+    // ── Key file loading ──────────────────────────────────────────────────────
 
-        let dir_str = self
-            .encrypted_file_path
+    fn load_key_file(&self) -> Result<KeyFileData, String> {
+        let dir = self.encrypted_file_path
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .to_string_lossy()
             .to_string();
 
-        let key_manager = KeyFileManager::new(dir_str.clone(), dir_str);
-        let key_path_str = self.key_file_path.to_string_lossy().to_string();
-        let metadata = key_manager.read_key_file(&key_path_str)?;
+        let key_manager   = KeyFileManager::new(dir.clone(), dir);
+        let key_path_str  = self.key_file_path.to_string_lossy().to_string();
 
-        self.error_manager.log_info("Key file parsed successfully");
+        let data = key_manager.read_key_file(&key_path_str)?;
 
-        Ok(metadata)
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "[DLMReverseExecutor] Key file loaded: mode={}, modules={}",
+                data.config.key_type,
+                data.pipeline.modules_used.join(","),
+            ));
+        }
+
+        Ok(data)
     }
 
-    /// Instantiate modules from typed KeyFileMetadata
+    // ── Module instantiation ──────────────────────────────────────────────────
+
     fn instantiate_modules(
         &self,
-        metadata: &KeyFileMetadata,
+        key_data: &KeyFileData,
     ) -> Result<(Option<Box<dyn IEncryptor>>, Option<Box<dyn ICompressor>>, Option<Box<dyn IAuditor>>), String> {
-        let dir_str = self
-            .encrypted_file_path
+        let dir = self.encrypted_file_path
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .to_string_lossy()
             .to_string();
 
-        let key_manager = KeyFileManager::new(dir_str.clone(), dir_str);
+        let key_manager = KeyFileManager::new(dir.clone(), dir.clone());
 
-        let mut encryptor: Option<Box<dyn IEncryptor>> = None;
+        let mut encryptor:  Option<Box<dyn IEncryptor>>  = None;
         let mut compressor: Option<Box<dyn ICompressor>> = None;
-        let mut auditor: Option<Box<dyn IAuditor>> = None;
+        let mut auditor:    Option<Box<dyn IAuditor>>    = None;
 
-        // Create decryptor from encryption metadata
-        if let Some(ref enc_meta) = metadata.encryption {
-            let config = key_manager
-                .extract_encryption_config(metadata)
+        // Decryptor — modules list is in reversal order so decryptor comes first.
+        if let Some(ref enc_data) = key_data.key_data.encryption {
+            let config = key_manager.extract_encryption_config(key_data)
                 .unwrap_or_default();
+            encryptor = Some(self.create_decryptor(&enc_data.algorithm, &config)?);
 
-            encryptor = Some(self.create_decryptor(&enc_meta.algorithm, &config)?);
-            self.error_manager
-                .log_info(&format!("Decryptor initialized: {}", enc_meta.algorithm));
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(&format!(
+                    "[DLMReverseExecutor] Decryptor: {}",
+                    enc_data.algorithm,
+                ));
+            }
         }
 
-        // Create decompressor from compression metadata
-        if let Some(ref comp_meta) = metadata.compression {
-            compressor = Some(self.create_decompressor(&comp_meta.algorithm)?);
-            self.error_manager
-                .log_info(&format!("Decompressor initialized: {}", comp_meta.algorithm));
+        // Decompressor
+        if let Some(ref comp_data) = key_data.key_data.compression {
+            compressor = Some(self.create_decompressor(&comp_data.algorithm)?);
+
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(&format!(
+                    "[DLMReverseExecutor] Decompressor: {}",
+                    comp_data.algorithm,
+                ));
+            }
         }
 
-        // Create auditor for logging decryption attempts (if audit data was present)
-        if metadata.audit.is_some() {
-            let source_file = self.determine_source_file_path();
-            let output_dir = self
-                .encrypted_file_path
+        // Auditor — only if one was recorded in the key file metadata
+        let had_auditor = key_data.pipeline.modules_used.iter()
+            .any(|m| m.to_lowercase().contains("dauditor"));
+
+        if had_auditor {
+            let source = self.derive_source_path();
+            let output = self.encrypted_file_path
                 .parent()
                 .unwrap_or_else(|| Path::new("."));
+            auditor = Some(Box::new(DiyAuditor::new(&source, output)));
 
-            auditor = Some(Box::new(DiyAuditor::new(&source_file, output_dir)));
-            self.error_manager
-                .log_info("Auditor initialized for decryption logging");
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(
+                    "[DLMReverseExecutor] Auditor created for decryption logging",
+                );
+            }
         }
 
         Ok((encryptor, compressor, auditor))
     }
 
-    /// Create decryptor: construct with no security config, then initialize from key metadata
     fn create_decryptor(
         &self,
         algorithm: &str,
         config: &HashMap<String, String>,
     ) -> Result<Box<dyn IEncryptor>, String> {
         let mut enc: Box<dyn IEncryptor> = match algorithm.to_lowercase().as_str() {
-            "xor" => Box::new(XorEncryptor::new(None)),
-            "aes128-gcm" | "aes128" => Box::new(Aes128Encryptor::new(None)),
-            "aes256-gcm" | "aes256" => Box::new(Aes256Encryptor::new(None)),
+            "xor"                          => Box::new(XorEncryptor::new(None)),
+            "aes128-gcm" | "aes128"        => Box::new(Aes128Encryptor::new(None)),
+            "aes256-gcm" | "aes256"        => Box::new(Aes256Encryptor::new(None)),
             "chacha20-poly1305" | "chacha20" => Box::new(Chacha20Encryptor::new(None)),
-            _ => return Err(format!("Unknown encryption algorithm: {}", algorithm)),
+            _ => {
+                let msg = format!("Unknown encryption algorithm in key file: {}", algorithm);
+                self.error_manager.add_dlm_error(
+                    DlmErrorType::ModuleExecutionFailed,
+                    msg.clone(),
+                    Some(self.file_label()),
+                    None,
+                    None,
+                    ErrorSeverity::Fatal,
+                );
+                return Err(msg);
+            }
         };
 
-        // Load key material from saved metadata
         enc.initialize(config.clone());
-
         Ok(enc)
     }
 
-    /// Create decompressor from algorithm string
     fn create_decompressor(&self, algorithm: &str) -> Result<Box<dyn ICompressor>, String> {
-        let compressor: Box<dyn ICompressor> = match algorithm.to_lowercase().as_str() {
-            "gzip" => Box::new(GzipCompressor::new()),
+        let comp: Box<dyn ICompressor> = match algorithm.to_lowercase().as_str() {
+            "gzip"  => Box::new(GzipCompressor::new()),
             "bzip2" => Box::new(Bzip2Compressor::new()),
-            "lzma" => Box::new(LzmaCompressor::new()),
-            _ => return Err(format!("Unknown compression algorithm: {}", algorithm)),
+            "lzma"  => Box::new(LzmaCompressor::new()),
+            _ => {
+                let msg = format!("Unknown compression algorithm in key file: {}", algorithm);
+                self.error_manager.add_dlm_error(
+                    DlmErrorType::ModuleExecutionFailed,
+                    msg.clone(),
+                    Some(self.file_label()),
+                    None,
+                    None,
+                    ErrorSeverity::Fatal,
+                );
+                return Err(msg);
+            }
         };
-
-        Ok(compressor)
+        Ok(comp)
     }
 
-    /// Execute decryption
-    #[inline]
-    fn execute_decryption(
-        &self,
-        encryptor: &dyn IEncryptor,
-        data: &[u8],
-        result: &mut DLMReverseResult,
-    ) -> Result<Vec<u8>, String> {
-        self.error_manager.log_info("Executing Decryption...");
+    // ── Utility ───────────────────────────────────────────────────────────────
 
-        let start = Instant::now();
-        let decrypted = encryptor.decrypt(data)?;
-        let _duration = start.elapsed();
-
-        result.executed_modules.push("Decryptor".to_string());
-
-        self.error_manager.log_info(&format!(
-            "Decryption complete: {} -> {} bytes",
-            data.len(),
-            decrypted.len()
-        ));
-
-        Ok(decrypted)
-    }
-
-    /// Execute decompression
-    #[inline]
-    fn execute_decompression(
-        &self,
-        compressor: &dyn ICompressor,
-        data: &[u8],
-        result: &mut DLMReverseResult,
-    ) -> Result<Vec<u8>, String> {
-        self.error_manager.log_info("Executing Decompression...");
-
-        let start = Instant::now();
-        let decompressed = compressor.decompress(data)?;
-        let _duration = start.elapsed();
-
-        result.executed_modules.push("Decompressor".to_string());
-
-        self.error_manager.log_info(&format!(
-            "Decompression complete: {} -> {} bytes",
-            data.len(),
-            decompressed.len()
-        ));
-
-        Ok(decompressed)
-    }
-
-    /// Determine source file path from encrypted file path
-    fn determine_source_file_path(&self) -> PathBuf {
-        let enc_dir = self
-            .encrypted_file_path
+    /// Derive the original `.mdix` source path from the encrypted file path.
+    fn derive_source_path(&self) -> PathBuf {
+        let dir = self.encrypted_file_path
             .parent()
             .unwrap_or_else(|| Path::new("."));
 
-        let mut base_name = self
-            .encrypted_file_path
+        let mut name = self.encrypted_file_path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
 
-        if base_name.ends_with(".enc") {
-            base_name = base_name[..base_name.len() - 4].to_string();
-        }
-        if base_name.ends_with(".mdix") {
-            base_name = base_name[..base_name.len() - 5].to_string();
-        }
+        // Strip ".enc" and ".mdix" suffixes to get the bare stem
+        if let Some(stripped) = name.strip_suffix(".enc") { name = stripped.to_string(); }
+        if let Some(stripped) = name.strip_suffix(".mdix") { name = stripped.to_string(); }
 
-        let expected_source = enc_dir.join(format!("{}.mdix", base_name));
+        let candidate = dir.join(format!("{}.mdix", name));
 
         if self.debug_config.is_enabled {
-            if expected_source.exists() {
-                self.error_manager.log_debug(&format!(
-                    "Found source file: {}",
-                    expected_source.display()
-                ));
-            } else {
-                self.error_manager.log_debug(&format!(
-                    "Source file not found, using derived path: {}",
-                    expected_source.display()
-                ));
-            }
+            self.error_manager.log_debug(&format!(
+                "[DLMReverseExecutor] Derived source path: {}",
+                candidate.display(),
+            ));
         }
 
-        expected_source
+        candidate
+    }
+
+    #[inline]
+    fn file_label(&self) -> String {
+        self.encrypted_file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string()
     }
 }

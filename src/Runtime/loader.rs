@@ -20,8 +20,11 @@ use super::dix_data::DixData;
 
 /// Internal loader for DixScript files.
 ///
-/// Handles plain `.mdix` loading, encrypted `.mdix.enc` loading,
-/// and the full compilation pipeline including DLM execution.
+/// Supports four entry points:
+/// - `load_text`              — load from a `.mdix` file path
+/// - `load_from_str`          — load from a string of mdix source directly
+/// - `load_encrypted`         — load from a `.mdix.enc` file path
+/// - `load_from_encrypted_bytes` — load from raw encrypted bytes + key file content
 pub struct DixLoader {
     error_manager: ErrorManager,
     key_resolver: KeyFileResolver,
@@ -35,7 +38,9 @@ impl DixLoader {
         }
     }
 
-    /// Load a plain `.mdix` file through the full compilation pipeline.
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    /// Load a plain `.mdix` file from a file path.
     pub fn load_text(
         &self,
         mdix_path: &str,
@@ -52,7 +57,7 @@ impl DixLoader {
                 0,
                 0,
                 vec![],
-                Some("Check file path".to_string()),
+                Some("Check the file path".to_string()),
             );
             return Err(msg);
         }
@@ -84,21 +89,55 @@ impl DixLoader {
         );
 
         self.error_manager.log_info("Text file loaded successfully");
-
-        if let Some(ref path) = file_gen.generated_enc_file {
-            self.error_manager.log_info(&format!("Generated encrypted file: {}", path));
-        }
-        if let Some(ref path) = file_gen.generated_key_file {
-            self.error_manager.log_info(&format!("Generated key file: {}", path));
-        }
-        if let Some(ref path) = file_gen.generated_audit_file {
-            self.error_manager.log_info(&format!("Generated audit file: {}", path));
-        }
-
+        self.log_generated_files(&file_gen);
         Ok(dix_data)
     }
 
-    /// Load an encrypted `.mdix.enc` file.
+    /// Load mdix source directly from a string.
+    ///
+    /// Runs the full compilation pipeline (tokenize → parse → semantics →
+    /// enhancement → value resolution). DLM file-output steps are skipped
+    /// because there is no source file path to anchor output to — if you need
+    /// `.mdix.enc` / `.mdix.key` output, use `load_text` with a real file.
+    pub fn load_from_str(
+        &self,
+        source: &str,
+        options: &DixLoadOptions,
+    ) -> Result<DixData, String> {
+        self.error_manager.log_info("Loading from string source");
+
+        if source.trim().is_empty() {
+            let msg = "Source string is empty".to_string();
+            self.error_manager.add_runtime_error(
+                RuntimeErrorType::InvalidArgument,
+                msg.clone(),
+                Some("DixLoader.load_from_str".to_string()),
+                0,
+                0,
+                vec![],
+                Some("Provide non-empty DixScript source".to_string()),
+            );
+            return Err(msg);
+        }
+
+        // Synthetic path used only for error messages and log context.
+        let compiled_ast = self.compile_source(source, "<string_input>")?;
+
+        // Skip DLM file generation — no output path available for string input.
+        let dix_data = DixData::from_ast(
+            compiled_ast,
+            "1.0.0".to_string(),
+            Utc::now(),
+            false,
+            false,
+            vec![],
+        );
+
+        self.error_manager.log_info("String source loaded successfully");
+        Ok(dix_data)
+    }
+
+    /// Load an encrypted `.mdix.enc` file from a file path.
     pub fn load_encrypted(
         &self,
         enc_path: &str,
@@ -137,10 +176,107 @@ impl DixLoader {
         self.error_manager.log_info(&format!("Encrypted file size: {} bytes", encrypted_data.len()));
 
         let key_resolution = self.key_resolver.resolve_key_file(enc_path, options)?;
-
-        self.error_manager.log_info(&format!("Key source: {:?}", key_resolution.source));
         self.error_manager.log_info(&format!("Key from: {}", key_resolution.source_description));
 
+        self.decrypt_and_deserialize(&encrypted_data, &key_resolution, enc_path, options)
+    }
+
+    /// Load directly from raw encrypted bytes and key file content as a string.
+    ///
+    /// This is the in-memory equivalent of `load_encrypted` — useful when you
+    /// have the encrypted payload and key material from a network response,
+    /// a database blob, or a secrets manager without touching the filesystem.
+    ///
+    /// `key_file_content` is the full text of the `.mdix.key` file.
+    /// `options` may supply a password if the key file was created in password mode.
+    pub fn load_from_encrypted_bytes(
+        &self,
+        encrypted_bytes: &[u8],
+        key_file_content: &str,
+        options: &DixLoadOptions,
+    ) -> Result<DixData, String> {
+        self.error_manager.log_info(&format!(
+            "Loading from encrypted bytes ({} bytes)",
+            encrypted_bytes.len()
+        ));
+
+        if encrypted_bytes.is_empty() {
+            let msg = "Encrypted bytes slice is empty".to_string();
+            self.error_manager.add_runtime_error(
+                RuntimeErrorType::InvalidArgument,
+                msg.clone(),
+                Some("DixLoader.load_from_encrypted_bytes".to_string()),
+                0,
+                0,
+                vec![],
+                Some("Provide non-empty encrypted data".to_string()),
+            );
+            return Err(msg);
+        }
+
+        if key_file_content.trim().is_empty() {
+            let msg = "Key file content string is empty".to_string();
+            self.error_manager.add_runtime_error(
+                RuntimeErrorType::InvalidArgument,
+                msg.clone(),
+                Some("DixLoader.load_from_encrypted_bytes".to_string()),
+                0,
+                0,
+                vec![],
+                Some("Provide the full .mdix.key file content".to_string()),
+            );
+            return Err(msg);
+        }
+
+        // Write both buffers to temp files so the existing reverse pipeline
+        // (which is path-based) can process them, then clean up afterwards.
+        let temp_dir = std::env::temp_dir();
+        let id = uuid::Uuid::new_v4();
+        let temp_enc  = temp_dir.join(format!("dix_enc_{}.mdix.enc", id));
+        let temp_key  = temp_dir.join(format!("dix_key_{}.mdix.key", id));
+
+        fs::write(&temp_enc, encrypted_bytes)
+            .map_err(|e| format!("Failed to write temp encrypted file: {}", e))?;
+        fs::write(&temp_key, key_file_content)
+            .map_err(|e| format!("Failed to write temp key file: {}", e))?;
+
+        let key_resolution = KeyFileResolution {
+            source: KeyFileSource::FilePath,
+            source_description: "In-memory bytes provided by caller".to_string(),
+            content: key_file_content.to_string(),
+            file_path: Some(temp_key.clone()),
+        };
+
+        let result = self.decrypt_and_deserialize(
+            encrypted_bytes,
+            &key_resolution,
+            temp_enc.to_str().unwrap_or(""),
+            options,
+        );
+
+        // Best-effort cleanup — failures are non-fatal.
+        for temp in [&temp_enc, &temp_key] {
+            if let Err(e) = fs::remove_file(temp) {
+                self.error_manager.log_warning(&format!(
+                    "Failed to remove temp file '{}': {}",
+                    temp.display(),
+                    e
+                ));
+            }
+        }
+
+        result
+    }
+
+    // ── Shared decryption + deserialization path ──────────────────────────────
+
+    fn decrypt_and_deserialize(
+        &self,
+        _encrypted_data: &[u8],
+        key_resolution: &KeyFileResolution,
+        enc_path: &str,
+        options: &DixLoadOptions,
+    ) -> Result<DixData, String> {
         let key_data = self.parse_key_file_content(&key_resolution.content)?;
 
         if key_data.is_password_mode && options.password.is_none() {
@@ -150,7 +286,7 @@ impl DixLoader {
             self.error_manager.add_runtime_error(
                 RuntimeErrorType::InvalidOperation,
                 msg.to_string(),
-                Some("DixLoader.load_encrypted".to_string()),
+                Some("DixLoader.decrypt_and_deserialize".to_string()),
                 0,
                 0,
                 vec![],
@@ -165,7 +301,7 @@ impl DixLoader {
             self.error_manager.log_info("Using keyfile-based decryption");
         }
 
-        let binary_data = self.execute_reverse_pipeline(enc_path, &key_resolution, options)?;
+        let binary_data = self.execute_reverse_pipeline(enc_path, key_resolution, options)?;
 
         self.error_manager.log_info(&format!("Decrypted data size: {} bytes", binary_data.len()));
 
@@ -177,7 +313,7 @@ impl DixLoader {
             self.error_manager.add_runtime_error(
                 RuntimeErrorType::InvalidOperation,
                 msg.clone(),
-                Some("DixLoader.load_encrypted".to_string()),
+                Some("DixLoader.decrypt_and_deserialize".to_string()),
                 0,
                 0,
                 vec![],
@@ -202,14 +338,13 @@ impl DixLoader {
             key_data.applied_modules,
         );
 
-        self.error_manager.log_info("Encrypted file loaded successfully");
+        self.error_manager.log_info("Encrypted data loaded successfully");
         Ok(dix_data)
     }
 
     // ── Compilation pipeline ──────────────────────────────────────────────────
 
-    /// Full compilation: config → tokenize → parse → semantics →
-    /// AST enhancement → value resolution.
+    /// config → tokenize → parse → semantics → AST enhancement → value resolution
     fn compile_source(
         &self,
         source_text: &str,
@@ -277,7 +412,7 @@ impl DixLoader {
         let mut resolved_ast = enhancement_result.enhanced_ast;
 
         // Step 5: Value resolution
-        let has_local_functions  = resolved_ast.quick_functions.is_some();
+        let has_local_functions = resolved_ast.quick_functions.is_some();
         let has_imported_functions = semantic_result
             .symbol_table
             .as_ref()
@@ -349,7 +484,6 @@ impl DixLoader {
         let has_compressor = dlm_section.modules.iter().any(|m| m.module_type == DLMModuleType::DCompressor);
         let has_encryptor  = dlm_section.modules.iter().any(|m| m.module_type == DLMModuleType::DEncryptor);
 
-        // Auditor-only path
         if has_auditor && !has_compressor && !has_encryptor {
             self.error_manager.log_info("DAuditor only - generating .mdix.au file");
             let audit_file = self.generate_audit_only(ast, source_file_path, options)?;
@@ -358,7 +492,6 @@ impl DixLoader {
             return Ok(result);
         }
 
-        // Compressor/Encryptor path — produces .mdix.enc + .mdix.key
         if has_compressor || has_encryptor {
             self.error_manager.log_info("DCompressor/DEncryptor detected - generating binary files");
 
@@ -395,24 +528,19 @@ impl DixLoader {
                 ser_result.binary_data.len()
             ));
 
-            let dlm_executor = DLMPipelineExecutor::new(
-                source_file_path,
-                output_dir,
-                DebugMode::Off,
-            );
-
+            let dlm_executor = DLMPipelineExecutor::new(source_file_path, output_dir, DebugMode::Off);
             let dlm_result = dlm_executor.execute(&mut ast_with_security, ser_result.binary_data);
 
             if !dlm_result.is_success {
                 return Err(format!("DLM pipeline failed: {:?}", dlm_result.errors));
             }
 
-            result.is_compressed         = has_compressor;
-            result.is_encrypted          = has_encryptor;
-            result.applied_modules       = dlm_result.executed_modules;
-            result.generated_enc_file    = dlm_result.encrypted_file_path;
-            result.generated_key_file    = dlm_result.key_file_path;
-            result.generated_audit_file  = dlm_result.audit_file_path;
+            result.is_compressed        = has_compressor;
+            result.is_encrypted         = has_encryptor;
+            result.applied_modules      = dlm_result.executed_modules;
+            result.generated_enc_file   = dlm_result.encrypted_file_path;
+            result.generated_key_file   = dlm_result.key_file_path;
+            result.generated_audit_file = dlm_result.audit_file_path;
 
             self.error_manager.log_info(&format!(
                 "DLM pipeline complete: {} modules executed",
@@ -477,10 +605,6 @@ impl DixLoader {
 
     // ── Key file parsing ──────────────────────────────────────────────────────
 
-    /// Parse `.mdix.key` content into the loader's internal metadata type.
-    ///
-    /// Writes to a temp file, delegates to `KeyFileManager`, then maps
-    /// the structured `KeyFileData` to what the loader needs.
     fn parse_key_file_content(&self, key_content: &str) -> Result<LoaderKeyMetadata, String> {
         let temp_dir = std::env::temp_dir();
         let temp_key_file = temp_dir.join(format!(
@@ -504,7 +628,6 @@ impl DixLoader {
             self.error_manager.log_warning(&format!("Failed to clean up temp key file: {}", e));
         }
 
-        // Determine password mode from presence of KDF parameters
         let is_password_mode = km.key_data.encryption
             .as_ref()
             .map(|enc| enc.kdf.is_some())
@@ -517,7 +640,6 @@ impl DixLoader {
         if km.key_data.encryption.is_some() {
             applied_modules.push("Encryptor".to_string());
         }
-        // No dedicated audit field on KeyFileData; detect via pipeline module list
         if km.pipeline.modules_used.iter().any(|m| m.to_lowercase().contains("dauditor")) {
             applied_modules.push("Auditor".to_string());
         }
@@ -532,10 +654,6 @@ impl DixLoader {
 
     // ── Reverse pipeline ──────────────────────────────────────────────────────
 
-    /// Execute reverse DLM pipeline (decrypt + decompress).
-    ///
-    /// For non-file key sources (DirectContent / Url) the key content is
-    /// written to a temp file so `DLMReverseExecutor` can read it normally.
     fn execute_reverse_pipeline(
         &self,
         enc_path: &str,
@@ -595,6 +713,20 @@ impl DixLoader {
 
         Ok(reverse_result.restored_data)
     }
+
+    // ── Utility ───────────────────────────────────────────────────────────────
+
+    fn log_generated_files(&self, file_gen: &DLMFileGeneration) {
+        if let Some(ref path) = file_gen.generated_enc_file {
+            self.error_manager.log_info(&format!("Generated encrypted file: {}", path));
+        }
+        if let Some(ref path) = file_gen.generated_key_file {
+            self.error_manager.log_info(&format!("Generated key file: {}", path));
+        }
+        if let Some(ref path) = file_gen.generated_audit_file {
+            self.error_manager.log_info(&format!("Generated audit file: {}", path));
+        }
+    }
 }
 
 impl Default for DixLoader {
@@ -631,4 +763,18 @@ mod tests {
         let loader = DixLoader::new();
         assert!(!loader.error_manager.has_errors());
     }
-}
+
+    #[test]
+    fn test_load_from_str_empty_fails() {
+        let loader = DixLoader::new();
+        let result = loader.load_from_str("", &DixLoadOptions::new());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_from_encrypted_bytes_empty_fails() {
+        let loader = DixLoader::new();
+        let result = loader.load_from_encrypted_bytes(&[], "some_key_content", &DixLoadOptions::new());
+        assert!(result.is_err());
+    }
+            }

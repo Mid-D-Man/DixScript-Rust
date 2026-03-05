@@ -1,0 +1,36 @@
+@CONFIG(
+  version  -> "1.0.0"
+  features -> "advanced"
+)
+
+@ENUMS(
+  Tier { FREE = 1, PRO = 2, ENTERPRISE = 3 }
+)
+
+@QUICKFUNCS(
+  ~makeServer<object>(host, port) {
+    return {
+      host    = host
+      port    = port
+      ssl     = false
+      timeout = 5000
+    }
+  }
+
+  ~tierLimit<int>(tier<enum>) {
+    return tier == Tier.FREE ? 10 :
+           tier == Tier.PRO  ? 100 : 1000
+  }
+)
+
+@DATA(
+  app_name = "FuncApp"
+
+  servers::
+    makeServer("primary.local", 8080),
+    makeServer("replica.local", 8081)
+
+  free_limit       = tierLimit(Tier.FREE)
+  pro_limit        = tierLimit(Tier.PRO)
+  enterprise_limit = tierLimit(Tier.ENTERPRISE)
+)

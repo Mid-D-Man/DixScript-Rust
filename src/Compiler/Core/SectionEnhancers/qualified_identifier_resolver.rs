@@ -30,7 +30,7 @@ impl QualifiedIdentifierResolver {
         }
     }
 
-    // ── Statement resolution ────────────────────────────────────────────────
+    // ==================== STATEMENT RESOLUTION ====================
 
     pub fn resolve_statement(&self, statement: &QuickFuncStatement) -> QuickFuncStatement {
         match statement {
@@ -124,7 +124,7 @@ impl QualifiedIdentifierResolver {
         )
     }
 
-    // ── Expression resolution ───────────────────────────────────────────────
+    // ==================== EXPRESSION RESOLUTION ====================
 
     pub fn resolve_expression(&self, expr: &Expression) -> Expression {
         match expr {
@@ -251,7 +251,7 @@ impl QualifiedIdentifierResolver {
         expressions.iter().map(|e| self.resolve_expression(e)).collect()
     }
 
-    // ── QualifiedIdentifier transformation ─────────────────────────────────
+    // ==================== QUALIFIEDIDENTIFIER TRANSFORMATION ====================
 
     fn transform_qualified_identifier(&self, expr: &Expression) -> Expression {
         let (parts, arguments, position) =
@@ -285,6 +285,7 @@ impl QualifiedIdentifierResolver {
             ));
         }
 
+        // Fallback: no resolution recorded — make a best-effort transform.
         if arguments.is_some() {
             Expression::QuickFuncCall {
                 name: parts.join("."),
@@ -401,7 +402,7 @@ impl QualifiedIdentifierResolver {
         }
     }
 
-    // ── Value resolution ────────────────────────────────────────────────────
+    // ==================== VALUE RESOLUTION ====================
 
     fn resolve_value(&self, value: &Value) -> Value {
         match value {
@@ -451,7 +452,7 @@ impl QualifiedIdentifierResolver {
         }
     }
 
-    /// Converts dotted identifier values like `"Status.COMPLETED"` to `EnumValue`.
+    /// Converts dotted identifier values like "Status.COMPLETED" to EnumValue.
     fn resolve_identifier_value(&self, id_value: &str, position: Position) -> Value {
         if !id_value.contains('.') {
             return Value::Identifier { value: id_value.to_string(), position };
@@ -467,4 +468,4 @@ impl QualifiedIdentifierResolver {
             _ => Value::Identifier { value: id_value.to_string(), position },
         }
     }
-                }
+}

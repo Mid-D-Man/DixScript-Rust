@@ -310,6 +310,8 @@ jobs:
             cargo bench --bench value_resolution_benchmark --color=never 2>&1 || true
             echo "=== binary_serialization_benchmark ==="
             cargo bench --bench binary_serialization_benchmark --color=never 2>&1 || true
+            echo "=== runtime_benchmark ==="
+            cargo bench --bench runtime_benchmark --color=never 2>&1 || true
           } | tee bench-raw.txt
 
       - name: Parse benchmark results to JSON
@@ -533,6 +535,7 @@ jobs:
             --bench ast_enhancement_benchmark \
             --bench value_resolution_benchmark \
             --bench binary_serialization_benchmark \
+            --bench runtime_benchmark \
             2>&1 || true
 
       - name: Generate flamegraphs
@@ -575,14 +578,15 @@ jobs:
             fi
           }
 
-          run_flame "throughput_benchmark"          "throughput_benchmark"
-          run_flame "lexer_throughput"              "lexer_throughput"
-          run_flame "config_throughput"             "config_throughput"
-          run_flame "general_parser_benchmark"      "general_parser_benchmark"
-          run_flame "semantics_benchmark"           "semantics_benchmark"
-          run_flame "ast_enhancement_benchmark"     "ast_enhancement_benchmark"
-          run_flame "value_resolution_benchmark"    "value_resolution_benchmark"
+          run_flame "throughput_benchmark"           "throughput_benchmark"
+          run_flame "lexer_throughput"               "lexer_throughput"
+          run_flame "config_throughput"              "config_throughput"
+          run_flame "general_parser_benchmark"       "general_parser_benchmark"
+          run_flame "semantics_benchmark"            "semantics_benchmark"
+          run_flame "ast_enhancement_benchmark"      "ast_enhancement_benchmark"
+          run_flame "value_resolution_benchmark"     "value_resolution_benchmark"
           run_flame "binary_serialization_benchmark" "binary_serialization_benchmark"
+          run_flame "runtime_benchmark"              "runtime_benchmark"
 
           echo ""
           echo "Generated flamegraphs:"

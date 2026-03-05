@@ -114,7 +114,9 @@ harness = false
 [[bench]]
 name    = "binary_serialization_benchmark"
 harness = false
-
+[[bench]]
+name    = "runtime_benchmark"
+harness = false
 # =============================================================================
 # Feature flags
 # =============================================================================

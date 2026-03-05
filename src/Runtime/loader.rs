@@ -79,17 +79,21 @@ impl DixLoader {
         let compiled_ast = self.compile_source(&source_text, mdix_path)?;
         let file_gen = self.determine_dlm_behavior(&compiled_ast, mdix_path, options)?;
 
+        // FIX: log generated files BEFORE partially moving file_gen into from_ast.
+        // Previously, file_gen.resolved_ast was moved first, making the subsequent
+        // borrow of file_gen in log_generated_files a compile error (E0382).
+        self.error_manager.log_info("Text file loaded successfully");
+        self.log_generated_files(&file_gen);
+
         let dix_data = DixData::from_ast(
             file_gen.resolved_ast,
             "1.0.0".to_string(),
             Utc::now(),
             file_gen.is_encrypted,
             file_gen.is_compressed,
-            file_gen.applied_modules.clone(), // clone to avoid partial move before log_generated_files
+            file_gen.applied_modules,
         );
 
-        self.error_manager.log_info("Text file loaded successfully");
-        self.log_generated_files(&file_gen);
         Ok(dix_data)
     }
 
@@ -777,4 +781,4 @@ mod tests {
         let result = loader.load_from_encrypted_bytes(&[], "some_key_content", &DixLoadOptions::new());
         assert!(result.is_err());
     }
-                }
+            }

@@ -1,20 +1,11 @@
 // src/Runtime/key_resolver.rs
-//! Key Resolver - resolves encryption keys and locates .dxkey files for .mdix loading
-//!
-//! Two separate concerns:
-//! - `KeyFileResolver`: Finds the .dxkey file based on DixLoadOptions
-//! - `KeyResolver`: Extracts/derives the actual encryption key bytes from a .dxkey file
-
-use crate::Compiler::DLM::KeyManagement::{KeyFileManager, KeyFileMetadata, EncryptionMetadata};
+use crate::Compiler::DLM::KeyManagement::{KeyFileManager, KeyFileData, EncryptionKeyData};
 use crate::ErrorManager::{ErrorManager, DlmErrorType, ErrorSeverity};
 use crate::Runtime::load_options::DixLoadOptions;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use argon2::{Argon2, Algorithm, Version, Params};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-
-// ==================== KEY FILE SOURCE ====================
-// (Describes where the .dxkey file was found)
 
 #[derive(Debug, Clone)]
 pub enum KeyFileSource {
@@ -24,21 +15,13 @@ pub enum KeyFileSource {
     Url,
 }
 
-// ==================== KEY FILE RESOLUTION ====================
-// (The result of locating a .dxkey file: its content and origin)
-
 #[derive(Debug, Clone)]
 pub struct KeyFileResolution {
     pub source: KeyFileSource,
     pub source_description: String,
-    /// Raw JSON content of the .dxkey file
     pub content: String,
-    /// Filesystem path, if applicable
     pub file_path: Option<PathBuf>,
 }
-
-// ==================== KEY FILE RESOLVER ====================
-// (Finds the .dxkey file given load options and an encrypted file path)
 
 pub struct KeyFileResolver {
     error_manager: ErrorManager,
@@ -51,24 +34,18 @@ impl KeyFileResolver {
         }
     }
 
-    /// Locate and read the .dxkey file based on the provided load options.
+    /// Locate and read the .mdix.key file based on the provided load options.
     ///
-    /// Priority order:
-    /// 1. Direct content (from vault / secret manager)
-    /// 2. Explicit key file path
-    /// 3. Key file URL (HTTPS only)
-    /// 4. Auto-detect from same directory as encrypted file
+    /// Priority: direct content > explicit path > URL > auto-detect.
     pub fn resolve_key_file(
         &self,
         enc_path: &str,
         options: &DixLoadOptions,
     ) -> Result<KeyFileResolution, String> {
-        // 1. Direct content
         if let Some(ref content) = options.key_file_content {
             if !options.allow_direct_key_content {
                 return Err(
-                    "Direct key content loading is disabled for security. \
-                     Set allow_direct_key_content = true."
+                    "Direct key content loading is disabled. Set allow_direct_key_content = true."
                         .to_string(),
                 );
             }
@@ -80,7 +57,6 @@ impl KeyFileResolver {
             });
         }
 
-        // 2. Explicit key file path
         if let Some(ref key_path) = options.key_file_path {
             let path = Path::new(key_path);
             if !path.exists() {
@@ -96,7 +72,6 @@ impl KeyFileResolver {
             });
         }
 
-        // 3. URL (async not supported here — return descriptive error)
         if let Some(ref url) = options.key_file_url {
             if !options.allow_url_key_loading {
                 return Err("URL key loading is disabled. Set allow_url_key_loading = true.".to_string());
@@ -111,7 +86,6 @@ impl KeyFileResolver {
             );
         }
 
-        // 4. Auto-detect from same directory as .enc file
         self.auto_detect_key_file(enc_path, options)
     }
 
@@ -123,7 +97,6 @@ impl KeyFileResolver {
         let enc_path_buf = Path::new(enc_path);
         let dir = enc_path_buf.parent().unwrap_or_else(|| Path::new("."));
 
-        // Derive base name by stripping .enc and .mdix extensions
         let file_name = enc_path_buf
             .file_name()
             .and_then(|n| n.to_str())
@@ -135,7 +108,6 @@ impl KeyFileResolver {
             .strip_suffix(".mdix")
             .unwrap_or(file_name);
 
-        // Build search dirs
         let mut search_dirs: Vec<PathBuf> = vec![dir.to_path_buf()];
         if let Some(ref paths) = options.key_file_search_paths {
             for p in paths {
@@ -144,7 +116,7 @@ impl KeyFileResolver {
         }
 
         for search_dir in &search_dirs {
-            let candidate = search_dir.join(format!("{}.dxkey", base_stem));
+            let candidate = search_dir.join(format!("{}.mdix.key", base_stem));
             if candidate.exists() {
                 let content = std::fs::read_to_string(&candidate)
                     .map_err(|e| format!("Failed to read key file '{}': {}", candidate.display(), e))?;
@@ -158,7 +130,7 @@ impl KeyFileResolver {
         }
 
         Err(format!(
-            "Key file '{}.dxkey' not found. Searched in: {}",
+            "Key file '{}.mdix.key' not found. Searched in: {}",
             base_stem,
             search_dirs
                 .iter()
@@ -175,43 +147,27 @@ impl Default for KeyFileResolver {
     }
 }
 
-// ==================== RESOLVED KEY ====================
-// (Actual encryption key bytes, ready to hand to a cipher)
-
 #[derive(Debug, Clone)]
 pub struct ResolvedKey {
-    /// Raw key bytes (16 for AES-128, 32 for AES-256 / ChaCha20)
     pub key_bytes: Vec<u8>,
-    /// Initialization vector / nonce bytes
     pub iv_bytes: Vec<u8>,
-    /// Algorithm name (e.g. "aes256-gcm")
     pub algorithm: String,
-    /// Key length in bytes
     pub key_length: u32,
 }
 
-// ==================== KEY SOURCE ====================
-// (How the caller wants to supply the encryption key)
-
 #[derive(Debug, Clone)]
 pub enum KeySource {
-    /// Read key_data directly from .dxkey file (keyfile mode — no password needed)
     KeyFile(String),
-    /// Derive key from password using KDF metadata stored in .dxkey
     Password {
         key_file_path: String,
         password: String,
     },
-    /// Caller provides raw key bytes directly (advanced / testing only)
     RawBytes {
         key_bytes: Vec<u8>,
         iv_bytes: Vec<u8>,
         algorithm: String,
     },
 }
-
-// ==================== KEY RESOLVER ====================
-// (Resolves the actual encryption key from a KeySource)
 
 pub struct KeyResolver {
     error_manager: ErrorManager,
@@ -238,16 +194,14 @@ impl KeyResolver {
         }
     }
 
-    // ---- Keyfile mode ----
-
     fn resolve_from_key_file(&self, key_file_path: &str) -> Result<ResolvedKey, String> {
         self.log_debug(&format!("Resolving key from key file: {}", key_file_path));
 
         let manager = self.make_key_file_manager(key_file_path);
-        let metadata = manager.read_key_file(key_file_path)?;
-        manager.validate_key_file(&metadata)?;
+        let data = manager.read_key_file(key_file_path)?;
+        data.validate().map_err(|errs| errs.join(", "))?;
 
-        let enc = self.require_enc_meta(&metadata)?;
+        let enc = self.require_enc_meta(&data)?;
 
         let key_data = enc.key_data.as_ref().ok_or_else(|| {
             let msg = format!(
@@ -271,11 +225,9 @@ impl KeyResolver {
             key_bytes,
             iv_bytes,
             algorithm: enc.algorithm.clone(),
-            key_length: enc.key_length,
+            key_length: enc.key_length as u32,
         })
     }
-
-    // ---- Password mode (Argon2id KDF) ----
 
     fn resolve_from_password(
         &self,
@@ -294,10 +246,10 @@ impl KeyResolver {
         ));
 
         let manager = self.make_key_file_manager(key_file_path);
-        let metadata = manager.read_key_file(key_file_path)?;
-        manager.validate_key_file(&metadata)?;
+        let data = manager.read_key_file(key_file_path)?;
+        data.validate().map_err(|errs| errs.join(", "))?;
 
-        if !manager.is_password_protected(&metadata) {
+        if !manager.is_password_protected(&data) {
             let msg = format!(
                 "Key file '{}' is not password-protected. Use KeySource::KeyFile instead.",
                 key_file_path
@@ -306,25 +258,24 @@ impl KeyResolver {
             return Err(msg);
         }
 
-        let enc = self.require_enc_meta(&metadata)?;
+        let enc = self.require_enc_meta(&data)?;
 
-        // Decode salt
-        let salt_b64 = enc.salt.as_ref().ok_or_else(|| {
-            let msg = "Password-protected key file is missing the salt field".to_string();
+        let kdf = enc.kdf.as_ref().ok_or_else(|| {
+            let msg = "Password-protected key file is missing KDF parameters".to_string();
             self.report_error(&msg);
             msg
         })?;
-        let salt = BASE64.decode(salt_b64).map_err(|e| {
+
+        let salt = BASE64.decode(&kdf.salt).map_err(|e| {
             let msg = format!("Failed to base64-decode salt: {}", e);
             self.report_error(&msg);
             msg
         })?;
 
-        // KDF parameters from key file metadata (with sane defaults)
-        let key_length = enc.key_length as usize;
-        let t_cost = enc.kdf_iterations.unwrap_or(3);
-        let m_cost = enc.kdf_memory.unwrap_or(65536);
-        let p_cost = enc.kdf_parallelism.unwrap_or(4);
+        let key_length = enc.key_length;
+        let t_cost = kdf.iterations;
+        let m_cost = kdf.memory;
+        let p_cost = kdf.parallelism;
 
         self.log_debug(&format!(
             "Argon2id KDF: memory={}KB, iterations={}, parallelism={}, key_len={}",
@@ -354,11 +305,9 @@ impl KeyResolver {
             key_bytes,
             iv_bytes,
             algorithm: enc.algorithm.clone(),
-            key_length: enc.key_length,
+            key_length: enc.key_length as u32,
         })
     }
-
-    // ---- Raw bytes mode ----
 
     fn resolve_from_raw_bytes(
         &self,
@@ -388,8 +337,6 @@ impl KeyResolver {
         })
     }
 
-    // ---- Helpers ----
-
     fn make_key_file_manager(&self, key_file_path: &str) -> KeyFileManager {
         let output_dir = Path::new(key_file_path)
             .parent()
@@ -401,9 +348,9 @@ impl KeyResolver {
 
     fn require_enc_meta<'a>(
         &self,
-        metadata: &'a KeyFileMetadata,
-    ) -> Result<&'a EncryptionMetadata, String> {
-        metadata.encryption.as_ref().ok_or_else(|| {
+        data: &'a KeyFileData,
+    ) -> Result<&'a EncryptionKeyData, String> {
+        data.key_data.encryption.as_ref().ok_or_else(|| {
             let msg = format!(
                 "Key file for '{}' contains no encryption metadata. \
                  The file may not have been compiled with an encryptor module.",
@@ -414,13 +361,14 @@ impl KeyResolver {
         })
     }
 
-    fn decode_iv(&self, enc: &EncryptionMetadata, key_file_path: &str) -> Result<Vec<u8>, String> {
-        let iv_b64 = enc.iv.as_ref().ok_or_else(|| {
-            let msg = format!("Key file '{}' is missing IV/nonce field", key_file_path);
+    /// Decode the IV from the encryption metadata. `iv` is always a non-empty base64 string.
+    fn decode_iv(&self, enc: &EncryptionKeyData, key_file_path: &str) -> Result<Vec<u8>, String> {
+        if enc.iv.is_empty() {
+            let msg = format!("Key file '{}' has an empty IV field", key_file_path);
             self.report_error(&msg);
-            msg
-        })?;
-        BASE64.decode(iv_b64).map_err(|e| {
+            return Err(msg);
+        }
+        BASE64.decode(&enc.iv).map_err(|e| {
             let msg = format!("Failed to base64-decode IV: {}", e);
             self.report_error(&msg);
             msg
@@ -432,7 +380,6 @@ impl KeyResolver {
             "aes128" | "aes-128-gcm" | "aes128-gcm" => Some(16),
             "aes256" | "aes-256-gcm" | "aes256-gcm" => Some(32),
             "chacha20" | "chacha20poly1305" | "chacha20-poly1305" => Some(32),
-            "xor" => None,
             _ => None,
         };
         if let Some(exp) = expected {
@@ -465,8 +412,6 @@ impl KeyResolver {
         self.error_manager.log_debug(message);
     }
 }
-
-// ==================== TESTS ====================
 
 #[cfg(test)]
 mod tests {
@@ -514,10 +459,10 @@ mod tests {
     fn test_empty_password_fails() {
         let resolver = KeyResolver::new("test.mdix".to_string());
         let result = resolver.resolve(&KeySource::Password {
-            key_file_path: "nonexistent.dxkey".to_string(),
+            key_file_path: "nonexistent.mdix.key".to_string(),
             password: "".to_string(),
         });
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("empty"));
     }
-}
+             }

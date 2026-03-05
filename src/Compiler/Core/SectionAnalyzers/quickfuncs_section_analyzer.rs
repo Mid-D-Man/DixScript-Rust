@@ -11,6 +11,9 @@ use crate::Compiler::Core::Functions::CycleDetectionValidator;
 use crate::Compiler::Core::SectionAnalyzers::{
     SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo,
 };
+use crate::Compiler::Core::SectionEnhancers::{
+    QualifiedIdentifierKey, QualifiedIdentifierResolution, QualifiedIdentifierType,
+};
 use crate::Compiler::Utilities::{SymbolTable, ParameterInfo, FunctionSignature};
 use crate::Builtins::Core::DixType;
 use crate::Builtins::Resolver::{has_instance_method, has_static_method, has_static_object};
@@ -913,7 +916,8 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
             ));
         }
     }
-// ==================== CONTROL FLOW VALIDATION ====================
+
+    // ==================== CONTROL FLOW VALIDATION ====================
 
     fn validate_if_statement(
         &self,
@@ -1237,8 +1241,7 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
             ));
         }
     }
-
-    // ==================== EXPRESSION VALIDATION ====================
+// ==================== EXPRESSION VALIDATION ====================
 
     fn validate_expression(
         &self,
@@ -1265,9 +1268,10 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
             Expression::Identifier { name, .. } => {
                 self.validate_identifier(name, &func.name, local_scope, symbol_table, result, expr.position());
             }
-            Expression::QualifiedIdentifier { parts, arguments, .. } => {
+            // position is now captured explicitly so it can be passed to validate_qualified_identifier
+            Expression::QualifiedIdentifier { parts, arguments, position } => {
                 self.validate_qualified_identifier(
-                    parts, arguments.as_ref(), func, symbol_table, local_scope, result, max_depth,
+                    parts, arguments.as_ref(), func, symbol_table, local_scope, result, max_depth, *position,
                 );
             }
             Expression::QuickFuncCall { name, arguments, .. } => {
@@ -1388,6 +1392,8 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
         );
     }
 
+    // position parameter added — required so the QualifiedIdentifierKey built here
+    // matches the key the resolver builds from the same expression node.
     fn validate_qualified_identifier(
         &self,
         parts: &[String],
@@ -1397,6 +1403,7 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
         local_scope: &LocalScopeTracker,
         result: &mut SectionAnalysisResult,
         max_depth: usize,
+        position: Position,
     ) {
         if parts.len() < 2 {
             return;
@@ -1404,14 +1411,36 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
 
         let first = &parts[0];
         let second = &parts[1];
+        let is_call = arguments.is_some();
 
-        // Local variable/parameter — property access or method call on a local.
+        // Helper closure: builds the key and inserts a resolution into the map.
+        // Defined as a local macro-like pattern to keep call sites readable.
+        let insert = |result: &mut SectionAnalysisResult,
+                      resolved_type: QualifiedIdentifierType,
+                      context: Option<String>| {
+            let key = QualifiedIdentifierKey {
+                position,
+                parts: parts.to_vec(),
+                is_call,
+            };
+            let resolution = QualifiedIdentifierResolution::new(
+                resolved_type,
+                context,
+                parts.to_vec(),
+                is_call,
+                position,
+            );
+            result.qualified_id_resolutions.insert(key, resolution);
+        };
+
+        // Local variable or parameter — property access or instance method call.
         if local_scope.has_variable(first) || local_scope.has_parameter(first) {
             if let Some(args) = arguments {
                 for arg in args {
                     self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
                 }
             }
+            insert(result, QualifiedIdentifierType::ObjectPropertyAccess, Some("local".to_string()));
             return;
         }
 
@@ -1426,40 +1455,54 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
                         "ENUM_VALUE_NOT_FOUND",
                         &format!("Enum '{}' does not have value '{}'", first, second),
                         &format!("Valid values: {}", valid.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")),
-                        Position::UNKNOWN,
+                        position,
                     );
                 }
             }
+            insert(result, QualifiedIdentifierType::LocalEnumAccess, Some(first.clone()));
             return;
         }
 
-        // Namespace access.
+        // Namespace access (imported file).
         if symbol_table.is_imported_namespace(first) {
             self.validate_namespace_access(
                 parts, arguments, func, symbol_table, local_scope, result, max_depth,
             );
+
+            // Determine the precise resolution type for the enhancer.
+            let resolved_type = if parts.len() == 3 && arguments.is_none() {
+                QualifiedIdentifierType::ImportedEnumAccess
+            } else if parts.len() == 2 && arguments.is_none() {
+                QualifiedIdentifierType::NamespaceEnumReference
+            } else {
+                QualifiedIdentifierType::ImportedFunctionCall
+            };
+
+            insert(result, resolved_type, Some(first.clone()));
             return;
         }
 
-        // Builtin static object access.
+        // Builtin static object access: Math.sqrt(), DateTime.now(), etc.
         if has_static_object(first) {
             self.validate_static_object_access(
                 parts, arguments, func, symbol_table, local_scope, result, max_depth,
             );
+            insert(result, QualifiedIdentifierType::StaticObjectAccess, Some(first.clone()));
             return;
         }
 
-        // DATA section variable — property access is allowed.
+        // DATA section variable — property access is valid at runtime.
         if symbol_table.has_data_variable(first) {
             if let Some(args) = arguments {
                 for arg in args {
                     self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
                 }
             }
+            insert(result, QualifiedIdentifierType::ObjectPropertyAccess, Some("data".to_string()));
             return;
         }
 
-        // Unknown — will be resolved at runtime; emit a warning only.
+        // Unknown — will be resolved at runtime; emit a warning and record as unknown.
         self.add_warning(
             result,
             "QFUNC_WARN001",
@@ -1468,7 +1511,7 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
                 first
             ),
             "QUICKFUNCS",
-            Position::UNKNOWN,
+            position,
         );
 
         if let Some(args) = arguments {
@@ -1476,6 +1519,8 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
                 self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
             }
         }
+
+        insert(result, QualifiedIdentifierType::ObjectPropertyAccess, Some("unknown".to_string()));
     }
 
     fn validate_namespace_access(
@@ -1902,7 +1947,6 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
         result: &mut SectionAnalysisResult,
         max_depth: usize,
     ) {
-        // Lambda invocation via local variable — pass through.
         if local_scope.has_variable(name) {
             for arg in arguments {
                 self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
@@ -1951,7 +1995,6 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
         result: &mut SectionAnalysisResult,
         max_depth: usize,
     ) {
-        // Treat as instance method call on a local variable.
         if local_scope.has_variable(namespace_name) {
             for arg in arguments {
                 self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
@@ -2436,8 +2479,6 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
         }
     }
 
-    /// Count how many chained method/property accesses precede the root.
-    /// Result is cached implicitly because we only call this at the call site.
     fn count_method_chain_depth(expr: &Expression) -> usize {
         let mut depth = 0;
         let mut current = expr;
@@ -2587,8 +2628,6 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
 
 // ==================== LOCAL SCOPE TRACKER ====================
 
-/// Tracks local variables and parameters within a single function body.
-/// Allocated once before the function loop and reused via `reset_with_params`.
 struct LocalScopeTracker {
     variables: FxHashMap<String, VariableScopeInfo>,
     parameters: FxHashSet<String>,
@@ -2602,7 +2641,6 @@ impl LocalScopeTracker {
         }
     }
 
-    /// Clear and reinitialise for a new function, avoiding heap reallocation.
     fn reset_with_params(&mut self, func_parameters: &[QuickFuncParam]) {
         self.variables.clear();
         self.parameters.clear();
@@ -2833,4 +2871,4 @@ impl VariableReferenceCollector {
             self.referenced.insert(name.to_string());
         }
     }
-          }
+}

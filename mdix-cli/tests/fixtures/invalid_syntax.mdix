@@ -1,0 +1,10 @@
+@CONFIG(
+  version -> "1.0.0"
+)
+
+@DATA(
+  broken = = "double equals"
+  unclosed_string = "no closing quote
+  missing_value =
+  123invalid_identifier = true
+)

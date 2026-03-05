@@ -4,7 +4,7 @@
 //! Applies parameter default values from type annotations and resolves
 //! QualifiedIdentifier nodes using semantic analysis metadata.
 //! The resolver is constructed once per section, not once per function,
-//! keeping cost O(q) rather than O(f·q).
+//! keeping cost O(q) rather than O(f*q).
 
 use crate::Compiler::AST::*;
 use crate::Compiler::Core::SectionAnalyzers::SectionAnalysisResult;
@@ -42,7 +42,7 @@ impl<'a> QuickFunctionsAstEnhancer<'a> {
         }
 
         // Build the resolver once for the entire section. Creating it per-function
-        // would clone the resolution map f times, making cost O(f²·q) rather than O(f·q).
+        // would clone the resolution map f times, making cost O(f^2 * q) rather than O(f*q).
         let resolver = analysis_result
             .filter(|r| !r.qualified_id_resolutions.is_empty())
             .map(|r| {
@@ -135,4 +135,4 @@ impl<'a> QuickFunctionsAstEnhancer<'a> {
     pub fn get_enhancement_count(&self) -> usize {
         self.enhancement_count
     }
-                                                     }
+}

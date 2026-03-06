@@ -1,8 +1,6 @@
-// src/Compiler/Core/general_ast_enhancer.rs
 //! Applies compile-time enhancements to a validated AST.
 //!
 //! Must run after semantic analysis: Parse -> Semantic Analysis -> AST Enhancement -> Value Resolution.
-//! Semantic analysis produces QualifiedIdentifierResolution metadata that this phase consumes.
 
 use crate::Compiler::AST::DixScript;
 use crate::Compiler::Core::{
@@ -14,26 +12,36 @@ use std::time::Instant;
 
 pub struct GeneralAstEnhancer<'a> {
     operational_settings: &'a OperationalSettings,
-    error_manager: ErrorManager,
-    debug_config: DebugConfig,
-    enhancement_result: EnhancementResult,
-    stopwatch: Instant,
+    error_manager:        ErrorManager,
+    debug_config:         DebugConfig,
+    enhancement_result:   EnhancementResult,
+    stopwatch:            Instant,
 }
 
 impl<'a> GeneralAstEnhancer<'a> {
-    pub fn new(operational_settings: &'a OperationalSettings) -> Self {
+    /// Primary constructor — caller supplies the ErrorManager instance.
+    pub fn new_with_error_manager(
+        operational_settings: &'a OperationalSettings,
+        error_manager:        ErrorManager,
+    ) -> Self {
+        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
         GeneralAstEnhancer {
-            debug_config: DebugConfig::from_debug_mode(operational_settings.debug_mode),
-            error_manager: ErrorManager::get_shared_instance(),
             operational_settings,
+            error_manager,
+            debug_config,
             enhancement_result: EnhancementResult::new(),
             stopwatch: Instant::now(),
         }
     }
 
+    /// Backward-compatible constructor for the CLI path.
+    pub fn new(operational_settings: &'a OperationalSettings) -> Self {
+        Self::new_with_error_manager(operational_settings, ErrorManager::get_shared_instance())
+    }
+
     pub fn enhance(
         mut self,
-        ast: &DixScript,
+        ast:             &DixScript,
         semantic_result: Option<&SemanticAnalysisResult>,
     ) -> EnhancementResult {
         self.error_manager.log_info("Starting AST enhancement");
@@ -42,7 +50,7 @@ impl<'a> GeneralAstEnhancer<'a> {
         self.enhance_quickfunctions(&mut enhanced_ast, semantic_result);
 
         self.enhancement_result.enhanced_ast = enhanced_ast;
-        self.enhancement_result.is_success = self.enhancement_result.errors.is_empty();
+        self.enhancement_result.is_success   = self.enhancement_result.errors.is_empty();
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -57,7 +65,7 @@ impl<'a> GeneralAstEnhancer<'a> {
 
     fn enhance_quickfunctions(
         &mut self,
-        ast: &mut DixScript,
+        ast:             &mut DixScript,
         semantic_result: Option<&SemanticAnalysisResult>,
     ) {
         let quickfuncs_section = match ast.quick_functions.as_ref() {
@@ -85,18 +93,19 @@ impl<'a> GeneralAstEnhancer<'a> {
             }
         }
 
-        let mut enhancer = QuickFunctionsAstEnhancer::new(self.operational_settings);
-        let enhanced_section = enhancer.enhance(quickfuncs_section, quickfuncs_analysis);
-
-        let count = enhancer.get_enhancement_count();
+        // Phase 2: pass error_manager into QuickFunctionsAstEnhancer.
+        // For now it acquires get_shared_instance() internally.
+        let mut enhancer       = QuickFunctionsAstEnhancer::new(self.operational_settings);
+        let enhanced_section   = enhancer.enhance(quickfuncs_section, quickfuncs_analysis);
+        let count              = enhancer.get_enhancement_count();
 
         self.enhancement_result.total_enhancements += count;
         self.enhancement_result.section_enhancements.insert(
             "QUICKFUNCS".to_string(),
             SectionEnhancementInfo {
-                section_name: "QUICKFUNCS".to_string(),
+                section_name:         "QUICKFUNCS".to_string(),
                 enhancements_applied: count,
-                enhancement_types: vec![
+                enhancement_types:    vec![
                     "parameter_defaults".to_string(),
                     "qualified_identifier_resolution".to_string(),
                 ],

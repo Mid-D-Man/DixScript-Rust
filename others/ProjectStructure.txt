@@ -1,236 +1,18 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Thu Mar  5 18:22:30 UTC 2026
+Generated: Fri Mar  6 04:00:21 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 7b07298713e708a09e3b2973efaf977e2891525d
+Commit: 5faa0e5521fc4ae57b93366338802309210fd555
 Branch: master
 ==================================
 
 Source Files:
 ============
-src/Builtins/Core/builtin_method.rs
-src/Builtins/Core/dix_type.rs
-src/Builtins/Core/dix_value.rs
-src/Builtins/Core/mod.rs
-src/Builtins/Instance/array_methods.rs
-src/Builtins/Instance/blob_methods.rs
-src/Builtins/Instance/mod.rs
-src/Builtins/Instance/number_methods.rs
-src/Builtins/Instance/regex_methods.rs
-src/Builtins/Instance/string_methods.rs
-src/Builtins/Instance/tuple_methods.rs
-src/Builtins/Instance/universal_methods.rs
-src/Builtins/Resolver/builtin_call_resolver.rs
-src/Builtins/Resolver/compile_time_validator.rs
-src/Builtins/Resolver/instance_method_registry.rs
-src/Builtins/Resolver/mod.rs
-src/Builtins/Resolver/static_object_registry.rs
-src/Builtins/Static/array_object.rs
-src/Builtins/Static/datetime_object.rs
-src/Builtins/Static/dix_object.rs
-src/Builtins/Static/enum_object.rs
-src/Builtins/Static/guid_object.rs
-src/Builtins/Static/ip_address_object.rs
-src/Builtins/Static/math_object.rs
-src/Builtins/Static/mod.rs
-src/Builtins/Static/random_object.rs
-src/Builtins/Static/static_object_base.rs
-src/Builtins/mod.rs
-src/Compiler/AST/Visitors/ast_visitor_base.rs
-src/Compiler/AST/Visitors/mod.rs
-src/Compiler/AST/Visitors/type_inference_visitor.rs
-src/Compiler/AST/config.rs
-src/Compiler/AST/data.rs
-src/Compiler/AST/data_types.rs
-src/Compiler/AST/dlm.rs
-src/Compiler/AST/enums.rs
-src/Compiler/AST/expressions.rs
-src/Compiler/AST/helpers.rs
-src/Compiler/AST/imports.rs
-src/Compiler/AST/mod.rs
-src/Compiler/AST/position.rs
-src/Compiler/AST/quickfuncs.rs
-src/Compiler/AST/root.rs
-src/Compiler/AST/security.rs
-src/Compiler/AST/statements.rs
-src/Compiler/AST/values.rs
-src/Compiler/Core/BinarySerialization/SectionReaders/config_section_reader.rs
-src/Compiler/Core/BinarySerialization/SectionReaders/data_section_reader.rs
-src/Compiler/Core/BinarySerialization/SectionReaders/enums_section_reader.rs
-src/Compiler/Core/BinarySerialization/SectionReaders/imports_section_reader.rs
-src/Compiler/Core/BinarySerialization/SectionReaders/mod.rs
-src/Compiler/Core/BinarySerialization/SectionReaders/security_section_reader.rs
-src/Compiler/Core/BinarySerialization/SectionWriters/config_section_writer.rs
-src/Compiler/Core/BinarySerialization/SectionWriters/data_section_writer.rs
-src/Compiler/Core/BinarySerialization/SectionWriters/enums_section_writer.rs
-src/Compiler/Core/BinarySerialization/SectionWriters/imports_section_writer.rs
-src/Compiler/Core/BinarySerialization/SectionWriters/mod.rs
-src/Compiler/Core/BinarySerialization/SectionWriters/security_section_writer.rs
-src/Compiler/Core/BinarySerialization/binary_format.rs
-src/Compiler/Core/BinarySerialization/binary_header.rs
-src/Compiler/Core/BinarySerialization/binary_packer.rs
-src/Compiler/Core/BinarySerialization/binary_serialization_context.rs
-src/Compiler/Core/BinarySerialization/binary_serialization_error.rs
-src/Compiler/Core/BinarySerialization/binary_serialization_result.rs
-src/Compiler/Core/BinarySerialization/binary_unpacker.rs
-src/Compiler/Core/BinarySerialization/checksum_validator.rs
-src/Compiler/Core/BinarySerialization/mod.rs
-src/Compiler/Core/BinarySerialization/section_offset.rs
-src/Compiler/Core/BinarySerialization/value_decoder.rs
-src/Compiler/Core/BinarySerialization/value_encoder.rs
-src/Compiler/Core/Config/config_schema.rs
-src/Compiler/Core/Config/config_section_handler.rs
-src/Compiler/Core/Config/mod.rs
-src/Compiler/Core/Config/operational_settings.rs
-src/Compiler/Core/Functions/call_collector.rs
-src/Compiler/Core/Functions/call_graph.rs
-src/Compiler/Core/Functions/call_site.rs
-src/Compiler/Core/Functions/cycle_detector.rs
-src/Compiler/Core/Functions/mod.rs
-src/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs
-src/Compiler/Core/SectionAnalyzers/dlm_section_analyzer.rs
-src/Compiler/Core/SectionAnalyzers/enums_section_analyzer.rs
-src/Compiler/Core/SectionAnalyzers/imports_section_analyzer.rs
-src/Compiler/Core/SectionAnalyzers/mod.rs
-src/Compiler/Core/SectionAnalyzers/quickfuncs_section_analyzer.rs
-src/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs
-src/Compiler/Core/SectionEnhancers/mod.rs
-src/Compiler/Core/SectionEnhancers/qualified_identifier_resolution.rs
-src/Compiler/Core/SectionEnhancers/qualified_identifier_resolver.rs
-src/Compiler/Core/SectionEnhancers/quickfuncs_ast_enhancer.rs
-src/Compiler/Core/SectionParsers/data_section_parser.rs
-src/Compiler/Core/SectionParsers/dlm_section_parser.rs
-src/Compiler/Core/SectionParsers/enums_section_parser.rs
-src/Compiler/Core/SectionParsers/imports_section_parser.rs
-src/Compiler/Core/SectionParsers/mod.rs
-src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs
-src/Compiler/Core/SectionParsers/security_section_parser.rs
-src/Compiler/Core/Tokenizer/lexer.rs
-src/Compiler/Core/Tokenizer/mod.rs
-src/Compiler/Core/Tokenizer/token.rs
-src/Compiler/Core/ValueResolution/ast_walker.rs
-src/Compiler/Core/ValueResolution/execution_context.rs
-src/Compiler/Core/ValueResolution/function_interpreter.rs
-src/Compiler/Core/ValueResolution/mod.rs
-src/Compiler/Core/ValueResolution/supporting_classes.rs
-src/Compiler/Core/ValueResolution/value_resolver.rs
-src/Compiler/Core/general_ast_enhancer.rs
-src/Compiler/Core/general_parser.rs
-src/Compiler/Core/general_semantics_analyzer.rs
-src/Compiler/Core/mod.rs
-src/Compiler/DLM/Auditor/auditor_trait.rs
-src/Compiler/DLM/Auditor/auditor_utilities.rs
-src/Compiler/DLM/Auditor/diy_auditor.rs
-src/Compiler/DLM/Auditor/enhanced_auditor.rs
-src/Compiler/DLM/Auditor/mod.rs
-src/Compiler/DLM/Compressor/bzip2_compressor.rs
-src/Compiler/DLM/Compressor/compressor_trait.rs
-src/Compiler/DLM/Compressor/gzip_compressor.rs
-src/Compiler/DLM/Compressor/lzma_compressor.rs
-src/Compiler/DLM/Compressor/mod.rs
-src/Compiler/DLM/Encryptor/aes128_encryptor.rs
-src/Compiler/DLM/Encryptor/aes256_encryptor.rs
-src/Compiler/DLM/Encryptor/argon2_kdf.rs
-src/Compiler/DLM/Encryptor/chacha20_encryptor.rs
-src/Compiler/DLM/Encryptor/encryptor_trait.rs
-src/Compiler/DLM/Encryptor/mod.rs
-src/Compiler/DLM/Encryptor/xor_encryptor.rs
-src/Compiler/DLM/KeyManagement/argon2_kdf.rs
-src/Compiler/DLM/KeyManagement/key_file_data.rs
-src/Compiler/DLM/KeyManagement/key_file_format.rs
-src/Compiler/DLM/KeyManagement/key_file_manager.rs
-src/Compiler/DLM/KeyManagement/mod.rs
-src/Compiler/DLM/dlm_module_base.rs
-src/Compiler/DLM/dlm_pipeline_executor.rs
-src/Compiler/DLM/dlm_pipeline_result.rs
-src/Compiler/DLM/dlm_reverse_executor.rs
-src/Compiler/DLM/mod.rs
-src/Compiler/Extensions/mod.rs
-src/Compiler/Extensions/type_system_manager.rs
-src/Compiler/ImportsResolution/cloud_file_cache.rs
-src/Compiler/ImportsResolution/cloud_provider_factory.rs
-src/Compiler/ImportsResolution/cloud_storage_provider.rs
-src/Compiler/ImportsResolution/hash_verifier.rs
-src/Compiler/ImportsResolution/http_cloud_provider.rs
-src/Compiler/ImportsResolution/imports_resolver.rs
-src/Compiler/ImportsResolution/mod.rs
-src/Compiler/Utilities/comment_filter.rs
-src/Compiler/Utilities/identifier_pattern_analyzer.rs
-src/Compiler/Utilities/mod.rs
-src/Compiler/Utilities/path_builder.rs
-src/Compiler/Utilities/security_utilities.rs
-src/Compiler/Utilities/symbol_table.rs
-src/Compiler/VersionControl/compatibility_result.rs
-src/Compiler/VersionControl/forward_compatibility_manager.rs
-src/Compiler/VersionControl/mod.rs
-src/Compiler/VersionControl/version_constraints.rs
-src/Compiler/VersionControl/version_manager.rs
-src/Compiler/mod.rs
-src/ErrorManager/ErrorTypes/ast_enhancement_error.rs
-src/ErrorManager/ErrorTypes/binary_serialization_error.rs
-src/ErrorManager/ErrorTypes/config_error.rs
-src/ErrorManager/ErrorTypes/dlm_error.rs
-src/ErrorManager/ErrorTypes/error_enums.rs
-src/ErrorManager/ErrorTypes/general_error.rs
-src/ErrorManager/ErrorTypes/imports_resolution_error.rs
-src/ErrorManager/ErrorTypes/lexical_error.rs
-src/ErrorManager/ErrorTypes/mod.rs
-src/ErrorManager/ErrorTypes/parse_error.rs
-src/ErrorManager/ErrorTypes/runtime_error.rs
-src/ErrorManager/ErrorTypes/semantic_error.rs
-src/ErrorManager/ErrorTypes/value_resolution_error.rs
-src/ErrorManager/Helpers/ast_enhancement_exception.rs
-src/ErrorManager/Helpers/binary_serialization_exception.rs
-src/ErrorManager/Helpers/dlm_pipeline_exception.rs
-src/ErrorManager/Helpers/imports_resolution_exception.rs
-src/ErrorManager/Helpers/mod.rs
-src/ErrorManager/Helpers/parse_exception.rs
-src/ErrorManager/Helpers/parse_state.rs
-src/ErrorManager/Helpers/runtime_exception.rs
-src/ErrorManager/Helpers/semantics_exception.rs
-src/ErrorManager/Helpers/source_line_extensions.rs
-src/ErrorManager/Helpers/tokenization_exception.rs
-src/ErrorManager/Helpers/value_resolution_exception.rs
-src/ErrorManager/diagnostic_dumper.rs
-src/ErrorManager/error_manager.rs
-src/ErrorManager/mod.rs
-src/Runtime/compactor.rs
-src/Runtime/converter.rs
-src/Runtime/data_builder.rs
-src/Runtime/dix_data.rs
-src/Runtime/dix_value.rs
-src/Runtime/format_options.rs
-src/Runtime/key_resolver.rs
-src/Runtime/load_options.rs
-src/Runtime/loader.rs
-src/Runtime/mod.rs
-src/Utilities/ast_debug_printer.rs
-src/Utilities/keyword_definitions.rs
-src/Utilities/mid_helper_functions.rs
-src/Utilities/mid_logger.rs
-src/Utilities/mod.rs
-src/Utilities/parser_collection_helper.rs
-src/Utilities/token_debug_printer.rs
-src/Utilities/utilities.rs
-src/lib.rs
 
 Test Files:
 ===========
-tests/config_test.rs
-tests/integration/mod.rs
-tests/runtime_tests.rs
-tests/unit/mod.rs
 
 Benchmark Files:
 ===============
-benches/ast_enhancement_benchmark.rs
-benches/binary_serialization_benchmark.rs
-benches/config_throughput.rs
-benches/general_parser_benchmark.rs
-benches/lexer_throughput.rs
-benches/runtime_benchmark.rs
-benches/semantics_benchmark.rs
-benches/throughput_benchmark.rs
-benches/value_resolution_benchmark.rs
 
 Configuration Files:
 ===================
@@ -240,6 +22,6 @@ rustfmt.toml
 
 Total Rust Files:
 ================
-Source: 205
-Tests: 4
-Benches: 9
+Source: 0
+Tests: 0
+Benches: 0

@@ -1,18 +1,11 @@
-//! DixScript Lexer v1.0.2 — Static-string operators + test-gated diagnostics
+//! DixScript Lexer — tokenises a `.mdix` source string into a `Vec<Token>`.
 //!
-//! ## Changes from v1.0.1
-//! - PHF keyword closures: `Keyword("if".to_string())` → `Keyword("if")`
-//!   All keyword/operator variants that hold compile-time-fixed strings now
-//!   carry `&'static str` instead of heap-allocated `String`, matching the
-//!   updated `TokenType` definition.
-//! - `ArithmeticOp`, `ArithmeticAssignOp`, `ComparisonOp`, `LogicalOp`,
-//!   `BitwiseOp` construction sites updated identically.
-//! - `analyze_token_sequences` and `analyze_potential_builtin_calls` are now
-//!   gated on `debug_config.is_testing` instead of `debug_config.is_enabled`.
-//!   These passes verify tokeniser output structure and have real O(n) cost;
-//!   they must never run in dev/release/bench builds.  `is_testing` is a
-//!   compile-time constant (`cfg!(test)`) so the branch is eliminated by the
-//!   optimiser in all non-test builds.
+//! Static-string operators: keyword/operator variants hold `&'static str` so
+//! operator tokens carry zero heap allocation.
+//!
+//! Diagnostic passes (`analyze_token_sequences`, `analyze_potential_builtin_calls`)
+//! are gated on `debug_config.is_testing` (= `cfg!(test)`) and are eliminated
+//! entirely by the optimiser in dev/release/bench builds.
 
 use phf::phf_map;
 use memchr::memchr;
@@ -22,72 +15,46 @@ use crate::Compiler::Core::Config::OperationalSettings;
 use crate::Compiler::Core::Config::operational_settings::ErrorHandlingStrategy;
 use crate::Compiler::VersionControl::VersionManager;
 
-// =============================================================================
-// Constants
-// =============================================================================
-
 const INITIAL_TOKEN_POOL_SIZE: usize = 256;
 const MAX_RECOVERY_ATTEMPTS:   usize = 10;
 
-// =============================================================================
-// Perfect-hash keyword table
-//
-// Every closure now returns a `&'static str` variant instead of
-// `String::from(...)`.  The allocation savings are small per-token (~30 ns)
-// but add up across large files and eliminate false positives in heap
-// profilers.
-//
-// `Bool` entries are unchanged — they carry `bool`, not a string.
-// =============================================================================
-
 static KEYWORDS: phf::Map<&'static str, fn() -> TokenType> = phf_map! {
-    // 2 chars
-    "if" => || TokenType::Keyword("if"),
-    "or" => || TokenType::Keyword("or"),
-    // 3 chars
-    "and" => || TokenType::Keyword("and"),
-    "not" => || TokenType::Keyword("not"),
-    "int" => || TokenType::Keyword("int"),
-    "hex" => || TokenType::Keyword("hex"),
-    "chk" => || TokenType::Keyword("chk"),
-    "let" => || TokenType::Keyword("let"),
-    "mut" => || TokenType::Keyword("mut"),
-    "any" => || TokenType::Keyword("any"),
-    // 4 chars
-    "true"  => || TokenType::Bool(true),
-    "null"  => || TokenType::Keyword("null"),
-    "else"  => || TokenType::Keyword("else"),
-    "elif"  => || TokenType::Keyword("elif"),
-    "then"  => || TokenType::Keyword("then"),
-    "enum"  => || TokenType::Keyword("enum"),
-    "date"  => || TokenType::Keyword("date"),
-    "bool"  => || TokenType::Keyword("bool"),
-    "blob"  => || TokenType::Keyword("blob"),
-    "miss"  => || TokenType::Keyword("miss"),
-    "from"  => || TokenType::Keyword("from"),
-    // 5 chars
-    "false" => || TokenType::Bool(false),
-    "float" => || TokenType::Keyword("float"),
-    "tuple" => || TokenType::Keyword("tuple"),
-    "regex" => || TokenType::Keyword("regex"),
-    "array" => || TokenType::Keyword("array"),
-    "const" => || TokenType::Keyword("const"),
-    // 6 chars
-    "string" => || TokenType::Keyword("string"),
-    "double" => || TokenType::Keyword("double"),
-    "object" => || TokenType::Keyword("object"),
-    "return" => || TokenType::Keyword("return"),
-    "global" => || TokenType::Keyword("global"),
-    "verify" => || TokenType::Keyword("verify"),
-    // 9 chars
-    "timestamp" => || TokenType::Keyword("timestamp"),
-    // 10 chars
-    "from_cloud" => || TokenType::Keyword("from_cloud"),
+    "if"          => || TokenType::Keyword("if"),
+    "or"          => || TokenType::Keyword("or"),
+    "and"         => || TokenType::Keyword("and"),
+    "not"         => || TokenType::Keyword("not"),
+    "int"         => || TokenType::Keyword("int"),
+    "hex"         => || TokenType::Keyword("hex"),
+    "chk"         => || TokenType::Keyword("chk"),
+    "let"         => || TokenType::Keyword("let"),
+    "mut"         => || TokenType::Keyword("mut"),
+    "any"         => || TokenType::Keyword("any"),
+    "true"        => || TokenType::Bool(true),
+    "null"        => || TokenType::Keyword("null"),
+    "else"        => || TokenType::Keyword("else"),
+    "elif"        => || TokenType::Keyword("elif"),
+    "then"        => || TokenType::Keyword("then"),
+    "enum"        => || TokenType::Keyword("enum"),
+    "date"        => || TokenType::Keyword("date"),
+    "bool"        => || TokenType::Keyword("bool"),
+    "blob"        => || TokenType::Keyword("blob"),
+    "miss"        => || TokenType::Keyword("miss"),
+    "from"        => || TokenType::Keyword("from"),
+    "false"       => || TokenType::Bool(false),
+    "float"       => || TokenType::Keyword("float"),
+    "tuple"       => || TokenType::Keyword("tuple"),
+    "regex"       => || TokenType::Keyword("regex"),
+    "array"       => || TokenType::Keyword("array"),
+    "const"       => || TokenType::Keyword("const"),
+    "string"      => || TokenType::Keyword("string"),
+    "double"      => || TokenType::Keyword("double"),
+    "object"      => || TokenType::Keyword("object"),
+    "return"      => || TokenType::Keyword("return"),
+    "global"      => || TokenType::Keyword("global"),
+    "verify"      => || TokenType::Keyword("verify"),
+    "timestamp"   => || TokenType::Keyword("timestamp"),
+    "from_cloud"  => || TokenType::Keyword("from_cloud"),
 };
-
-// =============================================================================
-// TokenizerState
-// =============================================================================
 
 #[derive(Debug, Clone, Copy)]
 struct TokenizerState {
@@ -143,16 +110,12 @@ impl TokenizerState {
     }
 }
 
-// =============================================================================
-// Tokenizer
-// =============================================================================
-
 pub struct Tokenizer<'src> {
     input:    &'src str,
     settings: &'src OperationalSettings,
 
     version_allows_all_tokens: bool,
-    debug_config: DebugConfig,
+    debug_config:  DebugConfig,
     error_manager: ErrorManager,
     current_section: SectionId,
 
@@ -162,9 +125,16 @@ pub struct Tokenizer<'src> {
 }
 
 impl<'src> Tokenizer<'src> {
-    pub fn new(input: &'src str, settings: &'src OperationalSettings) -> Self {
+    /// Primary constructor — caller supplies the ErrorManager instance.
+    ///
+    /// For the CLI this will be `ErrorManager::get_shared_instance()`.
+    /// For the LSP this will be the per-document isolated instance.
+    pub fn new_with_error_manager(
+        input:         &'src str,
+        settings:      &'src OperationalSettings,
+        error_manager: ErrorManager,
+    ) -> Self {
         let estimated_tokens = (input.len() / 10).max(INITIAL_TOKEN_POOL_SIZE);
-        let error_manager    = ErrorManager::get_shared_instance();
         let debug_config     = DebugConfig::from_debug_mode(error_manager.get_debug_mode());
 
         let version_allows_all_tokens = VersionManager::instance()
@@ -188,9 +158,13 @@ impl<'src> Tokenizer<'src> {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Main tokenisation loop
-    // ------------------------------------------------------------------
+    /// Backward-compatible constructor for the CLI path.
+    ///
+    /// Acquires the process-wide shared ErrorManager so all existing call
+    /// sites continue to work without modification.
+    pub fn new(input: &'src str, settings: &'src OperationalSettings) -> Self {
+        Self::new_with_error_manager(input, settings, ErrorManager::get_shared_instance())
+    }
 
     pub fn tokenize(mut self) -> TokenizationResult {
         let input_len = self.input.len();
@@ -258,11 +232,6 @@ impl<'src> Tokenizer<'src> {
 
         self.token_pool.push(Token::eof(state.line, state.column));
 
-        // Diagnostic passes that verify tokeniser output structure.
-        // `is_testing` is cfg!(test) — a compile-time constant.
-        // The branch and everything inside it is eliminated by the
-        // optimiser in dev / release / bench builds.  It only runs
-        // under `cargo test`.
         if self.debug_config.is_testing {
             self.analyze_token_sequences();
         }
@@ -276,10 +245,6 @@ impl<'src> Tokenizer<'src> {
             static_calls:          self.static_calls_found,
         }
     }
-
-    // ------------------------------------------------------------------
-    // Error handling
-    // ------------------------------------------------------------------
 
     #[inline]
     fn handle_tokenization_error(
@@ -312,7 +277,6 @@ impl<'src> Tokenizer<'src> {
         } else {
             "Token type not supported in current version".to_string()
         };
-
         self.error_manager.add_lexical_error(
             LexicalErrorType::InvalidCharacter,
             msg, token.line, token.column, None, None,
@@ -348,10 +312,6 @@ impl<'src> Tokenizer<'src> {
         false
     }
 
-    // ------------------------------------------------------------------
-    // Strategy helpers
-    // ------------------------------------------------------------------
-
     #[inline] fn should_terminate(&self) -> bool { self.error_manager.should_terminate_parsing() }
     #[inline] fn supports_recovery(&self) -> bool { !self.should_terminate() || self.should_continue() }
     #[inline] fn should_continue(&self) -> bool { self.error_manager.has_errors() && !self.should_terminate() }
@@ -363,10 +323,6 @@ impl<'src> Tokenizer<'src> {
             .map(|vm| vm.is_token_valid_for_version(&token.token_type))
             .unwrap_or(true)
     }
-
-    // ------------------------------------------------------------------
-    // Whitespace
-    // ------------------------------------------------------------------
 
     #[inline]
     fn skip_whitespace(&self, state: &mut TokenizerState) {
@@ -382,10 +338,6 @@ impl<'src> Tokenizer<'src> {
 
     #[inline]
     fn is_hex_digit(&self, c: char) -> bool { c.is_ascii_hexdigit() }
-
-    // ------------------------------------------------------------------
-    // Section context
-    // ------------------------------------------------------------------
 
     #[inline]
     fn update_section_context(&mut self, token: &Token) {
@@ -403,34 +355,26 @@ impl<'src> Tokenizer<'src> {
     }
 }
 
-// =============================================================================
-// Core scanning
-// =============================================================================
-
 impl<'src> Tokenizer<'src> {
     fn scan_token(&mut self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         if state.is_at_end() { return Ok(None); }
 
         let current = state.peek(self.input);
 
-        // 1. Comments
         if current == '/' {
             let next = state.peek_next(self.input);
             if next == '/' { return Ok(Some(self.scan_single_line_comment(state))); }
             if next == '*' { return self.scan_multi_line_comment(state); }
         }
 
-        // 2. Section keywords
         if current == '@' {
             if let Some(t) = self.try_scan_section_keyword(state) { return Ok(Some(t)); }
         }
 
-        // 3. String literals
         if current == '"' || current == '\'' {
             return self.scan_string_literal(state);
         }
 
-        // 4. Interpolated strings (advanced sections only)
         if current == '$' && self.is_advanced_section() {
             let next = state.peek_next(self.input);
             if next == '"' || next == '\'' {
@@ -438,7 +382,6 @@ impl<'src> Tokenizer<'src> {
             }
         }
 
-        // 5. Hex literals 0x…
         if current == '0' {
             let next = state.peek_next(self.input);
             if next == 'x' || next == 'X' {
@@ -446,20 +389,16 @@ impl<'src> Tokenizer<'src> {
             }
         }
 
-        // 6. Numeric literals
         if current.is_ascii_digit()
             || (current == '-' && state.peek_next(self.input).is_ascii_digit())
         {
             return self.scan_numeric_literal(state);
         }
 
-        // 7. Hex colours #RGB / #RRGGBB
         if current == '#' { return Ok(Some(self.scan_hex_color(state))); }
 
-        // 8. Multi-character operators (must precede single-char)
         if let Some(t) = self.try_scan_multi_char_operator(state) { return Ok(Some(t)); }
 
-        // 9. Prefixed constructors b:  t:  r:
         if current.is_ascii_alphabetic()
             && state.peek_next(self.input) == ':'
             && self.is_valid_prefixed_constructor(state)
@@ -467,24 +406,18 @@ impl<'src> Tokenizer<'src> {
             return Ok(Some(self.scan_prefixed_constructor(state)));
         }
 
-        // 10. Identifiers and keywords
         if current.is_ascii_alphabetic() || current == '_' {
             return Ok(Some(self.scan_identifier_or_keyword(state)));
         }
 
-        // 11. Single characters
         self.scan_single_character(state)
     }
-
-    // ------------------------------------------------------------------
-    // Comments
-    // ------------------------------------------------------------------
 
     fn scan_single_line_comment(&self, state: &mut TokenizerState) -> Token {
         let start_column = state.column;
         let start_line   = state.line;
-        state.advance(self.input); // /
-        state.advance(self.input); // /
+        state.advance(self.input);
+        state.advance(self.input);
         let comment_start = state.position;
         let bytes = self.input.as_bytes();
         if let Some(offset) = memchr(b'\n', &bytes[state.position..]) {
@@ -507,8 +440,8 @@ impl<'src> Tokenizer<'src> {
     fn scan_multi_line_comment(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line   = state.line;
-        state.advance(self.input); // /
-        state.advance(self.input); // *
+        state.advance(self.input);
+        state.advance(self.input);
         let comment_start = state.position;
         let bytes = self.input.as_bytes();
 
@@ -555,10 +488,6 @@ impl<'src> Tokenizer<'src> {
         )))
     }
 
-    // ------------------------------------------------------------------
-    // Section keywords
-    // ------------------------------------------------------------------
-
     fn try_scan_section_keyword(&self, state: &mut TokenizerState) -> Option<Token> {
         let start_pos    = state.position;
         let start_line   = state.line;
@@ -596,10 +525,6 @@ impl<'src> Tokenizer<'src> {
             None
         }
     }
-
-    // ------------------------------------------------------------------
-    // String literals
-    // ------------------------------------------------------------------
 
     fn scan_string_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_line   = state.line;
@@ -650,10 +575,10 @@ impl<'src> Tokenizer<'src> {
                         pos = found_pos + 1;
                     }
                 } else {
-                    break; // newline — unterminated
+                    break;
                 }
             } else {
-                break; // EOF — unterminated
+                break;
             }
         }
 
@@ -680,7 +605,7 @@ impl<'src> Tokenizer<'src> {
     fn scan_interpolated_string(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_line   = state.line;
         let start_column = state.column;
-        state.advance(self.input); // $
+        state.advance(self.input);
         let quote = state.advance(self.input);
         let mut content     = String::new();
         let mut brace_depth = 0i32;
@@ -734,10 +659,6 @@ impl<'src> Tokenizer<'src> {
         }
     }
 }
-
-// =============================================================================
-// Numeric scanning
-// =============================================================================
 
 impl<'src> Tokenizer<'src> {
     fn scan_numeric_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
@@ -883,15 +804,11 @@ impl<'src> Tokenizer<'src> {
         )))
     }
 
-    // ------------------------------------------------------------------
-    // Hex
-    // ------------------------------------------------------------------
-
     fn scan_hex_color(&self, state: &mut TokenizerState) -> Token {
         let start_column = state.column;
         let start_line   = state.line;
         let start_pos    = state.position;
-        state.advance(self.input); // #
+        state.advance(self.input);
         while !state.is_at_end()
             && self.is_hex_digit(state.peek(self.input))
             && (state.position - start_pos) < 9
@@ -906,8 +823,8 @@ impl<'src> Tokenizer<'src> {
         let start_column = state.column;
         let start_line   = state.line;
         let start_pos    = state.position;
-        state.advance(self.input); // 0
-        state.advance(self.input); // x
+        state.advance(self.input);
+        state.advance(self.input);
         while !state.is_at_end() && self.is_hex_digit(state.peek(self.input)) {
             state.advance(self.input);
         }
@@ -935,13 +852,6 @@ impl<'src> Tokenizer<'src> {
         )))
     }
 
-    // ------------------------------------------------------------------
-    // Multi-character operators
-    //
-    // All operator string payloads are now `&'static str` literals.
-    // No `.to_string()` calls — zero heap allocation for operator tokens.
-    // ------------------------------------------------------------------
-
     fn try_scan_multi_char_operator(&self, state: &mut TokenizerState) -> Option<Token> {
         if state.is_at_end() { return None; }
         let start_column = state.column;
@@ -949,7 +859,6 @@ impl<'src> Tokenizer<'src> {
         let current      = state.peek(self.input);
         let next         = state.peek_next(self.input);
 
-        // Three-char operators first
         if state.position + 2 < state.input_length {
             let third = state.peek_at(self.input, 2);
             let three_char: Option<TokenType> = match (current, next, third) {
@@ -967,7 +876,6 @@ impl<'src> Tokenizer<'src> {
             }
         }
 
-        // Two-char operators
         let two_char: Option<TokenType> = match (current, next) {
             ('=', '>') => Some(TokenType::Arrow),
             (':', ':') => Some(TokenType::DoubleColon),
@@ -1006,10 +914,6 @@ impl<'src> Tokenizer<'src> {
     }
 }
 
-// =============================================================================
-// Identifiers, keywords, prefixed constructors, single chars
-// =============================================================================
-
 impl<'src> Tokenizer<'src> {
     fn scan_identifier_or_keyword(&self, state: &mut TokenizerState) -> Token {
         let start_column = state.column;
@@ -1021,7 +925,6 @@ impl<'src> Tokenizer<'src> {
         }
         let identifier = state.slice(self.input, start_pos, state.position - start_pos);
 
-        // Perfect-hash lookup — O(1)
         if let Some(ctor) = KEYWORDS.get(identifier) {
             return Token::new(ctor(), start_line, start_column, self.current_section);
         }
@@ -1041,7 +944,7 @@ impl<'src> Tokenizer<'src> {
         let start_column = state.column;
         let start_line   = state.line;
         let prefix       = state.advance(self.input);
-        state.advance(self.input); // :
+        state.advance(self.input);
 
         let constructor_type = match prefix {
             'b' => "BLOB_CONSTRUCTOR",
@@ -1067,12 +970,6 @@ impl<'src> Tokenizer<'src> {
         Token::new(token_type, start_line, start_column, self.current_section)
     }
 
-    // ------------------------------------------------------------------
-    // Single characters
-    //
-    // Single-char operator payloads are now `&'static str` literals.
-    // ------------------------------------------------------------------
-
     fn scan_single_character(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line   = state.line;
@@ -1090,13 +987,8 @@ impl<'src> Tokenizer<'src> {
             '<' | '>' | '=' | '!' => TokenType::Symbol(symbol),
             _ if !symbol.is_control() && !symbol.is_whitespace() => TokenType::Symbol(symbol),
             _ => {
-                // Format the detailed message only when debug is enabled —
-                // the format! still allocates, but this is a cold error path.
                 let msg = if self.debug_config.is_enabled {
-                    format!(
-                        "Unexpected character: '{}' (0x{:X})",
-                        symbol, symbol as u32
-                    )
+                    format!("Unexpected character: '{}' (0x{:X})", symbol, symbol as u32)
                 } else {
                     "Unexpected character".to_string()
                 };
@@ -1115,17 +1007,6 @@ impl<'src> Tokenizer<'src> {
         };
         Ok(Some(Token::new(token_type, start_line, start_column, self.current_section)))
     }
-
-    // ------------------------------------------------------------------
-    // Post-pass: static-call hints
-    //
-    // Gated on `is_testing` (compile-time cfg!(test) constant).
-    // This pass is a tokeniser-output verification tool, not a
-    // production diagnostic.  It has real O(n) cost and must never run
-    // in dev / release / bench builds.
-    //
-    // BUG FIX (carried forward): uses token1.section, not self.current_section.
-    // ------------------------------------------------------------------
 
     fn analyze_token_sequences(&mut self) {
         let len = self.token_pool.len();
@@ -1167,36 +1048,29 @@ impl<'src> Tokenizer<'src> {
             && identifier != "Dix"
     }
 
-    // ------------------------------------------------------------------
-    // Metadata
-    // ------------------------------------------------------------------
-
     fn create_metadata(&self) -> TokenizationMetadata {
         let sections_detected = self.get_sections_from_tokens();
 
-        // `analyze_potential_builtin_calls` is a test-verification pass —
-        // same reasoning as `analyze_token_sequences`.  Returns 0 in all
-        // non-test builds because the branch is compiled away entirely.
         let potential_builtin_calls = if self.debug_config.is_testing {
             self.analyze_potential_builtin_calls()
         } else { 0 };
 
         TokenizationMetadata {
-            version:                      "1.0.0".to_string(),
-            total_lines:                  self.token_pool.last().map(|t| t.line).unwrap_or(1),
-            total_tokens:                 self.token_pool.len().saturating_sub(1),
+            version:                     "1.0.0".to_string(),
+            total_lines:                 self.token_pool.last().map(|t| t.line).unwrap_or(1),
+            total_tokens:                self.token_pool.len().saturating_sub(1),
             sections_detected,
-            prefixed_constructors_found:  self.prefixed_constructors_found.len(),
-            blob_constructors:            self.prefixed_constructors_found.iter()
-                                              .filter(|p| p.constructor_type == "BLOB_CONSTRUCTOR")
-                                              .count(),
-            tuple_constructors:           self.prefixed_constructors_found.iter()
-                                              .filter(|p| p.constructor_type == "TUPLE_CONSTRUCTOR")
-                                              .count(),
-            regex_constructors:           self.prefixed_constructors_found.iter()
-                                              .filter(|p| p.constructor_type == "REGEX_CONSTRUCTOR")
-                                              .count(),
-            static_calls_found:           self.static_calls_found.len(),
+            prefixed_constructors_found: self.prefixed_constructors_found.len(),
+            blob_constructors:           self.prefixed_constructors_found.iter()
+                                             .filter(|p| p.constructor_type == "BLOB_CONSTRUCTOR")
+                                             .count(),
+            tuple_constructors:          self.prefixed_constructors_found.iter()
+                                             .filter(|p| p.constructor_type == "TUPLE_CONSTRUCTOR")
+                                             .count(),
+            regex_constructors:          self.prefixed_constructors_found.iter()
+                                             .filter(|p| p.constructor_type == "REGEX_CONSTRUCTOR")
+                                             .count(),
+            static_calls_found:          self.static_calls_found.len(),
             potential_builtin_calls,
         }
     }
@@ -1230,10 +1104,6 @@ impl<'src> Tokenizer<'src> {
     }
 }
 
-// =============================================================================
-// Public result types
-// =============================================================================
-
 #[derive(Debug, Clone)]
 pub struct TokenizationResult {
     pub tokens:                Vec<Token>,
@@ -1244,16 +1114,16 @@ pub struct TokenizationResult {
 
 #[derive(Debug, Clone)]
 pub struct TokenizationMetadata {
-    pub version:                      String,
-    pub total_lines:                  usize,
-    pub total_tokens:                 usize,
-    pub sections_detected:            Vec<String>,
-    pub prefixed_constructors_found:  usize,
-    pub blob_constructors:            usize,
-    pub tuple_constructors:           usize,
-    pub regex_constructors:           usize,
-    pub static_calls_found:           usize,
-    pub potential_builtin_calls:      usize,
+    pub version:                     String,
+    pub total_lines:                 usize,
+    pub total_tokens:                usize,
+    pub sections_detected:           Vec<String>,
+    pub prefixed_constructors_found: usize,
+    pub blob_constructors:           usize,
+    pub tuple_constructors:          usize,
+    pub regex_constructors:          usize,
+    pub static_calls_found:          usize,
+    pub potential_builtin_calls:     usize,
 }
 
 #[derive(Debug, Clone)]
@@ -1273,4 +1143,4 @@ pub struct StaticCallInfo {
     pub column:       usize,
     pub section:      SectionId,
     pub token_index:  usize,
-    }
+}

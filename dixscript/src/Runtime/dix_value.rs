@@ -1,6 +1,7 @@
 // src/Runtime/dix_value.rs
 
 use std::collections::HashMap;
+use serde::Serialize;
 
 /// Runtime value representation for DixScript
 /// 
@@ -9,7 +10,8 @@ use std::collections::HashMap;
 /// - Flattened data storage in DixData
 /// - Conversion to/from HashMap
 /// - FFI boundary (serialized to JSON)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
 pub enum DixValue {
     Null,
     Bool(bool),
@@ -17,11 +19,11 @@ pub enum DixValue {
     Float(f32),
     Double(f64),
     String(String),
-    Date(String),       // ISO 8601 date string
-    Timestamp(String),  // ISO 8601 timestamp string
-    HexColor(String),   // #RRGGBB format
-    Blob(String),       // Base64-encoded binary data
-    Regex(String),      // Regex pattern
+    Date(String),
+    Timestamp(String),
+    HexColor(String),
+    Blob(String),
+    Regex(String),
     Array(Vec<DixValue>),
     Object(HashMap<String, DixValue>),
     Tuple(Vec<DixValue>),
@@ -250,4 +252,4 @@ impl From<HashMap<String, DixValue>> for DixValue {
     fn from(m: HashMap<String, DixValue>) -> Self {
         DixValue::Object(m)
     }
-  }
+    }

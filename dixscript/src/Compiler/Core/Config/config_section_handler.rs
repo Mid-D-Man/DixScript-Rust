@@ -2,7 +2,7 @@
 //!
 //! Grammar reference: `others/midx.ebnf`, @CONFIG section.
 
-use crate::Compiler::AST::{ConfigSection};
+use crate::Compiler::AST::ConfigSection;
 use crate::Compiler::VersionControl::VersionManager;
 use crate::ErrorManager::{ErrorManager, DebugConfig};
 use crate::Utilities::MID_Logger;
@@ -15,12 +15,19 @@ const CONFIG_KEYWORD_LENGTH: usize = 7;
 pub struct ConfigSectionHandler {
     logger: Option<std::sync::Arc<std::sync::Mutex<MID_Logger>>>,
     error_manager: ErrorManager,
-    /// Cached after `initialize_singletons` runs; `DebugConfig::silent()` until then.
     debug_config: DebugConfig,
 }
 
 impl ConfigSectionHandler {
-    pub fn new(logger: Option<std::sync::Arc<std::sync::Mutex<MID_Logger>>>) -> Self {
+    /// Primary constructor — caller supplies the ErrorManager instance.
+    ///
+    /// For the CLI this will be `ErrorManager::get_shared_instance()`.
+    /// For the LSP this will be a per-document isolated instance created
+    /// before the pipeline starts.
+    pub fn new_with_error_manager(
+        logger: Option<std::sync::Arc<std::sync::Mutex<MID_Logger>>>,
+        error_manager: ErrorManager,
+    ) -> Self {
         let logger = logger.or_else(|| {
             if MID_Logger::HasSharedInstance() {
                 Some(MID_Logger::GetSharedInstance(None, None))
@@ -28,7 +35,6 @@ impl ConfigSectionHandler {
                 None
             }
         });
-        let error_manager = ErrorManager::get_shared_instance();
         ConfigSectionHandler {
             logger,
             error_manager,
@@ -36,8 +42,26 @@ impl ConfigSectionHandler {
         }
     }
 
+    /// Backward-compatible constructor for the CLI path.
+    ///
+    /// Acquires the process-wide shared ErrorManager so all existing call
+    /// sites continue to work without modification.
+    pub fn new(logger: Option<std::sync::Arc<std::sync::Mutex<MID_Logger>>>) -> Self {
+        Self::new_with_error_manager(logger, ErrorManager::get_shared_instance())
+    }
+
+    /// Returns a clone of the injected ErrorManager handle.
+    ///
+    /// The LSP analyzer can use this to call `force_strategy` after
+    /// `process_config_section` completes, overriding whatever the file
+    /// requested in @CONFIG.
+    pub fn error_manager(&self) -> ErrorManager {
+        self.error_manager.clone()
+    }
+
     /// Main entry point — processes @CONFIG and initialises VersionManager and ErrorManager.
-    /// Must be called before any parsing begins.
+    ///
+    /// Must be called before any other pipeline stage.
     pub fn process_config_section(&mut self, input_string: &str) -> ProcessConfigResult {
         self.log_info("Starting CONFIG section extraction");
 
@@ -92,9 +116,8 @@ impl ConfigSectionHandler {
                 } else {
                     self.log_info("No valid CONFIG section - using cached defaults");
                     result.config_section = ConfigSchema::create_minimal_config();
-                    result.warnings.push(
-                        "No valid CONFIG section - using cached defaults".to_string(),
-                    );
+                    result.warnings
+                        .push("No valid CONFIG section - using cached defaults".to_string());
                     result.cleaned_input_string = input_string.to_string();
                 }
             }
@@ -110,8 +133,12 @@ impl ConfigSectionHandler {
         result
     }
 
-    /// Initialises VersionManager and ErrorManager from the parsed config.
-    /// Order: extract settings -> VersionManager -> ErrorManager.
+    /// Pushes the parsed @CONFIG values into the injected ErrorManager and
+    /// initialises VersionManager.
+    ///
+    /// This is the only place `update_settings` is called.  For the LSP path
+    /// the caller should invoke `error_manager().force_strategy(...)` after
+    /// this method returns if it needs to override the file's preference.
     fn initialize_singletons(&mut self, result: &mut ProcessConfigResult) {
         let settings = ConfigSchema::extract_operational_settings(&result.config_section);
         self.debug_config = DebugConfig::from_debug_mode(settings.debug_mode);
@@ -119,9 +146,7 @@ impl ConfigSectionHandler {
         if self.debug_config.is_enabled {
             self.log_info(&format!(
                 "Settings: {:?}, {:?}, Version: {}",
-                settings.error_handling_strategy,
-                settings.debug_mode,
-                settings.version
+                settings.error_handling_strategy, settings.debug_mode, settings.version
             ));
         }
 
@@ -144,7 +169,6 @@ impl ConfigSectionHandler {
             }
         }
 
-        // Initialization path: clone required since both result and ErrorManager need ownership.
         self.error_manager.update_settings(settings.clone());
         result.operational_settings = settings;
 
@@ -188,8 +212,7 @@ impl ConfigSectionHandler {
 
     #[inline]
     fn index_of_config(&self, input: &str) -> Option<usize> {
-        let input_upper = input.to_uppercase();
-        input_upper.find(CONFIG_SECTION_KEYWORD)
+        input.to_uppercase().find(CONFIG_SECTION_KEYWORD)
     }
 
     #[inline]
@@ -208,8 +231,6 @@ impl ConfigSectionHandler {
         None
     }
 
-    /// Finds the closing `)` of the @CONFIG block without heap-allocating a `Vec<char>`.
-    /// Uses `char_indices` on the relevant slice plus a peekable iterator for one-char lookahead.
     fn find_config_end_optimized(&self, input: &str, open_paren_index: usize) -> usize {
         let relevant = &input[open_paren_index..];
         let mut chars = relevant.char_indices().peekable();
@@ -377,9 +398,13 @@ impl ConfigSectionHandler {
                 continue;
             }
             match self.parse_single_entry_optimized(entry_str) {
-                Ok((key, value)) => { result.entries.insert(key, value); }
+                Ok((key, value)) => {
+                    result.entries.insert(key, value);
+                }
                 Err(e) => {
-                    result.warnings.push(format!("Failed to parse '{}': {}", entry_str, e));
+                    result
+                        .warnings
+                        .push(format!("Failed to parse '{}': {}", entry_str, e));
                 }
             }
         }
@@ -475,6 +500,10 @@ impl ConfigSectionHandler {
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Result types
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct ProcessConfigResult {

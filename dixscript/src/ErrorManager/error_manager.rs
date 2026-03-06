@@ -1,206 +1,423 @@
-// src/ErrorManager/error_manager.rs
-use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy, DebugMode};
-use crate::ErrorManager::ErrorTypes::*;
-use crate::ErrorManager::Helpers::*;
-use crate::Utilities::MID_Logger;
+//! Thread-safe ErrorManager singleton and per-document isolated instances.
+//!
+//! Two construction paths:
+//! - `get_shared_instance()` — CLI / single-document pipeline (OnceLock singleton).
+//! - `new_isolated()` — LSP per-document analysis (fresh Arc, no OnceLock side-effects).
+
+use chrono::Local;
+use std::fmt::Write as FmtWrite;
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// Debug and test configuration cached from OperationalSettings at module construction.
+use crate::Compiler::Core::{DebugMode, ErrorHandlingStrategy, OperationalSettings};
+use crate::ErrorManager::ErrorTypes::*;
+use crate::ErrorManager::Helpers::*;
+use crate::Utilities::mid_logger::LogLevel;
+
+// =============================================================================
+// LogFormat
+// =============================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LogFormat {
+    #[default]
+    Plain,
+    Colored,
+}
+
+// =============================================================================
+// DixError — unified error wrapper for flat iteration
+// =============================================================================
+
+/// Unified error type returned by `get_all_errors_flat` and `get_errors_by_severity`.
 ///
-/// Cached once so hot-path code never needs to acquire a lock just to decide
-/// whether to format a log message or run a diagnostic pass.
+/// Each variant wraps the concrete per-phase error.  Use `severity()` and
+/// `message()` for cross-variant access without downcasting.
+#[derive(Debug, Clone)]
+pub enum DixError {
+    Lexical(LexicalError),
+    Parse(ParseError),
+    Semantic(SemanticError),
+    ImportsResolution(ImportsResolutionError),
+    AstEnhancement(AstEnhancementError),
+    ValueResolution(ValueResolutionError),
+    Dlm(DlmError),
+    BinarySerialization(BinarySerializationError),
+    Runtime(RuntimeError),
+    Config(ConfigError),
+    General(GeneralError),
+}
+
+impl DixError {
+    pub fn severity(&self) -> ErrorSeverity {
+        match self {
+            Self::Lexical(e)             => e.severity,
+            Self::Parse(e)               => e.severity,
+            Self::Semantic(e)            => e.severity,
+            Self::ImportsResolution(e)   => e.severity,
+            Self::AstEnhancement(e)      => e.severity,
+            Self::ValueResolution(e)     => e.severity,
+            Self::Dlm(e)                 => e.severity,
+            Self::BinarySerialization(e) => e.severity,
+            Self::Runtime(e)             => e.severity,
+            Self::Config(e)              => e.severity,
+            Self::General(e)             => e.severity,
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Lexical(e)             => &e.message,
+            Self::Parse(e)               => &e.message,
+            Self::Semantic(e)            => &e.message,
+            Self::ImportsResolution(e)   => &e.message,
+            Self::AstEnhancement(e)      => &e.message,
+            Self::ValueResolution(e)     => &e.message,
+            Self::Dlm(e)                 => &e.message,
+            Self::BinarySerialization(e) => &e.message,
+            Self::Runtime(e)             => &e.message,
+            Self::Config(e)              => &e.message,
+            Self::General(e)             => &e.message,
+        }
+    }
+}
+
+// =============================================================================
+// DebugConfig
+// =============================================================================
+
+/// Debug and test gating flags cached from `OperationalSettings` at construction.
 ///
-/// ## `is_testing`
-/// Set at **compile time** via `cfg!(test)` — automatically `true` when running
-/// under `cargo test`, `false` in every other build (dev, release, bench).
-/// This means features like `analyze_token_sequences` have zero runtime cost in
-/// production: the branch is compiled away entirely.
-///
-/// Do NOT manually set `is_testing = true` in application code.
-/// If you need a "dry-run" or "validation-only" mode at runtime, add a separate
-/// `OperationalSettings` flag instead.
+/// `is_testing` is resolved at **compile time** via `cfg!(test)`.  Any branch
+/// guarded by it is eliminated entirely in release / bench / dev builds.
 #[derive(Debug, Clone, Copy)]
 pub struct DebugConfig {
-    /// True when debug_mode is Regular or Verbose.
-    /// Gates format!() calls and diagnostic output.
     pub is_enabled: bool,
-
-    /// True when debug_mode is Verbose.
-    /// Gates extra-verbose diagnostic output.
     pub is_verbose: bool,
-
-    /// True when compiled under `cargo test`.
-    /// Gates test-only diagnostic passes (e.g. lexer static-call hints,
-    /// token sequence analysis) that have real O(n) cost but are only
-    /// useful when verifying tokenizer output, not in production.
-    ///
-    /// This is a compile-time constant — `cfg!(test)` — so the branch is
-    /// eliminated entirely by the optimizer in release/bench/dev builds.
     pub is_testing: bool,
 }
 
 impl DebugConfig {
-    pub fn from_debug_mode(mode: crate::Compiler::Core::Config::DebugMode) -> Self {
+    pub fn from_debug_mode(mode: DebugMode) -> Self {
         DebugConfig {
-            is_enabled: matches!(
-                mode,
-                crate::Compiler::Core::Config::DebugMode::Regular
-                | crate::Compiler::Core::Config::DebugMode::Verbose
-            ),
-            is_verbose: matches!(
-                mode,
-                crate::Compiler::Core::Config::DebugMode::Verbose
-            ),
-            // cfg!(test) is resolved at compile time to a bool literal.
-            // In test builds: true. In all other builds: false.
-            // The optimizer eliminates any branch guarded by this in non-test builds.
+            is_enabled: matches!(mode, DebugMode::Regular | DebugMode::Verbose),
+            is_verbose: matches!(mode, DebugMode::Verbose),
             is_testing: cfg!(test),
         }
     }
 
-    /// Convenience: returns a DebugConfig with everything off.
-    /// Used in non-interactive paths (e.g. FFI, WASM) where no settings are available.
     pub const fn silent() -> Self {
-        DebugConfig {
-            is_enabled: false,
-            is_verbose: false,
-            is_testing: false,
-        }
+        DebugConfig { is_enabled: false, is_verbose: false, is_testing: false }
     }
 
-    /// Convenience: returns a DebugConfig with everything on.
-    /// Use only in unit tests that explicitly need all diagnostic passes.
-    ///
-    /// Example:
-    /// ```rust no
-    /// #[cfg(test)]
-    /// fn test_static_call_detection() {
-    ///     let config = DebugConfig::full();
-    ///     assert!(config.is_testing);
-    /// }
-    /// ```
     #[cfg(test)]
     pub const fn full() -> Self {
-        DebugConfig {
-            is_enabled: true,
-            is_verbose: true,
-            is_testing: true,
-        }
+        DebugConfig { is_enabled: true, is_verbose: true, is_testing: true }
     }
 }
 
-/// Thread-safe singleton ErrorManager
-/// Uses OnceLock for lazy initialization
+// =============================================================================
+// Singleton storage
+// =============================================================================
+
 static ERROR_MANAGER: OnceLock<Arc<Mutex<ErrorManagerInner>>> = OnceLock::new();
 
-/// Public interface for ErrorManager
+// =============================================================================
+// Public handle
+// =============================================================================
+
 #[derive(Clone)]
 pub struct ErrorManager {
     inner: Arc<Mutex<ErrorManagerInner>>,
 }
 
-/// Internal state of ErrorManager
-struct ErrorManagerInner {
-    // Error collections
-    lexical_errors: Vec<LexicalError>,
-    parse_errors: Vec<ParseError>,
-    semantic_errors: Vec<SemanticError>,
-    imports_resolution_errors: Vec<ImportsResolutionError>,
-    ast_enhancement_errors: Vec<AstEnhancementError>,
-    value_resolution_errors: Vec<ValueResolutionError>,
-    dlm_errors: Vec<DlmError>,
-    binary_serialization_errors: Vec<BinarySerializationError>,
-    runtime_errors: Vec<RuntimeError>,
-    config_errors: Vec<ConfigError>,
-    general_errors: Vec<GeneralError>,
+// =============================================================================
+// Inner state
+// =============================================================================
 
-    // State
-    has_errors: bool,
+struct ErrorManagerInner {
+    lexical_errors:              Vec<LexicalError>,
+    parse_errors:                Vec<ParseError>,
+    semantic_errors:             Vec<SemanticError>,
+    imports_resolution_errors:   Vec<ImportsResolutionError>,
+    ast_enhancement_errors:      Vec<AstEnhancementError>,
+    value_resolution_errors:     Vec<ValueResolutionError>,
+    dlm_errors:                  Vec<DlmError>,
+    binary_serialization_errors: Vec<BinarySerializationError>,
+    runtime_errors:              Vec<RuntimeError>,
+    config_errors:               Vec<ConfigError>,
+    general_errors:              Vec<GeneralError>,
+
+    has_errors:           bool,
     operational_settings: OperationalSettings,
 
-    // Logger reference (now Arc<Mutex<>> to match MID_Logger::GetSharedInstance)
-    logger: Arc<Mutex<MID_Logger>>,
+    log_buffer:       Vec<String>,
+    log_level_filter: LogLevel,
+    log_enabled:      bool,
+    log_format:       LogFormat,
 }
 
+// =============================================================================
+// ErrorManager — construction
+// =============================================================================
+
 impl ErrorManager {
-    /// Get the shared singleton instance
+    /// Returns the process-wide singleton.  Creates it on first call.
+    ///
+    /// Use this for CLI compilation and single-document pipelines.
     pub fn get_shared_instance() -> Self {
         let inner = ERROR_MANAGER.get_or_init(|| {
             Arc::new(Mutex::new(ErrorManagerInner::new()))
         });
+        ErrorManager { inner: Arc::clone(inner) }
+    }
 
+    /// Creates a completely independent instance that does **not** touch the
+    /// OnceLock singleton.  Use this for LSP per-document analysis so that
+    /// parallel document pipelines never share error state.
+    ///
+    /// Call `force_strategy(Continue)` immediately after to ensure all
+    /// diagnostics are collected regardless of what the file's @CONFIG says.
+    pub fn new_isolated() -> Self {
         ErrorManager {
-            inner: Arc::clone(inner),
+            inner: Arc::new(Mutex::new(ErrorManagerInner::new())),
         }
     }
 
-    /// Reset the shared instance (for testing only)
-    pub fn reset_shared_instance() {
-        // Note: OnceLock doesn't support reset in stable Rust
-        // This is a limitation - for tests, use separate instances
-        // or feature-gate with test-only code
-    }
+    /// Stub retained for API compatibility.
+    ///
+    /// `OnceLock` cannot be reset in stable Rust.  For test isolation use
+    /// `new_isolated()` rather than relying on this method.
+    pub fn reset_shared_instance() {}
+}
 
-    /// Update operational settings
+// =============================================================================
+// ErrorManager — settings
+// =============================================================================
+
+impl ErrorManager {
     pub fn update_settings(&self, settings: OperationalSettings) {
         let mut inner = self.inner.lock().unwrap();
         inner.update_settings(settings);
     }
 
-    /// Get current debug mode from operational settings
+    /// Overrides the error handling strategy regardless of what `update_settings`
+    /// stored.  Intended for LSP mode where `Continue` must always be enforced
+    /// so all diagnostics are collected.
+    pub fn force_strategy(&self, strategy: ErrorHandlingStrategy) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.operational_settings.error_handling_strategy = strategy;
+    }
+
     pub fn get_debug_mode(&self) -> DebugMode {
         let inner = self.inner.lock().unwrap();
         inner.operational_settings.debug_mode
     }
+}
 
-    // ==================== LEXICAL ERRORS ====================
+// =============================================================================
+// ErrorManager — add errors
+// =============================================================================
 
-    /// Add a lexical error
+impl ErrorManager {
     pub fn add_lexical_error(
         &self,
-        error_type: LexicalErrorType,
-        message: String,
-        line: usize,
-        column: usize,
-        suggestion: Option<String>,
+        error_type:  LexicalErrorType,
+        message:     String,
+        line:        usize,
+        column:      usize,
+        suggestion:  Option<String>,
         source_line: Option<String>,
     ) {
         let mut inner = self.inner.lock().unwrap();
         inner.add_lexical_error(error_type, message, line, column, suggestion, source_line);
     }
 
-    /// Get all lexical errors (returns borrowed slice)
-    pub fn get_lexical_errors(&self) -> Vec<LexicalError> {
-        let inner = self.inner.lock().unwrap();
-        inner.lexical_errors.clone()
-    }
-
-    // ==================== PARSE ERRORS ====================
-
-    /// Add a parse error
     pub fn add_parse_error(
         &self,
-        error_type: ParseErrorType,
-        message: String,
-        line: usize,
-        column: usize,
-        suggestion: Option<String>,
+        error_type:  ParseErrorType,
+        message:     String,
+        line:        usize,
+        column:      usize,
+        suggestion:  Option<String>,
         source_line: Option<String>,
     ) {
         let mut inner = self.inner.lock().unwrap();
         inner.add_parse_error(error_type, message, line, column, suggestion, source_line);
     }
 
-    /// Get all parse errors
-    pub fn get_parse_errors(&self) -> Vec<ParseError> {
-        let inner = self.inner.lock().unwrap();
-        inner.parse_errors.clone()
+    pub fn add_semantic_error(
+        &self,
+        error_type:   SemanticErrorType,
+        message:      String,
+        line:         i32,
+        column:       i32,
+        section_name: Option<String>,
+        suggestion:   Option<String>,
+    ) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.add_semantic_error(error_type, message, line, column, section_name, suggestion);
     }
 
-    /// Get registry errors (built-in validation errors)
+    pub fn add_imports_resolution_error(
+        &self,
+        error_type:     ImportsResolutionErrorType,
+        message:        String,
+        import_alias:   String,
+        import_path:    Option<String>,
+        resolved_path:  Option<String>,
+        circular_chain: Option<Vec<String>>,
+        line:           i32,
+        column:         i32,
+        suggestion:     Option<String>,
+    ) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.add_imports_resolution_error(
+            error_type, message, import_alias, import_path,
+            resolved_path, circular_chain, line, column, suggestion,
+        );
+    }
+
+    pub fn add_ast_enhancement_error(
+        &self,
+        error_type:   AstEnhancementErrorType,
+        message:      String,
+        line:         i32,
+        column:       i32,
+        section_name: Option<String>,
+        suggestion:   Option<String>,
+    ) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.add_ast_enhancement_error(
+            error_type, message, line, column, section_name, suggestion,
+        );
+    }
+
+    pub fn add_value_resolution_error(
+        &self,
+        error_type:    ValueResolutionErrorType,
+        message:       String,
+        line:          i32,
+        column:        i32,
+        section_name:  Option<String>,
+        variable_name: Option<String>,
+        function_name: Option<String>,
+        suggestion:    Option<String>,
+    ) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.add_value_resolution_error(
+            error_type, message, line, column,
+            section_name, variable_name, function_name, suggestion,
+        );
+    }
+
+    pub fn add_dlm_error(
+        &self,
+        error_type:    DlmErrorType,
+        message:       String,
+        library_path:  Option<String>,
+        function_name: Option<String>,
+        suggestion:    Option<String>,
+        severity:      ErrorSeverity,
+    ) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.add_dlm_error(error_type, message, library_path, function_name, suggestion, severity);
+    }
+
+    pub fn add_binary_serialization_error(
+        &self,
+        error_type:       BinarySerializationErrorType,
+        message:          String,
+        file_path:        Option<String>,
+        expected_version: Option<String>,
+        actual_version:   Option<String>,
+        suggestion:       Option<String>,
+    ) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.add_binary_serialization_error(
+            error_type, message, file_path, expected_version, actual_version, suggestion,
+        );
+    }
+
+    pub fn add_runtime_error(
+        &self,
+        error_type:    RuntimeErrorType,
+        message:       String,
+        function_name: Option<String>,
+        line:          i32,
+        column:        i32,
+        stack_trace:   Vec<String>,
+        suggestion:    Option<String>,
+    ) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.add_runtime_error(
+            error_type, message, function_name, line, column, stack_trace, suggestion,
+        );
+    }
+
+    pub fn add_runtime_error_with_severity(
+        &self,
+        error_type:    RuntimeErrorType,
+        message:       String,
+        function_name: Option<String>,
+        line:          i32,
+        column:        i32,
+        stack_trace:   Vec<String>,
+        suggestion:    Option<String>,
+        severity:      ErrorSeverity,
+    ) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.add_runtime_error_with_severity(
+            error_type, message, function_name, line, column, stack_trace, suggestion, severity,
+        );
+    }
+
+    pub fn add_config_error(
+        &self,
+        error_type:     ConfigErrorType,
+        message:        String,
+        section_name:   Option<String>,
+        field_name:     Option<String>,
+        expected_value: Option<String>,
+        actual_value:   Option<String>,
+        line:           i32,
+        column:         i32,
+        suggestion:     Option<String>,
+    ) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.add_config_error(
+            error_type, message, section_name, field_name,
+            expected_value, actual_value, line, column, suggestion,
+        );
+    }
+
+    pub fn add_general_error(
+        &self,
+        error_type:   GeneralErrorType,
+        message:      String,
+        context:      Option<String>,
+        source_error: Option<String>,
+        suggestion:   Option<String>,
+    ) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.add_general_error(error_type, message, context, source_error, suggestion);
+    }
+}
+
+// =============================================================================
+// ErrorManager — typed getters (Vec<T>)
+// =============================================================================
+
+impl ErrorManager {
+    pub fn get_lexical_errors(&self) -> Vec<LexicalError> {
+        self.inner.lock().unwrap().lexical_errors.clone()
+    }
+
+    pub fn get_parse_errors(&self) -> Vec<ParseError> {
+        self.inner.lock().unwrap().parse_errors.clone()
+    }
+
     pub fn get_registry_errors(&self) -> Vec<ParseError> {
-        let inner = self.inner.lock().unwrap();
-        inner.parse_errors.iter()
+        self.inner.lock().unwrap().parse_errors.iter()
             .filter(|e| matches!(
                 e.error_type,
                 ParseErrorType::UnknownStaticObject
@@ -213,695 +430,640 @@ impl ErrorManager {
             .collect()
     }
 
-    // ==================== SEMANTIC ERRORS ====================
-
-    /// Add a semantic error
-    pub fn add_semantic_error(
-        &self,
-        error_type: SemanticErrorType,
-        message: String,
-        line: i32,
-        column: i32,
-        section_name: Option<String>,
-        suggestion: Option<String>,
-    ) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.add_semantic_error(error_type, message, line, column, section_name, suggestion);
-    }
-
-    /// Get all semantic errors
     pub fn get_semantic_errors(&self) -> Vec<SemanticError> {
-        let inner = self.inner.lock().unwrap();
-        inner.semantic_errors.clone()
+        self.inner.lock().unwrap().semantic_errors.clone()
     }
 
-    // ==================== IMPORTS RESOLUTION ERRORS ====================
-
-    /// Add an imports resolution error
-    pub fn add_imports_resolution_error(
-        &self,
-        error_type: ImportsResolutionErrorType,
-        message: String,
-        import_alias: String,
-        import_path: Option<String>,
-        resolved_path: Option<String>,
-        circular_chain: Option<Vec<String>>,
-        line: i32,
-        column: i32,
-        suggestion: Option<String>,
-    ) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.add_imports_resolution_error(
-            error_type,
-            message,
-            import_alias,
-            import_path,
-            resolved_path,
-            circular_chain,
-            line,
-            column,
-            suggestion,
-        );
-    }
-
-    /// Get all imports resolution errors
     pub fn get_imports_resolution_errors(&self) -> Vec<ImportsResolutionError> {
-        let inner = self.inner.lock().unwrap();
-        inner.imports_resolution_errors.clone()
+        self.inner.lock().unwrap().imports_resolution_errors.clone()
     }
 
-    // ==================== AST ENHANCEMENT ERRORS ====================
-
-    /// Add an AST enhancement error
-    pub fn add_ast_enhancement_error(
-        &self,
-        error_type: AstEnhancementErrorType,
-        message: String,
-        line: i32,
-        column: i32,
-        section_name: Option<String>,
-        suggestion: Option<String>,
-    ) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.add_ast_enhancement_error(error_type, message, line, column, section_name, suggestion);
-    }
-
-    /// Get all AST enhancement errors
     pub fn get_ast_enhancement_errors(&self) -> Vec<AstEnhancementError> {
-        let inner = self.inner.lock().unwrap();
-        inner.ast_enhancement_errors.clone()
+        self.inner.lock().unwrap().ast_enhancement_errors.clone()
     }
 
-    // ==================== VALUE RESOLUTION ERRORS ====================
-
-    /// Add a value resolution error
-    pub fn add_value_resolution_error(
-        &self,
-        error_type: ValueResolutionErrorType,
-        message: String,
-        line: i32,
-        column: i32,
-        section_name: Option<String>,
-        variable_name: Option<String>,
-        function_name: Option<String>,
-        suggestion: Option<String>,
-    ) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.add_value_resolution_error(
-            error_type,
-            message,
-            line,
-            column,
-            section_name,
-            variable_name,
-            function_name,
-            suggestion,
-        );
-    }
-
-    /// Get all value resolution errors
     pub fn get_value_resolution_errors(&self) -> Vec<ValueResolutionError> {
-        let inner = self.inner.lock().unwrap();
-        inner.value_resolution_errors.clone()
+        self.inner.lock().unwrap().value_resolution_errors.clone()
     }
 
-    // ==================== DLM ERRORS ====================
-
-    /// Add a DLM error
-    pub fn add_dlm_error(
-        &self,
-        error_type: DlmErrorType,
-        message: String,
-        library_path: Option<String>,
-        function_name: Option<String>,
-        suggestion: Option<String>,
-        severity: ErrorSeverity,
-    ) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.add_dlm_error(error_type, message, library_path, function_name, suggestion, severity);
-    }
-
-    /// Get all DLM errors
     pub fn get_dlm_errors(&self) -> Vec<DlmError> {
-        let inner = self.inner.lock().unwrap();
-        inner.dlm_errors.clone()
+        self.inner.lock().unwrap().dlm_errors.clone()
     }
 
-    // ==================== BINARY SERIALIZATION ERRORS ====================
-
-    /// Add a binary serialization error
-    pub fn add_binary_serialization_error(
-        &self,
-        error_type: BinarySerializationErrorType,
-        message: String,
-        file_path: Option<String>,
-        expected_version: Option<String>,
-        actual_version: Option<String>,
-        suggestion: Option<String>,
-    ) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.add_binary_serialization_error(
-            error_type,
-            message,
-            file_path,
-            expected_version,
-            actual_version,
-            suggestion,
-        );
-    }
-
-    /// Get all binary serialization errors
     pub fn get_binary_serialization_errors(&self) -> Vec<BinarySerializationError> {
-        let inner = self.inner.lock().unwrap();
-        inner.binary_serialization_errors.clone()
+        self.inner.lock().unwrap().binary_serialization_errors.clone()
     }
 
-    // ==================== RUNTIME ERRORS ====================
-
-    /// Add a runtime error
-    pub fn add_runtime_error(
-        &self,
-        error_type: RuntimeErrorType,
-        message: String,
-        function_name: Option<String>,
-        line: i32,
-        column: i32,
-        stack_trace: Vec<String>,
-        suggestion: Option<String>,
-    ) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.add_runtime_error(
-            error_type,
-            message,
-            function_name,
-            line,
-            column,
-            stack_trace,
-            suggestion,
-        );
-    }
-    pub fn add_runtime_error_with_severity(
-        &self,
-        error_type: RuntimeErrorType,
-        message: String,
-        function_name: Option<String>,
-        line: i32,
-        column: i32,
-        stack_trace: Vec<String>,
-        suggestion: Option<String>,
-        severity: ErrorSeverity,  // NEW: explicit severity parameter
-    ) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.add_runtime_error_with_severity(
-            error_type,
-            message,
-            function_name,
-            line,
-            column,
-            stack_trace,
-            suggestion,
-            severity,
-        );
-    }
-    /// Get all runtime errors
     pub fn get_runtime_errors(&self) -> Vec<RuntimeError> {
-        let inner = self.inner.lock().unwrap();
-        inner.runtime_errors.clone()
+        self.inner.lock().unwrap().runtime_errors.clone()
     }
 
-    // ==================== CONFIG ERRORS ====================
-
-    /// Add a config error
-    pub fn add_config_error(
-        &self,
-        error_type: ConfigErrorType,
-        message: String,
-        section_name: Option<String>,
-        field_name: Option<String>,
-        expected_value: Option<String>,
-        actual_value: Option<String>,
-        line: i32,
-        column: i32,
-        suggestion: Option<String>,
-    ) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.add_config_error(
-            error_type,
-            message,
-            section_name,
-            field_name,
-            expected_value,
-            actual_value,
-            line,
-            column,
-            suggestion,
-        );
-    }
-
-    /// Get all config errors
     pub fn get_config_errors(&self) -> Vec<ConfigError> {
-        let inner = self.inner.lock().unwrap();
-        inner.config_errors.clone()
+        self.inner.lock().unwrap().config_errors.clone()
     }
 
-    // ==================== GENERAL ERRORS ====================
-
-    /// Add a general error
-    pub fn add_general_error(
-        &self,
-        error_type: GeneralErrorType,
-        message: String,
-        context: Option<String>,
-        source_error: Option<String>,
-        suggestion: Option<String>,
-    ) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.add_general_error(error_type, message, context, source_error, suggestion);
-    }
-
-    /// Get all general errors
     pub fn get_general_errors(&self) -> Vec<GeneralError> {
-        let inner = self.inner.lock().unwrap();
-        inner.general_errors.clone()
+        self.inner.lock().unwrap().general_errors.clone()
+    }
+}
+
+// =============================================================================
+// ErrorManager — typed getters (_as_string variants)
+// =============================================================================
+
+impl ErrorManager {
+    pub fn get_lexical_errors_as_string(&self) -> String {
+        self.inner.lock().unwrap().lexical_errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
-    // ==================== STATE QUERIES ====================
+    pub fn get_parse_errors_as_string(&self) -> String {
+        self.inner.lock().unwrap().parse_errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
-    /// Check if there are any errors
+    pub fn get_semantic_errors_as_string(&self) -> String {
+        self.inner.lock().unwrap().semantic_errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    pub fn get_config_errors_as_string(&self) -> String {
+        self.inner.lock().unwrap().config_errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    pub fn get_runtime_errors_as_string(&self) -> String {
+        self.inner.lock().unwrap().runtime_errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    pub fn get_imports_resolution_errors_as_string(&self) -> String {
+        self.inner.lock().unwrap().imports_resolution_errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    pub fn get_value_resolution_errors_as_string(&self) -> String {
+        self.inner.lock().unwrap().value_resolution_errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    pub fn get_dlm_errors_as_string(&self) -> String {
+        self.inner.lock().unwrap().dlm_errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    pub fn get_binary_serialization_errors_as_string(&self) -> String {
+        self.inner.lock().unwrap().binary_serialization_errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+// =============================================================================
+// ErrorManager — flat iteration and severity filtering
+// =============================================================================
+
+impl ErrorManager {
+    /// Returns every error from every category as a single flat `Vec<DixError>`.
+    ///
+    /// Errors are ordered: Config → Lexical → Parse → ImportsResolution →
+    /// Semantic → AstEnhancement → ValueResolution → DLM → BinarySerialization
+    /// → Runtime → General.
+    pub fn get_all_errors_flat(&self) -> Vec<DixError> {
+        let inner = self.inner.lock().unwrap();
+        let capacity = inner.lexical_errors.len()
+            + inner.parse_errors.len()
+            + inner.semantic_errors.len()
+            + inner.imports_resolution_errors.len()
+            + inner.ast_enhancement_errors.len()
+            + inner.value_resolution_errors.len()
+            + inner.dlm_errors.len()
+            + inner.binary_serialization_errors.len()
+            + inner.runtime_errors.len()
+            + inner.config_errors.len()
+            + inner.general_errors.len();
+
+        let mut all = Vec::with_capacity(capacity);
+        all.extend(inner.config_errors.iter().cloned().map(DixError::Config));
+        all.extend(inner.lexical_errors.iter().cloned().map(DixError::Lexical));
+        all.extend(inner.parse_errors.iter().cloned().map(DixError::Parse));
+        all.extend(inner.imports_resolution_errors.iter().cloned().map(DixError::ImportsResolution));
+        all.extend(inner.semantic_errors.iter().cloned().map(DixError::Semantic));
+        all.extend(inner.ast_enhancement_errors.iter().cloned().map(DixError::AstEnhancement));
+        all.extend(inner.value_resolution_errors.iter().cloned().map(DixError::ValueResolution));
+        all.extend(inner.dlm_errors.iter().cloned().map(DixError::Dlm));
+        all.extend(inner.binary_serialization_errors.iter().cloned().map(DixError::BinarySerialization));
+        all.extend(inner.runtime_errors.iter().cloned().map(DixError::Runtime));
+        all.extend(inner.general_errors.iter().cloned().map(DixError::General));
+        all
+    }
+
+    /// Returns all errors whose severity matches the given level.
+    pub fn get_errors_by_severity(&self, severity: ErrorSeverity) -> Vec<DixError> {
+        self.get_all_errors_flat()
+            .into_iter()
+            .filter(|e| e.severity() == severity)
+            .collect()
+    }
+}
+
+// =============================================================================
+// ErrorManager — state queries
+// =============================================================================
+
+impl ErrorManager {
     pub fn has_errors(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
-        inner.has_errors
+        self.inner.lock().unwrap().has_errors
     }
 
-    /// Check if there are any fatal errors
     pub fn has_fatal_errors(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
-        inner.has_fatal_errors()
+        self.inner.lock().unwrap().has_fatal_errors()
     }
 
-    /// Should terminate parsing based on error handling strategy
     pub fn should_terminate_parsing(&self) -> bool {
         let inner = self.inner.lock().unwrap();
         inner.has_errors && matches!(
             inner.operational_settings.error_handling_strategy,
-           ErrorHandlingStrategy::Halt
+            ErrorHandlingStrategy::Halt
         )
     }
 
-    /// Clear all errors
     pub fn clear_errors(&self) {
         let mut inner = self.inner.lock().unwrap();
         inner.clear_errors();
     }
 
-    /// Get error counts by severity
     pub fn get_error_counts_by_severity(&self) -> std::collections::HashMap<ErrorSeverity, usize> {
-        let inner = self.inner.lock().unwrap();
-        inner.get_error_counts_by_severity()
+        self.inner.lock().unwrap().get_error_counts_by_severity()
     }
 }
 
+// =============================================================================
+// ErrorManager — reporting
+// =============================================================================
+
+impl ErrorManager {
+    pub fn generate_error_report(&self) -> String {
+        self.inner.lock().unwrap().generate_error_report()
+    }
+
+    pub fn get_all_errors_as_json(&self, pretty_print: bool) -> Result<String, String> {
+        self.inner.lock().unwrap().get_all_errors_as_json(pretty_print)
+    }
+
+    pub fn get_log_contents(&self) -> String {
+        self.inner.lock().unwrap().log_buffer.join("\n")
+    }
+
+    pub fn get_debug_info(&self) -> std::collections::HashMap<String, String> {
+        let inner = self.inner.lock().unwrap();
+        let mut info = std::collections::HashMap::new();
+        info.insert("version".to_string(), "1.0.0".to_string());
+        info.insert("has_errors".to_string(), inner.has_errors.to_string());
+        info.insert(
+            "error_handling_strategy".to_string(),
+            format!("{:?}", inner.operational_settings.error_handling_strategy),
+        );
+        info.insert(
+            "debug_mode".to_string(),
+            format!("{:?}", inner.operational_settings.debug_mode),
+        );
+
+        let total = inner.lexical_errors.len()
+            + inner.parse_errors.len()
+            + inner.semantic_errors.len()
+            + inner.imports_resolution_errors.len()
+            + inner.ast_enhancement_errors.len()
+            + inner.value_resolution_errors.len()
+            + inner.dlm_errors.len()
+            + inner.binary_serialization_errors.len()
+            + inner.runtime_errors.len()
+            + inner.config_errors.len()
+            + inner.general_errors.len();
+
+        info.insert("total_errors".to_string(), total.to_string());
+        info.insert("lexical_errors".to_string(), inner.lexical_errors.len().to_string());
+        info.insert("parse_errors".to_string(), inner.parse_errors.len().to_string());
+        info.insert("semantic_errors".to_string(), inner.semantic_errors.len().to_string());
+        info.insert("imports_errors".to_string(), inner.imports_resolution_errors.len().to_string());
+        info
+    }
+}
+
+// =============================================================================
+// ErrorManager — logging delegation
+// =============================================================================
+
+impl ErrorManager {
+    pub fn log_debug(&self, message: &str) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.write_log(LogLevel::Debug, message);
+    }
+
+    pub fn log_info(&self, message: &str) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.write_log(LogLevel::Info, message);
+    }
+
+    pub fn log_warning(&self, message: &str) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.write_log(LogLevel::Warning, message);
+    }
+
+    pub fn log_error(&self, message: &str) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.write_log(LogLevel::Error, message);
+    }
+}
+
+// =============================================================================
+// ErrorManagerInner — construction and settings
+// =============================================================================
+
 impl ErrorManagerInner {
     fn new() -> Self {
-        let logger = MID_Logger::GetSharedInstance(None, None);
-
         ErrorManagerInner {
-            lexical_errors: Vec::new(),
-            parse_errors: Vec::new(),
-            semantic_errors: Vec::new(),
-            imports_resolution_errors: Vec::new(),
-            ast_enhancement_errors: Vec::new(),
-            value_resolution_errors: Vec::new(),
-            dlm_errors: Vec::new(),
+            lexical_errors:              Vec::new(),
+            parse_errors:                Vec::new(),
+            semantic_errors:             Vec::new(),
+            imports_resolution_errors:   Vec::new(),
+            ast_enhancement_errors:      Vec::new(),
+            value_resolution_errors:     Vec::new(),
+            dlm_errors:                  Vec::new(),
             binary_serialization_errors: Vec::new(),
-            runtime_errors: Vec::new(),
-            config_errors: Vec::new(),
-            general_errors: Vec::new(),
-            has_errors: false,
-            operational_settings: OperationalSettings::default(),
-            logger,
+            runtime_errors:              Vec::new(),
+            config_errors:               Vec::new(),
+            general_errors:              Vec::new(),
+            has_errors:                  false,
+            operational_settings:        OperationalSettings::default(),
+            log_buffer:                  Vec::new(),
+            log_level_filter:            LogLevel::Info,
+            log_enabled:                 true,
+            log_format:                  LogFormat::Colored,
         }
     }
 
     fn update_settings(&mut self, settings: OperationalSettings) {
+        self.log_level_filter = match settings.debug_mode {
+            DebugMode::Off              => LogLevel::Info,
+            DebugMode::Regular
+            | DebugMode::Verbose        => LogLevel::Debug,
+        };
         self.operational_settings = settings;
-        // TODO: Sync logger settings when MID_Logger is fully ported
+    }
+}
+
+// =============================================================================
+// ErrorManagerInner — inlined logging
+// =============================================================================
+
+impl ErrorManagerInner {
+    fn write_log(&mut self, level: LogLevel, message: &str) {
+        if !self.log_enabled { return; }
+        if level < self.log_level_filter { return; }
+
+        let line = self.format_log_line(level, message);
+
+        match self.log_format {
+            LogFormat::Colored => Self::write_to_console_colored(&line, level),
+            LogFormat::Plain   => println!("{}", line),
+        }
+
+        self.log_buffer.push(line);
     }
 
+    fn format_log_line(&self, level: LogLevel, message: &str) -> String {
+        let timestamp = Local::now().format("%H:%M:%S%.3f");
+        format!("[{}] [{:?}] {}", timestamp, level, message)
+    }
+
+    fn write_to_console_colored(line: &str, level: LogLevel) {
+        match level {
+            LogLevel::Debug   => println!("\x1b[90m{}\x1b[0m", line),
+            LogLevel::Info    => println!("\x1b[97m{}\x1b[0m", line),
+            LogLevel::Warning => println!("\x1b[93m{}\x1b[0m", line),
+            LogLevel::Error   => println!("\x1b[91m{}\x1b[0m", line),
+            LogLevel::None    => {}
+        }
+    }
+}
+
+// =============================================================================
+// ErrorManagerInner — severity determination
+// =============================================================================
+
+impl ErrorManagerInner {
     fn determine_severity(&self, source: ErrorSource) -> ErrorSeverity {
+        let is_halt = matches!(
+            self.operational_settings.error_handling_strategy,
+            ErrorHandlingStrategy::Halt
+        );
 
         match source {
-            ErrorSource::Lexer if matches!(
-                self.operational_settings.error_handling_strategy,
-                ErrorHandlingStrategy::Halt
-            ) => ErrorSeverity::Fatal,
+            ErrorSource::Lexer
+            | ErrorSource::Parser
+            | ErrorSource::ImportsResolution if is_halt => ErrorSeverity::Fatal,
 
-            ErrorSource::Parser if matches!(
-                self.operational_settings.error_handling_strategy,
-                ErrorHandlingStrategy::Halt
-            ) => ErrorSeverity::Fatal,
-
-            ErrorSource::ImportsResolution if matches!(
-                self.operational_settings.error_handling_strategy,
-                ErrorHandlingStrategy::Halt
-            ) => ErrorSeverity::Fatal,
-
-            ErrorSource::Lexer | ErrorSource::Parser | ErrorSource::ImportsResolution
-            | ErrorSource::AstEnhancement | ErrorSource::ValueResolution
-            | ErrorSource::BinarySerialization | ErrorSource::DLM
-            | ErrorSource::Runtime | ErrorSource::Configuration => ErrorSeverity::Error,
+            ErrorSource::Lexer
+            | ErrorSource::Parser
+            | ErrorSource::ImportsResolution
+            | ErrorSource::AstEnhancement
+            | ErrorSource::ValueResolution
+            | ErrorSource::BinarySerialization
+            | ErrorSource::DLM
+            | ErrorSource::Runtime
+            | ErrorSource::Configuration => ErrorSeverity::Error,
 
             ErrorSource::SemanticAnalyzer => ErrorSeverity::Warning,
 
             _ => ErrorSeverity::Info,
         }
     }
+}
 
+// =============================================================================
+// ErrorManagerInner — add error methods
+// =============================================================================
+
+impl ErrorManagerInner {
     fn add_lexical_error(
         &mut self,
-        error_type: LexicalErrorType,
-        message: String,
-        line: usize,
-        column: usize,
-        suggestion: Option<String>,
+        error_type:  LexicalErrorType,
+        message:     String,
+        line:        usize,
+        column:      usize,
+        suggestion:  Option<String>,
         source_line: Option<String>,
     ) {
         let severity = self.determine_severity(ErrorSource::Lexer);
         let error = LexicalError::new(
-            error_type,
-            message,
-            line,
-            column,
-            suggestion,
-            source_line,
-            severity,
+            error_type, message, line, column, suggestion, source_line, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Error(&format!("[Lexer] {}", error));
+        self.write_log(LogLevel::Error, &format!("[Lexer] {}", error));
         self.lexical_errors.push(error);
         self.has_errors = true;
     }
 
     fn add_parse_error(
         &mut self,
-        error_type: ParseErrorType,
-        message: String,
-        line: usize,
-        column: usize,
-        suggestion: Option<String>,
+        error_type:  ParseErrorType,
+        message:     String,
+        line:        usize,
+        column:      usize,
+        suggestion:  Option<String>,
         source_line: Option<String>,
     ) {
         let severity = self.determine_severity(ErrorSource::Parser);
         let error = ParseError::new(
-            error_type,
-            message,
-            line,
-            column,
-            suggestion,
-            source_line,
-            severity,
+            error_type, message, line, column, suggestion, source_line, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Error(&format!("[Parser] {}", error));
+        self.write_log(LogLevel::Error, &format!("[Parser] {}", error));
         self.parse_errors.push(error);
         self.has_errors = true;
     }
 
     fn add_semantic_error(
         &mut self,
-        error_type: SemanticErrorType,
-        message: String,
-        line: i32,
-        column: i32,
+        error_type:   SemanticErrorType,
+        message:      String,
+        line:         i32,
+        column:       i32,
         section_name: Option<String>,
-        suggestion: Option<String>,
+        suggestion:   Option<String>,
     ) {
         let severity = self.determine_severity(ErrorSource::SemanticAnalyzer);
         let error = SemanticError::new(
-            error_type,
-            message,
-            line,
-            column,
-            section_name,
-            suggestion,
-            severity,
+            error_type, message, line, column, section_name, suggestion, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Warning(&format!("[Semantic] {}", error));
+        self.write_log(LogLevel::Warning, &format!("[Semantic] {}", error));
         self.semantic_errors.push(error);
         self.has_errors = true;
     }
 
     fn add_imports_resolution_error(
         &mut self,
-        error_type: ImportsResolutionErrorType,
-        message: String,
-        import_alias: String,
-        import_path: Option<String>,
-        resolved_path: Option<String>,
+        error_type:     ImportsResolutionErrorType,
+        message:        String,
+        import_alias:   String,
+        import_path:    Option<String>,
+        resolved_path:  Option<String>,
         circular_chain: Option<Vec<String>>,
-        line: i32,
-        column: i32,
-        suggestion: Option<String>,
+        line:           i32,
+        column:         i32,
+        suggestion:     Option<String>,
     ) {
         let severity = self.determine_severity(ErrorSource::ImportsResolution);
         let error = ImportsResolutionError::new(
-            error_type,
-            message,
-            import_alias,
-            import_path,
-            resolved_path,
-            circular_chain,
-            line,
-            column,
-            suggestion,
-            severity,
+            error_type, message, import_alias, import_path, resolved_path,
+            circular_chain, line, column, suggestion, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Error(&format!("[Imports] {}", error));
+        self.write_log(LogLevel::Error, &format!("[Imports] {}", error));
         self.imports_resolution_errors.push(error);
         self.has_errors = true;
     }
 
     fn add_ast_enhancement_error(
         &mut self,
-        error_type: AstEnhancementErrorType,
-        message: String,
-        line: i32,
-        column: i32,
+        error_type:   AstEnhancementErrorType,
+        message:      String,
+        line:         i32,
+        column:       i32,
         section_name: Option<String>,
-        suggestion: Option<String>,
+        suggestion:   Option<String>,
     ) {
         let severity = self.determine_severity(ErrorSource::AstEnhancement);
         let error = AstEnhancementError::new(
-            error_type,
-            message,
-            line,
-            column,
-            section_name,
-            suggestion,
-            severity,
+            error_type, message, line, column, section_name, suggestion, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Error(&format!("[AstEnhancement] {}", error));
+        self.write_log(LogLevel::Error, &format!("[AstEnhancement] {}", error));
         self.ast_enhancement_errors.push(error);
         self.has_errors = true;
     }
 
     fn add_value_resolution_error(
         &mut self,
-        error_type: ValueResolutionErrorType,
-        message: String,
-        line: i32,
-        column: i32,
-        section_name: Option<String>,
+        error_type:    ValueResolutionErrorType,
+        message:       String,
+        line:          i32,
+        column:        i32,
+        section_name:  Option<String>,
         variable_name: Option<String>,
         function_name: Option<String>,
-        suggestion: Option<String>,
+        suggestion:    Option<String>,
     ) {
         let severity = self.determine_severity(ErrorSource::ValueResolution);
         let error = ValueResolutionError::new(
-            error_type,
-            message,
-            line,
-            column,
-            section_name,
-            variable_name,
-            function_name,
-            suggestion,
-            severity,
+            error_type, message, line, column,
+            section_name, variable_name, function_name, suggestion, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Error(&format!("[ValueResolution] {}", error));
+        self.write_log(LogLevel::Error, &format!("[ValueResolution] {}", error));
         self.value_resolution_errors.push(error);
         self.has_errors = true;
     }
 
     fn add_dlm_error(
         &mut self,
-        error_type: DlmErrorType,
-        message: String,
-        library_path: Option<String>,
+        error_type:    DlmErrorType,
+        message:       String,
+        library_path:  Option<String>,
         function_name: Option<String>,
-        suggestion: Option<String>,
-        severity: ErrorSeverity,
+        suggestion:    Option<String>,
+        severity:      ErrorSeverity,
     ) {
         let error = DlmError::new(
-            error_type,
-            message,
-            library_path,
-            function_name,
-            suggestion,
-            severity,
+            error_type, message, library_path, function_name, suggestion, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Error(&format!("[DLM] {}", error));
+        self.write_log(LogLevel::Error, &format!("[DLM] {}", error));
         self.dlm_errors.push(error);
         self.has_errors = true;
     }
 
     fn add_binary_serialization_error(
         &mut self,
-        error_type: BinarySerializationErrorType,
-        message: String,
-        file_path: Option<String>,
+        error_type:       BinarySerializationErrorType,
+        message:          String,
+        file_path:        Option<String>,
         expected_version: Option<String>,
-        actual_version: Option<String>,
-        suggestion: Option<String>,
+        actual_version:   Option<String>,
+        suggestion:       Option<String>,
     ) {
         let severity = self.determine_severity(ErrorSource::BinarySerialization);
         let error = BinarySerializationError::new(
-            error_type,
-            message,
-            file_path,
-            expected_version,
-            actual_version,
-            suggestion,
-            severity,
+            error_type, message, file_path, expected_version, actual_version, suggestion, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Error(&format!("[BinarySerialization] {}", error));
+        self.write_log(LogLevel::Error, &format!("[BinarySerialization] {}", error));
         self.binary_serialization_errors.push(error);
         self.has_errors = true;
     }
 
     fn add_runtime_error(
         &mut self,
-        error_type: RuntimeErrorType,
-        message: String,
+        error_type:    RuntimeErrorType,
+        message:       String,
         function_name: Option<String>,
-        line: i32,
-        column: i32,
-        stack_trace: Vec<String>,
-        suggestion: Option<String>,
+        line:          i32,
+        column:        i32,
+        stack_trace:   Vec<String>,
+        suggestion:    Option<String>,
     ) {
         let severity = self.determine_severity(ErrorSource::Runtime);
         let error = RuntimeError::new(
-            error_type,
-            message,
-            function_name,
-            line,
-            column,
-            stack_trace,
-            suggestion,
-            severity,
+            error_type, message, function_name, line, column, stack_trace, suggestion, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Error(&format!("[Runtime] {}", error));
+        self.write_log(LogLevel::Error, &format!("[Runtime] {}", error));
         self.runtime_errors.push(error);
         self.has_errors = true;
     }
 
     fn add_runtime_error_with_severity(
         &mut self,
-        error_type: RuntimeErrorType,
-        message: String,
+        error_type:    RuntimeErrorType,
+        message:       String,
         function_name: Option<String>,
-        line: i32,
-        column: i32,
-        stack_trace: Vec<String>,
-        suggestion: Option<String>,
-        severity: ErrorSeverity,  // NEW: use provided severity instead of determine_severity
+        line:          i32,
+        column:        i32,
+        stack_trace:   Vec<String>,
+        suggestion:    Option<String>,
+        severity:      ErrorSeverity,
     ) {
         let error = RuntimeError::new(
-            error_type,
-            message,
-            function_name,
-            line,
-            column,
-            stack_trace,
-            suggestion,
-            severity,  // Use provided severity
+            error_type, message, function_name, line, column, stack_trace, suggestion, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Error(&format!("[Runtime] {}", error));
+        self.write_log(LogLevel::Error, &format!("[Runtime] {}", error));
         self.runtime_errors.push(error);
         self.has_errors = true;
     }
+
     fn add_config_error(
         &mut self,
-        error_type: ConfigErrorType,
-        message: String,
-        section_name: Option<String>,
-        field_name: Option<String>,
+        error_type:     ConfigErrorType,
+        message:        String,
+        section_name:   Option<String>,
+        field_name:     Option<String>,
         expected_value: Option<String>,
-        actual_value: Option<String>,
-        line: i32,
-        column: i32,
-        suggestion: Option<String>,
+        actual_value:   Option<String>,
+        line:           i32,
+        column:         i32,
+        suggestion:     Option<String>,
     ) {
         let severity = self.determine_severity(ErrorSource::Configuration);
         let error = ConfigError::new(
-            error_type,
-            message,
-            section_name,
-            field_name,
-            expected_value,
-            actual_value,
-            line,
-            column,
-            suggestion,
-            severity,
+            error_type, message, section_name, field_name,
+            expected_value, actual_value, line, column, suggestion, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Error(&format!("[Config] {}", error));
+        self.write_log(LogLevel::Error, &format!("[Config] {}", error));
         self.config_errors.push(error);
         self.has_errors = true;
     }
 
     fn add_general_error(
         &mut self,
-        error_type: GeneralErrorType,
-        message: String,
-        context: Option<String>,
+        error_type:   GeneralErrorType,
+        message:      String,
+        context:      Option<String>,
         source_error: Option<String>,
-        suggestion: Option<String>,
+        suggestion:   Option<String>,
     ) {
         let severity = self.determine_severity(ErrorSource::General);
         let error = GeneralError::new(
-            error_type,
-            message,
-            context,
-            source_error,
-            suggestion,
-            severity,
+            error_type, message, context, source_error, suggestion, severity,
         );
-
-        let mut logger = self.logger.lock().unwrap();
-        logger.Error(&format!("[General] {}", error));
+        self.write_log(LogLevel::Error, &format!("[General] {}", error));
         self.general_errors.push(error);
         self.has_errors = true;
+    }
+}
+
+// =============================================================================
+// ErrorManagerInner — state queries
+// =============================================================================
+
+impl ErrorManagerInner {
+    fn has_fatal_errors(&self) -> bool {
+        macro_rules! any_fatal {
+            ($($coll:ident),+) => {
+                $(self.$coll.iter().any(|e| e.severity == ErrorSeverity::Fatal))||+
+            }
+        }
+        any_fatal!(
+            lexical_errors,
+            parse_errors,
+            semantic_errors,
+            imports_resolution_errors,
+            ast_enhancement_errors,
+            value_resolution_errors,
+            dlm_errors,
+            binary_serialization_errors,
+            runtime_errors,
+            config_errors,
+            general_errors
+        )
     }
 
     fn clear_errors(&mut self) {
@@ -919,20 +1081,6 @@ impl ErrorManagerInner {
         self.has_errors = false;
     }
 
-    fn has_fatal_errors(&self) -> bool {
-        self.lexical_errors.iter().any(|e| e.severity == ErrorSeverity::Fatal)
-            || self.parse_errors.iter().any(|e| e.severity == ErrorSeverity::Fatal)
-            || self.semantic_errors.iter().any(|e| e.severity == ErrorSeverity::Fatal)
-            || self.imports_resolution_errors.iter().any(|e| e.severity == ErrorSeverity::Fatal)
-            || self.ast_enhancement_errors.iter().any(|e| e.severity == ErrorSeverity::Fatal)
-            || self.value_resolution_errors.iter().any(|e| e.severity == ErrorSeverity::Fatal)
-            || self.dlm_errors.iter().any(|e| e.severity == ErrorSeverity::Fatal)
-            || self.binary_serialization_errors.iter().any(|e| e.severity == ErrorSeverity::Fatal)
-            || self.runtime_errors.iter().any(|e| e.severity == ErrorSeverity::Fatal)
-            || self.config_errors.iter().any(|e| e.severity == ErrorSeverity::Fatal)
-            || self.general_errors.iter().any(|e| e.severity == ErrorSeverity::Fatal)
-    }
-
     fn get_error_counts_by_severity(&self) -> std::collections::HashMap<ErrorSeverity, usize> {
         let mut counts = std::collections::HashMap::new();
         counts.insert(ErrorSeverity::Info, 0);
@@ -940,144 +1088,48 @@ impl ErrorManagerInner {
         counts.insert(ErrorSeverity::Error, 0);
         counts.insert(ErrorSeverity::Fatal, 0);
 
-        for error in &self.lexical_errors {
-            *counts.entry(error.severity).or_insert(0) += 1;
+        macro_rules! count_coll {
+            ($($coll:ident),+) => {
+                $(for e in &self.$coll {
+                    *counts.entry(e.severity).or_insert(0) += 1;
+                })+
+            }
         }
-        for error in &self.parse_errors {
-            *counts.entry(error.severity).or_insert(0) += 1;
-        }
-        for error in &self.semantic_errors {
-            *counts.entry(error.severity).or_insert(0) += 1;
-        }
-        for error in &self.imports_resolution_errors {
-            *counts.entry(error.severity).or_insert(0) += 1;
-        }
-        for error in &self.ast_enhancement_errors {
-            *counts.entry(error.severity).or_insert(0) += 1;
-        }
-        for error in &self.value_resolution_errors {
-            *counts.entry(error.severity).or_insert(0) += 1;
-        }
-        for error in &self.dlm_errors {
-            *counts.entry(error.severity).or_insert(0) += 1;
-        }
-        for error in &self.binary_serialization_errors {
-            *counts.entry(error.severity).or_insert(0) += 1;
-        }
-        for error in &self.runtime_errors {
-            *counts.entry(error.severity).or_insert(0) += 1;
-        }
-        for error in &self.config_errors {
-            *counts.entry(error.severity).or_insert(0) += 1;
-        }
-        for error in &self.general_errors {
-            *counts.entry(error.severity).or_insert(0) += 1;
-        }
+        count_coll!(
+            lexical_errors, parse_errors, semantic_errors,
+            imports_resolution_errors, ast_enhancement_errors,
+            value_resolution_errors, dlm_errors, binary_serialization_errors,
+            runtime_errors, config_errors, general_errors
+        );
 
         counts
     }
 }
 
-// Add to ErrorManager impl block (public interface)
-impl ErrorManager {
-    // ==================== ERROR REPORTING ====================
+// =============================================================================
+// ErrorManagerInner — reporting
+// =============================================================================
 
-    /// Generate a comprehensive error report
-    pub fn generate_error_report(&self) -> String {
-        let inner = self.inner.lock().unwrap();
-        inner.generate_error_report()
-    }
-
-    /// Get all errors as JSON string
-    pub fn get_all_errors_as_json(&self, pretty_print: bool) -> Result<String, String> {
-        let inner = self.inner.lock().unwrap();
-        inner.get_all_errors_as_json(pretty_print)
-    }
-
-    /// Get log contents from logger
-    pub fn get_log_contents(&self) -> String {
-        let inner = self.inner.lock().unwrap();
-        let logger = inner.logger.lock().unwrap();
-        logger.GetLogContents().to_string()
-    }
-
-    // ==================== LOGGING DELEGATION ====================
-
-    /// Log debug message
-    pub fn log_debug(&self, message: &str) {
-        let inner = self.inner.lock().unwrap();
-        let mut logger = inner.logger.lock().unwrap();
-        logger.DebugStr(message);
-    }
-
-    /// Log info message
-    pub fn log_info(&self, message: &str) {
-        let inner = self.inner.lock().unwrap();
-        let mut logger = inner.logger.lock().unwrap();
-        logger.Info(message);
-    }
-
-    /// Log warning message
-    pub fn log_warning(&self, message: &str) {
-        let inner = self.inner.lock().unwrap();
-        let mut logger = inner.logger.lock().unwrap();
-        logger.Warning(message);
-    }
-
-    /// Log error message
-    pub fn log_error(&self, message: &str) {
-        let inner = self.inner.lock().unwrap();
-        let mut logger = inner.logger.lock().unwrap();
-        logger.Error(message);
-    }
-
-    // ==================== DEBUG INFO ====================
-
-    /// Get debug information about ErrorManager state
-    pub fn get_debug_info(&self) -> std::collections::HashMap<String, String> {
-        let inner = self.inner.lock().unwrap();
-
-        let mut info = std::collections::HashMap::new();
-        info.insert("version".to_string(), "1.0.0".to_string());
-        info.insert("has_errors".to_string(), inner.has_errors.to_string());
-        info.insert("error_handling_strategy".to_string(),
-                    format!("{:?}", inner.operational_settings.error_handling_strategy));
-        info.insert("debug_mode".to_string(),
-                    format!("{:?}", inner.operational_settings.debug_mode));
-
-        let total_errors = inner.lexical_errors.len()
-            + inner.parse_errors.len()
-            + inner.semantic_errors.len()
-            + inner.imports_resolution_errors.len()
-            + inner.ast_enhancement_errors.len()
-            + inner.value_resolution_errors.len()
-            + inner.dlm_errors.len()
-            + inner.binary_serialization_errors.len()
-            + inner.runtime_errors.len()
-            + inner.config_errors.len()
-            + inner.general_errors.len();
-
-        info.insert("total_errors".to_string(), total_errors.to_string());
-        info.insert("lexical_errors".to_string(), inner.lexical_errors.len().to_string());
-        info.insert("parse_errors".to_string(), inner.parse_errors.len().to_string());
-        info.insert("semantic_errors".to_string(), inner.semantic_errors.len().to_string());
-        info.insert("imports_errors".to_string(), inner.imports_resolution_errors.len().to_string());
-
-        info
-    }
-}
-
-// Add to ErrorManagerInner impl block (internal methods)
 impl ErrorManagerInner {
     fn generate_error_report(&self) -> String {
-        use std::fmt::Write;
-
         let mut report = String::new();
 
         writeln!(report, "=== DixScript Error Report v1.0.0 ===").unwrap();
-        writeln!(report, "Generated: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")).unwrap();
-        writeln!(report, "Error Handling Strategy: {:?}", self.operational_settings.error_handling_strategy).unwrap();
-        writeln!(report, "Debug Mode: {:?}", self.operational_settings.debug_mode).unwrap();
+        writeln!(
+            report,
+            "Generated: {}",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        ).unwrap();
+        writeln!(
+            report,
+            "Error Handling Strategy: {:?}",
+            self.operational_settings.error_handling_strategy
+        ).unwrap();
+        writeln!(
+            report,
+            "Debug Mode: {:?}",
+            self.operational_settings.debug_mode
+        ).unwrap();
         writeln!(report).unwrap();
 
         if !self.has_errors {
@@ -1085,107 +1137,31 @@ impl ErrorManagerInner {
             return report;
         }
 
-        // Config errors
-        if !self.config_errors.is_empty() {
-            writeln!(report, "=== Configuration Errors ===").unwrap();
-            for error in &self.config_errors {
-                writeln!(report, "{}", error).unwrap();
-                writeln!(report).unwrap();
+        macro_rules! write_section {
+            ($coll:expr, $header:expr) => {
+                if !$coll.is_empty() {
+                    writeln!(report, "=== {} ===", $header).unwrap();
+                    for e in &$coll {
+                        writeln!(report, "{}", e).unwrap();
+                        writeln!(report).unwrap();
+                    }
+                }
             }
         }
 
-        // Lexical errors
-        if !self.lexical_errors.is_empty() {
-            writeln!(report, "=== Lexical Errors ===").unwrap();
-            for error in &self.lexical_errors {
-                writeln!(report, "{}", error).unwrap();
-                writeln!(report).unwrap();
-            }
-        }
+        write_section!(self.config_errors,               "Configuration Errors");
+        write_section!(self.lexical_errors,              "Lexical Errors");
+        write_section!(self.parse_errors,                "Parse Errors");
+        write_section!(self.imports_resolution_errors,   "Imports Resolution Errors");
+        write_section!(self.semantic_errors,             "Semantic Errors");
+        write_section!(self.ast_enhancement_errors,      "AST Enhancement Errors");
+        write_section!(self.value_resolution_errors,     "Value Resolution Errors");
+        write_section!(self.dlm_errors,                  "DLM Errors");
+        write_section!(self.binary_serialization_errors, "Binary Serialization Errors");
+        write_section!(self.runtime_errors,              "Runtime Errors");
+        write_section!(self.general_errors,              "General Errors");
 
-        // Parse errors
-        if !self.parse_errors.is_empty() {
-            writeln!(report, "=== Parse Errors ===").unwrap();
-            for error in &self.parse_errors {
-                writeln!(report, "{}", error).unwrap();
-                writeln!(report).unwrap();
-            }
-        }
-
-        // Imports resolution errors
-        if !self.imports_resolution_errors.is_empty() {
-            writeln!(report, "=== Imports Resolution Errors ===").unwrap();
-            for error in &self.imports_resolution_errors {
-                writeln!(report, "{}", error).unwrap();
-                writeln!(report).unwrap();
-            }
-        }
-
-        // Semantic errors
-        if !self.semantic_errors.is_empty() {
-            writeln!(report, "=== Semantic Errors ===").unwrap();
-            for error in &self.semantic_errors {
-                writeln!(report, "{}", error).unwrap();
-                writeln!(report).unwrap();
-            }
-        }
-
-        // AST enhancement errors
-        if !self.ast_enhancement_errors.is_empty() {
-            writeln!(report, "=== AST Enhancement Errors ===").unwrap();
-            for error in &self.ast_enhancement_errors {
-                writeln!(report, "{}", error).unwrap();
-                writeln!(report).unwrap();
-            }
-        }
-
-        // Value resolution errors
-        if !self.value_resolution_errors.is_empty() {
-            writeln!(report, "=== Value Resolution Errors ===").unwrap();
-            for error in &self.value_resolution_errors {
-                writeln!(report, "{}", error).unwrap();
-                writeln!(report).unwrap();
-            }
-        }
-
-        // DLM errors
-        if !self.dlm_errors.is_empty() {
-            writeln!(report, "=== DLM Errors ===").unwrap();
-            for error in &self.dlm_errors {
-                writeln!(report, "{}", error).unwrap();
-                writeln!(report).unwrap();
-            }
-        }
-
-        // Binary serialization errors
-        if !self.binary_serialization_errors.is_empty() {
-            writeln!(report, "=== Binary Serialization Errors ===").unwrap();
-            for error in &self.binary_serialization_errors {
-                writeln!(report, "{}", error).unwrap();
-                writeln!(report).unwrap();
-            }
-        }
-
-        // Runtime errors
-        if !self.runtime_errors.is_empty() {
-            writeln!(report, "=== Runtime Errors ===").unwrap();
-            for error in &self.runtime_errors {
-                writeln!(report, "{}", error).unwrap();
-                writeln!(report).unwrap();
-            }
-        }
-
-        // General errors
-        if !self.general_errors.is_empty() {
-            writeln!(report, "=== General Errors ===").unwrap();
-            for error in &self.general_errors {
-                writeln!(report, "{}", error).unwrap();
-                writeln!(report).unwrap();
-            }
-        }
-
-        // Summary
-        let total_errors = self.lexical_errors.len()
+        let total = self.lexical_errors.len()
             + self.parse_errors.len()
             + self.semantic_errors.len()
             + self.imports_resolution_errors.len()
@@ -1198,18 +1174,18 @@ impl ErrorManagerInner {
             + self.general_errors.len();
 
         writeln!(report, "=== Summary ===").unwrap();
-        writeln!(report, "Total errors: {}", total_errors).unwrap();
-        writeln!(report, "Config: {}", self.config_errors.len()).unwrap();
-        writeln!(report, "Lexical: {}", self.lexical_errors.len()).unwrap();
-        writeln!(report, "Parse: {}", self.parse_errors.len()).unwrap();
-        writeln!(report, "ImportsResolution: {}", self.imports_resolution_errors.len()).unwrap();
-        writeln!(report, "Semantic: {}", self.semantic_errors.len()).unwrap();
-        writeln!(report, "AstEnhancement: {}", self.ast_enhancement_errors.len()).unwrap();
-        writeln!(report, "ValueResolution: {}", self.value_resolution_errors.len()).unwrap();
-        writeln!(report, "DLM: {}", self.dlm_errors.len()).unwrap();
-        writeln!(report, "BinarySerialization: {}", self.binary_serialization_errors.len()).unwrap();
-        writeln!(report, "Runtime: {}", self.runtime_errors.len()).unwrap();
-        writeln!(report, "General: {}", self.general_errors.len()).unwrap();
+        writeln!(report, "Total errors:          {}", total).unwrap();
+        writeln!(report, "Config:                {}", self.config_errors.len()).unwrap();
+        writeln!(report, "Lexical:               {}", self.lexical_errors.len()).unwrap();
+        writeln!(report, "Parse:                 {}", self.parse_errors.len()).unwrap();
+        writeln!(report, "ImportsResolution:     {}", self.imports_resolution_errors.len()).unwrap();
+        writeln!(report, "Semantic:              {}", self.semantic_errors.len()).unwrap();
+        writeln!(report, "AstEnhancement:        {}", self.ast_enhancement_errors.len()).unwrap();
+        writeln!(report, "ValueResolution:       {}", self.value_resolution_errors.len()).unwrap();
+        writeln!(report, "DLM:                   {}", self.dlm_errors.len()).unwrap();
+        writeln!(report, "BinarySerialization:   {}", self.binary_serialization_errors.len()).unwrap();
+        writeln!(report, "Runtime:               {}", self.runtime_errors.len()).unwrap();
+        writeln!(report, "General:               {}", self.general_errors.len()).unwrap();
 
         report
     }
@@ -1217,7 +1193,7 @@ impl ErrorManagerInner {
     fn get_all_errors_as_json(&self, pretty_print: bool) -> Result<String, String> {
         use serde_json::json;
 
-        let total_errors = self.lexical_errors.len()
+        let total = self.lexical_errors.len()
             + self.parse_errors.len()
             + self.semantic_errors.len()
             + self.imports_resolution_errors.len()
@@ -1229,80 +1205,101 @@ impl ErrorManagerInner {
             + self.config_errors.len()
             + self.general_errors.len();
 
-        let error_data = json!({
+        let payload = json!({
             "timestamp": chrono::Local::now().to_rfc3339(),
             "error_handling_strategy": format!("{:?}", self.operational_settings.error_handling_strategy),
             "debug_mode": format!("{:?}", self.operational_settings.debug_mode),
             "summary": {
-                "total_errors": total_errors,
-                "config": self.config_errors.len(),
-                "lexical": self.lexical_errors.len(),
-                "parse": self.parse_errors.len(),
-                "imports_resolution": self.imports_resolution_errors.len(),
-                "semantic": self.semantic_errors.len(),
-                "ast_enhancement": self.ast_enhancement_errors.len(),
-                "value_resolution": self.value_resolution_errors.len(),
-                "dlm": self.dlm_errors.len(),
-                "binary_serialization": self.binary_serialization_errors.len(),
-                "runtime": self.runtime_errors.len(),
-                "general": self.general_errors.len(),
+                "total_errors":          total,
+                "config":                self.config_errors.len(),
+                "lexical":               self.lexical_errors.len(),
+                "parse":                 self.parse_errors.len(),
+                "imports_resolution":    self.imports_resolution_errors.len(),
+                "semantic":              self.semantic_errors.len(),
+                "ast_enhancement":       self.ast_enhancement_errors.len(),
+                "value_resolution":      self.value_resolution_errors.len(),
+                "dlm":                   self.dlm_errors.len(),
+                "binary_serialization":  self.binary_serialization_errors.len(),
+                "runtime":               self.runtime_errors.len(),
+                "general":               self.general_errors.len(),
             },
             "errors": {
                 "config": self.config_errors.iter().map(|e| json!({
-                    "error_id": e.error_id,
-                    "type": format!("{:?}", e.error_type),
-                    "severity": format!("{:?}", e.severity),
-                    "message": e.message,
+                    "error_id":    e.error_id,
+                    "type":        format!("{:?}", e.error_type),
+                    "severity":    format!("{:?}", e.severity),
+                    "message":     e.message,
                     "section_name": e.section_name,
-                    "field_name": e.field_name,
-                    "line": e.line,
-                    "column": e.column,
-                    "suggestion": e.suggestion,
+                    "field_name":  e.field_name,
+                    "line":        e.line,
+                    "column":      e.column,
+                    "suggestion":  e.suggestion,
                 })).collect::<Vec<_>>(),
 
                 "lexical": self.lexical_errors.iter().map(|e| json!({
                     "error_id": e.error_id,
-                    "type": format!("{:?}", e.error_type),
+                    "type":     format!("{:?}", e.error_type),
                     "severity": format!("{:?}", e.severity),
-                    "message": e.message,
-                    "line": e.line,
-                    "column": e.column,
+                    "message":  e.message,
+                    "line":     e.line,
+                    "column":   e.column,
                     "suggestion": e.suggestion,
                 })).collect::<Vec<_>>(),
 
                 "parse": self.parse_errors.iter().map(|e| json!({
-                    "error_id": e.error_id,
-                    "type": format!("{:?}", e.error_type),
-                    "severity": format!("{:?}", e.severity),
-                    "message": e.message,
-                    "line": e.line,
-                    "column": e.column,
+                    "error_id":   e.error_id,
+                    "type":       format!("{:?}", e.error_type),
+                    "severity":   format!("{:?}", e.severity),
+                    "message":    e.message,
+                    "line":       e.line,
+                    "column":     e.column,
                     "suggestion": e.suggestion,
                     "quick_fixes": e.quick_fixes,
                 })).collect::<Vec<_>>(),
 
                 "imports_resolution": self.imports_resolution_errors.iter().map(|e| json!({
-                    "error_id": e.error_id,
-                    "type": format!("{:?}", e.error_type),
-                    "severity": format!("{:?}", e.severity),
-                    "message": e.message,
-                    "import_alias": e.import_alias,
-                    "import_path": e.import_path,
+                    "error_id":      e.error_id,
+                    "type":          format!("{:?}", e.error_type),
+                    "severity":      format!("{:?}", e.severity),
+                    "message":       e.message,
+                    "import_alias":  e.import_alias,
+                    "import_path":   e.import_path,
                     "resolved_path": e.resolved_path,
                     "circular_chain": e.circular_chain,
-                    "line": e.line,
-                    "column": e.column,
-                    "suggestion": e.suggestion,
+                    "line":          e.line,
+                    "column":        e.column,
+                    "suggestion":    e.suggestion,
+                })).collect::<Vec<_>>(),
+
+                "semantic": self.semantic_errors.iter().map(|e| json!({
+                    "error_id":    e.error_id,
+                    "type":        format!("{:?}", e.error_type),
+                    "severity":    format!("{:?}", e.severity),
+                    "message":     e.message,
+                    "line":        e.line,
+                    "column":      e.column,
+                    "suggestion":  e.suggestion,
+                })).collect::<Vec<_>>(),
+
+                "runtime": self.runtime_errors.iter().map(|e| json!({
+                    "error_id":    e.error_id,
+                    "type":        format!("{:?}", e.error_type),
+                    "severity":    format!("{:?}", e.severity),
+                    "message":     e.message,
+                    "line":        e.line,
+                    "column":      e.column,
+                    "suggestion":  e.suggestion,
+                    "stack_trace": e.stack_trace,
                 })).collect::<Vec<_>>(),
             }
         });
 
         if pretty_print {
-            serde_json::to_string_pretty(&error_data)
+            serde_json::to_string_pretty(&payload)
                 .map_err(|e| format!("JSON serialization error: {}", e))
         } else {
-            serde_json::to_string(&error_data)
+            serde_json::to_string(&payload)
                 .map_err(|e| format!("JSON serialization error: {}", e))
         }
     }
-}
+            }

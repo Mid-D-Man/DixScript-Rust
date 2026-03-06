@@ -1,4 +1,4 @@
-// mdix-cli/src/commands/config.rs
+// dixscript-cli/src/commands/config.rs
 
 use clap::{Args, Subcommand};
 use crate::commands::{handle_error, GlobalOpts};

@@ -1,13 +1,13 @@
-// mdix-cli/tests/config_tests.rs
+// dixscript-cli/tests/config_tests.rs
 //
-// These tests mutate ~/.mdix/config.toml so each test resets the key it
+// These tests mutate ~/.dixscript/config.toml so each test resets the key it
 // touches before and after to avoid cross-test pollution.
 
 use assert_cmd::Command;
 use predicates::prelude::*;
 
 fn mdix() -> Command {
-    Command::cargo_bin("mdix").unwrap()
+    Command::cargo_bin("dixscript").unwrap()
 }
 
 fn reset_key(key: &str) {

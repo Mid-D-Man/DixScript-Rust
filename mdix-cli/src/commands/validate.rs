@@ -1,4 +1,4 @@
-// mdix-cli/src/commands/validate.rs
+// dixscript-cli/src/commands/validate.rs
 
 use std::path::PathBuf;
 use clap::Args;
@@ -9,7 +9,7 @@ use crate::services::validation;
 
 #[derive(Args)]
 pub struct ValidateArgs {
-    /// Path to the .mdix file
+    /// Path to the .dixscript file
     pub file: PathBuf,
 
     /// Treat warnings as errors

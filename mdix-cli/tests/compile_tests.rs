@@ -1,4 +1,4 @@
-// mdix-cli/tests/compile_tests.rs
+// dixscript-cli/tests/compile_tests.rs
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -6,7 +6,7 @@ use std::path::Path;
 use tempfile::TempDir;
 
 fn mdix() -> Command {
-    Command::cargo_bin("mdix").unwrap()
+    Command::cargo_bin("dixscript").unwrap()
 }
 
 fn fixture(name: &str) -> String {
@@ -25,7 +25,7 @@ fn compile_basic_exits_zero() {
     mdix()
         .args([
             "compile",
-            &fixture("basic.mdix"),
+            &fixture("basic.dixscript"),
             "-o",
             tmp.path().to_str().unwrap(),
         ])
@@ -40,7 +40,7 @@ fn compile_with_enums_exits_zero() {
     mdix()
         .args([
             "compile",
-            &fixture("with_enums.mdix"),
+            &fixture("with_enums.dixscript"),
             "-o",
             tmp.path().to_str().unwrap(),
         ])
@@ -55,7 +55,7 @@ fn compile_with_functions_exits_zero() {
     mdix()
         .args([
             "compile",
-            &fixture("with_functions.mdix"),
+            &fixture("with_functions.dixscript"),
             "-o",
             tmp.path().to_str().unwrap(),
         ])
@@ -70,13 +70,13 @@ fn compile_prints_source_path() {
     mdix()
         .args([
             "compile",
-            &fixture("basic.mdix"),
+            &fixture("basic.dixscript"),
             "-o",
             tmp.path().to_str().unwrap(),
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("basic.mdix").or(predicate::str::contains("Compiled")));
+        .stdout(predicate::str::contains("basic.dixscript").or(predicate::str::contains("Compiled")));
 }
 
 // ── Failure cases ─────────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ fn compile_prints_source_path() {
 #[test]
 fn compile_missing_file_exits_two() {
     mdix()
-        .args(["compile", "does_not_exist.mdix"])
+        .args(["compile", "does_not_exist.dixscript"])
         .assert()
         .failure()
         .code(2);
@@ -96,7 +96,7 @@ fn compile_invalid_syntax_exits_nonzero() {
     mdix()
         .args([
             "compile",
-            &fixture("invalid_syntax.mdix"),
+            &fixture("invalid_syntax.dixscript"),
             "-o",
             tmp.path().to_str().unwrap(),
         ])
@@ -113,7 +113,7 @@ fn compile_json_flag_produces_valid_json() {
         .args([
             "compile",
             "--json",
-            &fixture("basic.mdix"),
+            &fixture("basic.dixscript"),
             "-o",
             tmp.path().to_str().unwrap(),
         ])
@@ -134,7 +134,7 @@ fn compile_json_flag_produces_valid_json() {
 #[test]
 fn inspect_after_compile_shows_data_section() {
     mdix()
-        .args(["inspect", &fixture("basic.mdix")])
+        .args(["inspect", &fixture("basic.dixscript")])
         .assert()
         .success()
         .stdout(predicate::str::contains("@DATA"));

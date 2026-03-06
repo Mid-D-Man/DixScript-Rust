@@ -1,5 +1,5 @@
-// mdix-cli/src/config/manager.rs
-//! Loads and saves CliConfig at ~/.mdix/config.toml.
+// dixscript-cli/src/config/manager.rs
+//! Loads and saves CliConfig at ~/.dixscript/config.toml.
 //!
 //! The config directory is created on first write. Reads return defaults if
 //! the file does not yet exist, so the CLI works out of the box without any
@@ -12,14 +12,14 @@ use super::cli_config::CliConfig;
 pub struct ConfigManager;
 
 impl ConfigManager {
-    /// Return the path to the config directory (~/.mdix/).
+    /// Return the path to the config directory (~/.dixscript/).
     pub fn config_dir() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".mdix")
+            .join(".dixscript")
     }
 
-    /// Return the path to the config file (~/.mdix/config.toml).
+    /// Return the path to the config file (~/.dixscript/config.toml).
     pub fn config_path() -> PathBuf {
         Self::config_dir().join("config.toml")
     }

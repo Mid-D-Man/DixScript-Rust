@@ -1,4 +1,4 @@
-// mdix-cli/src/services/file_io.rs
+// dixscript-cli/src/services/file_io.rs
 //! File read/write helpers with `CliError` error mapping.
 
 use std::path::{Path, PathBuf};
@@ -26,14 +26,14 @@ pub fn ensure_dir(path: &Path) -> Result<(), CliError> {
 
 /// Derive a default output path by replacing `input`'s extension.
 ///
-/// `mdix convert foo.json --to mdix` → `foo.mdix`
+/// `dixscript convert foo.json --to dixscript` → `foo.dixscript`
 pub fn default_output_path(input: &Path, new_ext: &str) -> PathBuf {
     input.with_extension(new_ext)
 }
 
 /// Derive an output path with a suffix inserted before the extension.
 ///
-/// `compact("foo.mdix", "compact")` → `foo.compact.mdix`
+/// `compact("foo.dixscript", "compact")` → `foo.compact.dixscript`
 pub fn suffixed_output_path(input: &Path, suffix: &str) -> PathBuf {
     let stem = input
         .file_stem()
@@ -42,15 +42,15 @@ pub fn suffixed_output_path(input: &Path, suffix: &str) -> PathBuf {
     let ext = input
         .extension()
         .and_then(|s| s.to_str())
-        .unwrap_or("mdix");
+        .unwrap_or("dixscript");
     let parent = input.parent().unwrap_or(Path::new("."));
     parent.join(format!("{}.{}.{}", stem, suffix, ext))
 }
 
-/// Return `CliError::InvalidArgument` if `path` does not end in `.mdix`.
+/// Return `CliError::InvalidArgument` if `path` does not end in `.dixscript`.
 pub fn validate_mdix_extension(path: &Path) -> Result<(), CliError> {
     match path.extension().and_then(|e| e.to_str()) {
-        Some("mdix") => Ok(()),
+        Some("dixscript") => Ok(()),
         _ => Err(CliError::InvalidArgument(format!(
             "'{}' does not have a .mdix extension",
             path.display()
@@ -58,13 +58,13 @@ pub fn validate_mdix_extension(path: &Path) -> Result<(), CliError> {
     }
 }
 
-/// Return `CliError::InvalidArgument` if `path` does not end in `.mdix.enc`.
+/// Return `CliError::InvalidArgument` if `path` does not end in `.dixscript.enc`.
 pub fn validate_enc_extension(path: &Path) -> Result<(), CliError> {
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("");
-    if name.ends_with(".mdix.enc") {
+    if name.ends_with(".dixscript.enc") {
         Ok(())
     } else {
         Err(CliError::InvalidArgument(format!(

@@ -1,4 +1,4 @@
-// mdix-cli/src/commands/format.rs
+// dixscript-cli/src/commands/format.rs
 
 use std::path::PathBuf;
 use clap::Args;
@@ -10,7 +10,7 @@ use dixscript::Runtime::{DixConverter, DixFormatOptions, DixLoader, DixLoadOptio
 
 #[derive(Args)]
 pub struct FormatArgs {
-    /// Path to the .mdix file
+    /// Path to the .dixscript file
     pub file: PathBuf,
 
     /// Write formatted output to this path instead of overwriting input

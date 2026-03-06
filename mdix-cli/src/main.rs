@@ -1,4 +1,4 @@
-// mdix-cli/src/main.rs
+// dixscript-cli/src/main.rs
 //! Entry point — parses global flags, dispatches to subcommands.
 
 mod commands;
@@ -15,9 +15,9 @@ use commands::{
 
 #[derive(Parser)]
 #[command(
-    name = "mdix",
+    name = "dixscript",
     version = "1.0.0",
-    about = "DixScript (.mdix) file toolchain",
+    about = "DixScript (.dixscript) file toolchain",
     long_about = None,
 )]
 pub struct Cli {
@@ -43,21 +43,21 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Validate a .mdix file without compiling
+    /// Validate a .dixscript file without compiling
     Validate(ValidateArgs),
-    /// Compile a .mdix file through the full pipeline
+    /// Compile a .dixscript file through the full pipeline
     Compile(CompileArgs),
-    /// Decrypt a .mdix.enc file
+    /// Decrypt a .dixscript.enc file
     Decrypt(DecryptArgs),
-    /// Convert between .mdix and other formats (json, toml, yaml)
+    /// Convert between .dixscript and other formats (json, toml, yaml)
     Convert(ConvertArgs),
-    /// Create a new .mdix file from a template
+    /// Create a new .dixscript file from a template
     Create(CreateArgs),
-    /// Format a .mdix file in-place
+    /// Format a .dixscript file in-place
     Format(FormatArgs),
-    /// Compact or minify a .mdix file
+    /// Compact or minify a .dixscript file
     Compact(CompactArgs),
-    /// Inspect the structure of a .mdix file
+    /// Inspect the structure of a .dixscript file
     Inspect(InspectArgs),
     /// Key file management
     Key(KeyArgs),

@@ -1,4 +1,4 @@
-// mdix-cli/src/services/compilation.rs
+// dixscript-cli/src/services/compilation.rs
 //! Wraps the full dixscript compilation and load pipeline.
 
 use std::path::Path;
@@ -54,7 +54,7 @@ pub fn compile(path: &Path, opts: &CompileOpts) -> Result<CompileResult, CliErro
     })
 }
 
-/// Decrypt a `.mdix.enc` file and write the restored binary/text to disk.
+/// Decrypt a `.dixscript.enc` file and write the restored binary/text to disk.
 pub struct DecryptResult {
     pub source_path:    String,
     pub output_path:    String,

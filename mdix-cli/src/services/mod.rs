@@ -1,4 +1,4 @@
-// mdix-cli/src/services/mod.rs
+// dixscript-cli/src/services/mod.rs
 //! Services wrap dixscript library calls and return `CliError` on failure.
 
 pub mod compilation;

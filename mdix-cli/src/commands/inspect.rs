@@ -1,4 +1,4 @@
-// mdix-cli/src/commands/inspect.rs
+// dixscript-cli/src/commands/inspect.rs
 
 use std::path::PathBuf;
 use clap::Args;
@@ -10,7 +10,7 @@ use dixscript::Runtime::{DixLoader, DixLoadOptions};
 
 #[derive(Args)]
 pub struct InspectArgs {
-    /// Path to the .mdix file
+    /// Path to the .dixscript file
     pub file: PathBuf,
 
     /// Show only section summary

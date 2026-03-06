@@ -1,4 +1,4 @@
-// mdix-cli/src/commands/decrypt.rs
+// dixscript-cli/src/commands/decrypt.rs
 
 use std::path::PathBuf;
 use clap::Args;
@@ -10,7 +10,7 @@ use crate::services::file_io;
 
 #[derive(Args)]
 pub struct DecryptArgs {
-    /// Path to the .mdix.enc file
+    /// Path to the .dixscript.enc file
     pub file: PathBuf,
 
     /// Explicit key file path (auto-detected if omitted)

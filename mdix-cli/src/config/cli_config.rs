@@ -1,4 +1,4 @@
-// mdix-cli/src/config/cli_config.rs
+// dixscript-cli/src/config/cli_config.rs
 //! CliConfig struct — all user-adjustable preferences with serde defaults.
 
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ pub struct CliConfig {
     /// Enable colored terminal output
     pub color_output: bool,
 
-    /// Automatically search for .mdix.key files next to encrypted files
+    /// Automatically search for .dixscript.key files next to encrypted files
     pub auto_find_key_files: bool,
 
     /// Additional directories to search for key files

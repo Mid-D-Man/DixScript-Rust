@@ -1,4 +1,4 @@
-// mdix-cli/src/commands/key.rs
+// dixscript-cli/src/commands/key.rs
 
 use clap::{Args, Subcommand};
 use serde::Serialize;
@@ -14,18 +14,18 @@ pub struct KeyArgs {
 
 #[derive(Subcommand)]
 pub enum KeySubcommand {
-    /// Generate a new .mdix.key file
+    /// Generate a new .dixscript.key file
     Generate(KeyGenerateArgs),
-    /// Validate an existing .mdix.key file
+    /// Validate an existing .dixscript.key file
     Validate(KeyValidateArgs),
-    /// Show metadata from a .mdix.key file
+    /// Show metadata from a .dixscript.key file
     Info(KeyInfoArgs),
 }
 
 #[derive(Args)]
 pub struct KeyGenerateArgs {
     /// Output path for the generated key file
-    #[arg(long, default_value = "output.mdix.key")]
+    #[arg(long, default_value = "output.dixscript.key")]
     pub output: String,
 
     /// Encryption algorithm: aes128 | aes256 | chacha20
@@ -39,13 +39,13 @@ pub struct KeyGenerateArgs {
 
 #[derive(Args)]
 pub struct KeyValidateArgs {
-    /// Path to the .mdix.key file
+    /// Path to the .dixscript.key file
     pub keyfile: String,
 }
 
 #[derive(Args)]
 pub struct KeyInfoArgs {
-    /// Path to the .mdix.key file
+    /// Path to the .dixscript.key file
     pub keyfile: String,
 }
 

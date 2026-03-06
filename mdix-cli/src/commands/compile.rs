@@ -1,4 +1,4 @@
-// mdix-cli/src/commands/compile.rs
+// dixscript-cli/src/commands/compile.rs
 
 use std::path::PathBuf;
 use clap::Args;
@@ -9,7 +9,7 @@ use crate::services::compilation::{self, CompileOpts};
 
 #[derive(Args)]
 pub struct CompileArgs {
-    /// Path to the .mdix file
+    /// Path to the .dixscript file
     pub file: PathBuf,
 
     /// Output directory for generated files

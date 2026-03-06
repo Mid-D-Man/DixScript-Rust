@@ -1,4 +1,4 @@
-// mdix-cli/src/services/key_service.rs
+// dixscript-cli/src/services/key_service.rs
 //! Wraps KeyFileManager for key generation and inspection.
 
 use std::path::Path;
@@ -20,7 +20,7 @@ pub struct KeyInfo {
     pub created:         String,
 }
 
-/// Generate a new `.mdix.key` file.
+/// Generate a new `.dixscript.key` file.
 pub fn generate_key_file(
     output_path: &str,
     algorithm: &str,
@@ -53,7 +53,7 @@ pub fn generate_key_file(
     })
 }
 
-/// Validate an existing `.mdix.key` file.
+/// Validate an existing `.dixscript.key` file.
 pub fn validate_key_file(key_path: &str) -> Result<(), CliError> {
     if !Path::new(key_path).exists() {
         return Err(CliError::FileNotFound(Path::new(key_path).to_path_buf()));
@@ -73,7 +73,7 @@ pub fn validate_key_file(key_path: &str) -> Result<(), CliError> {
     Ok(())
 }
 
-/// Read metadata from a `.mdix.key` file without validation.
+/// Read metadata from a `.dixscript.key` file without validation.
 pub fn get_key_info(key_path: &str) -> Result<KeyInfo, CliError> {
     if !Path::new(key_path).exists() {
         return Err(CliError::FileNotFound(Path::new(key_path).to_path_buf()));

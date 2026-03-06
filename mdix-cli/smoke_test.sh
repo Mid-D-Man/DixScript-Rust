@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# mdix-cli/smoke_test.sh
+# dixscript-cli/smoke_test.sh
 #
 # Quick end-to-end sanity check. Run after every significant change:
 #   chmod +x smoke_test.sh
 #   ./smoke_test.sh
 #
-# Requires: cargo build -p mdix-cli before running.
+# Requires: cargo build -p dixscript-cli before running.
 
 set -euo pipefail
 
@@ -119,7 +119,7 @@ fi
 
 MDIX_RT="$SCRATCH/recovered.mdix"
 run_expect_ok "convert json→mdix exits 0" \
-    convert "$JSON_FILE" --to mdix -o "$MDIX_RT"
+    convert "$JSON_FILE" --to dixscript -o "$MDIX_RT"
 
 run_expect_exit "convert unknown format exits 4" 4 \
     convert "$FIXTURES/basic.mdix" --to xyz -o "$SCRATCH/out.xyz"

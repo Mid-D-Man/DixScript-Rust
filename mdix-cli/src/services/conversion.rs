@@ -1,4 +1,4 @@
-// mdix-cli/src/services/conversion.rs
+// dixscript-cli/src/services/conversion.rs
 //! Wraps DixConverter for cross-format conversion.
 
 use std::path::Path;
@@ -17,7 +17,7 @@ pub enum Format {
 impl Format {
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_lowercase().as_str() {
-            "mdix"        => Some(Format::Mdix),
+            "dixscript"        => Some(Format::Mdix),
             "json"        => Some(Format::Json),
             "toml"        => Some(Format::Toml),
             _             => None,
@@ -26,7 +26,7 @@ impl Format {
 
     pub fn extension(&self) -> &'static str {
         match self {
-            Format::Mdix => "mdix",
+            Format::Mdix => "dixscript",
             Format::Json => "json",
             Format::Toml => "toml",
         }
@@ -38,7 +38,7 @@ impl std::str::FromStr for Format {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "mdix" => Ok(Format::Mdix),
+            "dixscript" => Ok(Format::Mdix),
             "json" => Ok(Format::Json),
             "toml" => Ok(Format::Toml),
             other  => Err(format!("Unsupported format: '{}'", other)),

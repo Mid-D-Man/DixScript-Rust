@@ -542,17 +542,17 @@ cargo install dixscript
 
 **Basic usage:**
 ```bash
-# Compile a .mdix file
-dixscript compile config.mdix
+# Compile a .dixscript file
+dixscript compile config.dixscript
 
 # With encryption
-dixscript compile secrets.mdix --password
+dixscript compile secrets.dixscript --password
 
 # Validate syntax
-dixscript validate config.mdix
+dixscript validate config.dixscript
 
 # Convert from JSON
-dixscript convert config.json --to mdix
+dixscript convert config.json --to dixscript
 ```
 
 **In your Rust code:**
@@ -560,7 +560,7 @@ dixscript convert config.json --to mdix
 use dixscript::runtime::Dix;
 
 fn main() {
-    let result = Dix::load("config.mdix");
+    let result = Dix::load("config.dixscript");
     
     match result {
         Ok(data) => {

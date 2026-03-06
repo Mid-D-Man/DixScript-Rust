@@ -1,4 +1,4 @@
-// mdix-cli/tests/convert_tests.rs
+// dixscript-cli/tests/convert_tests.rs
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -6,7 +6,7 @@ use std::path::Path;
 use tempfile::TempDir;
 
 fn mdix() -> Command {
-    Command::cargo_bin("mdix").unwrap()
+    Command::cargo_bin("dixscript").unwrap()
 }
 
 fn fixture(name: &str) -> String {
@@ -17,14 +17,14 @@ fn fixture(name: &str) -> String {
         .to_string()
 }
 
-// ── mdix → json ───────────────────────────────────────────────────────────────
+// ── dixscript → json ───────────────────────────────────────────────────────────────
 
 #[test]
 fn convert_mdix_to_json_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let out = tmp.path().join("output.json").to_string_lossy().to_string();
     mdix()
-        .args(["convert", &fixture("basic.mdix"), "--to", "json", "-o", &out])
+        .args(["convert", &fixture("basic.dixscript"), "--to", "json", "-o", &out])
         .assert()
         .success()
         .code(0);
@@ -37,7 +37,7 @@ fn convert_mdix_to_json_produces_valid_json() {
     let out = out_path.to_string_lossy().to_string();
 
     mdix()
-        .args(["convert", &fixture("basic.mdix"), "--to", "json", "-o", &out])
+        .args(["convert", &fixture("basic.dixscript"), "--to", "json", "-o", &out])
         .assert()
         .success();
 
@@ -54,7 +54,7 @@ fn convert_mdix_to_json_contains_expected_keys() {
     let out = out_path.to_string_lossy().to_string();
 
     mdix()
-        .args(["convert", &fixture("basic.mdix"), "--to", "json", "-o", &out])
+        .args(["convert", &fixture("basic.dixscript"), "--to", "json", "-o", &out])
         .assert()
         .success();
 
@@ -62,31 +62,31 @@ fn convert_mdix_to_json_contains_expected_keys() {
     assert!(content.contains("app_name") || content.contains("port"));
 }
 
-// ── json → mdix ───────────────────────────────────────────────────────────────
+// ── json → dixscript ───────────────────────────────────────────────────────────────
 
 #[test]
 fn convert_json_to_mdix_exits_zero() {
     let tmp = TempDir::new().unwrap();
 
-    // First produce a JSON file from basic.mdix
+    // First produce a JSON file from basic.dixscript
     let json_path = tmp.path().join("basic.json");
     mdix()
         .args([
             "convert",
-            &fixture("basic.mdix"),
+            &fixture("basic.dixscript"),
             "--to", "json",
             "-o", json_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    // Then convert it back to mdix
-    let mdix_out = tmp.path().join("recovered.mdix").to_string_lossy().to_string();
+    // Then convert it back to dixscript
+    let mdix_out = tmp.path().join("recovered.dixscript").to_string_lossy().to_string();
     mdix()
         .args([
             "convert",
             json_path.to_str().unwrap(),
-            "--to", "mdix",
+            "--to", "dixscript",
             "-o", &mdix_out,
         ])
         .assert()
@@ -101,7 +101,7 @@ fn convert_unknown_format_exits_four() {
     let tmp = TempDir::new().unwrap();
     let out = tmp.path().join("out.xyz").to_string_lossy().to_string();
     mdix()
-        .args(["convert", &fixture("basic.mdix"), "--to", "xyz", "-o", &out])
+        .args(["convert", &fixture("basic.dixscript"), "--to", "xyz", "-o", &out])
         .assert()
         .failure()
         .code(4);
@@ -112,7 +112,7 @@ fn convert_unknown_format_exits_four() {
 #[test]
 fn convert_missing_file_exits_two() {
     mdix()
-        .args(["convert", "ghost.mdix", "--to", "json"])
+        .args(["convert", "ghost.dixscript", "--to", "json"])
         .assert()
         .failure()
         .code(2);
@@ -123,12 +123,12 @@ fn convert_missing_file_exits_two() {
 #[test]
 fn convert_same_format_exits_nonzero() {
     let tmp = TempDir::new().unwrap();
-    let out = tmp.path().join("out.mdix").to_string_lossy().to_string();
+    let out = tmp.path().join("out.dixscript").to_string_lossy().to_string();
     mdix()
         .args([
             "convert",
-            &fixture("basic.mdix"),
-            "--to", "mdix",
+            &fixture("basic.dixscript"),
+            "--to", "dixscript",
             "-o", &out,
         ])
         .assert()
@@ -146,7 +146,7 @@ fn convert_json_flag_produces_envelope() {
         .args([
             "convert",
             "--json",
-            &fixture("basic.mdix"),
+            &fixture("basic.dixscript"),
             "--to", "json",
             "-o", &out,
         ])

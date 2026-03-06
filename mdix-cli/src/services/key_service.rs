@@ -52,7 +52,9 @@ pub fn generate_key_file(
     rand::thread_rng().fill_bytes(&mut key_bytes);
     rand::thread_rng().fill_bytes(&mut iv_bytes);
 
-    let algo_label = match algorithm.to_lowercase().as_str() {
+    // Bind to a local so the temporary String lives past the match.
+    let algo_lower = algorithm.to_lowercase();
+    let algo_label = match algo_lower.as_str() {
         "aes128"   => "aes128-gcm",
         "aes256"   => "aes256-gcm",
         "chacha20" => "chacha20-poly1305",
@@ -100,7 +102,7 @@ pub fn validate_key_file(key_path: &str) -> Result<(), CliError> {
         .unwrap_or(".");
 
     let manager = KeyFileManager::new("".to_string(), dir.to_string());
-    let data = manager.read_key_file(key_path).map_err(|e| CliError::KeyError(e))?;
+    let data = manager.read_key_file(key_path).map_err(CliError::KeyError)?;
 
     data.validate()
         .map_err(|errs| CliError::KeyError(errs.join(", ")))?;
@@ -120,7 +122,7 @@ pub fn get_key_info(key_path: &str) -> Result<KeyInfo, CliError> {
         .unwrap_or(".");
 
     let manager = KeyFileManager::new("".to_string(), dir.to_string());
-    let data = manager.read_key_file(key_path).map_err(|e| CliError::KeyError(e))?;
+    let data = manager.read_key_file(key_path).map_err(CliError::KeyError)?;
 
     let (algorithm, key_length, mode) = data
         .key_data
@@ -142,4 +144,4 @@ pub fn get_key_info(key_path: &str) -> Result<KeyInfo, CliError> {
         has_compression: data.key_data.compression.is_some(),
         created,
     })
-}
+        }

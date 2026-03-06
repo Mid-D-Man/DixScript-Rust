@@ -39,6 +39,18 @@ colored    = "2.0"
 # Error propagation in main and service layer
 anyhow     = "1.0"
 
+# Key generation — random bytes for key and IV
+rand       = "0.8"
+
+# Base64 encoding for generated key material
+base64     = "0.21"
+
+# Temp file naming during format conversion
+uuid       = { version = "1.0", features = ["v4"] }
+
+# Platform config directory (~/.dixscript/config.toml)
+dirs       = "5.0"
+
 # Progress bars for long-running compile/decrypt operations (optional)
 # Enable with: cargo build -p mdix-cli --features progress
 indicatif  = { version = "0.17", optional = true }

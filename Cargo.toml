@@ -1,3 +1,5 @@
 [workspace]
-members = ["dixscript","mdix-cli"]
+members = ["dixscript", "mdix-cli"]
 resolver = "2"
+# resolver 2 is required for proper feature unification across workspace members.
+# Without it, optional features can leak across crates in surprising ways.

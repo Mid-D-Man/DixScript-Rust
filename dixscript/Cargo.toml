@@ -12,11 +12,12 @@ categories = ["config", "encoding", "data-structures"]
 
 [lib]
 name = "dixscript"
-# NOTE: staticlib/cdylib are kept here until the workspace split is done.
-# Once you create a separate dixscript-ffi crate, remove staticlib and cdylib
-# from here — they hurt compile times and prevent some LTO optimisations for
-# library consumers.
-crate-type = ["lib", "staticlib", "cdylib"]
+# staticlib and cdylib have been removed now that the workspace split is done.
+# If C FFI bindings are needed in the future, create a separate dixscript-ffi
+# crate in the workspace with crate-type = ["staticlib", "cdylib"] that depends
+# on this crate. Keeping them here hurts compile times for mdix-cli and prevents
+# LTO optimisations for all library consumers.
+crate-type = ["lib"]
 
 # =============================================================================
 # Runtime dependencies
@@ -114,9 +115,11 @@ harness = false
 [[bench]]
 name    = "binary_serialization_benchmark"
 harness = false
+
 [[bench]]
 name    = "runtime_benchmark"
 harness = false
+
 # =============================================================================
 # Feature flags
 # =============================================================================
@@ -128,6 +131,11 @@ cue_cli_available = []
 
 # =============================================================================
 # Build profiles
+# NOTE: profiles are only respected when defined in the workspace root Cargo.toml.
+# These are kept here for reference but should be moved to the workspace root
+# once profile inheritance is needed across all members. For now Cargo inherits
+# the workspace root profiles automatically, so these are effectively no-ops
+# if the workspace root also defines them. Define once, in the root.
 # =============================================================================
 
 # --- Production release: fully stripped, maximum optimisation

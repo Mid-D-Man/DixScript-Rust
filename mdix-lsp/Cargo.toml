@@ -1,19 +1,20 @@
 [package]
-name        = "mdix-lsp"
-version     = "1.0.0"
-edition     = "2021"
+name         = "mdix-lsp"
+version      = "1.0.0"
+edition      = "2021"
 rust-version = "1.70"
-authors     = ["MidManStudio"]
-description = "LSP server for DixScript (.mdix files)"
-license     = "MIT"
+authors      = ["MidManStudio"]
+description  = "Language server for DixScript (.mdix files)"
+license      = "MIT"
 
 [[bin]]
 name = "mdix-lsp"
 path = "src/main.rs"
 
 [dependencies]
+# Aliased so all source files use `use tower_lsp::...` — the standard idiom.
+tower-lsp          = { version = "0.20", package = "tower-lsp-server" }
 dixscript          = { path = "../dixscript" }
-tower-lsp-server   = "0.20"
 tokio              = { version = "1", features = ["full"] }
 dashmap            = "6"
 lsp-types          = "0.97"

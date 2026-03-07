@@ -1,12 +1,15 @@
 {
   "name": "vscode-mdix-test",
   "displayName": "DixScript (.mdix) — LSP Test Harness",
-  "description": "Dev-only extension that wires VS Code to the local mdix-lsp binary for testing.",
+  "description": "Dev-only extension that wires VS Code to the local mdix-lsp binary.",
   "version": "0.0.1",
   "private": true,
-  "engines": { "vscode": "^1.82.0" },
+  "publisher": "midmanstudio",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
   "categories": ["Programming Languages"],
-  "activationEvents": ["onLanguage:mdix"],
+  "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
     "languages": [
@@ -20,7 +23,8 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "watch":   "tsc -watch -p ./"
+    "watch":   "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

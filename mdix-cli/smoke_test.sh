@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# dixscript-cli/smoke_test.sh
+# mdix-cli/smoke_test.sh
 #
 # Quick end-to-end sanity check. Run after every significant change:
 #   chmod +x smoke_test.sh
 #   ./smoke_test.sh
 #
-# Requires: cargo build -p dixscript-cli before running.
+# Requires: cargo build -p mdix-cli before running.
 
 set -euo pipefail
 
 BINARY="$(dirname "$0")/../target/debug/mdix"
 FIXTURES="$(dirname "$0")/tests/fixtures"
+RESULTS_ROOT="$(dirname "$0")/../test_results/smoke"
 SCRATCH="$(mktemp -d)"
 PASS=0
 FAIL=0
@@ -20,8 +21,8 @@ RED="\033[0;31m"
 YELLOW="\033[0;33m"
 RESET="\033[0m"
 
-ok()   { echo -e "  ${GREEN}PASS${RESET}  $1"; ((PASS++)) || true; }
-fail() { echo -e "  ${RED}FAIL${RESET}  $1"; ((FAIL++)) || true; }
+ok()      { echo -e "  ${GREEN}PASS${RESET}  $1"; ((PASS++)) || true; }
+fail()    { echo -e "  ${RED}FAIL${RESET}  $1"; ((FAIL++)) || true; }
 section() { echo -e "\n${YELLOW}── $1${RESET}"; }
 
 require_binary() {
@@ -31,6 +32,9 @@ require_binary() {
         exit 1
     fi
 }
+
+require_binary
+mkdir -p "$RESULTS_ROOT"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -81,6 +85,7 @@ run_expect_fail "validate invalid_syntax.mdix exits 1" validate "$FIXTURES/inval
 run_expect_exit "validate missing file exits 2"     2  validate "nonexistent.mdix"
 
 JSON_OUT=$("$BINARY" validate --json "$FIXTURES/basic.mdix" 2>/dev/null)
+echo "$JSON_OUT" > "$RESULTS_ROOT/validate_basic.json"
 if json_has_key "$JSON_OUT" "token_count"; then
     ok "validate --json contains token_count"
 else
@@ -96,6 +101,9 @@ run_expect_ok   "compile with_enums.mdix exits 0"     compile "$FIXTURES/with_en
 run_expect_fail "compile invalid_syntax.mdix exits 1" compile "$FIXTURES/invalid_syntax.mdix" -o "$SCRATCH"
 run_expect_exit "compile missing file exits 2"     2  compile "nonexistent.mdix"
 
+JSON_OUT=$("$BINARY" compile --json "$FIXTURES/basic.mdix" -o "$SCRATCH" 2>/dev/null)
+echo "$JSON_OUT" > "$RESULTS_ROOT/compile_basic.json"
+
 # ── convert ───────────────────────────────────────────────────────────────────
 
 section "convert"
@@ -104,22 +112,36 @@ JSON_FILE="$SCRATCH/basic.json"
 run_expect_ok "convert mdix→json exits 0" \
     convert "$FIXTURES/basic.mdix" --to json -o "$JSON_FILE"
 
+cp "$JSON_FILE" "$RESULTS_ROOT/basic_converted.json" 2>/dev/null || true
+
 if [[ -f "$JSON_FILE" ]]; then
     ok "convert produced output file"
     if python3 -c "import json,sys; json.load(open('$JSON_FILE'))" 2>/dev/null; then
-        ok "converted JSON is valid"
+        ok "converted JSON is valid (python3)"
     elif node -e "JSON.parse(require('fs').readFileSync('$JSON_FILE','utf8'))" 2>/dev/null; then
-        ok "converted JSON is valid (via node)"
+        ok "converted JSON is valid (node)"
     else
-        ok "converted JSON file exists (parser not available for deep check)"
+        ok "converted JSON file exists (no parser available for deep check)"
     fi
 else
     fail "convert did not produce output file"
 fi
 
+TOML_FILE="$SCRATCH/basic.toml"
+run_expect_ok "convert mdix→toml exits 0" \
+    convert "$FIXTURES/basic.mdix" --to toml -o "$TOML_FILE"
+cp "$TOML_FILE" "$RESULTS_ROOT/basic_converted.toml" 2>/dev/null || true
+
 MDIX_RT="$SCRATCH/recovered.mdix"
 run_expect_ok "convert json→mdix exits 0" \
-    convert "$JSON_FILE" --to dixscript -o "$MDIX_RT"
+    convert "$JSON_FILE" --to mdix -o "$MDIX_RT"
+
+run_expect_ok "convert json→mdix via dixscript alias exits 0" \
+    convert "$JSON_FILE" --to dixscript -o "$SCRATCH/recovered_alias.mdix"
+
+TOML_RT="$SCRATCH/recovered_from_toml.mdix"
+run_expect_ok "convert toml→mdix exits 0" \
+    convert "$TOML_FILE" --to mdix -o "$TOML_RT"
 
 run_expect_exit "convert unknown format exits 4" 4 \
     convert "$FIXTURES/basic.mdix" --to xyz -o "$SCRATCH/out.xyz"
@@ -131,6 +153,7 @@ section "compact"
 COMPACT_OUT="$SCRATCH/basic.compact.mdix"
 run_expect_ok "compact basic.mdix exits 0" \
     compact "$FIXTURES/basic.mdix" -o "$COMPACT_OUT"
+cp "$COMPACT_OUT" "$RESULTS_ROOT/basic.compact.mdix" 2>/dev/null || true
 
 if [[ -f "$COMPACT_OUT" ]]; then
     ok "compact produced output file"
@@ -139,6 +162,7 @@ else
 fi
 
 COMPACT_JSON=$("$BINARY" compact --json "$FIXTURES/basic.mdix" -o "$SCRATCH/b2.compact.mdix" 2>/dev/null)
+echo "$COMPACT_JSON" > "$RESULTS_ROOT/compact_basic.json"
 if json_has_key "$COMPACT_JSON" "ratio"; then
     ok "compact --json contains ratio"
 else
@@ -170,6 +194,7 @@ else
 fi
 
 INSPECT_JSON=$("$BINARY" inspect --json "$FIXTURES/basic.mdix" 2>/dev/null)
+echo "$INSPECT_JSON" > "$RESULTS_ROOT/inspect_basic.json"
 if json_has_key "$INSPECT_JSON" "key_count"; then
     ok "inspect --json contains key_count"
 else
@@ -181,13 +206,13 @@ fi
 section "create"
 
 NEW_FILE="$SCRATCH/new_basic.mdix"
-run_expect_ok "create basic template exits 0"    create "$NEW_FILE"
-run_expect_ok "validate created file exits 0"    validate "$NEW_FILE"
+run_expect_ok   "create basic template exits 0"     create "$NEW_FILE"
+run_expect_ok   "validate created file exits 0"     validate "$NEW_FILE"
 run_expect_fail "create existing file without --force fails" create "$NEW_FILE"
-run_expect_ok "create with --force overwrites"   create --force "$NEW_FILE"
+run_expect_ok   "create with --force overwrites"    create --force "$NEW_FILE"
 
 NEW_ADV="$SCRATCH/new_advanced.mdix"
-run_expect_ok "create advanced template exits 0" create --template advanced "$NEW_ADV"
+run_expect_ok "create advanced template exits 0"  create --template advanced "$NEW_ADV"
 run_expect_ok "validate advanced template exits 0" validate "$NEW_ADV"
 
 run_expect_fail "create unknown template exits nonzero" \
@@ -207,10 +232,11 @@ else
     fail "key generate did not produce key file"
 fi
 
-run_expect_ok "key validate exits 0"        key validate "$KEY_FILE"
-run_expect_ok "key info exits 0"            key info "$KEY_FILE"
+run_expect_ok "key validate exits 0" key validate "$KEY_FILE"
+run_expect_ok "key info exits 0"     key info "$KEY_FILE"
 
 KEY_JSON=$("$BINARY" key info --json "$KEY_FILE" 2>/dev/null)
+echo "$KEY_JSON" > "$RESULTS_ROOT/key_info.json"
 if json_has_key "$KEY_JSON" "algorithm"; then
     ok "key info --json contains algorithm"
 else
@@ -223,16 +249,17 @@ run_expect_fail "key validate missing file fails" key validate "missing.mdix.key
 
 section "config"
 
-run_expect_ok "config list exits 0"                        config list
-run_expect_ok "config get known key exits 0"               config get default_indent_size
+run_expect_ok   "config list exits 0"                      config list
+run_expect_ok   "config get known key exits 0"             config get default_indent_size
 run_expect_fail "config get unknown key exits nonzero"     config get no_such_key_xyz
-run_expect_ok "config set integer exits 0"                 config set default_indent_size 4
-run_expect_ok "config get after set returns 4"             config get default_indent_size
-run_expect_ok "config reset single key exits 0"            config reset default_indent_size
-run_expect_ok "config get after reset returns default 2"   config get default_indent_size
-run_expect_ok "config reset all exits 0"                   config reset
+run_expect_ok   "config set integer exits 0"               config set default_indent_size 4
+run_expect_ok   "config get after set returns 4"           config get default_indent_size
+run_expect_ok   "config reset single key exits 0"          config reset default_indent_size
+run_expect_ok   "config get after reset returns default 2" config get default_indent_size
+run_expect_ok   "config reset all exits 0"                 config reset
 
 CONFIG_LIST=$("$BINARY" config list --json 2>/dev/null)
+echo "$CONFIG_LIST" > "$RESULTS_ROOT/config_list.json"
 if json_has_key "$CONFIG_LIST" "default_indent_size"; then
     ok "config list --json contains default_indent_size"
 else
@@ -262,9 +289,19 @@ echo -e "───────────────────────�
 echo -e "  ${GREEN}PASSED${RESET}: $PASS"
 if [[ "$FAIL" -gt 0 ]]; then
     echo -e "  ${RED}FAILED${RESET}: $FAIL"
+    echo -e "\nResults written to: $RESULTS_ROOT"
     echo ""
     exit 1
 else
-    echo -e "  ${RED}FAILED${RESET}: $FAIL"
+    echo -e "  ${RED}FAILED${RESET}: 0"
     echo -e "\n${GREEN}All smoke tests passed.${RESET}"
+    echo -e "Results written to: $RESULTS_ROOT"
 fi
+```
+
+---
+
+**`.gitignore` addition** (add these lines to whatever `.gitignore` you already have)
+```
+# Test result output files - generated by cargo test and smoke_test.sh
+test_results/

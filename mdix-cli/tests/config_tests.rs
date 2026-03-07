@@ -1,13 +1,15 @@
-// dixscript-cli/tests/config_tests.rs
+// mdix-cli/tests/config_tests.rs
 //
-// These tests mutate ~/.dixscript/config.toml so each test resets the key it
+// These tests mutate ~/.dixscript/config.toml. Each test resets the key it
 // touches before and after to avoid cross-test pollution.
+
+mod helpers;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
 
 fn mdix() -> Command {
-    Command::cargo_bin("dixscript").unwrap()
+    Command::cargo_bin("mdix").unwrap()
 }
 
 fn reset_key(key: &str) {
@@ -53,6 +55,9 @@ fn config_list_json_produces_object() {
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(parsed["success"], true);
     assert!(parsed["data"].is_object());
+
+    let result = helpers::results_file("config", "list.json");
+    std::fs::write(result, &stdout).ok();
 }
 
 // ── Get ───────────────────────────────────────────────────────────────────────
@@ -175,4 +180,4 @@ fn config_reset_all_exits_zero() {
         .assert()
         .success()
         .code(0);
-  }
+}

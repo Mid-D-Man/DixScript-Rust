@@ -1,33 +1,25 @@
-// dixscript-cli/tests/compile_tests.rs
+// mdix-cli/tests/compile_tests.rs
+
+mod helpers;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-use std::path::Path;
-use tempfile::TempDir;
 
 fn mdix() -> Command {
-    Command::cargo_bin("dixscript").unwrap()
-}
-
-fn fixture(name: &str) -> String {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures")
-        .join(name)
-        .to_string_lossy()
-        .to_string()
+    Command::cargo_bin("mdix").unwrap()
 }
 
 // ── Success cases ─────────────────────────────────────────────────────────────
 
 #[test]
 fn compile_basic_exits_zero() {
-    let tmp = TempDir::new().unwrap();
+    let out = helpers::results_dir("compile");
     mdix()
         .args([
             "compile",
-            &fixture("basic.dixscript"),
+            &helpers::fixture("basic.mdix"),
             "-o",
-            tmp.path().to_str().unwrap(),
+            out.to_str().unwrap(),
         ])
         .assert()
         .success()
@@ -36,13 +28,13 @@ fn compile_basic_exits_zero() {
 
 #[test]
 fn compile_with_enums_exits_zero() {
-    let tmp = TempDir::new().unwrap();
+    let out = helpers::results_dir("compile");
     mdix()
         .args([
             "compile",
-            &fixture("with_enums.dixscript"),
+            &helpers::fixture("with_enums.mdix"),
             "-o",
-            tmp.path().to_str().unwrap(),
+            out.to_str().unwrap(),
         ])
         .assert()
         .success()
@@ -51,13 +43,13 @@ fn compile_with_enums_exits_zero() {
 
 #[test]
 fn compile_with_functions_exits_zero() {
-    let tmp = TempDir::new().unwrap();
+    let out = helpers::results_dir("compile");
     mdix()
         .args([
             "compile",
-            &fixture("with_functions.dixscript"),
+            &helpers::fixture("with_functions.mdix"),
             "-o",
-            tmp.path().to_str().unwrap(),
+            out.to_str().unwrap(),
         ])
         .assert()
         .success()
@@ -66,17 +58,20 @@ fn compile_with_functions_exits_zero() {
 
 #[test]
 fn compile_prints_source_path() {
-    let tmp = TempDir::new().unwrap();
+    let out = helpers::results_dir("compile");
     mdix()
         .args([
             "compile",
-            &fixture("basic.dixscript"),
+            &helpers::fixture("basic.mdix"),
             "-o",
-            tmp.path().to_str().unwrap(),
+            out.to_str().unwrap(),
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("basic.dixscript").or(predicate::str::contains("Compiled")));
+        .stdout(
+            predicate::str::contains("basic.mdix")
+                .or(predicate::str::contains("Compiled")),
+        );
 }
 
 // ── Failure cases ─────────────────────────────────────────────────────────────
@@ -84,7 +79,7 @@ fn compile_prints_source_path() {
 #[test]
 fn compile_missing_file_exits_two() {
     mdix()
-        .args(["compile", "does_not_exist.dixscript"])
+        .args(["compile", "does_not_exist.mdix"])
         .assert()
         .failure()
         .code(2);
@@ -92,13 +87,13 @@ fn compile_missing_file_exits_two() {
 
 #[test]
 fn compile_invalid_syntax_exits_nonzero() {
-    let tmp = TempDir::new().unwrap();
+    let out = helpers::results_dir("compile");
     mdix()
         .args([
             "compile",
-            &fixture("invalid_syntax.dixscript"),
+            &helpers::fixture("invalid_syntax.mdix"),
             "-o",
-            tmp.path().to_str().unwrap(),
+            out.to_str().unwrap(),
         ])
         .assert()
         .failure();
@@ -108,14 +103,14 @@ fn compile_invalid_syntax_exits_nonzero() {
 
 #[test]
 fn compile_json_flag_produces_valid_json() {
-    let tmp = TempDir::new().unwrap();
+    let out = helpers::results_dir("compile");
     let output = mdix()
         .args([
             "compile",
             "--json",
-            &fixture("basic.dixscript"),
+            &helpers::fixture("basic.mdix"),
             "-o",
-            tmp.path().to_str().unwrap(),
+            out.to_str().unwrap(),
         ])
         .output()
         .unwrap();
@@ -127,6 +122,10 @@ fn compile_json_flag_produces_valid_json() {
     assert_eq!(parsed["success"], true);
     assert!(parsed["data"]["source_path"].is_string());
     assert!(parsed["data"]["elapsed_ms"].is_number());
+
+    // Write result for inspection.
+    let result_file = helpers::results_file("compile", "basic_compile.json");
+    std::fs::write(result_file, &stdout).ok();
 }
 
 // ── Inspect after compile ─────────────────────────────────────────────────────
@@ -134,8 +133,8 @@ fn compile_json_flag_produces_valid_json() {
 #[test]
 fn inspect_after_compile_shows_data_section() {
     mdix()
-        .args(["inspect", &fixture("basic.dixscript")])
+        .args(["inspect", &helpers::fixture("basic.mdix")])
         .assert()
         .success()
         .stdout(predicate::str::contains("@DATA"));
-          }
+}

@@ -1,5 +1,4 @@
-// dixscript-cli/src/services/conversion.rs
-//! Wraps DixConverter for cross-format conversion.
+// mdix-cli/src/services/conversion.rs
 
 use std::path::Path;
 use std::time::Instant;
@@ -15,18 +14,21 @@ pub enum Format {
 }
 
 impl Format {
+    /// Detect format from a file extension string.
+    /// Accepts both "mdix" and "dixscript" as aliases for the native format.
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_lowercase().as_str() {
-            "dixscript"        => Some(Format::Mdix),
-            "json"        => Some(Format::Json),
-            "toml"        => Some(Format::Toml),
-            _             => None,
+            "mdix" | "dixscript" => Some(Format::Mdix),
+            "json"               => Some(Format::Json),
+            "toml"               => Some(Format::Toml),
+            _                    => None,
         }
     }
 
+    /// The canonical file extension produced when writing this format.
     pub fn extension(&self) -> &'static str {
         match self {
-            Format::Mdix => "dixscript",
+            Format::Mdix => "mdix",
             Format::Json => "json",
             Format::Toml => "toml",
         }
@@ -38,10 +40,13 @@ impl std::str::FromStr for Format {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "dixscript" => Ok(Format::Mdix),
-            "json" => Ok(Format::Json),
-            "toml" => Ok(Format::Toml),
-            other  => Err(format!("Unsupported format: '{}'", other)),
+            "mdix" | "dixscript" => Ok(Format::Mdix),
+            "json"               => Ok(Format::Json),
+            "toml"               => Ok(Format::Toml),
+            other => Err(format!(
+                "Unsupported format '{}'. Use: mdix, json, toml",
+                other
+            )),
         }
     }
 }
@@ -66,10 +71,10 @@ pub struct ConversionResult {
 pub fn detect_format(path: &Path) -> Result<Format, CliError> {
     path.extension()
         .and_then(|e| e.to_str())
-        .and_then(|e| Format::from_extension(e))
+        .and_then(Format::from_extension)
         .ok_or_else(|| {
             CliError::UnsupportedFormat(format!(
-                "Cannot detect format from extension of '{}'",
+                "Cannot detect format from extension of '{}'. Supported: .mdix, .json, .toml",
                 path.display()
             ))
         })
@@ -86,6 +91,12 @@ pub fn convert_file(path: &Path, opts: &ConvertOpts) -> Result<ConversionResult,
         None    => detect_format(path)?,
     };
 
+    if from == opts.to {
+        return Err(CliError::InvalidArgument(
+            "Input and output formats are the same".to_string(),
+        ));
+    }
+
     let input_size = std::fs::metadata(path)
         .map(|m| m.len() as usize)
         .unwrap_or(0);
@@ -97,11 +108,6 @@ pub fn convert_file(path: &Path, opts: &ConvertOpts) -> Result<ConversionResult,
         (Format::Json, Format::Mdix) => json_to_mdix(path, opts.pretty)?,
         (Format::Toml, Format::Mdix) => toml_to_mdix(path, opts.pretty)?,
         (Format::Mdix, Format::Toml) => mdix_to_toml(path)?,
-        (f, t) if f == t            => {
-            return Err(CliError::InvalidArgument(
-                "Input and output formats are the same".to_string(),
-            ))
-        }
         (f, t) => {
             return Err(CliError::UnsupportedFormat(format!(
                 "Conversion from {:?} to {:?} is not supported",
@@ -121,7 +127,7 @@ pub fn convert_file(path: &Path, opts: &ConvertOpts) -> Result<ConversionResult,
     file_io::write_file(Path::new(&output_path), &output_content)?;
 
     Ok(ConversionResult {
-        input_path: path.to_string_lossy().to_string(),
+        input_path:  path.to_string_lossy().to_string(),
         output_path,
         input_size,
         output_size,
@@ -129,11 +135,13 @@ pub fn convert_file(path: &Path, opts: &ConvertOpts) -> Result<ConversionResult,
     })
 }
 
+// ── Format converters ─────────────────────────────────────────────────────────
+
 fn mdix_to_json(path: &Path, pretty: bool) -> Result<String, CliError> {
-    let loader = DixLoader::new();
+    let loader   = DixLoader::new();
     let dix_data = loader
         .load_text(path.to_str().unwrap_or(""), &DixLoadOptions::new())
-        .map_err(|e| CliError::ConversionError(e))?;
+        .map_err(CliError::ConversionError)?;
 
     let map = dix_data.to_hashmap();
 
@@ -160,7 +168,7 @@ fn json_to_mdix(path: &Path, pretty: bool) -> Result<String, CliError> {
     let converter = DixConverter::new();
     let ast = converter
         .from_hashmap(dix_map)
-        .map_err(|e| CliError::ConversionError(e))?;
+        .map_err(CliError::ConversionError)?;
 
     let fmt_opts = if pretty {
         DixFormatOptions::pretty()
@@ -170,7 +178,7 @@ fn json_to_mdix(path: &Path, pretty: bool) -> Result<String, CliError> {
 
     converter
         .to_mdix(&ast, Some(&fmt_opts))
-        .map_err(|e| CliError::ConversionError(e))
+        .map_err(CliError::ConversionError)
 }
 
 fn toml_to_mdix(path: &Path, pretty: bool) -> Result<String, CliError> {
@@ -182,7 +190,11 @@ fn toml_to_mdix(path: &Path, pretty: bool) -> Result<String, CliError> {
         .map_err(|e| CliError::ConversionError(e.to_string()))?;
 
     let tmp = tempfile_from_json(&json_str)?;
-    json_to_mdix(&tmp, pretty)
+    let result = json_to_mdix(&tmp, pretty);
+
+    // Best-effort cleanup of the temp file.
+    let _ = std::fs::remove_file(&tmp);
+    result
 }
 
 fn mdix_to_toml(path: &Path) -> Result<String, CliError> {
@@ -202,6 +214,8 @@ fn tempfile_from_json(json: &str) -> Result<std::path::PathBuf, CliError> {
     Ok(tmp)
 }
 
+// ── serde_json → DixValue ─────────────────────────────────────────────────────
+
 fn json_value_to_dix(v: serde_json::Value) -> dixscript::Runtime::DixValue {
     use dixscript::Runtime::DixValue;
     use serde_json::Value;
@@ -217,11 +231,9 @@ fn json_value_to_dix(v: serde_json::Value) -> dixscript::Runtime::DixValue {
             }
         }
         Value::String(s)   => DixValue::String(s),
-        Value::Array(arr)  => {
-            DixValue::Array(arr.into_iter().map(json_value_to_dix).collect())
-        }
-        Value::Object(obj) => {
-            DixValue::Object(obj.into_iter().map(|(k, v)| (k, json_value_to_dix(v))).collect())
-        }
+        Value::Array(arr)  => DixValue::Array(arr.into_iter().map(json_value_to_dix).collect()),
+        Value::Object(obj) => DixValue::Object(
+            obj.into_iter().map(|(k, v)| (k, json_value_to_dix(v))).collect()
+        ),
     }
-      }
+}

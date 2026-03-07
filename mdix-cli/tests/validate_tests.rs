@@ -1,19 +1,12 @@
-// dixscript-cli/tests/validate_tests.rs
+// mdix-cli/tests/validate_tests.rs
+
+mod helpers;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-use std::path::Path;
 
 fn mdix() -> Command {
-    Command::cargo_bin("dixscript").unwrap()
-}
-
-fn fixture(name: &str) -> String {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures")
-        .join(name)
-        .to_string_lossy()
-        .to_string()
+    Command::cargo_bin("mdix").unwrap()
 }
 
 // ── Success cases ─────────────────────────────────────────────────────────────
@@ -21,7 +14,7 @@ fn fixture(name: &str) -> String {
 #[test]
 fn validate_basic_exits_zero() {
     mdix()
-        .args(["validate", &fixture("basic.dixscript")])
+        .args(["validate", &helpers::fixture("basic.mdix")])
         .assert()
         .success()
         .code(0);
@@ -30,7 +23,7 @@ fn validate_basic_exits_zero() {
 #[test]
 fn validate_with_enums_exits_zero() {
     mdix()
-        .args(["validate", &fixture("with_enums.dixscript")])
+        .args(["validate", &helpers::fixture("with_enums.mdix")])
         .assert()
         .success()
         .code(0);
@@ -39,7 +32,7 @@ fn validate_with_enums_exits_zero() {
 #[test]
 fn validate_with_functions_exits_zero() {
     mdix()
-        .args(["validate", &fixture("with_functions.dixscript")])
+        .args(["validate", &helpers::fixture("with_functions.mdix")])
         .assert()
         .success()
         .code(0);
@@ -48,7 +41,7 @@ fn validate_with_functions_exits_zero() {
 #[test]
 fn validate_prints_token_count() {
     mdix()
-        .args(["validate", &fixture("basic.dixscript")])
+        .args(["validate", &helpers::fixture("basic.mdix")])
         .assert()
         .success()
         .stdout(predicate::str::contains("tokens"));
@@ -59,7 +52,7 @@ fn validate_prints_token_count() {
 #[test]
 fn validate_invalid_syntax_exits_nonzero() {
     mdix()
-        .args(["validate", &fixture("invalid_syntax.dixscript")])
+        .args(["validate", &helpers::fixture("invalid_syntax.mdix")])
         .assert()
         .failure();
 }
@@ -67,7 +60,7 @@ fn validate_invalid_syntax_exits_nonzero() {
 #[test]
 fn validate_missing_file_exits_two() {
     mdix()
-        .args(["validate", "nonexistent.dixscript"])
+        .args(["validate", "nonexistent.mdix"])
         .assert()
         .failure()
         .code(2);
@@ -78,7 +71,7 @@ fn validate_missing_file_exits_two() {
 #[test]
 fn validate_json_flag_produces_valid_json_on_success() {
     let output = mdix()
-        .args(["validate", "--json", &fixture("basic.dixscript")])
+        .args(["validate", "--json", &helpers::fixture("basic.mdix")])
         .output()
         .unwrap();
 
@@ -88,12 +81,16 @@ fn validate_json_flag_produces_valid_json_on_success() {
         .expect("stdout should be valid JSON");
     assert_eq!(parsed["success"], true);
     assert!(parsed["data"]["token_count"].is_number());
+
+    // Write result for inspection.
+    let out = helpers::results_file("validate", "basic_success.json");
+    std::fs::write(out, &stdout).ok();
 }
 
 #[test]
 fn validate_json_flag_produces_valid_json_on_failure() {
     let output = mdix()
-        .args(["validate", "--json", &fixture("invalid_syntax.dixscript")])
+        .args(["validate", "--json", &helpers::fixture("invalid_syntax.mdix")])
         .output()
         .unwrap();
 
@@ -103,6 +100,10 @@ fn validate_json_flag_produces_valid_json_on_failure() {
         .expect("stderr should be valid JSON");
     assert_eq!(parsed["success"], false);
     assert!(parsed["error"].is_string());
+
+    // Write result for inspection.
+    let out = helpers::results_file("validate", "invalid_syntax_failure.json");
+    std::fs::write(out, &stderr).ok();
 }
 
 // ── Quiet flag ────────────────────────────────────────────────────────────────
@@ -110,8 +111,19 @@ fn validate_json_flag_produces_valid_json_on_failure() {
 #[test]
 fn validate_quiet_produces_no_stdout_on_success() {
     mdix()
-        .args(["validate", "--quiet", &fixture("basic.dixscript")])
+        .args(["validate", "--quiet", &helpers::fixture("basic.mdix")])
         .assert()
         .success()
         .stdout(predicate::str::is_empty());
+}
+
+// ── Strict flag ───────────────────────────────────────────────────────────────
+
+#[test]
+fn validate_strict_on_valid_file_exits_zero() {
+    mdix()
+        .args(["validate", "--strict", &helpers::fixture("basic.mdix")])
+        .assert()
+        .success()
+        .code(0);
 }

@@ -12,8 +12,9 @@ name = "mdix-lsp"
 path = "src/main.rs"
 
 [dependencies]
-# Aliased so all source files use `use tower_lsp::...` — the standard idiom.
-tower-lsp          = { version = "0.20", package = "tower-lsp-server" }
+# Original tower-lsp crate — v0.20 is the latest stable release.
+# Uses #[async_trait] which matches all server.rs code as written.
+tower-lsp          = "0.20"
 dixscript          = { path = "../dixscript" }
 tokio              = { version = "1", features = ["full"] }
 dashmap            = "6"

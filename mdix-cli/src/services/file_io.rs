@@ -1,11 +1,9 @@
-// dixscript-cli/src/services/file_io.rs
-//! File read/write helpers with `CliError` error mapping.
+// mdix-cli/src/services/file_io.rs
 
 use std::path::{Path, PathBuf};
 use crate::commands::CliError;
 
-/// Read a text file, returning `CliError::FileNotFound` if missing and
-/// `CliError::IoError` on any other failure.
+/// Read a text file, returning `CliError::FileNotFound` if missing.
 pub fn read_file(path: &Path) -> Result<String, CliError> {
     if !path.exists() {
         return Err(CliError::FileNotFound(path.to_path_buf()));
@@ -26,14 +24,14 @@ pub fn ensure_dir(path: &Path) -> Result<(), CliError> {
 
 /// Derive a default output path by replacing `input`'s extension.
 ///
-/// `dixscript convert foo.json --to dixscript` → `foo.dixscript`
+/// `mdix convert foo.json --to mdix` → `foo.mdix`
 pub fn default_output_path(input: &Path, new_ext: &str) -> PathBuf {
     input.with_extension(new_ext)
 }
 
 /// Derive an output path with a suffix inserted before the extension.
 ///
-/// `compact("foo.dixscript", "compact")` → `foo.compact.dixscript`
+/// `compact("foo.mdix", "compact")` → `foo.compact.mdix`
 pub fn suffixed_output_path(input: &Path, suffix: &str) -> PathBuf {
     let stem = input
         .file_stem()
@@ -42,15 +40,15 @@ pub fn suffixed_output_path(input: &Path, suffix: &str) -> PathBuf {
     let ext = input
         .extension()
         .and_then(|s| s.to_str())
-        .unwrap_or("dixscript");
+        .unwrap_or("mdix");
     let parent = input.parent().unwrap_or(Path::new("."));
     parent.join(format!("{}.{}.{}", stem, suffix, ext))
 }
 
-/// Return `CliError::InvalidArgument` if `path` does not end in `.dixscript`.
+/// Return `CliError::InvalidArgument` if `path` does not end in `.mdix` or `.dixscript`.
 pub fn validate_mdix_extension(path: &Path) -> Result<(), CliError> {
     match path.extension().and_then(|e| e.to_str()) {
-        Some("dixscript") => Ok(()),
+        Some("mdix") | Some("dixscript") => Ok(()),
         _ => Err(CliError::InvalidArgument(format!(
             "'{}' does not have a .mdix extension",
             path.display()
@@ -58,13 +56,13 @@ pub fn validate_mdix_extension(path: &Path) -> Result<(), CliError> {
     }
 }
 
-/// Return `CliError::InvalidArgument` if `path` does not end in `.dixscript.enc`.
+/// Return `CliError::InvalidArgument` if `path` does not end in `.mdix.enc`.
 pub fn validate_enc_extension(path: &Path) -> Result<(), CliError> {
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("");
-    if name.ends_with(".dixscript.enc") {
+    if name.ends_with(".mdix.enc") {
         Ok(())
     } else {
         Err(CliError::InvalidArgument(format!(
@@ -83,4 +81,4 @@ pub fn format_size(bytes: usize) -> String {
     } else {
         format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     }
-  }
+}

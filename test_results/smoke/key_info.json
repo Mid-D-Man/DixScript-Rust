@@ -1,0 +1,10 @@
+{
+  "success": true,
+  "data": {
+    "algorithm": "aes256-gcm",
+    "key_length": 32,
+    "mode": "keyfile",
+    "has_compression": false,
+    "created": "2026-03-08T09:42:04+00:00"
+  }
+}

@@ -1,0 +1,8 @@
+@CONFIG(
+    
+)
+
+@DATA(
+    somethingCool = "Nothing somethingCool"
+    
+)

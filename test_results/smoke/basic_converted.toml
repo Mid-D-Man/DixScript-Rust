@@ -1,0 +1,16 @@
+app_name = "TestApp"
+debug = true
+port = 8080
+"server.config.host" = "localhost"
+"server.config.port" = 8080
+"server.config.ssl" = false
+tags = [
+    "web",
+    "api",
+    "v1",
+]
+"tags[0]" = "web"
+"tags[1]" = "api"
+"tags[2]" = "v1"
+timeout = 5000
+version = "1.0.0"

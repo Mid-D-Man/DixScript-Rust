@@ -1,0 +1,10 @@
+{
+  "success": true,
+  "data": {
+    "file": "/Users/midman/Desktop/DixScript-Rust/mdix-cli/tests/fixtures/basic.mdix",
+    "token_count": 41,
+    "warning_count": 0,
+    "warnings": [],
+    "elapsed_ms": 15.626166
+  }
+}

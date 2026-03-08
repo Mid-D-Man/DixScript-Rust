@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "data": {
+    "auto_find_key_files": "true",
+    "color_output": "true",
+    "default_indent_size": "2",
+    "default_output_directory": "./output",
+    "key_search_paths": "",
+    "max_error_display": "50",
+    "pretty_print_json": "true",
+    "show_warnings": "true",
+    "use_tabs": "false"
+  }
+}

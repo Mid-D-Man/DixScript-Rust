@@ -1,0 +1,18 @@
+{
+  "tags[2]": "v1",
+  "tags[1]": "api",
+  "server.config.ssl": false,
+  "tags[0]": "web",
+  "port": 8080,
+  "app_name": "TestApp",
+  "server.config.host": "localhost",
+  "server.config.port": 8080,
+  "debug": true,
+  "version": "1.0.0",
+  "timeout": 5000,
+  "tags": [
+    "web",
+    "api",
+    "v1"
+  ]
+}

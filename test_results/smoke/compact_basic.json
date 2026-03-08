@@ -1,0 +1,10 @@
+{
+  "success": true,
+  "data": {
+    "input_path": "/Users/midman/Desktop/DixScript-Rust/mdix-cli/tests/fixtures/basic.mdix",
+    "output_path": "/var/folders/b6/2vht_ybd7mnchql5p208lqvc0000gn/T/tmp.p7SC22kA/b2.compact.mdix",
+    "original_size": 251,
+    "compacted_size": 251,
+    "ratio": 0.0
+  }
+}

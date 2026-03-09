@@ -1,0 +1,46 @@
+[package]
+name = "mdix-ffi"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.70"
+authors = ["MidManStudio"]
+description = "C FFI layer for DixScript — Unity/C# native plugin"
+license = "MIT"
+repository = "https://github.com/Mid-D-Man/DixScript-Rust"
+
+[lib]
+name = "mdix_ffi"
+# cdylib   → .dll / .so / .bundle  — Windows, Android, macOS, Linux (dynamic load)
+# staticlib → .a                    — iOS: dynamic loading is forbidden on iOS,
+#             the .a gets linked directly into the Xcode build by Unity.
+#             C# uses DllImport("__Internal") on iOS instead of the library name.
+crate-type = ["cdylib", "staticlib"]
+
+# =============================================================================
+# Runtime dependencies
+# =============================================================================
+[dependencies]
+dixscript = { path = "../dixscript" }
+
+# =============================================================================
+# Build dependencies
+# =============================================================================
+[build-dependencies]
+# csbindgen parses our extern "C" functions and auto-generates MdixNative.cs.
+# Never hand-edit the generated file — rebuild instead.
+csbindgen = "0.8"
+
+# =============================================================================
+# Build profiles — inherit from workspace root when placed there.
+# Defined here for standalone reference.
+# =============================================================================
+[profile.release]
+opt-level     = 3
+lto           = true
+codegen-units = 1
+strip         = true
+debug         = false
+
+[profile.dev]
+opt-level = 0
+debug     = true

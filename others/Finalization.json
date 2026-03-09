@@ -2,6 +2,7 @@
   "project": "DixScript-Rust",
   "run": "final-optimization",
   "version_policy": {
+    
     "rule": "All files remain at v1.0.0. Do not increment any version string.",
     "applies_to": "every file touched in this run"
   },

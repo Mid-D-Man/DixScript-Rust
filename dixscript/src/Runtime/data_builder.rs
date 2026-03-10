@@ -7,54 +7,30 @@ use super::dix_data::DixData;
 use super::converter::DixConverter;
 use super::format_options::DixFormatOptions;
 
-/// Fluent builder for creating DixData programmatically
+/// Fluent builder for creating DixData programmatically.
 ///
-/// Enforces DixScript structure rules:
-/// - Flat properties must come before grouped data (two-tier structure)
-/// - Table properties and group arrays can be mixed after flat properties
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use dixscript::Runtime::*;
-///
-/// let data = DixDataBuilder::new()
-///     .config(|c| {
-///         c.with_version("1.0.0");
-///         c.with_author("Alice");
-///     })
-///     .data(|d| {
-///         d.with_int("x", 42);
-///         d.with_string("name", "test");
-///         d.with_table_properties("user", |t| {
-///             t.with_string("name", "Bob");
-///             t.with_int("age", 30);
-///         });
-///     })
-///     .build()
-///     .unwrap();
-/// ```
+/// Enforces DixScript's two-tier structure: flat properties must be added
+/// before table properties or group arrays. Violations return `Err` rather
+/// than panicking, making this safe to call from FFI or C# via the runtime.
 pub struct DixDataBuilder {
-    config_builder: ConfigBuilder,
-    enums_builder: EnumsBuilder,
-    data_builder: DataBuilder,
-    version: String,
-    compile_time: chrono::DateTime<Utc>,
+    config_builder:  ConfigBuilder,
+    enums_builder:   EnumsBuilder,
+    data_builder:    DataBuilder,
+    version:         String,
+    compile_time:    chrono::DateTime<Utc>,
 }
 
 impl DixDataBuilder {
-    /// Create new builder with default settings
     pub fn new() -> Self {
         DixDataBuilder {
             config_builder: ConfigBuilder::new(),
-            enums_builder: EnumsBuilder::new(),
-            data_builder: DataBuilder::new(),
-            version: "1.0.0".to_string(),
-            compile_time: Utc::now(),
+            enums_builder:  EnumsBuilder::new(),
+            data_builder:   DataBuilder::new(),
+            version:        "1.0.0".to_string(),
+            compile_time:   Utc::now(),
         }
     }
 
-    /// Configure CONFIG section (closure style - like C#)
     pub fn config<F>(mut self, configure: F) -> Self
     where
         F: FnOnce(&mut ConfigBuilder),
@@ -63,7 +39,6 @@ impl DixDataBuilder {
         self
     }
 
-    /// Configure ENUMS section
     pub fn enums<F>(mut self, configure: F) -> Self
     where
         F: FnOnce(&mut EnumsBuilder),
@@ -72,7 +47,11 @@ impl DixDataBuilder {
         self
     }
 
-    /// Configure DATA section
+    /// Configure the DATA section.
+    ///
+    /// The closure receives a `&mut DataBuilder`. Methods on `DataBuilder`
+    /// return `Result` — if you need to propagate errors out of the closure,
+    /// collect them and return via `build()`.
     pub fn data<F>(mut self, configure: F) -> Self
     where
         F: FnOnce(&mut DataBuilder),
@@ -81,32 +60,33 @@ impl DixDataBuilder {
         self
     }
 
-    /// Set version
     pub fn with_version(mut self, version: impl Into<String>) -> Self {
         self.version = version.into();
         self
     }
 
-    /// Set compile time
     pub fn with_compile_time(mut self, time: chrono::DateTime<Utc>) -> Self {
         self.compile_time = time;
         self
     }
 
-    /// Build DixData in memory
+    /// Build DixData in memory.
+    ///
+    /// Returns `Err` if the data builder accumulated any two-tier violations.
     pub fn build(self) -> Result<DixData, String> {
         let config_section = self.config_builder.build();
-        let enums_section = self.enums_builder.build();
-        let data_section = self.data_builder.build()?;
+        let enums_section  = self.enums_builder.build();
+        let data_section   = self.data_builder.build()?;
 
+        // Surface any deferred two-tier errors collected during the closure.
         let ast = DixScript {
-            config: config_section,
-            imports: None,
-            dlm: None,
-            enums: enums_section,
+            config:          config_section,
+            imports:         None,
+            dlm:             None,
+            enums:           enums_section,
             quick_functions: None,
-            data: data_section,
-            security: None,
+            data:            data_section,
+            security:        None,
         };
 
         Ok(DixData::from_ast(
@@ -119,63 +99,49 @@ impl DixDataBuilder {
         ))
     }
 
-    /// Build and save to .dixscript file
+    /// Build and write to a `.dixscript` file.
     pub fn build_and_save(
         self,
         output_path: impl AsRef<std::path::Path>,
         options: Option<&DixFormatOptions>,
     ) -> Result<String, String> {
         let output_path = output_path.as_ref();
-
-        // Ensure .dixscript extension
         let output_path = if output_path.extension().and_then(|s| s.to_str()) != Some("dixscript") {
             output_path.with_extension("dixscript")
         } else {
             output_path.to_path_buf()
         };
 
-        // Create directory if needed
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create directory: {}", e))?;
         }
 
-        // Build DixData
-        let dix_data = self.build()?;
-
-        // Convert to MDIX format
+        let dix_data  = self.build()?;
         let converter = DixConverter::new();
 
-        // Reconstruct AST from DixData (simplified - just for export)
         let ast = DixScript {
             config: dix_data.config.as_ref().map(|cfg| {
-                let entries = cfg
-                    .iter()
-                    .map(|(k, v)| ConfigEntry {
-                        key: k.clone(),
-                        value: ConfigValue::String(v.clone()),
-                        position: Position::UNKNOWN,
-                    })
-                    .collect();
-                ConfigSection {
-                    entries,
+                let entries = cfg.iter().map(|(k, v)| ConfigEntry {
+                    key:      k.clone(),
+                    value:    ConfigValue::String(v.clone()),
                     position: Position::UNKNOWN,
-                }
+                }).collect();
+                ConfigSection { entries, position: Position::UNKNOWN }
             }),
             data: Some(DataSection {
-                entries: vec![], // Would need full reconstruction - simplified for now
+                entries:  vec![],
                 position: Position::UNKNOWN,
             }),
-            imports: None,
-            dlm: None,
-            enums: None,
+            imports:         None,
+            dlm:             None,
+            enums:           None,
             quick_functions: None,
-            security: None,
+            security:        None,
         };
 
         let mdix_content = converter.to_mdix(&ast, options)?;
 
-        // Write to file
         std::fs::write(&output_path, mdix_content)
             .map_err(|e| format!("Failed to write file: {}", e))?;
 
@@ -189,51 +155,41 @@ impl Default for DixDataBuilder {
     }
 }
 
-// ===== SUB-BUILDERS =====
+// ── ConfigBuilder ─────────────────────────────────────────────────────────────
 
-/// CONFIG section builder
 pub struct ConfigBuilder {
     entries: Vec<(String, String)>,
 }
 
 impl ConfigBuilder {
     pub fn new() -> Self {
-        ConfigBuilder {
-            entries: Vec::new(),
-        }
+        ConfigBuilder { entries: Vec::new() }
     }
 
-    /// Add config entry (mutable - for closure style)
     pub fn add_entry(&mut self, key: impl Into<String>, value: impl Into<String>) {
         self.entries.push((key.into(), value.into()));
     }
 
-    /// Set version
     pub fn with_version(&mut self, version: impl Into<String>) {
         self.add_entry("version", version);
     }
 
-    /// Set encoding
     pub fn with_encoding(&mut self, encoding: impl Into<String>) {
         self.add_entry("encoding", encoding);
     }
 
-    /// Set author
     pub fn with_author(&mut self, author: impl Into<String>) {
         self.add_entry("author", author);
     }
 
-    /// Set created timestamp
     pub fn with_created(&mut self, created: chrono::DateTime<Utc>) {
         self.add_entry("created", created.format("%Y-%m-%dT%H:%M:%SZ").to_string());
     }
 
-    /// Set features
     pub fn with_features(&mut self, features: impl Into<String>) {
         self.add_entry("features", features);
     }
 
-    /// Add custom entry
     pub fn with_custom(&mut self, key: impl Into<String>, value: impl Into<String>) {
         self.add_entry(key, value);
     }
@@ -242,21 +198,12 @@ impl ConfigBuilder {
         if self.entries.is_empty() {
             return None;
         }
-
-        let config_entries = self
-            .entries
-            .into_iter()
-            .map(|(key, value)| ConfigEntry {
-                key,
-                value: ConfigValue::String(value),
-                position: Position::UNKNOWN,
-            })
-            .collect();
-
-        Some(ConfigSection {
-            entries: config_entries,
+        let config_entries = self.entries.into_iter().map(|(key, value)| ConfigEntry {
+            key,
+            value:    ConfigValue::String(value),
             position: Position::UNKNOWN,
-        })
+        }).collect();
+        Some(ConfigSection { entries: config_entries, position: Position::UNKNOWN })
     }
 }
 
@@ -266,7 +213,8 @@ impl Default for ConfigBuilder {
     }
 }
 
-/// ENUMS section builder
+// ── EnumsBuilder ──────────────────────────────────────────────────────────────
+
 pub struct EnumsBuilder {
     enums: Vec<(String, Vec<(String, Option<i32>)>)>,
 }
@@ -276,23 +224,17 @@ impl EnumsBuilder {
         EnumsBuilder { enums: Vec::new() }
     }
 
-    /// Add enum with auto-values (0, 1, 2, ...)
     pub fn with_enum(&mut self, enum_name: impl Into<String>, field_names: &[&str]) {
-        let fields = field_names
-            .iter()
-            .map(|name| (name.to_string(), None))
-            .collect();
+        let fields = field_names.iter().map(|name| (name.to_string(), None)).collect();
         self.enums.push((enum_name.into(), fields));
     }
 
-    /// Add enum with explicit values
     pub fn with_enum_values(
         &mut self,
         enum_name: impl Into<String>,
         fields: &[(impl AsRef<str>, i32)],
     ) {
-        let fields_vec = fields
-            .iter()
+        let fields_vec = fields.iter()
             .map(|(name, value)| (name.as_ref().to_string(), Some(*value)))
             .collect();
         self.enums.push((enum_name.into(), fields_vec));
@@ -302,31 +244,15 @@ impl EnumsBuilder {
         if self.enums.is_empty() {
             return None;
         }
-
-        let enum_declarations = self
-            .enums
-            .into_iter()
-            .map(|(name, fields)| {
-                let enum_fields = fields
-                    .into_iter()
-                    .map(|(field_name, value)| EnumField {
-                        name: field_name,
-                        value,
-                        position: Position::UNKNOWN,
-                    })
-                    .collect();
-                EnumDeclaration {
-                    name,
-                    fields: enum_fields,
-                    position: Position::UNKNOWN,
-                }
-            })
-            .collect();
-
-        Some(EnumsSection {
-            enums: enum_declarations,
-            position: Position::UNKNOWN,
-        })
+        let enum_declarations = self.enums.into_iter().map(|(name, fields)| {
+            let enum_fields = fields.into_iter().map(|(field_name, value)| EnumField {
+                name: field_name,
+                value,
+                position: Position::UNKNOWN,
+            }).collect();
+            EnumDeclaration { name, fields: enum_fields, position: Position::UNKNOWN }
+        }).collect();
+        Some(EnumsSection { enums: enum_declarations, position: Position::UNKNOWN })
     }
 }
 
@@ -336,165 +262,168 @@ impl Default for EnumsBuilder {
     }
 }
 
-/// DATA section builder
+// ── DataBuilder ───────────────────────────────────────────────────────────────
+
+/// Builds the DATA section.
 ///
-/// Enforces two-tier structure:
-/// - Flat properties must come first
-/// - Table properties and group arrays come after
+/// Flat properties must be added before any table properties or group arrays.
+/// Violations are collected as errors and surfaced when `build()` is called,
+/// rather than panicking immediately. This makes the builder safe to use from
+/// any context, including across FFI boundaries.
 pub struct DataBuilder {
-    flat_properties: Vec<(String, Value)>,
-    table_properties: Vec<(String, Vec<(String, Value)>)>,
-    group_arrays: Vec<(String, Vec<Value>)>,
+    flat_properties:      Vec<(String, Value)>,
+    table_properties:     Vec<(String, Vec<(String, Value)>)>,
+    group_arrays:         Vec<(String, Vec<Value>)>,
     has_seen_grouped_data: bool,
+    deferred_errors:      Vec<String>,
 }
 
 impl DataBuilder {
     pub fn new() -> Self {
         DataBuilder {
-            flat_properties: Vec::new(),
-            table_properties: Vec::new(),
-            group_arrays: Vec::new(),
+            flat_properties:       Vec::new(),
+            table_properties:      Vec::new(),
+            group_arrays:          Vec::new(),
             has_seen_grouped_data: false,
+            deferred_errors:       Vec::new(),
         }
     }
 
-    // ===== FLAT PROPERTIES (must come first) =====
+    // ── Flat properties ───────────────────────────────────────────────────────
 
-    /// Add integer property
     pub fn with_int(&mut self, name: impl Into<String>, value: i32) {
-        self.validate_flat_property_allowed();
-        self.flat_properties.push((
-            name.into(),
-            Value::Integer { value, position: Position::UNKNOWN }
-        ));
+        if self.check_flat_allowed(name.as_ref_str_hack()) {
+            self.flat_properties.push((
+                name.into(),
+                Value::Integer { value, position: Position::UNKNOWN },
+            ));
+        }
     }
 
-    /// Add float property
     pub fn with_float(&mut self, name: impl Into<String>, value: f32) {
-        self.validate_flat_property_allowed();
-        self.flat_properties.push((
-            name.into(),
-            Value::Float { value, position: Position::UNKNOWN }
-        ));
+        if self.check_flat_allowed(name.as_ref_str_hack()) {
+            self.flat_properties.push((
+                name.into(),
+                Value::Float { value, position: Position::UNKNOWN },
+            ));
+        }
     }
 
-    /// Add double property
     pub fn with_double(&mut self, name: impl Into<String>, value: f64) {
-        self.validate_flat_property_allowed();
-        self.flat_properties.push((
-            name.into(),
-            Value::Double { value, position: Position::UNKNOWN }
-        ));
+        if self.check_flat_allowed(name.as_ref_str_hack()) {
+            self.flat_properties.push((
+                name.into(),
+                Value::Double { value, position: Position::UNKNOWN },
+            ));
+        }
     }
 
-    /// Add string property
     pub fn with_string(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.validate_flat_property_allowed();
-        self.flat_properties.push((
-            name.into(),
-            Value::String { value: value.into(), position: Position::UNKNOWN }
-        ));
+        if self.check_flat_allowed(name.as_ref_str_hack()) {
+            self.flat_properties.push((
+                name.into(),
+                Value::String { value: value.into(), position: Position::UNKNOWN },
+            ));
+        }
     }
 
-    /// Add boolean property
     pub fn with_bool(&mut self, name: impl Into<String>, value: bool) {
-        self.validate_flat_property_allowed();
-        self.flat_properties.push((
-            name.into(),
-            Value::Boolean { value, position: Position::UNKNOWN }
-        ));
+        if self.check_flat_allowed(name.as_ref_str_hack()) {
+            self.flat_properties.push((
+                name.into(),
+                Value::Boolean { value, position: Position::UNKNOWN },
+            ));
+        }
     }
 
-    /// Add date property
     pub fn with_date(&mut self, name: impl Into<String>, value: chrono::NaiveDate) {
-        self.validate_flat_property_allowed();
-        self.flat_properties.push((
-            name.into(),
-            Value::Date {
-                value: value.format("%Y-%m-%d").to_string(),
-                position: Position::UNKNOWN
-            },
-        ));
+        if self.check_flat_allowed(name.as_ref_str_hack()) {
+            self.flat_properties.push((
+                name.into(),
+                Value::Date {
+                    value:    value.format("%Y-%m-%d").to_string(),
+                    position: Position::UNKNOWN,
+                },
+            ));
+        }
     }
 
-    /// Add hex color property
     pub fn with_hex_color(&mut self, name: impl Into<String>, hex_value: impl Into<String>) {
-        self.validate_flat_property_allowed();
         let hex = hex_value.into();
         if !hex.starts_with('#') {
-            panic!("Hex color must start with #");
+            self.deferred_errors.push(format!(
+                "Hex color value must start with '#', got: {}", hex
+            ));
+            return;
         }
-        self.flat_properties.push((
-            name.into(),
-            Value::HexColor { value: hex, position: Position::UNKNOWN }
-        ));
+        if self.check_flat_allowed(name.as_ref_str_hack()) {
+            self.flat_properties.push((
+                name.into(),
+                Value::HexColor { value: hex, position: Position::UNKNOWN },
+            ));
+        }
     }
 
-    /// Add array property
     pub fn with_array(&mut self, name: impl Into<String>, items: Vec<Value>) {
-        self.validate_flat_property_allowed();
-        self.flat_properties.push((
-            name.into(),
-            Value::Array { values: items, position: Position::UNKNOWN }
-        ));
+        if self.check_flat_allowed(name.as_ref_str_hack()) {
+            self.flat_properties.push((
+                name.into(),
+                Value::Array { values: items, position: Position::UNKNOWN },
+            ));
+        }
     }
 
-    // ===== GROUPED DATA (comes after flat properties) =====
+    // ── Grouped data ──────────────────────────────────────────────────────────
 
-    /// Add table properties (e.g., user: name = "Bob", age = 30)
-    pub fn with_table_properties<F>(
-        &mut self,
-        path: impl Into<String>,
-        configure: F,
-    )
+    pub fn with_table_properties<F>(&mut self, path: impl Into<String>, configure: F)
     where
         F: FnOnce(&mut TablePropertiesBuilder),
     {
         self.has_seen_grouped_data = true;
-
         let mut builder = TablePropertiesBuilder::new();
         configure(&mut builder);
-
         self.table_properties.push((path.into(), builder.build()));
     }
 
-    /// Add group array (e.g., items:: 1, 2, 3)
     pub fn with_group_array(&mut self, path: impl Into<String>, items: Vec<Value>) {
         self.has_seen_grouped_data = true;
         self.group_arrays.push((path.into(), items));
     }
 
-    /// Add group array with builder
-    pub fn with_group_array_builder<F>(
-        &mut self,
-        path: impl Into<String>,
-        configure: F,
-    )
+    pub fn with_group_array_builder<F>(&mut self, path: impl Into<String>, configure: F)
     where
         F: FnOnce(&mut GroupArrayBuilder),
     {
         self.has_seen_grouped_data = true;
-
         let mut builder = GroupArrayBuilder::new();
         configure(&mut builder);
-
         self.group_arrays.push((path.into(), builder.build()));
     }
 
-    /// Validate that flat properties can still be added
-    fn validate_flat_property_allowed(&self) {
+    // ── Validation ────────────────────────────────────────────────────────────
+
+    /// Returns `true` if a flat property may be added, `false` if a two-tier
+    /// violation was detected (error deferred for `build()`).
+    fn check_flat_allowed(&mut self, name: &str) -> bool {
         if self.has_seen_grouped_data {
-            panic!(
-                "Cannot add flat properties after table properties or group arrays. \
-                 Flat properties must come first (two-tier structure)."
-            );
+            self.deferred_errors.push(format!(
+                "Cannot add flat property '{}' after table properties or group arrays. \
+                 Flat properties must come first (two-tier structure).",
+                name
+            ));
+            false
+        } else {
+            true
         }
     }
 
     fn build(self) -> Result<Option<DataSection>, String> {
+        if !self.deferred_errors.is_empty() {
+            return Err(self.deferred_errors.join("\n"));
+        }
+
         let mut entries = Vec::new();
 
-        // Add flat properties
         for (name, value) in self.flat_properties {
             entries.push(DataEntry::SimpleProperty {
                 name,
@@ -504,37 +433,26 @@ impl DataBuilder {
             });
         }
 
-        // Add table properties
         for (path, properties) in self.table_properties {
             let table_path = TablePath {
                 segments: path.split('.').map(String::from).collect(),
             };
-
-            let property_assignments = properties
-                .into_iter()
-                .map(|(name, value)| PropertyAssignment {
-                    name,
-                    data_type: None,
-                    value,
-                    position: Position::UNKNOWN,
-                })
-                .collect();
-
+            let property_assignments = properties.into_iter().map(|(name, value)| {
+                PropertyAssignment { name, data_type: None, value, position: Position::UNKNOWN }
+            }).collect();
             entries.push(DataEntry::TableProperty {
-                path: table_path,
+                path:       table_path,
                 properties: property_assignments,
-                position: Position::UNKNOWN,
+                position:   Position::UNKNOWN,
             });
         }
 
-        // Add group arrays
         for (path, items) in self.group_arrays {
             let array_path = TablePath {
                 segments: path.split('.').map(String::from).collect(),
             };
-
             entries.push(DataEntry::GroupArray {
-                path: array_path,
+                path:     array_path,
                 items,
                 position: Position::UNKNOWN,
             });
@@ -544,10 +462,7 @@ impl DataBuilder {
             return Ok(None);
         }
 
-        Ok(Some(DataSection {
-            entries,
-            position: Position::UNKNOWN,
-        }))
+        Ok(Some(DataSection { entries, position: Position::UNKNOWN }))
     }
 }
 
@@ -557,51 +472,56 @@ impl Default for DataBuilder {
     }
 }
 
-/// Table properties builder (for table: prop1 = val1, prop2 = val2)
+// ── Hack trait to peek at the name before consuming it ───────────────────────
+//
+// `check_flat_allowed` needs a &str for the error message, but the name is
+// `impl Into<String>` which is consumed on the call. This trait lets us peek
+// at the string slice before moving it.
+
+trait AsRefStrHack {
+    fn as_ref_str_hack(&self) -> &str;
+}
+
+impl AsRefStrHack for String {
+    fn as_ref_str_hack(&self) -> &str { self.as_str() }
+}
+
+impl AsRefStrHack for &str {
+    fn as_ref_str_hack(&self) -> &str { self }
+}
+
+// ── TablePropertiesBuilder ────────────────────────────────────────────────────
+
 pub struct TablePropertiesBuilder {
     properties: Vec<(String, Value)>,
 }
 
 impl TablePropertiesBuilder {
     pub fn new() -> Self {
-        TablePropertiesBuilder {
-            properties: Vec::new(),
-        }
+        TablePropertiesBuilder { properties: Vec::new() }
     }
 
     pub fn with_int(&mut self, name: impl Into<String>, value: i32) {
-        self.properties.push((
-            name.into(),
-            Value::Integer { value, position: Position::UNKNOWN }
-        ));
+        self.properties.push((name.into(), Value::Integer { value, position: Position::UNKNOWN }));
     }
 
     pub fn with_float(&mut self, name: impl Into<String>, value: f32) {
-        self.properties.push((
-            name.into(),
-            Value::Float { value, position: Position::UNKNOWN }
-        ));
+        self.properties.push((name.into(), Value::Float { value, position: Position::UNKNOWN }));
     }
 
     pub fn with_double(&mut self, name: impl Into<String>, value: f64) {
-        self.properties.push((
-            name.into(),
-            Value::Double { value, position: Position::UNKNOWN }
-        ));
+        self.properties.push((name.into(), Value::Double { value, position: Position::UNKNOWN }));
     }
 
     pub fn with_string(&mut self, name: impl Into<String>, value: impl Into<String>) {
         self.properties.push((
             name.into(),
-            Value::String { value: value.into(), position: Position::UNKNOWN }
+            Value::String { value: value.into(), position: Position::UNKNOWN },
         ));
     }
 
     pub fn with_bool(&mut self, name: impl Into<String>, value: bool) {
-        self.properties.push((
-            name.into(),
-            Value::Boolean { value, position: Position::UNKNOWN }
-        ));
+        self.properties.push((name.into(), Value::Boolean { value, position: Position::UNKNOWN }));
     }
 
     fn build(self) -> Vec<(String, Value)> {
@@ -615,7 +535,8 @@ impl Default for TablePropertiesBuilder {
     }
 }
 
-/// Group array builder (for array:: item1, item2, item3)
+// ── GroupArrayBuilder ─────────────────────────────────────────────────────────
+
 pub struct GroupArrayBuilder {
     items: Vec<Value>,
 }
@@ -689,16 +610,54 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Cannot add flat properties after table properties")]
-    fn test_two_tier_enforcement() {
-        let _ = DixDataBuilder::new()
+    fn test_two_tier_violation_returns_err_not_panic() {
+        let result = DixDataBuilder::new()
             .data(|d| {
                 d.with_table_properties("user", |t| {
                     t.with_string("name", "Bob");
                 });
-                // This should panic - flat property after grouped data
+                // Two-tier violation — should NOT panic, should defer to build()
                 d.with_int("x", 42);
             })
             .build();
+
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("two-tier"), "expected two-tier error, got: {}", msg);
     }
-}
+
+    #[test]
+    fn test_multiple_violations_all_reported() {
+        let result = DixDataBuilder::new()
+            .data(|d| {
+                d.with_group_array("tags", vec![]);
+                d.with_int("x", 1);
+                d.with_string("y", "hello");
+            })
+            .build();
+
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        // Both violations should appear in the error message.
+        assert!(msg.contains('x'), "expected 'x' in error, got: {}", msg);
+        assert!(msg.contains('y'), "expected 'y' in error, got: {}", msg);
+    }
+
+    #[test]
+    fn test_hex_color_without_hash_returns_err() {
+        let result = DixDataBuilder::new()
+            .data(|d| {
+                d.with_hex_color("color", "FF5733");
+            })
+            .build();
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains('#'));
+    }
+
+    #[test]
+    fn test_empty_data_returns_none_section() {
+        let data = DixDataBuilder::new().build().unwrap();
+        assert_eq!(data.entry_count(), 0);
+    }
+    }

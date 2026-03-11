@@ -11,13 +11,11 @@ use std::os::raw::c_char;
 
 /// Convert a raw C string pointer to a Rust &str.
 ///
-/// Returns None if:
-/// - the pointer is null
-/// - the bytes are not valid UTF-8
+/// Returns None if the pointer is null or the bytes are not valid UTF-8.
 ///
 /// # Safety
-/// Caller must ensure `ptr` points to a valid null-terminated C string that
-/// remains alive for the duration of the returned reference.
+/// `ptr` must point to a valid null-terminated C string that remains alive
+/// for the duration of the returned reference.
 pub unsafe fn c_str_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
     if ptr.is_null() {
         return None;
@@ -28,8 +26,7 @@ pub unsafe fn c_str_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
 /// Convert a Rust String into a heap-allocated C string, returning a raw pointer.
 ///
 /// The caller is responsible for freeing the returned pointer via mdix_free_string().
-/// Returns null if the string contains interior null bytes (which would corrupt
-/// the C string terminator).
+/// Returns null if the string contains interior null bytes.
 pub fn str_to_c_char(s: String) -> *mut c_char {
     match CString::new(s) {
         Ok(cs) => cs.into_raw(),
@@ -37,29 +34,15 @@ pub fn str_to_c_char(s: String) -> *mut c_char {
     }
 }
 
-/// Convert a static str to a C string pointer.
+/// Convert a Vec<String> into a heap-allocated boxed slice of C string pointers.
 ///
-/// The memory is 'static — do NOT free this pointer with mdix_free_string().
-/// Only used for constant responses like the version string.
-pub fn static_str_to_c_char(s: &'static str) -> *const c_char {
-    // Safety: we immediately call as_ptr() — the CString would normally be
-    // dropped here but since s is 'static and has no interior nulls we leak it
-    // intentionally as a one-time allocation.
-    let cs = CString::new(s).expect("static string contained null byte");
-    let ptr = cs.as_ptr();
-    std::mem::forget(cs);
-    ptr
-}
-
-/// Convert a Vec<String> into a heap-allocated array of C strings.
-///
-/// Returns a pointer to an array of `*mut c_char`, with count written to `out_count`.
-/// The entire allocation (array + each string) must be freed via mdix_free_string_array().
-/// Returns null on allocation failure.
+/// Returns a pointer to the first element and writes the element count to `out_count`.
+/// The allocation is a `Box<[*mut c_char]>` that was leaked via `Box::into_raw`.
+/// The caller must free the entire allocation with mdix_free_string_array(result, out_count).
+/// Returns null when the input is empty.
 pub fn string_vec_to_c_array(strings: Vec<String>, out_count: *mut i32) -> *mut *mut c_char {
     let count = strings.len();
 
-    // Write count to the output parameter before any early return.
     if !out_count.is_null() {
         unsafe { *out_count = count as i32 };
     }
@@ -68,25 +51,25 @@ pub fn string_vec_to_c_array(strings: Vec<String>, out_count: *mut i32) -> *mut 
         return std::ptr::null_mut();
     }
 
-    // Allocate the pointer array on the heap via Vec, then leak it.
-    let mut ptrs: Vec<*mut c_char> = strings
+    // Build into a boxed slice so capacity is always exactly len.
+    // This is required for the matching Box::from_raw in free_c_char_array to be sound.
+    let boxed: Box<[*mut c_char]> = strings
         .into_iter()
-        .map(|s| str_to_c_char(s))
-        .collect();
+        .map(str_to_c_char)
+        .collect::<Vec<_>>()
+        .into_boxed_slice();
 
-    let raw = ptrs.as_mut_ptr();
-    std::mem::forget(ptrs);
-    raw
+    Box::into_raw(boxed) as *mut *mut c_char
 }
 
-/// Free a C string that was returned by an mdix FFI function.
+/// Free a C string that was returned by an mdix FFI getter function.
 ///
-/// Must only be called on strings allocated by str_to_c_char — not on
-/// static pointers like the one returned by mdix_version().
+/// Must only be called on strings allocated by str_to_c_char.
+/// Passing null is safe. Do NOT call this on the pointer returned by mdix_version().
 ///
 /// # Safety
-/// `ptr` must be a pointer previously returned by an mdix get_string function,
-/// or null. Calling this twice on the same pointer is undefined behavior.
+/// `ptr` must have been produced by an mdix get_string function, or be null.
+/// Calling this twice on the same pointer is undefined behavior.
 pub unsafe fn free_c_char(ptr: *mut c_char) {
     if !ptr.is_null() {
         drop(CString::from_raw(ptr));
@@ -97,20 +80,23 @@ pub unsafe fn free_c_char(ptr: *mut c_char) {
 ///
 /// # Safety
 /// `arr` must be the exact pointer returned by mdix_get_keys().
-/// `count` must match the count written by that call.
+/// `count` must match the value written to out_count by that call.
 /// Calling this twice on the same pointer is undefined behavior.
 pub unsafe fn free_c_char_array(arr: *mut *mut c_char, count: i32) {
     if arr.is_null() || count <= 0 {
         return;
     }
     let count = count as usize;
-    // Reconstruct the slice to free each string, then free the array itself.
-    let slice = std::slice::from_raw_parts_mut(arr, count);
-    for ptr in slice.iter() {
+
+    // Reconstruct the boxed slice. This is sound because string_vec_to_c_array
+    // always uses into_boxed_slice(), so the allocation length equals count exactly.
+    let slice_ptr = std::ptr::slice_from_raw_parts_mut(arr, count);
+    let boxed = Box::from_raw(slice_ptr);
+
+    for ptr in boxed.iter() {
         if !ptr.is_null() {
             drop(CString::from_raw(*ptr));
         }
     }
-    // Reconstruct the Vec to free the array allocation.
-    drop(Vec::from_raw_parts(arr, count, count));
-  }
+    // boxed drops here, freeing the slice allocation.
+    }

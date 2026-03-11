@@ -82,7 +82,6 @@ fn validate_json_flag_produces_valid_json_on_success() {
     assert_eq!(parsed["success"], true);
     assert!(parsed["data"]["token_count"].is_number());
 
-    // Write result for inspection.
     let out = helpers::results_file("validate", "basic_success.json");
     std::fs::write(out, &stdout).ok();
 }
@@ -101,7 +100,6 @@ fn validate_json_flag_produces_valid_json_on_failure() {
     assert_eq!(parsed["success"], false);
     assert!(parsed["error"].is_string());
 
-    // Write result for inspection.
     let out = helpers::results_file("validate", "invalid_syntax_failure.json");
     std::fs::write(out, &stderr).ok();
 }

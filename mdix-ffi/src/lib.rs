@@ -17,9 +17,9 @@ mod error;
 mod handle;
 mod string_utils;
 
+use std::ffi::CString;
 use std::os::raw::c_char;
 use std::sync::OnceLock;
-use std::ffi::CString;
 
 use dixscript::Runtime::{
     DixConverter, DixData, DixFormatOptions, DixLoader, DixLoadOptions, DixValue,
@@ -30,6 +30,34 @@ use handle::{MdixBuilderHandle, MdixHandle};
 use string_utils::{
     c_str_to_str, free_c_char, free_c_char_array, str_to_c_char, string_vec_to_c_array,
 };
+
+// =============================================================================
+// Type discriminants
+// =============================================================================
+
+/// Type discriminants returned by mdix_get_type().
+///
+/// Maps 1:1 to DixValue variants. Use these constants on the C# side to decide
+/// which getter to call. Unknown (-1) means the path does not exist.
+#[repr(i32)]
+pub enum MdixType {
+    Unknown   = -1,
+    Null      = 0,
+    Bool      = 1,
+    Int       = 2,
+    Float     = 3,
+    Double    = 4,
+    String    = 5,
+    Date      = 6,
+    Timestamp = 7,
+    HexColor  = 8,
+    Blob      = 9,
+    Regex     = 10,
+    Array     = 11,
+    Object    = 12,
+    Tuple     = 13,
+    Enum      = 14,
+}
 
 // =============================================================================
 // Metadata
@@ -79,8 +107,7 @@ pub extern "C" fn mdix_load(path: *const c_char) -> *mut MdixHandle {
 
 /// Load a .mdix file from a raw source string (no disk access).
 ///
-/// Useful for loading .mdix content that was downloaded, bundled as a
-/// TextAsset in Unity, or generated at runtime.
+/// Useful for loading .mdix content bundled as a TextAsset in Unity.
 ///
 /// Returns an opaque handle on success, null on failure.
 /// The caller must free the handle with mdix_free() when done.
@@ -191,9 +218,6 @@ pub extern "C" fn mdix_load_encrypted_password(
 
 /// Load encrypted data from raw bytes with the key file contents as a string.
 ///
-/// Useful when both the encrypted payload and the key are fetched from a
-/// network source or a secrets manager — no disk access required.
-///
 /// `encrypted_bytes`  — pointer to the encrypted data buffer.
 /// `byte_count`       — number of bytes in the buffer.
 /// `key_file_content` — full text content of the .mdix.key file.
@@ -217,7 +241,9 @@ pub extern "C" fn mdix_load_encrypted_bytes(
     let key_content = match unsafe { c_str_to_str(key_file_content) } {
         Some(s) => s,
         None => {
-            set_last_error("mdix_load_encrypted_bytes: key_file_content is null or invalid UTF-8");
+            set_last_error(
+                "mdix_load_encrypted_bytes: key_file_content is null or invalid UTF-8",
+            );
             return std::ptr::null_mut();
         }
     };
@@ -241,7 +267,7 @@ pub extern "C" fn mdix_load_encrypted_bytes(
 
 /// Free a handle returned by any mdix_load* function.
 ///
-/// After calling this, the handle pointer is invalid — do not use it again.
+/// After calling this the handle pointer is invalid — do not use it again.
 /// Passing null is safe and does nothing.
 #[no_mangle]
 pub extern "C" fn mdix_free(handle: *mut MdixHandle) {
@@ -249,10 +275,10 @@ pub extern "C" fn mdix_free(handle: *mut MdixHandle) {
 }
 
 // =============================================================================
-// Validity check
+// Validity and metadata
 // =============================================================================
 
-/// Return true if the handle is non-null and was loaded successfully.
+/// Return true if the handle is non-null.
 #[no_mangle]
 pub extern "C" fn mdix_is_valid(handle: *const MdixHandle) -> bool {
     !handle.is_null()
@@ -270,13 +296,74 @@ pub extern "C" fn mdix_entry_count(handle: *const MdixHandle) -> i32 {
 }
 
 // =============================================================================
+// Type inspection
+// =============================================================================
+
+/// Return the MdixType discriminant of the value at the given path.
+///
+/// Returns -1 (MdixType::Unknown) if the path does not exist or the handle is null.
+/// Call this before a getter when the schema is not known at compile time.
+#[no_mangle]
+pub extern "C" fn mdix_get_type(handle: *const MdixHandle, path: *const c_char) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+
+    let path_str = match unsafe { c_str_to_str(path) } {
+        Some(s) => s,
+        None => return -1,
+    };
+
+    match unsafe { (*handle).data.get_value(path_str) } {
+        None                         => -1,
+        Some(DixValue::Null)         =>  0,
+        Some(DixValue::Bool(_))      =>  1,
+        Some(DixValue::Int(_))       =>  2,
+        Some(DixValue::Float(_))     =>  3,
+        Some(DixValue::Double(_))    =>  4,
+        Some(DixValue::String(_))    =>  5,
+        Some(DixValue::Date(_))      =>  6,
+        Some(DixValue::Timestamp(_)) =>  7,
+        Some(DixValue::HexColor(_))  =>  8,
+        Some(DixValue::Blob(_))      =>  9,
+        Some(DixValue::Regex(_))     => 10,
+        Some(DixValue::Array(_))     => 11,
+        Some(DixValue::Object(_))    => 12,
+        Some(DixValue::Tuple(_))     => 13,
+        Some(DixValue::Enum { .. })  => 14,
+    }
+}
+
+/// Return the number of items in the array at the given path.
+///
+/// Returns -1 if the path does not exist, the value is not an array, or the
+/// handle is null. Use this to drive a loop over indexed paths:
+///   for i in 0..mdix_get_array_length(h, "enemies") { mdix_get_int(h, $"enemies[{i}].health") }
+#[no_mangle]
+pub extern "C" fn mdix_get_array_length(handle: *const MdixHandle, path: *const c_char) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+
+    let path_str = match unsafe { c_str_to_str(path) } {
+        Some(s) => s,
+        None => return -1,
+    };
+
+    match unsafe { (*handle).data.get_value(path_str) } {
+        Some(DixValue::Array(arr)) => arr.len() as i32,
+        _ => -1,
+    }
+}
+
+// =============================================================================
 // Data access — typed getters
 // =============================================================================
 
 /// Get a string value by dotted path.
 ///
-/// Returns a heap-allocated C string on success, null if the path does not
-/// exist or the value cannot be converted to a string.
+/// Also works for Date, Timestamp, and HexColor — all are stored as strings.
+/// Returns a heap-allocated C string on success, null on failure.
 /// The caller must free the result with mdix_free_string().
 #[no_mangle]
 pub extern "C" fn mdix_get_string(
@@ -301,7 +388,8 @@ pub extern "C" fn mdix_get_string(
 
 /// Get an integer value by dotted path.
 ///
-/// Returns 0 on failure. Use mdix_exists() first to distinguish 0 from not-found.
+/// Also works for Enum values — returns the resolved integer (e.g. BOSS → 2).
+/// Returns 0 on failure. Use mdix_exists() to distinguish 0 from not-found.
 #[no_mangle]
 pub extern "C" fn mdix_get_int(handle: *const MdixHandle, path: *const c_char) -> i32 {
     clear_last_error();
@@ -383,6 +471,122 @@ pub extern "C" fn mdix_get_bool(handle: *const MdixHandle, path: *const c_char) 
     }
 }
 
+// =============================================================================
+// Data access — enum names
+// =============================================================================
+
+/// Return the enum type name at the given path (e.g. "AIType").
+///
+/// Returns null if the path does not exist or the value is not an enum.
+/// The caller must free the result with mdix_free_string().
+///
+/// Use mdix_get_int for the resolved integer value and mdix_get_enum_field
+/// for the field name. Together these give the full picture:
+///   type  = mdix_get_enum_name(h, "enemy.ai")   → "AIType"
+///   field = mdix_get_enum_field(h, "enemy.ai")  → "BOSS"
+///   value = mdix_get_int(h, "enemy.ai")         →  2
+#[no_mangle]
+pub extern "C" fn mdix_get_enum_name(
+    handle: *const MdixHandle,
+    path: *const c_char,
+) -> *mut c_char {
+    clear_last_error();
+
+    let (data, path_str) = match validate_read_args(handle, path, "mdix_get_enum_name") {
+        Some(v) => v,
+        None => return std::ptr::null_mut(),
+    };
+
+    match data.get_value(path_str) {
+        Some(DixValue::Enum { enum_name, .. }) => str_to_c_char(enum_name.clone()),
+        Some(_) => {
+            set_last_error(&format!(
+                "mdix_get_enum_name('{}'): value is not an enum",
+                path_str
+            ));
+            std::ptr::null_mut()
+        }
+        None => {
+            set_last_error(&format!("mdix_get_enum_name('{}'): path not found", path_str));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Return the enum field name at the given path (e.g. "BOSS").
+///
+/// Returns null if the path does not exist or the value is not an enum.
+/// The caller must free the result with mdix_free_string().
+#[no_mangle]
+pub extern "C" fn mdix_get_enum_field(
+    handle: *const MdixHandle,
+    path: *const c_char,
+) -> *mut c_char {
+    clear_last_error();
+
+    let (data, path_str) = match validate_read_args(handle, path, "mdix_get_enum_field") {
+        Some(v) => v,
+        None => return std::ptr::null_mut(),
+    };
+
+    match data.get_value(path_str) {
+        Some(DixValue::Enum { field_name, .. }) => str_to_c_char(field_name.clone()),
+        Some(_) => {
+            set_last_error(&format!(
+                "mdix_get_enum_field('{}'): value is not an enum",
+                path_str
+            ));
+            std::ptr::null_mut()
+        }
+        None => {
+            set_last_error(&format!("mdix_get_enum_field('{}'): path not found", path_str));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+// =============================================================================
+// Data access — JSON escape hatch
+// =============================================================================
+
+/// Serialize the value at the given path to a JSON string.
+///
+/// This is the escape hatch for Blob, Regex, Tuple, and any nested structure
+/// where you want the whole subtree handed to JsonUtility or Newtonsoft in one call.
+///
+/// Returns a heap-allocated C string on success, null on failure.
+/// The caller must free the result with mdix_free_string().
+#[no_mangle]
+pub extern "C" fn mdix_get_json(
+    handle: *const MdixHandle,
+    path: *const c_char,
+) -> *mut c_char {
+    clear_last_error();
+
+    let (data, path_str) = match validate_read_args(handle, path, "mdix_get_json") {
+        Some(v) => v,
+        None => return std::ptr::null_mut(),
+    };
+
+    match data.get_value(path_str) {
+        None => {
+            set_last_error(&format!("mdix_get_json('{}'): path not found", path_str));
+            std::ptr::null_mut()
+        }
+        Some(value) => match serde_json::to_string(value) {
+            Ok(json) => str_to_c_char(json),
+            Err(e) => {
+                set_last_error(&format!("mdix_get_json('{}'): {}", path_str, e));
+                std::ptr::null_mut()
+            }
+        },
+    }
+}
+
+// =============================================================================
+// Key existence and enumeration
+// =============================================================================
+
 /// Check whether a dotted path exists in the loaded data.
 ///
 /// Returns false if the handle is null.
@@ -399,10 +603,6 @@ pub extern "C" fn mdix_exists(handle: *const MdixHandle, path: *const c_char) ->
 
     unsafe { (*handle).data.exists(path_str) }
 }
-
-// =============================================================================
-// Key enumeration
-// =============================================================================
 
 /// Get the direct child key names under a path prefix.
 ///
@@ -437,10 +637,10 @@ pub extern "C" fn mdix_get_keys(
 }
 
 // =============================================================================
-// Memory management — strings and arrays returned to C#
+// Memory management
 // =============================================================================
 
-/// Free a string returned by mdix_get_string or mdix_builder_to_string.
+/// Free a string returned by any mdix getter that returns *mut c_char.
 ///
 /// Passing null is safe. Do NOT call this on the pointer from mdix_version().
 #[no_mangle]
@@ -481,7 +681,7 @@ pub extern "C" fn mdix_clear_error() {
 }
 
 // =============================================================================
-// Builder — create and write .mdix save data at runtime
+// Builder — lifecycle
 // =============================================================================
 
 /// Create a new empty builder handle.
@@ -493,12 +693,35 @@ pub extern "C" fn mdix_builder_new() -> *mut MdixBuilderHandle {
     MdixBuilderHandle::new()
 }
 
-/// Free a builder handle.
-///
-/// Passing null is safe.
+/// Free a builder handle. Passing null is safe.
 #[no_mangle]
 pub extern "C" fn mdix_builder_free(builder: *mut MdixBuilderHandle) {
     unsafe { MdixBuilderHandle::free(builder) };
+}
+
+/// Return the number of entries currently in the builder. Returns -1 if null.
+#[no_mangle]
+pub extern "C" fn mdix_builder_entry_count(builder: *const MdixBuilderHandle) -> i32 {
+    if builder.is_null() {
+        return -1;
+    }
+    unsafe { (*builder).entries.len() as i32 }
+}
+
+/// Remove all entries from the builder without freeing the handle.
+///
+/// Returns true on success, false if the builder is null.
+#[no_mangle]
+pub extern "C" fn mdix_builder_clear(builder: *mut MdixBuilderHandle) -> bool {
+    clear_last_error();
+
+    if builder.is_null() {
+        set_last_error("mdix_builder_clear: builder is null");
+        return false;
+    }
+
+    unsafe { (*builder).entries.clear() };
+    true
 }
 
 // =============================================================================
@@ -637,22 +860,6 @@ pub extern "C" fn mdix_builder_remove(
     builder_ref.entries.remove(path_str).is_some()
 }
 
-/// Remove all entries from the builder without freeing the handle.
-///
-/// Returns true on success, false if the builder is null.
-#[no_mangle]
-pub extern "C" fn mdix_builder_clear(builder: *mut MdixBuilderHandle) -> bool {
-    clear_last_error();
-
-    if builder.is_null() {
-        set_last_error("mdix_builder_clear: builder is null");
-        return false;
-    }
-
-    unsafe { (*builder).entries.clear() };
-    true
-}
-
 // =============================================================================
 // Builder — read back
 // =============================================================================
@@ -705,7 +912,10 @@ pub extern "C" fn mdix_builder_get_string(
             std::ptr::null_mut()
         }
         None => {
-            set_last_error(&format!("mdix_builder_get_string('{}'): key not found", path_str));
+            set_last_error(&format!(
+                "mdix_builder_get_string('{}'): key not found",
+                path_str
+            ));
             std::ptr::null_mut()
         }
     }
@@ -728,8 +938,8 @@ pub extern "C" fn mdix_builder_get_int(
         };
 
     match builder_ref.entries.get(path_str) {
-        Some(DixValue::Int(i)) => *i,
-        Some(DixValue::Float(f)) => *f as i32,
+        Some(DixValue::Int(i))    => *i,
+        Some(DixValue::Float(f))  => *f as i32,
         Some(DixValue::Double(d)) => *d as i32,
         Some(other) => {
             set_last_error(&format!(
@@ -763,8 +973,8 @@ pub extern "C" fn mdix_builder_get_float(
         };
 
     match builder_ref.entries.get(path_str) {
-        Some(DixValue::Float(f)) => *f,
-        Some(DixValue::Int(i)) => *i as f32,
+        Some(DixValue::Float(f))  => *f,
+        Some(DixValue::Int(i))    => *i as f32,
         Some(DixValue::Double(d)) => *d as f32,
         Some(other) => {
             set_last_error(&format!(
@@ -775,7 +985,10 @@ pub extern "C" fn mdix_builder_get_float(
             0.0
         }
         None => {
-            set_last_error(&format!("mdix_builder_get_float('{}'): key not found", path_str));
+            set_last_error(&format!(
+                "mdix_builder_get_float('{}'): key not found",
+                path_str
+            ));
             0.0
         }
     }
@@ -788,7 +1001,7 @@ pub extern "C" fn mdix_builder_get_float(
 pub extern "C" fn mdix_builder_get_double(
     builder: *const MdixBuilderHandle,
     path: *const c_char,
-) -> f64 {
+) -> f32 {
     clear_last_error();
 
     let (builder_ref, path_str) =
@@ -798,9 +1011,9 @@ pub extern "C" fn mdix_builder_get_double(
         };
 
     match builder_ref.entries.get(path_str) {
-        Some(DixValue::Double(d)) => *d,
-        Some(DixValue::Float(f)) => *f as f64,
-        Some(DixValue::Int(i)) => *i as f64,
+        Some(DixValue::Double(d)) => *d as f32,
+        Some(DixValue::Float(f))  => *f as f32,
+        Some(DixValue::Int(i))    => *i as f32,
         Some(other) => {
             set_last_error(&format!(
                 "mdix_builder_get_double('{}'): value is {} not numeric",
@@ -810,7 +1023,10 @@ pub extern "C" fn mdix_builder_get_double(
             0.0
         }
         None => {
-            set_last_error(&format!("mdix_builder_get_double('{}'): key not found", path_str));
+            set_last_error(&format!(
+                "mdix_builder_get_double('{}'): key not found",
+                path_str
+            ));
             0.0
         }
     }
@@ -843,7 +1059,10 @@ pub extern "C" fn mdix_builder_get_bool(
             false
         }
         None => {
-            set_last_error(&format!("mdix_builder_get_bool('{}'): key not found", path_str));
+            set_last_error(&format!(
+                "mdix_builder_get_bool('{}'): key not found",
+                path_str
+            ));
             false
         }
     }
@@ -899,7 +1118,10 @@ pub extern "C" fn mdix_builder_save(
 
     if let Some(parent) = std::path::Path::new(path_str).parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
-            set_last_error(&format!("mdix_builder_save: could not create directories: {}", e));
+            set_last_error(&format!(
+                "mdix_builder_save: could not create directories: {}",
+                e
+            ));
             return false;
         }
     }
@@ -932,7 +1154,10 @@ pub extern "C" fn mdix_builder_to_string(builder: *const MdixBuilderHandle) -> *
     let ast = match converter.from_hashmap(entries) {
         Ok(a) => a,
         Err(e) => {
-            set_last_error(&format!("mdix_builder_to_string: AST conversion failed: {}", e));
+            set_last_error(&format!(
+                "mdix_builder_to_string: AST conversion failed: {}",
+                e
+            ));
             return std::ptr::null_mut();
         }
     };
@@ -946,25 +1171,14 @@ pub extern "C" fn mdix_builder_to_string(builder: *const MdixBuilderHandle) -> *
     }
 }
 
-/// Return the number of entries currently in the builder.
-///
-/// Returns -1 if the builder is null.
-#[no_mangle]
-pub extern "C" fn mdix_builder_entry_count(builder: *const MdixBuilderHandle) -> i32 {
-    if builder.is_null() {
-        return -1;
-    }
-    unsafe { (*builder).entries.len() as i32 }
-}
-
 // =============================================================================
 // Private helpers
 // =============================================================================
 
 /// Validate a read call's handle and path.
 ///
-/// The returned references derive from raw pointers. Callers must use them
-/// immediately within the same function and not store them past any FFI boundary.
+/// The returned references derive from raw pointers and must be used
+/// immediately within the calling function only.
 fn validate_read_args<'a>(
     handle: *const MdixHandle,
     path: *const c_char,
@@ -981,14 +1195,13 @@ fn validate_read_args<'a>(
         return None;
     }
 
-    let data = unsafe { &(*handle).data };
-    Some((data, path_str))
+    Some((unsafe { &(*handle).data }, path_str))
 }
 
 /// Validate a mutable builder call's handle and path.
 ///
-/// The returned references derive from raw pointers. Callers must use them
-/// immediately within the same function and not store them past any FFI boundary.
+/// The returned references derive from raw pointers and must be used
+/// immediately within the calling function only.
 fn validate_builder_args<'a>(
     builder: *mut MdixBuilderHandle,
     path: *const c_char,
@@ -1005,13 +1218,13 @@ fn validate_builder_args<'a>(
         return None;
     }
 
-    let builder_ref = unsafe { &mut *builder };
-    Some((builder_ref, path_str))
+    Some((unsafe { &mut *builder }, path_str))
 }
 
 /// Validate an immutable builder read call's handle and path.
 ///
-/// Same lifetime caveat as validate_read_args.
+/// The returned references derive from raw pointers and must be used
+/// immediately within the calling function only.
 fn validate_builder_read_args<'a>(
     builder: *const MdixBuilderHandle,
     path: *const c_char,
@@ -1028,6 +1241,5 @@ fn validate_builder_read_args<'a>(
         return None;
     }
 
-    let builder_ref = unsafe { &*builder };
-    Some((builder_ref, path_str))
+    Some((unsafe { &*builder }, path_str))
 }

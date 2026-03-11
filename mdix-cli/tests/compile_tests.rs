@@ -123,7 +123,6 @@ fn compile_json_flag_produces_valid_json() {
     assert!(parsed["data"]["source_path"].is_string());
     assert!(parsed["data"]["elapsed_ms"].is_number());
 
-    // Write result for inspection.
     let result_file = helpers::results_file("compile", "basic_compile.json");
     std::fs::write(result_file, &stdout).ok();
 }

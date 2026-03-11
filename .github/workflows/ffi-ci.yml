@@ -21,7 +21,7 @@ permissions:
 
 jobs:
 
-  # ── 1. Gate: only run when commit contains --ffi ──────────────────────────
+  # ── 1. Gate ───────────────────────────────────────────────────────────────
   parse-trigger:
     runs-on: ubuntu-latest
     outputs:
@@ -68,31 +68,35 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ubuntu-latest-cargo-ffi-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ubuntu-latest-cargo-ffi-
 
       - name: Build mdix-ffi (Linux)
+        id: build
         run: |
           START=$(date +%s)
 
-          cargo build -p mdix-ffi --release > build.log 2>&1
+          # tee streams output to the UI in real-time AND captures it.
+          # PIPESTATUS[0] is cargo's exit code, not tee's.
+          set -o pipefail
+          cargo build -p mdix-ffi --release 2>&1 | tee build.log
           BUILD_EXIT=$?
 
           END=$(date +%s)
           echo "DURATION_S=$((END - START))" >> $GITHUB_ENV
 
-          if [ $BUILD_EXIT -ne 0 ]; then
-            echo "=== BUILD FAILED — full output below ==="
-            cat build.log
-            exit $BUILD_EXIT
-          fi
+          echo "=== Artifact sizes ==="
+          ls -lh target/release/libmdix_ffi.so 2>/dev/null || echo "libmdix_ffi.so not found"
+          ls -lh target/release/libmdix_ffi.a  2>/dev/null || echo "libmdix_ffi.a not found"
 
-          echo "=== Build successful ==="
-          ls -lh target/release/libmdix_ffi.so  2>/dev/null || true
-          ls -lh target/release/libmdix_ffi.a   2>/dev/null || true
+          exit $BUILD_EXIT
 
       - name: Collect result
         id: result
         if: always()
         run: |
+          DUR="${DURATION_S:-0}"
+
           if [ -f "target/release/libmdix_ffi.so" ]; then
             SIZE=$(stat -c%s target/release/libmdix_ffi.so)
             echo "status=success"   >> $GITHUB_OUTPUT
@@ -105,10 +109,10 @@ jobs:
             echo "status=failed"    >> $GITHUB_OUTPUT
             echo "size_bytes=0"     >> $GITHUB_OUTPUT
           fi
-          echo "duration_s=${{ env.DURATION_S }}" >> $GITHUB_OUTPUT
+          echo "duration_s=$DUR" >> $GITHUB_OUTPUT
 
       - name: Upload Linux artifact
-        if: success()
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: libmdix-ffi-linux-${{ github.run_number }}
@@ -144,31 +148,34 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: macos-latest-cargo-ffi-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            macos-latest-cargo-ffi-
 
       - name: Build mdix-ffi (macOS)
+        id: build
         run: |
           START=$(date +%s)
 
-          cargo build -p mdix-ffi --release > build.log 2>&1
+          set -o pipefail
+          cargo build -p mdix-ffi --release 2>&1 | tee build.log
           BUILD_EXIT=$?
 
           END=$(date +%s)
           echo "DURATION_S=$((END - START))" >> $GITHUB_ENV
 
-          if [ $BUILD_EXIT -ne 0 ]; then
-            echo "=== BUILD FAILED — full output below ==="
-            cat build.log
-            exit $BUILD_EXIT
-          fi
+          echo "=== Artifact sizes ==="
+          ls -lh target/release/libmdix_ffi.dylib 2>/dev/null || echo "libmdix_ffi.dylib not found"
+          ls -lh target/release/libmdix_ffi.a      2>/dev/null || echo "libmdix_ffi.a not found"
 
-          echo "=== Build successful ==="
-          ls -lh target/release/libmdix_ffi.dylib 2>/dev/null || true
-          ls -lh target/release/libmdix_ffi.a      2>/dev/null || true
+          exit $BUILD_EXIT
 
       - name: Collect result
         id: result
         if: always()
         run: |
+          DUR="${DURATION_S:-0}"
+
+          # macOS stat uses -f%z not -c%s
           if [ -f "target/release/libmdix_ffi.dylib" ]; then
             SIZE=$(stat -f%z target/release/libmdix_ffi.dylib)
             echo "status=success"   >> $GITHUB_OUTPUT
@@ -181,10 +188,10 @@ jobs:
             echo "status=failed"    >> $GITHUB_OUTPUT
             echo "size_bytes=0"     >> $GITHUB_OUTPUT
           fi
-          echo "duration_s=${{ env.DURATION_S }}" >> $GITHUB_OUTPUT
+          echo "duration_s=$DUR" >> $GITHUB_OUTPUT
 
       - name: Upload macOS artifact
-        if: success()
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: libmdix-ffi-macos-${{ github.run_number }}
@@ -222,41 +229,63 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ubuntu-latest-cargo-ffi-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ubuntu-latest-cargo-ffi-test-
 
       - name: Run dixscript core tests
+        id: run-tests
         continue-on-error: true
         run: |
           START=$(date +%s)
-          set +e
+
+          # Stream output live. Write exit code explicitly because the pipe
+          # to tee means the shell exit code would otherwise be tee's (0).
           cargo test -p dixscript --color=never --no-fail-fast 2>&1 | tee test-output.txt
-          echo "TEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
-          echo "DURATION_S=$(($(date +%s) - START))" >> $GITHUB_ENV
+          TEST_EXIT=${PIPESTATUS[0]}
+
+          END=$(date +%s)
+          echo "TEST_EXIT=$TEST_EXIT"          >> $GITHUB_ENV
+          echo "DURATION_S=$((END - START))"   >> $GITHUB_ENV
+
+          # Always exit 0 so the step does not kill the job —
+          # we record the real exit code above and report it in the result step.
           exit 0
 
       - name: Parse test counts
         id: result
+        if: always()
         run: |
           TOTAL=0; PASSED=0; FAILED=0
-          while IFS= read -r line; do
-            if echo "$line" | grep -qE '^test result:'; then
-              P=$(echo "$line" | grep -oP '\d+(?= passed)'  | head -1 || echo 0)
-              F=$(echo "$line" | grep -oP '\d+(?= failed)'  | head -1 || echo 0)
-              PASSED=$((PASSED + ${P:-0}))
-              FAILED=$((FAILED + ${F:-0}))
-              TOTAL=$((TOTAL + ${P:-0} + ${F:-0}))
-            fi
-          done < test-output.txt
 
-          STATUS=success
-          [ "${{ env.TEST_EXIT }}" != "0" ] && STATUS=failed
+          if [ -f test-output.txt ]; then
+            while IFS= read -r line; do
+              if echo "$line" | grep -qE '^test result:'; then
+                P=$(echo "$line" | grep -oP '\d+(?= passed)' | head -1)
+                F=$(echo "$line" | grep -oP '\d+(?= failed)' | head -1)
+                PASSED=$((PASSED + ${P:-0}))
+                FAILED=$((FAILED + ${F:-0}))
+                TOTAL=$((TOTAL   + ${P:-0} + ${F:-0}))
+              fi
+            done < test-output.txt
+          fi
 
-          echo "status=$STATUS"                       >> $GITHUB_OUTPUT
-          echo "total=$TOTAL"                         >> $GITHUB_OUTPUT
-          echo "passed=$PASSED"                       >> $GITHUB_OUTPUT
-          echo "failed=$FAILED"                       >> $GITHUB_OUTPUT
-          echo "duration_s=${{ env.DURATION_S }}"     >> $GITHUB_OUTPUT
+          # If cargo couldn't compile at all, TEST_EXIT=101 and counts stay 0.
+          # Report as failed so the dashboard shows the right state.
+          if [ "${TEST_EXIT:-0}" != "0" ]; then
+            STATUS=failed
+          else
+            STATUS=success
+          fi
 
-  # ── 5. Collect results → JSON → deploy to gh-pages ────────────────────────
+          echo "status=$STATUS"                     >> $GITHUB_OUTPUT
+          echo "total=$TOTAL"                       >> $GITHUB_OUTPUT
+          echo "passed=$PASSED"                     >> $GITHUB_OUTPUT
+          echo "failed=$FAILED"                     >> $GITHUB_OUTPUT
+          echo "duration_s=${DURATION_S:-0}"        >> $GITHUB_OUTPUT
+
+          echo "Test result: $STATUS  total=$TOTAL passed=$PASSED failed=$FAILED"
+
+  # ── 5. Collect → JSON → deploy ────────────────────────────────────────────
   collect-and-deploy:
     runs-on: ubuntu-latest
     needs: [parse-trigger, build-ffi-linux, build-ffi-macos, test-core]
@@ -370,8 +399,6 @@ jobs:
           cp ffi-results.json       "$WORK/ffi/builds/build_${BUILD_NUM}/ffi-results.json"
           cp ffi-results-index.html "$WORK/ffi/builds/build_${BUILD_NUM}/index.html"
 
-          # Always write the canonical landing page from the template.
-          # The template already includes all four links including FFI.
           cp .github/landing-index.html "$WORK/index.html"
 
           cd "$WORK"
@@ -385,11 +412,9 @@ jobs:
             "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
             gh-pages
 
-          echo ""
-          echo "Deployed FFI results to gh-pages"
-          echo "  https://mid-d-man.github.io/DixScript-Rust/ffi/"
+          echo "Deployed: https://mid-d-man.github.io/DixScript-Rust/ffi/"
 
-  # ── 6. Summary ─────────────────────────────────────────────────────────────
+  # ── 6. Summary ────────────────────────────────────────────────────────────
   summary:
     runs-on: ubuntu-latest
     needs: [parse-trigger, build-ffi-linux, build-ffi-macos, test-core, collect-and-deploy]

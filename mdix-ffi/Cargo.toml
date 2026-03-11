@@ -16,24 +16,14 @@ name = "mdix_ffi"
 #             C# uses DllImport("__Internal") on iOS instead of the library name.
 crate-type = ["cdylib", "staticlib"]
 
-# =============================================================================
-# Runtime dependencies
-# =============================================================================
 [dependencies]
 dixscript = { path = "../dixscript" }
 
-# =============================================================================
-# Build dependencies
-# =============================================================================
 [build-dependencies]
 # csbindgen parses our extern "C" functions and auto-generates MdixNative.cs.
 # Never hand-edit the generated file — rebuild instead.
-csbindgen = "0.8"
+csbindgen = "1"
 
-# =============================================================================
-# Build profiles — inherit from workspace root when placed there.
-# Defined here for standalone reference.
-# =============================================================================
 [profile.release]
 opt-level     = 3
 lto           = true

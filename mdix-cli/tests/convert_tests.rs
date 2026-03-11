@@ -61,7 +61,6 @@ fn convert_mdix_to_json_contains_expected_keys() {
         .success();
 
     let content = std::fs::read_to_string(&out_path).unwrap();
-    // basic.mdix declares app_name and port
     assert!(
         content.contains("app_name") || content.contains("port"),
         "converted JSON should contain data keys from basic.mdix"
@@ -130,7 +129,6 @@ fn convert_mdix_to_toml_produces_valid_toml() {
         .success();
 
     let content = std::fs::read_to_string(&out_path).unwrap();
-    // Basic TOML sanity: should not be empty and should not be JSON.
     assert!(!content.trim().is_empty(), "toml output should not be empty");
     assert!(
         !content.trim_start().starts_with('{'),
@@ -142,7 +140,6 @@ fn convert_mdix_to_toml_produces_valid_toml() {
 
 #[test]
 fn convert_json_to_mdix_exits_zero() {
-    // First produce a JSON file from basic.mdix
     let json_path = helpers::results_file("convert", "roundtrip_input.json");
     mdix()
         .args([
@@ -154,7 +151,6 @@ fn convert_json_to_mdix_exits_zero() {
         .assert()
         .success();
 
-    // Then convert it back to mdix
     let mdix_out = helpers::results_file("convert", "roundtrip_recovered.mdix");
     mdix()
         .args([
@@ -181,7 +177,6 @@ fn convert_json_to_mdix_via_dixscript_alias_exits_zero() {
         .assert()
         .success();
 
-    // "dixscript" is the long-form alias for "mdix"
     let out = helpers::results_file("convert", "alias_recovered.mdix");
     mdix()
         .args([
@@ -228,7 +223,6 @@ fn convert_json_to_mdix_produces_nonempty_file() {
 
 #[test]
 fn convert_toml_to_mdix_exits_zero() {
-    // Produce a toml file first
     let toml_path = helpers::results_file("convert", "toml_rt_input.toml");
     mdix()
         .args([
@@ -318,7 +312,6 @@ fn convert_json_flag_produces_envelope() {
     assert!(parsed["data"]["output_path"].is_string());
     assert!(parsed["data"]["elapsed_ms"].is_number());
 
-    // Write envelope for inspection.
     let result = helpers::results_file("convert", "envelope_result.json");
     std::fs::write(result, &stdout).ok();
 }

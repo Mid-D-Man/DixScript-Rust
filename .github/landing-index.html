@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript-Rust — CI Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117; color: #e6edf3;
+      display: flex; align-items: center;
+      justify-content: center; min-height: 100vh; padding: 24px;
+    }
+    .card {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 12px; padding: 36px 40px;
+      max-width: 480px; width: 100%;
+    }
+    h1 { font-size: 1.6rem; color: #79c0ff; margin-bottom: 4px; }
+    .subtitle { color: #8b949e; font-size: 0.83rem; margin-bottom: 6px; }
+    .divider {
+      border: none; border-top: 1px solid #30363d;
+      margin: 18px 0;
+    }
+    .links { display: flex; flex-direction: column; gap: 10px; }
+    a {
+      display: flex; align-items: center; gap: 12px;
+      background: #1c2128; border: 1px solid #30363d;
+      border-radius: 8px; padding: 13px 16px;
+      text-decoration: none; color: #e6edf3;
+      font-size: 0.88rem; transition: border-color 0.15s, color 0.15s;
+    }
+    a:hover { border-color: #79c0ff; color: #79c0ff; }
+    a:hover .desc { color: #79c0ff; opacity: 0.7; }
+
+    .icon { font-size: 1.25rem; flex-shrink: 0; width: 28px; text-align: center; }
+
+    .info { display: flex; flex-direction: column; gap: 1px; }
+    .label { font-weight: 600; }
+    .desc  { font-size: 0.74rem; color: #484f58; transition: color 0.15s; }
+
+    /* Per-link accent colours on hover */
+    a.tests:hover  { border-color: #3fb950; color: #3fb950; }
+    a.tests:hover .desc { color: #3fb950; }
+
+    a.bench:hover  { border-color: #f78166; color: #f78166; }
+    a.bench:hover .desc { color: #f78166; }
+
+    a.flame:hover  { border-color: #e3b341; color: #e3b341; }
+    a.flame:hover .desc { color: #e3b341; }
+
+    a.ffi:hover    { border-color: #a371f7; color: #a371f7; }
+    a.ffi:hover .desc { color: #a371f7; }
+
+    footer {
+      margin-top: 24px; text-align: center;
+      font-size: 0.72rem; color: #30363d;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>DixScript-Rust</h1>
+    <p class="subtitle">MidManStudio — CI Result Dashboard</p>
+    <hr class="divider">
+    <div class="links">
+
+      <a class="tests" href="tests/">
+        <span class="icon">✅</span>
+        <div class="info">
+          <span class="label">Test Results</span>
+          <span class="desc">cargo test — per-suite breakdown with captured output</span>
+        </div>
+      </a>
+
+      <a class="bench" href="bench/">
+        <span class="icon">📊</span>
+        <div class="info">
+          <span class="label">Benchmarks</span>
+          <span class="desc">criterion — throughput and latency across all suites</span>
+        </div>
+      </a>
+
+      <a class="flame" href="flame/">
+        <span class="icon">🔥</span>
+        <div class="info">
+          <span class="label">Flamegraphs</span>
+          <span class="desc">perf + cargo-flamegraph — profiling for hot paths</span>
+        </div>
+      </a>
+
+      <a class="ffi" href="ffi/">
+        <span class="icon">🔗</span>
+        <div class="info">
+          <span class="label">FFI Builds</span>
+          <span class="desc">mdix-ffi — cdylib / staticlib for Linux and macOS</span>
+        </div>
+      </a>
+
+    </div>
+    <footer>Trigger: push with --publish-* or --ffi · workflow_dispatch for manual runs</footer>
+  </div>
+</body>
+  </html>

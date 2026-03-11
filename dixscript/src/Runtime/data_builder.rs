@@ -1,6 +1,5 @@
 // src/Runtime/data_builder.rs
 
-use std::collections::HashMap;
 use chrono::Utc;
 use crate::Compiler::AST::*;
 use super::dix_data::DixData;
@@ -13,11 +12,11 @@ use super::format_options::DixFormatOptions;
 /// before table properties or group arrays. Violations return `Err` rather
 /// than panicking, making this safe to call from FFI or C# via the runtime.
 pub struct DixDataBuilder {
-    config_builder:  ConfigBuilder,
-    enums_builder:   EnumsBuilder,
-    data_builder:    DataBuilder,
-    version:         String,
-    compile_time:    chrono::DateTime<Utc>,
+    config_builder: ConfigBuilder,
+    enums_builder:  EnumsBuilder,
+    data_builder:   DataBuilder,
+    version:        String,
+    compile_time:   chrono::DateTime<Utc>,
 }
 
 impl DixDataBuilder {
@@ -78,7 +77,6 @@ impl DixDataBuilder {
         let enums_section  = self.enums_builder.build();
         let data_section   = self.data_builder.build()?;
 
-        // Surface any deferred two-tier errors collected during the closure.
         let ast = DixScript {
             config:          config_section,
             imports:         None,
@@ -268,14 +266,13 @@ impl Default for EnumsBuilder {
 ///
 /// Flat properties must be added before any table properties or group arrays.
 /// Violations are collected as errors and surfaced when `build()` is called,
-/// rather than panicking immediately. This makes the builder safe to use from
-/// any context, including across FFI boundaries.
+/// rather than panicking immediately.
 pub struct DataBuilder {
-    flat_properties:      Vec<(String, Value)>,
-    table_properties:     Vec<(String, Vec<(String, Value)>)>,
-    group_arrays:         Vec<(String, Vec<Value>)>,
+    flat_properties:       Vec<(String, Value)>,
+    table_properties:      Vec<(String, Vec<(String, Value)>)>,
+    group_arrays:          Vec<(String, Vec<Value>)>,
     has_seen_grouped_data: bool,
-    deferred_errors:      Vec<String>,
+    deferred_errors:       Vec<String>,
 }
 
 impl DataBuilder {
@@ -292,54 +289,60 @@ impl DataBuilder {
     // ── Flat properties ───────────────────────────────────────────────────────
 
     pub fn with_int(&mut self, name: impl Into<String>, value: i32) {
-        if self.check_flat_allowed(name.as_ref_str_hack()) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
             self.flat_properties.push((
-                name.into(),
+                name,
                 Value::Integer { value, position: Position::UNKNOWN },
             ));
         }
     }
 
     pub fn with_float(&mut self, name: impl Into<String>, value: f32) {
-        if self.check_flat_allowed(name.as_ref_str_hack()) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
             self.flat_properties.push((
-                name.into(),
+                name,
                 Value::Float { value, position: Position::UNKNOWN },
             ));
         }
     }
 
     pub fn with_double(&mut self, name: impl Into<String>, value: f64) {
-        if self.check_flat_allowed(name.as_ref_str_hack()) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
             self.flat_properties.push((
-                name.into(),
+                name,
                 Value::Double { value, position: Position::UNKNOWN },
             ));
         }
     }
 
     pub fn with_string(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        if self.check_flat_allowed(name.as_ref_str_hack()) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
             self.flat_properties.push((
-                name.into(),
+                name,
                 Value::String { value: value.into(), position: Position::UNKNOWN },
             ));
         }
     }
 
     pub fn with_bool(&mut self, name: impl Into<String>, value: bool) {
-        if self.check_flat_allowed(name.as_ref_str_hack()) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
             self.flat_properties.push((
-                name.into(),
+                name,
                 Value::Boolean { value, position: Position::UNKNOWN },
             ));
         }
     }
 
     pub fn with_date(&mut self, name: impl Into<String>, value: chrono::NaiveDate) {
-        if self.check_flat_allowed(name.as_ref_str_hack()) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
             self.flat_properties.push((
-                name.into(),
+                name,
                 Value::Date {
                     value:    value.format("%Y-%m-%d").to_string(),
                     position: Position::UNKNOWN,
@@ -356,18 +359,20 @@ impl DataBuilder {
             ));
             return;
         }
-        if self.check_flat_allowed(name.as_ref_str_hack()) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
             self.flat_properties.push((
-                name.into(),
+                name,
                 Value::HexColor { value: hex, position: Position::UNKNOWN },
             ));
         }
     }
 
     pub fn with_array(&mut self, name: impl Into<String>, items: Vec<Value>) {
-        if self.check_flat_allowed(name.as_ref_str_hack()) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
             self.flat_properties.push((
-                name.into(),
+                name,
                 Value::Array { values: items, position: Position::UNKNOWN },
             ));
         }
@@ -470,24 +475,6 @@ impl Default for DataBuilder {
     fn default() -> Self {
         Self::new()
     }
-}
-
-// ── Hack trait to peek at the name before consuming it ───────────────────────
-//
-// `check_flat_allowed` needs a &str for the error message, but the name is
-// `impl Into<String>` which is consumed on the call. This trait lets us peek
-// at the string slice before moving it.
-
-trait AsRefStrHack {
-    fn as_ref_str_hack(&self) -> &str;
-}
-
-impl AsRefStrHack for String {
-    fn as_ref_str_hack(&self) -> &str { self.as_str() }
-}
-
-impl AsRefStrHack for &str {
-    fn as_ref_str_hack(&self) -> &str { self }
 }
 
 // ── TablePropertiesBuilder ────────────────────────────────────────────────────
@@ -616,7 +603,6 @@ mod tests {
                 d.with_table_properties("user", |t| {
                     t.with_string("name", "Bob");
                 });
-                // Two-tier violation — should NOT panic, should defer to build()
                 d.with_int("x", 42);
             })
             .build();
@@ -638,7 +624,6 @@ mod tests {
 
         assert!(result.is_err());
         let msg = result.unwrap_err();
-        // Both violations should appear in the error message.
         assert!(msg.contains('x'), "expected 'x' in error, got: {}", msg);
         assert!(msg.contains('y'), "expected 'y' in error, got: {}", msg);
     }

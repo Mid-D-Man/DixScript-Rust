@@ -1,0 +1,410 @@
+name: DixScript — FFI Build & Deploy
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Force run regardless of commit message'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+
+  # ── 1. Gate: only run when commit contains --ffi ──────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether to run FFI build
+        id: decide
+        run: |
+          RUN=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-ffi' && RUN=true || true
+          fi
+
+          echo "should_run=$RUN" >> $GITHUB_OUTPUT
+          echo "FFI build triggered: $RUN"
+
+  # ── 2. Build — Linux ──────────────────────────────────────────────────────
+  build-ffi-linux:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.should_run == 'true'
+    outputs:
+      status:     ${{ steps.result.outputs.status }}
+      size_bytes: ${{ steps.result.outputs.size_bytes }}
+      duration_s: ${{ steps.result.outputs.duration_s }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-ffi-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build mdix-ffi (Linux)
+        run: |
+          START=$(date +%s)
+
+          cargo build -p mdix-ffi --release > build.log 2>&1
+          BUILD_EXIT=$?
+
+          END=$(date +%s)
+          echo "DURATION_S=$((END - START))" >> $GITHUB_ENV
+
+          if [ $BUILD_EXIT -ne 0 ]; then
+            echo "=== BUILD FAILED — full output below ==="
+            cat build.log
+            exit $BUILD_EXIT
+          fi
+
+          echo "=== Build successful ==="
+          ls -lh target/release/libmdix_ffi.so  2>/dev/null || true
+          ls -lh target/release/libmdix_ffi.a   2>/dev/null || true
+
+      - name: Collect result
+        id: result
+        if: always()
+        run: |
+          if [ -f "target/release/libmdix_ffi.so" ]; then
+            SIZE=$(stat -c%s target/release/libmdix_ffi.so)
+            echo "status=success"   >> $GITHUB_OUTPUT
+            echo "size_bytes=$SIZE" >> $GITHUB_OUTPUT
+          elif [ -f "target/release/libmdix_ffi.a" ]; then
+            SIZE=$(stat -c%s target/release/libmdix_ffi.a)
+            echo "status=success"   >> $GITHUB_OUTPUT
+            echo "size_bytes=$SIZE" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed"    >> $GITHUB_OUTPUT
+            echo "size_bytes=0"     >> $GITHUB_OUTPUT
+          fi
+          echo "duration_s=${{ env.DURATION_S }}" >> $GITHUB_OUTPUT
+
+      - name: Upload Linux artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmdix-ffi-linux-${{ github.run_number }}
+          path: |
+            target/release/libmdix_ffi.so
+            target/release/libmdix_ffi.a
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ── 3. Build — macOS ──────────────────────────────────────────────────────
+  build-ffi-macos:
+    runs-on: macos-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.should_run == 'true'
+    outputs:
+      status:     ${{ steps.result.outputs.status }}
+      size_bytes: ${{ steps.result.outputs.size_bytes }}
+      duration_s: ${{ steps.result.outputs.duration_s }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-latest-cargo-ffi-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build mdix-ffi (macOS)
+        run: |
+          START=$(date +%s)
+
+          cargo build -p mdix-ffi --release > build.log 2>&1
+          BUILD_EXIT=$?
+
+          END=$(date +%s)
+          echo "DURATION_S=$((END - START))" >> $GITHUB_ENV
+
+          if [ $BUILD_EXIT -ne 0 ]; then
+            echo "=== BUILD FAILED — full output below ==="
+            cat build.log
+            exit $BUILD_EXIT
+          fi
+
+          echo "=== Build successful ==="
+          ls -lh target/release/libmdix_ffi.dylib 2>/dev/null || true
+          ls -lh target/release/libmdix_ffi.a      2>/dev/null || true
+
+      - name: Collect result
+        id: result
+        if: always()
+        run: |
+          if [ -f "target/release/libmdix_ffi.dylib" ]; then
+            SIZE=$(stat -f%z target/release/libmdix_ffi.dylib)
+            echo "status=success"   >> $GITHUB_OUTPUT
+            echo "size_bytes=$SIZE" >> $GITHUB_OUTPUT
+          elif [ -f "target/release/libmdix_ffi.a" ]; then
+            SIZE=$(stat -f%z target/release/libmdix_ffi.a)
+            echo "status=success"   >> $GITHUB_OUTPUT
+            echo "size_bytes=$SIZE" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed"    >> $GITHUB_OUTPUT
+            echo "size_bytes=0"     >> $GITHUB_OUTPUT
+          fi
+          echo "duration_s=${{ env.DURATION_S }}" >> $GITHUB_OUTPUT
+
+      - name: Upload macOS artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmdix-ffi-macos-${{ github.run_number }}
+          path: |
+            target/release/libmdix_ffi.dylib
+            target/release/libmdix_ffi.a
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ── 4. Core tests ─────────────────────────────────────────────────────────
+  test-core:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.should_run == 'true'
+    outputs:
+      status:     ${{ steps.result.outputs.status }}
+      total:      ${{ steps.result.outputs.total }}
+      passed:     ${{ steps.result.outputs.passed }}
+      failed:     ${{ steps.result.outputs.failed }}
+      duration_s: ${{ steps.result.outputs.duration_s }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-ffi-test-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run dixscript core tests
+        continue-on-error: true
+        run: |
+          START=$(date +%s)
+          set +e
+          cargo test -p dixscript --color=never --no-fail-fast 2>&1 | tee test-output.txt
+          echo "TEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          echo "DURATION_S=$(($(date +%s) - START))" >> $GITHUB_ENV
+          exit 0
+
+      - name: Parse test counts
+        id: result
+        run: |
+          TOTAL=0; PASSED=0; FAILED=0
+          while IFS= read -r line; do
+            if echo "$line" | grep -qE '^test result:'; then
+              P=$(echo "$line" | grep -oP '\d+(?= passed)'  | head -1 || echo 0)
+              F=$(echo "$line" | grep -oP '\d+(?= failed)'  | head -1 || echo 0)
+              PASSED=$((PASSED + ${P:-0}))
+              FAILED=$((FAILED + ${F:-0}))
+              TOTAL=$((TOTAL + ${P:-0} + ${F:-0}))
+            fi
+          done < test-output.txt
+
+          STATUS=success
+          [ "${{ env.TEST_EXIT }}" != "0" ] && STATUS=failed
+
+          echo "status=$STATUS"                       >> $GITHUB_OUTPUT
+          echo "total=$TOTAL"                         >> $GITHUB_OUTPUT
+          echo "passed=$PASSED"                       >> $GITHUB_OUTPUT
+          echo "failed=$FAILED"                       >> $GITHUB_OUTPUT
+          echo "duration_s=${{ env.DURATION_S }}"     >> $GITHUB_OUTPUT
+
+  # ── 5. Collect results → JSON → deploy to gh-pages ────────────────────────
+  collect-and-deploy:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-ffi-linux, build-ffi-macos, test-core]
+    if: |
+      always() &&
+      needs.parse-trigger.outputs.should_run == 'true' &&
+      (needs.build-ffi-linux.result != 'skipped' ||
+       needs.build-ffi-macos.result != 'skipped' ||
+       needs.test-core.result       != 'skipped')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get Rust version
+        id: rustver
+        run: echo "ver=$(rustc --version)" >> $GITHUB_OUTPUT
+
+      - name: Generate ffi-results.json
+        env:
+          BUILD_NUM:    ${{ github.run_number }}
+          BRANCH:       ${{ github.ref_name }}
+          COMMIT:       ${{ github.sha }}
+          BUILD_DATE:   ${{ github.event.head_commit.timestamp }}
+          RUST_VER:     ${{ steps.rustver.outputs.ver }}
+          LINUX_STATUS: ${{ needs.build-ffi-linux.outputs.status     || 'skipped' }}
+          LINUX_SIZE:   ${{ needs.build-ffi-linux.outputs.size_bytes  || '0' }}
+          LINUX_DUR:    ${{ needs.build-ffi-linux.outputs.duration_s  || '0' }}
+          MAC_STATUS:   ${{ needs.build-ffi-macos.outputs.status      || 'skipped' }}
+          MAC_SIZE:     ${{ needs.build-ffi-macos.outputs.size_bytes   || '0' }}
+          MAC_DUR:      ${{ needs.build-ffi-macos.outputs.duration_s   || '0' }}
+          TEST_STATUS:  ${{ needs.test-core.outputs.status             || 'skipped' }}
+          TEST_TOTAL:   ${{ needs.test-core.outputs.total              || '0' }}
+          TEST_PASSED:  ${{ needs.test-core.outputs.passed             || '0' }}
+          TEST_FAILED:  ${{ needs.test-core.outputs.failed             || '0' }}
+          TEST_DUR:     ${{ needs.test-core.outputs.duration_s         || '0' }}
+        run: |
+          python3 - << 'PYEOF'
+          import json, os
+
+          def int_env(key):
+              try:
+                  return int(os.environ.get(key, "0"))
+              except ValueError:
+                  return 0
+
+          result = {
+              "build":        os.environ.get("BUILD_NUM",  "0"),
+              "branch":       os.environ.get("BRANCH",     "unknown"),
+              "commit":       os.environ.get("COMMIT",     "unknown")[:8],
+              "date":         os.environ.get("BUILD_DATE", ""),
+              "rust_version": os.environ.get("RUST_VER",  "stable"),
+              "builds": [
+                  {
+                      "platform":   "linux",
+                      "runner":     "ubuntu-latest",
+                      "artifact":   "libmdix_ffi.so",
+                      "status":     os.environ.get("LINUX_STATUS", "skipped"),
+                      "size_bytes": int_env("LINUX_SIZE"),
+                      "duration_s": int_env("LINUX_DUR"),
+                  },
+                  {
+                      "platform":   "macos",
+                      "runner":     "macos-latest",
+                      "artifact":   "libmdix_ffi.dylib",
+                      "status":     os.environ.get("MAC_STATUS", "skipped"),
+                      "size_bytes": int_env("MAC_SIZE"),
+                      "duration_s": int_env("MAC_DUR"),
+                  },
+              ],
+              "tests": {
+                  "status":     os.environ.get("TEST_STATUS",  "skipped"),
+                  "total":      int_env("TEST_TOTAL"),
+                  "passed":     int_env("TEST_PASSED"),
+                  "failed":     int_env("TEST_FAILED"),
+                  "duration_s": int_env("TEST_DUR"),
+              },
+          }
+
+          with open("ffi-results.json", "w") as f:
+              json.dump(result, f, indent=2)
+
+          print(json.dumps(result, indent=2))
+          PYEOF
+
+      - name: Build FFI HTML report
+        run: |
+          cp .github/ffi-results-template.html ffi-results-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g" ffi-results-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"      ffi-results-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"           ffi-results-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                    ffi-results-index.html
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            echo "Creating fresh gh-pages branch"
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/ffi" "$WORK/ffi/builds/build_${BUILD_NUM}"
+          cp ffi-results.json       "$WORK/ffi/ffi-results.json"
+          cp ffi-results-index.html "$WORK/ffi/index.html"
+          cp ffi-results.json       "$WORK/ffi/builds/build_${BUILD_NUM}/ffi-results.json"
+          cp ffi-results-index.html "$WORK/ffi/builds/build_${BUILD_NUM}/index.html"
+
+          # Always write the canonical landing page from the template.
+          # The template already includes all four links including FFI.
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "DixScript FFI CI — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+
+          echo ""
+          echo "Deployed FFI results to gh-pages"
+          echo "  https://mid-d-man.github.io/DixScript-Rust/ffi/"
+
+  # ── 6. Summary ─────────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-ffi-linux, build-ffi-macos, test-core, collect-and-deploy]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "======================================================="
+          echo "  DixScript — FFI Build Summary"
+          echo "======================================================="
+          echo "Build:   #${{ github.run_number }}"
+          echo "Branch:  ${{ github.ref_name }}"
+          echo "Linux:   ${{ needs.build-ffi-linux.result   || 'skipped' }}"
+          echo "macOS:   ${{ needs.build-ffi-macos.result   || 'skipped' }}"
+          echo "Tests:   ${{ needs.test-core.result         || 'skipped' }}"
+          echo "Deploy:  ${{ needs.collect-and-deploy.result || 'skipped' }}"
+          echo ""
+          echo "FFI page: https://mid-d-man.github.io/DixScript-Rust/ffi/"

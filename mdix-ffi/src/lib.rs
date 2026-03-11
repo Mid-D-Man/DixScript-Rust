@@ -1001,7 +1001,7 @@ pub extern "C" fn mdix_builder_get_float(
 pub extern "C" fn mdix_builder_get_double(
     builder: *const MdixBuilderHandle,
     path: *const c_char,
-) -> f32 {
+) -> f64 {
     clear_last_error();
 
     let (builder_ref, path_str) =
@@ -1011,9 +1011,9 @@ pub extern "C" fn mdix_builder_get_double(
         };
 
     match builder_ref.entries.get(path_str) {
-        Some(DixValue::Double(d)) => *d as f32,
-        Some(DixValue::Float(f))  => *f as f32,
-        Some(DixValue::Int(i))    => *i as f32,
+        Some(DixValue::Double(d)) => *d as f64,
+        Some(DixValue::Float(f))  => *f as f64,
+        Some(DixValue::Int(i))    => *i as f64,
         Some(other) => {
             set_last_error(&format!(
                 "mdix_builder_get_double('{}'): value is {} not numeric",

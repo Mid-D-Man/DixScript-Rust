@@ -1,0 +1,32 @@
+{
+  "build": "1",
+  "branch": "master",
+  "commit": "59258d0f",
+  "date": "2026-03-11T15:21:41+01:00",
+  "rust_version": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+  "builds": [
+    {
+      "platform": "linux",
+      "runner": "ubuntu-latest",
+      "artifact": "libmdix_ffi.so",
+      "status": "failed",
+      "size_bytes": 0,
+      "duration_s": 0
+    },
+    {
+      "platform": "macos",
+      "runner": "macos-latest",
+      "artifact": "libmdix_ffi.dylib",
+      "status": "failed",
+      "size_bytes": 0,
+      "duration_s": 0
+    }
+  ],
+  "tests": {
+    "status": "failed",
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "duration_s": 0
+  }
+}

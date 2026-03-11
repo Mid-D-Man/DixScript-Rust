@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript — FFI Builds · Build #1</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117; color: #e6edf3;
+      padding: 32px 24px; min-height: 100vh;
+    }
+    .container { max-width: 1100px; margin: 0 auto; }
+
+    /* ── Header ── */
+    header { border-bottom: 2px solid #a371f7; padding-bottom: 18px; margin-bottom: 28px; }
+    header h1 { font-size: 1.9rem; color: #a371f7; }
+    header h1 span { color: #e6edf3; }
+    .meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+    .meta-item {
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      padding: 5px 12px; font-size: 0.82rem;
+    }
+    .meta-item strong { color: #a371f7; }
+
+    /* ── Nav ── */
+    .nav-links { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+    .nav-link {
+      display: inline-flex; align-items: center; gap: 5px; color: #8b949e;
+      font-size: 0.80rem; text-decoration: none; padding: 5px 12px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .nav-link:hover { color: #e6edf3; border-color: #8b949e; }
+
+    /* ── Banner ── */
+    .banner {
+      border-radius: 8px; padding: 14px 20px; margin-bottom: 24px;
+      font-weight: 600; font-size: 0.95rem;
+    }
+    .banner.pass    { background: #0f2a1a; border: 1px solid #2ea043; color: #3fb950; }
+    .banner.fail    { background: #2a0f0f; border: 1px solid #f85149; color: #f85149; }
+    .banner.partial { background: #1c1a0a; border: 1px solid #e3b341; color: #e3b341; }
+    .banner.loading { background: #1c2128; border: 1px solid #30363d; color: #8b949e; }
+
+    /* ── Summary cards ── */
+    .stat-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px; margin-bottom: 28px;
+    }
+    .stat-card {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 8px; padding: 14px 16px;
+    }
+    .stat-card .s-label {
+      font-size: 0.70rem; text-transform: uppercase; letter-spacing: 0.6px;
+      color: #484f58; margin-bottom: 6px;
+    }
+    .stat-card .s-value { font-size: 1.4rem; font-weight: 700; }
+    .stat-card .s-sub   { font-size: 0.72rem; color: #8b949e; margin-top: 2px; }
+
+    /* ── Section title ── */
+    .section-title {
+      font-size: 1rem; font-weight: 700; border-left: 3px solid #a371f7;
+      padding-left: 10px; margin-bottom: 14px;
+    }
+
+    /* ── Platform cards ── */
+    .platform-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .platform-card {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 8px; overflow: hidden;
+    }
+    .platform-card.pass { border-color: #2ea043; }
+    .platform-card.fail { border-color: #f85149; }
+    .platform-card.skipped { border-color: #30363d; opacity: 0.6; }
+
+    .platform-header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 18px; border-bottom: 1px solid #30363d;
+    }
+    .platform-icon { font-size: 1.5rem; flex-shrink: 0; }
+    .platform-name { font-size: 1rem; font-weight: 700; flex: 1; }
+    .platform-badge {
+      font-size: 0.72rem; font-weight: 700; padding: 3px 10px;
+      border-radius: 10px;
+    }
+    .badge-pass    { background: rgba(63,185,80,0.15);  border: 1px solid #2ea043; color: #3fb950; }
+    .badge-fail    { background: rgba(248,81,73,0.15);  border: 1px solid #f85149; color: #f85149; }
+    .badge-skipped { background: #1c2128; border: 1px solid #30363d; color: #484f58; }
+
+    .platform-body { padding: 16px 18px; }
+    .platform-row  { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #21262d; font-size: 0.82rem; }
+    .platform-row:last-child { border-bottom: none; }
+    .platform-row .label { color: #484f58; text-transform: uppercase; font-size: 0.70rem; letter-spacing: 0.4px; }
+    .platform-row .value { font-family: 'SFMono-Regular', Consolas, monospace; color: #e6edf3; }
+    .value.pass { color: #3fb950; }
+    .value.fail { color: #f85149; }
+
+    /* ── Test result section ── */
+    .test-card {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 8px; overflow: hidden; margin-bottom: 32px;
+    }
+    .test-card.pass { border-color: #2ea043; }
+    .test-card.fail { border-color: #f85149; }
+
+    .test-header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 18px; border-bottom: 1px solid #30363d;
+    }
+    .test-header .title { font-size: 1rem; font-weight: 700; flex: 1; }
+
+    .test-body { padding: 16px 18px; }
+    .test-stat-row {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 10px;
+    }
+    .test-stat {
+      background: #0d1117; border: 1px solid #21262d;
+      border-radius: 6px; padding: 10px 14px; text-align: center;
+    }
+    .test-stat .ts-label { font-size: 0.68rem; text-transform: uppercase; color: #484f58; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .test-stat .ts-value { font-size: 1.2rem; font-weight: 700; font-family: monospace; }
+
+    /* ── Artifact download links ── */
+    .artifacts-section { margin-bottom: 32px; }
+    .artifacts-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+    .artifact-link {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      padding: 8px 14px; text-decoration: none; color: #8b949e;
+      font-size: 0.82rem; transition: all 0.15s;
+    }
+    .artifact-link:hover { border-color: #a371f7; color: #a371f7; }
+    .artifact-link .af-icon { font-size: 1rem; }
+    .artifact-link .af-name { font-family: monospace; }
+    .artifact-link .af-size { font-size: 0.72rem; color: #484f58; }
+
+    /* ── History table ── */
+    .history-section { margin-bottom: 32px; }
+    .history-note { font-size: 0.78rem; color: #484f58; margin-bottom: 10px; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px; background: #161b22;
+      border: 1px solid #3fb950; color: #3fb950; padding: 10px 18px;
+      border-radius: 8px; font-size: 0.82rem; font-weight: 600; z-index: 9999;
+      transform: translateY(80px); opacity: 0; transition: all 0.25s ease;
+      pointer-events: none;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 40px; padding-top: 14px; border-top: 1px solid #30363d;
+      color: #484f58; font-size: 0.76rem; text-align: center;
+    }
+
+    /* ── Copy button ── */
+    .copy-btn {
+      background: none; border: 1px solid #30363d; color: #484f58;
+      padding: 3px 8px; border-radius: 5px; font-size: 0.70rem; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .copy-btn:hover  { border-color: #a371f7; color: #a371f7; }
+    .copy-btn.copied { border-color: #3fb950; color: #3fb950; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="nav-links">
+    <a class="nav-link" href="../tests/">✅ Test Results</a>
+    <a class="nav-link" href="../bench/">📊 Benchmarks</a>
+    <a class="nav-link" href="../flame/">🔥 Flamegraphs</a>
+  </div>
+
+  <header>
+    <h1>🔗 DixScript <span>— FFI Builds</span></h1>
+    <p style="color:#8b949e;margin-top:5px">MidManStudio | DixScript-Rust · C FFI Layer (mdix-ffi)</p>
+    <div class="meta">
+      <div class="meta-item"><strong>Build:</strong> #1</div>
+      <div class="meta-item"><strong>Branch:</strong> master</div>
+      <div class="meta-item"><strong>Commit:</strong> 59258d0f</div>
+      <div class="meta-item"><strong>Date:</strong> Wed Mar 11 14:22:21 UTC 2026</div>
+    </div>
+  </header>
+
+  <div class="banner loading" id="banner">⏳ Loading FFI build results…</div>
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="s-label">Platforms</div>
+      <div class="s-value" id="s-platforms">—</div>
+      <div class="s-sub">build targets</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Passing</div>
+      <div class="s-value" id="s-passing" style="color:#3fb950">—</div>
+      <div class="s-sub">successful builds</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Failing</div>
+      <div class="s-value" id="s-failing" style="color:#f85149">—</div>
+      <div class="s-sub">failed builds</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Tests</div>
+      <div class="s-value" id="s-tests">—</div>
+      <div class="s-sub" id="s-tests-sub">core suite</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Rust</div>
+      <div class="s-value" id="s-rust" style="font-size:0.85rem;padding-top:4px">—</div>
+      <div class="s-sub">toolchain</div>
+    </div>
+  </div>
+
+  <!-- Platform builds -->
+  <div class="section-title">Platform Builds</div>
+  <div class="platform-grid" id="platform-grid"></div>
+
+  <!-- Core tests -->
+  <div class="section-title">Core Test Suite</div>
+  <div id="test-section"></div>
+
+  <!-- Artifact links -->
+  <div class="artifacts-section">
+    <div class="section-title">Build Artifacts</div>
+    <p style="font-size:0.78rem;color:#484f58;margin-bottom:12px">
+      Artifacts are retained for 30 days. Download from the GitHub Actions run page.
+    </p>
+    <div class="artifacts-grid" id="artifacts-grid"></div>
+  </div>
+
+  <footer>DixScript-Rust FFI Builds — MidManStudio — Build #1</footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmtBytes(b) {
+  if (!b || b === 0) return '—';
+  if (b >= 1048576) return (b / 1048576).toFixed(2) + ' MB';
+  if (b >= 1024)    return (b / 1024).toFixed(1)    + ' KB';
+  return b + ' B';
+}
+
+function fmtDur(s) {
+  if (!s || s === 0) return '—';
+  if (s < 60) return s + 's';
+  return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = '✓ ' + msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+async function copyText(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+  }
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied'; btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
+  }
+  showToast('Copied');
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+
+const PLATFORM_ICON = { linux: '🐧', macos: '🍎', windows: '🪟' };
+const PLATFORM_LABEL = {
+  linux:   'Linux (ubuntu-latest)',
+  macos:   'macOS (macos-latest)',
+  windows: 'Windows (windows-latest)',
+};
+const ARTIFACT_LABEL = {
+  linux:   'libmdix_ffi.so',
+  macos:   'libmdix_ffi.dylib',
+  windows: 'mdix_ffi.dll',
+};
+
+function renderAll(data) {
+  // Banner
+  const builds   = data.builds || [];
+  const passing  = builds.filter(b => b.status === 'success').length;
+  const failing  = builds.filter(b => b.status === 'failed').length;
+  const skipped  = builds.filter(b => b.status === 'skipped').length;
+  const allPass  = failing === 0 && passing > 0;
+  const anyFail  = failing > 0;
+
+  const banner = document.getElementById('banner');
+  banner.className = 'banner ' + (allPass ? 'pass' : anyFail ? 'fail' : 'partial');
+  banner.textContent = allPass
+    ? `✅ All ${passing} platform build(s) succeeded — Build #${data.build}`
+    : anyFail
+      ? `❌ ${failing} platform build(s) FAILED — ${passing} succeeded`
+      : `⚠️ Build results partial — ${passing} succeeded, ${skipped} skipped`;
+
+  // Summary cards
+  document.getElementById('s-platforms').textContent = builds.length;
+  document.getElementById('s-platforms').style.color = '#a371f7';
+
+  document.getElementById('s-passing').textContent   = passing;
+  document.getElementById('s-failing').textContent   = failing;
+
+  const tests = data.tests || {};
+  const testVal = tests.status === 'skipped' ? '—'
+    : `${tests.passed}/${tests.total}`;
+  document.getElementById('s-tests').textContent     = testVal;
+  document.getElementById('s-tests').style.color     =
+    tests.status === 'success' ? '#3fb950' :
+    tests.status === 'failed'  ? '#f85149' : '#8b949e';
+  document.getElementById('s-tests-sub').textContent =
+    tests.status === 'skipped' ? 'not run' : 'passed / total';
+
+  const rustFull = data.rust_version || '—';
+  const rustShort = rustFull.replace('rustc ', '').split(' ')[0];
+  document.getElementById('s-rust').textContent = rustShort;
+  document.getElementById('s-rust').title       = rustFull;
+
+  // Platform cards
+  const grid = document.getElementById('platform-grid');
+  grid.innerHTML = '';
+  builds.forEach(b => {
+    const cls  = b.status === 'success' ? 'pass' : b.status === 'failed' ? 'fail' : 'skipped';
+    const icon = PLATFORM_ICON[b.platform] || '🖥️';
+    const label = PLATFORM_LABEL[b.platform] || b.runner || b.platform;
+    const artName = ARTIFACT_LABEL[b.platform] || b.artifact || '—';
+    const badgeCls = cls === 'pass' ? 'badge-pass' : cls === 'fail' ? 'badge-fail' : 'badge-skipped';
+    const badgeTxt = cls === 'pass' ? '✓ Passed' : cls === 'fail' ? '✗ Failed' : '⊘ Skipped';
+    const sizeTxt = b.size_bytes > 0 ? fmtBytes(b.size_bytes) : '—';
+    const durTxt  = b.duration_s  > 0 ? fmtDur(b.duration_s)  : '—';
+
+    const card = document.createElement('div');
+    card.className = `platform-card ${cls}`;
+    card.innerHTML = `
+      <div class="platform-header">
+        <span class="platform-icon">${icon}</span>
+        <span class="platform-name">${label}</span>
+        <span class="platform-badge ${badgeCls}">${badgeTxt}</span>
+      </div>
+      <div class="platform-body">
+        <div class="platform-row">
+          <span class="label">Artifact</span>
+          <span class="value" style="font-size:0.78rem">${artName}</span>
+        </div>
+        <div class="platform-row">
+          <span class="label">Size</span>
+          <span class="value ${cls === 'pass' ? 'pass' : ''}">${sizeTxt}</span>
+        </div>
+        <div class="platform-row">
+          <span class="label">Build time</span>
+          <span class="value">${durTxt}</span>
+        </div>
+        <div class="platform-row">
+          <span class="label">Status</span>
+          <span class="value ${cls}">${b.status}</span>
+        </div>
+      </div>`;
+    grid.appendChild(card);
+  });
+
+  // Test section
+  const testSection = document.getElementById('test-section');
+  if (tests.status === 'skipped') {
+    testSection.innerHTML = `
+      <div class="test-card" style="margin-bottom:32px">
+        <div class="test-header">
+          <span style="font-size:1.3rem">🧪</span>
+          <span class="title">dixscript core tests</span>
+          <span class="platform-badge badge-skipped">⊘ Skipped</span>
+        </div>
+        <div class="test-body" style="color:#484f58;font-size:0.82rem;padding:16px 18px">
+          Tests were not run in this build trigger.
+        </div>
+      </div>`;
+  } else {
+    const tcls = tests.status === 'success' ? 'pass' : 'fail';
+    const tbadge = tests.status === 'success' ? 'badge-pass' : 'badge-fail';
+    const ttxt   = tests.status === 'success' ? '✓ All passed' : `✗ ${tests.failed} FAILED`;
+    testSection.innerHTML = `
+      <div class="test-card ${tcls}" style="margin-bottom:32px">
+        <div class="test-header">
+          <span style="font-size:1.3rem">🧪</span>
+          <span class="title">dixscript core tests</span>
+          <span class="platform-badge ${tbadge}">${ttxt}</span>
+        </div>
+        <div class="test-body">
+          <div class="test-stat-row">
+            <div class="test-stat">
+              <div class="ts-label">Total</div>
+              <div class="ts-value" style="color:#e6edf3">${tests.total || 0}</div>
+            </div>
+            <div class="test-stat">
+              <div class="ts-label">Passed</div>
+              <div class="ts-value" style="color:#3fb950">${tests.passed || 0}</div>
+            </div>
+            <div class="test-stat">
+              <div class="ts-label">Failed</div>
+              <div class="ts-value" style="color:${(tests.failed || 0) > 0 ? '#f85149' : '#484f58'}">${tests.failed || 0}</div>
+            </div>
+            <div class="test-stat">
+              <div class="ts-label">Duration</div>
+              <div class="ts-value" style="color:#8b949e;font-size:0.95rem">${fmtDur(tests.duration_s)}</div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // Artifact download section
+  const artGrid = document.getElementById('artifacts-grid');
+  artGrid.innerHTML = '';
+  builds.filter(b => b.status === 'success').forEach(b => {
+    const artName = ARTIFACT_LABEL[b.platform] || b.artifact;
+    const bundleName = `libmdix-ffi-${b.platform}-${data.build}`;
+    const el = document.createElement('div');
+    el.className = 'artifact-link';
+    el.innerHTML = `
+      <span class="af-icon">${PLATFORM_ICON[b.platform] || '📦'}</span>
+      <div>
+        <div class="af-name">${artName}</div>
+        <div class="af-size">${fmtBytes(b.size_bytes)} · ${bundleName}</div>
+      </div>`;
+    el.title = `Download from Actions: ${bundleName}`;
+    artGrid.appendChild(el);
+  });
+
+  if (artGrid.children.length === 0) {
+    artGrid.innerHTML = '<span style="color:#484f58;font-size:0.82rem">No artifacts produced in this build.</span>';
+  }
+}
+
+// ── Fetch ──────────────────────────────────────────────────────────────────────
+
+fetch('ffi-results.json')
+  .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+  .then(data => renderAll(data))
+  .catch(err => {
+    const banner = document.getElementById('banner');
+    banner.className = 'banner fail';
+    banner.textContent = `❌ Failed to load ffi-results.json: ${err.message}`;
+
+    document.getElementById('platform-grid').innerHTML = `
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;
+        padding:28px;text-align:center;color:#8b949e;grid-column:1/-1">
+        <p>No FFI build data available.</p>
+        <p style="margin-top:8px;font-size:0.80rem">
+          Push a commit containing <strong>--ffi</strong> to trigger a build,
+          or use workflow_dispatch.
+        </p>
+      </div>`;
+    document.getElementById('test-section').innerHTML = '';
+  });
+</script>
+</body>
+  </html>

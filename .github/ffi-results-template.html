@@ -5,167 +5,290 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DixScript — FFI Builds · Build #BUILD_NUM_PLACEHOLDER</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: #0d1117; color: #e6edf3;
-      padding: 32px 24px; min-height: 100vh;
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --bg:       #0d1117;
+      --bg2:      #161b22;
+      --bg3:      #1c2128;
+      --border:   #30363d;
+      --border2:  #21262d;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --dim:      #484f58;
+      --purple:   #a371f7;
+      --purple2:  #7c3aed;
+      --green:    #3fb950;
+      --green2:   #2ea043;
+      --red:      #f85149;
+      --red2:     #da3633;
+      --yellow:   #e3b341;
+      --blue:     #58a6ff;
     }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 32px 24px;
+      min-height: 100vh;
+    }
+
     .container { max-width: 1100px; margin: 0 auto; }
 
-    /* ── Header ── */
-    header { border-bottom: 2px solid #a371f7; padding-bottom: 18px; margin-bottom: 28px; }
-    header h1 { font-size: 1.9rem; color: #a371f7; }
-    header h1 span { color: #e6edf3; }
-    .meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
-    .meta-item {
-      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
-      padding: 5px 12px; font-size: 0.82rem;
-    }
-    .meta-item strong { color: #a371f7; }
-
-    /* ── Nav ── */
-    .nav-links { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+    /* Nav */
+    .nav-links { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
     .nav-link {
-      display: inline-flex; align-items: center; gap: 5px; color: #8b949e;
-      font-size: 0.80rem; text-decoration: none; padding: 5px 12px;
-      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      display: inline-flex; align-items: center; gap: 5px;
+      color: var(--muted); font-size: 0.80rem; text-decoration: none;
+      padding: 5px 12px; background: var(--bg2);
+      border: 1px solid var(--border); border-radius: 6px;
       transition: color 0.15s, border-color 0.15s;
     }
-    .nav-link:hover { color: #e6edf3; border-color: #8b949e; }
+    .nav-link:hover { color: var(--text); border-color: var(--muted); }
 
-    /* ── Banner ── */
-    .banner {
-      border-radius: 8px; padding: 14px 20px; margin-bottom: 24px;
-      font-weight: 600; font-size: 0.95rem;
+    /* Header */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 20px; margin-bottom: 28px;
     }
-    .banner.pass    { background: #0f2a1a; border: 1px solid #2ea043; color: #3fb950; }
-    .banner.fail    { background: #2a0f0f; border: 1px solid #f85149; color: #f85149; }
-    .banner.partial { background: #1c1a0a; border: 1px solid #e3b341; color: #e3b341; }
-    .banner.loading { background: #1c2128; border: 1px solid #30363d; color: #8b949e; }
+    header h1 {
+      font-size: 1.75rem; font-weight: 700; letter-spacing: -0.5px;
+      color: var(--purple);
+    }
+    header h1 span { color: var(--text); }
+    .sub { color: var(--muted); font-size: 0.82rem; margin-top: 5px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    .meta-item {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 4px 12px; font-size: 0.78rem;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .meta-item strong { color: var(--purple); font-weight: 600; }
 
-    /* ── Summary cards ── */
+    /* Banner */
+    .banner {
+      border-radius: 8px; padding: 13px 18px; margin-bottom: 24px;
+      font-weight: 600; font-size: 0.92rem; display: flex;
+      align-items: center; gap: 10px;
+    }
+    .banner.pass    { background: #0f2a1a; border: 1px solid var(--green2); color: var(--green); }
+    .banner.fail    { background: #2a0f0f; border: 1px solid var(--red2);   color: var(--red); }
+    .banner.partial { background: #1c1a0a; border: 1px solid var(--yellow); color: var(--yellow); }
+    .banner.loading { background: var(--bg3); border: 1px solid var(--border); color: var(--muted); }
+
+    /* Stat grid */
     .stat-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       gap: 12px; margin-bottom: 28px;
     }
     .stat-card {
-      background: #161b22; border: 1px solid #30363d;
+      background: var(--bg2); border: 1px solid var(--border);
       border-radius: 8px; padding: 14px 16px;
     }
-    .stat-card .s-label {
-      font-size: 0.70rem; text-transform: uppercase; letter-spacing: 0.6px;
-      color: #484f58; margin-bottom: 6px;
+    .s-label {
+      font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.7px;
+      color: var(--dim); margin-bottom: 6px; font-weight: 600;
     }
-    .stat-card .s-value { font-size: 1.4rem; font-weight: 700; }
-    .stat-card .s-sub   { font-size: 0.72rem; color: #8b949e; margin-top: 2px; }
+    .s-value {
+      font-size: 1.4rem; font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .s-sub { font-size: 0.70rem; color: var(--muted); margin-top: 3px; }
 
-    /* ── Section title ── */
+    /* Section title */
     .section-title {
-      font-size: 1rem; font-weight: 700; border-left: 3px solid #a371f7;
-      padding-left: 10px; margin-bottom: 14px;
+      font-size: 0.82rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.8px; color: var(--muted);
+      border-left: 3px solid var(--purple); padding-left: 10px;
+      margin-bottom: 14px;
     }
 
-    /* ── Platform cards ── */
-    .platform-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 32px; }
-    .platform-card {
-      background: #161b22; border: 1px solid #30363d;
-      border-radius: 8px; overflow: hidden;
+    /* Platform grid */
+    .platform-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 14px; margin-bottom: 32px;
     }
-    .platform-card.pass { border-color: #2ea043; }
-    .platform-card.fail { border-color: #f85149; }
-    .platform-card.skipped { border-color: #30363d; opacity: 0.6; }
+    .platform-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 8px; overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .platform-card.pass    { border-color: var(--green2); }
+    .platform-card.fail    { border-color: var(--red2); }
+    .platform-card.skipped { border-color: var(--border); opacity: 0.55; }
 
     .platform-header {
       display: flex; align-items: center; gap: 12px;
-      padding: 14px 18px; border-bottom: 1px solid #30363d;
+      padding: 13px 16px; border-bottom: 1px solid var(--border2);
+      background: var(--bg3);
     }
-    .platform-icon { font-size: 1.5rem; flex-shrink: 0; }
-    .platform-name { font-size: 1rem; font-weight: 700; flex: 1; }
-    .platform-badge {
-      font-size: 0.72rem; font-weight: 700; padding: 3px 10px;
-      border-radius: 10px;
+    .platform-icon { font-size: 1.4rem; flex-shrink: 0; }
+    .platform-name { font-size: 0.92rem; font-weight: 600; flex: 1; }
+    .badge {
+      font-size: 0.68rem; font-weight: 700; padding: 3px 9px;
+      border-radius: 10px; text-transform: uppercase; letter-spacing: 0.4px;
     }
-    .badge-pass    { background: rgba(63,185,80,0.15);  border: 1px solid #2ea043; color: #3fb950; }
-    .badge-fail    { background: rgba(248,81,73,0.15);  border: 1px solid #f85149; color: #f85149; }
-    .badge-skipped { background: #1c2128; border: 1px solid #30363d; color: #484f58; }
+    .badge-pass    { background: rgba(63,185,80,0.12); border: 1px solid var(--green2); color: var(--green); }
+    .badge-fail    { background: rgba(248,81,73,0.12); border: 1px solid var(--red2);   color: var(--red); }
+    .badge-skipped { background: var(--bg3); border: 1px solid var(--border); color: var(--dim); }
 
-    .platform-body { padding: 16px 18px; }
-    .platform-row  { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #21262d; font-size: 0.82rem; }
+    .platform-body { padding: 14px 16px; }
+    .platform-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 7px 0; border-bottom: 1px solid var(--border2); font-size: 0.80rem;
+    }
     .platform-row:last-child { border-bottom: none; }
-    .platform-row .label { color: #484f58; text-transform: uppercase; font-size: 0.70rem; letter-spacing: 0.4px; }
-    .platform-row .value { font-family: 'SFMono-Regular', Consolas, monospace; color: #e6edf3; }
-    .value.pass { color: #3fb950; }
-    .value.fail { color: #f85149; }
+    .p-label {
+      color: var(--dim); text-transform: uppercase;
+      font-size: 0.67rem; letter-spacing: 0.5px; font-weight: 600;
+    }
+    .p-value { font-family: 'JetBrains Mono', monospace; font-size: 0.80rem; }
+    .p-value.pass { color: var(--green); }
+    .p-value.fail { color: var(--red); }
+    .p-value.skip { color: var(--dim); }
 
-    /* ── Test result section ── */
+    /* Test card */
     .test-card {
-      background: #161b22; border: 1px solid #30363d;
+      background: var(--bg2); border: 1px solid var(--border);
       border-radius: 8px; overflow: hidden; margin-bottom: 32px;
     }
-    .test-card.pass { border-color: #2ea043; }
-    .test-card.fail { border-color: #f85149; }
+    .test-card.pass { border-color: var(--green2); }
+    .test-card.fail { border-color: var(--red2); }
 
     .test-header {
       display: flex; align-items: center; gap: 12px;
-      padding: 14px 18px; border-bottom: 1px solid #30363d;
+      padding: 13px 16px; border-bottom: 1px solid var(--border2);
+      background: var(--bg3);
     }
-    .test-header .title { font-size: 1rem; font-weight: 700; flex: 1; }
+    .test-title { font-size: 0.92rem; font-weight: 600; flex: 1; }
 
-    .test-body { padding: 16px 18px; }
+    .test-body { padding: 16px; }
     .test-stat-row {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-      gap: 10px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 10px; margin-bottom: 16px;
     }
     .test-stat {
-      background: #0d1117; border: 1px solid #21262d;
-      border-radius: 6px; padding: 10px 14px; text-align: center;
+      background: var(--bg); border: 1px solid var(--border2);
+      border-radius: 6px; padding: 10px 12px; text-align: center;
     }
-    .test-stat .ts-label { font-size: 0.68rem; text-transform: uppercase; color: #484f58; letter-spacing: 0.5px; margin-bottom: 4px; }
-    .test-stat .ts-value { font-size: 1.2rem; font-weight: 700; font-family: monospace; }
+    .ts-label {
+      font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.6px;
+      color: var(--dim); margin-bottom: 5px; font-weight: 600;
+    }
+    .ts-value {
+      font-size: 1.2rem; font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+    }
 
-    /* ── Artifact download links ── */
+    /* Failing tests list */
+    .failures-section { margin-top: 4px; }
+    .failures-title {
+      font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.6px; color: var(--red); margin-bottom: 8px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .failure-list {
+      background: var(--bg); border: 1px solid rgba(248,81,73,0.3);
+      border-radius: 6px; overflow: hidden;
+    }
+    .failure-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px; border-bottom: 1px solid var(--border2);
+      font-family: 'JetBrains Mono', monospace; font-size: 0.76rem;
+    }
+    .failure-item:last-child { border-bottom: none; }
+    .failure-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--red); flex-shrink: 0;
+    }
+    .failure-name { color: var(--text); flex: 1; word-break: break-all; }
+    .failure-copy {
+      background: none; border: 1px solid var(--border); color: var(--dim);
+      padding: 2px 7px; border-radius: 4px; font-size: 0.65rem; cursor: pointer;
+      transition: all 0.15s; flex-shrink: 0;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .failure-copy:hover { border-color: var(--red); color: var(--red); }
+
+    /* C# download card */
+    .cs-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 8px; overflow: hidden; margin-bottom: 32px;
+    }
+    .cs-header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 13px 16px; border-bottom: 1px solid var(--border2);
+      background: var(--bg3);
+    }
+    .cs-title { font-size: 0.92rem; font-weight: 600; flex: 1; }
+    .cs-body { padding: 16px; }
+    .cs-description {
+      font-size: 0.80rem; color: var(--muted); margin-bottom: 14px;
+      line-height: 1.5;
+    }
+    .cs-description code {
+      font-family: 'JetBrains Mono', monospace;
+      background: var(--bg); border: 1px solid var(--border2);
+      padding: 1px 5px; border-radius: 3px; font-size: 0.75rem;
+      color: var(--purple);
+    }
+    .cs-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .btn-download {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--purple2); color: white;
+      border: none; border-radius: 6px; padding: 9px 18px;
+      font-size: 0.82rem; font-weight: 600; cursor: pointer;
+      text-decoration: none; transition: background 0.15s;
+      font-family: 'Inter', sans-serif;
+    }
+    .btn-download:hover { background: var(--purple); }
+    .btn-download.disabled {
+      background: var(--bg3); color: var(--dim);
+      border: 1px solid var(--border); cursor: not-allowed;
+    }
+    .cs-note {
+      font-size: 0.72rem; color: var(--dim);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Artifacts */
     .artifacts-section { margin-bottom: 32px; }
     .artifacts-grid { display: flex; flex-wrap: wrap; gap: 10px; }
-    .artifact-link {
-      display: inline-flex; align-items: center; gap: 8px;
-      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
-      padding: 8px 14px; text-decoration: none; color: #8b949e;
-      font-size: 0.82rem; transition: all 0.15s;
+    .artifact-card {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 9px 14px;
+      font-size: 0.80rem; color: var(--muted);
     }
-    .artifact-link:hover { border-color: #a371f7; color: #a371f7; }
-    .artifact-link .af-icon { font-size: 1rem; }
-    .artifact-link .af-name { font-family: monospace; }
-    .artifact-link .af-size { font-size: 0.72rem; color: #484f58; }
+    .artifact-icon { font-size: 1rem; }
+    .artifact-name { font-family: 'JetBrains Mono', monospace; color: var(--text); }
+    .artifact-size { font-size: 0.70rem; color: var(--dim); margin-top: 1px; }
 
-    /* ── History table ── */
-    .history-section { margin-bottom: 32px; }
-    .history-note { font-size: 0.78rem; color: #484f58; margin-bottom: 10px; }
-
-    /* ── Toast ── */
+    /* Toast */
     .toast {
-      position: fixed; bottom: 24px; right: 24px; background: #161b22;
-      border: 1px solid #3fb950; color: #3fb950; padding: 10px 18px;
-      border-radius: 8px; font-size: 0.82rem; font-weight: 600; z-index: 9999;
-      transform: translateY(80px); opacity: 0; transition: all 0.25s ease;
-      pointer-events: none;
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--bg2); border: 1px solid var(--green2);
+      color: var(--green); padding: 9px 16px; border-radius: 6px;
+      font-size: 0.80rem; font-weight: 600; z-index: 9999;
+      transform: translateY(60px); opacity: 0;
+      transition: all 0.2s ease; pointer-events: none;
+      font-family: 'JetBrains Mono', monospace;
     }
     .toast.show { transform: translateY(0); opacity: 1; }
 
-    /* ── Footer ── */
+    /* Footer */
     footer {
-      margin-top: 40px; padding-top: 14px; border-top: 1px solid #30363d;
-      color: #484f58; font-size: 0.76rem; text-align: center;
+      margin-top: 40px; padding-top: 14px;
+      border-top: 1px solid var(--border);
+      color: var(--dim); font-size: 0.72rem; text-align: center;
+      font-family: 'JetBrains Mono', monospace;
     }
-
-    /* ── Copy button ── */
-    .copy-btn {
-      background: none; border: 1px solid #30363d; color: #484f58;
-      padding: 3px 8px; border-radius: 5px; font-size: 0.70rem; cursor: pointer;
-      transition: all 0.15s;
-    }
-    .copy-btn:hover  { border-color: #a371f7; color: #a371f7; }
-    .copy-btn.copied { border-color: #3fb950; color: #3fb950; }
 
     .hidden { display: none !important; }
   </style>
@@ -180,32 +303,32 @@
   </div>
 
   <header>
-    <h1>🔗 DixScript <span>— FFI Builds</span></h1>
-    <p style="color:#8b949e;margin-top:5px">MidManStudio | DixScript-Rust · C FFI Layer (mdix-ffi)</p>
+    <h1>DixScript <span>— FFI Builds</span></h1>
+    <p class="sub">MidManStudio · DixScript-Rust · C FFI Layer (mdix-ffi)</p>
     <div class="meta">
-      <div class="meta-item"><strong>Build:</strong> #BUILD_NUM_PLACEHOLDER</div>
-      <div class="meta-item"><strong>Branch:</strong> BRANCH_PLACEHOLDER</div>
-      <div class="meta-item"><strong>Commit:</strong> COMMIT_PLACEHOLDER</div>
-      <div class="meta-item"><strong>Date:</strong> DATE_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Build</strong> #BUILD_NUM_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Branch</strong> BRANCH_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Commit</strong> COMMIT_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Date</strong> DATE_PLACEHOLDER</div>
     </div>
   </header>
 
-  <div class="banner loading" id="banner">⏳ Loading FFI build results…</div>
+  <div class="banner loading" id="banner">Loading FFI build results…</div>
 
   <div class="stat-grid">
     <div class="stat-card">
       <div class="s-label">Platforms</div>
-      <div class="s-value" id="s-platforms">—</div>
+      <div class="s-value" id="s-platforms" style="color:var(--purple)">—</div>
       <div class="s-sub">build targets</div>
     </div>
     <div class="stat-card">
       <div class="s-label">Passing</div>
-      <div class="s-value" id="s-passing" style="color:#3fb950">—</div>
+      <div class="s-value" id="s-passing" style="color:var(--green)">—</div>
       <div class="s-sub">successful builds</div>
     </div>
     <div class="stat-card">
       <div class="s-label">Failing</div>
-      <div class="s-value" id="s-failing" style="color:#f85149">—</div>
+      <div class="s-value" id="s-failing" style="color:var(--red)">—</div>
       <div class="s-sub">failed builds</div>
     </div>
     <div class="stat-card">
@@ -215,35 +338,54 @@
     </div>
     <div class="stat-card">
       <div class="s-label">Rust</div>
-      <div class="s-value" id="s-rust" style="font-size:0.85rem;padding-top:4px">—</div>
+      <div class="s-value" id="s-rust" style="font-size:0.78rem;padding-top:6px">—</div>
       <div class="s-sub">toolchain</div>
     </div>
   </div>
 
-  <!-- Platform builds -->
   <div class="section-title">Platform Builds</div>
   <div class="platform-grid" id="platform-grid"></div>
 
-  <!-- Core tests -->
+  <div class="section-title">C# Bindings (MdixNative.cs)</div>
+  <div class="cs-card" id="cs-card">
+    <div class="cs-header">
+      <span style="font-size:1.3rem">⚙️</span>
+      <span class="cs-title">MdixNative.cs — Unity P/Invoke Bindings</span>
+      <span class="badge badge-skipped" id="cs-badge">Loading…</span>
+    </div>
+    <div class="cs-body">
+      <p class="cs-description">
+        Auto-generated by <code>csbindgen</code> during the Linux build. Drop this file into
+        <code>unity-package/Runtime/Generated/</code> — never edit it by hand.
+        Regenerated on every build from <code>mdix-ffi/src/lib.rs</code>.
+      </p>
+      <div class="cs-actions">
+        <a id="cs-download-btn" class="btn-download disabled" href="#" target="_blank">
+          ⬇ Download MdixNative.cs
+        </a>
+        <span class="cs-note" id="cs-note">Checking availability…</span>
+      </div>
+    </div>
+  </div>
+
   <div class="section-title">Core Test Suite</div>
   <div id="test-section"></div>
 
-  <!-- Artifact links -->
   <div class="artifacts-section">
     <div class="section-title">Build Artifacts</div>
-    <p style="font-size:0.78rem;color:#484f58;margin-bottom:12px">
-      Artifacts are retained for 30 days. Download from the GitHub Actions run page.
+    <p style="font-size:0.76rem;color:var(--dim);margin-bottom:12px">
+      Retained for 30 days. Download native libraries from the GitHub Actions run page.
     </p>
     <div class="artifacts-grid" id="artifacts-grid"></div>
   </div>
 
-  <footer>DixScript-Rust FFI Builds — MidManStudio — Build #BUILD_NUM_PLACEHOLDER</footer>
+  <footer>DixScript-Rust FFI · MidManStudio · Build #BUILD_NUM_PLACEHOLDER</footer>
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const REPO_PAGES_BASE = 'https://mid-d-man.github.io/DixScript-Rust';
 
 function fmtBytes(b) {
   if (!b || b === 0) return '—';
@@ -251,13 +393,11 @@ function fmtBytes(b) {
   if (b >= 1024)    return (b / 1024).toFixed(1)    + ' KB';
   return b + ' B';
 }
-
 function fmtDur(s) {
   if (!s || s === 0) return '—';
   if (s < 60) return s + 's';
   return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
 }
-
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = '✓ ' + msg;
@@ -265,7 +405,6 @@ function showToast(msg) {
   clearTimeout(t._timer);
   t._timer = setTimeout(() => t.classList.remove('show'), 2000);
 }
-
 async function copyText(text, btn) {
   try { await navigator.clipboard.writeText(text); }
   catch {
@@ -276,15 +415,16 @@ async function copyText(text, btn) {
   }
   if (btn) {
     const orig = btn.textContent;
-    btn.textContent = '✓ Copied'; btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
+    btn.textContent = 'copied'; btn.style.borderColor = 'var(--green)'; btn.style.color = 'var(--green)';
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.style.borderColor = ''; btn.style.color = '';
+    }, 1600);
   }
-  showToast('Copied');
+  showToast('Copied to clipboard');
 }
 
-// ── Render ────────────────────────────────────────────────────────────────────
-
-const PLATFORM_ICON = { linux: '🐧', macos: '🍎', windows: '🪟' };
+const PLATFORM_ICON  = { linux: '🐧', macos: '🍎', windows: '🪟' };
 const PLATFORM_LABEL = {
   linux:   'Linux (ubuntu-latest)',
   macos:   'macOS (macos-latest)',
@@ -297,56 +437,49 @@ const ARTIFACT_LABEL = {
 };
 
 function renderAll(data) {
+  const builds  = data.builds || [];
+  const passing = builds.filter(b => b.status === 'success').length;
+  const failing = builds.filter(b => b.status === 'failed').length;
+  const allPass = failing === 0 && passing > 0;
+
   // Banner
-  const builds   = data.builds || [];
-  const passing  = builds.filter(b => b.status === 'success').length;
-  const failing  = builds.filter(b => b.status === 'failed').length;
-  const skipped  = builds.filter(b => b.status === 'skipped').length;
-  const allPass  = failing === 0 && passing > 0;
-  const anyFail  = failing > 0;
-
   const banner = document.getElementById('banner');
-  banner.className = 'banner ' + (allPass ? 'pass' : anyFail ? 'fail' : 'partial');
+  banner.className = 'banner ' + (allPass ? 'pass' : failing > 0 ? 'fail' : 'partial');
   banner.textContent = allPass
-    ? `✅ All ${passing} platform build(s) succeeded — Build #${data.build}`
-    : anyFail
-      ? `❌ ${failing} platform build(s) FAILED — ${passing} succeeded`
-      : `⚠️ Build results partial — ${passing} succeeded, ${skipped} skipped`;
+    ? `All ${passing} platform build(s) succeeded — Build #${data.build}`
+    : failing > 0
+      ? `${failing} platform build(s) FAILED — ${passing} succeeded`
+      : `Build results partial — ${passing} succeeded`;
 
-  // Summary cards
+  // Stats
   document.getElementById('s-platforms').textContent = builds.length;
-  document.getElementById('s-platforms').style.color = '#a371f7';
-
   document.getElementById('s-passing').textContent   = passing;
   document.getElementById('s-failing').textContent   = failing;
 
   const tests = data.tests || {};
-  const testVal = tests.status === 'skipped' ? '—'
-    : `${tests.passed}/${tests.total}`;
-  document.getElementById('s-tests').textContent     = testVal;
-  document.getElementById('s-tests').style.color     =
-    tests.status === 'success' ? '#3fb950' :
-    tests.status === 'failed'  ? '#f85149' : '#8b949e';
+  const testVal = tests.status === 'skipped' ? '—' : `${tests.passed}/${tests.total}`;
+  const tColor  = tests.status === 'success' ? 'var(--green)'
+                : tests.status === 'failed'  ? 'var(--red)'
+                : 'var(--muted)';
+  document.getElementById('s-tests').textContent    = testVal;
+  document.getElementById('s-tests').style.color    = tColor;
   document.getElementById('s-tests-sub').textContent =
     tests.status === 'skipped' ? 'not run' : 'passed / total';
 
-  const rustFull = data.rust_version || '—';
-  const rustShort = rustFull.replace('rustc ', '').split(' ')[0];
+  const rustShort = (data.rust_version || '—').replace('rustc ', '').split(' ')[0];
   document.getElementById('s-rust').textContent = rustShort;
-  document.getElementById('s-rust').title       = rustFull;
+  document.getElementById('s-rust').title       = data.rust_version || '';
 
   // Platform cards
   const grid = document.getElementById('platform-grid');
   grid.innerHTML = '';
   builds.forEach(b => {
-    const cls  = b.status === 'success' ? 'pass' : b.status === 'failed' ? 'fail' : 'skipped';
-    const icon = PLATFORM_ICON[b.platform] || '🖥️';
-    const label = PLATFORM_LABEL[b.platform] || b.runner || b.platform;
+    const cls     = b.status === 'success' ? 'pass' : b.status === 'failed' ? 'fail' : 'skipped';
+    const bCls    = cls === 'pass' ? 'badge-pass' : cls === 'fail' ? 'badge-fail' : 'badge-skipped';
+    const bTxt    = cls === 'pass' ? '✓ Passed' : cls === 'fail' ? '✗ Failed' : '⊘ Skipped';
+    const icon    = PLATFORM_ICON[b.platform]  || '🖥️';
+    const label   = PLATFORM_LABEL[b.platform] || b.runner || b.platform;
     const artName = ARTIFACT_LABEL[b.platform] || b.artifact || '—';
-    const badgeCls = cls === 'pass' ? 'badge-pass' : cls === 'fail' ? 'badge-fail' : 'badge-skipped';
-    const badgeTxt = cls === 'pass' ? '✓ Passed' : cls === 'fail' ? '✗ Failed' : '⊘ Skipped';
-    const sizeTxt = b.size_bytes > 0 ? fmtBytes(b.size_bytes) : '—';
-    const durTxt  = b.duration_s  > 0 ? fmtDur(b.duration_s)  : '—';
 
     const card = document.createElement('div');
     card.className = `platform-card ${cls}`;
@@ -354,28 +487,49 @@ function renderAll(data) {
       <div class="platform-header">
         <span class="platform-icon">${icon}</span>
         <span class="platform-name">${label}</span>
-        <span class="platform-badge ${badgeCls}">${badgeTxt}</span>
+        <span class="badge ${bCls}">${bTxt}</span>
       </div>
       <div class="platform-body">
         <div class="platform-row">
-          <span class="label">Artifact</span>
-          <span class="value" style="font-size:0.78rem">${artName}</span>
+          <span class="p-label">Artifact</span>
+          <span class="p-value">${artName}</span>
         </div>
         <div class="platform-row">
-          <span class="label">Size</span>
-          <span class="value ${cls === 'pass' ? 'pass' : ''}">${sizeTxt}</span>
+          <span class="p-label">Size</span>
+          <span class="p-value ${cls === 'pass' ? 'pass' : 'skip'}">${fmtBytes(b.size_bytes)}</span>
         </div>
         <div class="platform-row">
-          <span class="label">Build time</span>
-          <span class="value">${durTxt}</span>
+          <span class="p-label">Build time</span>
+          <span class="p-value">${fmtDur(b.duration_s)}</span>
         </div>
         <div class="platform-row">
-          <span class="label">Status</span>
-          <span class="value ${cls}">${b.status}</span>
+          <span class="p-label">Status</span>
+          <span class="p-value ${cls}">${b.status}</span>
         </div>
       </div>`;
     grid.appendChild(card);
   });
+
+  // C# bindings card
+  const csAvailable = data.cs_available === true;
+  const csUrl = REPO_PAGES_BASE + '/ffi/MdixNative.cs';
+  const csBtn  = document.getElementById('cs-download-btn');
+  const csBadge = document.getElementById('cs-badge');
+  const csNote  = document.getElementById('cs-note');
+
+  if (csAvailable) {
+    csBtn.classList.remove('disabled');
+    csBtn.href = csUrl;
+    csBadge.className = 'badge badge-pass';
+    csBadge.textContent = '✓ Available';
+    csNote.textContent = 'Generated from this build';
+  } else {
+    csBtn.classList.add('disabled');
+    csBtn.removeAttribute('href');
+    csBadge.className = 'badge badge-skipped';
+    csBadge.textContent = '⊘ Not available';
+    csNote.textContent = 'Linux build did not produce output';
+  }
 
   // Test section
   const testSection = document.getElementById('test-section');
@@ -383,92 +537,116 @@ function renderAll(data) {
     testSection.innerHTML = `
       <div class="test-card" style="margin-bottom:32px">
         <div class="test-header">
-          <span style="font-size:1.3rem">🧪</span>
-          <span class="title">dixscript core tests</span>
-          <span class="platform-badge badge-skipped">⊘ Skipped</span>
+          <span style="font-size:1.2rem">🧪</span>
+          <span class="test-title">dixscript core tests</span>
+          <span class="badge badge-skipped">⊘ Skipped</span>
         </div>
-        <div class="test-body" style="color:#484f58;font-size:0.82rem;padding:16px 18px">
+        <div class="test-body" style="color:var(--dim);font-size:0.80rem">
           Tests were not run in this build trigger.
         </div>
       </div>`;
   } else {
-    const tcls = tests.status === 'success' ? 'pass' : 'fail';
+    const tcls   = tests.status === 'success' ? 'pass' : 'fail';
     const tbadge = tests.status === 'success' ? 'badge-pass' : 'badge-fail';
-    const ttxt   = tests.status === 'success' ? '✓ All passed' : `✗ ${tests.failed} FAILED`;
+    const ttxt   = tests.status === 'success'
+      ? `✓ All ${tests.total} passed`
+      : `✗ ${tests.failed} FAILED`;
+
+    const failedNames = tests.failed_names || [];
+    const failuresHtml = failedNames.length > 0 ? `
+      <div class="failures-section">
+        <div class="failures-title">
+          <span>✗ Failing Tests (${failedNames.length})</span>
+        </div>
+        <div class="failure-list">
+          ${failedNames.map(name => `
+            <div class="failure-item">
+              <span class="failure-dot"></span>
+              <span class="failure-name">${escHtml(name)}</span>
+              <button class="failure-copy" onclick="copyText('${escAttr(name)}', this)">copy</button>
+            </div>`).join('')}
+        </div>
+      </div>` : '';
+
     testSection.innerHTML = `
       <div class="test-card ${tcls}" style="margin-bottom:32px">
         <div class="test-header">
-          <span style="font-size:1.3rem">🧪</span>
-          <span class="title">dixscript core tests</span>
-          <span class="platform-badge ${tbadge}">${ttxt}</span>
+          <span style="font-size:1.2rem">🧪</span>
+          <span class="test-title">dixscript core tests</span>
+          <span class="badge ${tbadge}">${ttxt}</span>
         </div>
         <div class="test-body">
           <div class="test-stat-row">
             <div class="test-stat">
               <div class="ts-label">Total</div>
-              <div class="ts-value" style="color:#e6edf3">${tests.total || 0}</div>
+              <div class="ts-value" style="color:var(--text)">${tests.total || 0}</div>
             </div>
             <div class="test-stat">
               <div class="ts-label">Passed</div>
-              <div class="ts-value" style="color:#3fb950">${tests.passed || 0}</div>
+              <div class="ts-value" style="color:var(--green)">${tests.passed || 0}</div>
             </div>
             <div class="test-stat">
               <div class="ts-label">Failed</div>
-              <div class="ts-value" style="color:${(tests.failed || 0) > 0 ? '#f85149' : '#484f58'}">${tests.failed || 0}</div>
+              <div class="ts-value" style="color:${(tests.failed||0)>0?'var(--red)':'var(--dim)'}">${tests.failed || 0}</div>
             </div>
             <div class="test-stat">
               <div class="ts-label">Duration</div>
-              <div class="ts-value" style="color:#8b949e;font-size:0.95rem">${fmtDur(tests.duration_s)}</div>
+              <div class="ts-value" style="color:var(--muted);font-size:0.90rem">${fmtDur(tests.duration_s)}</div>
             </div>
           </div>
+          ${failuresHtml}
         </div>
       </div>`;
   }
 
-  // Artifact download section
+  // Artifacts
   const artGrid = document.getElementById('artifacts-grid');
   artGrid.innerHTML = '';
   builds.filter(b => b.status === 'success').forEach(b => {
     const artName = ARTIFACT_LABEL[b.platform] || b.artifact;
-    const bundleName = `libmdix-ffi-${b.platform}-${data.build}`;
     const el = document.createElement('div');
-    el.className = 'artifact-link';
+    el.className = 'artifact-card';
     el.innerHTML = `
-      <span class="af-icon">${PLATFORM_ICON[b.platform] || '📦'}</span>
+      <span class="artifact-icon">${PLATFORM_ICON[b.platform] || '📦'}</span>
       <div>
-        <div class="af-name">${artName}</div>
-        <div class="af-size">${fmtBytes(b.size_bytes)} · ${bundleName}</div>
+        <div class="artifact-name">${artName}</div>
+        <div class="artifact-size">${fmtBytes(b.size_bytes)} · libmdix-ffi-${b.platform}-${data.build}</div>
       </div>`;
-    el.title = `Download from Actions: ${bundleName}`;
     artGrid.appendChild(el);
   });
 
   if (artGrid.children.length === 0) {
-    artGrid.innerHTML = '<span style="color:#484f58;font-size:0.82rem">No artifacts produced in this build.</span>';
+    artGrid.innerHTML = '<span style="color:var(--dim);font-size:0.80rem">No artifacts produced in this build.</span>';
   }
 }
 
-// ── Fetch ──────────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+  return s.replace(/'/g, "\\'");
+}
 
 fetch('ffi-results.json')
   .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
   .then(data => renderAll(data))
   .catch(err => {
-    const banner = document.getElementById('banner');
-    banner.className = 'banner fail';
-    banner.textContent = `❌ Failed to load ffi-results.json: ${err.message}`;
-
+    document.getElementById('banner').className = 'banner fail';
+    document.getElementById('banner').textContent = `Failed to load ffi-results.json: ${err.message}`;
     document.getElementById('platform-grid').innerHTML = `
-      <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;
-        padding:28px;text-align:center;color:#8b949e;grid-column:1/-1">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+        padding:28px;text-align:center;color:var(--muted);grid-column:1/-1">
         <p>No FFI build data available.</p>
-        <p style="margin-top:8px;font-size:0.80rem">
-          Push a commit containing <strong>--ffi</strong> to trigger a build,
-          or use workflow_dispatch.
+        <p style="margin-top:8px;font-size:0.78rem">
+          Push a commit with <strong>--ffi</strong> in the message to trigger a build.
         </p>
       </div>`;
+    const csBadge = document.getElementById('cs-badge');
+    csBadge.className = 'badge badge-skipped';
+    csBadge.textContent = '⊘ Not available';
+    document.getElementById('cs-note').textContent = 'No build data';
     document.getElementById('test-section').innerHTML = '';
   });
 </script>
 </body>
-  </html>
+</html>

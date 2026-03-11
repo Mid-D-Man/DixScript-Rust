@@ -36,4 +36,4 @@ pub fn results_file(category: &str, filename: &str) -> String {
         .join(filename)
         .to_string_lossy()
         .to_string()
-          }
+}

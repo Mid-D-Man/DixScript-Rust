@@ -25,5 +25,7 @@
     <Compile Include="..\..\..\unity-package\Runtime\Generated\MdixNative.cs"
              Link="Generated\MdixNative.cs" />
   </ItemGroup>
-
+<ItemGroup>
+  <PackageReference Include="System.Text.Json" Version="6.0.10" />
+</ItemGroup>
 </Project>

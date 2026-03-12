@@ -3,9 +3,9 @@
 mod helpers;
 
 use assert_cmd::Command;
-use predicates::prelude::*;
 
 fn mdix() -> Command {
+    #[allow(deprecated)]
     Command::cargo_bin("mdix").unwrap()
 }
 
@@ -132,7 +132,7 @@ fn convert_mdix_to_toml_produces_valid_toml() {
     assert!(!content.trim().is_empty(), "toml output should not be empty");
     assert!(
         !content.trim_start().starts_with('{'),
-        "toml output should not start with '{'"
+        "toml output should not start with '{{'"
     );
 }
 
@@ -314,4 +314,4 @@ fn convert_json_flag_produces_envelope() {
 
     let result = helpers::results_file("convert", "envelope_result.json");
     std::fs::write(result, &stdout).ok();
-}
+    }

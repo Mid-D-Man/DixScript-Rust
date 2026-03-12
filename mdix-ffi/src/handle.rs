@@ -8,6 +8,10 @@
 // Two handle types:
 //   MdixHandle        — wraps a loaded, read-only DixData (load → read → free)
 //   MdixBuilderHandle — wraps a mutable HashMap for building save data (new → set → save → free)
+//
+// Both structs are #[repr(C)] so csbindgen emits the corresponding C# partial
+// struct definitions in MdixNative.cs. Without repr(C), csbindgen silently
+// skips them and the C# side fails to compile.
 
 use std::collections::HashMap;
 use dixscript::Runtime::{DixData, DixValue};
@@ -16,6 +20,7 @@ use dixscript::Runtime::{DixData, DixValue};
 ///
 /// Created by mdix_load / mdix_load_str / mdix_load_encrypted.
 /// Freed by mdix_free.
+#[repr(C)]
 pub struct MdixHandle {
     pub data: DixData,
 }
@@ -41,6 +46,7 @@ impl MdixHandle {
 /// Used for building save data at runtime without needing a template file.
 /// Created by mdix_builder_new.
 /// Freed by mdix_builder_free.
+#[repr(C)]
 pub struct MdixBuilderHandle {
     /// Flat dotted-path key → value store, mirrors DixData's internal layout.
     pub entries: HashMap<String, DixValue>,
@@ -62,4 +68,4 @@ impl MdixBuilderHandle {
             drop(Box::from_raw(ptr));
         }
     }
-  }
+}

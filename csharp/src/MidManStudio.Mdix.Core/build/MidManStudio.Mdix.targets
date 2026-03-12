@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MidManStudio.Mdix.targets
+  Auto-injected into consumer projects by NuGet (lives at build/ in the .nupkg).
+
+  Copies the correct platform-native mdix_ffi library to the consumer's output
+  directory. Belt-and-suspenders fallback for:
+    - .NET Framework consumers (do not process runtimes/ at all)
+    - older .NET Core hosts that skip runtimes/ during `dotnet publish`
+    - self-contained publish without an explicit RID set
+
+  .NET 5+ / .NET Core 3.x on a known RID already handles runtimes/ natively;
+  this file is effectively a no-op for them because PreserveNewest only copies
+  when the destination is older than the source.
+
+  $(MSBuildThisFileDirectory) resolves to the build/ folder inside the NuGet
+  package cache entry, so ..\runtimes\ reaches the runtimes/ peer folder.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup>
+    <MidManStudio_Mdix_NativesRoot
+      Condition="'$(MidManStudio_Mdix_NativesRoot)' == ''"
+    >$(MSBuildThisFileDirectory)..\runtimes\</MidManStudio_Mdix_NativesRoot>
+  </PropertyGroup>
+
+  <!-- Windows x64 -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT' AND '$(Platform)' != 'x86'">
+    <None Include="$(MidManStudio_Mdix_NativesRoot)win-x64\native\mdix_ffi.dll"
+          Condition="Exists('$(MidManStudio_Mdix_NativesRoot)win-x64\native\mdix_ffi.dll')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+
+  <!-- Windows x86 -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT' AND '$(Platform)' == 'x86'">
+    <None Include="$(MidManStudio_Mdix_NativesRoot)win-x86\native\mdix_ffi.dll"
+          Condition="Exists('$(MidManStudio_Mdix_NativesRoot)win-x86\native\mdix_ffi.dll')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+
+  <!-- Linux x64 -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux')) AND '$(Platform)' != 'arm64'">
+    <None Include="$(MidManStudio_Mdix_NativesRoot)linux-x64\native\libmdix_ffi.so"
+          Condition="Exists('$(MidManStudio_Mdix_NativesRoot)linux-x64\native\libmdix_ffi.so')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+
+  <!-- Linux arm64 -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux')) AND '$(Platform)' == 'arm64'">
+    <None Include="$(MidManStudio_Mdix_NativesRoot)linux-arm64\native\libmdix_ffi.so"
+          Condition="Exists('$(MidManStudio_Mdix_NativesRoot)linux-arm64\native\libmdix_ffi.so')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+
+  <!-- macOS arm64 (Apple Silicon — check first) -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) AND '$(Platform)' == 'arm64'">
+    <None Include="$(MidManStudio_Mdix_NativesRoot)osx-arm64\native\libmdix_ffi.dylib"
+          Condition="Exists('$(MidManStudio_Mdix_NativesRoot)osx-arm64\native\libmdix_ffi.dylib')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+
+  <!-- macOS x64 (Intel) -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) AND '$(Platform)' != 'arm64'">
+    <None Include="$(MidManStudio_Mdix_NativesRoot)osx-x64\native\libmdix_ffi.dylib"
+          Condition="Exists('$(MidManStudio_Mdix_NativesRoot)osx-x64\native\libmdix_ffi.dylib')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+
+</Project>

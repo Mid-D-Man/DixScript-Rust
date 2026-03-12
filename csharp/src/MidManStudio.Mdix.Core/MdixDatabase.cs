@@ -668,6 +668,50 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
+        #region Dynamic Access
+
+        /// <summary>
+        /// Returns a <see cref="MdixDynamic"/> wrapper over this database for
+        /// path navigation without string literals at call sites.
+        /// <code>
+        /// dynamic cfg = db.AsDynamic();
+        /// int port    = cfg.server.port;
+        /// string name = cfg.enemies[0].name;
+        /// </code>
+        /// The underlying database must remain undisposed while any
+        /// <see cref="MdixDynamic"/> that references it is in use.
+        /// </summary>
+        public MdixDynamic AsDynamic()
+        {
+            ThrowIfDisposed();
+            return new MdixDynamic(this);
+        }
+
+        #endregion
+
+        #region Schema Validation
+
+        /// <summary>
+        /// Validates this database against the given schema.
+        /// All errors are collected in a single pass — never throws.
+        /// <code>
+        /// var schema = new MdixSchemaBuilder()
+        ///     .Require&lt;int&gt;("server.port")
+        ///     .Optional&lt;string&gt;("server.host");
+        ///
+        /// var report = db.Validate(schema);
+        /// if (!report.IsValid) foreach (var e in report.Errors) Console.WriteLine(e);
+        /// </code>
+        /// </summary>
+        public MdixValidationReport Validate(IMdixSchemaSource schema)
+        {
+            ThrowIfDisposed();
+            if (schema is null) throw new ArgumentNullException(nameof(schema));
+            return MdixDatabaseValidator.Validate(this, schema);
+        }
+
+        #endregion
+
         #region Hot Reload
 
         /// <summary>
@@ -675,10 +719,6 @@ namespace MidManStudio.Mdix.Core
         /// <see cref="OnReloaded"/> and <see cref="OnReloadFailed"/> are fired on a
         /// background thread — Unity layer wraps these to dispatch to the main thread.
         /// </summary>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when the database was not loaded from a file path
-        /// (e.g. loaded via <see cref="LoadStr"/>).
-        /// </exception>
         public void EnableHotReload()
         {
             ThrowIfDisposed();
@@ -738,13 +778,11 @@ namespace MidManStudio.Mdix.Core
 
         private void HandleFileChanged(object sender, FileSystemEventArgs e)
         {
-            // Debounce — editors often write a file in multiple flushes.
             var now  = DateTime.UtcNow.Ticks;
             var last = Interlocked.Read(ref _lastReloadTick);
             if (now - last < ReloadDebounceTicks) return;
             Interlocked.Exchange(ref _lastReloadTick, now);
 
-            // Brief pause to ensure the write is fully flushed.
             Thread.Sleep(100);
 
             var result = Reload();
@@ -762,12 +800,6 @@ namespace MidManStudio.Mdix.Core
 
         #region Private Helpers — Handle Acquisition
 
-        /// <summary>
-        /// Validates <paramref name="path"/>, checks disposal, acquires a
-        /// DangerousRef on the handle, and returns the raw pointer.
-        /// Returns <c>false</c> and sets <paramref name="error"/> on any failure.
-        /// The caller MUST call <c>_safeHandle.DangerousRelease()</c> if this returns <c>true</c>.
-        /// </summary>
         private bool TryGetRawHandleForPath(
             string    path,
             out void* rawHandle,
@@ -790,11 +822,6 @@ namespace MidManStudio.Mdix.Core
             return TryGetRawHandle(out rawHandle, out error);
         }
 
-        /// <summary>
-        /// Checks disposal and acquires a DangerousRef on the handle.
-        /// Returns <c>false</c> and sets <paramref name="error"/> on failure.
-        /// The caller MUST call <c>_safeHandle.DangerousRelease()</c> if this returns <c>true</c>.
-        /// </summary>
         private bool TryGetRawHandle(out void* rawHandle, out MdixError error)
         {
             rawHandle = null;
@@ -824,33 +851,17 @@ namespace MidManStudio.Mdix.Core
 
         #region Private Helpers — String Marshalling
 
-        /// <summary>
-        /// Reads the current native last-error string into a managed string.
-        /// The native pointer is valid only until the next FFI call — we copy immediately.
-        /// Returns <c>null</c> if no error is set.
-        /// </summary>
         private static string? ReadLastError()
         {
             var ptr = MdixNative.mdix_get_last_error();
             return ptr == null ? null : Marshal.PtrToStringUTF8((IntPtr)ptr);
         }
 
-        /// <summary>
-        /// Converts a heap-allocated native string to a managed string and frees
-        /// the native allocation. The <c>try/finally</c> guarantees the free even
-        /// if marshalling throws.
-        /// </summary>
         private static string? ReadFreeNativeString(byte* ptr)
         {
             if (ptr == null) return null;
-            try
-            {
-                return Marshal.PtrToStringUTF8((IntPtr)ptr);
-            }
-            finally
-            {
-                MdixNative.mdix_free_string(ptr);
-            }
+            try   { return Marshal.PtrToStringUTF8((IntPtr)ptr); }
+            finally { MdixNative.mdix_free_string(ptr); }
         }
 
         #endregion
@@ -868,40 +879,31 @@ namespace MidManStudio.Mdix.Core
 
         #region Private Helpers — Tuple Parsing
 
-        private static MdixResult<T> ParseJsonElement<T>(
-            JsonElement element,
-            string      path)
+        private static MdixResult<T> ParseJsonElement<T>(JsonElement element, string path)
         {
             try
             {
                 object? value;
-
                 if      (typeof(T) == typeof(string))  value = element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
                 else if (typeof(T) == typeof(int))     value = element.GetInt32();
                 else if (typeof(T) == typeof(float))   value = (float)element.GetDouble();
                 else if (typeof(T) == typeof(double))  value = element.GetDouble();
                 else if (typeof(T) == typeof(bool))    value = element.GetBoolean();
                 else
-                    return MdixError.TypeMismatch(
-                        path, typeof(T).Name, element.ValueKind.ToString());
-
+                    return MdixError.TypeMismatch(path, typeof(T).Name, element.ValueKind.ToString());
                 return MdixResult<T>.Ok((T)value!);
             }
             catch (Exception ex)
             {
-                return MdixError.ParseError(
-                    $"Failed to deserialize tuple element at '{path}': {ex.Message}");
+                return MdixError.ParseError($"Failed to deserialize tuple element at '{path}': {ex.Message}");
             }
         }
 
-        private static MdixResult<JsonElement[]> ParseJsonArray(
-            string json,
-            string path,
-            int    expectedLength)
+        private static MdixResult<JsonElement[]> ParseJsonArray(string json, string path, int expectedLength)
         {
             try
             {
-                var doc = JsonDocument.Parse(json);
+                var doc  = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
                 if (root.ValueKind != JsonValueKind.Array)
@@ -915,7 +917,7 @@ namespace MidManStudio.Mdix.Core
 
                 var elements = new JsonElement[expectedLength];
                 for (int i = 0; i < expectedLength; i++)
-                    elements[i] = root[i].Clone(); // Clone so we can dispose the doc
+                    elements[i] = root[i].Clone();
 
                 doc.Dispose();
                 return MdixResult<JsonElement[]>.Ok(elements);

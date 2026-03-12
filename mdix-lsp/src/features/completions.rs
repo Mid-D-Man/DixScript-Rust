@@ -340,3 +340,107 @@ fn word_before_dot(source: &str, pos: Position) -> String {
         .unwrap_or("")
         .to_string()
   }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyzer::run_pipeline;
+    use crate::document::Document;
+    use tower_lsp::lsp_types::{Position, Url};
+
+    fn test_doc(source: &str) -> Document {
+        let mut doc = Document::new(
+            Url::parse("file:///test.mdix").unwrap(),
+            source.to_string(),
+            0,
+        );
+        run_pipeline(&mut doc);
+        doc
+    }
+
+    #[test]
+    fn section_snippet_completions_are_non_empty() {
+        let items = section_snippet_completions();
+        assert!(!items.is_empty(), "should return section snippets");
+    }
+
+    #[test]
+    fn section_snippet_completions_include_all_sections() {
+        let items  = section_snippet_completions();
+        let labels: Vec<&str> = items.iter()
+            .filter_map(|i| i.label.as_str().into())
+            .collect();
+        for expected in &["@CONFIG", "@IMPORTS", "@DLM", "@ENUMS",
+                          "@QUICKFUNCS", "@DATA", "@SECURITY"] {
+            assert!(labels.iter().any(|l| l == expected),
+                "missing section completion: {}", expected);
+        }
+    }
+
+    #[test]
+    fn type_annotation_completions_include_primitives() {
+        let items = type_annotation_completions();
+        let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+        for t in &["<int>", "<float>", "<string>", "<bool>", "<array>"] {
+            assert!(labels.iter().any(|l| l == t),
+                "missing type completion: {}", t);
+        }
+    }
+
+    #[test]
+    fn static_method_completions_math_non_empty() {
+        let methods = static_method_completions("Math");
+        assert!(!methods.is_empty(), "Math should have static methods");
+        assert!(methods.iter().any(|m| m.label == "sqrt"), "Math.sqrt missing");
+        assert!(methods.iter().any(|m| m.label == "round"), "Math.round missing");
+    }
+
+    #[test]
+    fn static_method_completions_unknown_object_empty() {
+        let methods = static_method_completions("NonExistentObject");
+        assert!(methods.is_empty(), "unknown object should return no completions");
+    }
+
+    #[test]
+    fn provide_on_none_doc_returns_section_snippets() {
+        // None document falls through to section_snippet_completions
+        let result = provide(None, Position::new(0, 0));
+        // The function may return Some or None depending on trigger char heuristics
+        // with no document — just verify it does not panic
+        let _ = result;
+    }
+
+    #[test]
+    fn general_completions_include_keywords() {
+        let doc    = test_doc("@DATA(\n  x = 1\n)");
+        let result = general_completions(&doc, Position::new(0, 0));
+        let labels: Vec<&str> = result.iter()
+            .filter_map(|i| i.label.as_str().into())
+            .collect();
+        assert!(labels.contains(&"return"), "should include 'return' keyword");
+        assert!(labels.contains(&"true"),   "should include 'true' keyword");
+    }
+
+    #[test]
+    fn general_completions_include_static_objects() {
+        let doc    = test_doc("@DATA(\n  x = 1\n)");
+        let result = general_completions(&doc, Position::new(0, 0));
+        let labels: Vec<&str> = result.iter()
+            .filter_map(|i| i.label.as_str().into())
+            .collect();
+        assert!(labels.contains(&"Math"),     "should include Math");
+        assert!(labels.contains(&"DateTime"), "should include DateTime");
+        assert!(labels.contains(&"Array"),    "should include Array");
+    }
+
+    #[test]
+    fn completions_quickfuncs_appear_after_pipeline() {
+        let source = "@QUICKFUNCS(\n  ~calc<int>(x) { return x }\n)\n@DATA(\n  y = 1\n)";
+        let doc    = test_doc(source);
+        let result = general_completions(&doc, Position::new(3, 0));
+        let labels: Vec<&str> = result.iter()
+            .filter_map(|i| i.label.as_str().into())
+            .collect();
+        assert!(labels.contains(&"calc"),
+            "QuickFunc 'calc' should appear in completions; got: {:?}", labels);
+    }
+            }

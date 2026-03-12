@@ -1,0 +1,5 @@
+@DATA(
+  x = unknownFunc(10)
+  y = UndeclaredEnum.VALUE
+  z<int> = "wrong type"
+)

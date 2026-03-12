@@ -1,3 +1,4 @@
+// mdix-lsp/src/converters.rs
 //! Converts DixScript compiler errors into LSP diagnostics.
 //!
 //! All DixScript positions are 1-based; LSP expects 0-based.
@@ -23,15 +24,24 @@ pub fn to_diagnostic(error: &DixError) -> Diagnostic {
     }
 }
 
-/// Converts a slice of errors into diagnostics. Filters out duplicate positions
-/// so the editor does not stack multiple identical squiggles on the same character.
+/// Converts a slice of errors into diagnostics.
+///
+/// Filters out duplicate (line, character, message) triples so the editor
+/// does not stack multiple identical squiggles on the same character.
+/// `Range` does not implement `Hash`, so we key on the start position fields
+/// and the message text instead.
 pub fn to_diagnostics(errors: &[DixError]) -> Vec<Diagnostic> {
-    let mut seen  = std::collections::HashSet::new();
-    let mut out   = Vec::with_capacity(errors.len());
+    // Key: (start_line, start_character, message)
+    let mut seen: std::collections::HashSet<(u32, u32, String)> = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(errors.len());
 
     for error in errors {
         let diag = to_diagnostic(error);
-        let key  = (diag.range, diag.message.clone());
+        let key  = (
+            diag.range.start.line,
+            diag.range.start.character,
+            diag.message.clone(),
+        );
         if seen.insert(key) {
             out.push(diag);
         }
@@ -171,4 +181,4 @@ fn error_code(error: &DixError) -> Option<NumberOrString> {
     } else {
         Some(NumberOrString::String(id.to_string()))
     }
-      }
+            }

@@ -12,6 +12,16 @@
 // Both structs are #[repr(C)] so csbindgen emits the corresponding C# partial
 // struct definitions in MdixNative.cs. Without repr(C), csbindgen silently
 // skips them and the C# side fails to compile.
+//
+// Fields are pub(crate), NOT pub. If the fields were pub, csbindgen would try
+// to map DixData and HashMap<String, DixValue> into C# field declarations —
+// types that don't exist in C#. pub(crate) makes csbindgen emit clean empty
+// opaque structs:
+//
+//   internal unsafe partial struct MdixHandle { }
+//   internal unsafe partial struct MdixBuilderHandle { }
+//
+// which is exactly what Unity needs — an opaque pointer target.
 
 use std::collections::HashMap;
 use dixscript::Runtime::{DixData, DixValue};
@@ -22,7 +32,7 @@ use dixscript::Runtime::{DixData, DixValue};
 /// Freed by mdix_free.
 #[repr(C)]
 pub struct MdixHandle {
-    pub data: DixData,
+    pub(crate) data: DixData,
 }
 
 impl MdixHandle {
@@ -49,7 +59,7 @@ impl MdixHandle {
 #[repr(C)]
 pub struct MdixBuilderHandle {
     /// Flat dotted-path key → value store, mirrors DixData's internal layout.
-    pub entries: HashMap<String, DixValue>,
+    pub(crate) entries: HashMap<String, DixValue>,
 }
 
 impl MdixBuilderHandle {

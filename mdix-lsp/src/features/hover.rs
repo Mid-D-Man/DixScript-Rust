@@ -272,3 +272,75 @@ pub fn token_at(tokens: &[Token], pos: Position) -> Option<&Token> {
 
     best
       }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyzer::run_pipeline;
+    use crate::document::Document;
+    use tower_lsp::lsp_types::{HoverContents, Position, Url};
+
+    fn test_doc(source: &str) -> Document {
+        let mut doc = Document::new(
+            Url::parse("file:///test.mdix").unwrap(),
+            source.to_string(),
+            0,
+        );
+        run_pipeline(&mut doc);
+        doc
+    }
+
+    #[test]
+    fn hover_none_doc_returns_none() {
+        assert!(provide(None, Position::new(0, 0)).is_none());
+    }
+
+    #[test]
+    fn hover_data_section_keyword_returns_markup() {
+        let doc    = test_doc("@DATA(\n  x = 1\n)");
+        let result = provide(Some(&doc), Position::new(0, 1));
+        assert!(result.is_some(), "@DATA should produce a hover result");
+        if let Some(h) = result {
+            match h.contents {
+                HoverContents::Markup(m) => {
+                    assert!(m.value.contains("DATA"), "hover should mention DATA");
+                }
+                _ => panic!("expected MarkupContent"),
+            }
+        }
+    }
+
+    #[test]
+    fn hover_enums_section_keyword_returns_markup() {
+        let doc    = test_doc("@ENUMS(\n  Status { ACTIVE = 1 }\n)");
+        let result = provide(Some(&doc), Position::new(0, 1));
+        assert!(result.is_some(), "@ENUMS should produce a hover result");
+        if let Some(h) = result {
+            if let HoverContents::Markup(m) = h.contents {
+                assert!(m.value.contains("ENUMS") || m.value.contains("enum"),
+                    "hover should mention enums");
+            }
+        }
+    }
+
+    #[test]
+    fn hover_whitespace_does_not_panic() {
+        let doc = test_doc("@DATA(\n  x = 1\n)");
+        // Position inside the parentheses on an empty area — result may be None, that's fine
+        let _ = provide(Some(&doc), Position::new(1, 0));
+    }
+
+    #[test]
+    fn token_at_returns_none_past_end_of_file() {
+        let doc    = test_doc("@DATA(\n  x = 1\n)");
+        let result = token_at(&doc.tokens, Position::new(999, 0));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn hover_quickfunc_section_keyword() {
+        let source = "@QUICKFUNCS(\n  ~add<int>(a, b) {\n    return a\n  }\n)";
+        let doc    = test_doc(source);
+        let result = provide(Some(&doc), Position::new(0, 1));
+        assert!(result.is_some(), "@QUICKFUNCS should produce a hover result");
+    }
+            }

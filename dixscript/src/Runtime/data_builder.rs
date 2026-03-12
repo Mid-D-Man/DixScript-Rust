@@ -9,8 +9,10 @@ use super::format_options::DixFormatOptions;
 /// Fluent builder for creating DixData programmatically.
 ///
 /// Enforces DixScript's two-tier structure: flat properties must be added
-/// before table properties or group arrays. Violations return `Err` rather
-/// than panicking, making this safe to call from FFI or C# via the runtime.
+/// before table properties or group arrays. Violations return `Err` from
+/// `build()` — they do NOT panic. This is intentional: panics across FFI
+/// boundaries are undefined behavior. Callers that discard `Result` are
+/// responsible for their own mistakes.
 pub struct DixDataBuilder {
     config_builder: ConfigBuilder,
     enums_builder:  EnumsBuilder,
@@ -48,9 +50,8 @@ impl DixDataBuilder {
 
     /// Configure the DATA section.
     ///
-    /// The closure receives a `&mut DataBuilder`. Methods on `DataBuilder`
-    /// return `Result` — if you need to propagate errors out of the closure,
-    /// collect them and return via `build()`.
+    /// Flat properties must be added before any table properties or group
+    /// arrays. Violations are recorded and surfaced as `Err` from `build()`.
     pub fn data<F>(mut self, configure: F) -> Self
     where
         F: FnOnce(&mut DataBuilder),
@@ -71,7 +72,9 @@ impl DixDataBuilder {
 
     /// Build DixData in memory.
     ///
-    /// Returns `Err` if the data builder accumulated any two-tier violations.
+    /// Returns `Err` if any two-tier ordering violations were recorded inside
+    /// the `data()` closure, or if other validation failed (e.g. bad hex color).
+    /// All violations are collected so the caller sees them all at once.
     pub fn build(self) -> Result<DixData, String> {
         let config_section = self.config_builder.build();
         let enums_section  = self.enums_builder.build();
@@ -265,8 +268,10 @@ impl Default for EnumsBuilder {
 /// Builds the DATA section.
 ///
 /// Flat properties must be added before any table properties or group arrays.
-/// Violations are collected as errors and surfaced when `build()` is called,
-/// rather than panicking immediately.
+/// Violations are **collected** rather than panicking so that the caller sees
+/// every problem at once when `build()` is called. This also keeps the type
+/// safe to use from FFI wrappers, where a panic would cross a C boundary and
+/// cause undefined behavior.
 pub struct DataBuilder {
     flat_properties:       Vec<(String, Value)>,
     table_properties:      Vec<(String, Vec<(String, Value)>)>,
@@ -408,7 +413,8 @@ impl DataBuilder {
     // ── Validation ────────────────────────────────────────────────────────────
 
     /// Returns `true` if a flat property may be added, `false` if a two-tier
-    /// violation was detected (error deferred for `build()`).
+    /// violation was detected. The error is deferred to `build()` so all
+    /// violations are reported together rather than stopping at the first one.
     fn check_flat_allowed(&mut self, name: &str) -> bool {
         if self.has_seen_grouped_data {
             self.deferred_errors.push(format!(
@@ -645,4 +651,23 @@ mod tests {
         let data = DixDataBuilder::new().build().unwrap();
         assert_eq!(data.entry_count(), 0);
     }
+
+    #[test]
+    fn test_group_array_builder() {
+        let data = DixDataBuilder::new()
+            .data(|d| {
+                d.with_string("version", "1.0.0");
+                d.with_group_array_builder("tags", |arr| {
+                    arr.add_string("alpha");
+                    arr.add_string("beta");
+                });
+            })
+            .build()
+            .unwrap();
+
+        assert!(data.exists("tags"));
+        assert!(data.exists("tags[0]"));
+        let first: String = data.get("tags[0]").unwrap();
+        assert_eq!(first, "alpha");
     }
+}

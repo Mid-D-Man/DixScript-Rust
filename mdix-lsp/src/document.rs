@@ -1,3 +1,4 @@
+// mdix-lsp/src/document.rs
 //! Per-document state. Rebuilt on every didOpen / didChange.
 
 use dixscript::Compiler::AST::DixScript;
@@ -9,7 +10,9 @@ use tower_lsp::lsp_types::Url;
 ///
 /// Rebuilt from scratch on every text change — the compiler pipeline is fast
 /// enough that full re-analysis on each keystroke is acceptable.
-#[derive(Debug)]
+///
+/// `ErrorManager` does not implement `Debug`, so we implement `Debug`
+/// manually and omit it from the output rather than deriving.
 pub struct Document {
     /// The editor's canonical URI for this file.
     pub uri: Url,
@@ -38,6 +41,25 @@ pub struct Document {
     /// Version counter from the editor. Used to discard stale analysis results
     /// when a newer change arrives before the current analysis finishes.
     pub version: i32,
+}
+
+/// Manual `Debug` impl because `ErrorManager` does not implement `Debug`.
+/// The error manager's contents are intentionally omitted — they are
+/// transient pipeline state that has no meaningful debug representation
+/// at the document level.
+impl std::fmt::Debug for Document {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Document")
+            .field("uri",     &self.uri)
+            .field("version", &self.version)
+            .field("source_len", &self.source.len())
+            .field("token_count", &self.tokens.len())
+            .field("has_ast", &self.ast.is_some())
+            .field("has_semantic_result", &self.semantic_result.is_some())
+            .field("has_enhancement_result", &self.enhancement_result.is_some())
+            // error_manager omitted: ErrorManager does not implement Debug
+            .finish()
+    }
 }
 
 impl Document {

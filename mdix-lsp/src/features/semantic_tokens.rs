@@ -7,7 +7,7 @@
 //!
 //! Encoding follows the LSP spec: each token is represented as a
 //! `SemanticToken` struct with five fields —
-//! delta_line, delta_start_char, length, token_type, token_modifiers_bitset.
+//! delta_line, delta_start, length, token_type, token_modifiers_bitset.
 
 use tower_lsp::lsp_types::{SemanticToken, SemanticTokens, SemanticTokensResult};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
@@ -45,7 +45,7 @@ pub fn provide(doc: Option<&Document>) -> Option<SemanticTokensResult> {
 /// Encodes the token stream as a `Vec<SemanticToken>`.
 ///
 /// Each `SemanticToken` holds the five LSP-specified fields:
-///   delta_line, delta_start_char, length, token_type, token_modifiers_bitset.
+///   delta_line, delta_start, length, token_type, token_modifiers_bitset.
 /// Positions are expressed as deltas relative to the previous token.
 fn encode_tokens(tokens: &[Token]) -> Vec<SemanticToken> {
     let mut data: Vec<SemanticToken> = Vec::with_capacity(tokens.len());
@@ -62,8 +62,10 @@ fn encode_tokens(tokens: &[Token]) -> Vec<SemanticToken> {
         let line = token.line.saturating_sub(1) as u32;
         let col  = token.column.saturating_sub(1) as u32;
 
-        let delta_line      = line - prev_line;
-        let delta_start_char = if delta_line == 0 { col - prev_col } else { col };
+        let delta_line  = line - prev_line;
+        // delta_start is relative to the start of the previous token's line
+        // only when on the same line; otherwise it is the absolute column.
+        let delta_start = if delta_line == 0 { col - prev_col } else { col };
 
         let length = token_length(token) as u32;
         if length == 0 {
@@ -72,7 +74,7 @@ fn encode_tokens(tokens: &[Token]) -> Vec<SemanticToken> {
 
         data.push(SemanticToken {
             delta_line,
-            delta_start_char,
+            delta_start,   // correct field name in tower-lsp SemanticToken
             length,
             token_type,
             token_modifiers_bitset: modifiers,
@@ -170,7 +172,7 @@ fn classify(token: &Token) -> Option<(u32, u32)> {
         // Comments
         TokenType::Comment(_) => Some((TT_COMMENT, 0)),
 
-        // Multi-char symbols that are operator-like (e.g. ::)
+        // Multi-char symbols that are operator-like
         TokenType::MultiCharSymbol(_) => Some((TT_OPERATOR, 0)),
 
         // Skip: plain symbols, EOF, errors, parse context, and tokens

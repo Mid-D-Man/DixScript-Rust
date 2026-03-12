@@ -12,8 +12,6 @@ name = "mdix-lsp"
 path = "src/main.rs"
 
 [dependencies]
-# Original tower-lsp crate — v0.20 is the latest stable release.
-# Uses #[async_trait] which matches all server.rs code as written.
 tower-lsp          = "0.20"
 dixscript          = { path = "../dixscript" }
 tokio              = { version = "1", features = ["full"] }
@@ -22,3 +20,12 @@ lsp-types          = "0.97"
 serde_json         = "1.0"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+serde_json = "1.0"
+
+# harness = false: the file has its own main() and outputs lsp-integration-results.json.
+[[test]]
+name    = "lsp_integration"
+path    = "tests/lsp_integration.rs"
+harness = false

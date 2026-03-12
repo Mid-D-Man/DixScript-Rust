@@ -1,224 +1,499 @@
-// src/Runtime/dix_value.rs
-//! Consumer-facing runtime value type for DixScript.
-//!
-//! This is a flat enum — consumers (FFI, game engines, C# via csbindgen)
-//! pattern match directly on variants. It is intentionally separate from
-//! Builtins::Core::DixValue, which is the compiler-side interpreter value
-//! used during QuickFuncs evaluation and carries arithmetic/comparison methods.
+// src/Runtime/dix_data.rs
 
-use std::collections::HashMap;
-use serde::Serialize;
+use std::collections::{HashMap, HashSet};
+use chrono::{DateTime, Utc};
+use crate::Compiler::AST::DixScript;
+use super::dix_value::DixValue;
 
-/// All value types that can appear in a loaded `.mdix` file.
+/// Loaded DixScript data container with O(1) flattened access.
 ///
-/// Variants map 1:1 to the MdixType discriminants exposed by the C FFI.
-/// Use `type_name()` to get a human-readable label for error messages.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "type", content = "value")]
-pub enum DixValue {
-    Null,
-    Bool(bool),
-    Int(i32),
-    Float(f32),
-    Double(f64),
-    String(String),
-    /// Date stored as `YYYY-MM-DD` string.
-    Date(String),
-    /// Timestamp stored as ISO-8601 string.
-    Timestamp(String),
-    /// Hex color stored as `#RRGGBB` / `#RRGGBBAA` string.
-    HexColor(String),
-    Array(Vec<DixValue>),
-    Tuple(Vec<DixValue>),
-    Object(HashMap<String, DixValue>),
-    /// Base64-encoded binary data.
-    Blob(String),
-    /// Regex pattern string.
-    Regex(String),
-    /// Resolved enum value.  `value` is the integer the field maps to.
-    Enum {
-        enum_name:  String,
-        field_name: String,
-        value:      i32,
-    },
+/// `flattened_data` is the primary store keyed by dotted paths.
+/// `prefix_index` is built once at load time to make `get_keys()` O(1).
+#[derive(Debug, Clone)]
+pub struct DixData {
+    flattened_data: HashMap<String, DixValue>,
+    prefix_index:   HashMap<String, HashSet<String>>,
+
+    pub config:          Option<HashMap<String, String>>,
+    pub enums:           Option<HashMap<String, HashMap<String, i32>>>,
+    pub security:        Option<HashMap<String, DixValue>>,
+    pub dlm:             Option<Vec<String>>,
+    pub version:         String,
+    pub compile_time:    DateTime<Utc>,
+    pub is_encrypted:    bool,
+    pub is_compressed:   bool,
+    pub applied_modules: Vec<String>,
 }
 
-impl DixValue {
-    // ==================== CONSTRUCTORS ====================
-
-    /// Convenience constructor for `DixValue::String`.
-    #[inline]
-    pub fn string(s: impl Into<String>) -> Self {
-        DixValue::String(s.into())
-    }
-
-    /// Convenience constructor for `DixValue::Array`.
-    #[inline]
-    pub fn array(items: Vec<DixValue>) -> Self {
-        DixValue::Array(items)
-    }
-
-    /// Convenience constructor for `DixValue::Object`.
-    #[inline]
-    pub fn object(map: HashMap<String, DixValue>) -> Self {
-        DixValue::Object(map)
-    }
-
-    // ==================== TYPE ACCESSORS ====================
-
-    /// Returns the inner `&str` if this is a `String` variant, otherwise `None`.
-    #[inline]
-    pub fn as_string(&self) -> Option<&str> {
-        match self {
-            DixValue::String(s) => Some(s.as_str()),
-            _ => None,
-        }
-    }
-
-    /// Returns the inner `i32` if this is a numeric or enum variant, otherwise `None`.
+impl DixData {
+    /// Build a `DixData` from a resolved AST.
     ///
-    /// `Float` and `Double` are truncated toward zero.
-    #[inline]
-    pub fn as_int(&self) -> Option<i32> {
-        match self {
-            DixValue::Int(i)              => Some(*i),
-            DixValue::Float(f)            => Some(*f as i32),
-            DixValue::Double(d)           => Some(*d as i32),
-            DixValue::Enum { value, .. }  => Some(*value),
-            _ => None,
+    /// Enums are extracted first so their integer values can be resolved
+    /// during the data-flattening pass that follows.
+    pub fn from_ast(
+        ast: DixScript,
+        version: String,
+        compile_time: DateTime<Utc>,
+        is_encrypted: bool,
+        is_compressed: bool,
+        applied_modules: Vec<String>,
+    ) -> Self {
+        let enums = Self::extract_enums_section(ast.enums.as_ref());
+
+        let mut flattened_data = HashMap::new();
+        if let Some(ref data) = ast.data {
+            Self::flatten_data_section(data, &mut flattened_data, enums.as_ref());
+        }
+
+        let prefix_index = Self::build_prefix_index(&flattened_data);
+        let config       = Self::extract_config_section(ast.config.as_ref());
+        let security     = Self::extract_security_section(ast.security.as_ref());
+        let dlm          = Self::extract_dlm_section(ast.dlm.as_ref());
+
+        DixData {
+            flattened_data,
+            prefix_index,
+            config,
+            enums,
+            security,
+            dlm,
+            version,
+            compile_time,
+            is_encrypted,
+            is_compressed,
+            applied_modules,
         }
     }
 
-    /// Returns the value as `f64` if this is any numeric variant, otherwise `None`.
+    /// Get a value by dotted path with type conversion via `TryFrom<DixValue>`.
+    pub fn get<T>(&self, path: &str) -> Result<T, String>
+    where
+        T: TryFrom<DixValue>,
+        <T as TryFrom<DixValue>>::Error: std::fmt::Display,
+    {
+        let value = self.flattened_data
+            .get(path)
+            .ok_or_else(|| format!("Path not found: {}", path))?;
+
+        T::try_from(value.clone())
+            .map_err(|e| format!("Type conversion failed for '{}': {}", path, e))
+    }
+
+    /// Get a value by path, returning `default` if missing or unconvertible.
+    pub fn get_or_default<T>(&self, path: &str, default: T) -> T
+    where
+        T: TryFrom<DixValue>,
+    {
+        self.flattened_data
+            .get(path)
+            .and_then(|v| T::try_from(v.clone()).ok())
+            .unwrap_or(default)
+    }
+
+    /// Get the raw `DixValue` at a path without conversion.
     #[inline]
-    pub fn as_float(&self) -> Option<f64> {
-        match self {
-            DixValue::Int(i)    => Some(*i as f64),
-            DixValue::Float(f)  => Some(*f as f64),
-            DixValue::Double(d) => Some(*d),
-            _ => None,
+    pub fn get_value(&self, path: &str) -> Option<&DixValue> {
+        self.flattened_data.get(path)
+    }
+
+    /// Return `true` if the dotted path exists.
+    #[inline]
+    pub fn exists(&self, path: &str) -> bool {
+        self.flattened_data.contains_key(path)
+    }
+
+    /// Get the direct child segment names under `path`.
+    ///
+    /// Pass an empty string for top-level keys.
+    pub fn get_keys(&self, path: &str) -> Vec<String> {
+        match self.prefix_index.get(path) {
+            Some(children) => children.iter().cloned().collect(),
+            None           => Vec::new(),
         }
     }
 
-    /// Returns a reference to the inner `Vec<DixValue>` if this is an `Array`
-    /// variant, otherwise `None`.
+    /// Collect all values whose dotted path matches a wildcard pattern.
+    ///
+    /// Use `*` to match any single segment.
+    /// Example: `"enemies.*.name"` matches `"enemies.0.name"`, `"enemies.1.name"`, etc.
+    pub fn select_many<T>(&self, pattern: &str) -> Vec<T>
+    where
+        T: TryFrom<DixValue>,
+    {
+        let pattern_segments: Vec<&str> = pattern.split('.').collect();
+
+        self.flattened_data
+            .iter()
+            .filter(|(key, _)| Self::path_matches_pattern(key, &pattern_segments))
+            .filter_map(|(_, v)| T::try_from(v.clone()).ok())
+            .collect()
+    }
+
+    /// Total entries in the flattened store, including indexed array elements.
     #[inline]
-    pub fn as_array(&self) -> Option<&Vec<DixValue>> {
-        match self {
-            DixValue::Array(arr) => Some(arr),
-            _ => None,
+    pub fn entry_count(&self) -> usize {
+        self.flattened_data.len()
+    }
+
+    /// Clone the internal flat store as a `HashMap`.
+    pub fn to_hashmap(&self) -> HashMap<String, DixValue> {
+        self.flattened_data.clone()
+    }
+
+    // ── Pattern matching ──────────────────────────────────────────────────────
+
+    fn path_matches_pattern(key: &str, pattern_segments: &[&str]) -> bool {
+        let key_segments: Vec<&str> = key.split('.').collect();
+        if key_segments.len() != pattern_segments.len() {
+            return false;
         }
+        key_segments
+            .iter()
+            .zip(pattern_segments.iter())
+            .all(|(k, p)| *p == "*" || *k == *p)
     }
 
-    /// Returns a reference to the inner `HashMap` if this is an `Object`
-    /// variant, otherwise `None`.
-    #[inline]
-    pub fn as_object(&self) -> Option<&HashMap<String, DixValue>> {
-        match self {
-            DixValue::Object(obj) => Some(obj),
-            _ => None,
+    // ── Prefix index ──────────────────────────────────────────────────────────
+
+    fn build_prefix_index(
+        flattened: &HashMap<String, DixValue>,
+    ) -> HashMap<String, HashSet<String>> {
+        let mut index: HashMap<String, HashSet<String>> =
+            HashMap::with_capacity(flattened.len());
+        for key in flattened.keys() {
+            Self::index_key(&mut index, key);
         }
+        index
     }
 
-    // ==================== METADATA ====================
-
-    /// Human-readable variant label, used in error messages.
-    pub fn type_name(&self) -> &'static str {
-        match self {
-            DixValue::Null         => "null",
-            DixValue::Bool(_)      => "bool",
-            DixValue::Int(_)       => "int",
-            DixValue::Float(_)     => "float",
-            DixValue::Double(_)    => "double",
-            DixValue::String(_)    => "string",
-            DixValue::Date(_)      => "date",
-            DixValue::Timestamp(_) => "timestamp",
-            DixValue::HexColor(_)  => "hexcolor",
-            DixValue::Array(_)     => "array",
-            DixValue::Tuple(_)     => "tuple",
-            DixValue::Object(_)    => "object",
-            DixValue::Blob(_)      => "blob",
-            DixValue::Regex(_)     => "regex",
-            DixValue::Enum { .. }  => "enum",
-        }
-    }
-
-    /// Returns `true` if this value is `Null`.
-    #[inline]
-    pub fn is_null(&self) -> bool {
-        matches!(self, DixValue::Null)
-    }
-}
-
-// ==================== FROM TRAIT IMPLEMENTATIONS ====================
-
-impl From<bool> for DixValue {
-    fn from(v: bool) -> Self { DixValue::Bool(v) }
-}
-
-impl From<i32> for DixValue {
-    fn from(v: i32) -> Self { DixValue::Int(v) }
-}
-
-impl From<f32> for DixValue {
-    fn from(v: f32) -> Self { DixValue::Float(v) }
-}
-
-impl From<f64> for DixValue {
-    fn from(v: f64) -> Self { DixValue::Double(v) }
-}
-
-impl From<&str> for DixValue {
-    fn from(v: &str) -> Self { DixValue::String(v.to_string()) }
-}
-
-impl From<String> for DixValue {
-    fn from(v: String) -> Self { DixValue::String(v) }
-}
-
-// ==================== DISPLAY ====================
-
-impl std::fmt::Display for DixValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DixValue::Null                                   => write!(f, "null"),
-            DixValue::Bool(b)                                => write!(f, "{}", b),
-            DixValue::Int(i)                                 => write!(f, "{}", i),
-            DixValue::Float(fl)                              => write!(f, "{}f", fl),
-            DixValue::Double(d)                              => write!(f, "{}", d),
-            DixValue::String(s)                              => write!(f, "\"{}\"", s),
-            DixValue::Date(d)                                => write!(f, "{}", d),
-            DixValue::Timestamp(t)                           => write!(f, "{}", t),
-            DixValue::HexColor(c)                            => write!(f, "{}", c),
-            DixValue::Blob(b)                                => write!(f, "b:({})", b),
-            DixValue::Regex(r)                               => write!(f, "r:({})", r),
-            DixValue::Enum { enum_name, field_name, value } => {
-                write!(f, "{}.{} ({})", enum_name, field_name, value)
-            }
-            DixValue::Array(arr) => {
-                write!(f, "[")?;
-                for (i, v) in arr.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
-                    write!(f, "{}", v)?;
+    /// Walk a key's dot-segments upward, registering each segment as a child
+    /// of its parent prefix.
+    ///
+    /// `"database.primary.host"` produces:
+    ///   index\["database.primary"\] ← "host"
+    ///   index\["database"\]         ← "primary"
+    ///   index\[""\]                 ← "database"
+    fn index_key(index: &mut HashMap<String, HashSet<String>>, key: &str) {
+        let mut remaining = key;
+        loop {
+            match remaining.rfind('.') {
+                None => {
+                    index.entry(String::new()).or_default().insert(remaining.to_string());
+                    break;
                 }
-                write!(f, "]")
-            }
-            DixValue::Tuple(items) => {
-                write!(f, "t:(")?;
-                for (i, v) in items.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
-                    write!(f, "{}", v)?;
+                Some(dot_pos) => {
+                    let parent = &remaining[..dot_pos];
+                    let child  = &remaining[dot_pos + 1..];
+                    index.entry(parent.to_string()).or_default().insert(child.to_string());
+                    remaining = parent;
                 }
-                write!(f, ")")
             }
-            DixValue::Object(obj) => {
-                write!(f, "{{")?;
-                for (i, (k, v)) in obj.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
-                    write!(f, "{}: {}", k, v)?;
+        }
+    }
+
+    // ── Section extraction ────────────────────────────────────────────────────
+
+    fn extract_config_section(
+        config: Option<&crate::Compiler::AST::ConfigSection>,
+    ) -> Option<HashMap<String, String>> {
+        config.map(|cfg| {
+            cfg.entries
+                .iter()
+                .map(|entry| (entry.key.clone(), Self::config_value_to_string(&entry.value)))
+                .collect()
+        })
+    }
+
+    fn extract_enums_section(
+        enums: Option<&crate::Compiler::AST::EnumsSection>,
+    ) -> Option<HashMap<String, HashMap<String, i32>>> {
+        enums.map(|section| {
+            section.enums.iter().map(|decl| {
+                let mut auto_value = 0i32;
+                let fields: HashMap<String, i32> = decl.fields.iter().map(|field| {
+                    let value = field.value.unwrap_or_else(|| {
+                        let v = auto_value;
+                        auto_value += 1;
+                        v
+                    });
+                    auto_value = value + 1;
+                    (field.name.clone(), value)
+                }).collect();
+                (decl.name.clone(), fields)
+            }).collect()
+        })
+    }
+
+    fn extract_security_section(
+        security: Option<&crate::Compiler::AST::SecuritySection>,
+    ) -> Option<HashMap<String, DixValue>> {
+        security.map(|sec| {
+            sec.entries.iter().map(|entry| {
+                let mut block_data = HashMap::new();
+                for field in &entry.fields {
+                    if let Some(dix_val) = Self::ast_value_to_dix_value(&field.value, None) {
+                        block_data.insert(field.key.clone(), dix_val);
+                    }
                 }
-                write!(f, "}}")
+                (entry.block_key.clone(), DixValue::Object(block_data))
+            }).collect()
+        })
+    }
+
+    fn extract_dlm_section(
+        dlm: Option<&crate::Compiler::AST::DLMSection>,
+    ) -> Option<Vec<String>> {
+        dlm.map(|section| {
+            section.modules.iter()
+                .map(|module| format!("{:?}", module.module_type))
+                .collect()
+        })
+    }
+
+    // ── Data flattening ───────────────────────────────────────────────────────
+
+    fn flatten_data_section(
+        data: &crate::Compiler::AST::DataSection,
+        result: &mut HashMap<String, DixValue>,
+        enums: Option<&HashMap<String, HashMap<String, i32>>>,
+    ) {
+        for entry in &data.entries {
+            Self::flatten_entry(entry, "", result, enums);
+        }
+    }
+
+    fn flatten_entry(
+        entry: &crate::Compiler::AST::DataEntry,
+        prefix: &str,
+        result: &mut HashMap<String, DixValue>,
+        enums: Option<&HashMap<String, HashMap<String, i32>>>,
+    ) {
+        use crate::Compiler::AST::DataEntry;
+
+        match entry {
+            DataEntry::SimpleProperty { name, value, .. } => {
+                let key = Self::build_path(prefix, name);
+                if let Some(dix_value) = Self::ast_value_to_dix_value(value, enums) {
+                    result.insert(key, dix_value);
+                }
             }
+
+            DataEntry::TableProperty { path, properties, .. } => {
+                let table_path = Self::build_path(prefix, &path.to_string());
+                for prop in properties {
+                    let key = Self::build_path(&table_path, &prop.name);
+                    if let Some(dix_value) = Self::ast_value_to_dix_value(&prop.value, enums) {
+                        result.insert(key, dix_value);
+                    }
+                }
+            }
+
+            DataEntry::GroupArray { path, items, .. } => {
+                let array_path = Self::build_path(prefix, &path.to_string());
+
+                let array_values: Vec<DixValue> = items
+                    .iter()
+                    .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
+                    .collect();
+
+                result.insert(array_path.clone(), DixValue::Array(array_values.clone()));
+
+                for (i, value) in array_values.iter().enumerate() {
+                    result.insert(format!("{}[{}]", array_path, i), value.clone());
+                }
+            }
+
+            DataEntry::ObjectProperty { name, object, .. } => {
+                let key = Self::build_path(prefix, name);
+
+                if let crate::Compiler::AST::Value::Object { ref properties, .. } = **object {
+                    let mut obj_map = HashMap::new();
+                    for prop in properties {
+                        if let Some(dix_value) = Self::ast_value_to_dix_value(&prop.value, enums) {
+                            obj_map.insert(prop.key.clone(), dix_value.clone());
+                            result.insert(Self::build_path(&key, &prop.key), dix_value);
+                        }
+                    }
+                    result.insert(key, DixValue::Object(obj_map));
+                }
+            }
+        }
+    }
+
+    fn build_path(prefix: &str, segment: &str) -> String {
+        if prefix.is_empty() {
+            segment.to_string()
+        } else {
+            format!("{}.{}", prefix, segment)
+        }
+    }
+
+    // ── Conversion helpers ────────────────────────────────────────────────────
+
+    fn config_value_to_string(value: &crate::Compiler::AST::ConfigValue) -> String {
+        use crate::Compiler::AST::ConfigValue;
+        match value {
+            ConfigValue::String(s)    => s.clone(),
+            ConfigValue::Integer(i)   => i.to_string(),
+            ConfigValue::Float(f)     => f.to_string(),
+            ConfigValue::Boolean(b)   => b.to_string(),
+            ConfigValue::Date(d)      => d.clone(),
+            ConfigValue::Timestamp(t) => t.clone(),
+            _                         => String::new(),
+        }
+    }
+
+    /// Convert an AST `Value` to a `DixValue`.
+    ///
+    /// `enums` carries the resolved enum table so `EnumValue` nodes get their
+    /// integer field value looked up rather than defaulting to 0.
+    fn ast_value_to_dix_value(
+        value: &crate::Compiler::AST::Value,
+        enums: Option<&HashMap<String, HashMap<String, i32>>>,
+    ) -> Option<DixValue> {
+        use crate::Compiler::AST::Value;
+
+        match value {
+            Value::Null { .. }                => Some(DixValue::Null),
+            Value::Boolean { value: b, .. }   => Some(DixValue::Bool(*b)),
+            Value::Integer { value: i, .. }   => Some(DixValue::Int(*i)),
+            Value::Float { value: f, .. }     => Some(DixValue::Float(*f)),
+            Value::Double { value: d, .. }    => Some(DixValue::Double(*d)),
+            Value::String { value: s, .. }    => Some(DixValue::String(s.clone())),
+            Value::Date { value: d, .. }      => Some(DixValue::Date(d.clone())),
+            Value::Timestamp { value: t, .. } => Some(DixValue::Timestamp(t.clone())),
+            Value::HexColor { value: c, .. }  => Some(DixValue::HexColor(c.clone())),
+
+            Value::Array { values, .. } => {
+                let items: Vec<DixValue> = values
+                    .iter()
+                    .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
+                    .collect();
+                Some(DixValue::Array(items))
+            }
+
+            Value::Object { properties, .. } => {
+                let mut obj = HashMap::new();
+                for prop in properties {
+                    if let Some(dix_value) = Self::ast_value_to_dix_value(&prop.value, enums) {
+                        obj.insert(prop.key.clone(), dix_value);
+                    }
+                }
+                Some(DixValue::Object(obj))
+            }
+
+            Value::EnumValue { enum_name, value: field_name, .. } => {
+                let resolved = enums
+                    .and_then(|e| e.get(enum_name.as_str()))
+                    .and_then(|fields| fields.get(field_name.as_str()))
+                    .copied()
+                    .unwrap_or(0);
+
+                Some(DixValue::Enum {
+                    enum_name:  enum_name.clone(),
+                    field_name: field_name.clone(),
+                    value:      resolved,
+                })
+            }
+
+            Value::PrefixedConstructor { prefix, arguments, .. } => {
+                match prefix.as_str() {
+                    "t" => {
+                        let items: Vec<DixValue> = arguments
+                            .iter()
+                            .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
+                            .collect();
+                        Some(DixValue::Tuple(items))
+                    }
+                    "b" => {
+                        if let Some(Value::String { value: s, .. }) = arguments.first() {
+                            Some(DixValue::Blob(s.clone()))
+                        } else {
+                            None
+                        }
+                    }
+                    "r" => {
+                        if let Some(Value::String { value: s, .. }) = arguments.first() {
+                            Some(DixValue::Regex(s.clone()))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+            }
+
+            _ => None,
+        }
+    }
+}
+
+// ── TryFrom implementations ───────────────────────────────────────────────────
+
+impl TryFrom<DixValue> for String {
+    type Error = String;
+    fn try_from(value: DixValue) -> Result<Self, Self::Error> {
+        match value {
+            DixValue::String(s)    => Ok(s),
+            DixValue::Date(d)      => Ok(d),
+            DixValue::Timestamp(t) => Ok(t),
+            DixValue::HexColor(c)  => Ok(c),
+            _ => Err(format!("Cannot convert {} to String", value.type_name())),
+        }
+    }
+}
+
+impl TryFrom<DixValue> for i32 {
+    type Error = String;
+    fn try_from(value: DixValue) -> Result<Self, Self::Error> {
+        match value {
+            DixValue::Int(i)             => Ok(i),
+            DixValue::Float(f)           => Ok(f as i32),
+            DixValue::Double(d)          => Ok(d as i32),
+            DixValue::Enum { value, .. } => Ok(value),
+            _ => Err(format!("Cannot convert {} to i32", value.type_name())),
+        }
+    }
+}
+
+impl TryFrom<DixValue> for f64 {
+    type Error = String;
+    fn try_from(value: DixValue) -> Result<Self, Self::Error> {
+        match value {
+            DixValue::Int(i)    => Ok(i as f64),
+            DixValue::Float(f)  => Ok(f as f64),
+            DixValue::Double(d) => Ok(d),
+            _ => Err(format!("Cannot convert {} to f64", value.type_name())),
+        }
+    }
+}
+
+impl TryFrom<DixValue> for bool {
+    type Error = String;
+    fn try_from(value: DixValue) -> Result<Self, Self::Error> {
+        match value {
+            DixValue::Bool(b) => Ok(b),
+            _ => Err(format!("Cannot convert {} to bool", value.type_name())),
+        }
+    }
+}
+
+impl TryFrom<DixValue> for Vec<DixValue> {
+    type Error = String;
+    fn try_from(value: DixValue) -> Result<Self, Self::Error> {
+        match value {
+            DixValue::Array(arr) => Ok(arr),
+            _ => Err(format!("Cannot convert {} to Vec<DixValue>", value.type_name())),
+        }
+    }
+}
+
+impl TryFrom<DixValue> for HashMap<String, DixValue> {
+    type Error = String;
+    fn try_from(value: DixValue) -> Result<Self, Self::Error> {
+        match value {
+            DixValue::Object(obj) => Ok(obj),
+            _ => Err(format!("Cannot convert {} to HashMap", value.type_name())),
         }
     }
 }
@@ -226,166 +501,147 @@ impl std::fmt::Display for DixValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Compiler::AST::*;
 
-    #[test]
-    fn test_constructors() {
-        let s = DixValue::string("hello");
-        assert_eq!(s.type_name(), "string");
-        assert_eq!(s.as_string(), Some("hello"));
-
-        let arr = DixValue::array(vec![DixValue::Int(1), DixValue::Int(2)]);
-        assert_eq!(arr.type_name(), "array");
-        assert_eq!(arr.as_array().map(|a| a.len()), Some(2));
-
-        let mut map = HashMap::new();
-        map.insert("k".to_string(), DixValue::Bool(true));
-        let obj = DixValue::object(map);
-        assert_eq!(obj.type_name(), "object");
-        assert_eq!(obj.as_object().map(|o| o.len()), Some(1));
-    }
-
-    #[test]
-    fn test_as_int_coercions() {
-        assert_eq!(DixValue::Int(42).as_int(),         Some(42));
-        assert_eq!(DixValue::Float(3.9_f32).as_int(),  Some(3));
-        assert_eq!(DixValue::Double(7.1).as_int(),     Some(7));
-        assert_eq!(DixValue::String("x".into()).as_int(), None);
-        assert_eq!(
-            DixValue::Enum { enum_name: "E".into(), field_name: "A".into(), value: 5 }.as_int(),
-            Some(5)
-        );
-    }
-
-    #[test]
-    fn test_as_float_coercions() {
-        assert!((DixValue::Int(5).as_float().unwrap() - 5.0).abs() < f64::EPSILON);
-        assert!((DixValue::Float(1.5_f32).as_float().unwrap() - 1.5).abs() < 1e-6);
-        assert!((DixValue::Double(3.14).as_float().unwrap() - 3.14).abs() < f64::EPSILON);
-        assert_eq!(DixValue::Bool(true).as_float(), None);
-    }
-
-    #[test]
-    fn test_type_name() {
-        assert_eq!(DixValue::Null.type_name(),                              "null");
-        assert_eq!(DixValue::Int(1).type_name(),                            "int");
-        assert_eq!(DixValue::Float(1.0).type_name(),                        "float");
-        assert_eq!(DixValue::Double(1.0).type_name(),                       "double");
-        assert_eq!(DixValue::Bool(true).type_name(),                        "bool");
-        assert_eq!(DixValue::String("x".into()).type_name(),                "string");
-        assert_eq!(DixValue::Date("2025-01-01".into()).type_name(),         "date");
-        assert_eq!(DixValue::Timestamp("2025-01-01T00:00:00Z".into()).type_name(), "timestamp");
-        assert_eq!(DixValue::HexColor("#FF0000".into()).type_name(),        "hexcolor");
-        assert_eq!(DixValue::Array(vec![]).type_name(),                     "array");
-        assert_eq!(DixValue::Tuple(vec![]).type_name(),                     "tuple");
-        assert_eq!(DixValue::Object(HashMap::new()).type_name(),            "object");
-        assert_eq!(DixValue::Blob("data".into()).type_name(),               "blob");
-        assert_eq!(DixValue::Regex(".*".into()).type_name(),                "regex");
-        assert_eq!(
-            DixValue::Enum { enum_name: "AIType".into(), field_name: "BOSS".into(), value: 2 }
-                .type_name(),
-            "enum"
-        );
-    }
-
-    #[test]
-    fn test_is_null() {
-        assert!(DixValue::Null.is_null());
-        assert!(!DixValue::Int(0).is_null());
-        assert!(!DixValue::Bool(false).is_null());
-    }
-
-    #[test]
-    fn test_display_primitives() {
-        assert_eq!(format!("{}", DixValue::Null),                    "null");
-        assert_eq!(format!("{}", DixValue::Bool(true)),              "true");
-        assert_eq!(format!("{}", DixValue::Bool(false)),             "false");
-        assert_eq!(format!("{}", DixValue::Int(42)),                 "42");
-        assert_eq!(format!("{}", DixValue::Float(1.5)),              "1.5f");
-        assert_eq!(format!("{}", DixValue::Double(3.14)),            "3.14");
-        assert_eq!(format!("{}", DixValue::String("hi".into())),     "\"hi\"");
-        assert_eq!(format!("{}", DixValue::Blob("abc".into())),      "b:(abc)");
-        assert_eq!(format!("{}", DixValue::Regex(".*".into())),      "r:(.*)");
-    }
-
-    #[test]
-    fn test_display_array() {
-        let arr = DixValue::Array(vec![
-            DixValue::Int(1),
-            DixValue::Int(2),
-            DixValue::Int(3),
-        ]);
-        assert_eq!(format!("{}", arr), "[1, 2, 3]");
-    }
-
-    #[test]
-    fn test_display_enum() {
-        let e = DixValue::Enum {
-            enum_name:  "AIType".into(),
-            field_name: "BOSS".into(),
-            value:      2,
-        };
-        assert_eq!(format!("{}", e), "AIType.BOSS (2)");
-    }
-
-    #[test]
-    fn test_from_impls() {
-        let v_bool:   DixValue = true.into();
-        let v_int:    DixValue = 42_i32.into();
-        let v_float:  DixValue = 1.5_f32.into();
-        let v_double: DixValue = 3.14_f64.into();
-        let v_str:    DixValue = "hello".into();
-        let v_owned:  DixValue = "owned".to_string().into();
-
-        assert_eq!(v_bool.type_name(),   "bool");
-        assert_eq!(v_int.type_name(),    "int");
-        assert_eq!(v_float.type_name(),  "float");
-        assert_eq!(v_double.type_name(), "double");
-        assert_eq!(v_str.type_name(),    "string");
-        assert_eq!(v_owned.type_name(),  "string");
-    }
-
-    #[test]
-    fn test_serialize_primitives() {
-        let cases: Vec<(&str, DixValue)> = vec![
-            ("Null",   DixValue::Null),
-            ("Bool",   DixValue::Bool(true)),
-            ("Int",    DixValue::Int(42)),
-            ("String", DixValue::String("hello".into())),
-        ];
-        for (label, v) in cases {
-            let json = serde_json::to_string(&v).expect(label);
-            assert!(json.contains(label), "expected '{}' tag in {}", label, json);
+    fn dix_data_from_flat(flattened: HashMap<String, DixValue>) -> DixData {
+        let prefix_index = DixData::build_prefix_index(&flattened);
+        DixData {
+            flattened_data: flattened,
+            prefix_index,
+            config:          None,
+            enums:           None,
+            security:        None,
+            dlm:             None,
+            version:         "1.0.0".to_string(),
+            compile_time:    Utc::now(),
+            is_encrypted:    false,
+            is_compressed:   false,
+            applied_modules: vec![],
         }
     }
 
     #[test]
-    fn test_serialize_enum_variant() {
-        let v = DixValue::Enum {
-            enum_name:  "AIType".into(),
-            field_name: "BOSS".into(),
+    fn test_dix_data_creation() {
+        let ast  = DixScript::new();
+        let data = DixData::from_ast(ast, "1.0.0".to_string(), Utc::now(), false, false, vec![]);
+        assert_eq!(data.version, "1.0.0");
+        assert!(!data.is_encrypted);
+    }
+
+    #[test]
+    fn test_get_value() {
+        let mut flattened = HashMap::new();
+        flattened.insert("name".to_string(), DixValue::String("Alice".to_string()));
+        flattened.insert("age".to_string(),  DixValue::Int(30));
+        let data = dix_data_from_flat(flattened);
+
+        let name: String = data.get("name").unwrap();
+        assert_eq!(name, "Alice");
+        let age: i32 = data.get("age").unwrap();
+        assert_eq!(age, 30);
+    }
+
+    #[test]
+    fn test_exists() {
+        let mut flattened = HashMap::new();
+        flattened.insert("x".to_string(), DixValue::Int(42));
+        let data = dix_data_from_flat(flattened);
+        assert!(data.exists("x"));
+        assert!(!data.exists("y"));
+    }
+
+    #[test]
+    fn test_get_or_default() {
+        let data = dix_data_from_flat(HashMap::new());
+        let value: i32 = data.get_or_default("missing", 999);
+        assert_eq!(value, 999);
+    }
+
+    #[test]
+    fn test_get_keys_top_level() {
+        let mut flattened = HashMap::new();
+        flattened.insert("a".to_string(),   DixValue::Int(1));
+        flattened.insert("b.c".to_string(), DixValue::Int(2));
+        flattened.insert("b.d".to_string(), DixValue::Int(3));
+        let data = dix_data_from_flat(flattened);
+        let mut top = data.get_keys("");
+        top.sort();
+        assert_eq!(top, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn test_get_keys_nested() {
+        let mut flattened = HashMap::new();
+        flattened.insert("db.host".to_string(), DixValue::String("localhost".to_string()));
+        flattened.insert("db.port".to_string(), DixValue::Int(5432));
+        flattened.insert("db.ssl".to_string(),  DixValue::Bool(true));
+        let data = dix_data_from_flat(flattened);
+        let mut children = data.get_keys("db");
+        children.sort();
+        assert_eq!(children, vec!["host", "port", "ssl"]);
+    }
+
+    #[test]
+    fn test_select_many_wildcard() {
+        let mut flattened = HashMap::new();
+        flattened.insert("enemies.0.name".to_string(), DixValue::String("Goblin".to_string()));
+        flattened.insert("enemies.1.name".to_string(), DixValue::String("Orc".to_string()));
+        flattened.insert("enemies.0.hp".to_string(),   DixValue::Int(50));
+        let data = dix_data_from_flat(flattened);
+        let mut names: Vec<String> = data.select_many("enemies.*.name");
+        names.sort();
+        assert_eq!(names, vec!["Goblin", "Orc"]);
+    }
+
+    #[test]
+    fn test_select_many_no_match() {
+        let data = dix_data_from_flat(HashMap::new());
+        let results: Vec<String> = data.select_many("missing.*.field");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_enum_value_resolves_correctly() {
+        let mut enum_table: HashMap<String, HashMap<String, i32>> = HashMap::new();
+        let mut ai_type = HashMap::new();
+        ai_type.insert("PASSIVE".to_string(),    0);
+        ai_type.insert("AGGRESSIVE".to_string(), 1);
+        ai_type.insert("BOSS".to_string(),       2);
+        enum_table.insert("AIType".to_string(), ai_type);
+
+        let value = DixData::ast_value_to_dix_value(
+            &crate::Compiler::AST::Value::EnumValue {
+                enum_name: "AIType".to_string(),
+                value:     "BOSS".to_string(),
+                position:  crate::Compiler::AST::Position::UNKNOWN,
+            },
+            Some(&enum_table),
+        );
+
+        assert_eq!(
+            value,
+            Some(DixValue::Enum {
+                enum_name:  "AIType".to_string(),
+                field_name: "BOSS".to_string(),
+                value:      2,
+            })
+        );
+    }
+
+    #[test]
+    fn test_enum_value_as_i32() {
+        let dix_enum = DixValue::Enum {
+            enum_name:  "AIType".to_string(),
+            field_name: "BOSS".to_string(),
             value:      2,
         };
-        let json = serde_json::to_string(&v).unwrap();
-        assert!(json.contains("Enum"));
-        assert!(json.contains("AIType"));
-        assert!(json.contains("BOSS"));
-        assert!(json.contains('2'));
+        let as_int: i32 = i32::try_from(dix_enum).unwrap();
+        assert_eq!(as_int, 2);
     }
 
     #[test]
-    fn test_clone_and_eq() {
-        let a = DixValue::Array(vec![DixValue::Int(1), DixValue::Bool(false)]);
-        let b = a.clone();
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn test_object_roundtrip() {
-        let mut map = HashMap::new();
-        map.insert("x".to_string(), DixValue::Int(10));
-        map.insert("y".to_string(), DixValue::String("hello".into()));
-        let obj = DixValue::Object(map);
-        let json = serde_json::to_string(&obj).unwrap();
-        assert!(json.contains("Object"));
+    fn test_get_keys_missing_prefix() {
+        let data = dix_data_from_flat(HashMap::new());
+        assert!(data.get_keys("nonexistent").is_empty());
     }
 }

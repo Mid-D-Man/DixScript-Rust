@@ -21,7 +21,13 @@ fn main() {
     }
 
     csbindgen::Builder::default()
+        // lib.rs contains all #[no_mangle] extern "C" functions.
+        // handle.rs contains the #[repr(C)] structs that csbindgen must see
+        // in order to emit the MdixHandle and MdixBuilderHandle C# partial
+        // struct definitions. Without this second input they are silently
+        // skipped and the C# side fails to compile.
         .input_extern_file("src/lib.rs")
+        .input_extern_file("src/handle.rs")
         // The DLL name Unity will load at runtime.
         // On iOS this MUST be "__Internal" because iOS forbids dynamic library loading.
         .csharp_dll_name("mdix_ffi")

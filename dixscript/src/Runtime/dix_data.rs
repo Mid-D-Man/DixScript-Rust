@@ -7,8 +7,8 @@ use super::dix_value::DixValue;
 
 /// Runtime data container with optimized flattened access.
 ///
-/// Flattened HashMap storage with O(1) access by dotted path and O(1)
-/// prefix-child lookup via a secondary index built once at load time.
+/// Provides O(1) access by dotted path and O(1) prefix-child lookup via a
+/// secondary index built once at load time.
 #[derive(Debug, Clone)]
 pub struct DixData {
     flattened_data: HashMap<String, DixValue>,
@@ -27,9 +27,6 @@ pub struct DixData {
 
 impl DixData {
     /// Create DixData from a resolved AST.
-    ///
-    /// Enums are extracted first so their integer values can be resolved
-    /// during the data-flattening pass that follows.
     pub fn from_ast(
         ast: DixScript,
         version: String,
@@ -38,7 +35,6 @@ impl DixData {
         is_compressed: bool,
         applied_modules: Vec<String>,
     ) -> Self {
-        // Extract enums before flattening so we can resolve enum field values.
         let enums = Self::extract_enums_section(ast.enums.as_ref());
 
         let mut flattened_data = HashMap::new();
@@ -102,8 +98,6 @@ impl DixData {
     }
 
     /// Get the direct child segment names under a path prefix.
-    ///
-    /// Pass an empty string for top-level keys.
     pub fn get_keys(&self, path: &str) -> Vec<String> {
         match self.prefix_index.get(path) {
             Some(children) => children.iter().cloned().collect(),
@@ -114,9 +108,6 @@ impl DixData {
     /// Select all values whose path matches a dot-separated wildcard pattern.
     ///
     /// Use `*` to match any single path segment.
-    /// Example: `"enemies.*.name"` matches `"enemies.0.name"`, `"enemies.1.name"`, etc.
-    ///
-    /// No regex or allocation — uses a segment-by-segment comparison.
     pub fn select_many<T>(&self, pattern: &str) -> Vec<T>
     where
         T: TryFrom<DixValue>,
@@ -130,10 +121,6 @@ impl DixData {
             .collect()
     }
 
-    /// Check whether a key matches a wildcard pattern.
-    ///
-    /// Both key and pattern are split on `.`. A `*` segment matches any
-    /// single key segment. Segment counts must match exactly.
     fn path_matches_pattern(key: &str, pattern_segments: &[&str]) -> bool {
         let key_segments: Vec<&str> = key.split('.').collect();
         if key_segments.len() != pattern_segments.len() {
@@ -157,7 +144,7 @@ impl DixData {
 
     // ── Prefix index ──────────────────────────────────────────────────────────
 
-    fn build_prefix_index(
+    pub(crate) fn build_prefix_index(
         flattened: &HashMap<String, DixValue>,
     ) -> HashMap<String, HashSet<String>> {
         let mut index: HashMap<String, HashSet<String>> =
@@ -168,13 +155,6 @@ impl DixData {
         index
     }
 
-    /// Walk a key's dot-segments upward, registering each segment as a child
-    /// of its parent prefix.
-    ///
-    /// `"database.primary.host"` produces:
-    ///   index["database.primary"] ← "host"
-    ///   index["database"]         ← "primary"
-    ///   index[""]                 ← "database"
     fn index_key(index: &mut HashMap<String, HashSet<String>>, key: &str) {
         let mut remaining = key;
         loop {
@@ -233,7 +213,6 @@ impl DixData {
             sec.entries.iter().map(|entry| {
                 let mut block_data = HashMap::new();
                 for field in &entry.fields {
-                    // Security sections don't reference game enums; pass None.
                     if let Some(dix_val) = Self::ast_value_to_dix_value(&field.value, None) {
                         block_data.insert(field.key.clone(), dix_val);
                     }
@@ -346,11 +325,7 @@ impl DixData {
         }
     }
 
-    /// Convert an AST Value to a DixValue.
-    ///
-    /// `enums` is the resolved enum table. When present, `EnumValue` nodes
-    /// have their integer field value looked up rather than defaulting to 0.
-    fn ast_value_to_dix_value(
+    pub(crate) fn ast_value_to_dix_value(
         value: &crate::Compiler::AST::Value,
         enums: Option<&HashMap<String, HashMap<String, i32>>>,
     ) -> Option<DixValue> {
@@ -400,8 +375,7 @@ impl DixData {
             }
 
             Value::PrefixedConstructor { prefix, arguments, .. } => {
-                let prefix_str = prefix.to_string();
-                match prefix_str.as_str() {
+                match prefix.as_str() {
                     "t" => {
                         let items: Vec<DixValue> = arguments
                             .iter()
@@ -442,7 +416,7 @@ impl TryFrom<DixValue> for String {
             DixValue::Date(d)      => Ok(d),
             DixValue::Timestamp(t) => Ok(t),
             DixValue::HexColor(c)  => Ok(c),
-            _ => Err(format!("Cannot convert {} to String", value.type_name())),
+            other => Err(format!("Cannot convert {} to String", other.type_name())),
         }
     }
 }
@@ -451,12 +425,11 @@ impl TryFrom<DixValue> for i32 {
     type Error = String;
     fn try_from(value: DixValue) -> Result<Self, Self::Error> {
         match value {
-            DixValue::Int(i)    => Ok(i),
-            DixValue::Float(f)  => Ok(f as i32),
-            DixValue::Double(d) => Ok(d as i32),
-            // Enum values are now resolved integers — expose them as i32 directly.
-            DixValue::Enum { value, .. } => Ok(value),
-            _ => Err(format!("Cannot convert {} to i32", value.type_name())),
+            DixValue::Int(i)                 => Ok(i),
+            DixValue::Float(f)               => Ok(f as i32),
+            DixValue::Double(d)              => Ok(d as i32),
+            DixValue::Enum { value: v, .. }  => Ok(v),
+            other => Err(format!("Cannot convert {} to i32", other.type_name())),
         }
     }
 }
@@ -468,7 +441,7 @@ impl TryFrom<DixValue> for f64 {
             DixValue::Int(i)    => Ok(i as f64),
             DixValue::Float(f)  => Ok(f as f64),
             DixValue::Double(d) => Ok(d),
-            _ => Err(format!("Cannot convert {} to f64", value.type_name())),
+            other => Err(format!("Cannot convert {} to f64", other.type_name())),
         }
     }
 }
@@ -478,7 +451,7 @@ impl TryFrom<DixValue> for bool {
     fn try_from(value: DixValue) -> Result<Self, Self::Error> {
         match value {
             DixValue::Bool(b) => Ok(b),
-            _ => Err(format!("Cannot convert {} to bool", value.type_name())),
+            other => Err(format!("Cannot convert {} to bool", other.type_name())),
         }
     }
 }
@@ -488,7 +461,7 @@ impl TryFrom<DixValue> for Vec<DixValue> {
     fn try_from(value: DixValue) -> Result<Self, Self::Error> {
         match value {
             DixValue::Array(arr) => Ok(arr),
-            _ => Err(format!("Cannot convert {} to Vec<DixValue>", value.type_name())),
+            other => Err(format!("Cannot convert {} to Vec<DixValue>", other.type_name())),
         }
     }
 }
@@ -498,7 +471,7 @@ impl TryFrom<DixValue> for HashMap<String, DixValue> {
     fn try_from(value: DixValue) -> Result<Self, Self::Error> {
         match value {
             DixValue::Object(obj) => Ok(obj),
-            _ => Err(format!("Cannot convert {} to HashMap", value.type_name())),
+            other => Err(format!("Cannot convert {} to HashMap", other.type_name())),
         }
     }
 }
@@ -607,12 +580,11 @@ mod tests {
 
     #[test]
     fn test_enum_value_resolves_correctly() {
-        // Simulate what from_ast does: enums extracted, then threaded into flattening.
         let mut enum_table: HashMap<String, HashMap<String, i32>> = HashMap::new();
         let mut ai_type = HashMap::new();
-        ai_type.insert("PASSIVE".to_string(), 0);
+        ai_type.insert("PASSIVE".to_string(),    0);
         ai_type.insert("AGGRESSIVE".to_string(), 1);
-        ai_type.insert("BOSS".to_string(), 2);
+        ai_type.insert("BOSS".to_string(),       2);
         enum_table.insert("AIType".to_string(), ai_type);
 
         let value = DixData::ast_value_to_dix_value(
@@ -650,4 +622,4 @@ mod tests {
         let data = dix_data_from_flat(HashMap::new());
         assert!(data.get_keys("nonexistent").is_empty());
     }
-            }
+}

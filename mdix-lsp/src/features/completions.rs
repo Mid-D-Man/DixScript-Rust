@@ -1,27 +1,44 @@
+// mdix-lsp/src/features/completions.rs
 //! Completion provider.
 //!
 //! Triggered by: '@', '.', '<', '~'
 //! Provides: section snippets, enum values, function names, type annotations,
 //! built-in static object methods, keyword completions inside QuickFuncs.
+//!
+//! The trigger character is taken from the LSP request context when present.
+//! Source-text inference (`trigger_char`) is only used as a fallback for
+//! editors that do not populate `context.triggerCharacter`.
 
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
+    CompletionItem, CompletionItemKind, CompletionResponse,
     Documentation, InsertTextFormat, MarkupContent, MarkupKind, Position,
-    TextEdit, Range,
 };
 use dixscript::Compiler::Core::Tokenizer::TokenType;
 use dixscript::Compiler::AST::DixScript;
 use crate::document::Document;
 
-pub fn provide(doc: Option<&Document>, pos: Position) -> Option<CompletionResponse> {
+/// Entry point called from `server.rs`.
+///
+/// `trigger` — the `triggerCharacter` from the LSP `CompletionContext`, if
+/// the editor provided one.  When `None`, the character immediately before
+/// the cursor is used instead.
+pub fn provide(
+    doc: Option<&Document>,
+    pos: Position,
+    trigger: Option<&str>,
+) -> Option<CompletionResponse> {
     let items = match doc {
         None => section_snippet_completions(),
         Some(d) => {
-            let trigger = trigger_char(&d.source, pos);
-            match trigger {
+            // Prefer the LSP context trigger; fall back to source inference.
+            let trigger_ch: char = trigger
+                .and_then(|t| t.chars().next())
+                .unwrap_or_else(|| trigger_char(&d.source, pos));
+
+            match trigger_ch {
                 '@' => section_snippet_completions(),
                 '<' => type_annotation_completions(),
-                '~' => vec![],  // prefix typed by user; no extra completion needed
+                '~' => vec![],
                 '.' => dot_completions(d, pos),
                 _   => general_completions(d, pos),
             }
@@ -201,7 +218,6 @@ fn enum_value_completions(ast: &DixScript, enum_name: &str) -> Vec<CompletionIte
 }
 
 fn static_method_completions(object_name: &str) -> Vec<CompletionItem> {
-    // Static method catalogue mirrors the built-in registry in the compiler.
     let catalogue: &[(&str, &[(&str, &str)])] = &[
         ("Math", &[
             ("sqrt",  "Math.sqrt(x: double) -> double"),
@@ -317,6 +333,7 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
 // ── Source text helpers ───────────────────────────────────────────────────────
 
 /// Returns the character that immediately precedes the cursor on the same line.
+/// Used only when the LSP context does not supply `triggerCharacter`.
 fn trigger_char(source: &str, pos: Position) -> char {
     let line = source.lines().nth(pos.line as usize).unwrap_or("");
     if pos.character == 0 {
@@ -339,7 +356,8 @@ fn word_before_dot(source: &str, pos: Position) -> String {
         .last()
         .unwrap_or("")
         .to_string()
-  }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,11 +420,25 @@ mod tests {
 
     #[test]
     fn provide_on_none_doc_returns_section_snippets() {
-        // None document falls through to section_snippet_completions
-        let result = provide(None, Position::new(0, 0));
-        // The function may return Some or None depending on trigger char heuristics
-        // with no document — just verify it does not panic
+        let result = provide(None, Position::new(0, 0), None);
         let _ = result;
+    }
+
+    #[test]
+    fn provide_with_explicit_trigger_overrides_source_inference() {
+        // Passing "<" as trigger must return type annotations even when the
+        // character at that position in the source is not '<'.
+        let doc    = test_doc("@DATA(\n  x = 1\n)");
+        let result = provide(Some(&doc), Position::new(0, 0), Some("<"));
+        let items  = match result {
+            Some(CompletionResponse::Array(v)) => v,
+            _ => vec![],
+        };
+        assert!(
+            items.iter().any(|i| i.label.contains("int")),
+            "explicit '<' trigger should produce type annotation completions; got: {:?}",
+            items.iter().map(|i| &i.label).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -443,4 +475,4 @@ mod tests {
         assert!(labels.contains(&"calc"),
             "QuickFunc 'calc' should appear in completions; got: {:?}", labels);
     }
-            }
+    }

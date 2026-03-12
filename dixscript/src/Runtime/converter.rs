@@ -14,9 +14,6 @@ use super::format_options::DixFormatOptions;
 ///
 /// Converts between `HashMap<String, DixValue>` and a DixScript AST,
 /// and serializes an AST to `.mdix` text format.
-///
-/// JSON/TOML/YAML/XML parsing is handled by language wrappers — this
-/// provides only the core HashMap ↔ AST conversion.
 pub struct DixConverter {
     default_options: DixFormatOptions,
 }
@@ -31,21 +28,15 @@ impl DixConverter {
     }
 
     /// Convert a flat HashMap to a DixScript AST.
-    ///
-    /// Produces a minimal AST with a CONFIG section (version + timestamp)
-    /// and a DATA section derived from the provided map.
     pub fn from_hashmap(&self, data: HashMap<String, DixValue>) -> Result<DixScript, String> {
-        let mut flat_properties   = HashMap::new();
+        let mut flat_properties:   HashMap<String, DixValue> = HashMap::new();
         let mut nested_structures: HashMap<String, DixValue> = HashMap::new();
 
         for (key, value) in data {
-            match &value {
-                DixValue::Object(_) | DixValue::Array(_) => {
-                    nested_structures.insert(key, value);
-                }
-                _ => {
-                    flat_properties.insert(key, value);
-                }
+            if matches!(value, DixValue::Object(_) | DixValue::Array(_)) {
+                nested_structures.insert(key, value);
+            } else {
+                flat_properties.insert(key, value);
             }
         }
 
@@ -101,13 +92,8 @@ impl DixConverter {
     }
 
     /// Convert a DixScript AST to a flat HashMap with dotted-path keys.
-    ///
-    /// The enum table from the AST is extracted first so that `EnumValue`
-    /// nodes resolve to their correct integer values rather than 0.
     pub fn to_hashmap(&self, ast: &DixScript) -> HashMap<String, DixValue> {
         let mut result = HashMap::new();
-
-        // Extract enums so field values can be resolved during flattening.
         let enums = self.extract_enums(ast);
 
         if let Some(ref data) = ast.data {
@@ -121,7 +107,7 @@ impl DixConverter {
 
     /// Serialize a DixScript AST to `.mdix` format text.
     pub fn to_mdix(&self, ast: &DixScript, options: Option<&DixFormatOptions>) -> Result<String, String> {
-        let opts = options.unwrap_or(&self.default_options);
+        let opts   = options.unwrap_or(&self.default_options);
         let mut output = String::new();
         let nl     = opts.get_newline();
         let sp     = opts.get_space();
@@ -247,7 +233,6 @@ impl DixConverter {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    /// Extract the enum table from an AST for use during value conversion.
     fn extract_enums(
         &self,
         ast: &DixScript,
@@ -288,23 +273,20 @@ impl DixConverter {
                     segments: current_path.split('.').map(String::from).collect(),
                 };
 
-                let mut properties = Vec::new();
-                let mut nested     = Vec::new();
+                let mut properties: Vec<PropertyAssignment> = Vec::new();
+                let mut nested: Vec<(String, DixValue)>     = Vec::new();
 
                 for (k, v) in obj {
-                    match v {
-                        DixValue::Object(_) | DixValue::Array(_) => {
-                            nested.push((k.clone(), v.clone()));
-                        }
-                        _ => {
-                            let ast_value = self.convert_dix_value_to_ast_value(v)?;
-                            properties.push(PropertyAssignment {
-                                name: k.clone(),
-                                data_type: None,
-                                value: ast_value,
-                                position: Position::UNKNOWN,
-                            });
-                        }
+                    if matches!(v, DixValue::Object(_) | DixValue::Array(_)) {
+                        nested.push((k.clone(), v.clone()));
+                    } else {
+                        let ast_value = self.convert_dix_value_to_ast_value(v)?;
+                        properties.push(PropertyAssignment {
+                            name: k.clone(),
+                            data_type: None,
+                            value: ast_value,
+                            position: Position::UNKNOWN,
+                        });
                     }
                 }
 
@@ -336,10 +318,10 @@ impl DixConverter {
                 });
             }
 
-            _ => {
+            other => {
                 return Err(format!(
                     "Expected object or array for nested structure, got: {}",
-                    value.type_name()
+                    other.type_name()
                 ));
             }
         }
@@ -379,12 +361,12 @@ impl DixConverter {
             }
 
             DixValue::Object(obj) => {
-                let mut properties = Vec::new();
+                let mut properties = Vec::with_capacity(obj.len());
                 for (k, v) in obj {
                     let ast_value = self.convert_dix_value_to_ast_value(v)?;
                     properties.push(ObjectProperty {
-                        key: k.clone(),
-                        value: ast_value,
+                        key:      k.clone(),
+                        value:    ast_value,
                         position: Position::UNKNOWN,
                     });
                 }
@@ -397,14 +379,12 @@ impl DixConverter {
                     .map(|v| self.convert_dix_value_to_ast_value(v))
                     .collect();
                 Value::PrefixedConstructor {
-                    prefix: "t".to_string(),
+                    prefix:    "t".to_string(),
                     arguments: args?,
-                    position: Position::UNKNOWN,
+                    position:  Position::UNKNOWN,
                 }
             }
 
-            // Round-trip enums by name — the integer value is not stored in
-            // the AST node itself, only the enum and field names are.
             DixValue::Enum { enum_name, field_name, .. } => Value::EnumValue {
                 enum_name: enum_name.clone(),
                 value:     field_name.clone(),
@@ -413,7 +393,6 @@ impl DixConverter {
         })
     }
 
-    /// Flatten a DataEntry into a HashMap, resolving enum values via the table.
     fn flatten_entry(
         &self,
         entry: &DataEntry,
@@ -516,8 +495,7 @@ impl DixConverter {
             }
 
             Value::PrefixedConstructor { prefix, arguments, .. } => {
-                let prefix_str = prefix.to_string();
-                match prefix_str.as_str() {
+                match prefix.as_str() {
                     "t" => {
                         let items: Vec<DixValue> = arguments
                             .iter()

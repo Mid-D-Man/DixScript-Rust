@@ -1,0 +1,31 @@
+@ENUMS(
+  AIType   { PASSIVE = 0, NEUTRAL = 1, AGGRESSIVE = 2, BOSS = 3 }
+  LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3 }
+)
+
+@QUICKFUNCS(
+  ~createEnemy<object>(name, health, damage) {
+    return {
+      name   = name,
+      health = health,
+      damage = damage,
+      armor  = health / 10,
+      xp     = health / 2
+    }
+  }
+)
+
+@DATA(
+  app_name        = "DixScript LSP Test"
+  version         = "1.0.0"
+  max_players     = 100
+  primary_color   = #FF5733
+  secondary_color = #4287f5
+
+  enemies::
+    createEnemy("Goblin", 50, 10),
+    createEnemy("Orc", 100, 20),
+    createEnemy("Boss", 500, 80)
+
+  player.config: speed = 5, jump_height = 3, ai_type<enum> = AIType.AGGRESSIVE
+)

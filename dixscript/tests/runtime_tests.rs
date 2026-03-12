@@ -925,7 +925,8 @@ fn dix_value_create_array_10() {
 
     println!("[dix_value_create_array_10] {:.3} µs  value={}", us, v);
     assert_eq!(v.type_name(), "array");
-    assert_eq!(v.as_array().map(|a: &Vec<DixValue>| a.len()), Some(10));
+    // as_array() returns Option<&[DixValue]> — use a plain slice reference
+    assert_eq!(v.as_array().map(|a| a.len()), Some(10));
 }
 
 #[test]
@@ -939,7 +940,8 @@ fn dix_value_create_object_10() {
 
     println!("[dix_value_create_object_10] {:.3} µs  value={}", us, v);
     assert_eq!(v.type_name(), "object");
-    assert_eq!(v.as_object().map(|o: &HashMap<String, DixValue>| o.len()), Some(10));
+    // as_object() returns Option<&HashMap<String, DixValue>> — no annotation needed
+    assert_eq!(v.as_object().map(|o| o.len()), Some(10));
 }
 
 #[test]

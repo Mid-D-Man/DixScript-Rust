@@ -1,3 +1,4 @@
+// mdix-lsp/src/server.rs
 //! Backend — implements the tower-lsp LanguageServer trait.
 //!
 //! Owns a DashMap of open documents. A tokio Mutex serialises pipeline
@@ -18,8 +19,8 @@ use crate::document::Document;
 use crate::features;
 
 pub struct Backend {
-    pub client:    Client,
-    pub documents: DashMap<Url, Document>,
+    pub client:        Client,
+    pub documents:     DashMap<Url, Document>,
     /// Serialises pipeline execution until section parsers are fully isolated.
     pub pipeline_lock: tokio::sync::Mutex<()>,
 }
@@ -103,10 +104,24 @@ impl LanguageServer for Backend {
         &self,
         params: CompletionParams,
     ) -> LspResult<Option<CompletionResponse>> {
-        let uri = &params.text_document_position.text_document.uri;
-        let pos = params.text_document_position.position;
-        let doc = self.documents.get(uri);
-        Ok(features::completions::provide(doc.as_deref(), pos))
+        let uri     = &params.text_document_position.text_document.uri;
+        let pos     = params.text_document_position.position;
+        let doc     = self.documents.get(uri);
+
+        // Extract the trigger character from the LSP context when the editor
+        // supplies it.  This is more reliable than inferring it from the
+        // source text because the cursor may be on a different token
+        // (e.g. inside a QuickFunc body when the user typed '<' for a type
+        // annotation elsewhere on the line).
+        let trigger: Option<String> = params
+            .context
+            .and_then(|ctx| ctx.trigger_character);
+
+        Ok(features::completions::provide(
+            doc.as_deref(),
+            pos,
+            trigger.as_deref(),
+        ))
     }
 
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
@@ -164,9 +179,9 @@ impl LanguageServer for Backend {
         &self,
         params: CodeActionParams,
     ) -> LspResult<Option<CodeActionResponse>> {
-        let uri  = &params.text_document.uri;
+        let uri   = &params.text_document.uri;
         let diags = &params.context.diagnostics;
-        let doc  = self.documents.get(uri);
+        let doc   = self.documents.get(uri);
         Ok(features::code_actions::provide(doc.as_deref(), diags))
     }
-  }
+}

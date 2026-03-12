@@ -572,19 +572,25 @@ fn data_builder_large_flat_100_keys() {
 
 #[test]
 fn data_builder_two_tier_enforcement() {
-    let result = std::panic::catch_unwind(|| {
-        let _ = DixDataBuilder::new()
-            .data(|d| {
-                d.with_table_properties("user", |t| {
-                    t.with_string("name", "Bob");
-                });
-                d.with_int("late_flat", 1);
-            })
-            .build();
-    });
+    // Two-tier violations return Err, not panic.
+    // This is intentional: panics across FFI boundaries (C#/Unity) are
+    // undefined behavior. Err is recoverable; panic is not.
+    let result = DixDataBuilder::new()
+        .data(|d| {
+            d.with_table_properties("user", |t| {
+                t.with_string("name", "Bob");
+            });
+            d.with_int("late_flat", 1);
+        })
+        .build();
 
-    assert!(result.is_err(), "two-tier violation must panic");
-    println!("[data_builder_two_tier_enforcement] correctly panicked on tier violation");
+    assert!(result.is_err(), "two-tier violation must return Err");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("two-tier"),
+        "error message should mention two-tier, got: {}", msg
+    );
+    println!("[data_builder_two_tier_enforcement] correctly returned Err: {}", msg);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -919,7 +925,7 @@ fn dix_value_create_array_10() {
 
     println!("[dix_value_create_array_10] {:.3} µs  value={}", us, v);
     assert_eq!(v.type_name(), "array");
-    assert_eq!(v.as_array().map(|a| a.len()), Some(10));
+    assert_eq!(v.as_array().map(|a: &Vec<DixValue>| a.len()), Some(10));
 }
 
 #[test]
@@ -933,7 +939,7 @@ fn dix_value_create_object_10() {
 
     println!("[dix_value_create_object_10] {:.3} µs  value={}", us, v);
     assert_eq!(v.type_name(), "object");
-    assert_eq!(v.as_object().map(|o| o.len()), Some(10));
+    assert_eq!(v.as_object().map(|o: &HashMap<String, DixValue>| o.len()), Some(10));
 }
 
 #[test]

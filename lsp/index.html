@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript — LSP Tests · Build #19</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --bg:     #0d1117; --bg2:    #161b22; --bg3:    #1c2128;
+      --border: #30363d; --border2: #21262d;
+      --text:   #e6edf3; --muted:  #8b949e; --dim:    #484f58;
+      --blue:   #58a6ff; --blue2:  #1f6feb;
+      --green:  #3fb950; --green2: #2ea043;
+      --red:    #f85149; --red2:   #da3633;
+      --yellow: #e3b341; --purple: #a371f7;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      padding: 32px 24px; min-height: 100vh;
+    }
+    .container { max-width: 1100px; margin: 0 auto; }
+
+    /* Nav */
+    .nav-links { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+    .nav-link {
+      display: inline-flex; align-items: center; gap: 5px;
+      color: var(--muted); font-size: 0.80rem; text-decoration: none;
+      padding: 5px 12px; background: var(--bg2);
+      border: 1px solid var(--border); border-radius: 6px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .nav-link:hover { color: var(--text); border-color: var(--muted); }
+
+    /* Header */
+    header { border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 28px; }
+    header h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.5px; color: var(--blue); }
+    header h1 span { color: var(--text); }
+    .sub { color: var(--muted); font-size: 0.82rem; margin-top: 5px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    .meta-item {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 4px 12px; font-size: 0.78rem;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .meta-item strong { color: var(--blue); font-weight: 600; }
+
+    /* Banner */
+    .banner {
+      border-radius: 8px; padding: 13px 18px; margin-bottom: 24px;
+      font-weight: 600; font-size: 0.92rem;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .banner.pass    { background: #0f2a1a; border: 1px solid var(--green2); color: var(--green); }
+    .banner.fail    { background: #2a0f0f; border: 1px solid var(--red2);   color: var(--red); }
+    .banner.loading { background: var(--bg3); border: 1px solid var(--border); color: var(--muted); }
+
+    /* Stats grid */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px; margin-bottom: 28px;
+    }
+    .stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+    .s-label { font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.7px; color: var(--dim); margin-bottom: 6px; font-weight: 600; }
+    .s-value { font-size: 1.4rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+    .s-sub   { font-size: 0.70rem; color: var(--muted); margin-top: 3px; }
+
+    /* Section title */
+    .section-title {
+      font-size: 0.82rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.8px; color: var(--muted);
+      border-left: 3px solid var(--blue); padding-left: 10px;
+      margin-bottom: 14px;
+    }
+
+    /* Capability table */
+    .cap-table-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 32px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      background: var(--bg3); padding: 10px 14px;
+      font-size: 0.70rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.6px; color: var(--dim);
+      border-bottom: 1px solid var(--border2); text-align: left;
+    }
+    tbody tr { border-bottom: 1px solid var(--border2); }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--bg3); }
+    tbody td { padding: 10px 14px; font-size: 0.82rem; vertical-align: middle; }
+    .cap-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+    .cap-icon { font-size: 1rem; }
+
+    /* Latency bar */
+    .lat-wrap { display: flex; align-items: center; gap: 8px; }
+    .lat-val  { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; min-width: 52px; }
+    .lat-bg   { flex: 1; height: 5px; background: var(--bg); border-radius: 3px; overflow: hidden; min-width: 60px; }
+    .lat-fill { height: 100%; border-radius: 3px; background: var(--green); transition: width 0.4s; }
+    .lat-warn .lat-fill { background: var(--yellow); }
+    .lat-slow .lat-fill { background: var(--red); }
+
+    /* Badge */
+    .badge { font-size: 0.68rem; font-weight: 700; padding: 3px 9px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .badge-pass { background: rgba(63,185,80,0.12); border: 1px solid var(--green2); color: var(--green); }
+    .badge-fail { background: rgba(248,81,73,0.12); border: 1px solid var(--red2);   color: var(--red); }
+    .badge-skip { background: var(--bg3); border: 1px solid var(--border); color: var(--dim); }
+
+    /* Unit suites */
+    .suite-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 8px; overflow: hidden; margin-bottom: 10px;
+    }
+    .suite-card.pass { border-color: var(--green2); }
+    .suite-card.fail { border-color: var(--red2); }
+    .suite-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 11px 14px; cursor: pointer; background: var(--bg3);
+      border-bottom: 1px solid transparent; user-select: none;
+    }
+    .suite-card.open .suite-header { border-bottom-color: var(--border2); }
+    .suite-name   { font-size: 0.88rem; font-weight: 600; flex: 1; font-family: 'JetBrains Mono', monospace; }
+    .suite-counts { font-size: 0.78rem; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+    .expand-arrow { color: var(--dim); font-size: 0.70rem; transition: transform 0.2s; }
+    .suite-card.open .expand-arrow { transform: rotate(90deg); }
+    .suite-body { display: none; padding: 6px 0; }
+    .suite-card.open .suite-body { display: block; }
+    .test-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 14px; font-size: 0.78rem; font-family: 'JetBrains Mono', monospace;
+    }
+    .test-row:hover { background: var(--bg3); }
+    .test-icon.pass { color: var(--green); }
+    .test-icon.fail { color: var(--red); }
+    .test-icon.skip { color: var(--dim); }
+    .test-name { flex: 1; color: var(--muted); }
+    .test-name.fail { color: var(--red); }
+    .test-dur  { color: var(--dim); }
+
+    /* Failures section */
+    .failure-card {
+      background: var(--bg2); border: 1px solid var(--red2);
+      border-radius: 8px; overflow: hidden; margin-bottom: 16px;
+    }
+    .failure-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 11px 14px; background: rgba(248,81,73,0.06);
+      border-bottom: 1px solid var(--border2);
+    }
+    .failure-cap  { font-size: 0.80rem; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+    .failure-sep  { color: var(--dim); }
+    .failure-name { font-size: 0.88rem; font-weight: 600; flex: 1; }
+    .failure-body { padding: 14px; }
+    .diff-msg {
+      font-size: 0.82rem; color: var(--red);
+      background: rgba(248,81,73,0.08);
+      border: 1px solid rgba(248,81,73,0.25);
+      border-radius: 6px; padding: 8px 12px; margin-bottom: 12px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    @media (max-width: 700px) { .diff-grid { grid-template-columns: 1fr; } }
+    .diff-col { border-radius: 6px; overflow: hidden; }
+    .diff-col-label {
+      font-size: 0.67rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.6px; padding: 5px 10px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .diff-expected .diff-col-label { background: rgba(63,185,80,0.12); color: var(--green); }
+    .diff-actual   .diff-col-label { background: rgba(248,81,73,0.12); color: var(--red); }
+    .diff-content {
+      background: var(--bg); padding: 10px;
+      font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      color: var(--muted); overflow: auto; max-height: 220px;
+      white-space: pre; border: 1px solid var(--border2); border-top: none;
+    }
+    .req-section { margin-top: 4px; }
+    .req-label {
+      font-size: 0.67rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.6px; color: var(--dim);
+      display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+    }
+    .req-pre {
+      background: var(--bg); border: 1px solid var(--border2);
+      border-radius: 6px; padding: 10px; font-size: 0.75rem;
+      font-family: 'JetBrains Mono', monospace; color: var(--muted);
+      overflow: auto; max-height: 180px; white-space: pre;
+    }
+
+    /* Copy button */
+    .copy-btn {
+      background: none; border: 1px solid var(--border); color: var(--dim);
+      padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; cursor: pointer;
+      font-family: 'JetBrains Mono', monospace; transition: all 0.15s; flex-shrink: 0;
+    }
+    .copy-btn:hover { border-color: var(--blue); color: var(--blue); }
+    .copy-btn.copied { border-color: var(--green); color: var(--green); }
+
+    /* Copy all results bar */
+    .copy-all-bar {
+      display: flex; align-items: center; justify-content: flex-end;
+      margin-bottom: 28px;
+    }
+    .copy-all-btn {
+      background: var(--bg2); border: 1px solid var(--border);
+      color: var(--muted); padding: 7px 16px; border-radius: 6px;
+      font-size: 0.80rem; cursor: pointer; font-family: 'Inter', sans-serif;
+      font-weight: 600; transition: all 0.15s;
+    }
+    .copy-all-btn:hover { border-color: var(--blue); color: var(--blue); }
+
+    /* Toast */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--bg2); border: 1px solid var(--green2);
+      color: var(--green); padding: 9px 16px; border-radius: 6px;
+      font-size: 0.80rem; font-weight: 600; z-index: 9999;
+      transform: translateY(60px); opacity: 0;
+      transition: all 0.2s; pointer-events: none;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+
+    /* Empty state */
+    .empty-msg { color: var(--dim); font-size: 0.80rem; padding: 18px; text-align: center; }
+
+    footer {
+      margin-top: 40px; padding-top: 14px;
+      border-top: 1px solid var(--border);
+      color: var(--dim); font-size: 0.72rem; text-align: center;
+      font-family: 'JetBrains Mono', monospace;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="nav-links">
+    <a class="nav-link" href="../tests/">✅ Test Results</a>
+    <a class="nav-link" href="../bench/">📊 Benchmarks</a>
+    <a class="nav-link" href="../flame/">🔥 Flamegraphs</a>
+    <a class="nav-link" href="../ffi/">🔗 FFI Builds</a>
+  </div>
+
+  <header>
+    <h1>DixScript <span>— LSP Tests</span></h1>
+    <p class="sub">MidManStudio · mdix-lsp · Unit + Integration · JSON-RPC latency</p>
+    <div class="meta">
+      <div class="meta-item"><strong>Build</strong> #19</div>
+      <div class="meta-item"><strong>Branch</strong> master</div>
+      <div class="meta-item"><strong>Commit</strong> a6c0b614</div>
+      <div class="meta-item"><strong>Date</strong> Thu Mar 12 04:05:04 UTC 2026</div>
+      <div class="meta-item"><strong>Rust</strong> rustc 1.94.0 (4a4ef493e 2026-03-02)</div>
+    </div>
+  </header>
+
+  <div class="banner loading" id="banner">Loading LSP test results…</div>
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="s-label">Total</div>
+      <div class="s-value" id="s-total" style="color:var(--text)">—</div>
+      <div class="s-sub">all tests</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Unit</div>
+      <div class="s-value" id="s-unit" style="color:var(--green)">—</div>
+      <div class="s-sub">passed / total</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Integration</div>
+      <div class="s-value" id="s-int" style="color:var(--blue)">—</div>
+      <div class="s-sub">passed / total</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Capabilities</div>
+      <div class="s-value" id="s-caps" style="color:var(--purple)">—</div>
+      <div class="s-sub">tested</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Duration</div>
+      <div class="s-value" id="s-dur" style="font-size:0.9rem;padding-top:6px">—</div>
+      <div class="s-sub">total</div>
+    </div>
+  </div>
+
+  <div class="copy-all-bar">
+    <button class="copy-all-btn" id="copy-all-btn">⬇ Copy Full Results JSON</button>
+  </div>
+
+  <div class="section-title">LSP Capabilities</div>
+  <div class="cap-table-wrap" style="margin-bottom:32px">
+    <table>
+      <thead>
+        <tr>
+          <th>Capability</th>
+          <th>Status</th>
+          <th>Pass / Total</th>
+          <th>Avg Latency</th>
+          <th>Max Latency</th>
+        </tr>
+      </thead>
+      <tbody id="cap-tbody"></tbody>
+    </table>
+  </div>
+
+  <div id="failures-section" style="display:none">
+    <div class="section-title">Failures</div>
+    <div id="failures-list"></div>
+  </div>
+
+  <div class="section-title">Unit Test Suites</div>
+  <div id="unit-suites" style="margin-bottom:32px"></div>
+
+  <footer>DixScript-Rust LSP · MidManStudio · Build #19</footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ── Utilities ──────────────────────────────────────────────────────────────── */
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtLat(ms) {
+  if (!ms && ms !== 0) return '—';
+  if (ms < 1)   return ms.toFixed(2) + 'ms';
+  if (ms < 100) return ms.toFixed(1) + 'ms';
+  return ms.toFixed(0) + 'ms';
+}
+function fmtDur(s) {
+  if (!s) return '—';
+  if (s < 60) return s.toFixed(2) + 's';
+  return Math.floor(s / 60) + 'm ' + (s % 60).toFixed(0) + 's';
+}
+function latClass(ms) {
+  if (ms > 100) return 'lat-slow';
+  if (ms > 50)  return 'lat-warn';
+  return '';
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = '✓ ' + msg;
+  t.classList.add('show');
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.classList.remove('show'), 2000);
+}
+async function copyText(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+  }
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = 'copied'; btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1600);
+  }
+  showToast('Copied to clipboard');
+}
+
+/* ── Renderers ──────────────────────────────────────────────────────────────── */
+function renderAll(data) {
+  const summ = data.summary || {};
+  const failed = summ.failed || 0;
+  const total  = summ.total  || 0;
+  const passed = summ.passed || 0;
+
+  const banner = document.getElementById('banner');
+  if (total === 0) {
+    banner.className = 'banner loading';
+    banner.textContent = 'No tests found — trigger with --lsp in your commit message.';
+  } else if (failed === 0) {
+    banner.className = 'banner pass';
+    banner.textContent = `All ${total} tests passed — Build #${data.build}`;
+  } else {
+    banner.className = 'banner fail';
+    banner.textContent = `${failed} test(s) FAILED — ${passed} of ${total} passed`;
+  }
+
+  document.getElementById('s-total').textContent = total;
+  document.getElementById('s-unit').textContent  =
+    (summ.unit_passed ?? '—') + '/' + (summ.unit_total ?? '—');
+  document.getElementById('s-int').textContent   =
+    (summ.int_passed  ?? '—') + '/' + (summ.int_total  ?? '—');
+  document.getElementById('s-caps').textContent  = (data.capabilities || []).length;
+  document.getElementById('s-dur').textContent   = fmtDur(summ.duration_s);
+
+  renderCapabilities(data.capabilities || []);
+  renderFailures(data.failures || []);
+  renderUnitSuites(data.unit_suites || []);
+
+  document.getElementById('copy-all-btn').onclick = function() {
+    copyText(JSON.stringify(data, null, 2), this);
+  };
+}
+
+function renderCapabilities(caps) {
+  const tbody  = document.getElementById('cap-tbody');
+  if (!caps.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-msg">No integration tests run this build.</td></tr>`;
+    return;
+  }
+  const maxLat = Math.max(...caps.map(c => c.max_latency_ms || 0), 1);
+  tbody.innerHTML = caps.map(cap => {
+    const ok      = cap.failed === 0;
+    const badgeCls = ok ? 'badge-pass' : 'badge-fail';
+    const badgeTxt = ok ? '✓ PASS' : `✗ ${cap.failed} FAIL`;
+    const avg      = cap.avg_latency_ms || 0;
+    const max      = cap.max_latency_ms || 0;
+    const barPct   = ((avg / maxLat) * 100).toFixed(1);
+    const lcls     = latClass(avg);
+    return `<tr>
+      <td><span class="cap-name"><span class="cap-icon">${cap.icon||''}</span>${escHtml(cap.name)}</span></td>
+      <td><span class="badge ${badgeCls}">${badgeTxt}</span></td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:0.80rem">${cap.passed}/${cap.total}</td>
+      <td>
+        <div class="lat-wrap ${lcls}">
+          <span class="lat-val">${fmtLat(avg)}</span>
+          <div class="lat-bg"><div class="lat-fill" style="width:${barPct}%"></div></div>
+        </div>
+      </td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:0.80rem;color:var(--muted)">${fmtLat(max)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderFailures(failures) {
+  const section = document.getElementById('failures-section');
+  const list    = document.getElementById('failures-list');
+  if (!failures.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  list.innerHTML = failures.map((f, idx) => {
+    const actualStr  = JSON.stringify(f.actual,   null, 2) || 'null';
+    const reqStr     = JSON.stringify(f.request,  null, 2) || 'null';
+    const expectedStr = String(f.expected || '—');
+    const diffStr    = String(f.diff     || '—');
+    const uid = 'f' + idx;
+    return `<div class="failure-card">
+      <div class="failure-header">
+        <span class="failure-cap">${escHtml(f.capability)}</span>
+        <span class="failure-sep">::</span>
+        <span class="failure-name">${escHtml(f.name)}</span>
+        <span class="badge badge-fail">✗ ${escHtml(f.status || 'failed')}</span>
+      </div>
+      <div class="failure-body">
+        <div class="diff-msg">${escHtml(diffStr)}</div>
+        <div class="diff-grid">
+          <div class="diff-col diff-expected">
+            <div class="diff-col-label">Expected</div>
+            <div class="diff-content">${escHtml(expectedStr)}</div>
+          </div>
+          <div class="diff-col diff-actual">
+            <div class="diff-col-label">
+              Actual
+              <button class="copy-btn" onclick="copyText(${JSON.stringify(actualStr)},this)">copy</button>
+            </div>
+            <div class="diff-content">${escHtml(actualStr)}</div>
+          </div>
+        </div>
+        ${f.request ? `<div class="req-section">
+          <div class="req-label">
+            Request
+            <button class="copy-btn" onclick="copyText(${JSON.stringify(reqStr)},this)">copy</button>
+          </div>
+          <pre class="req-pre">${escHtml(reqStr)}</pre>
+        </div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderUnitSuites(suites) {
+  const container = document.getElementById('unit-suites');
+  if (!suites.length) {
+    container.innerHTML = '<div class="empty-msg">No unit tests run this build.</div>';
+    return;
+  }
+  container.innerHTML = suites.map((suite, idx) => {
+    const ok      = suite.failed === 0;
+    const cls     = ok ? 'pass' : 'fail';
+    const badgeCls = ok ? 'badge-pass' : 'badge-fail';
+    const badgeTxt = ok ? `✓ ${suite.passed} passed`
+                        : `✗ ${suite.failed} failed`;
+    const testRows = (suite.tests || []).map(t => {
+      const st   = t.status === 'passed' ? 'pass' : t.status === 'ignored' ? 'skip' : 'fail';
+      const icon = t.status === 'passed' ? '✓' : t.status === 'ignored' ? '○' : '✗';
+      return `<div class="test-row">
+        <span class="test-icon ${st}">${icon}</span>
+        <span class="test-name ${st === 'fail' ? 'fail' : ''}">${escHtml(t.name)}</span>
+        <span class="test-dur">${t.duration_ms || 0}ms</span>
+      </div>`;
+    }).join('');
+    return `<div class="suite-card ${cls}" id="suite-${idx}">
+      <div class="suite-header" onclick="toggleSuite('suite-${idx}')">
+        <span class="suite-name">${escHtml(suite.name)}</span>
+        <span class="suite-counts">${suite.passed}/${suite.total}</span>
+        <span class="badge ${badgeCls}">${badgeTxt}</span>
+        <span class="expand-arrow">▶</span>
+      </div>
+      <div class="suite-body">${testRows}</div>
+    </div>`;
+  }).join('');
+
+  // Auto-open failing suites
+  suites.forEach((s, i) => {
+    if (s.failed > 0) {
+      document.getElementById('suite-' + i)?.classList.add('open');
+    }
+  });
+}
+
+function toggleSuite(id) {
+  document.getElementById(id)?.classList.toggle('open');
+}
+
+/* ── Bootstrap ──────────────────────────────────────────────────────────────── */
+fetch('lsp-results.json')
+  .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+  .then(data => renderAll(data))
+  .catch(err => {
+    document.getElementById('banner').className = 'banner fail';
+    document.getElementById('banner').textContent = `Failed to load lsp-results.json: ${err.message}`;
+    document.getElementById('cap-tbody').innerHTML =
+      `<tr><td colspan="5" class="empty-msg">No data. Push with --lsp to trigger a build.</td></tr>`;
+  });
+</script>
+</body>
+  </html>

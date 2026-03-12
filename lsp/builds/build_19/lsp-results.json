@@ -1,0 +1,241 @@
+{
+  "build": "19",
+  "branch": "master",
+  "commit": "a6c0b614",
+  "date": "2026-03-12T05:03:38+01:00",
+  "rust_version": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+  "summary": {
+    "total": 15,
+    "passed": 14,
+    "failed": 1,
+    "duration_s": 0.511,
+    "unit_total": 0,
+    "unit_passed": 0,
+    "unit_failed": 0,
+    "int_total": 15,
+    "int_passed": 14,
+    "int_failed": 1
+  },
+  "capabilities": [
+    {
+      "avg_latency_ms": 3.5,
+      "failed": 0,
+      "icon": "\ud83d\ude80",
+      "max_latency_ms": 3.5,
+      "name": "initialize",
+      "passed": 1,
+      "tests": [
+        {
+          "latency_ms": 3.5,
+          "name": "server_responds_to_initialize",
+          "status": "passed"
+        }
+      ],
+      "total": 1
+    },
+    {
+      "avg_latency_ms": 0.4,
+      "failed": 0,
+      "icon": "\ud83d\udcac",
+      "max_latency_ms": 0.6,
+      "name": "hover",
+      "passed": 3,
+      "tests": [
+        {
+          "latency_ms": 0.6,
+          "name": "hover_section_keyword",
+          "status": "passed"
+        },
+        {
+          "latency_ms": 0.3,
+          "name": "hover_data_identifier",
+          "status": "passed"
+        },
+        {
+          "latency_ms": 0.3,
+          "name": "hover_quickfunc_call",
+          "status": "passed"
+        }
+      ],
+      "total": 3
+    },
+    {
+      "avg_latency_ms": 0.6,
+      "failed": 1,
+      "icon": "\u2728",
+      "max_latency_ms": 0.6,
+      "name": "completions",
+      "passed": 2,
+      "tests": [
+        {
+          "latency_ms": 0.6,
+          "name": "completions_at_trigger",
+          "status": "passed"
+        },
+        {
+          "latency_ms": 0.6,
+          "name": "completions_dot_trigger",
+          "status": "passed"
+        },
+        {
+          "latency_ms": 0.6,
+          "name": "completions_type_trigger",
+          "status": "failed"
+        }
+      ],
+      "total": 3
+    },
+    {
+      "avg_latency_ms": 0.3,
+      "failed": 0,
+      "icon": "\ud83d\udccd",
+      "max_latency_ms": 0.3,
+      "name": "goto_definition",
+      "passed": 2,
+      "tests": [
+        {
+          "latency_ms": 0.3,
+          "name": "goto_quickfunc_call",
+          "status": "passed"
+        },
+        {
+          "latency_ms": 0.3,
+          "name": "goto_enum_field",
+          "status": "passed"
+        }
+      ],
+      "total": 2
+    },
+    {
+      "avg_latency_ms": 0.5,
+      "failed": 0,
+      "icon": "\ud83c\udfa8",
+      "max_latency_ms": 0.5,
+      "name": "semantic_tokens",
+      "passed": 2,
+      "tests": [
+        {
+          "latency_ms": 0.5,
+          "name": "tokens_non_empty",
+          "status": "passed"
+        },
+        {
+          "latency_ms": 0.5,
+          "name": "tokens_minimum_count",
+          "status": "passed"
+        }
+      ],
+      "total": 2
+    },
+    {
+      "avg_latency_ms": 0.4,
+      "failed": 0,
+      "icon": "\ud83d\udd8c",
+      "max_latency_ms": 0.4,
+      "name": "document_color",
+      "passed": 1,
+      "tests": [
+        {
+          "latency_ms": 0.4,
+          "name": "hex_color_swatches",
+          "status": "passed"
+        }
+      ],
+      "total": 1
+    },
+    {
+      "avg_latency_ms": 0.4,
+      "failed": 0,
+      "icon": "\ud83d\udca1",
+      "max_latency_ms": 0.4,
+      "name": "inlay_hints",
+      "passed": 1,
+      "tests": [
+        {
+          "latency_ms": 0.4,
+          "name": "inlay_hints_no_crash",
+          "status": "passed"
+        }
+      ],
+      "total": 1
+    },
+    {
+      "avg_latency_ms": 0.6,
+      "failed": 0,
+      "icon": "\ud83d\udd0d",
+      "max_latency_ms": 0.6,
+      "name": "diagnostics",
+      "passed": 1,
+      "tests": [
+        {
+          "latency_ms": 0.6,
+          "name": "server_stable_on_errors",
+          "status": "passed"
+        }
+      ],
+      "total": 1
+    },
+    {
+      "avg_latency_ms": 0.3,
+      "failed": 0,
+      "icon": "\u26a1",
+      "max_latency_ms": 0.3,
+      "name": "code_actions",
+      "passed": 1,
+      "tests": [
+        {
+          "latency_ms": 0.3,
+          "name": "code_actions_no_crash",
+          "status": "passed"
+        }
+      ],
+      "total": 1
+    }
+  ],
+  "failures": [
+    {
+      "actual": [
+        {
+          "detail": "~createEnemy<Object>(name, health, damage) \u2014 QuickFunc",
+          "kind": 3,
+          "label": "createEnemy"
+        },
+        {
+          "kind": 14,
+          "label": "return"
+        },
+        {
+          "kind": 14,
+          "label": "let"
+        },
+        {
+          "kind": 14,
+          "label": "if:"
+        },
+        {
+          "kind": 14,
+          "label": "elif:"
+        }
+      ],
+      "capability": "completions",
+      "diff": "<int> not found in type annotation completions",
+      "expected": "<int> in type completions",
+      "name": "completions_type_trigger",
+      "request": {
+        "context": {
+          "triggerCharacter": "<",
+          "triggerKind": 2
+        },
+        "position": {
+          "character": 12,
+          "line": 13
+        },
+        "textDocument": {
+          "uri": "file:///comprehensive-lsp-test.mdix"
+        }
+      },
+      "status": "failed"
+    }
+  ],
+  "unit_suites": []
+}

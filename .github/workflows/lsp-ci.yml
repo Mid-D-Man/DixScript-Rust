@@ -1,53 +1,294 @@
-name: DixScript — LSP Tests
+name: DixScript — LSP Tests & Deploy
 
 on:
   push:
     branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
+
+  # ── 1. Gate ──────────────────────────────────────────────────────────────────
   parse-trigger:
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.decide.outputs.should_run }}
     steps:
-      - id: decide
+      - name: Decide whether to run LSP tests
+        id: decide
         run: |
           RUN=false
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             RUN=true
           else
-            echo "${{ github.event.head_commit.message }}" | grep -qiE '\-\-lsp' && RUN=true || true
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-lsp' && RUN=true || true
           fi
           echo "should_run=$RUN" >> $GITHUB_OUTPUT
+          echo "LSP tests triggered: $RUN"
 
+  # ── 2. Build + test ──────────────────────────────────────────────────────────
   test-lsp:
     runs-on: ubuntu-latest
     needs: parse-trigger
     if: needs.parse-trigger.outputs.should_run == 'true'
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@master
-        with: { toolchain: stable }
+        with:
+          toolchain: stable
+
+      - name: Get Rust version
+        id: rustver
+        run: echo "ver=$(rustc --version)" >> $GITHUB_OUTPUT
+
       - uses: actions/cache@v3
         with:
           path: |
-            ~/.cargo/registry/
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
             target/
-          key: ubuntu-lsp-${{ hashFiles('**/Cargo.lock') }}
+          key: ubuntu-latest-cargo-lsp-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-lsp-
 
-      - name: Run LSP unit + integration tests
+      # Build the server binary first so integration tests can spawn it.
+      - name: Build mdix-lsp binary
         run: |
-          cargo test -p mdix-lsp --color=never --no-fail-fast 2>&1 | tee lsp-raw.txt
-          echo "LSP_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          cargo build -p mdix-lsp 2>&1
+          echo "Binary: $(stat -c%s target/debug/mdix-lsp 2>/dev/null || echo 0) bytes"
 
-      - name: Parse results to JSON
-        # same Python parser pattern as your existing workflows
+      # Unit tests: #[cfg(test)] blocks inside the source files.
+      - name: Run unit tests
+        continue-on-error: true
         run: |
-          python3 parse_lsp_results.py  # same script, different output file
+          set +e
+          cargo test -p mdix-lsp --lib --color=never --no-fail-fast 2>&1 | tee unit-raw.txt
+          echo "UNIT_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          exit 0
+
+      # Integration tests: custom harness that spawns the binary over JSON-RPC.
+      - name: Run integration tests
+        continue-on-error: true
+        env:
+          MDIX_LSP_BIN:    ${{ github.workspace }}/target/debug/mdix-lsp
+          LSP_RESULTS_OUT: ${{ github.workspace }}/lsp-integration-results.json
+        run: |
+          set +e
+          cargo test -p mdix-lsp --test lsp_integration --color=never 2>&1 | tee integration-raw.txt
+          echo "INTEGRATION_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          exit 0
+
+      - name: Merge and parse all results to JSON
+        env:
+          BUILD_NUM:    ${{ github.run_number }}
+          BRANCH:       ${{ github.ref_name }}
+          COMMIT:       ${{ github.sha }}
+          BUILD_DATE:   ${{ github.event.head_commit.timestamp }}
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+        run: |
+          python3 - << 'PYEOF'
+          import re, json, os, sys
+
+          RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+          def strip_ansi(s):
+              return RE_ANSI.sub('', s)
+
+          # ── Parse unit test output ──────────────────────────────────────────
+          unit_suites = []
+          raw = open('unit-raw.txt', encoding='utf-8', errors='replace').read() \
+                if os.path.exists('unit-raw.txt') else ''
+          text = strip_ansi(raw)
+
+          RE_RUN    = re.compile(r'Running\s+(?:unittests?\s+)?(\S+)\s+\(')
+          RE_TEST   = re.compile(r'^test\s+([\w:]+(?:::\w+)*)\s+\.\.\.\s+(ok|FAILED|ignored)(?:\s+\(([\d.]+)s\))?')
+          RE_RESULT = re.compile(r'test result:.*?finished in ([\d.]+)s')
+
+          cur_name, cur_tests, cur_dur = None, [], 0.0
+          for line in text.splitlines():
+              m = RE_RUN.search(line)
+              if m:
+                  if cur_name and cur_tests:
+                      unit_suites.append({'name': cur_name, 'tests': cur_tests,
+                                          'duration_s': round(cur_dur, 4)})
+                  cur_name = os.path.splitext(os.path.basename(m.group(1)))[0]
+                  cur_tests, cur_dur = [], 0.0
+                  continue
+              m = RE_TEST.match(line)
+              if m:
+                  if cur_name is None:
+                      cur_name, cur_tests, cur_dur = 'lib', [], 0.0
+                  tname, status, dur = m.group(1), m.group(2), m.group(3)
+                  cur_tests.append({
+                      'name':        tname,
+                      'status':      {'ok': 'passed', 'FAILED': 'failed',
+                                      'ignored': 'ignored'}.get(status, 'unknown'),
+                      'duration_ms': int(float(dur) * 1000) if dur else 0,
+                  })
+                  continue
+              m = RE_RESULT.search(line)
+              if m:
+                  cur_dur = float(m.group(1))
+                  if cur_name and cur_tests:
+                      unit_suites.append({'name': cur_name, 'tests': cur_tests,
+                                          'duration_s': round(cur_dur, 4)})
+                      cur_name, cur_tests, cur_dur = None, [], 0.0
+          if cur_name and cur_tests:
+              unit_suites.append({'name': cur_name, 'tests': cur_tests,
+                                  'duration_s': round(cur_dur, 4)})
+
+          for s in unit_suites:
+              s['passed']  = sum(1 for t in s['tests'] if t['status'] == 'passed')
+              s['failed']  = sum(1 for t in s['tests'] if t['status'] == 'failed')
+              s['ignored'] = sum(1 for t in s['tests'] if t['status'] == 'ignored')
+              s['total']   = len(s['tests'])
+
+          # ── Load integration results ────────────────────────────────────────
+          int_data = {}
+          if os.path.exists('lsp-integration-results.json'):
+              try:
+                  int_data = json.load(open('lsp-integration-results.json',
+                                            encoding='utf-8'))
+              except Exception as e:
+                  print(f'Warning: could not parse integration results: {e}', file=sys.stderr)
+
+          # ── Build merged output ─────────────────────────────────────────────
+          u_total   = sum(s['total']      for s in unit_suites)
+          u_passed  = sum(s['passed']     for s in unit_suites)
+          u_failed  = sum(s['failed']     for s in unit_suites)
+          u_dur     = sum(s['duration_s'] for s in unit_suites)
+
+          caps      = int_data.get('capabilities', [])
+          failures  = int_data.get('failures', [])
+          i_total   = sum(c['total']  for c in caps)
+          i_passed  = sum(c['passed'] for c in caps)
+          i_failed  = sum(c['failed'] for c in caps)
+          i_dur     = int_data.get('duration_s', 0)
+
+          result = {
+              'build':        os.environ.get('BUILD_NUM',    '0'),
+              'branch':       os.environ.get('BRANCH',       'unknown'),
+              'commit':       os.environ.get('COMMIT',       'unknown')[:8],
+              'date':         os.environ.get('BUILD_DATE',   ''),
+              'rust_version': os.environ.get('RUST_VERSION', 'stable'),
+              'summary': {
+                  'total':       u_total + i_total,
+                  'passed':      u_passed + i_passed,
+                  'failed':      u_failed + i_failed,
+                  'duration_s':  round(u_dur + i_dur, 3),
+                  'unit_total':  u_total,  'unit_passed':  u_passed,  'unit_failed':  u_failed,
+                  'int_total':   i_total,  'int_passed':   i_passed,  'int_failed':   i_failed,
+              },
+              'capabilities': caps,
+              'failures':     failures,
+              'unit_suites':  unit_suites,
+          }
+
+          with open('lsp-results.json', 'w') as f:
+              json.dump(result, f, indent=2)
+
+          total  = result['summary']['total']
+          passed = result['summary']['passed']
+          failed = result['summary']['failed']
+          print(f'Total:{total}  Passed:{passed}  Failed:{failed}')
+          print(f'Capabilities:{len(caps)}  UnitSuites:{len(unit_suites)}  Failures:{len(failures)}')
+          PYEOF
+
+      - name: Build HTML report
+        env:
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+        run: |
+          cp .github/lsp-results-template.html lsp-results-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  lsp-results-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       lsp-results-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            lsp-results-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     lsp-results-index.html
+          sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        lsp-results-index.html
 
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: lsp-results-${{ github.run_number }}
-          path: lsp-results.json
+          path: |
+            lsp-results.json
+            lsp-results-index.html
+            unit-raw.txt
+            integration-raw.txt
+          retention-days: 30
+
+  # ── 3. Deploy ─────────────────────────────────────────────────────────────────
+  deploy-results:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, test-lsp]
+    if: always() && needs.test-lsp.result == 'success'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download LSP artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lsp-results-${{ github.run_number }}
+          path: deploy/lsp/
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            echo "Creating fresh gh-pages branch"
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/lsp" "$WORK/lsp/builds/build_${BUILD_NUM}"
+          cp deploy/lsp/lsp-results.json       "$WORK/lsp/lsp-results.json"
+          cp deploy/lsp/lsp-results-index.html "$WORK/lsp/index.html"
+          cp deploy/lsp/lsp-results.json       "$WORK/lsp/builds/build_${BUILD_NUM}/lsp-results.json"
+          cp deploy/lsp/lsp-results-index.html "$WORK/lsp/builds/build_${BUILD_NUM}/index.html"
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "DixScript LSP CI — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+          echo "Deployed: https://mid-d-man.github.io/DixScript-Rust/lsp/"
+
+  # ── 4. Summary ────────────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, test-lsp, deploy-results]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "======================================================="
+          echo "  DixScript — LSP CI Summary"
+          echo "======================================================="
+          echo "Build:   #${{ github.run_number }}"
+          echo "Branch:  ${{ github.ref_name }}"
+          echo "Tests:   ${{ needs.test-lsp.result      || 'skipped' }}"
+          echo "Deploy:  ${{ needs.deploy-results.result || 'skipped' }}"
+          echo ""
+          echo "LSP results: https://mid-d-man.github.io/DixScript-Rust/lsp/"

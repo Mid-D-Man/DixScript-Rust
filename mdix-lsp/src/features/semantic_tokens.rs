@@ -1,37 +1,40 @@
+// mdix-lsp/src/features/semantic_tokens.rs
 //! Semantic token provider.
 //!
 //! Maps DixScript TokenType variants to LSP SemanticTokenType indices
 //! (defined in capabilities.rs) so editors can apply accurate syntax
 //! highlighting beyond what a TextMate grammar can express.
 //!
-//! Encoding follows the LSP spec: each token is represented as 5 u32 values —
-//! [deltaLine, deltaStartChar, length, tokenType, tokenModifiers].
+//! Encoding follows the LSP spec: each token is represented as a
+//! `SemanticToken` struct with five fields —
+//! delta_line, delta_start_char, length, token_type, token_modifiers_bitset.
 
-use tower_lsp::lsp_types::{SemanticTokens, SemanticTokensResult};
+use tower_lsp::lsp_types::{SemanticToken, SemanticTokens, SemanticTokensResult};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
 use crate::document::Document;
 
 // Token type indices — must match the order in capabilities::TOKEN_TYPES.
-const TT_KEYWORD:    u32 = 0;
-const TT_STRING:     u32 = 1;
-const TT_NUMBER:     u32 = 2;
-const TT_OPERATOR:   u32 = 3;
-const TT_VARIABLE:   u32 = 4;
-const TT_FUNCTION:   u32 = 5;
-const TT_TYPE:       u32 = 6;
-const TT_ENUM_MEMBER:u32 = 7;
-const TT_COMMENT:    u32 = 8;
-const TT_NAMESPACE:  u32 = 9;
-const TT_PROPERTY:   u32 = 10;
-const TT_PARAMETER:  u32 = 11;
+const TT_KEYWORD:     u32 = 0;
+const TT_STRING:      u32 = 1;
+const TT_NUMBER:      u32 = 2;
+const TT_OPERATOR:    u32 = 3;
+const TT_VARIABLE:    u32 = 4;
+const TT_FUNCTION:    u32 = 5;
+const TT_TYPE:        u32 = 6;
+const TT_ENUM_MEMBER: u32 = 7;
+const TT_COMMENT:     u32 = 8;
+const TT_NAMESPACE:   u32 = 9;
+const TT_PROPERTY:    u32 = 10;
+#[allow(dead_code)]
+const TT_PARAMETER:   u32 = 11;
 
 // Token modifier bitmasks — must match capabilities::TOKEN_MODIFIERS.
 const MOD_DECLARATION: u32 = 1 << 0;
 const MOD_READONLY:    u32 = 1 << 1;
 
 pub fn provide(doc: Option<&Document>) -> Option<SemanticTokensResult> {
-    let doc = doc?;
+    let doc  = doc?;
     let data = encode_tokens(&doc.tokens);
     Some(SemanticTokensResult::Tokens(SemanticTokens {
         result_id: None,
@@ -39,8 +42,13 @@ pub fn provide(doc: Option<&Document>) -> Option<SemanticTokensResult> {
     }))
 }
 
-fn encode_tokens(tokens: &[Token]) -> Vec<u32> {
-    let mut data = Vec::with_capacity(tokens.len() * 5);
+/// Encodes the token stream as a `Vec<SemanticToken>`.
+///
+/// Each `SemanticToken` holds the five LSP-specified fields:
+///   delta_line, delta_start_char, length, token_type, token_modifiers_bitset.
+/// Positions are expressed as deltas relative to the previous token.
+fn encode_tokens(tokens: &[Token]) -> Vec<SemanticToken> {
+    let mut data: Vec<SemanticToken> = Vec::with_capacity(tokens.len());
     let mut prev_line: u32 = 0;
     let mut prev_col:  u32 = 0;
 
@@ -54,19 +62,21 @@ fn encode_tokens(tokens: &[Token]) -> Vec<u32> {
         let line = token.line.saturating_sub(1) as u32;
         let col  = token.column.saturating_sub(1) as u32;
 
-        let delta_line = line - prev_line;
-        let delta_col  = if delta_line == 0 { col - prev_col } else { col };
+        let delta_line      = line - prev_line;
+        let delta_start_char = if delta_line == 0 { col - prev_col } else { col };
 
         let length = token_length(token) as u32;
         if length == 0 {
             continue;
         }
 
-        data.push(delta_line);
-        data.push(delta_col);
-        data.push(length);
-        data.push(token_type);
-        data.push(modifiers);
+        data.push(SemanticToken {
+            delta_line,
+            delta_start_char,
+            length,
+            token_type,
+            token_modifiers_bitset: modifiers,
+        });
 
         prev_line = line;
         prev_col  = col;
@@ -119,11 +129,11 @@ fn classify(token: &Token) -> Option<(u32, u32)> {
         | TokenType::SwitchCase
         | TokenType::DoubleColon => Some((TT_OPERATOR, 0)),
 
-        // Function prefix ~ and function declarations
+        // Function prefix ~
         TokenType::FunctionPrefix => Some((TT_OPERATOR, 0)),
 
         // QuickFunc names — identifiers in QUICKFUNCS section
-        TokenType::Identifier(name) if token.section == SectionId::QuickFuncs => {
+        TokenType::Identifier(_) if token.section == SectionId::QuickFuncs => {
             Some((TT_FUNCTION, MOD_DECLARATION))
         }
 
@@ -142,12 +152,7 @@ fn classify(token: &Token) -> Option<(u32, u32)> {
         // Dix built-in functions
         TokenType::DixFunction(_) => Some((TT_FUNCTION, 0)),
 
-        // General identifiers in DATA section = variables
-        TokenType::Identifier(_) if token.section == SectionId::Data => {
-            Some((TT_VARIABLE, 0))
-        }
-
-        // Identifiers anywhere else
+        // Identifiers in DATA section = variables; elsewhere also variables
         TokenType::Identifier(_) => Some((TT_VARIABLE, 0)),
 
         // Special constructors
@@ -165,25 +170,24 @@ fn classify(token: &Token) -> Option<(u32, u32)> {
         // Comments
         TokenType::Comment(_) => Some((TT_COMMENT, 0)),
 
-        // Skip: symbols, EOF, errors, parse context
+        // Multi-char symbols that are operator-like (e.g. ::)
+        TokenType::MultiCharSymbol(_) => Some((TT_OPERATOR, 0)),
+
+        // Skip: plain symbols, EOF, errors, parse context, and tokens
+        // that are already represented by higher-level token types.
         TokenType::Symbol(_)
         | TokenType::EndOfFile
         | TokenType::Error(_)
-        | TokenType::ParseContext(_) => None,
-
-        // Skip: scope declarations, object/array access (already covered
-        // by higher-level tokens in practice)
-        TokenType::ScopeDeclaration(_)
+        | TokenType::ParseContext(_)
+        | TokenType::ScopeDeclaration(_)
         | TokenType::ObjectAccess(_)
         | TokenType::BuiltinMethod(_)
         | TokenType::ControlFlowColon => None,
-
-        TokenType::MultiCharSymbol(_) => Some((TT_OPERATOR, 0)),
     }
 }
 
-/// Approximates the source length of a token from its value.
-/// Used for the length field in the encoded output.
+/// Approximates the source length of a token from its stored value.
+/// Used for the `length` field of the encoded output.
 fn token_length(token: &Token) -> usize {
     match &token.token_type {
         TokenType::String(s)             => s.len() + 2,  // include quotes
@@ -199,8 +203,8 @@ fn token_length(token: &Token) -> usize {
         TokenType::SectionData           => 5,   // @DATA
         TokenType::SectionSecurity       => 9,   // @SECURITY
         TokenType::DoubleColon           => 2,
-        TokenType::Arrow                 => 2,   // =>
-        TokenType::SwitchCase            => 2,   // ->
+        TokenType::Arrow                 => 2,
+        TokenType::SwitchCase            => 2,
         _ => {
             let v = token.get_token_value();
             if v.is_empty() { 1 } else { v.len() }

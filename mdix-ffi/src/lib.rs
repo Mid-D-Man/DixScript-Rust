@@ -327,35 +327,36 @@ pub extern "C" fn mdix_entry_count(handle: *const c_void) -> i32 {
 ///
 /// Returns MdixType::Unknown (-1) if the path does not exist or the handle is null.
 /// Call this before a getter when the schema is not known at compile time.
+// AFTER — MdixType appears in the signature, csbindgen emits the C# enum
 #[no_mangle]
-pub extern "C" fn mdix_get_type(handle: *const c_void, path: *const c_char) -> i32 {
+pub extern "C" fn mdix_get_type(handle: *const c_void, path: *const c_char) -> MdixType {
     let h = match unsafe { as_handle(handle) } {
         Some(h) => h,
-        None => return -1,
+        None => return MdixType::Unknown,
     };
 
     let path_str = match unsafe { c_str_to_str(path) } {
         Some(s) => s,
-        None => return -1,
+        None => return MdixType::Unknown,
     };
 
     match h.data.get_value(path_str) {
-        None                         => MdixType::Unknown   as i32,
-        Some(DixValue::Null)         => MdixType::Null      as i32,
-        Some(DixValue::Bool(_))      => MdixType::Bool      as i32,
-        Some(DixValue::Int(_))       => MdixType::Int       as i32,
-        Some(DixValue::Float(_))     => MdixType::Float     as i32,
-        Some(DixValue::Double(_))    => MdixType::Double    as i32,
-        Some(DixValue::String(_))    => MdixType::String    as i32,
-        Some(DixValue::Date(_))      => MdixType::Date      as i32,
-        Some(DixValue::Timestamp(_)) => MdixType::Timestamp as i32,
-        Some(DixValue::HexColor(_))  => MdixType::HexColor  as i32,
-        Some(DixValue::Blob(_))      => MdixType::Blob      as i32,
-        Some(DixValue::Regex(_))     => MdixType::Regex     as i32,
-        Some(DixValue::Array(_))     => MdixType::Array     as i32,
-        Some(DixValue::Object(_))    => MdixType::Object    as i32,
-        Some(DixValue::Tuple(_))     => MdixType::Tuple     as i32,
-        Some(DixValue::Enum { .. })  => MdixType::Enum      as i32,
+        None                         => MdixType::Unknown,
+        Some(DixValue::Null)         => MdixType::Null,
+        Some(DixValue::Bool(_))      => MdixType::Bool,
+        Some(DixValue::Int(_))       => MdixType::Int,
+        Some(DixValue::Float(_))     => MdixType::Float,
+        Some(DixValue::Double(_))    => MdixType::Double,
+        Some(DixValue::String(_))    => MdixType::String,
+        Some(DixValue::Date(_))      => MdixType::Date,
+        Some(DixValue::Timestamp(_)) => MdixType::Timestamp,
+        Some(DixValue::HexColor(_))  => MdixType::HexColor,
+        Some(DixValue::Blob(_))      => MdixType::Blob,
+        Some(DixValue::Regex(_))     => MdixType::Regex,
+        Some(DixValue::Array(_))     => MdixType::Array,
+        Some(DixValue::Object(_))    => MdixType::Object,
+        Some(DixValue::Tuple(_))     => MdixType::Tuple,
+        Some(DixValue::Enum { .. })  => MdixType::Enum,
     }
 }
 

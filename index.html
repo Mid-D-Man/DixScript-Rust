@@ -45,6 +45,8 @@
     a.ffi:hover .desc { color: #a371f7; }
     a.lsp:hover    { border-color: #58a6ff; color: #58a6ff; }
     a.lsp:hover .desc { color: #58a6ff; }
+    a.csharp:hover { border-color: #a371f7; color: #a371f7; }
+    a.csharp:hover .desc { color: #a371f7; }
 
     footer {
       margin-top: 24px; text-align: center;
@@ -99,8 +101,16 @@
         </div>
       </a>
 
+      <a class="csharp" href="csharp/">
+        <span class="icon">📦</span>
+        <div class="info">
+          <span class="label">C# Core Tests</span>
+          <span class="desc">dotnet test — MidManStudio.Mdix.Core managed + native tests</span>
+        </div>
+      </a>
+
     </div>
-    <footer>Trigger: push with --publish-* / --ffi / --lsp · workflow_dispatch for manual runs</footer>
+    <footer>Trigger: push with --publish-* / --ffi / --lsp / --mdix-cs · workflow_dispatch for manual runs</footer>
   </div>
 </body>
 </html>

@@ -1,0 +1,601 @@
+{
+  "build": "6",
+  "branch": "master",
+  "commit": "34fe1d41",
+  "date": "2026-03-13T18:08:41+01:00",
+  "dotnet": "7.0",
+  "summary": {
+    "total": 93,
+    "passed": 77,
+    "failed": 0,
+    "ignored": 16,
+    "duration_s": 0.105
+  },
+  "suites": [
+    {
+      "name": "MdixResultTests",
+      "passed": 40,
+      "failed": 0,
+      "ignored": 0,
+      "duration_s": 0.041,
+      "tests": [
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.UnwrapOrElse_DoesNotCallFactoryOnSuccess",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Tap_CallsActionAndReturnsOriginalOnSuccess",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.GenericResult_AndThen_Chains",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.ImplicitConversion_FromMdixError_CreatesErr",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.TapError_CallsActionOnFailure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.UnwrapOr_ReturnsValueOnSuccess",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.GenericResult_Map_TransformsSuccess",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Ensure_OnFailure_IsPassThrough",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.ErrorFactories_ProduceCorrectKind",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.GenericResult_TryAsync_WrapsExceptionAsErr",
+          "status": "passed",
+          "duration_ms": 13,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.AndThen_ShortCircuitsOnFailure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.UnwrapOrElse_CallsFactoryOnFailure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.GenericResult_Ok_IsSuccess",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Match_Func_ProjectsCorrectBranch",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.GenericResult_Try_WrapsSuccessAsOk",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.AndThen_ChainsResultOnSuccess",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Tap_DoesNotCallOnFailure",
+          "status": "passed",
+          "duration_ms": 15,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Or_ReturnsFallbackOnFailure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.GenericResult_Err_IsFailure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Err_CarriesError",
+          "status": "passed",
+          "duration_ms": 1,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.OrThrow_ReturnsValueOnSuccess",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Error_ThrowsOnSuccess",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Ok_SetsIsSuccessTrue",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Map_TransformsValueOnSuccess",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Or_ReturnsThisOnSuccess",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.GenericResult_Try_WrapsExceptionAsErr",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Match_Action_CallsFailureBranchOnErr",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.OrThrow_ThrowsMdixExceptionOnFailure",
+          "status": "passed",
+          "duration_ms": 4,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.TapError_DoesNotCallOnSuccess",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.GenericResult_OrThrow_ThrowsResultUnwrapExceptionOnFailure",
+          "status": "passed",
+          "duration_ms": 1,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.SuccessResult_ThrowsOnFailure",
+          "status": "passed",
+          "duration_ms": 1,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Match_Action_CallsSuccessBranchOnOk",
+          "status": "passed",
+          "duration_ms": 1,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.GenericResult_TryAsync_WrapsSuccessAsOk",
+          "status": "passed",
+          "duration_ms": 4,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Err_SetsIsFailureTrue",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.NotFound_IncludesPathInMessage",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Ensure_PassingPredicate_ReturnsSameOk",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Ok_CarriesValue",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Map_ForwardsErrorUnchangedOnFailure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.Ensure_FailingPredicate_ConvertsToErr",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixResultTests.UnwrapOr_ReturnsFallbackOnFailure",
+          "status": "passed",
+          "duration_ms": 1,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "MdixDatabaseTests",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 16,
+      "duration_s": 0.016,
+      "tests": [
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.LoadStr_ValidSource_Succeeds",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.GetValueType_ReturnsCorrectDiscriminants",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.Exists_PresentPath_ReturnsTrue",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.GetInt_MissingPath_ReturnsErr",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.Validate_PassesForMatchingSchema",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.GetString_AfterDispose_ReturnsDisposedErr",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.Validate_FailsForTypeMismatch",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.GetBool_KnownPath_ReturnsValue",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.AsDynamic_ScalarAccess_Works",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.GetInt_KnownPath_ReturnsValue",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.LoadStr_EmptySource_ReturnsErr",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.Validate_FailsForMissingRequiredField",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.LoadStr_MalformedSource_ReturnsParseErr",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.Exists_AbsentPath_ReturnsFalse",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.GetString_KnownPath_ReturnsValue",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixDatabaseTests.Dispose_CalledTwice_DoesNotThrow",
+          "status": "ignored",
+          "duration_ms": 1,
+          "output": "Requires native mdix_ffi \u2014 run 'cargo build -p mdix-ffi' and copy the library next to the test assembly."
+        }
+      ]
+    },
+    {
+      "name": "MdixBuilderTests",
+      "passed": 37,
+      "failed": 0,
+      "ignored": 0,
+      "duration_s": 0.048,
+      "tests": [
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Create_ReturnsUsableBuilder",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithDate_ProducesDateFormat",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Config_Author_AppearsInOutput",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithBool_ProducesLiterals",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithTableProperties_ProducesSingleColonSyntax",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.EmptyBuilder_ProducesEmptyOrWhitespace",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithGroupArray_Objects_ProducesMultilineLayout",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithObject_ProducesObjectLiteral",
+          "status": "passed",
+          "duration_ms": 1,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Enums_EmptyFieldList_ThrowsArgumentException",
+          "status": "passed",
+          "duration_ms": 2,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithInt_ProducesIntegerLiteral",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Config_AfterDispose_ThrowsObjectDisposedException",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithGroupArray_Simple_ProducesDoubleColonSyntax",
+          "status": "passed",
+          "duration_ms": 1,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.EmptyData_IsOmittedFromOutput",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.AllThreeSections_AppearInCorrectOrder",
+          "status": "passed",
+          "duration_ms": 1,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.EmptyConfig_IsOmittedFromOutput",
+          "status": "passed",
+          "duration_ms": 14,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Config_Created_FormatsAsIso8601",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Serialize_AfterDispose_ThrowsObjectDisposedException",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithFloat_ProducesFSuffix",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithHexColor_ProducesUnquotedHex",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithString_ProducesQuotedValue",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithBlob_ProducesBlobSyntax",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Config_Version_AppearsInOutput",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Enums_ExplicitValues_AppearsInOutput",
+          "status": "passed",
+          "duration_ms": 5,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.TwoTier_FlatThenGrouped_IsValid",
+          "status": "passed",
+          "duration_ms": 1,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithBlob_RejectsInvalidBase64",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithEnum_ProducesDotNotation",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Enums_AutoIncrement_AppearsInOutput",
+          "status": "passed",
+          "duration_ms": 1,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithRegex_ProducesRegexSyntax",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Dispose_CalledTwice_DoesNotThrow",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_AfterDispose_ThrowsObjectDisposedException",
+          "status": "passed",
+          "duration_ms": 9,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithHexColor_RejectsNonHashPrefix",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.TwoTier_FlatAfterGrouped_ThrowsImmediately",
+          "status": "passed",
+          "duration_ms": 13,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithArray_ProducesArrayLiteral",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Config_Custom_AppearsInOutput",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithTuple_FiveElements_ThrowsArgumentException",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithTuple_ProducesTupleSyntax",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Data_WithDouble_ProducesNoFSuffix",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    }
+  ]
+}

@@ -50,12 +50,27 @@
     .summary-card.total   .value { color: #e6edf3; }
     .summary-card.duration .value { color: #79c0ff; font-size: 1.2rem; }
 
-    .banner {
-      background: #161b22; border: 1px solid #30363d; border-left: 3px solid #a371f7;
+    /* Dynamic status banner */
+    .status-banner {
       border-radius: 8px; padding: 12px 16px;
-      font-size: 0.8rem; color: #8b949e; margin-bottom: 24px;
+      font-size: 0.82rem; margin-bottom: 24px;
+      display: flex; align-items: center; gap: 10px;
     }
-    .banner strong { color: #d29922; }
+    .status-banner.all-pass {
+      background: #0f2d1a; border: 1px solid #3fb950; border-left: 3px solid #3fb950;
+      color: #3fb950;
+    }
+    .status-banner.has-fail {
+      background: #2d0f0f; border: 1px solid #f85149; border-left: 3px solid #f85149;
+      color: #f85149;
+    }
+    .status-banner.has-skip {
+      background: #1c1a0f; border: 1px solid #d29922; border-left: 3px solid #d29922;
+      color: #d29922;
+    }
+    .status-banner .icon { font-size: 1.1rem; flex-shrink: 0; }
+    .status-banner .msg { color: #e6edf3; }
+    .status-banner .msg strong { color: inherit; }
 
     .filter-bar {
       display: flex; align-items: center; gap: 10px;
@@ -119,12 +134,14 @@
       flex: 1; font-family: 'Cascadia Code', 'Fira Code', monospace;
       color: #c9d1d9; word-break: break-all;
     }
+    /* Strip the class prefix from test names for readability */
+    .test-name .class-prefix { color: #484f58; }
+
     .test-dur {
       flex-shrink: 0; color: #484f58; font-size: 0.72rem;
       min-width: 48px; text-align: right; margin-top: 2px;
     }
 
-    /* Output / skip-reason panel */
     .test-output {
       margin: 4px 18px 10px calc(18px + 56px + 12px);
       background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
@@ -133,7 +150,6 @@
       font-size: 0.75rem; white-space: pre-wrap; word-break: break-all;
       display: none;
     }
-    /* failures → red; skip reasons → amber */
     .test-output.output-fail   { color: #f85149; }
     .test-output.output-skip   { color: #d29922; }
 
@@ -168,17 +184,17 @@
   <div class="page-header">
     <h1>MidManStudio.Mdix.Core — Test Results</h1>
     <div class="meta">
-      <span>🔢 Build <strong style="color:#e6edf3">#BUILD_NUM_PLACEHOLDER</strong></span>
-      <span>🌿 <strong style="color:#e6edf3">BRANCH_PLACEHOLDER</strong></span>
-      <span>📝 <code style="color:#e6edf3">COMMIT_PLACEHOLDER</code></span>
-      <span>🕐 DATE_PLACEHOLDER</span>
+      <span>🔢 Build <strong id="meta-build" style="color:#e6edf3">—</strong></span>
+      <span>🌿 <strong id="meta-branch" style="color:#e6edf3">—</strong></span>
+      <span>📝 <code id="meta-commit" style="color:#e6edf3">—</code></span>
+      <span>☕ .NET <strong id="meta-dotnet" style="color:#e6edf3">—</strong></span>
+      <span>🕐 <span id="meta-date">—</span></span>
     </div>
   </div>
 
-  <div class="banner">
-    <strong>Note:</strong> Tests requiring the native <code>mdix_ffi</code> library are marked
-    <strong style="color:#d29922">ignored (skipped)</strong> in managed-only CI.
-    Run <code>cargo build -p mdix-ffi</code> and copy the library next to the test assembly to enable them.
+  <div id="status-banner" style="display:none" class="status-banner">
+    <span class="icon" id="banner-icon"></span>
+    <span class="msg" id="banner-msg"></span>
   </div>
 
   <div id="summary-grid" class="summary-grid" style="display:none">
@@ -231,7 +247,7 @@
   async function init() {
     try {
       const resp = await fetch('test-results.json');
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} — test-results.json not found`);
       allData = await resp.json();
       renderPage(allData);
     } catch (e) {
@@ -245,15 +261,54 @@
   function renderPage(data) {
     document.getElementById('loading').style.display = 'none';
 
+    // ── Meta ──────────────────────────────────────────────────────────────────
+    document.getElementById('meta-build') .textContent = data.build  || '—';
+    document.getElementById('meta-branch').textContent = data.branch || '—';
+    document.getElementById('meta-commit').textContent = data.commit || '—';
+    document.getElementById('meta-dotnet').textContent = data.dotnet || '—';
+
+    const raw = data.date || '';
+    document.getElementById('meta-date').textContent =
+      raw ? new Date(raw).toUTCString() : '—';
+
+    // ── Summary grid ──────────────────────────────────────────────────────────
     const s = data.summary || {};
-    document.getElementById('val-total').textContent    = s.total    ?? 0;
-    document.getElementById('val-passed').textContent   = s.passed   ?? 0;
-    document.getElementById('val-failed').textContent   = s.failed   ?? 0;
-    document.getElementById('val-ignored').textContent  = s.ignored  ?? 0;
+    const total   = s.total   ?? 0;
+    const passed  = s.passed  ?? 0;
+    const failed  = s.failed  ?? 0;
+    const ignored = s.ignored ?? 0;
+
+    document.getElementById('val-total')   .textContent = total;
+    document.getElementById('val-passed')  .textContent = passed;
+    document.getElementById('val-failed')  .textContent = failed;
+    document.getElementById('val-ignored') .textContent = ignored;
     document.getElementById('val-duration').textContent = fmtDur(s.duration_s ?? 0);
     document.getElementById('summary-grid').style.display = '';
-    document.getElementById('content').style.display = '';
 
+    // ── Status banner ─────────────────────────────────────────────────────────
+    const banner  = document.getElementById('status-banner');
+    const bIcon   = document.getElementById('banner-icon');
+    const bMsg    = document.getElementById('banner-msg');
+
+    if (failed > 0) {
+      banner.className = 'status-banner has-fail';
+      bIcon.textContent = '✗';
+      bMsg.innerHTML = `<strong>${failed} test${failed !== 1 ? 's' : ''} failed</strong> — expand the suite below to see details.`;
+    } else if (ignored > 0) {
+      banner.className = 'status-banner has-skip';
+      bIcon.textContent = '⊘';
+      bMsg.innerHTML =
+        `All <strong>${passed}</strong> runnable tests passed. ` +
+        `<strong>${ignored}</strong> test${ignored !== 1 ? 's' : ''} skipped — ` +
+        `run <code>cargo build -p mdix-ffi</code> and copy the library next to the test assembly to enable them.`;
+    } else {
+      banner.className = 'status-banner all-pass';
+      bIcon.textContent = '✓';
+      bMsg.innerHTML = `All <strong>${passed}</strong> tests passed.`;
+    }
+    banner.style.display = 'flex';
+
+    document.getElementById('content').style.display = '';
     renderSuites();
   }
 
@@ -276,7 +331,8 @@
 
       const block = document.createElement('div');
       block.className = 'suite-block';
-      if (suite.failed > 0) block.classList.add('open');
+      // Auto-open suites with failures, or when searching/filtering
+      if (suite.failed > 0 || curFilter !== 'all' || curSearch) block.classList.add('open');
 
       const passCount   = tests.filter(t => t.status === 'passed').length;
       const failCount   = tests.filter(t => t.status === 'failed').length;
@@ -295,30 +351,49 @@
             <span class="chevron">▶</span>
           </div>
         </div>
-        <div class="suite-tests">${buildTests(tests)}</div>`;
+        <div class="suite-tests">${buildTests(tests, suite.name)}</div>`;
 
       container.appendChild(block);
     }
 
     document.getElementById('no-results').style.display = anyShown ? 'none' : '';
 
-    // re-attach output toggles
     container.querySelectorAll('.test-row.has-output').forEach(row => {
       row.addEventListener('click', () => row.classList.toggle('expanded'));
     });
   }
 
-  function buildTests(tests) {
+  function buildTests(tests, suiteName) {
+    // Strip the fully-qualified prefix that xunit puts in test names,
+    // keeping only the method name for readability.
+    // e.g. "MidManStudio.Mdix.Core.Tests.MdixBuilderTests.Create_ReturnsUsableBuilder"
+    //   →  class prefix dim, method name bright
+    const suitePrefix = suiteName + '.';
+
     return tests.map(t => {
       const output    = (t.output || '').trim();
       const hasOutput = output.length > 0;
+      const outClass  = t.status === 'ignored' ? 'output-skip' : 'output-fail';
+      const rowClass  = `test-row${hasOutput ? ' has-output' : ''}`;
+      const dur       = t.duration_ms != null ? `${t.duration_ms}ms` : '';
+      const label     = t.status === 'ignored' ? 'skip' : t.status;
 
-      // Choose colour class for the output panel
-      const outClass = t.status === 'ignored' ? 'output-skip' : 'output-fail';
-
-      const rowClass = `test-row${hasOutput ? ' has-output' : ''}`;
-      const dur      = t.duration_ms != null ? `${t.duration_ms}ms` : '';
-      const label    = t.status === 'ignored' ? 'skip' : t.status;
+      // Split display name: dim the suite-class prefix, highlight the method
+      let displayName;
+      if (t.name.startsWith(suitePrefix)) {
+        const method = t.name.slice(suitePrefix.length);
+        displayName = `<span class="class-prefix">${esc(suiteName)}.</span>${esc(method)}`;
+      } else {
+        // May have a longer fully-qualified name — trim everything up to the last dot
+        const lastDot = t.name.lastIndexOf('.');
+        if (lastDot > 0) {
+          const prefix = t.name.slice(0, lastDot + 1);
+          const method = t.name.slice(lastDot + 1);
+          displayName = `<span class="class-prefix">${esc(prefix)}</span>${esc(method)}`;
+        } else {
+          displayName = esc(t.name);
+        }
+      }
 
       const outPanel = hasOutput
         ? `<div class="test-output ${outClass}">${esc(output)}</div>`
@@ -327,7 +402,7 @@
       return `
         <div class="${rowClass}">
           <span class="test-status ${t.status}">${label}</span>
-          <span class="test-name">${esc(t.name)}</span>
+          <span class="test-name">${displayName}</span>
           <span class="test-dur">${dur}</span>
         </div>${outPanel}`;
     }).join('');
@@ -372,4 +447,4 @@
   init();
 </script>
 </body>
-</html>
+    </html>

@@ -10,79 +10,74 @@ namespace MidManStudio.Mdix.Core.Tests
     /// To run locally:
     ///   1. cargo build -p mdix-ffi
     ///   2. Copy the resulting .dll/.so/.dylib next to the test assembly
-    ///   3. Remove the Skip attribute below
     ///
-    /// All tests are marked Skip so managed-only CI passes without the native binary.
+    /// In CI these tests run after the FFI is built and copied automatically.
     /// </summary>
     public class MdixDatabaseTests
     {
-        private const string Skip =
-            "Requires native mdix_ffi — run 'cargo build -p mdix-ffi' " +
-            "and copy the library next to the test assembly.";
-
-        [Fact(Skip = Skip)]
+        [Fact]
         public void LoadStr_ValidSource_Succeeds()
         {
             using var db = Dix.LoadStr("@DATA( x = 1 )").OrThrow();
             db.IsValid.Should().BeTrue();
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void LoadStr_EmptySource_ReturnsErr()
         {
             Dix.LoadStr("").IsFailure.Should().BeTrue();
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void LoadStr_MalformedSource_ReturnsParseErr()
         {
             var r = Dix.LoadStr("@@@INVALID$$$");
             r.IsFailure.Should().BeTrue();
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void GetString_KnownPath_ReturnsValue()
         {
             using var db = Dix.LoadStr("@DATA( greeting = \"hello\" )").OrThrow();
             db.GetString("greeting").OrThrow().Should().Be("hello");
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void GetInt_KnownPath_ReturnsValue()
         {
             using var db = Dix.LoadStr("@DATA( port = 8080 )").OrThrow();
             db.GetInt("port").OrThrow().Should().Be(8080);
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void GetBool_KnownPath_ReturnsValue()
         {
             using var db = Dix.LoadStr("@DATA( flag = true )").OrThrow();
             db.GetBool("flag").OrThrow().Should().BeTrue();
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void GetInt_MissingPath_ReturnsErr()
         {
             using var db = Dix.LoadStr("@DATA( x = 1 )").OrThrow();
             db.GetInt("does_not_exist").IsFailure.Should().BeTrue();
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void Exists_PresentPath_ReturnsTrue()
         {
             using var db = Dix.LoadStr("@DATA( x = 1 )").OrThrow();
             db.Exists("x").Should().BeTrue();
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void Exists_AbsentPath_ReturnsFalse()
         {
             using var db = Dix.LoadStr("@DATA( x = 1 )").OrThrow();
             db.Exists("missing").Should().BeFalse();
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void GetValueType_ReturnsCorrectDiscriminants()
         {
             using var db = Dix.LoadStr(
@@ -93,7 +88,7 @@ namespace MidManStudio.Mdix.Core.Tests
             db.GetValueType("missing").Should().Be(MdixValueType.Unknown);
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void Dispose_CalledTwice_DoesNotThrow()
         {
             var db = Dix.LoadStr("@DATA( x = 1 )").OrThrow();
@@ -102,7 +97,7 @@ namespace MidManStudio.Mdix.Core.Tests
             act.Should().NotThrow();
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void GetString_AfterDispose_ReturnsDisposedErr()
         {
             var db = Dix.LoadStr("@DATA( x = \"val\" )").OrThrow();
@@ -110,7 +105,7 @@ namespace MidManStudio.Mdix.Core.Tests
             db.GetString("x").Error.Kind.Should().Be(MdixErrorKind.Disposed);
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void AsDynamic_ScalarAccess_Works()
         {
             using var db = Dix.LoadStr("@DATA( port = 9000 )").OrThrow();
@@ -119,7 +114,7 @@ namespace MidManStudio.Mdix.Core.Tests
             port.Should().Be(9000);
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void Validate_PassesForMatchingSchema()
         {
             using var db = Dix.LoadStr("@DATA( port = 8080 )").OrThrow();
@@ -127,7 +122,7 @@ namespace MidManStudio.Mdix.Core.Tests
               .IsValid.Should().BeTrue();
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void Validate_FailsForMissingRequiredField()
         {
             using var db = Dix.LoadStr("@DATA( x = 1 )").OrThrow();
@@ -137,7 +132,7 @@ namespace MidManStudio.Mdix.Core.Tests
             report.Errors[0].Kind.Should().Be(MdixValidationErrorKind.Missing);
         }
 
-        [Fact(Skip = Skip)]
+        [Fact]
         public void Validate_FailsForTypeMismatch()
         {
             using var db = Dix.LoadStr("@DATA( port = 8080 )").OrThrow();

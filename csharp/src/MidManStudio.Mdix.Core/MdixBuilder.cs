@@ -11,13 +11,11 @@ namespace MidManStudio.Mdix.Core
 {
     // ══════════════════════════════════════════════════════════════════════════
     // Internal value-entry types used by DataBuilder and the serializer.
-    // These are the equivalent of TupleValue / EnumValue / BlobValue / RegexValue
-    // from the C# reference implementation.
     // ══════════════════════════════════════════════════════════════════════════
 
     internal sealed record DixHexEntry(string Hex);
-    internal sealed record DixDateEntry(string Formatted);          // already YYYY-MM-DD
-    internal sealed record DixTimestampEntry(string Formatted);     // already ISO 8601
+    internal sealed record DixDateEntry(string Formatted);
+    internal sealed record DixTimestampEntry(string Formatted);
     internal sealed record DixEnumEntry(string EnumName, string FieldName);
     internal sealed record DixBlobEntry(string Base64);
     internal sealed record DixRegexEntry(string Pattern);
@@ -25,10 +23,6 @@ namespace MidManStudio.Mdix.Core
 
     // ══════════════════════════════════════════════════════════════════════════
     // MdixBuilder — top-level fluent builder
-    //
-    // Mirrors DixDataBuilder from the C# reference implementation.
-    // Pure C# — no native handle, no unsafe code, no DangerousAddRef.
-    // Serializes to .mdix string and writes to disk directly.
     // ══════════════════════════════════════════════════════════════════════════
 
     /// <summary>
@@ -70,16 +64,16 @@ namespace MidManStudio.Mdix.Core
         public static MdixBuilder Create() => new MdixBuilder();
 
         /// <summary>
-        /// Creates a builder pre-populated with flat DATA entries copied from a
-        /// loaded <see cref="MdixDatabase"/>. Only DATA values are copied —
-        /// @CONFIG and @ENUMS start empty (the database does not store them at runtime).
+        /// Creates a builder pre-populated with flat DATA entries copied from a loaded
+        /// <see cref="MdixDatabase"/>. Only DATA values are copied — @CONFIG and @ENUMS
+        /// start empty.
         /// </summary>
         public static MdixResult<MdixBuilder> FromDatabase(MdixDatabase db)
         {
             if (db is null) return MdixError.NativeError("FromDatabase: db cannot be null.");
 
-            var builder     = Create();
-            var keysResult  = db.GetKeys();
+            var builder    = Create();
+            var keysResult = db.GetKeys();
             if (keysResult.IsFailure) return MdixResult<MdixBuilder>.Err(keysResult.Error);
 
             var err = CopyKeysIntoData(db, builder._data, keysResult.SuccessResult);
@@ -138,9 +132,7 @@ namespace MidManStudio.Mdix.Core
 
         #region Serialization and Persistence
 
-        /// <summary>
-        /// Serializes all sections to a <c>.mdix</c> format string.
-        /// </summary>
+        /// <summary>Serializes all sections to a <c>.mdix</c> format string.</summary>
         public MdixResult<string> Serialize()
         {
             ThrowIfDisposed();
@@ -176,7 +168,8 @@ namespace MidManStudio.Mdix.Core
             {
                 var dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                File.WriteAllText(path, ser.SuccessResult, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                File.WriteAllText(path, ser.SuccessResult,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
                 return MdixResult<Unit>.Ok(Unit.Value);
             }
             catch (Exception ex)
@@ -205,9 +198,9 @@ namespace MidManStudio.Mdix.Core
         #region Private Helpers
 
         private static MdixError? CopyKeysIntoData(
-            MdixDatabase         db,
+            MdixDatabase           db,
             MdixDataSectionBuilder data,
-            string[]             keys)
+            string[]               keys)
         {
             foreach (var key in keys)
             {
@@ -288,33 +281,19 @@ namespace MidManStudio.Mdix.Core
     {
         internal readonly Dictionary<string, object> _entries = new Dictionary<string, object>();
 
-        public MdixConfigBuilder WithVersion(string version)
-            => Set("version", version);
+        public MdixConfigBuilder WithVersion(string version)        => Set("version", version);
+        public MdixConfigBuilder WithAuthor(string author)          => Set("author", author);
+        public MdixConfigBuilder WithEncoding(string encoding)      => Set("encoding", encoding);
+        public MdixConfigBuilder WithFeatures(string features)      => Set("features", features);
+        public MdixConfigBuilder WithDebugMode(string debugMode)    => Set("debug_mode", debugMode);
+        public MdixConfigBuilder WithErrorHandling(string eh)       => Set("error_handling", eh);
+        public MdixConfigBuilder WithCompatibilityMode(string mode) => Set("compatibility_mode", mode);
 
-        public MdixConfigBuilder WithAuthor(string author)
-            => Set("author", author);
-
-        public MdixConfigBuilder WithEncoding(string encoding)
-            => Set("encoding", encoding);
-
-        public MdixConfigBuilder WithFeatures(string features)
-            => Set("features", features);
-
-        public MdixConfigBuilder WithDebugMode(string debugMode)
-            => Set("debug_mode", debugMode);
-
-        public MdixConfigBuilder WithErrorHandling(string errorHandling)
-            => Set("error_handling", errorHandling);
-
-        public MdixConfigBuilder WithCompatibilityMode(string mode)
-            => Set("compatibility_mode", mode);
-
-        public MdixConfigBuilder WithCreated(DateTime created)
-            => Set("created", created.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
+        public MdixConfigBuilder WithCreated(DateTime created) =>
+            Set("created", created.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
 
         /// <summary>Adds a custom config entry not covered by the typed helpers.</summary>
-        public MdixConfigBuilder WithCustom(string key, string value)
-            => Set(key, value);
+        public MdixConfigBuilder WithCustom(string key, string value) => Set(key, value);
 
         private MdixConfigBuilder Set(string key, object value)
         {
@@ -332,19 +311,45 @@ namespace MidManStudio.Mdix.Core
         internal readonly List<(string Name, List<(string Field, int? Value)> Fields)> _enums
             = new List<(string, List<(string, int?)>)>();
 
+        // ── Zero-argument overload ────────────────────────────────────────────
+        //
+        // WHY THIS EXISTS:
+        // Both params-overloads below accept zero extra arguments (empty arrays),
+        // so a call like WithEnum("Empty") is ambiguous to the compiler.
+        // A non-params overload that matches the exact signature (string only)
+        // is always preferred over a params overload, resolving the ambiguity.
+        // We still throw ArgumentException because an enum with no fields is invalid.
+
+        /// <summary>
+        /// Always throws <see cref="ArgumentException"/> — an enum must have at
+        /// least one field. This overload exists solely to resolve the compile-time
+        /// ambiguity between the two <c>params</c> overloads when called with no
+        /// extra arguments.
+        /// </summary>
+        public MdixEnumsBuilder WithEnum(string enumName)
+        {
+            throw new ArgumentException("Enum must have at least one field.", nameof(enumName));
+        }
+
+        // ── Auto-increment overload ───────────────────────────────────────────
+
         /// <summary>
         /// Adds an enum with auto-incrementing values starting at 0.
         /// <code>e.WithEnum("AIType", "PASSIVE", "NEUTRAL", "AGGRESSIVE", "BOSS")</code>
         /// </summary>
         public MdixEnumsBuilder WithEnum(string enumName, params string[] fieldNames)
         {
-            if (string.IsNullOrEmpty(enumName)) throw new ArgumentException("Enum name cannot be empty.", nameof(enumName));
-            if (fieldNames == null || fieldNames.Length == 0) throw new ArgumentException("Enum must have at least one field.", nameof(fieldNames));
+            if (string.IsNullOrEmpty(enumName))
+                throw new ArgumentException("Enum name cannot be empty.", nameof(enumName));
+            if (fieldNames == null || fieldNames.Length == 0)
+                throw new ArgumentException("Enum must have at least one field.", nameof(fieldNames));
 
             var fields = fieldNames.Select(n => (n, (int?)null)).ToList();
             _enums.Add((enumName, fields));
             return this;
         }
+
+        // ── Explicit-value overload ───────────────────────────────────────────
 
         /// <summary>
         /// Adds an enum with explicit integer values.
@@ -352,8 +357,10 @@ namespace MidManStudio.Mdix.Core
         /// </summary>
         public MdixEnumsBuilder WithEnum(string enumName, params (string Field, int Value)[] fields)
         {
-            if (string.IsNullOrEmpty(enumName)) throw new ArgumentException("Enum name cannot be empty.", nameof(enumName));
-            if (fields == null || fields.Length == 0) throw new ArgumentException("Enum must have at least one field.", nameof(fields));
+            if (string.IsNullOrEmpty(enumName))
+                throw new ArgumentException("Enum name cannot be empty.", nameof(enumName));
+            if (fields == null || fields.Length == 0)
+                throw new ArgumentException("Enum must have at least one field.", nameof(fields));
 
             var fieldList = fields.Select(f => (f.Field, (int?)f.Value)).ToList();
             _enums.Add((enumName, fieldList));
@@ -367,37 +374,29 @@ namespace MidManStudio.Mdix.Core
 
     public sealed class MdixDataSectionBuilder
     {
-        // Ordered flat properties — use List<KV> to guarantee insertion order.
         internal readonly List<KeyValuePair<string, object>> _flatProperties
             = new List<KeyValuePair<string, object>>();
 
-        internal readonly List<MdixTableEntry>  _tableProperties = new List<MdixTableEntry>();
-        internal readonly List<MdixGroupEntry>  _groupArrays     = new List<MdixGroupEntry>();
+        internal readonly List<MdixTableEntry> _tableProperties = new List<MdixTableEntry>();
+        internal readonly List<MdixGroupEntry> _groupArrays     = new List<MdixGroupEntry>();
 
         private bool _hasSeenGroupedData;
 
         // ── Flat properties ───────────────────────────────────────────────────
 
-        public MdixDataSectionBuilder WithInt(string name, int value)
-            => AddFlat(name, value);
+        public MdixDataSectionBuilder WithInt(string name, int value)       => AddFlat(name, value);
+        public MdixDataSectionBuilder WithFloat(string name, float value)   => AddFlat(name, value);
+        public MdixDataSectionBuilder WithDouble(string name, double value) => AddFlat(name, value);
+        public MdixDataSectionBuilder WithString(string name, string value) => AddFlat(name, value);
+        public MdixDataSectionBuilder WithBool(string name, bool value)     => AddFlat(name, value);
 
-        public MdixDataSectionBuilder WithFloat(string name, float value)
-            => AddFlat(name, value);
+        public MdixDataSectionBuilder WithDate(string name, DateTime value) =>
+            AddFlat(name, new DixDateEntry(value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
 
-        public MdixDataSectionBuilder WithDouble(string name, double value)
-            => AddFlat(name, value);
-
-        public MdixDataSectionBuilder WithString(string name, string value)
-            => AddFlat(name, value);
-
-        public MdixDataSectionBuilder WithBool(string name, bool value)
-            => AddFlat(name, value);
-
-        public MdixDataSectionBuilder WithDate(string name, DateTime value)
-            => AddFlat(name, new DixDateEntry(value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
-
-        public MdixDataSectionBuilder WithTimestamp(string name, DateTime value)
-            => AddFlat(name, new DixTimestampEntry(value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)));
+        public MdixDataSectionBuilder WithTimestamp(string name, DateTime value) =>
+            AddFlat(name, new DixTimestampEntry(
+                value.ToUniversalTime()
+                     .ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)));
 
         public MdixDataSectionBuilder WithHexColor(string name, string hexValue)
         {
@@ -406,33 +405,36 @@ namespace MidManStudio.Mdix.Core
             return AddFlat(name, new DixHexEntry(hexValue));
         }
 
-        public MdixDataSectionBuilder WithEnum(string name, string enumName, string fieldName)
-            => AddFlat(name, new DixEnumEntry(enumName, fieldName));
+        public MdixDataSectionBuilder WithEnum(string name, string enumName, string fieldName) =>
+            AddFlat(name, new DixEnumEntry(enumName, fieldName));
 
         public MdixDataSectionBuilder WithBlob(string name, string base64Data)
         {
-            // Validate base64
-            try { Convert.FromBase64String(base64Data); }
-            catch (FormatException ex) { throw new ArgumentException($"Invalid base64 blob data: {ex.Message}", nameof(base64Data), ex); }
+            try   { Convert.FromBase64String(base64Data); }
+            catch (FormatException ex)
+            {
+                throw new ArgumentException($"Invalid base64 blob data: {ex.Message}",
+                    nameof(base64Data), ex);
+            }
             return AddFlat(name, new DixBlobEntry(base64Data));
         }
 
         public MdixDataSectionBuilder WithRegex(string name, string pattern)
         {
-            try { _ = new System.Text.RegularExpressions.Regex(pattern); }
-            catch (ArgumentException ex) { throw new ArgumentException($"Invalid regex pattern: {ex.Message}", nameof(pattern), ex); }
+            try   { _ = new System.Text.RegularExpressions.Regex(pattern); }
+            catch (ArgumentException ex)
+            {
+                throw new ArgumentException($"Invalid regex pattern: {ex.Message}",
+                    nameof(pattern), ex);
+            }
             return AddFlat(name, new DixRegexEntry(pattern));
         }
 
-        /// <summary>
-        /// Adds a homogeneous array. All items must be the same type.
-        /// </summary>
-        public MdixDataSectionBuilder WithArray<T>(string name, IEnumerable<T> items)
-            => AddFlat(name, items.Cast<object>().ToList());
+        /// <summary>Adds a homogeneous array. All items must be the same type.</summary>
+        public MdixDataSectionBuilder WithArray<T>(string name, IEnumerable<T> items) =>
+            AddFlat(name, items.Cast<object>().ToList());
 
-        /// <summary>
-        /// Adds a tuple (max 4 elements, mixed types allowed).
-        /// </summary>
+        /// <summary>Adds a tuple (max 4 elements, mixed types allowed).</summary>
         public MdixDataSectionBuilder WithTuple(string name, params object[] values)
         {
             if (values.Length > 4)
@@ -440,9 +442,7 @@ namespace MidManStudio.Mdix.Core
             return AddFlat(name, new DixTupleEntry(values.ToList()));
         }
 
-        /// <summary>
-        /// Adds a nested object literal as a flat property.
-        /// </summary>
+        /// <summary>Adds a nested object literal as a flat property.</summary>
         public MdixDataSectionBuilder WithObject(string name, Action<MdixObjectBuilder> configure)
         {
             var builder = new MdixObjectBuilder();
@@ -454,10 +454,10 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Adds a table property block (single-colon syntax).
-        /// <code>d.WithTableProperties("server", t => t.WithString("host", "localhost").WithInt("port", 8080))</code>
         /// Serializes as: <c>server: host = "localhost", port = 8080</c>
         /// </summary>
-        public MdixDataSectionBuilder WithTableProperties(string path, Action<MdixTablePropertiesBuilder> configure)
+        public MdixDataSectionBuilder WithTableProperties(
+            string path, Action<MdixTablePropertiesBuilder> configure)
         {
             _hasSeenGroupedData = true;
             var builder = new MdixTablePropertiesBuilder();
@@ -468,7 +468,6 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Adds a group array (double-colon syntax) from a typed collection.
-        /// <code>d.WithGroupArray("tags", new[] { "alpha", "beta" })</code>
         /// Serializes as: <c>tags:: "alpha", "beta"</c>
         /// </summary>
         public MdixDataSectionBuilder WithGroupArray<T>(string path, IEnumerable<T> items)
@@ -480,13 +479,9 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Adds a group array (double-colon syntax) using a builder for complex items.
-        /// <code>
-        /// d.WithGroupArray("enemies", a => a
-        ///     .AddObject(o => o.WithString("name", "Goblin").WithInt("hp", 50))
-        ///     .AddObject(o => o.WithString("name", "Orc").WithInt("hp", 100)))
-        /// </code>
         /// </summary>
-        public MdixDataSectionBuilder WithGroupArray(string path, Action<MdixGroupArrayBuilder> configure)
+        public MdixDataSectionBuilder WithGroupArray(
+            string path, Action<MdixGroupArrayBuilder> configure)
         {
             _hasSeenGroupedData = true;
             var builder = new MdixGroupArrayBuilder();
@@ -518,20 +513,24 @@ namespace MidManStudio.Mdix.Core
         internal readonly List<KeyValuePair<string, object>> _properties
             = new List<KeyValuePair<string, object>>();
 
-        public MdixTablePropertiesBuilder WithInt(string name, int value)          => Add(name, value);
-        public MdixTablePropertiesBuilder WithFloat(string name, float value)      => Add(name, value);
-        public MdixTablePropertiesBuilder WithDouble(string name, double value)    => Add(name, value);
-        public MdixTablePropertiesBuilder WithString(string name, string value)    => Add(name, value);
-        public MdixTablePropertiesBuilder WithBool(string name, bool value)        => Add(name, value);
+        public MdixTablePropertiesBuilder WithInt(string name, int value)       => Add(name, value);
+        public MdixTablePropertiesBuilder WithFloat(string name, float value)   => Add(name, value);
+        public MdixTablePropertiesBuilder WithDouble(string name, double value) => Add(name, value);
+        public MdixTablePropertiesBuilder WithString(string name, string value) => Add(name, value);
+        public MdixTablePropertiesBuilder WithBool(string name, bool value)     => Add(name, value);
+
         public MdixTablePropertiesBuilder WithHexColor(string name, string hex)
         {
-            if (!hex.StartsWith("#")) throw new ArgumentException("Hex color must start with '#'.");
+            if (!hex.StartsWith("#"))
+                throw new ArgumentException("Hex color must start with '#'.");
             return Add(name, new DixHexEntry(hex));
         }
-        public MdixTablePropertiesBuilder WithEnum(string name, string enumName, string fieldName)
-            => Add(name, new DixEnumEntry(enumName, fieldName));
-        public MdixTablePropertiesBuilder WithDate(string name, DateTime value)
-            => Add(name, new DixDateEntry(value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+
+        public MdixTablePropertiesBuilder WithEnum(string name, string enumName, string fieldName) =>
+            Add(name, new DixEnumEntry(enumName, fieldName));
+
+        public MdixTablePropertiesBuilder WithDate(string name, DateTime value) =>
+            Add(name, new DixDateEntry(value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
 
         private MdixTablePropertiesBuilder Add(string name, object value)
         {
@@ -548,11 +547,12 @@ namespace MidManStudio.Mdix.Core
     {
         internal readonly List<object> _items = new List<object>();
 
-        public MdixGroupArrayBuilder AddString(string value)    { _items.Add(value);  return this; }
-        public MdixGroupArrayBuilder AddInt(int value)          { _items.Add(value);  return this; }
-        public MdixGroupArrayBuilder AddFloat(float value)      { _items.Add(value);  return this; }
-        public MdixGroupArrayBuilder AddDouble(double value)    { _items.Add(value);  return this; }
-        public MdixGroupArrayBuilder AddBool(bool value)        { _items.Add(value);  return this; }
+        public MdixGroupArrayBuilder AddString(string value) { _items.Add(value); return this; }
+        public MdixGroupArrayBuilder AddInt(int value)       { _items.Add(value); return this; }
+        public MdixGroupArrayBuilder AddFloat(float value)   { _items.Add(value); return this; }
+        public MdixGroupArrayBuilder AddDouble(double value) { _items.Add(value); return this; }
+        public MdixGroupArrayBuilder AddBool(bool value)     { _items.Add(value); return this; }
+
         public MdixGroupArrayBuilder AddEnum(string enumName, string fieldName)
         {
             _items.Add(new DixEnumEntry(enumName, fieldName));
@@ -580,26 +580,31 @@ namespace MidManStudio.Mdix.Core
     {
         internal readonly Dictionary<string, object> _properties = new Dictionary<string, object>();
 
-        public MdixObjectBuilder WithInt(string name, int value)          { _properties[name] = value;  return this; }
-        public MdixObjectBuilder WithFloat(string name, float value)      { _properties[name] = value;  return this; }
-        public MdixObjectBuilder WithDouble(string name, double value)    { _properties[name] = value;  return this; }
-        public MdixObjectBuilder WithString(string name, string value)    { _properties[name] = value;  return this; }
-        public MdixObjectBuilder WithBool(string name, bool value)        { _properties[name] = value;  return this; }
+        public MdixObjectBuilder WithInt(string name, int value)       { _properties[name] = value; return this; }
+        public MdixObjectBuilder WithFloat(string name, float value)   { _properties[name] = value; return this; }
+        public MdixObjectBuilder WithDouble(string name, double value) { _properties[name] = value; return this; }
+        public MdixObjectBuilder WithString(string name, string value) { _properties[name] = value; return this; }
+        public MdixObjectBuilder WithBool(string name, bool value)     { _properties[name] = value; return this; }
+
         public MdixObjectBuilder WithEnum(string name, string enumName, string fieldName)
         {
             _properties[name] = new DixEnumEntry(enumName, fieldName);
             return this;
         }
+
         public MdixObjectBuilder WithDate(string name, DateTime value)
         {
-            _properties[name] = new DixDateEntry(value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            _properties[name] = new DixDateEntry(
+                value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             return this;
         }
+
         public MdixObjectBuilder WithArray<T>(string name, IEnumerable<T> items)
         {
             _properties[name] = items.Cast<object>().ToList();
             return this;
         }
+
         public MdixObjectBuilder WithObject(string name, Action<MdixObjectBuilder> configure)
         {
             var b = new MdixObjectBuilder();
@@ -610,13 +615,14 @@ namespace MidManStudio.Mdix.Core
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Internal data containers for the section builders
+    // Internal data containers
     // ══════════════════════════════════════════════════════════════════════════
 
     internal sealed class MdixTableEntry
     {
         internal string Path { get; }
         internal IReadOnlyList<KeyValuePair<string, object>> Properties { get; }
+
         internal MdixTableEntry(string path, IReadOnlyList<KeyValuePair<string, object>> props)
         {
             Path       = path;
@@ -626,8 +632,9 @@ namespace MidManStudio.Mdix.Core
 
     internal sealed class MdixGroupEntry
     {
-        internal string Path  { get; }
+        internal string Path { get; }
         internal IReadOnlyList<object> Items { get; }
+
         internal MdixGroupEntry(string path, IReadOnlyList<object> items)
         {
             Path  = path;
@@ -647,11 +654,9 @@ namespace MidManStudio.Mdix.Core
             MdixDataSectionBuilder data)
         {
             var sb = new StringBuilder();
-
             AppendConfig(sb, config);
             AppendEnums(sb, enums);
             AppendData(sb, data);
-
             return sb.ToString().TrimEnd();
         }
 
@@ -660,7 +665,6 @@ namespace MidManStudio.Mdix.Core
         private static void AppendConfig(StringBuilder sb, MdixConfigBuilder config)
         {
             if (config._entries.Count == 0) return;
-
             sb.AppendLine("@CONFIG(");
             foreach (var kvp in config._entries)
                 sb.AppendLine($"  {kvp.Key} -> {FormatConfigValue(kvp.Value)}");
@@ -681,11 +685,11 @@ namespace MidManStudio.Mdix.Core
         private static void AppendEnums(StringBuilder sb, MdixEnumsBuilder enums)
         {
             if (enums._enums.Count == 0) return;
-
             sb.AppendLine("@ENUMS(");
             foreach (var (name, fields) in enums._enums)
             {
-                var parts = fields.Select(f => f.Value.HasValue ? $"{f.Field} = {f.Value}" : f.Field);
+                var parts = fields.Select(f =>
+                    f.Value.HasValue ? $"{f.Field} = {f.Value}" : f.Field);
                 sb.AppendLine($"  {name} {{ {string.Join(", ", parts)} }}");
             }
             sb.AppendLine(")");
@@ -702,21 +706,18 @@ namespace MidManStudio.Mdix.Core
 
             sb.AppendLine("@DATA(");
 
-            // Tier 1 — flat properties
             foreach (var kv in data._flatProperties)
                 sb.AppendLine($"  {kv.Key} = {FormatValue(kv.Value)}");
 
-            // Blank line between tiers if both present
             if (hasFlat && hasGroups) sb.AppendLine();
 
-            // Tier 2a — table properties (single colon)
             foreach (var table in data._tableProperties)
             {
-                var props = string.Join(", ", table.Properties.Select(p => $"{p.Key} = {FormatValue(p.Value)}"));
+                var props = string.Join(", ",
+                    table.Properties.Select(p => $"{p.Key} = {FormatValue(p.Value)}"));
                 sb.AppendLine($"  {table.Path}: {props}");
             }
 
-            // Tier 2b — group arrays (double colon)
             foreach (var arr in data._groupArrays)
             {
                 if (arr.Items.Count == 0)
@@ -725,7 +726,6 @@ namespace MidManStudio.Mdix.Core
                     continue;
                 }
 
-                // Use multiline layout when items contain object literals
                 bool isComplex = arr.Items.Any(i => i is Dictionary<string, object>);
                 if (isComplex)
                 {
@@ -750,35 +750,36 @@ namespace MidManStudio.Mdix.Core
 
         private static string FormatValue(object value) => value switch
         {
-            null                             => "null",
-            bool b                           => b ? "true" : "false",
-            int i                            => i.ToString(),
-            float f                          => f.ToString("G", CultureInfo.InvariantCulture) + "f",
-            double d                         => d.ToString("G", CultureInfo.InvariantCulture),
-            string s                         => $"\"{Escape(s)}\"",
-            DixHexEntry h                    => h.Hex,
-            DixDateEntry dt                  => dt.Formatted,
-            DixTimestampEntry ts             => ts.Formatted,
-            DixEnumEntry e                   => $"{e.EnumName}.{e.FieldName}",
-            DixBlobEntry b                   => $"b:(\"{b.Base64}\")",
-            DixRegexEntry r                  => $"r:(\"{Escape(r.Pattern)}\")",
-            DixTupleEntry t                  => $"t:({string.Join(", ", t.Values.Select(FormatValue))})",
-            List<object> arr                 => $"[{string.Join(", ", arr.Select(FormatValue))}]",
-            Dictionary<string, object> obj   => FormatObject(obj),
-            _                                => $"\"{Escape(value.ToString() ?? "")}\"",
+            null                           => "null",
+            bool b                         => b ? "true" : "false",
+            int i                          => i.ToString(),
+            float f                        => f.ToString("G", CultureInfo.InvariantCulture) + "f",
+            double d                       => d.ToString("G", CultureInfo.InvariantCulture),
+            string s                       => $"\"{Escape(s)}\"",
+            DixHexEntry h                  => h.Hex,
+            DixDateEntry dt                => dt.Formatted,
+            DixTimestampEntry ts           => ts.Formatted,
+            DixEnumEntry e                 => $"{e.EnumName}.{e.FieldName}",
+            DixBlobEntry b                 => $"b:(\"{b.Base64}\")",
+            DixRegexEntry r                => $"r:(\"{Escape(r.Pattern)}\")",
+            DixTupleEntry t                => $"t:({string.Join(", ", t.Values.Select(FormatValue))})",
+            List<object> arr               => $"[{string.Join(", ", arr.Select(FormatValue))}]",
+            Dictionary<string, object> obj => FormatObject(obj),
+            _                              => $"\"{Escape(value.ToString() ?? "")}\"",
         };
 
         private static string FormatObject(Dictionary<string, object> obj)
         {
-            var props = string.Join(", ", obj.Select(kv => $"{kv.Key} = {FormatValue(kv.Value)}"));
+            var props = string.Join(", ",
+                obj.Select(kv => $"{kv.Key} = {FormatValue(kv.Value)}"));
             return $"{{ {props} }}";
         }
 
         private static string Escape(string s) =>
             s.Replace("\\", "\\\\")
              .Replace("\"", "\\\"")
-             .Replace("\n",  "\\n")
-             .Replace("\r",  "\\r")
-             .Replace("\t",  "\\t");
+             .Replace("\n", "\\n")
+             .Replace("\r", "\\r")
+             .Replace("\t", "\\t");
     }
 }

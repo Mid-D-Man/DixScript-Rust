@@ -11,8 +11,6 @@ permissions:
   contents: write
   actions: read
 
-# ─────────────────────────────────────────────────────────────────────────────
-
 jobs:
 
   # ── 1. Check trigger ───────────────────────────────────────────────────────
@@ -244,13 +242,34 @@ jobs:
           for trx in trx_files:
               root = ET.parse(trx).getroot()
 
+              # ── Collect skip reasons from UnitTest definitions ──────────────
+              # xUnit writes the Skip reason into the Description attribute of
+              # the TestMethod element inside TestDefinitions. We index it by
+              # test id so we can attach it to the result row later.
+              skip_reasons = {}
+              for ut in (root.find(q('TestDefinitions')) or []):
+                  tid = ut.attrib.get('id', '')
+                  tm  = ut.find(q('TestMethod'))
+                  if tm is None:
+                      continue
+                  # xUnit stores the skip message in Description when the test
+                  # outcome is NotExecuted.
+                  desc = ut.attrib.get('description', '').strip()
+                  if desc:
+                      skip_reasons[tid] = desc
+
+              # ── Collect results ────────────────────────────────────────────
               res_map = {}
               for r in (root.find(q('Results')) or []):
-                  name = r.attrib.get('testName', '')
-                  dur  = parse_duration_ms(r.attrib.get('duration', ''))
-                  out  = ''
+                  tid     = r.attrib.get('testId', '')
+                  name    = r.attrib.get('testName', '')
+                  dur     = parse_duration_ms(r.attrib.get('duration', ''))
+                  outcome = r.attrib.get('outcome', 'Failed')
+                  out     = ''
+
                   out_el = r.find(q('Output'))
                   if out_el is not None:
+                      # Error info (failures)
                       err_el = out_el.find(q('ErrorInfo'))
                       if err_el is not None:
                           parts = []
@@ -259,20 +278,29 @@ jobs:
                               if el is not None and el.text:
                                   parts.append(el.text.strip())
                           out = '\n'.join(parts)
+                      # StdOut
                       std = out_el.find(q('StdOut'))
                       if std is not None and std.text:
                           out = (out + '\n' + std.text.strip()).strip()
+
+                  # For skipped tests: fall back to the skip_reasons index when
+                  # no output was written to the result node itself.
+                  if outcome == 'NotExecuted' and not out:
+                      out = skip_reasons.get(tid, '')
+
                   res_map[name] = {
-                      'outcome': r.attrib.get('outcome', 'Failed'),
+                      'outcome': outcome,
                       'dur_ms':  dur,
                       'output':  out,
                   }
 
+              # ── Group by class ─────────────────────────────────────────────
               class_tests = {}
               for ut in (root.find(q('TestDefinitions')) or []):
                   name = ut.attrib.get('name', '')
                   tm   = ut.find(q('TestMethod'))
-                  if tm is None: continue
+                  if tm is None:
+                      continue
                   cls  = tm.attrib.get('className', 'Unknown').split('.')[-1]
                   res  = res_map.get(name, {})
                   class_tests.setdefault(cls, []).append({
@@ -385,7 +413,6 @@ jobs:
           cp deploy/cs-test-results.json       "$WORK/csharp/builds/build_${BUILD_NUM}/test-results.json"
           cp deploy/cs-test-results-index.html "$WORK/csharp/builds/build_${BUILD_NUM}/index.html"
 
-          # Always overwrite the landing page so the C# card is always present
           cp .github/landing-index.html "$WORK/index.html"
 
           cd "$WORK"

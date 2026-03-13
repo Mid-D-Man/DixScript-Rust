@@ -21,30 +21,33 @@
     }
     .back-link:hover { color: #a371f7; text-decoration: none; }
 
-    .page-header {
-      margin-bottom: 28px;
-    }
+    .page-header { margin-bottom: 28px; }
     .page-header h1 { font-size: 1.5rem; color: #a371f7; margin-bottom: 4px; }
-    .page-header .meta { font-size: 0.78rem; color: #484f58; display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; }
+    .page-header .meta {
+      font-size: 0.78rem; color: #484f58;
+      display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px;
+    }
     .page-header .meta span { display: flex; align-items: center; gap: 4px; }
 
     .summary-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-      gap: 12px;
-      margin-bottom: 28px;
+      gap: 12px; margin-bottom: 28px;
     }
     .summary-card {
       background: #161b22; border: 1px solid #30363d;
       border-radius: 10px; padding: 16px 18px;
       display: flex; flex-direction: column; gap: 4px;
     }
-    .summary-card .label { font-size: 0.72rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
+    .summary-card .label {
+      font-size: 0.72rem; color: #8b949e;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
     .summary-card .value { font-size: 1.6rem; font-weight: 700; }
-    .summary-card.passed .value  { color: #3fb950; }
-    .summary-card.failed .value  { color: #f85149; }
+    .summary-card.passed  .value { color: #3fb950; }
+    .summary-card.failed  .value { color: #f85149; }
     .summary-card.ignored .value { color: #d29922; }
-    .summary-card.total .value   { color: #e6edf3; }
+    .summary-card.total   .value { color: #e6edf3; }
     .summary-card.duration .value { color: #79c0ff; font-size: 1.2rem; }
 
     .banner {
@@ -55,7 +58,8 @@
     .banner strong { color: #d29922; }
 
     .filter-bar {
-      display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 18px; flex-wrap: wrap;
     }
     .filter-bar input {
       flex: 1; min-width: 200px;
@@ -69,9 +73,9 @@
       transition: border-color 0.15s, color 0.15s;
     }
     .filter-btn:hover, .filter-btn.active { border-color: #a371f7; color: #a371f7; }
-    .filter-btn.active-pass  { border-color: #3fb950; color: #3fb950; }
-    .filter-btn.active-fail  { border-color: #f85149; color: #f85149; }
-    .filter-btn.active-skip  { border-color: #d29922; color: #d29922; }
+    .filter-btn.active-pass { border-color: #3fb950; color: #3fb950; }
+    .filter-btn.active-fail { border-color: #f85149; color: #f85149; }
+    .filter-btn.active-skip { border-color: #d29922; color: #d29922; }
 
     .suite-block {
       background: #161b22; border: 1px solid #30363d;
@@ -85,10 +89,10 @@
     .suite-header:hover { background: #1c2128; }
     .suite-header .suite-name { font-weight: 600; font-size: 0.9rem; }
     .suite-header .suite-stats { display: flex; gap: 12px; font-size: 0.76rem; }
-    .suite-header .suite-stats .s-pass  { color: #3fb950; }
-    .suite-header .suite-stats .s-fail  { color: #f85149; }
-    .suite-header .suite-stats .s-skip  { color: #d29922; }
-    .suite-header .suite-stats .s-dur   { color: #484f58; }
+    .suite-header .suite-stats .s-pass { color: #3fb950; }
+    .suite-header .suite-stats .s-fail { color: #f85149; }
+    .suite-header .suite-stats .s-skip { color: #d29922; }
+    .suite-header .suite-stats .s-dur  { color: #484f58; }
     .chevron { color: #484f58; font-size: 0.7rem; transition: transform 0.2s; }
     .suite-block.open .chevron { transform: rotate(90deg); }
 
@@ -101,6 +105,7 @@
     }
     .test-row:last-child { border-bottom: none; }
     .test-row:hover { background: #1c2128; }
+
     .test-status {
       flex-shrink: 0; width: 56px; font-size: 0.7rem; font-weight: 600;
       text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
@@ -109,16 +114,29 @@
     .test-status.passed  { background: #0f2d1a; color: #3fb950; }
     .test-status.failed  { background: #2d0f0f; color: #f85149; }
     .test-status.ignored { background: #2d210f; color: #d29922; }
-    .test-name { flex: 1; font-family: 'Cascadia Code', 'Fira Code', monospace; color: #c9d1d9; word-break: break-all; }
-    .test-dur  { flex-shrink: 0; color: #484f58; font-size: 0.72rem; min-width: 48px; text-align: right; margin-top: 2px; }
 
+    .test-name {
+      flex: 1; font-family: 'Cascadia Code', 'Fira Code', monospace;
+      color: #c9d1d9; word-break: break-all;
+    }
+    .test-dur {
+      flex-shrink: 0; color: #484f58; font-size: 0.72rem;
+      min-width: 48px; text-align: right; margin-top: 2px;
+    }
+
+    /* Output / skip-reason panel */
     .test-output {
       margin: 4px 18px 10px calc(18px + 56px + 12px);
       background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
-      padding: 10px 12px; font-family: 'Cascadia Code', 'Fira Code', monospace;
-      font-size: 0.75rem; color: #f85149; white-space: pre-wrap; word-break: break-all;
+      padding: 10px 12px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 0.75rem; white-space: pre-wrap; word-break: break-all;
       display: none;
     }
+    /* failures → red; skip reasons → amber */
+    .test-output.output-fail   { color: #f85149; }
+    .test-output.output-skip   { color: #d29922; }
+
     .test-row.has-output { cursor: pointer; }
     .test-row.has-output .test-name::after {
       content: ' ▸'; color: #484f58; font-style: normal; font-size: 0.65rem;
@@ -128,10 +146,7 @@
     .no-results {
       text-align: center; padding: 48px 24px; color: #484f58; font-size: 0.9rem;
     }
-
-    .loading {
-      text-align: center; padding: 60px; color: #484f58;
-    }
+    .loading { text-align: center; padding: 60px; color: #484f58; }
     .loading .spinner {
       width: 28px; height: 28px; border: 2px solid #30363d;
       border-top-color: #a371f7; border-radius: 50%;
@@ -289,26 +304,32 @@
 
     // re-attach output toggles
     container.querySelectorAll('.test-row.has-output').forEach(row => {
-      row.addEventListener('click', () => {
-        row.classList.toggle('expanded');
-      });
+      row.addEventListener('click', () => row.classList.toggle('expanded'));
     });
   }
 
   function buildTests(tests) {
     return tests.map(t => {
-      const hasOutput = t.output && t.output.trim().length > 0;
-      const rowClass  = `test-row${hasOutput ? ' has-output' : ''}`;
-      const dur       = t.duration_ms != null ? `${t.duration_ms}ms` : '';
-      const out       = hasOutput
-        ? `<div class="test-output">${esc(t.output)}</div>`
+      const output    = (t.output || '').trim();
+      const hasOutput = output.length > 0;
+
+      // Choose colour class for the output panel
+      const outClass = t.status === 'ignored' ? 'output-skip' : 'output-fail';
+
+      const rowClass = `test-row${hasOutput ? ' has-output' : ''}`;
+      const dur      = t.duration_ms != null ? `${t.duration_ms}ms` : '';
+      const label    = t.status === 'ignored' ? 'skip' : t.status;
+
+      const outPanel = hasOutput
+        ? `<div class="test-output ${outClass}">${esc(output)}</div>`
         : '';
+
       return `
         <div class="${rowClass}">
-          <span class="test-status ${t.status}">${t.status === 'ignored' ? 'skip' : t.status}</span>
+          <span class="test-status ${t.status}">${label}</span>
           <span class="test-name">${esc(t.name)}</span>
           <span class="test-dur">${dur}</span>
-        </div>${out}`;
+        </div>${outPanel}`;
     }).join('');
   }
 
@@ -351,4 +372,4 @@
   init();
 </script>
 </body>
-  </html>
+</html>

@@ -76,6 +76,8 @@ jobs:
           echo "=== Artifact sizes ==="
           ls -lh target/release/libmdix_ffi.so 2>/dev/null || echo "libmdix_ffi.so not found"
           ls -lh target/release/libmdix_ffi.a  2>/dev/null || echo "libmdix_ffi.a not found"
+          echo "=== Generated MdixNative.cs ==="
+          ls -lh csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs 2>/dev/null || echo "MdixNative.cs not found"
           exit $BUILD_EXIT
 
       - name: Collect result
@@ -113,9 +115,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: MdixNative-cs-${{ github.run_number }}
-          path: unity-package/Runtime/Generated/MdixNative.cs
+          path: csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs
           retention-days: 30
-          if-no-files-found: warn
+          if-no-files-found: error
 
   build-ffi-macos:
     runs-on: macos-latest
@@ -247,7 +249,6 @@ jobs:
               fi
             done < test-output.txt
 
-            # Extract failing test names (max 30, pipe-separated for the output)
             FAILED_NAMES=$(grep -E "^test .+ \.\.\. FAILED" test-output.txt \
               | sed 's/^test //' \
               | sed 's/ \.\.\. FAILED//' \
@@ -300,7 +301,6 @@ jobs:
         id: rustver
         run: echo "ver=$(rustc --version)" >> $GITHUB_OUTPUT
 
-      # Download MdixNative.cs from the Linux build so it can be deployed
       - name: Download MdixNative.cs artifact
         if: needs.build-ffi-linux.result == 'success'
         uses: actions/download-artifact@v4
@@ -311,24 +311,24 @@ jobs:
 
       - name: Generate ffi-results.json
         env:
-          BUILD_NUM:      ${{ github.run_number }}
-          BRANCH:         ${{ github.ref_name }}
-          COMMIT:         ${{ github.sha }}
-          BUILD_DATE:     ${{ github.event.head_commit.timestamp }}
-          RUST_VER:       ${{ steps.rustver.outputs.ver }}
-          LINUX_STATUS:   ${{ needs.build-ffi-linux.outputs.status     || 'skipped' }}
-          LINUX_SIZE:     ${{ needs.build-ffi-linux.outputs.size_bytes  || '0' }}
-          LINUX_DUR:      ${{ needs.build-ffi-linux.outputs.duration_s  || '0' }}
-          MAC_STATUS:     ${{ needs.build-ffi-macos.outputs.status      || 'skipped' }}
-          MAC_SIZE:       ${{ needs.build-ffi-macos.outputs.size_bytes   || '0' }}
-          MAC_DUR:        ${{ needs.build-ffi-macos.outputs.duration_s   || '0' }}
-          TEST_STATUS:    ${{ needs.test-core.outputs.status             || 'skipped' }}
-          TEST_TOTAL:     ${{ needs.test-core.outputs.total              || '0' }}
-          TEST_PASSED:    ${{ needs.test-core.outputs.passed             || '0' }}
-          TEST_FAILED:    ${{ needs.test-core.outputs.failed             || '0' }}
-          TEST_DUR:       ${{ needs.test-core.outputs.duration_s         || '0' }}
-          TEST_FAILED_NAMES: ${{ needs.test-core.outputs.failed_names   || '' }}
-          CS_AVAILABLE:   ${{ needs.build-ffi-linux.result == 'success' && 'true' || 'false' }}
+          BUILD_NUM:         ${{ github.run_number }}
+          BRANCH:            ${{ github.ref_name }}
+          COMMIT:            ${{ github.sha }}
+          BUILD_DATE:        ${{ github.event.head_commit.timestamp }}
+          RUST_VER:          ${{ steps.rustver.outputs.ver }}
+          LINUX_STATUS:      ${{ needs.build-ffi-linux.outputs.status     || 'skipped' }}
+          LINUX_SIZE:        ${{ needs.build-ffi-linux.outputs.size_bytes  || '0' }}
+          LINUX_DUR:         ${{ needs.build-ffi-linux.outputs.duration_s  || '0' }}
+          MAC_STATUS:        ${{ needs.build-ffi-macos.outputs.status      || 'skipped' }}
+          MAC_SIZE:          ${{ needs.build-ffi-macos.outputs.size_bytes   || '0' }}
+          MAC_DUR:           ${{ needs.build-ffi-macos.outputs.duration_s   || '0' }}
+          TEST_STATUS:       ${{ needs.test-core.outputs.status             || 'skipped' }}
+          TEST_TOTAL:        ${{ needs.test-core.outputs.total              || '0' }}
+          TEST_PASSED:       ${{ needs.test-core.outputs.passed             || '0' }}
+          TEST_FAILED:       ${{ needs.test-core.outputs.failed             || '0' }}
+          TEST_DUR:          ${{ needs.test-core.outputs.duration_s         || '0' }}
+          TEST_FAILED_NAMES: ${{ needs.test-core.outputs.failed_names       || '' }}
+          CS_AVAILABLE:      ${{ needs.build-ffi-linux.result == 'success' && 'true' || 'false' }}
         run: |
           python3 - << 'PYEOF'
           import json, os
@@ -413,7 +413,6 @@ jobs:
           cp ffi-results.json       "$WORK/ffi/builds/build_${BUILD_NUM}/ffi-results.json"
           cp ffi-results-index.html "$WORK/ffi/builds/build_${BUILD_NUM}/index.html"
 
-          # Deploy MdixNative.cs if it was generated
           if [ -f "downloaded-cs/MdixNative.cs" ]; then
             cp downloaded-cs/MdixNative.cs "$WORK/ffi/MdixNative.cs"
             cp downloaded-cs/MdixNative.cs "$WORK/ffi/builds/build_${BUILD_NUM}/MdixNative.cs"

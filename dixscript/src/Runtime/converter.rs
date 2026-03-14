@@ -13,7 +13,7 @@ use super::format_options::DixFormatOptions;
 /// Core format conversion utilities.
 ///
 /// Converts between `HashMap<String, DixValue>` and a DixScript AST,
-/// and serializes an AST to `.mdix` text format.
+/// and serializes an AST to and from `.mdix`, JSON, and TOML text formats.
 pub struct DixConverter {
     default_options: DixFormatOptions,
 }
@@ -231,7 +231,216 @@ impl DixConverter {
         Ok(output)
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    // ── JSON ──────────────────────────────────────────────────────────────────
+
+    /// Serialize a DixScript AST to a JSON string.
+    ///
+    /// The data section is exported as a nested JSON object reconstructed from
+    /// the flat hashmap. Returns compact JSON by default; call with
+    /// `pretty = true` for indented output.
+    pub fn to_json(&self, ast: &DixScript, pretty: bool) -> Result<String, String> {
+        let map = self.to_hashmap(ast);
+        if pretty {
+            serde_json::to_string_pretty(&map)
+                .map_err(|e| format!("JSON serialization failed: {}", e))
+        } else {
+            serde_json::to_string(&map)
+                .map_err(|e| format!("JSON serialization failed: {}", e))
+        }
+    }
+
+    /// Parse a JSON string and convert it to a DixScript AST.
+    ///
+    /// The JSON must be an object at the top level. Nested objects become
+    /// DixValue::Object, arrays become DixValue::Array, and scalar types
+    /// map to their DixValue equivalents.
+    pub fn from_json(&self, json_str: &str) -> Result<DixScript, String> {
+        let json_value: serde_json::Value = serde_json::from_str(json_str)
+            .map_err(|e| format!("JSON parse failed: {}", e))?;
+
+        let map = self.json_value_to_hashmap(json_value)?;
+        self.from_hashmap(map)
+    }
+
+    // ── TOML ──────────────────────────────────────────────────────────────────
+
+    /// Serialize a DixScript AST to a TOML string.
+    ///
+    /// The data section is exported as a TOML document. Dotted-path keys
+    /// (e.g. "server.port") are reconstructed as TOML tables.
+    pub fn to_toml(&self, ast: &DixScript) -> Result<String, String> {
+        let map = self.to_hashmap(ast);
+        let toml_value = self.hashmap_to_toml_value(map)?;
+        toml::to_string_pretty(&toml_value)
+            .map_err(|e| format!("TOML serialization failed: {}", e))
+    }
+
+    /// Parse a TOML string and convert it to a DixScript AST.
+    ///
+    /// The TOML must be a table at the top level. Nested tables become
+    /// DixValue::Object, arrays become DixValue::Array, and scalar types
+    /// map to their DixValue equivalents.
+    pub fn from_toml(&self, toml_str: &str) -> Result<DixScript, String> {
+        let toml_value: toml::Value = toml::from_str(toml_str)
+            .map_err(|e| format!("TOML parse failed: {}", e))?;
+
+        let map = self.toml_value_to_hashmap(toml_value)?;
+        self.from_hashmap(map)
+    }
+
+    // ── Private helpers — JSON conversion ─────────────────────────────────────
+
+    fn json_value_to_hashmap(
+        &self,
+        value: serde_json::Value,
+    ) -> Result<HashMap<String, DixValue>, String> {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut result = HashMap::with_capacity(map.len());
+                for (k, v) in map {
+                    result.insert(k, self.json_value_to_dix_value(v)?);
+                }
+                Ok(result)
+            }
+            other => Err(format!(
+                "Expected a JSON object at the top level, got: {}",
+                other
+            )),
+        }
+    }
+
+    fn json_value_to_dix_value(&self, value: serde_json::Value) -> Result<DixValue, String> {
+        Ok(match value {
+            serde_json::Value::Null        => DixValue::Null,
+            serde_json::Value::Bool(b)     => DixValue::Bool(b),
+            serde_json::Value::String(s)   => DixValue::String(s),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    DixValue::Int(i as i32)
+                } else if let Some(f) = n.as_f64() {
+                    DixValue::Double(f)
+                } else {
+                    return Err(format!("Cannot convert JSON number {} to DixValue", n));
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                let items: Result<Vec<DixValue>, String> = arr
+                    .into_iter()
+                    .map(|v| self.json_value_to_dix_value(v))
+                    .collect();
+                DixValue::Array(items?)
+            }
+            serde_json::Value::Object(map) => {
+                let mut obj = HashMap::with_capacity(map.len());
+                for (k, v) in map {
+                    obj.insert(k, self.json_value_to_dix_value(v)?);
+                }
+                DixValue::Object(obj)
+            }
+        })
+    }
+
+    // ── Private helpers — TOML conversion ────────────────────────────────────
+
+    fn toml_value_to_hashmap(
+        &self,
+        value: toml::Value,
+    ) -> Result<HashMap<String, DixValue>, String> {
+        match value {
+            toml::Value::Table(table) => {
+                let mut result = HashMap::with_capacity(table.len());
+                for (k, v) in table {
+                    result.insert(k, self.toml_value_to_dix_value(v)?);
+                }
+                Ok(result)
+            }
+            other => Err(format!(
+                "Expected a TOML table at the top level, got type: {}",
+                other.type_str()
+            )),
+        }
+    }
+
+    fn toml_value_to_dix_value(&self, value: toml::Value) -> Result<DixValue, String> {
+        Ok(match value {
+            toml::Value::String(s)   => DixValue::String(s),
+            toml::Value::Integer(i)  => DixValue::Int(i as i32),
+            toml::Value::Float(f)    => DixValue::Double(f),
+            toml::Value::Boolean(b)  => DixValue::Bool(b),
+            toml::Value::Datetime(d) => DixValue::Timestamp(d.to_string()),
+            toml::Value::Array(arr) => {
+                let items: Result<Vec<DixValue>, String> = arr
+                    .into_iter()
+                    .map(|v| self.toml_value_to_dix_value(v))
+                    .collect();
+                DixValue::Array(items?)
+            }
+            toml::Value::Table(table) => {
+                let mut obj = HashMap::with_capacity(table.len());
+                for (k, v) in table {
+                    obj.insert(k, self.toml_value_to_dix_value(v)?);
+                }
+                DixValue::Object(obj)
+            }
+        })
+    }
+
+    fn hashmap_to_toml_value(
+        &self,
+        map: HashMap<String, DixValue>,
+    ) -> Result<toml::Value, String> {
+        let mut table = toml::map::Map::new();
+        for (k, v) in map {
+            if let Some(tv) = self.dix_value_to_toml_value(&v) {
+                table.insert(k, tv);
+            }
+        }
+        Ok(toml::Value::Table(table))
+    }
+
+    fn dix_value_to_toml_value(&self, value: &DixValue) -> Option<toml::Value> {
+        match value {
+            DixValue::Null            => None,
+            DixValue::Bool(b)         => Some(toml::Value::Boolean(*b)),
+            DixValue::Int(i)          => Some(toml::Value::Integer(*i as i64)),
+            DixValue::Float(f)        => Some(toml::Value::Float(*f as f64)),
+            DixValue::Double(d)       => Some(toml::Value::Float(*d)),
+            DixValue::String(s)       => Some(toml::Value::String(s.clone())),
+            DixValue::Date(d)         => Some(toml::Value::String(d.clone())),
+            DixValue::Timestamp(t)    => Some(toml::Value::String(t.clone())),
+            DixValue::HexColor(c)     => Some(toml::Value::String(c.clone())),
+            DixValue::Blob(b)         => Some(toml::Value::String(format!("b:({})", b))),
+            DixValue::Regex(r)        => Some(toml::Value::String(format!("r:({})", r))),
+            DixValue::Enum { enum_name, field_name, .. } => {
+                Some(toml::Value::String(format!("{}.{}", enum_name, field_name)))
+            }
+            DixValue::Array(arr) => {
+                let items: Vec<toml::Value> = arr
+                    .iter()
+                    .filter_map(|v| self.dix_value_to_toml_value(v))
+                    .collect();
+                Some(toml::Value::Array(items))
+            }
+            DixValue::Object(obj) => {
+                let mut table = toml::map::Map::new();
+                for (k, v) in obj {
+                    if let Some(tv) = self.dix_value_to_toml_value(v) {
+                        table.insert(k.clone(), tv);
+                    }
+                }
+                Some(toml::Value::Table(table))
+            }
+            DixValue::Tuple(items) => {
+                let arr: Vec<toml::Value> = items
+                    .iter()
+                    .filter_map(|v| self.dix_value_to_toml_value(v))
+                    .collect();
+                Some(toml::Value::Array(arr))
+            }
+        }
+    }
+
+    // ── Existing private helpers ──────────────────────────────────────────────
 
     fn extract_enums(
         &self,
@@ -668,6 +877,65 @@ mod tests {
         assert!(mdix.contains("@CONFIG"));
         assert!(mdix.contains("@DATA"));
         assert!(mdix.contains("x = 42"));
+    }
+
+    #[test]
+    fn test_to_json_and_back() {
+        let converter = DixConverter::new();
+        let mut data = HashMap::new();
+        data.insert("port".to_string(),    DixValue::Int(8080));
+        data.insert("enabled".to_string(), DixValue::Bool(true));
+        data.insert("host".to_string(),    DixValue::String("localhost".to_string()));
+
+        let ast  = converter.from_hashmap(data).unwrap();
+        let json = converter.to_json(&ast, false).unwrap();
+
+        assert!(json.contains("8080"));
+        assert!(json.contains("localhost"));
+
+        let ast2 = converter.from_json(&json).unwrap();
+        let map2 = converter.to_hashmap(&ast2);
+        assert_eq!(map2.get("port"), Some(&DixValue::Int(8080)));
+    }
+
+    #[test]
+    fn test_to_toml_and_back() {
+        let converter = DixConverter::new();
+        let mut data = HashMap::new();
+        data.insert("port".to_string(),    DixValue::Int(8080));
+        data.insert("enabled".to_string(), DixValue::Bool(true));
+        data.insert("host".to_string(),    DixValue::String("localhost".to_string()));
+
+        let ast  = converter.from_hashmap(data).unwrap();
+        let toml = converter.to_toml(&ast).unwrap();
+
+        assert!(toml.contains("8080"));
+        assert!(toml.contains("localhost"));
+
+        let ast2 = converter.from_toml(&toml).unwrap();
+        let map2 = converter.to_hashmap(&ast2);
+        assert_eq!(map2.get("port"), Some(&DixValue::Int(8080)));
+    }
+
+    #[test]
+    fn test_from_json_invalid_input() {
+        let converter = DixConverter::new();
+        let result = converter.from_json("not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_json_array_top_level_fails() {
+        let converter = DixConverter::new();
+        let result = converter.from_json("[1, 2, 3]");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_toml_invalid_input() {
+        let converter = DixConverter::new();
+        let result = converter.from_toml("[[[[invalid");
+        assert!(result.is_err());
     }
 
     #[test]

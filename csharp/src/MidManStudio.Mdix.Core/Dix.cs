@@ -125,5 +125,15 @@ namespace MidManStudio.Mdix
         /// </summary>
         public static Core.MdixResult<Core.MdixBuilder> BuilderFrom(Core.MdixDatabase db) =>
             Core.MdixBuilder.FromDatabase(db);
+
+        // ── Serializer cache ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// Clears the internal reflection cache used by <see cref="Deserialize{T}"/>
+        /// and <see cref="Core.MdixBuilder.Serialize{T}"/>.
+        /// Call this after hot-reload or dynamic assembly loading to force the
+        /// serializer to re-inspect types on the next use.
+        /// </summary>
+        public static void ClearSerializerCache() => Core.MdixSerializer.ClearCache();
     }
 }

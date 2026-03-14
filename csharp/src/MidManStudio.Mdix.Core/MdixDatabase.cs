@@ -54,7 +54,6 @@ namespace MidManStudio.Mdix.Core
         private long               _lastReloadTick;
         private readonly object    _watcherLock = new object();
 
-        // 500 ms debounce — editors often flush files in multiple writes.
         private const long ReloadDebounceTicks = 5_000_000L;
 
         #endregion
@@ -262,6 +261,15 @@ namespace MidManStudio.Mdix.Core
             }
         }
 
+        /// <summary>
+        /// Wraps a raw native handle returned by a converter function
+        /// (e.g. <c>mdix_from_json</c>, <c>mdix_from_toml</c>) into a <see cref="MdixDatabase"/>.
+        /// The handle must have been freshly allocated by the native layer.
+        /// This method takes ownership and will free it on dispose.
+        /// </summary>
+        internal static MdixDatabase FromRawHandle(void* rawHandle) =>
+            new MdixDatabase(rawHandle);
+
         #endregion
 
         #region Async factories
@@ -341,7 +349,7 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Gets a string value by dotted path.
-        /// Also works for Date, Timestamp, and HexColor — all stored as strings at the native layer.
+        /// Also works for Date, Timestamp, and HexColor.
         /// </summary>
         public MdixResult<string> GetString(string path)
         {
@@ -361,8 +369,7 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Gets an integer value by dotted path.
-        /// Also resolves Enum values — returns the integer (e.g. BOSS → 2).
-        /// Returns 0 on failure — use <see cref="Exists"/> to distinguish 0 from not-found.
+        /// Also resolves Enum values.
         /// </summary>
         public MdixResult<int> GetInt(string path)
         {
@@ -463,17 +470,11 @@ namespace MidManStudio.Mdix.Core
         public MdixResult<MdixHexColor> GetHexColor(string path) =>
             GetString(path).AndThen(raw => MdixHexColor.Parse(raw));
 
-        /// <summary>
-        /// Gets a blob value at path.
-        /// Call <see cref="MdixBlob.ToBytes"/> to decode.
-        /// </summary>
+        /// <summary>Gets a blob value at path.</summary>
         public MdixResult<MdixBlob> GetBlob(string path) =>
             GetString(path).Map(raw => new MdixBlob(raw));
 
-        /// <summary>
-        /// Gets a regex value at path.
-        /// Call <see cref="MdixRegex.ToRegex"/> or <see cref="MdixRegex.IsMatch"/> to use it.
-        /// </summary>
+        /// <summary>Gets a regex value at path.</summary>
         public MdixResult<MdixRegex> GetRegex(string path) =>
             GetString(path).Map(raw => new MdixRegex(raw));
 
@@ -523,7 +524,7 @@ namespace MidManStudio.Mdix.Core
             finally { _safeHandle.DangerousRelease(); }
         }
 
-        /// <summary>Returns the resolved integer value of the enum at path (e.g. BOSS → 2).</summary>
+        /// <summary>Returns the resolved integer value of the enum at path.</summary>
         public MdixResult<int> GetEnumValue(string path) => GetInt(path);
 
         #endregion
@@ -592,10 +593,7 @@ namespace MidManStudio.Mdix.Core
 
         #region Data access — tuples
 
-        /// <summary>
-        /// Returns the raw JSON string for a tuple at path (e.g. [1,"hello",true]).
-        /// Parse with your preferred JSON library.
-        /// </summary>
+        /// <summary>Returns the raw JSON string for a tuple at path.</summary>
         public MdixResult<string> GetTupleRaw(string path) => GetJson(path);
 
         /// <summary>Gets a 2-element tuple at path.</summary>
@@ -650,20 +648,7 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Deserializes the database into a strongly-typed object.
-        /// Supports classes, structs, and records including those with primary constructors.
-        /// <para>
-        /// Path resolution order for each property:
-        /// 1. Explicit <see cref="MdixPropertyAttribute"/> path.
-        /// 2. <see cref="MdixAliasAttribute"/> fallback paths (tried in declaration order).
-        /// 3. Property name converted to snake_case automatically.
-        /// </para>
         /// </summary>
-        /// <typeparam name="T">Target type. Must have a parameterless or mappable parameterized constructor.</typeparam>
-        /// <param name="prefix">
-        /// Root path prefix prepended to every property path.
-        /// Overrides any <see cref="MdixObjectAttribute"/> declared on <typeparamref name="T"/>.
-        /// Pass null to use the attribute value, or an empty string to read from the root.
-        /// </param>
         public MdixResult<T> Deserialize<T>(string? prefix = null)
         {
             ThrowIfDisposed();
@@ -676,13 +661,7 @@ namespace MidManStudio.Mdix.Core
         #region Dynamic access
 
         /// <summary>
-        /// Returns a <see cref="MdixDynamic"/> wrapper over this database for
-        /// path navigation without string literals at call sites.
-        /// <code>
-        /// dynamic cfg = db.AsDynamic();
-        /// int port    = cfg.server.port;
-        /// string name = cfg.enemies[0].name;
-        /// </code>
+        /// Returns a <see cref="MdixDynamic"/> wrapper for path navigation without string literals.
         /// </summary>
         public MdixDynamic AsDynamic()
         {
@@ -711,8 +690,6 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Starts watching the source file for changes and reloads automatically.
-        /// <see cref="OnReloaded"/> and <see cref="OnReloadFailed"/> are fired on a
-        /// background thread.
         /// </summary>
         public void EnableHotReload()
         {
@@ -790,6 +767,43 @@ namespace MidManStudio.Mdix.Core
                 MdixError.IoError(
                     $"File watcher error: {e.GetException()?.Message}",
                     e.GetException()));
+
+        #endregion
+
+        #region Internal handle access — for MdixConverter
+
+        /// <summary>
+        /// Acquires the raw native handle pointer for a single converter call.
+        /// Returns false if the database is disposed or the handle is invalid.
+        /// Must be paired with exactly one call to <see cref="ReleaseRawHandleInternal"/>.
+        /// </summary>
+        internal bool TryGetRawHandleInternal(out void* rawHandle)
+        {
+            rawHandle = null;
+
+            if (_disposed == 1) return false;
+
+            bool acquired = false;
+            _safeHandle.DangerousAddRef(ref acquired);
+
+            if (!acquired || _safeHandle.IsInvalid)
+            {
+                if (acquired) _safeHandle.DangerousRelease();
+                return false;
+            }
+
+            rawHandle = (void*)_safeHandle.DangerousGetHandle();
+            return true;
+        }
+
+        /// <summary>
+        /// Releases the ref-count acquired by <see cref="TryGetRawHandleInternal"/>.
+        /// Always call in a finally block immediately after the native call.
+        /// </summary>
+        internal void ReleaseRawHandleInternal()
+        {
+            _safeHandle.DangerousRelease();
+        }
 
         #endregion
 

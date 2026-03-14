@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 
 namespace MidManStudio.Mdix.Core
 {
@@ -135,14 +136,11 @@ namespace MidManStudio.Mdix.Core
 
     internal sealed class MdixSerializer
     {
-        // Reflection method handles cached once per AppDomain lifetime.
+        // Reflection method handle for nested POCO deserialization — cached once per AppDomain.
         private static readonly MethodInfo _deserializeMethod =
             typeof(MdixSerializer)
                 .GetMethods(BindingFlags.Instance | BindingFlags.NonPublic)
                 .First(m => m.Name == nameof(Deserialize) && m.IsGenericMethodDefinition);
-
-        private static readonly MethodInfo _dbGetMethod =
-            typeof(MdixDatabase).GetMethod(nameof(MdixDatabase.Get))!;
 
         private static readonly Dictionary<Type, TypeSerializationInfo> _cache = new();
         private static readonly object _cacheLock = new();
@@ -278,6 +276,8 @@ namespace MidManStudio.Mdix.Core
             return null;
         }
 
+        // ── Path resolution ───────────────────────────────────────────────────
+
         private (bool found, object? value) TryResolvePaths(
             MdixDatabase db,
             Type targetType,
@@ -295,13 +295,228 @@ namespace MidManStudio.Mdix.Core
                     continue;
                 }
 
-                var convMode = MdixConversionMode.Safe;
-                var (success, val) = InvokeGet(db, targetType, fullPath, convMode);
+                // 1. Try direct lookup via typed getters.
+                var (success, val) = DirectGet(db, targetType, fullPath);
                 if (success) return (true, val);
+
+                // 2. Fallback: for dotted paths, DixScript may store values in a nested
+                //    object hierarchy rather than as flat dotted keys. Walk up the path
+                //    and retrieve the parent as JSON, then navigate into it.
+                if (fullPath.Contains('.'))
+                {
+                    var (success2, val2) = TryGetViaParentJson(db, targetType, fullPath);
+                    if (success2) return (true, val2);
+                }
             }
 
             return (false, null);
         }
+
+        // ── Direct typed getter (no reflection, no silent catch) ──────────────
+
+        private static (bool success, object? value) DirectGet(
+            MdixDatabase db,
+            Type targetType,
+            string path)
+        {
+            try
+            {
+                if (targetType == typeof(string))
+                {
+                    var r = db.GetString(path);
+                    return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(int))
+                {
+                    var r = db.GetInt(path);
+                    return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(float))
+                {
+                    var r = db.GetFloat(path);
+                    return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(double))
+                {
+                    var r = db.GetDouble(path);
+                    return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(bool))
+                {
+                    var r = db.GetBool(path);
+                    return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(long))
+                {
+                    var r = db.GetInt(path);
+                    return r.IsSuccess ? (true, (object)(long)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(short))
+                {
+                    var r = db.GetInt(path);
+                    return r.IsSuccess ? (true, (object)(short)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(byte))
+                {
+                    var r = db.GetInt(path);
+                    return r.IsSuccess ? (true, (object)(byte)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(decimal))
+                {
+                    var r = db.GetDouble(path);
+                    return r.IsSuccess ? (true, (object)(decimal)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(DateTime))
+                {
+                    var r = db.GetString(path);
+                    if (r.IsSuccess && DateTime.TryParse(
+                            r.SuccessResult,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.RoundtripKind,
+                            out var dt))
+                        return (true, (object)dt);
+                    return (false, null);
+                }
+                if (targetType == typeof(MdixHexColor))
+                {
+                    var r = db.GetHexColor(path);
+                    return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(MdixBlob))
+                {
+                    var r = db.GetBlob(path);
+                    return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(MdixRegex))
+                {
+                    var r = db.GetRegex(path);
+                    return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(MdixDate))
+                {
+                    var r = db.GetDate(path);
+                    return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
+                }
+                if (targetType == typeof(MdixTimestamp))
+                {
+                    var r = db.GetTimestamp(path);
+                    return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
+                }
+                return (false, null);
+            }
+            catch
+            {
+                return (false, null);
+            }
+        }
+
+        // ── Parent JSON traversal fallback ────────────────────────────────────
+
+        /// <summary>
+        /// For dotted paths that fail direct lookup (because DixScript stores them as
+        /// nested objects rather than flat keys), walk up the path to find a JSON-able
+        /// parent, then navigate into the JSON to reach the target field.
+        /// </summary>
+        private static (bool success, object? value) TryGetViaParentJson(
+            MdixDatabase db,
+            Type targetType,
+            string path)
+        {
+            try
+            {
+                var segments = path.Split('.');
+
+                // Try progressively shorter parent paths (most specific first).
+                for (int parentLen = segments.Length - 1; parentLen >= 1; parentLen--)
+                {
+                    var parentPath = string.Join(".", segments, 0, parentLen);
+                    var jsonResult = db.GetJson(parentPath);
+                    if (jsonResult.IsFailure) continue;
+
+                    // Navigate the remaining segments into the JSON document.
+                    JsonElement cloned;
+                    using (var doc = JsonDocument.Parse(jsonResult.SuccessResult))
+                    {
+                        var el = doc.RootElement;
+                        bool found = true;
+
+                        for (int i = parentLen; i < segments.Length; i++)
+                        {
+                            if (el.ValueKind != JsonValueKind.Object ||
+                                !el.TryGetProperty(segments[i], out el))
+                            {
+                                found = false;
+                                break;
+                            }
+                        }
+
+                        if (!found) continue;
+
+                        // Clone before the document is disposed.
+                        cloned = el.Clone();
+                    }
+
+                    return ParseJsonElementAsType(cloned, targetType);
+                }
+
+                return (false, null);
+            }
+            catch
+            {
+                return (false, null);
+            }
+        }
+
+        /// <summary>Converts a <see cref="JsonElement"/> to the requested CLR type.</summary>
+        private static (bool success, object? value) ParseJsonElementAsType(
+            JsonElement el,
+            Type targetType)
+        {
+            try
+            {
+                if (targetType == typeof(string))
+                {
+                    var s = el.ValueKind == JsonValueKind.String
+                        ? el.GetString()
+                        : el.GetRawText();
+                    return (s != null, (object?)s);
+                }
+                if (targetType == typeof(int))
+                    return (true, (object)el.GetInt32());
+                if (targetType == typeof(long))
+                    return (true, (object)el.GetInt64());
+                if (targetType == typeof(short))
+                    return (true, (object)(short)el.GetInt32());
+                if (targetType == typeof(byte))
+                    return (true, (object)(byte)el.GetInt32());
+                if (targetType == typeof(float))
+                    return (true, (object)(float)el.GetDouble());
+                if (targetType == typeof(double))
+                    return (true, (object)el.GetDouble());
+                if (targetType == typeof(decimal))
+                    return (true, (object)el.GetDecimal());
+                if (targetType == typeof(bool))
+                    return (true, (object)el.GetBoolean());
+                if (targetType == typeof(DateTime))
+                {
+                    var raw = el.ValueKind == JsonValueKind.String ? el.GetString() : el.GetRawText();
+                    if (raw != null && DateTime.TryParse(
+                            raw,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.RoundtripKind,
+                            out var dt))
+                        return (true, (object)dt);
+                    return (false, null);
+                }
+                return (false, null);
+            }
+            catch
+            {
+                return (false, null);
+            }
+        }
+
+        // ── Nested complex-type deserialization ───────────────────────────────
 
         private object? DeserializeNested(MdixDatabase db, Type targetType, string prefix)
         {
@@ -314,31 +529,6 @@ namespace MidManStudio.Mdix.Core
             if (!isSuccess) return null;
 
             return resultType.GetProperty("SuccessResult")!.GetValue(result);
-        }
-
-        private static (bool success, object? value) InvokeGet(
-            MdixDatabase db,
-            Type targetType,
-            string path,
-            MdixConversionMode mode)
-        {
-            try
-            {
-                var method = _dbGetMethod.MakeGenericMethod(targetType);
-                var result = method.Invoke(db, new object[] { path });
-                if (result == null) return (false, null);
-
-                var resultType = result.GetType();
-                var isSuccess = (bool)resultType.GetProperty("IsSuccess")!.GetValue(result)!;
-                if (!isSuccess) return (false, null);
-
-                var value = resultType.GetProperty("SuccessResult")!.GetValue(result);
-                return (true, value);
-            }
-            catch
-            {
-                return (false, null);
-            }
         }
 
         // ── Serialization ─────────────────────────────────────────────────────
@@ -574,7 +764,7 @@ namespace MidManStudio.Mdix.Core
             return sb.ToString();
         }
 
-        // Types that MdixDatabase.Get<T> handles natively — do NOT recurse into these.
+        // Types that are scalar/terminal — do NOT recurse into these.
         private static readonly HashSet<Type> _simpleTypes = new HashSet<Type>
         {
             typeof(string),

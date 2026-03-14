@@ -1,3 +1,5 @@
+// csharp/tests/MidManStudio.Mdix.Core.Tests/MdixSerializerTests.cs
+
 using System;
 using FluentAssertions;
 using MidManStudio.Mdix;
@@ -126,7 +128,6 @@ namespace MidManStudio.Mdix.Core.Tests
         public MdixSerializerTests(ITestOutputHelper output)
         {
             _out = output;
-            // FIX: MdixSerializer is internal — access via the public Dix facade.
             Dix.ClearSerializerCache();
         }
 
@@ -161,11 +162,13 @@ namespace MidManStudio.Mdix.Core.Tests
         }
 
         // ── Explicit path via [MdixProperty] ──────────────────────────────────
+        // FIX: use table-property colon syntax so the runtime stores "server.host"
+        //      and "server.port" as flat dotted keys in flattened_data.
 
         [Fact]
         public void ExplicitPath_MdixProperty_MapsCorrectly()
         {
-            using var db = Load("@DATA( server.host = \"db.local\", server.port = 5432 )");
+            using var db = Load("@DATA( server: host = \"db.local\", port = 5432 )");
 
             var result = db.Deserialize<ExplicitPathConfig>();
 
@@ -178,11 +181,12 @@ namespace MidManStudio.Mdix.Core.Tests
         }
 
         // ── Class-level prefix via [MdixObject] ───────────────────────────────
+        // FIX: same — colon syntax for nested keys.
 
         [Fact]
         public void ClassLevelPrefix_MdixObject_MapsCorrectly()
         {
-            using var db = Load("@DATA( server.host = \"api.local\", server.port = 443 )");
+            using var db = Load("@DATA( server: host = \"api.local\", port = 443 )");
 
             var result = db.Deserialize<PrefixedConfig>();
 
@@ -195,11 +199,12 @@ namespace MidManStudio.Mdix.Core.Tests
         }
 
         // ── Explicit prefix overrides [MdixObject] ────────────────────────────
+        // FIX: colon syntax under the "db" table path.
 
         [Fact]
         public void ExplicitPrefix_OverridesMdixObject()
         {
-            using var db = Load("@DATA( db.host = \"replica.local\", db.port = 5433 )");
+            using var db = Load("@DATA( db: host = \"replica.local\", port = 5433 )");
 
             // PrefixedConfig has [MdixObject("server")] but we override with "db".
             var result = db.Deserialize<PrefixedConfig>("db");
@@ -232,11 +237,12 @@ namespace MidManStudio.Mdix.Core.Tests
         }
 
         // ── Record with [MdixProperty] on constructor parameters ───────────────
+        // FIX: colon syntax so "server.host" and "server.port" exist as flat keys.
 
         [Fact]
         public void Record_MdixPropertyOnParam_MapsCorrectly()
         {
-            using var db = Load("@DATA( server.host = \"mapped.local\", server.port = 7777 )");
+            using var db = Load("@DATA( server: host = \"mapped.local\", port = 7777 )");
 
             var result = db.Deserialize<MappedRecord>();
 
@@ -266,12 +272,14 @@ namespace MidManStudio.Mdix.Core.Tests
         }
 
         // ── Nested composition ────────────────────────────────────────────────
+        // FIX: two separate table properties — "app:" for name/version and
+        //      "app.server:" for the nested ServerSection fields.
 
         [Fact]
         public void Nested_Composition_MapsCorrectly()
         {
             using var db = Load(
-                "@DATA( app.name = \"GameApp\", app.version = 2, app.server.host = \"game.local\", app.server.port = 7070 )");
+                "@DATA( app: name = \"GameApp\", version = 2, app.server: host = \"game.local\", port = 7070 )");
 
             var result = db.Deserialize<AppConfig>();
 
@@ -296,12 +304,13 @@ namespace MidManStudio.Mdix.Core.Tests
         }
 
         // ── [MdixAlias] — primary path missing, fallback used ─────────────────
+        // FIX: colon syntax so "server.host" is a real flat key for the fallback.
 
         [Fact]
         public void Alias_FallbackPath_UsedWhenPrimaryMissing()
         {
             // "host" is missing — falls back to "server.host".
-            using var db = Load("@DATA( server.host = \"fallback.local\" )");
+            using var db = Load("@DATA( server: host = \"fallback.local\" )");
 
             var result = db.Deserialize<AliasConfig>();
 
@@ -312,11 +321,14 @@ namespace MidManStudio.Mdix.Core.Tests
             result.SuccessResult.Host.Should().Be("fallback.local");
         }
 
+        // FIX: flat "host" first (two-tier rule satisfied), then grouped "server:"
+        //      so both keys are available for alias resolution.
+
         [Fact]
         public void Alias_PrimaryPath_UsedWhenPresent()
         {
             // "host" is present — primary should win over alias.
-            using var db = Load("@DATA( host = \"primary.local\", server.host = \"alias.local\" )");
+            using var db = Load("@DATA( host = \"primary.local\", server: host = \"alias.local\" )");
 
             var result = db.Deserialize<AliasConfig>();
 
@@ -403,7 +415,6 @@ namespace MidManStudio.Mdix.Core.Tests
                 Active = true,
             };
 
-            // Serialize into builder, then produce .mdix string.
             using var builder = MdixBuilder.Create();
             var serResult = builder.Serialize(original);
 
@@ -418,11 +429,9 @@ namespace MidManStudio.Mdix.Core.Tests
             var mdixString = builder.Serialize().OrThrow();
             _out.WriteLine($"Generated .mdix:\n{mdixString}");
 
-            // Load the generated string back into a database.
             using var db = Dix.LoadStr(mdixString).OrThrow();
             _out.WriteLine($"Loaded DB IsValid: {db.IsValid}");
 
-            // Deserialize back to the same type.
             var result = db.Deserialize<RoundTripConfig>();
 
             _out.WriteLine($"Deserialize IsSuccess: {result.IsSuccess}");
@@ -448,7 +457,6 @@ namespace MidManStudio.Mdix.Core.Tests
                 .WithString("name", "ToDatabaseTest")
                 .WithInt("value", 99));
 
-            // FIX: MdixResult<MdixDatabase> is not IDisposable — unwrap before using.
             var dbResult = builder.ToDatabase();
 
             _out.WriteLine($"ToDatabase IsSuccess: {dbResult.IsSuccess}");

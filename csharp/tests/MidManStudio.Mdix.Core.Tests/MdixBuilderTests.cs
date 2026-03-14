@@ -264,13 +264,33 @@ namespace MidManStudio.Mdix.Core.Tests
             s.Should().Contain("coords = t:(1, 2, 3)");
         }
 
+        // Tuples max 6 elements. 5 is valid, 7 throws.
+
         [Fact]
-        public void Data_WithTuple_FiveElements_ThrowsArgumentException()
+        public void Data_WithTuple_FiveElements_Succeeds()
+        {
+            var ex = Record.Exception(() =>
+                Serialize(b => b.Data(d => d.WithTuple("t", 1, 2, 3, 4, 5))));
+            _out.WriteLine($"Exception: {ex?.Message ?? "none"}");
+            ex.Should().BeNull();
+        }
+
+        [Fact]
+        public void Data_WithTuple_SixElements_Succeeds()
+        {
+            var ex = Record.Exception(() =>
+                Serialize(b => b.Data(d => d.WithTuple("t", 1, 2, 3, 4, 5, 6))));
+            _out.WriteLine($"Exception: {ex?.Message ?? "none"}");
+            ex.Should().BeNull();
+        }
+
+        [Fact]
+        public void Data_WithTuple_SevenElements_ThrowsArgumentException()
         {
             ArgumentException? caught = null;
             try
             {
-                Serialize(b => b.Data(d => d.WithTuple("t", 1, 2, 3, 4, 5)));
+                Serialize(b => b.Data(d => d.WithTuple("t", 1, 2, 3, 4, 5, 6, 7)));
             }
             catch (ArgumentException ex)
             {

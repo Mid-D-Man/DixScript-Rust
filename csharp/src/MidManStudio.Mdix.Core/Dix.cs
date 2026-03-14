@@ -1,5 +1,7 @@
+// csharp/src/MidManStudio.Mdix.Core/Dix.cs
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace MidManStudio.Mdix
 {
@@ -56,19 +58,56 @@ namespace MidManStudio.Mdix
 
         // ── Foreign format loading ────────────────────────────────────────────
 
-        /// <summary>
-        /// Parses a JSON object string and returns a loaded database.
-        /// The JSON must be an object at the top level. Dispose when done.
-        /// </summary>
         public static Core.MdixResult<Core.MdixDatabase> LoadJson(string json) =>
             Core.MdixConverter.FromJson(json);
 
-        /// <summary>
-        /// Parses a TOML table string and returns a loaded database.
-        /// The TOML must be a table at the top level. Dispose when done.
-        /// </summary>
         public static Core.MdixResult<Core.MdixDatabase> LoadToml(string toml) =>
             Core.MdixConverter.FromToml(toml);
+
+        // ── Merging ───────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Merges <paramref name="secondary"/> into <paramref name="primary"/> and
+        /// returns a new combined database. Neither input is modified or disposed.
+        /// </summary>
+        public static Core.MdixResult<Core.MdixDatabase> Merge(
+            Core.MdixDatabase primary,
+            Core.MdixDatabase secondary,
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.PrimaryWins) =>
+            Core.MdixMerge.Merge(primary, secondary, strategy);
+
+        /// <summary>
+        /// Merges all databases left-to-right. First is the base; each subsequent
+        /// database is merged in using <paramref name="strategy"/>.
+        /// </summary>
+        public static Core.MdixResult<Core.MdixDatabase> MergeAll(
+            IEnumerable<Core.MdixDatabase> databases,
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.PrimaryWins) =>
+            Core.MdixMerge.MergeAll(databases, strategy);
+
+        /// <summary>
+        /// Merges a raw JSON object string into an existing database.
+        /// </summary>
+        public static Core.MdixResult<Core.MdixDatabase> MergeJson(
+            Core.MdixDatabase primary,
+            string secondaryJson,
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.PrimaryWins) =>
+            Core.MdixMerge.MergeJson(primary, secondaryJson, strategy);
+
+        // ── Async merging ─────────────────────────────────────────────────────
+
+        public static Task<Core.MdixResult<Core.MdixDatabase>> MergeAsync(
+            Core.MdixDatabase primary,
+            Core.MdixDatabase secondary,
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.PrimaryWins,
+            CancellationToken ct = default) =>
+            Task.Run(() => Core.MdixMerge.Merge(primary, secondary, strategy), ct);
+
+        public static Task<Core.MdixResult<Core.MdixDatabase>> MergeAllAsync(
+            IEnumerable<Core.MdixDatabase> databases,
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.PrimaryWins,
+            CancellationToken ct = default) =>
+            Task.Run(() => Core.MdixMerge.MergeAll(databases, strategy), ct);
 
         // ── POCO deserialization ──────────────────────────────────────────────
 
@@ -93,27 +132,22 @@ namespace MidManStudio.Mdix
 
         // ── Conversion and formatting ─────────────────────────────────────────
 
-        /// <summary>Re-serialize a loaded database to .mdix text.</summary>
         public static Core.MdixResult<string> ToMdix(
             Core.MdixDatabase db,
             Core.MdixFormatMode mode = Core.MdixFormatMode.Default) =>
             Core.MdixConverter.ToMdix(db, mode);
 
-        /// <summary>Export a loaded database as JSON.</summary>
         public static Core.MdixResult<string> ToJson(Core.MdixDatabase db, bool indented = true) =>
             Core.MdixConverter.ToJson(db, indented);
 
-        /// <summary>Export a loaded database as TOML.</summary>
         public static Core.MdixResult<string> ToToml(Core.MdixDatabase db) =>
             Core.MdixConverter.ToToml(db);
 
-        /// <summary>Format a raw .mdix source string.</summary>
         public static Core.MdixResult<string> Format(
             string source,
             Core.MdixFormatMode mode = Core.MdixFormatMode.Default) =>
             Core.MdixConverter.FormatSource(source, mode);
 
-        /// <summary>Minify a raw .mdix source string.</summary>
         public static Core.MdixResult<string> Minify(string source) =>
             Core.MdixConverter.MinifySource(source);
 

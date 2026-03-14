@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using FluentAssertions;
 using MidManStudio.Mdix;
 using MidManStudio.Mdix.Core;

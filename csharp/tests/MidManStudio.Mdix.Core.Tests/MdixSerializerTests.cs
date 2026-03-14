@@ -126,19 +126,12 @@ namespace MidManStudio.Mdix.Core.Tests
         public MdixSerializerTests(ITestOutputHelper output)
         {
             _out = output;
-            MdixSerializer.ClearCache();
+            // FIX: MdixSerializer is internal — access via the public Dix facade.
+            Dix.ClearSerializerCache();
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
-        private static MdixDatabase LoadSource(string source)
-        {
-            _out_static?.WriteLine($"Source:\n{source}");
-            return Dix.LoadStr(source).OrThrow();
-        }
-
-        // xUnit doesn't inject ITestOutputHelper into static helpers —
-        // we stash it in a thread-local for the LoadSource helper above.
         [ThreadStatic]
         private static ITestOutputHelper? _out_static;
 
@@ -455,7 +448,8 @@ namespace MidManStudio.Mdix.Core.Tests
                 .WithString("name", "ToDatabaseTest")
                 .WithInt("value", 99));
 
-            using var dbResult = builder.ToDatabase();
+            // FIX: MdixResult<MdixDatabase> is not IDisposable — unwrap before using.
+            var dbResult = builder.ToDatabase();
 
             _out.WriteLine($"ToDatabase IsSuccess: {dbResult.IsSuccess}");
 

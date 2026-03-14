@@ -36,10 +36,7 @@ namespace MidManStudio.Mdix.Core
     ///         .WithInt("version", 1)
     ///         .WithTableProperties("server", t => t
     ///             .WithString("host", "localhost")
-    ///             .WithInt("port", 8080))
-    ///         .WithGroupArray("tags", a => a
-    ///             .AddString("alpha")
-    ///             .AddString("beta")));
+    ///             .WithInt("port", 8080)));
     ///
     /// builder.Save("config.mdix").OrThrow();
     /// </code>
@@ -48,9 +45,9 @@ namespace MidManStudio.Mdix.Core
     {
         #region Fields
 
-        internal readonly MdixConfigBuilder      _config  = new MdixConfigBuilder();
-        internal readonly MdixEnumsBuilder       _enums   = new MdixEnumsBuilder();
-        internal readonly MdixDataSectionBuilder _data    = new MdixDataSectionBuilder();
+        internal readonly MdixConfigBuilder      _config = new MdixConfigBuilder();
+        internal readonly MdixEnumsBuilder       _enums  = new MdixEnumsBuilder();
+        internal readonly MdixDataSectionBuilder _data   = new MdixDataSectionBuilder();
 
         private volatile int _disposed;
 
@@ -64,9 +61,8 @@ namespace MidManStudio.Mdix.Core
         public static MdixBuilder Create() => new MdixBuilder();
 
         /// <summary>
-        /// Creates a builder pre-populated with flat DATA entries copied from a loaded
-        /// <see cref="MdixDatabase"/>. Only DATA values are copied — @CONFIG and @ENUMS
-        /// start empty.
+        /// Creates a builder pre-populated with flat DATA entries copied from a loaded database.
+        /// Only DATA values are copied — @CONFIG and @ENUMS start empty.
         /// </summary>
         public static MdixResult<MdixBuilder> FromDatabase(MdixDatabase db)
         {
@@ -97,7 +93,7 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Section Configuration
+        #region Section configuration
 
         /// <summary>Configures the <c>@CONFIG</c> section.</summary>
         public MdixBuilder Config(Action<MdixConfigBuilder> configure)
@@ -117,9 +113,7 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Configures the <c>@DATA</c> section.
-        /// Flat properties <b>must</b> be added before any table properties or group
-        /// arrays — the two-tier structure is enforced.
-        /// Violations throw <see cref="InvalidOperationException"/> immediately.
+        /// Flat properties must be added before any table properties or group arrays.
         /// </summary>
         public MdixBuilder Data(Action<MdixDataSectionBuilder> configure)
         {
@@ -130,15 +124,50 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Serialization and Persistence
+        #region POCO serialization
 
-        /// <summary>Serializes all sections to a <c>.mdix</c> format string.</summary>
+        /// <summary>
+        /// Serializes a POCO object into this builder's DATA section.
+        /// Call before any explicit <see cref="Data"/> calls that add table properties
+        /// to respect the two-tier ordering constraint.
+        /// </summary>
+        /// <param name="obj">The object to serialize.</param>
+        /// <param name="prefix">
+        /// Root path prefix. Overrides any <see cref="MdixObjectAttribute"/> on the type.
+        /// </param>
+        public MdixResult<Unit> Serialize<T>(T obj, string? prefix = null)
+        {
+            ThrowIfDisposed();
+            if (obj == null) return MdixError.NativeError("Cannot serialize a null object.");
+            var serializer = new MdixSerializer();
+            return serializer.Serialize(obj, _data, prefix);
+        }
+
+        /// <summary>
+        /// Serializes all builder contents to a .mdix string and loads it into a new
+        /// <see cref="MdixDatabase"/>. Useful for round-trip testing and in-memory use.
+        /// The caller is responsible for disposing the returned database.
+        /// </summary>
+        public MdixResult<MdixDatabase> ToDatabase()
+        {
+            ThrowIfDisposed();
+            var ser = Serialize();
+            if (ser.IsFailure) return MdixResult<MdixDatabase>.Err(ser.Error);
+            return MdixDatabase.LoadStr(ser.SuccessResult);
+        }
+
+        #endregion
+
+        #region Serialization and persistence
+
+        /// <summary>Serializes all sections to a .mdix format string.</summary>
         public MdixResult<string> Serialize()
         {
             ThrowIfDisposed();
             try
             {
-                return MdixResult<string>.Ok(MdixFileSerializer.Serialize(_config, _enums, _data));
+                return MdixResult<string>.Ok(
+                    MdixFileSerializer.Serialize(_config, _enums, _data));
             }
             catch (Exception ex)
             {
@@ -147,9 +176,9 @@ namespace MidManStudio.Mdix.Core
         }
 
         /// <summary>
-        /// Saves the builder contents to a <c>.mdix</c> file on disk.
+        /// Saves the builder contents to a .mdix file on disk.
         /// Creates intermediate directories automatically.
-        /// Appends <c>.mdix</c> extension if not already present.
+        /// Appends .mdix extension if not already present.
         /// </summary>
         public MdixResult<Unit> Save(string path)
         {
@@ -180,7 +209,7 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>Saves to disk on a background thread.</summary>
         public Task<MdixResult<Unit>> SaveAsync(
-            string path,
+            string            path,
             CancellationToken ct = default) =>
             Task.Run(() => Save(path), ct);
 
@@ -195,7 +224,7 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Private Helpers
+        #region Private helpers
 
         private static MdixError? CopyKeysIntoData(
             MdixDatabase           db,
@@ -267,6 +296,7 @@ namespace MidManStudio.Mdix.Core
                     }
                 }
             }
+
             return null;
         }
 
@@ -281,13 +311,13 @@ namespace MidManStudio.Mdix.Core
     {
         internal readonly Dictionary<string, object> _entries = new Dictionary<string, object>();
 
-        public MdixConfigBuilder WithVersion(string version)        => Set("version", version);
-        public MdixConfigBuilder WithAuthor(string author)          => Set("author", author);
-        public MdixConfigBuilder WithEncoding(string encoding)      => Set("encoding", encoding);
-        public MdixConfigBuilder WithFeatures(string features)      => Set("features", features);
-        public MdixConfigBuilder WithDebugMode(string debugMode)    => Set("debug_mode", debugMode);
-        public MdixConfigBuilder WithErrorHandling(string eh)       => Set("error_handling", eh);
-        public MdixConfigBuilder WithCompatibilityMode(string mode) => Set("compatibility_mode", mode);
+        public MdixConfigBuilder WithVersion(string version)        => Set("version",            version);
+        public MdixConfigBuilder WithAuthor(string author)          => Set("author",              author);
+        public MdixConfigBuilder WithEncoding(string encoding)      => Set("encoding",            encoding);
+        public MdixConfigBuilder WithFeatures(string features)      => Set("features",            features);
+        public MdixConfigBuilder WithDebugMode(string debugMode)    => Set("debug_mode",          debugMode);
+        public MdixConfigBuilder WithErrorHandling(string eh)       => Set("error_handling",      eh);
+        public MdixConfigBuilder WithCompatibilityMode(string mode) => Set("compatibility_mode",  mode);
 
         public MdixConfigBuilder WithCreated(DateTime created) =>
             Set("created", created.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
@@ -311,27 +341,11 @@ namespace MidManStudio.Mdix.Core
         internal readonly List<(string Name, List<(string Field, int? Value)> Fields)> _enums
             = new List<(string, List<(string, int?)>)>();
 
-        // ── Zero-argument overload ────────────────────────────────────────────
-        //
-        // WHY THIS EXISTS:
-        // Both params-overloads below accept zero extra arguments (empty arrays),
-        // so a call like WithEnum("Empty") is ambiguous to the compiler.
-        // A non-params overload that matches the exact signature (string only)
-        // is always preferred over a params overload, resolving the ambiguity.
-        // We still throw ArgumentException because an enum with no fields is invalid.
-
-        /// <summary>
-        /// Always throws <see cref="ArgumentException"/> — an enum must have at
-        /// least one field. This overload exists solely to resolve the compile-time
-        /// ambiguity between the two <c>params</c> overloads when called with no
-        /// extra arguments.
-        /// </summary>
+        // Non-params overload exists only to resolve compiler ambiguity — always throws.
         public MdixEnumsBuilder WithEnum(string enumName)
         {
             throw new ArgumentException("Enum must have at least one field.", nameof(enumName));
         }
-
-        // ── Auto-increment overload ───────────────────────────────────────────
 
         /// <summary>
         /// Adds an enum with auto-incrementing values starting at 0.
@@ -348,8 +362,6 @@ namespace MidManStudio.Mdix.Core
             _enums.Add((enumName, fields));
             return this;
         }
-
-        // ── Explicit-value overload ───────────────────────────────────────────
 
         /// <summary>
         /// Adds an enum with explicit integer values.
@@ -391,7 +403,8 @@ namespace MidManStudio.Mdix.Core
         public MdixDataSectionBuilder WithBool(string name, bool value)     => AddFlat(name, value);
 
         public MdixDataSectionBuilder WithDate(string name, DateTime value) =>
-            AddFlat(name, new DixDateEntry(value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+            AddFlat(name, new DixDateEntry(
+                value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
 
         public MdixDataSectionBuilder WithTimestamp(string name, DateTime value) =>
             AddFlat(name, new DixTimestampEntry(
@@ -410,22 +423,22 @@ namespace MidManStudio.Mdix.Core
 
         public MdixDataSectionBuilder WithBlob(string name, string base64Data)
         {
-            try   { Convert.FromBase64String(base64Data); }
+            try { Convert.FromBase64String(base64Data); }
             catch (FormatException ex)
             {
-                throw new ArgumentException($"Invalid base64 blob data: {ex.Message}",
-                    nameof(base64Data), ex);
+                throw new ArgumentException(
+                    $"Invalid base64 blob data: {ex.Message}", nameof(base64Data), ex);
             }
             return AddFlat(name, new DixBlobEntry(base64Data));
         }
 
         public MdixDataSectionBuilder WithRegex(string name, string pattern)
         {
-            try   { _ = new System.Text.RegularExpressions.Regex(pattern); }
+            try { _ = new System.Text.RegularExpressions.Regex(pattern); }
             catch (ArgumentException ex)
             {
-                throw new ArgumentException($"Invalid regex pattern: {ex.Message}",
-                    nameof(pattern), ex);
+                throw new ArgumentException(
+                    $"Invalid regex pattern: {ex.Message}", nameof(pattern), ex);
             }
             return AddFlat(name, new DixRegexEntry(pattern));
         }
@@ -434,11 +447,11 @@ namespace MidManStudio.Mdix.Core
         public MdixDataSectionBuilder WithArray<T>(string name, IEnumerable<T> items) =>
             AddFlat(name, items.Cast<object>().ToList());
 
-        /// <summary>Adds a tuple (max 4 elements, mixed types allowed).</summary>
+        /// <summary>Adds a tuple (max 6 elements, mixed types allowed).</summary>
         public MdixDataSectionBuilder WithTuple(string name, params object[] values)
         {
-            if (values.Length > 4)
-                throw new ArgumentException("Tuples may have at most 4 elements.", nameof(values));
+            if (values.Length > 6)
+                throw new ArgumentException("Tuples may have at most 6 elements.", nameof(values));
             return AddFlat(name, new DixTupleEntry(values.ToList()));
         }
 
@@ -530,7 +543,13 @@ namespace MidManStudio.Mdix.Core
             Add(name, new DixEnumEntry(enumName, fieldName));
 
         public MdixTablePropertiesBuilder WithDate(string name, DateTime value) =>
-            Add(name, new DixDateEntry(value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+            Add(name, new DixDateEntry(
+                value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+
+        public MdixTablePropertiesBuilder WithTimestamp(string name, DateTime value) =>
+            Add(name, new DixTimestampEntry(
+                value.ToUniversalTime()
+                     .ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)));
 
         private MdixTablePropertiesBuilder Add(string name, object value)
         {
@@ -578,7 +597,8 @@ namespace MidManStudio.Mdix.Core
 
     public sealed class MdixObjectBuilder
     {
-        internal readonly Dictionary<string, object> _properties = new Dictionary<string, object>();
+        internal readonly Dictionary<string, object> _properties =
+            new Dictionary<string, object>();
 
         public MdixObjectBuilder WithInt(string name, int value)       { _properties[name] = value; return this; }
         public MdixObjectBuilder WithFloat(string name, float value)   { _properties[name] = value; return this; }

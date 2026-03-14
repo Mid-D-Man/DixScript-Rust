@@ -9,7 +9,7 @@ use std::os::raw::{c_char, c_void};
 use std::sync::OnceLock;
 
 use dixscript::Runtime::{
-    DixConverter, DixFormatOptions, DixLoader, DixLoadOptions, DixValue,
+    DixCompactor, DixConverter, DixFormatOptions, DixLoader, DixLoadOptions, DixValue,
 };
 
 use error::{clear_last_error, get_last_error_ptr, set_last_error};
@@ -47,41 +47,39 @@ pub enum MdixType {
     Enum      = 14,
 }
 
+/// Controls how DixScript source or database content is formatted.
+/// Passed to mdix_to_mdix() and mdix_format_source().
+#[repr(i32)]
+pub enum MdixFormatMode {
+    /// Readable output with standard 2-space indentation.
+    Default  = 0,
+    /// Readable output with 4-space indentation and sorted keys.
+    Pretty   = 1,
+    /// Compact output — trailing whitespace removed, blank lines collapsed.
+    Compact  = 2,
+    /// Smallest possible output — all unnecessary whitespace removed.
+    Minified = 3,
+}
+
 // =============================================================================
 // Internal casting helpers
 // =============================================================================
 
-/// Cast a void* from C# back to a typed read handle.
-///
-/// # Safety
-/// `ptr` must have been returned by one of the mdix_load* functions and not yet freed.
 #[inline]
 unsafe fn as_handle<'a>(ptr: *const c_void) -> Option<&'a MdixHandle> {
     if ptr.is_null() { None } else { Some(&*(ptr as *const MdixHandle)) }
 }
 
-/// Cast a void* from C# back to a mutable typed read handle.
-///
-/// # Safety
-/// `ptr` must have been returned by one of the mdix_load* functions and not yet freed.
 #[inline]
 unsafe fn as_handle_mut<'a>(ptr: *mut c_void) -> Option<&'a mut MdixHandle> {
     if ptr.is_null() { None } else { Some(&mut *(ptr as *mut MdixHandle)) }
 }
 
-/// Cast a void* from C# back to a typed builder handle.
-///
-/// # Safety
-/// `ptr` must have been returned by mdix_builder_new and not yet freed.
 #[inline]
 unsafe fn as_builder<'a>(ptr: *const c_void) -> Option<&'a MdixBuilderHandle> {
     if ptr.is_null() { None } else { Some(&*(ptr as *const MdixBuilderHandle)) }
 }
 
-/// Cast a void* from C# back to a mutable typed builder handle.
-///
-/// # Safety
-/// `ptr` must have been returned by mdix_builder_new and not yet freed.
 #[inline]
 unsafe fn as_builder_mut<'a>(ptr: *mut c_void) -> Option<&'a mut MdixBuilderHandle> {
     if ptr.is_null() { None } else { Some(&mut *(ptr as *mut MdixBuilderHandle)) }
@@ -326,8 +324,6 @@ pub extern "C" fn mdix_entry_count(handle: *const c_void) -> i32 {
 /// Return the MdixType discriminant of the value at the given path.
 ///
 /// Returns MdixType::Unknown (-1) if the path does not exist or the handle is null.
-/// Call this before a getter when the schema is not known at compile time.
-// AFTER — MdixType appears in the signature, csbindgen emits the C# enum
 #[no_mangle]
 pub extern "C" fn mdix_get_type(handle: *const c_void, path: *const c_char) -> MdixType {
     let h = match unsafe { as_handle(handle) } {
@@ -363,8 +359,6 @@ pub extern "C" fn mdix_get_type(handle: *const c_void, path: *const c_char) -> M
 /// Return the number of items in the array at the given path.
 ///
 /// Returns -1 if the path does not exist, the value is not an array, or handle is null.
-/// Use this to drive a loop over indexed paths:
-///   for i in 0..mdix_get_array_length(h, "enemies") { mdix_get_int(h, $"enemies[{i}].health") }
 #[no_mangle]
 pub extern "C" fn mdix_get_array_length(handle: *const c_void, path: *const c_char) -> i32 {
     let h = match unsafe { as_handle(handle) } {
@@ -693,6 +687,147 @@ pub extern "C" fn mdix_clear_error() {
 }
 
 // =============================================================================
+// Conversion — database export
+// =============================================================================
+
+/// Export all entries in the loaded database as a JSON string.
+///
+/// Dotted-path nesting is reconstructed automatically.
+/// `indented` — pass true for pretty-printed JSON, false for compact single-line.
+/// Returns a heap-allocated C string on success, null on failure.
+/// The caller must free the result with mdix_free_string().
+#[no_mangle]
+pub extern "C" fn mdix_to_json(handle: *const c_void, indented: bool) -> *mut c_char {
+    clear_last_error();
+
+    let h = match unsafe { as_handle(handle) } {
+        Some(h) => h,
+        None => {
+            set_last_error("mdix_to_json: handle is null");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let entries = h.data.to_hashmap();
+    let converter = DixConverter::new();
+
+    let ast = match converter.from_hashmap(entries) {
+        Ok(a) => a,
+        Err(e) => {
+            set_last_error(&format!("mdix_to_json: AST conversion failed: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+
+    let map = converter.to_hashmap(&ast);
+    let result = if indented {
+        serde_json::to_string_pretty(&map)
+    } else {
+        serde_json::to_string(&map)
+    };
+
+    match result {
+        Ok(s) => str_to_c_char(s),
+        Err(e) => {
+            set_last_error(&format!("mdix_to_json: JSON serialization failed: {}", e));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Serialize the loaded database back to .mdix text format.
+///
+/// `mode` — one of the MdixFormatMode values controlling output style.
+/// Returns a heap-allocated C string on success, null on failure.
+/// The caller must free the result with mdix_free_string().
+#[no_mangle]
+pub extern "C" fn mdix_to_mdix(handle: *const c_void, mode: MdixFormatMode) -> *mut c_void {
+    clear_last_error();
+
+    let h = match unsafe { as_handle(handle) } {
+        Some(h) => h,
+        None => {
+            set_last_error("mdix_to_mdix: handle is null");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let entries = h.data.to_hashmap();
+    let converter = DixConverter::new();
+
+    let ast = match converter.from_hashmap(entries) {
+        Ok(a) => a,
+        Err(e) => {
+            set_last_error(&format!("mdix_to_mdix: AST conversion failed: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+
+    let options = format_mode_to_options(mode);
+
+    match converter.to_mdix(&ast, Some(&options)) {
+        Ok(s) => str_to_c_char(s) as *mut c_void,
+        Err(e) => {
+            set_last_error(&format!("mdix_to_mdix: serialization failed: {}", e));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+// =============================================================================
+// Conversion — source text formatting
+// =============================================================================
+
+/// Format a raw .mdix source string according to the requested mode.
+///
+/// `source` — null-terminated UTF-8 .mdix source.
+/// `mode`   — one of the MdixFormatMode values.
+/// Returns a heap-allocated C string on success, null on failure.
+/// The caller must free the result with mdix_free_string().
+#[no_mangle]
+pub extern "C" fn mdix_format_source(
+    source: *const c_char,
+    mode:   MdixFormatMode,
+) -> *mut c_char {
+    clear_last_error();
+
+    let source_str = match unsafe { c_str_to_str(source) } {
+        Some(s) => s,
+        None => {
+            set_last_error("mdix_format_source: source is null or invalid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let result = match mode {
+        MdixFormatMode::Minified => DixCompactor::minify(source_str),
+        _                        => DixCompactor::compact(source_str),
+    };
+
+    str_to_c_char(result)
+}
+
+/// Minify a raw .mdix source string — remove all unnecessary whitespace and comments.
+///
+/// String literal contents are preserved.
+/// Returns a heap-allocated C string on success, null on failure.
+/// The caller must free the result with mdix_free_string().
+#[no_mangle]
+pub extern "C" fn mdix_minify_source(source: *const c_char) -> *mut c_char {
+    clear_last_error();
+
+    let source_str = match unsafe { c_str_to_str(source) } {
+        Some(s) => s,
+        None => {
+            set_last_error("mdix_minify_source: source is null or invalid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    str_to_c_char(DixCompactor::minify(source_str))
+}
+
+// =============================================================================
 // Builder — lifecycle
 // =============================================================================
 
@@ -740,9 +875,7 @@ pub extern "C" fn mdix_builder_clear(builder: *mut c_void) -> bool {
 // Builder — write
 // =============================================================================
 
-/// Set a string value at the given dotted path.
-///
-/// Returns true on success, false if the builder or path is null.
+/// Set a string value at the given dotted path. Returns true on success.
 #[no_mangle]
 pub extern "C" fn mdix_builder_set_string(
     builder: *mut c_void,
@@ -768,9 +901,7 @@ pub extern "C" fn mdix_builder_set_string(
     true
 }
 
-/// Set an integer value at the given dotted path.
-///
-/// Returns true on success, false if the builder or path is null.
+/// Set an integer value at the given dotted path. Returns true on success.
 #[no_mangle]
 pub extern "C" fn mdix_builder_set_int(
     builder: *mut c_void,
@@ -788,9 +919,7 @@ pub extern "C" fn mdix_builder_set_int(
     true
 }
 
-/// Set a float value at the given dotted path.
-///
-/// Returns true on success, false if the builder or path is null.
+/// Set a float value at the given dotted path. Returns true on success.
 #[no_mangle]
 pub extern "C" fn mdix_builder_set_float(
     builder: *mut c_void,
@@ -808,9 +937,7 @@ pub extern "C" fn mdix_builder_set_float(
     true
 }
 
-/// Set a double value at the given dotted path.
-///
-/// Returns true on success, false if the builder or path is null.
+/// Set a double value at the given dotted path. Returns true on success.
 #[no_mangle]
 pub extern "C" fn mdix_builder_set_double(
     builder: *mut c_void,
@@ -828,9 +955,7 @@ pub extern "C" fn mdix_builder_set_double(
     true
 }
 
-/// Set a boolean value at the given dotted path.
-///
-/// Returns true on success, false if the builder or path is null.
+/// Set a boolean value at the given dotted path. Returns true on success.
 #[no_mangle]
 pub extern "C" fn mdix_builder_set_bool(
     builder: *mut c_void,
@@ -848,9 +973,7 @@ pub extern "C" fn mdix_builder_set_bool(
     true
 }
 
-/// Remove a key from the builder.
-///
-/// Returns true if the key existed and was removed, false otherwise.
+/// Remove a key from the builder. Returns true if it existed and was removed.
 #[no_mangle]
 pub extern "C" fn mdix_builder_remove(
     builder: *mut c_void,
@@ -871,8 +994,6 @@ pub extern "C" fn mdix_builder_remove(
 // =============================================================================
 
 /// Check whether a key exists in the builder.
-///
-/// Returns false if the builder is null or the key is not present.
 #[no_mangle]
 pub extern "C" fn mdix_builder_has_key(
     builder: *const c_void,
@@ -925,9 +1046,7 @@ pub extern "C" fn mdix_builder_get_string(
     }
 }
 
-/// Get an integer value from the builder by dotted path.
-///
-/// Returns 0 on failure. Use mdix_builder_has_key() to distinguish 0 from not-found.
+/// Get an integer value from the builder by dotted path. Returns 0 on failure.
 #[no_mangle]
 pub extern "C" fn mdix_builder_get_int(
     builder: *const c_void,
@@ -1229,4 +1348,144 @@ fn validate_builder_read<'a>(
     }
 
     Some((b, path_str))
+}
+
+fn format_mode_to_options(mode: MdixFormatMode) -> DixFormatOptions {
+    match mode {
+        MdixFormatMode::Default  => DixFormatOptions::new(),
+        MdixFormatMode::Pretty   => DixFormatOptions::pretty(),
+        MdixFormatMode::Compact  => DixFormatOptions::compact(),
+        MdixFormatMode::Minified => DixFormatOptions::minified(),
+    }
+}
+
+// =============================================================================
+// Conversion — TOML export and foreign format import
+// =============================================================================
+
+/// Export all entries in the loaded database as a TOML string.
+///
+/// Returns a heap-allocated C string on success, null on failure.
+/// The caller must free the result with mdix_free_string().
+#[no_mangle]
+pub extern "C" fn mdix_to_toml(handle: *const c_void) -> *mut c_char {
+    clear_last_error();
+
+    let h = match unsafe { as_handle(handle) } {
+        Some(h) => h,
+        None => {
+            set_last_error("mdix_to_toml: handle is null");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let entries = h.data.to_hashmap();
+    let converter = DixConverter::new();
+
+    let ast = match converter.from_hashmap(entries) {
+        Ok(a) => a,
+        Err(e) => {
+            set_last_error(&format!("mdix_to_toml: AST conversion failed: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+
+    match converter.to_toml(&ast) {
+        Ok(s) => str_to_c_char(s),
+        Err(e) => {
+            set_last_error(&format!("mdix_to_toml: TOML serialization failed: {}", e));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Load a JSON string and return a handle to the parsed data.
+///
+/// The JSON must be an object at the top level.
+/// Returns an opaque void pointer on success, null on failure.
+/// The caller must free the handle with mdix_free() when done.
+#[no_mangle]
+pub extern "C" fn mdix_from_json(source: *const c_char) -> *mut c_void {
+    clear_last_error();
+
+    let src = match unsafe { c_str_to_str(source) } {
+        Some(s) => s,
+        None => {
+            set_last_error("mdix_from_json: source is null or invalid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let converter = DixConverter::new();
+    let ast = match converter.from_json(src) {
+        Ok(a) => a,
+        Err(e) => {
+            set_last_error(&format!("mdix_from_json: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+
+    let map = converter.to_hashmap(&ast);
+    let loader = dixscript::Runtime::DixLoader::new();
+    // Re-serialize to .mdix source then load through the normal pipeline
+    // so the handle is a proper DixData, not a raw AST.
+    let mdix_src = match converter.to_mdix(&ast, None) {
+        Ok(s) => s,
+        Err(e) => {
+            set_last_error(&format!("mdix_from_json: re-serialization failed: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+
+    match loader.load_from_str(&mdix_src, &DixLoadOptions::new()) {
+        Ok(data) => MdixHandle::new(data) as *mut c_void,
+        Err(e) => {
+            set_last_error(&format!("mdix_from_json: load failed: {}", e));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Load a TOML string and return a handle to the parsed data.
+///
+/// The TOML must be a table at the top level.
+/// Returns an opaque void pointer on success, null on failure.
+/// The caller must free the handle with mdix_free() when done.
+#[no_mangle]
+pub extern "C" fn mdix_from_toml(source: *const c_char) -> *mut c_void {
+    clear_last_error();
+
+    let src = match unsafe { c_str_to_str(source) } {
+        Some(s) => s,
+        None => {
+            set_last_error("mdix_from_toml: source is null or invalid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let converter = DixConverter::new();
+    let ast = match converter.from_toml(src) {
+        Ok(a) => a,
+        Err(e) => {
+            set_last_error(&format!("mdix_from_toml: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+
+    let mdix_src = match converter.to_mdix(&ast, None) {
+        Ok(s) => s,
+        Err(e) => {
+            set_last_error(&format!("mdix_from_toml: re-serialization failed: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+
+    let loader = DixLoader::new();
+    match loader.load_from_str(&mdix_src, &DixLoadOptions::new()) {
+        Ok(data) => MdixHandle::new(data) as *mut c_void,
+        Err(e) => {
+            set_last_error(&format!("mdix_from_toml: load failed: {}", e));
+            std::ptr::null_mut()
+        }
+    }
 }

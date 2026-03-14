@@ -5,54 +5,32 @@ namespace MidManStudio.Mdix
 {
     /// <summary>
     /// Static one-liner facade — the primary entry point for all callers.
-    /// <code>
-    /// // Load and read
-    /// using var db = Dix.Load("config.mdix").OrThrow();
-    /// int port = db.GetInt("server.port").UnwrapOr(8080);
-    ///
-    /// // Deserialize to a POCO
-    /// var cfg = Dix.Deserialize&lt;ServerConfig&gt;("config.mdix").OrThrow();
-    ///
-    /// // Build and save
-    /// using var builder = Dix.Builder();
-    /// builder.Data(d => d.WithString("app", "MyGame")).Save("out.mdix").OrThrow();
-    ///
-    /// // Serialize a POCO into a builder
-    /// using var builder = Dix.Builder();
-    /// builder.Serialize(myConfig).OrThrow();
-    /// builder.Save("config.mdix").OrThrow();
-    /// </code>
     /// </summary>
     public static class Dix
     {
         // ── Loading ───────────────────────────────────────────────────────────
 
-        /// <summary>Loads a plain .mdix file from disk.</summary>
         public static Core.MdixResult<Core.MdixDatabase> Load(string path) =>
             Core.MdixDatabase.Load(path);
 
-        /// <summary>Loads DixScript source from a raw string — no disk access.</summary>
         public static Core.MdixResult<Core.MdixDatabase> LoadStr(string source) =>
             Core.MdixDatabase.LoadStr(source);
 
-        /// <summary>Loads an encrypted .mdix.enc file using a key file.</summary>
         public static Core.MdixResult<Core.MdixDatabase> LoadEncrypted(
-            string  encPath,
-            string? keyPath = null) =>
+            string encPath, string? keyPath = null) =>
             Core.MdixDatabase.LoadEncrypted(encPath, keyPath);
 
-        /// <summary>Loads an encrypted .mdix.enc file using a password.</summary>
         public static Core.MdixResult<Core.MdixDatabase> LoadEncryptedPassword(
-            string encPath,
-            string password) =>
+            string encPath, string password) =>
             Core.MdixDatabase.LoadEncryptedPassword(encPath, password);
 
-        /// <summary>Loads encrypted data from raw bytes.</summary>
         public static Core.MdixResult<Core.MdixDatabase> LoadEncryptedBytes(
-            byte[]  data,
-            string  keyContent,
-            string? password = null) =>
+            byte[] data, string keyContent, string? password = null) =>
             Core.MdixDatabase.LoadEncryptedBytes(data, keyContent, password);
+
+        public static Core.MdixResult<Core.MdixDatabase> LoadEncryptedWith(
+            string encPath, Core.MdixLoadOptions options) =>
+            options.Apply(encPath);
 
         // ── Async loading ─────────────────────────────────────────────────────
 
@@ -76,64 +54,71 @@ namespace MidManStudio.Mdix
             byte[] data, string keyContent, string? password = null, CancellationToken ct = default) =>
             Core.MdixDatabase.LoadEncryptedBytesAsync(data, keyContent, password, ct);
 
-        // ── POCO deserialization ───────────────────────────────────────────────
+        // ── Foreign format loading ────────────────────────────────────────────
 
         /// <summary>
-        /// Loads a .mdix file and deserializes it directly into a strongly-typed object.
-        /// Equivalent to calling <see cref="Load"/> then <see cref="Core.MdixDatabase.Deserialize{T}"/>.
-        /// The database is created and disposed internally — do not use it after this call.
+        /// Parses a JSON object string and returns a loaded database.
+        /// The JSON must be an object at the top level. Dispose when done.
         /// </summary>
-        /// <param name="path">Path to the .mdix file.</param>
-        /// <param name="prefix">
-        /// Optional root path prefix. Overrides any <see cref="Core.MdixObjectAttribute"/> on T.
-        /// </param>
+        public static Core.MdixResult<Core.MdixDatabase> LoadJson(string json) =>
+            Core.MdixConverter.FromJson(json);
+
+        /// <summary>
+        /// Parses a TOML table string and returns a loaded database.
+        /// The TOML must be a table at the top level. Dispose when done.
+        /// </summary>
+        public static Core.MdixResult<Core.MdixDatabase> LoadToml(string toml) =>
+            Core.MdixConverter.FromToml(toml);
+
+        // ── POCO deserialization ──────────────────────────────────────────────
+
         public static Core.MdixResult<T> Deserialize<T>(string path, string? prefix = null)
         {
             var loadResult = Load(path);
-            if (loadResult.IsFailure)
-                return Core.MdixResult<T>.Err(loadResult.Error);
-
+            if (loadResult.IsFailure) return Core.MdixResult<T>.Err(loadResult.Error);
             using var db = loadResult.SuccessResult;
             return db.Deserialize<T>(prefix);
         }
 
-        /// <summary>
-        /// Deserializes an already-loaded database into a strongly-typed object.
-        /// The database remains open and valid after this call.
-        /// </summary>
-        /// <param name="db">The loaded database to read from.</param>
-        /// <param name="prefix">
-        /// Optional root path prefix. Overrides any <see cref="Core.MdixObjectAttribute"/> on T.
-        /// </param>
         public static Core.MdixResult<T> DeserializeFrom<T>(
-            Core.MdixDatabase db,
-            string?           prefix = null) =>
+            Core.MdixDatabase db, string? prefix = null) =>
             db.Deserialize<T>(prefix);
 
         // ── Building ──────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Creates a new empty <see cref="Core.MdixBuilder"/> for constructing
-        /// .mdix config files with @CONFIG, @ENUMS, and @DATA sections.
-        /// </summary>
-        public static Core.MdixBuilder Builder() =>
-            Core.MdixBuilder.Create();
+        public static Core.MdixBuilder Builder() => Core.MdixBuilder.Create();
 
-        /// <summary>
-        /// Creates a <see cref="Core.MdixBuilder"/> pre-populated with DATA entries
-        /// copied from a loaded database.
-        /// </summary>
         public static Core.MdixResult<Core.MdixBuilder> BuilderFrom(Core.MdixDatabase db) =>
             Core.MdixBuilder.FromDatabase(db);
 
+        // ── Conversion and formatting ─────────────────────────────────────────
+
+        /// <summary>Re-serialize a loaded database to .mdix text.</summary>
+        public static Core.MdixResult<string> ToMdix(
+            Core.MdixDatabase db,
+            Core.MdixFormatMode mode = Core.MdixFormatMode.Default) =>
+            Core.MdixConverter.ToMdix(db, mode);
+
+        /// <summary>Export a loaded database as JSON.</summary>
+        public static Core.MdixResult<string> ToJson(Core.MdixDatabase db, bool indented = true) =>
+            Core.MdixConverter.ToJson(db, indented);
+
+        /// <summary>Export a loaded database as TOML.</summary>
+        public static Core.MdixResult<string> ToToml(Core.MdixDatabase db) =>
+            Core.MdixConverter.ToToml(db);
+
+        /// <summary>Format a raw .mdix source string.</summary>
+        public static Core.MdixResult<string> Format(
+            string source,
+            Core.MdixFormatMode mode = Core.MdixFormatMode.Default) =>
+            Core.MdixConverter.FormatSource(source, mode);
+
+        /// <summary>Minify a raw .mdix source string.</summary>
+        public static Core.MdixResult<string> Minify(string source) =>
+            Core.MdixConverter.MinifySource(source);
+
         // ── Serializer cache ──────────────────────────────────────────────────
 
-        /// <summary>
-        /// Clears the internal reflection cache used by <see cref="Deserialize{T}"/>
-        /// and <see cref="Core.MdixBuilder.Serialize{T}"/>.
-        /// Call this after hot-reload or dynamic assembly loading to force the
-        /// serializer to re-inspect types on the next use.
-        /// </summary>
         public static void ClearSerializerCache() => Core.MdixSerializer.ClearCache();
     }
 }

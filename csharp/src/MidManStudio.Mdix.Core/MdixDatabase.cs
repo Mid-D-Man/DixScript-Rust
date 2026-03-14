@@ -13,7 +13,7 @@ namespace MidManStudio.Mdix.Core
 
     /// <summary>
     /// Public-facing type discriminant returned by <see cref="MdixDatabase.GetValueType"/>.
-    /// Maps 1:1 to the native <c>MdixType</c> enum.
+    /// Maps 1:1 to the native MdixType enum.
     /// </summary>
     public enum MdixValueType
     {
@@ -41,8 +41,6 @@ namespace MidManStudio.Mdix.Core
     /// Loaded DixScript data container. All read operations are O(1) via the
     /// Rust-side flattened hash map. Implements <see cref="IDisposable"/> —
     /// always dispose when done to release the underlying native handle.
-    /// The finalizer is owned by the internal <see cref="MdixSafeHandle"/>
-    /// so no finalizer is required here.
     /// </summary>
     public sealed unsafe class MdixDatabase : IDisposable
     {
@@ -50,7 +48,7 @@ namespace MidManStudio.Mdix.Core
 
         private MdixSafeHandle  _safeHandle;
         private string?         _sourcePath;
-        private volatile int    _disposed; // 0 = alive, 1 = disposed
+        private volatile int    _disposed;
 
         private FileSystemWatcher? _watcher;
         private long               _lastReloadTick;
@@ -66,8 +64,7 @@ namespace MidManStudio.Mdix.Core
         /// <summary>
         /// Fired on the watcher background thread after a successful hot reload.
         /// The argument is the newly loaded <see cref="MdixDatabase"/> — the old
-        /// instance remains valid until you dispose it. Unity layer is responsible
-        /// for marshalling to the main thread.
+        /// instance remains valid until you dispose it.
         /// </summary>
         public event Action<MdixDatabase>? OnReloaded;
 
@@ -91,7 +88,7 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Releases the native handle and stops hot reload.
-        /// Safe to call multiple times — subsequent calls are no-ops.
+        /// Safe to call multiple times.
         /// </summary>
         public void Dispose()
         {
@@ -117,8 +114,8 @@ namespace MidManStudio.Mdix.Core
             _disposed == 0 && !_safeHandle.IsInvalid && !_safeHandle.IsClosed;
 
         /// <summary>
-        /// Total number of entries in the flattened store, including indexed array
-        /// elements. Returns -1 when disposed.
+        /// Total number of entries in the flattened store, including indexed array elements.
+        /// Returns -1 when disposed.
         /// </summary>
         public int EntryCount
         {
@@ -133,9 +130,9 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Sync Factories
+        #region Sync factories
 
-        /// <summary>Loads a plain <c>.mdix</c> file from disk.</summary>
+        /// <summary>Loads a plain .mdix file from disk.</summary>
         public static MdixResult<MdixDatabase> Load(string path)
         {
             if (string.IsNullOrEmpty(path))
@@ -173,9 +170,8 @@ namespace MidManStudio.Mdix.Core
         }
 
         /// <summary>
-        /// Loads an encrypted <c>.mdix.enc</c> file using a key file.
-        /// Pass <c>null</c> for <paramref name="keyPath"/> to auto-detect the
-        /// key file next to the enc file.
+        /// Loads an encrypted .mdix.enc file using a key file.
+        /// Pass null for keyPath to auto-detect the key file next to the enc file.
         /// </summary>
         public static MdixResult<MdixDatabase> LoadEncrypted(
             string  encPath,
@@ -207,16 +203,15 @@ namespace MidManStudio.Mdix.Core
         }
 
         /// <summary>
-        /// Loads an encrypted <c>.mdix.enc</c> file using a password.
-        /// The password is encoded transiently — it is never stored in the
-        /// string cache so it does not persist in memory beyond this call.
+        /// Loads an encrypted .mdix.enc file using a password.
+        /// The password is encoded transiently and never stored in the string cache.
         /// </summary>
         public static MdixResult<MdixDatabase> LoadEncryptedPassword(
             string encPath,
             string password)
         {
-            if (string.IsNullOrEmpty(encPath))   return MdixError.InvalidPath(encPath);
-            if (string.IsNullOrEmpty(password))  return MdixError.NativeError("Password cannot be null or empty.");
+            if (string.IsNullOrEmpty(encPath))  return MdixError.InvalidPath(encPath);
+            if (string.IsNullOrEmpty(password)) return MdixError.NativeError("Password cannot be null or empty.");
 
             fixed (byte* encPtr = MdixStringCache.GetUtf8Bytes(encPath))
             fixed (byte* pwdPtr = MdixStringCache.EncodeTemporary(password))
@@ -232,8 +227,7 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Loads encrypted data from raw bytes with the key file content as a string.
-        /// Useful when the payload and key both come from a network response or
-        /// secrets manager without touching the filesystem.
+        /// Useful when payload and key both come from a network response or secrets manager.
         /// </summary>
         public static MdixResult<MdixDatabase> LoadEncryptedBytes(
             byte[]  data,
@@ -270,9 +264,9 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Async Factories
+        #region Async factories
 
-        /// <summary>Loads a plain <c>.mdix</c> file on a background thread.</summary>
+        /// <summary>Loads a plain .mdix file on a background thread.</summary>
         public static Task<MdixResult<MdixDatabase>> LoadAsync(
             string            path,
             CancellationToken ct = default) =>
@@ -308,9 +302,9 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Data Access — Existence and Type
+        #region Data access — existence and type
 
-        /// <summary>Returns true if the dotted <paramref name="path"/> exists in the loaded data.</summary>
+        /// <summary>Returns true if the dotted path exists in the loaded data.</summary>
         public bool Exists(string path)
         {
             if (_disposed == 1 || string.IsNullOrEmpty(path)) return false;
@@ -324,7 +318,7 @@ namespace MidManStudio.Mdix.Core
         }
 
         /// <summary>
-        /// Returns the <see cref="MdixValueType"/> of the value at <paramref name="path"/>.
+        /// Returns the <see cref="MdixValueType"/> of the value at path.
         /// Returns <see cref="MdixValueType.Unknown"/> when the path does not exist.
         /// </summary>
         public MdixValueType GetValueType(string path)
@@ -343,12 +337,11 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Data Access — Core Typed Getters
+        #region Data access — core typed getters
 
         /// <summary>
         /// Gets a string value by dotted path.
-        /// Also works for Date, Timestamp, and HexColor — all are stored as strings
-        /// at the native layer. Use the dedicated getters for parsed types.
+        /// Also works for Date, Timestamp, and HexColor — all stored as strings at the native layer.
         /// </summary>
         public MdixResult<string> GetString(string path)
         {
@@ -381,8 +374,7 @@ namespace MidManStudio.Mdix.Core
                     MdixNative.mdix_clear_error();
                     int value = MdixNative.mdix_get_int(h, pathPtr);
                     var nativeErr = ReadLastError();
-                    if (nativeErr != null)
-                        return MdixError.NativeError(nativeErr);
+                    if (nativeErr != null) return MdixError.NativeError(nativeErr);
                     return MdixResult<int>.Ok(value);
                 }
             }
@@ -400,8 +392,7 @@ namespace MidManStudio.Mdix.Core
                     MdixNative.mdix_clear_error();
                     float value = MdixNative.mdix_get_float(h, pathPtr);
                     var nativeErr = ReadLastError();
-                    if (nativeErr != null)
-                        return MdixError.NativeError(nativeErr);
+                    if (nativeErr != null) return MdixError.NativeError(nativeErr);
                     return MdixResult<float>.Ok(value);
                 }
             }
@@ -419,8 +410,7 @@ namespace MidManStudio.Mdix.Core
                     MdixNative.mdix_clear_error();
                     double value = MdixNative.mdix_get_double(h, pathPtr);
                     var nativeErr = ReadLastError();
-                    if (nativeErr != null)
-                        return MdixError.NativeError(nativeErr);
+                    if (nativeErr != null) return MdixError.NativeError(nativeErr);
                     return MdixResult<double>.Ok(value);
                 }
             }
@@ -438,8 +428,7 @@ namespace MidManStudio.Mdix.Core
                     MdixNative.mdix_clear_error();
                     bool value = MdixNative.mdix_get_bool(h, pathPtr);
                     var nativeErr = ReadLastError();
-                    if (nativeErr != null)
-                        return MdixError.NativeError(nativeErr);
+                    if (nativeErr != null) return MdixError.NativeError(nativeErr);
                     return MdixResult<bool>.Ok(value);
                 }
             }
@@ -447,7 +436,7 @@ namespace MidManStudio.Mdix.Core
         }
 
         /// <summary>
-        /// Gets the raw JSON representation of the value at <paramref name="path"/>.
+        /// Gets the raw JSON representation of the value at path.
         /// Useful as an escape hatch for objects, arrays, tuples, and blobs.
         /// </summary>
         public MdixResult<string> GetJson(string path)
@@ -468,45 +457,39 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Data Access — Special Types
+        #region Data access — special types
 
-        /// <summary>
-        /// Gets and parses a hex color value (e.g. <c>#FF5733</c>) at <paramref name="path"/>.
-        /// </summary>
+        /// <summary>Gets and parses a hex color value (e.g. #FF5733) at path.</summary>
         public MdixResult<MdixHexColor> GetHexColor(string path) =>
             GetString(path).AndThen(raw => MdixHexColor.Parse(raw));
 
         /// <summary>
-        /// Gets a blob value at <paramref name="path"/>.
-        /// The raw base-64 string is returned — call <see cref="MdixBlob.ToBytes"/> to decode.
+        /// Gets a blob value at path.
+        /// Call <see cref="MdixBlob.ToBytes"/> to decode.
         /// </summary>
         public MdixResult<MdixBlob> GetBlob(string path) =>
             GetString(path).Map(raw => new MdixBlob(raw));
 
         /// <summary>
-        /// Gets a regex value at <paramref name="path"/>.
+        /// Gets a regex value at path.
         /// Call <see cref="MdixRegex.ToRegex"/> or <see cref="MdixRegex.IsMatch"/> to use it.
         /// </summary>
         public MdixResult<MdixRegex> GetRegex(string path) =>
             GetString(path).Map(raw => new MdixRegex(raw));
 
-        /// <summary>
-        /// Gets and parses a date value (<c>YYYY-MM-DD</c>) at <paramref name="path"/>.
-        /// </summary>
+        /// <summary>Gets and parses a date value (YYYY-MM-DD) at path.</summary>
         public MdixResult<MdixDate> GetDate(string path) =>
             GetString(path).AndThen(raw => MdixDate.Parse(raw));
 
-        /// <summary>
-        /// Gets and parses an ISO 8601 timestamp at <paramref name="path"/>.
-        /// </summary>
+        /// <summary>Gets and parses an ISO 8601 timestamp at path.</summary>
         public MdixResult<MdixTimestamp> GetTimestamp(string path) =>
             GetString(path).AndThen(raw => MdixTimestamp.Parse(raw));
 
         #endregion
 
-        #region Data Access — Enums
+        #region Data access — enums
 
-        /// <summary>Returns the enum type name at <paramref name="path"/> (e.g. <c>"AIType"</c>).</summary>
+        /// <summary>Returns the enum type name at path (e.g. "AIType").</summary>
         public MdixResult<string> GetEnumName(string path)
         {
             if (!TryGetRawHandleForPath(path, out var h, out var err)) return err;
@@ -523,7 +506,7 @@ namespace MidManStudio.Mdix.Core
             finally { _safeHandle.DangerousRelease(); }
         }
 
-        /// <summary>Returns the enum field name at <paramref name="path"/> (e.g. <c>"BOSS"</c>).</summary>
+        /// <summary>Returns the enum field name at path (e.g. "BOSS").</summary>
         public MdixResult<string> GetEnumField(string path)
         {
             if (!TryGetRawHandleForPath(path, out var h, out var err)) return err;
@@ -540,21 +523,16 @@ namespace MidManStudio.Mdix.Core
             finally { _safeHandle.DangerousRelease(); }
         }
 
-        /// <summary>
-        /// Returns the resolved integer value of the enum at <paramref name="path"/>
-        /// (e.g. <c>BOSS</c> → <c>2</c>).
-        /// </summary>
+        /// <summary>Returns the resolved integer value of the enum at path (e.g. BOSS → 2).</summary>
         public MdixResult<int> GetEnumValue(string path) => GetInt(path);
 
         #endregion
 
-        #region Data Access — Arrays and Keys
+        #region Data access — arrays and keys
 
         /// <summary>
-        /// Returns the number of items in the array at <paramref name="path"/>.
+        /// Returns the number of items in the array at path.
         /// Returns -1 if the path does not exist or is not an array.
-        /// Use this to drive indexed access:
-        /// <code>for (int i = 0; i &lt; db.GetArrayLength("enemies").UnwrapOr(0); i++) ...</code>
         /// </summary>
         public MdixResult<int> GetArrayLength(string path)
         {
@@ -573,8 +551,8 @@ namespace MidManStudio.Mdix.Core
         }
 
         /// <summary>
-        /// Returns the direct child key names under <paramref name="prefix"/>.
-        /// Pass an empty string or <c>null</c> to get top-level keys.
+        /// Returns the direct child key names under prefix.
+        /// Pass an empty string or null to get top-level keys.
         /// </summary>
         public MdixResult<string[]> GetKeys(string? prefix = null)
         {
@@ -612,42 +590,42 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Data Access — Tuples
+        #region Data access — tuples
 
         /// <summary>
-        /// Returns the raw JSON string for a tuple at <paramref name="path"/>
-        /// (e.g. <c>[1,"hello",true]</c>). Parse with your preferred JSON library.
+        /// Returns the raw JSON string for a tuple at path (e.g. [1,"hello",true]).
+        /// Parse with your preferred JSON library.
         /// </summary>
         public MdixResult<string> GetTupleRaw(string path) => GetJson(path);
 
-        /// <summary>Gets a 2-element tuple at <paramref name="path"/>.</summary>
+        /// <summary>Gets a 2-element tuple at path.</summary>
         public MdixResult<(T1, T2)> GetTuple<T1, T2>(string path) =>
             GetJson(path).AndThen(json => ParseTuple<T1, T2>(json, path));
 
-        /// <summary>Gets a 3-element tuple at <paramref name="path"/>.</summary>
+        /// <summary>Gets a 3-element tuple at path.</summary>
         public MdixResult<(T1, T2, T3)> GetTuple<T1, T2, T3>(string path) =>
             GetJson(path).AndThen(json => ParseTuple<T1, T2, T3>(json, path));
 
-        /// <summary>Gets a 4-element tuple at <paramref name="path"/>.</summary>
+        /// <summary>Gets a 4-element tuple at path.</summary>
         public MdixResult<(T1, T2, T3, T4)> GetTuple<T1, T2, T3, T4>(string path) =>
             GetJson(path).AndThen(json => ParseTuple<T1, T2, T3, T4>(json, path));
 
-        /// <summary>Gets a 5-element tuple at <paramref name="path"/>.</summary>
+        /// <summary>Gets a 5-element tuple at path.</summary>
         public MdixResult<(T1, T2, T3, T4, T5)> GetTuple<T1, T2, T3, T4, T5>(string path) =>
             GetJson(path).AndThen(json => ParseTuple<T1, T2, T3, T4, T5>(json, path));
 
-        /// <summary>Gets a 6-element tuple at <paramref name="path"/>.</summary>
+        /// <summary>Gets a 6-element tuple at path.</summary>
         public MdixResult<(T1, T2, T3, T4, T5, T6)> GetTuple<T1, T2, T3, T4, T5, T6>(string path) =>
             GetJson(path).AndThen(json => ParseTuple<T1, T2, T3, T4, T5, T6>(json, path));
 
         #endregion
 
-        #region Generic Accessor
+        #region Generic accessor
 
         /// <summary>
-        /// Dispatches to the appropriate typed getter based on <typeparamref name="T"/>.
-        /// Supports: <c>string, int, float, double, bool, MdixHexColor, MdixBlob,
-        /// MdixRegex, MdixDate, MdixTimestamp</c>.
+        /// Dispatches to the appropriate typed getter based on T.
+        /// Supports: string, int, float, double, bool, MdixHexColor, MdixBlob,
+        /// MdixRegex, MdixDate, MdixTimestamp.
         /// </summary>
         public MdixResult<T> Get<T>(string path)
         {
@@ -668,7 +646,34 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Dynamic Access
+        #region POCO deserialization
+
+        /// <summary>
+        /// Deserializes the database into a strongly-typed object.
+        /// Supports classes, structs, and records including those with primary constructors.
+        /// <para>
+        /// Path resolution order for each property:
+        /// 1. Explicit <see cref="MdixPropertyAttribute"/> path.
+        /// 2. <see cref="MdixAliasAttribute"/> fallback paths (tried in declaration order).
+        /// 3. Property name converted to snake_case automatically.
+        /// </para>
+        /// </summary>
+        /// <typeparam name="T">Target type. Must have a parameterless or mappable parameterized constructor.</typeparam>
+        /// <param name="prefix">
+        /// Root path prefix prepended to every property path.
+        /// Overrides any <see cref="MdixObjectAttribute"/> declared on <typeparamref name="T"/>.
+        /// Pass null to use the attribute value, or an empty string to read from the root.
+        /// </param>
+        public MdixResult<T> Deserialize<T>(string? prefix = null)
+        {
+            ThrowIfDisposed();
+            var serializer = new MdixSerializer();
+            return serializer.Deserialize<T>(this, prefix);
+        }
+
+        #endregion
+
+        #region Dynamic access
 
         /// <summary>
         /// Returns a <see cref="MdixDynamic"/> wrapper over this database for
@@ -678,8 +683,6 @@ namespace MidManStudio.Mdix.Core
         /// int port    = cfg.server.port;
         /// string name = cfg.enemies[0].name;
         /// </code>
-        /// The underlying database must remain undisposed while any
-        /// <see cref="MdixDynamic"/> that references it is in use.
         /// </summary>
         public MdixDynamic AsDynamic()
         {
@@ -689,19 +692,11 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Schema Validation
+        #region Schema validation
 
         /// <summary>
         /// Validates this database against the given schema.
         /// All errors are collected in a single pass — never throws.
-        /// <code>
-        /// var schema = new MdixSchemaBuilder()
-        ///     .Require&lt;int&gt;("server.port")
-        ///     .Optional&lt;string&gt;("server.host");
-        ///
-        /// var report = db.Validate(schema);
-        /// if (!report.IsValid) foreach (var e in report.Errors) Console.WriteLine(e);
-        /// </code>
         /// </summary>
         public MdixValidationReport Validate(IMdixSchemaSource schema)
         {
@@ -712,12 +707,12 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Hot Reload
+        #region Hot reload
 
         /// <summary>
         /// Starts watching the source file for changes and reloads automatically.
         /// <see cref="OnReloaded"/> and <see cref="OnReloadFailed"/> are fired on a
-        /// background thread — Unity layer wraps these to dispatch to the main thread.
+        /// background thread.
         /// </summary>
         public void EnableHotReload()
         {
@@ -798,7 +793,7 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Private Helpers — Handle Acquisition
+        #region Private helpers — handle acquisition
 
         private bool TryGetRawHandleForPath(
             string    path,
@@ -849,7 +844,7 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Private Helpers — String Marshalling
+        #region Private helpers — string marshalling
 
         private static string? ReadLastError()
         {
@@ -866,7 +861,7 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Private Helpers — Generic Cast
+        #region Private helpers — generic cast
 
         private static MdixResult<TTarget> CastResult<TSource, TTarget>(
             MdixResult<TSource> source)
@@ -877,7 +872,7 @@ namespace MidManStudio.Mdix.Core
 
         #endregion
 
-        #region Private Helpers — Tuple Parsing
+        #region Private helpers — tuple parsing
 
         private static MdixResult<T> ParseJsonElement<T>(JsonElement element, string path)
         {

@@ -1,6 +1,8 @@
 using System;
 using System.Runtime.InteropServices;
+using MidManStudio.Mdix.Core.Internal;
 using MidManStudio.DixScript.Native;
+using NativeFormatMode = MidManStudio.DixScript.Native.MdixFormatMode;
 
 namespace MidManStudio.Mdix.Core
 {
@@ -41,7 +43,7 @@ namespace MidManStudio.Mdix.Core
             try
             {
                 // mdix_to_mdix returns void* in the generated binding — cast to byte*.
-                var ptr = (byte*)MdixNative.mdix_to_mdix(handle, (MdixFormatMode)(int)mode);
+                var ptr = (byte*)MdixNative.mdix_to_mdix(handle, (NativeFormatMode)(int)mode);
                 if (ptr == null)
                     return MdixError.NativeError(ReadLastError() ?? "mdix_to_mdix returned null.");
                 return MdixResult<string>.Ok(ReadFreeString(ptr)!);
@@ -75,8 +77,7 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Parses a JSON object string and returns a loaded database handle.
-        /// The JSON must be an object at the top level — arrays are rejected.
-        /// The returned database must be disposed when done.
+        /// The JSON must be an object at the top level. Dispose when done.
         /// </summary>
         public static MdixResult<MdixDatabase> FromJson(string json)
         {
@@ -153,7 +154,7 @@ namespace MidManStudio.Mdix.Core
 
             fixed (byte* srcPtr = MdixStringCache.GetUtf8Bytes(source))
             {
-                var ptr = MdixNative.mdix_format_source(srcPtr, (MdixFormatMode)(int)mode);
+                var ptr = MdixNative.mdix_format_source(srcPtr, (NativeFormatMode)(int)mode);
                 if (ptr == null)
                     return MdixError.NativeError(ReadLastError() ?? "mdix_format_source returned null.");
                 return MdixResult<string>.Ok(ReadFreeString(ptr)!);

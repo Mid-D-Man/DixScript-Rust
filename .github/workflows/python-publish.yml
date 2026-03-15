@@ -1,4 +1,4 @@
-name: MidManStudio.Mdix — Python Package
+name: MidManStudio.Mdix — Python Tests
 
 on:
   push:
@@ -10,7 +10,6 @@ on:
 permissions:
   contents: write
   actions: read
-  id-token: write   # required for trusted PyPI publishing
 
 jobs:
 
@@ -20,7 +19,7 @@ jobs:
     outputs:
       run_py: ${{ steps.decide.outputs.run_py }}
     steps:
-      - name: Decide whether to run Python build
+      - name: Decide whether to run Python tests
         id: decide
         run: |
           RUN=false
@@ -36,10 +35,10 @@ jobs:
           fi
 
           echo "run_py=$RUN" >> $GITHUB_OUTPUT
-          echo "Run Python build: $RUN"
+          echo "Run Python tests: $RUN"
 
-  # ── 2. Build wheels — Linux (manylinux) ───────────────────────────────────
-  build-linux:
+  # ── 2. Build wheel + run tests ─────────────────────────────────────────────
+  build-and-test:
     runs-on: ubuntu-latest
     needs: parse-trigger
     if: needs.parse-trigger.outputs.run_py == 'true'
@@ -47,81 +46,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: linux-py-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: linux-py-
-
-      - name: Build manylinux wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          command:    build
-          args:       --release --out dist --manifest-path mdix-python/Cargo.toml
-          manylinux:  auto
-          target:     x86_64
-
-      - name: Upload Linux wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-linux-${{ github.run_number }}
-          path: dist/
-          retention-days: 1
-
-  # ── 3. Build wheels — Windows ─────────────────────────────────────────────
-  build-windows:
-    runs-on: windows-latest
-    needs: parse-trigger
-    if: needs.parse-trigger.outputs.run_py == 'true'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: windows-py-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: windows-py-
-
-      - name: Build Windows wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          args:    --release --out dist --manifest-path mdix-python/Cargo.toml
-          target:  x86_64-pc-windows-msvc
-
-      - name: Upload Windows wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-windows-${{ github.run_number }}
-          path: dist/
-          retention-days: 1
-
-  # ── 4. Build wheels — macOS universal ─────────────────────────────────────
-  build-macos:
-    runs-on: macos-latest
-    needs: parse-trigger
-    if: needs.parse-trigger.outputs.run_py == 'true'
-
-    steps:
-      - uses: actions/checkout@v4
-
+      # ── Rust toolchain ─────────────────────────────────────────────────────
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          targets: >-
-            x86_64-apple-darwin
-            aarch64-apple-darwin
 
       - uses: actions/cache@v3
         with:
@@ -131,91 +59,236 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: macos-py-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: macos-py-
+          key: ubuntu-py-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-py-test-
 
-      - name: Build macOS x64 wheel
-        uses: PyO3/maturin-action@v1
+      # ── Python setup ───────────────────────────────────────────────────────
+      - uses: actions/setup-python@v5
         with:
-          command: build
-          args:    --release --out dist --manifest-path mdix-python/Cargo.toml
-          target:  x86_64-apple-darwin
+          python-version: "3.11"
+          cache: pip
 
-      - name: Build macOS arm64 wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          args:    --release --out dist --manifest-path mdix-python/Cargo.toml
-          target:  aarch64-apple-darwin
+      # ── Build wheel with maturin ───────────────────────────────────────────
+      - name: Install maturin
+        run: pip install maturin
 
-      - name: Upload macOS wheels
+      - name: Build wheel
+        run: |
+          maturin build \
+            --release \
+            --out dist \
+            --manifest-path mdix-python/Cargo.toml
+          echo "Built wheel:"
+          ls -lh dist/
+
+      # ── Install wheel + test dependencies ─────────────────────────────────
+      - name: Install wheel and test dependencies
+        run: |
+          pip install dist/midmanstudio_mdix-*.whl
+          pip install \
+            pytest>=7.0 \
+            pytest-json-report>=1.5 \
+            numpy>=1.21 \
+            pandas>=1.3
+
+      # ── Run tests ──────────────────────────────────────────────────────────
+      - name: Run pytest
+        continue-on-error: true
+        run: |
+          python -m pytest mdix-python/tests/ \
+            --json-report \
+            --json-report-file=py-test-results.json \
+            --tb=short \
+            -v \
+            2>&1 | tee py-test-console.txt
+          echo "TEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+      # ── Parse JSON report → CI-friendly JSON ──────────────────────────────
+      - name: Parse test results
+        env:
+          BUILD_NUM:  ${{ github.run_number }}
+          BRANCH:     ${{ github.ref_name }}
+          COMMIT:     ${{ github.sha }}
+          BUILD_DATE: ${{ github.event.head_commit.timestamp }}
+        run: |
+          python3 - << 'PYEOF'
+          import json, os, sys
+
+          with open("py-test-results.json") as f:
+              raw = json.load(f)
+
+          summary_raw = raw.get("summary", {})
+          tests_raw   = raw.get("tests",   [])
+
+          suites: dict = {}
+          for t in tests_raw:
+              node    = t.get("nodeid", "")
+              parts   = node.split("::")
+              module  = parts[0].replace("mdix-python/tests/", "").replace(".py", "") if parts else "unknown"
+              cls     = parts[1] if len(parts) >= 3 else module
+              name    = parts[-1]
+              outcome = t.get("outcome", "failed")
+              dur_ms  = round(t.get("duration", 0) * 1000, 2)
+              output  = ""
+
+              call = t.get("call", {})
+              if call.get("longrepr"):
+                  output = str(call["longrepr"])[:500]
+              elif t.get("setup", {}).get("longrepr"):
+                  output = str(t["setup"]["longrepr"])[:500]
+
+              key = f"{module}.{cls}"
+              if key not in suites:
+                  suites[key] = {
+                      "name": cls,
+                      "module": module,
+                      "passed": 0, "failed": 0, "skipped": 0,
+                      "duration_s": 0.0,
+                      "tests": [],
+                  }
+
+              status = (
+                  "passed"  if outcome == "passed"  else
+                  "skipped" if outcome == "skipped" else
+                  "failed"
+              )
+              suites[key]["tests"].append({
+                  "name":        name,
+                  "status":      status,
+                  "duration_ms": dur_ms,
+                  "output":      output,
+              })
+              suites[key][status]     += 1
+              suites[key]["duration_s"] += dur_ms / 1000
+
+          suite_list = [
+              {**v, "duration_s": round(v["duration_s"], 4)}
+              for v in suites.values()
+          ]
+
+          total   = summary_raw.get("total",   0)
+          passed  = summary_raw.get("passed",  0)
+          failed  = summary_raw.get("failed",  0)
+          skipped = summary_raw.get("skipped", 0)
+          dur_s   = round(sum(s["duration_s"] for s in suite_list), 3)
+
+          out = {
+              "build":   os.environ.get("BUILD_NUM",  "0"),
+              "branch":  os.environ.get("BRANCH",     "unknown"),
+              "commit":  os.environ.get("COMMIT",     "")[:8],
+              "date":    os.environ.get("BUILD_DATE", ""),
+              "python":  "3.11",
+              "summary": {
+                  "total": total, "passed": passed,
+                  "failed": failed, "skipped": skipped,
+                  "duration_s": dur_s,
+              },
+              "suites": suite_list,
+          }
+
+          with open("py-test-output.json", "w") as f:
+              json.dump(out, f, indent=2)
+
+          print(f"Suites:{len(suite_list)}  Total:{total}  "
+                f"Passed:{passed}  Failed:{failed}  Skipped:{skipped}")
+          PYEOF
+
+      # ── Build HTML report ──────────────────────────────────────────────────
+      - name: Build HTML report
+        run: |
+          cp .github/python-test-template.html py-test-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  py-test-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       py-test-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            py-test-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     py-test-index.html
+
+      # ── Upload artifacts ───────────────────────────────────────────────────
+      - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-macos-${{ github.run_number }}
-          path: dist/
-          retention-days: 1
+          name: py-test-results-${{ github.run_number }}
+          path: |
+            py-test-output.json
+            py-test-index.html
+            py-test-console.txt
+            py-test-results.json
+            dist/
+          retention-days: 30
 
-  # ── 5. Publish to PyPI ─────────────────────────────────────────────────────
-  publish-pypi:
+  # ── 3. Deploy to gh-pages ──────────────────────────────────────────────────
+  deploy-results:
     runs-on: ubuntu-latest
-    needs: [build-linux, build-windows, build-macos]
+    needs: [parse-trigger, build-and-test]
     if: |
-      github.ref == 'refs/heads/master' ||
-      github.ref == 'refs/heads/main'   ||
-      github.event_name == 'workflow_dispatch'
-    environment:
-      name: pypi
-      url: https://pypi.org/project/midmanstudio-mdix/
+      always() &&
+      needs.build-and-test.result == 'success' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' ||
+       github.event_name == 'workflow_dispatch')
 
     steps:
-      - name: Download all wheels
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: wheels-*-${{ github.run_number }}
-          path:    dist/
-          merge-multiple: true
+          name: py-test-results-${{ github.run_number }}
+          path: deploy/
 
-      - name: List wheels
-        run: ls -lh dist/
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
 
-      - name: Publish to PyPI
-        uses: PyO3/maturin-action@v1
-        with:
-          command: upload
-          args:    --non-interactive --skip-existing dist/*.whl
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
 
-      - name: Upload wheel artifacts (downloadable from Actions)
-        uses: actions/upload-artifact@v4
-        with:
-          name: midmanstudio-mdix-wheels-${{ github.run_number }}
-          path: dist/
-          retention-days: 90
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
 
-  # ── 6. Summary ────────────────────────────────────────────────────────────
+          mkdir -p "$WORK/python" "$WORK/python/builds/build_${BUILD_NUM}"
+
+          cp deploy/py-test-output.json "$WORK/python/test-results.json"
+          cp deploy/py-test-index.html  "$WORK/python/index.html"
+          cp deploy/py-test-output.json "$WORK/python/builds/build_${BUILD_NUM}/test-results.json"
+          cp deploy/py-test-index.html  "$WORK/python/builds/build_${BUILD_NUM}/index.html"
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "Python Tests — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+          echo "Deployed → https://mid-d-man.github.io/DixScript-Rust/python/"
+
+  # ── 4. Summary ─────────────────────────────────────────────────────────────
   summary:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, build-linux, build-windows, build-macos, publish-pypi]
+    needs: [parse-trigger, build-and-test, deploy-results]
     if: always()
     steps:
       - name: Print summary
         run: |
           echo "============================================="
-          echo "  MidManStudio.Mdix — Python Package"
+          echo "  MidManStudio.Mdix — Python Test Summary"
           echo "============================================="
           echo "Build:   #${{ github.run_number }}"
           echo "Branch:  ${{ github.ref_name }}"
           echo "Trigger: ${{ github.event_name }}"
-          echo ""
-          echo "Linux:   ${{ needs.build-linux.result   || 'skipped' }}"
-          echo "Windows: ${{ needs.build-windows.result || 'skipped' }}"
-          echo "macOS:   ${{ needs.build-macos.result   || 'skipped' }}"
-          echo "PyPI:    ${{ needs.publish-pypi.result  || 'skipped' }}"
+          echo "Tests:   ${{ needs.build-and-test.result  || 'skipped' }}"
+          echo "Deploy:  ${{ needs.deploy-results.result  || 'skipped' }}"
           echo ""
           if [ "${{ needs.parse-trigger.outputs.run_py }}" != "true" ]; then
             echo "Skipped — commit message did not contain --mdix-py"
-          else
-            echo "Install: pip install midmanstudio-mdix"
-            echo "Import:  from midmanstudio.mdix import MdixDatabase"
           fi
+          echo ""
+          echo "Results → https://mid-d-man.github.io/DixScript-Rust/python/"

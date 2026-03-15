@@ -51,6 +51,8 @@
     a.wasm:hover .desc { color: #39d353; }
     a.c:hover      { border-color: #f0883e; color: #f0883e; }
     a.c:hover .desc { color: #f0883e; }
+    a.python:hover { border-color: #2ea8a0; color: #2ea8a0; }
+    a.python:hover .desc { color: #2ea8a0; }
 
     footer {
       margin-top: 24px; text-align: center;
@@ -129,8 +131,19 @@
         </div>
       </a>
 
+      <a class="python" href="python/">
+        <span class="icon">🐍</span>
+        <div class="info">
+          <span class="label">Python Tests</span>
+          <span class="desc">midmanstudio-mdix — pytest suite including numpy/pandas ML tests</span>
+        </div>
+      </a>
+
     </div>
-    <footer>Trigger: push with --publish-* / --ffi / --lsp / --mdix-cs / --mdix-wasm / --mdix-c · workflow_dispatch for manual runs</footer>
+    <footer>
+      Trigger: --publish-* / --ffi / --lsp / --mdix-cs / --mdix-wasm / --mdix-c / --mdix-py
+      · workflow_dispatch for manual runs
+    </footer>
   </div>
 </body>
 </html>

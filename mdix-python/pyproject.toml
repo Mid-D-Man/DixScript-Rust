@@ -1,16 +1,16 @@
 [build-system]
-requires = ["maturin>=1.5,<2.0"]
+requires      = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "midmanstudio-mdix"
-version = "1.0.0"
+name        = "midmanstudio-mdix"
+version     = "1.0.0"
 description = "DixScript (.mdix) runtime — MidManStudio"
-authors = [{ name = "MidManStudio" }]
-license = { text = "MIT" }
-readme = "README.md"
+authors     = [{ name = "MidManStudio" }]
+license     = { text = "MIT" }
+readme      = "README.md"
 requires-python = ">=3.8"
-keywords = ["dixscript", "mdix", "config", "data", "midmanstudio"]
+keywords    = ["dixscript", "mdix", "config", "data", "midmanstudio"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: Implementation :: CPython",
@@ -18,7 +18,18 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Software Development :: Libraries",
-    "Topic :: Utilities",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.optional-dependencies]
+numpy  = ["numpy>=1.21"]
+pandas = ["pandas>=1.3", "numpy>=1.21"]
+ml     = ["numpy>=1.21", "pandas>=1.3"]
+dev    = [
+    "numpy>=1.21",
+    "pandas>=1.3",
+    "pytest>=7.0",
+    "pytest-json-report>=1.5",
 ]
 
 [project.urls]
@@ -28,3 +39,7 @@ Repository = "https://github.com/Mid-D-Man/DixScript-Rust"
 python-source = "python"
 module-name   = "midmanstudio.mdix._mdix"
 features      = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths   = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -15,8 +15,8 @@ name = "dixscript"
 crate-type = ["lib"]
 
 [dependencies]
-rand       = "0.8"
-uuid       = { version = "1.0", features = ["v4", "serde"] }
+rand       = { version = "0.8", features = ["getrandom"] }
+uuid       = { version = "1.0", features = ["v4", "serde", "js"] }
 chrono     = { version = "0.4", features = ["serde"] }
 bitflags   = "2.4"
 
@@ -49,9 +49,6 @@ async-trait = { version = "0.1",                       optional = true }
 url         = { version = "2.5",                       optional = true }
 
 # ── Native-only deps (C libraries or OS threads — excluded from WASM) ─────────
-# bzip2 and xz2 link against C libraries (bzip2-sys, lzma-sys).
-# rayon requires OS threads which do not exist on wasm32-unknown-unknown.
-# hostname makes OS syscalls unavailable in the browser sandbox.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bzip2    = "0.4"
 xz2      = "0.1"
@@ -59,8 +56,6 @@ rayon    = "1.8"
 hostname = "0.3"
 
 # ── WASM-only deps ─────────────────────────────────────────────────────────────
-# getrandom needs the "js" feature to source entropy via crypto.getRandomValues().
-# This propagates down through rand, uuid, and any other crate using getrandom.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 

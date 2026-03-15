@@ -1,6 +1,6 @@
 //! BZIP2 compression implementation
 //! Slower compression with better ratio (for larger files)
-
+#![cfg(not(target_arch = "wasm32"))]
 use super::compressor_trait::{ICompressor, CompressorResult};
 use crate::Compiler::DLM::dlm_module_base::DLMModuleBase;
 use crate::ErrorManager::{DlmErrorType, ErrorSeverity};

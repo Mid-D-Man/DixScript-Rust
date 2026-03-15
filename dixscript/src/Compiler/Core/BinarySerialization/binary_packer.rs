@@ -1,7 +1,4 @@
 //! Main binary serialization orchestrator — packs DixScript AST into binary format.
-//!
-//! Serialized sections: CONFIG, ENUMS, DATA, SECURITY.
-//! IMPORTS are resolved before this stage; QUICKFUNCS and DLM are compile-time only.
 
 use std::time::Instant;
 use std::io::{Write, Cursor};
@@ -19,12 +16,8 @@ use super::{
     ValueEncoder,
 };
 
-/// When false, all sections are encoded sequentially regardless of count.
-/// Set to false for debugging or flamegraph profiling runs.
 const CONCURRENT_SERIALIZATION_ENABLED: bool = true;
 
-/// Sections encoded into the binary format, in canonical write order.
-/// Imports, QuickFuncs, and DLM are not serialized — they are compile-time only.
 const CANONICAL_SECTION_ORDER: &[SectionId] = &[
     SectionId::Config,
     SectionId::Enums,
@@ -32,10 +25,8 @@ const CANONICAL_SECTION_ORDER: &[SectionId] = &[
     SectionId::Security,
 ];
 
-/// Result of encoding a single section: raw bytes plus per-section statistics.
 type SectionEncodeResult = Result<(Vec<u8>, BinarySerializationStatistics), BinarySerializationError>;
 
-/// Serializes a DixScript AST into the .dixscript binary format.
 pub struct BinaryPacker {
     context: BinarySerializationContext,
 }
@@ -47,7 +38,6 @@ impl BinaryPacker {
         }
     }
 
-    /// Pack a DixScript AST into binary bytes.
     pub fn pack(&mut self, ast: &DixScript) -> BinarySerializationResult {
         let start = Instant::now();
 
@@ -77,8 +67,7 @@ impl BinaryPacker {
             Err(e) => {
                 let duration = start.elapsed();
                 self.context.error_manager.log_error(&format!(
-                    "[BinaryPacker] Serialization failed: {}",
-                    e
+                    "[BinaryPacker] Serialization failed: {}", e
                 ));
                 BinarySerializationResult::failure(
                     vec![e.to_string()],
@@ -108,20 +97,22 @@ impl BinaryPacker {
             self.encode_sections_parallel(ast, &sections_to_encode)?
         } else {
             if self.context.debug_config.is_enabled {
-                let reason = if !CONCURRENT_SERIALIZATION_ENABLED {
+                let reason = if cfg!(target_arch = "wasm32") {
+                    "(wasm32 — sequential only)"
+                } else if !CONCURRENT_SERIALIZATION_ENABLED {
                     "(CONCURRENT_SERIALIZATION_ENABLED = false)"
                 } else {
                     "(insufficient sections for parallel)"
                 };
-                self.context.log_info(&format!("Using sequential section encoding {}", reason));
+                self.context.log_info(&format!(
+                    "Using sequential section encoding {}", reason
+                ));
             }
             self.encode_sections_sequential(ast, &sections_to_encode)?
         };
 
         self.assemble_binary(encoded)
     }
-
-    // ── Section selection ─────────────────────────────────────────────────────
 
     fn determine_sections(&self, ast: &DixScript) -> Vec<SectionId> {
         let mut sections = Vec::with_capacity(4);
@@ -139,32 +130,38 @@ impl BinaryPacker {
             SectionId::Enums    => ast.enums.is_some(),
             SectionId::Data     => ast.data.is_some(),
             SectionId::Security => ast.security.is_some(),
-            SectionId::Imports  => false, // resolved at compile time
+            SectionId::Imports  => false,
         }
     }
 
     fn should_use_concurrent(&self, sections: &[SectionId]) -> bool {
+        if cfg!(target_arch = "wasm32") {
+            return false;
+        }
         sections.len() >= 2 && !self.context.debug_config.is_verbose
     }
-
-    // ── Parallel encode ───────────────────────────────────────────────────────
 
     fn encode_sections_parallel(
         &mut self,
         ast: &DixScript,
         sections: &[SectionId],
     ) -> Result<Vec<(SectionId, Vec<u8>)>, BinarySerializationError> {
-        use rayon::prelude::*;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use rayon::prelude::*;
 
-        let results: Vec<(SectionId, SectionEncodeResult)> = sections
-            .par_iter()
-            .map(|&id| (id, Self::encode_single_section(id, ast)))
-            .collect();
+            let results: Vec<(SectionId, SectionEncodeResult)> = sections
+                .par_iter()
+                .map(|&id| (id, Self::encode_single_section(id, ast)))
+                .collect();
 
-        self.collect_encode_results(results, sections)
+            return self.collect_encode_results(results, sections);
+        }
+
+        // Unreachable on WASM — should_use_concurrent returns false there.
+        #[cfg(target_arch = "wasm32")]
+        self.encode_sections_sequential(ast, sections)
     }
-
-    // ── Sequential encode ─────────────────────────────────────────────────────
 
     fn encode_sections_sequential(
         &mut self,
@@ -179,16 +176,11 @@ impl BinaryPacker {
         self.collect_encode_results(results, sections)
     }
 
-    // ── Result collection ─────────────────────────────────────────────────────
-
-    /// Processes encode results, merges statistics, reports errors to ErrorManager,
-    /// and respects the error handling strategy.
     fn collect_encode_results(
         &mut self,
         results: Vec<(SectionId, SectionEncodeResult)>,
         canonical_order: &[SectionId],
     ) -> Result<Vec<(SectionId, Vec<u8>)>, BinarySerializationError> {
-        // Preserve canonical section order in output regardless of parallel completion order.
         let mut map = std::collections::HashMap::with_capacity(results.len());
         let mut first_fatal: Option<BinarySerializationError> = None;
 
@@ -202,15 +194,12 @@ impl BinaryPacker {
                     self.context.error_manager.add_binary_serialization_error(
                         e.error_type,
                         e.message.clone(),
-                        None,
-                        None,
-                        None,
-                        None,
+                        None, None, None, None,
                     );
-                    if self.context.error_manager.should_terminate_parsing() {
-                        if first_fatal.is_none() {
-                            first_fatal = Some(e);
-                        }
+                    if self.context.error_manager.should_terminate_parsing()
+                        && first_fatal.is_none()
+                    {
+                        first_fatal = Some(e);
                     }
                 }
             }
@@ -229,10 +218,6 @@ impl BinaryPacker {
         Ok(ordered)
     }
 
-    // ── Single-section encoder (no &self — safe for rayon) ───────────────────
-
-    /// Encode one section into an independent byte buffer.
-    /// Creates its own BinarySerializationContext so it is safe to call in parallel.
     fn encode_single_section(section_id: SectionId, ast: &DixScript) -> SectionEncodeResult {
         let mut buf = Cursor::new(Vec::new());
         let mut ctx = BinarySerializationContext::new();
@@ -241,18 +226,17 @@ impl BinaryPacker {
             SectionId::Config => {
                 let config = ast.config.as_ref().ok_or_else(|| {
                     BinarySerializationError::invalid_state(
-                        "CONFIG section absent during encoding",
-                        "ConfigSection",
+                        "CONFIG section absent during encoding", "ConfigSection",
                     )
                 })?;
                 let mut enc = ValueEncoder::new();
-                ConfigSectionWriter::new(&mut ctx, &mut enc).write_section(&mut buf, config)?;
+                ConfigSectionWriter::new(&mut ctx, &mut enc)
+                    .write_section(&mut buf, config)?;
             }
             SectionId::Enums => {
                 let enums = ast.enums.as_ref().ok_or_else(|| {
                     BinarySerializationError::invalid_state(
-                        "ENUMS section absent during encoding",
-                        "EnumsSection",
+                        "ENUMS section absent during encoding", "EnumsSection",
                     )
                 })?;
                 EnumsSectionWriter::new(&mut ctx).write_section(&mut buf, enums)?;
@@ -260,18 +244,17 @@ impl BinaryPacker {
             SectionId::Data => {
                 let data = ast.data.as_ref().ok_or_else(|| {
                     BinarySerializationError::invalid_state(
-                        "DATA section absent during encoding",
-                        "DataSection",
+                        "DATA section absent during encoding", "DataSection",
                     )
                 })?;
                 let mut enc = ValueEncoder::new();
-                DataSectionWriter::new(&mut ctx, &mut enc).write_section(&mut buf, data)?;
+                DataSectionWriter::new(&mut ctx, &mut enc)
+                    .write_section(&mut buf, data)?;
             }
             SectionId::Security => {
                 let security = ast.security.as_ref().ok_or_else(|| {
                     BinarySerializationError::invalid_state(
-                        "SECURITY section absent during encoding",
-                        "SecuritySection",
+                        "SECURITY section absent during encoding", "SecuritySection",
                     )
                 })?;
                 let mut enc = ValueEncoder::new();
@@ -279,7 +262,6 @@ impl BinaryPacker {
                     .write_section(&mut buf, security)?;
             }
             SectionId::Imports => {
-                // Not serialized — resolved at compile time.
                 return Ok((Vec::new(), BinarySerializationStatistics::new()));
             }
         }
@@ -287,31 +269,25 @@ impl BinaryPacker {
         Ok((buf.into_inner(), ctx.statistics))
     }
 
-    // ── Binary assembly ───────────────────────────────────────────────────────
-
-    /// Concatenate encoded section buffers into the final binary, tracking offsets.
     fn assemble_binary(
         &mut self,
         encoded_sections: Vec<(SectionId, Vec<u8>)>,
     ) -> Result<Vec<u8>, BinarySerializationError> {
         let estimated_cap = HEADER_SIZE
             + encoded_sections.iter().map(|(_, b)| b.len()).sum::<usize>()
-            + encoded_sections.len() * 12 // offset table entries
-            + 32; // checksum
+            + encoded_sections.len() * 12
+            + 32;
         let mut buffer = Cursor::new(Vec::with_capacity(estimated_cap));
 
-        // Reserve space for the header; filled in after sections are written.
         buffer
             .write_all(&vec![0u8; HEADER_SIZE])
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "Header"))?;
 
-        let mut header = BinaryHeader::new();
+        let mut header          = BinaryHeader::new();
         let mut section_offsets = Vec::with_capacity(encoded_sections.len());
 
         for (section_id, bytes) in &encoded_sections {
-            if bytes.is_empty() {
-                continue;
-            }
+            if bytes.is_empty() { continue; }
             let offset = buffer.position() as i32;
             buffer
                 .write_all(bytes)
@@ -324,14 +300,11 @@ impl BinaryPacker {
             if self.context.debug_config.is_enabled {
                 self.context.log_info(&format!(
                     "{} written: offset={}, length={}",
-                    section_id.name(),
-                    offset,
-                    length
+                    section_id.name(), offset, length
                 ));
             }
         }
 
-        // Offset table.
         let offset_table_position = buffer.position() as i32;
         header.offset_table_position = offset_table_position;
         header.section_count = section_offsets.len() as i32;
@@ -342,22 +315,19 @@ impl BinaryPacker {
                 .map_err(|e| BinarySerializationError::write_error(e.to_string(), "OffsetTable"))?;
         }
 
-        // Patch header at byte 0.
-        let mut binary_data = buffer.into_inner();
-        let header_bytes = self.serialise_header(&header)?;
+        let mut binary_data   = buffer.into_inner();
+        let header_bytes      = self.serialise_header(&header)?;
         binary_data[0..HEADER_SIZE].copy_from_slice(&header_bytes);
 
-        // Append SHA-256 checksum.
         let binary_data = ChecksumValidator::append_checksum(&binary_data);
 
-        self.context.statistics.total_bytes = binary_data.len();
+        self.context.statistics.total_bytes    = binary_data.len();
         self.context.statistics.total_sections = section_offsets.len();
 
         if self.context.debug_config.is_enabled {
             self.context.log_info(&format!(
                 "Assembly complete: {} sections, {} bytes total",
-                section_offsets.len(),
-                binary_data.len()
+                section_offsets.len(), binary_data.len()
             ));
         }
 
@@ -375,30 +345,18 @@ impl BinaryPacker {
         Ok(buf.into_inner())
     }
 
-    // ── Utilities ─────────────────────────────────────────────────────────────
-
     fn estimate_original_size(&self, ast: &DixScript) -> usize {
         let mut size = 100;
-        if ast.config.is_some() {
-            size += 200;
-        }
-        if let Some(ref e) = ast.enums {
-            size += e.enums.len() * 100;
-        }
-        if let Some(ref d) = ast.data {
-            size += d.entries.len() * 150;
-        }
-        if ast.security.is_some() {
-            size += 100;
-        }
+        if ast.config.is_some()  { size += 200; }
+        if let Some(ref e) = ast.enums { size += e.enums.len() * 100; }
+        if let Some(ref d) = ast.data  { size += d.entries.len() * 150; }
+        if ast.security.is_some() { size += 100; }
         size
     }
 }
 
 impl Default for BinaryPacker {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 fn section_flag_for(id: SectionId) -> SectionFlags {

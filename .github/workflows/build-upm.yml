@@ -93,7 +93,15 @@ jobs:
       - name: Build FFI — Windows x64
         run: cargo build -p mdix-ffi --release --target x86_64-pc-windows-gnu
 
+      # cc-rs looks for CC_<target> (underscores) to find the C compiler when
+      # cross-compiling. Without these vars it falls back to the bare triple
+      # name "aarch64-linux-android-clang" which doesn't exist in the NDK;
+      # the NDK ships versioned names like aarch64-linux-android21-clang.
       - name: Build FFI — Android arm64
+        env:
+          CC_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+          CXX_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++
+          AR_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
         run: cargo build -p mdix-ffi --release --target aarch64-linux-android
 
       - name: Collect ubuntu artifacts
@@ -165,7 +173,28 @@ jobs:
           echo "Universal dylib:"
           lipo -info libmdix_ffi_universal.dylib
 
+      # iOS forbids dynamic loading of custom libraries — only staticlib is
+      # needed.  Building cdylib for aarch64-apple-ios fails because bzip2-sys
+      # and lzma-sys emit calls to ___chkstk_darwin (a compiler-rt stack-guard
+      # symbol) which the Rust linker cannot resolve when targeting iOS 10.0.
+      # Stripping cdylib from crate-type for this one build step avoids the
+      # dylib link step entirely; the .a is archived without full linking so
+      # the symbol reference is resolved later by Xcode when Unity links the
+      # final app against the iOS SDK's libclang_rt.
+      - name: Patch Cargo.toml — staticlib only for iOS
+        run: |
+          sed -i '' \
+            's/crate-type = \["cdylib", "staticlib"\]/crate-type = ["staticlib"]/' \
+            mdix-ffi/Cargo.toml
+          echo "Patched crate-type:"
+          grep crate-type mdix-ffi/Cargo.toml
+
+      # IPHONEOS_DEPLOYMENT_TARGET tells cc-rs to compile bzip2/lzma for iOS 16
+      # instead of the host SDK default (18.5), keeping the C objects compatible
+      # with what Unity's IL2CPP expects.
       - name: Build FFI — iOS arm64 (static)
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "16.0"
         run: cargo build -p mdix-ffi --release --target aarch64-apple-ios
 
       - name: Collect macOS artifacts
@@ -371,8 +400,6 @@ jobs:
           COMMIT="${GITHUB_SHA:0:8}"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          # Inject build info as a comment block at the bottom of package.json.
-          # Unity ignores unknown fields, so we add _build metadata safely.
           python3 - << PYEOF
           import json
 
@@ -446,8 +473,6 @@ jobs:
           COMMIT="${GITHUB_SHA:0:8}"
           WORK=$(mktemp -d)
 
-          # Check out upm branch into a worktree.
-          # If the branch doesn't exist yet create it as an orphan.
           if git ls-remote --exit-code --heads origin upm > /dev/null 2>&1; then
             git fetch origin upm
             git worktree add "$WORK" upm
@@ -455,8 +480,6 @@ jobs:
             git worktree add --orphan -b upm "$WORK"
           fi
 
-          # Clear the worktree and replace with the new package contents.
-          # The upm branch is CI-owned — never manually edited.
           find "$WORK" -mindepth 1 \
             ! -path "$WORK/.git" \
             ! -path "$WORK/.git/*" \
@@ -516,4 +539,3 @@ jobs:
           else
             echo "Build failed — check job logs above."
           fi
-

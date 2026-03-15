@@ -1,0 +1,53 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements"
+         xmlns:uie="UnityEditor.UIElements">
+
+  <ui:VisualElement name="mdix-root" class="mdix-root">
+
+    <!-- Title bar -->
+    <ui:VisualElement name="titlebar" class="mdix-titlebar">
+      <ui:Label name="title-label"    class="mdix-titlebar__title" text="MDIX Studio"/>
+      <ui:Label name="file-label"     class="mdix-titlebar__file"  text=""/>
+    </ui:VisualElement>
+
+    <!-- Tab bar -->
+    <ui:VisualElement name="tabbar" class="mdix-tabbar">
+      <ui:VisualElement name="tab-explorer" class="mdix-tab mdix-tab--active">
+        <ui:Label text="• Explorer"/>
+      </ui:VisualElement>
+      <ui:VisualElement name="tab-editor" class="mdix-tab">
+        <ui:Label text="• Editor"/>
+      </ui:VisualElement>
+      <ui:VisualElement name="tab-templates" class="mdix-tab">
+        <ui:Label text="• Templates"/>
+      </ui:VisualElement>
+    </ui:VisualElement>
+
+    <!-- Toolbar -->
+    <ui:VisualElement name="toolbar" class="mdix-toolbar">
+      <ui:Label name="status-label" class="mdix-status" text="✓ 0 errors"/>
+      <ui:VisualElement class="mdix-toolbar__spacer"/>
+      <ui:Button name="btn-fold-all" class="mdix-btn"         text="Fold All"/>
+      <ui:Button name="btn-save"     class="mdix-btn mdix-btn--primary" text="Save"/>
+      <ui:Button name="btn-compile"  class="mdix-btn mdix-btn--success" text="Compile"/>
+    </ui:VisualElement>
+
+    <!-- Main content — swapped by tab selection -->
+    <ui:VisualElement name="panel-explorer"  class="mdix-panel" style="flex-grow:1;"/>
+    <ui:VisualElement name="panel-editor"    class="mdix-panel" style="flex-grow:1; display:none;"/>
+    <ui:VisualElement name="panel-templates" class="mdix-panel" style="flex-grow:1; display:none;"/>
+
+    <!-- Status bar -->
+    <ui:VisualElement name="statusbar" class="mdix-statusbar">
+      <ui:Label name="sb-compiled"  class="mdix-statusbar__item mdix-statusbar__item--ok"
+                text="● Compiled"/>
+      <ui:Label name="sb-entries"   class="mdix-statusbar__item" text="0 entries"/>
+      <ui:Label name="sb-flat-keys" class="mdix-statusbar__item" text="0 flat keys"/>
+      <ui:Label name="sb-tables"    class="mdix-statusbar__item" text="0 tables"/>
+      <ui:VisualElement style="flex-grow:1;"/>
+      <ui:Label name="sb-path"      class="mdix-statusbar__item" text=""/>
+      <ui:Label name="sb-encoding"  class="mdix-statusbar__item" text="UTF-8"/>
+    </ui:VisualElement>
+
+  </ui:VisualElement>
+
+</ui:UXML>

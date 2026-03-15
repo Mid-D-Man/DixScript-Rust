@@ -91,16 +91,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install TypeScript dependencies
-        run: |
-          npm install
-        working-directory: npm
-
-      - name: Generate package-lock.json for future runs
-        run: |
-          if [ ! -f "package-lock.json" ]; then
-            echo "No package-lock.json found — one has been generated in the artifact."
-            echo "Commit it to the repo to enable npm ci in future runs."
-          fi
+        run: npm install
         working-directory: npm
 
       - name: Build TypeScript wrapper
@@ -127,10 +118,9 @@ jobs:
             npm/package-lock.json
           retention-days: 30
 
-      # ── Publish to npm — only when ready, on specific branches ────────
-      # To publish: push to master/main/npm-wasm OR use workflow_dispatch.
-      # PRs and develop branch builds are test-only — no publish.
+      # ── Publish to npm — only on release branches ──────────────────────
       - name: Publish to npm
+        continue-on-error: true
         if: |
           github.event_name != 'pull_request' &&
           github.ref != 'refs/heads/develop' &&
@@ -141,10 +131,86 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # ── 3. Summary ─────────────────────────────────────────────────────────
-  summary:
+  # ── 3. Deploy to gh-pages ──────────────────────────────────────────────
+  deploy-wasm-page:
     runs-on: ubuntu-latest
     needs: [parse-trigger, build-and-publish]
+    if: |
+      always() &&
+      needs.build-and-publish.result == 'success' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' ||
+       github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/npm-wasm' ||
+       github.event_name == 'workflow_dispatch')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-npm-build-${{ github.run_number }}
+          path: deploy/
+
+      - name: Write build metadata
+        run: |
+          cat > deploy/meta.json << EOF
+          {
+            "build":  "${{ github.run_number }}",
+            "branch": "${{ github.ref_name }}",
+            "commit": "${GITHUB_SHA:0:8}",
+            "date":   "$(date -u --iso-8601=seconds)"
+          }
+          EOF
+
+      - name: Deploy wasm playground to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          # wasm/ directory — test page + wasm-pkg output
+          mkdir -p "$WORK/wasm"
+
+          # Copy test page
+          cp .github/wasm-test-page.html "$WORK/wasm/index.html"
+
+          # Copy wasm-pack output (the .wasm binary and JS glue)
+          if [ -d "deploy/wasm-pkg" ]; then
+            cp deploy/wasm-pkg/mdix_wasm.js     "$WORK/wasm/mdix_wasm.js"     2>/dev/null || true
+            cp deploy/wasm-pkg/mdix_wasm_bg.wasm "$WORK/wasm/mdix_wasm_bg.wasm" 2>/dev/null || true
+            cp deploy/wasm-pkg/mdix_wasm.d.ts   "$WORK/wasm/mdix_wasm.d.ts"   2>/dev/null || true
+          fi
+
+          # Copy build metadata so the test page can show the build number
+          cp deploy/meta.json "$WORK/wasm/meta.json"
+
+          # Update the landing page
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "WASM playground — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+          echo "Deployed → https://mid-d-man.github.io/DixScript-Rust/wasm/"
+
+  # ── 4. Summary ─────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-publish, deploy-wasm-page]
     if: always()
     steps:
       - name: Print summary
@@ -155,11 +221,12 @@ jobs:
           echo "Build:   #${{ github.run_number }}"
           echo "Branch:  ${{ github.ref_name }}"
           echo "Trigger: ${{ github.event_name }}"
-          echo "Result:  ${{ needs.build-and-publish.result || 'skipped' }}"
+          echo "Build:   ${{ needs.build-and-publish.result  || 'skipped' }}"
+          echo "Deploy:  ${{ needs.deploy-wasm-page.result   || 'skipped' }}"
           echo ""
           if [ "${{ needs.parse-trigger.outputs.run_wasm }}" != "true" ]; then
             echo "Skipped — commit message did not contain --mdix-wasm"
           fi
           echo ""
-          echo "NOTE: Publish is blocked on develop branch."
-          echo "      Push to master/main/npm-wasm to publish to npm."
+          echo "Playground → https://mid-d-man.github.io/DixScript-Rust/wasm/"
+          echo "NOTE: npm publish is blocked on develop branch."

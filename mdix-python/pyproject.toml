@@ -1,0 +1,30 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "midmanstudio-mdix"
+version = "1.0.0"
+description = "DixScript (.mdix) runtime — MidManStudio"
+authors = [{ name = "MidManStudio" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["dixscript", "mdix", "config", "data", "midmanstudio"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Repository = "https://github.com/Mid-D-Man/DixScript-Rust"
+
+[tool.maturin]
+python-source = "python"
+module-name   = "midmanstudio.mdix._mdix"
+features      = ["pyo3/extension-module"]

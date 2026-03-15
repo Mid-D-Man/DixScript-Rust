@@ -263,11 +263,11 @@ export interface InitOutput {
     readonly mdixdatabase_toMdix: (a: number) => [number, number, number, number];
     readonly mdixdatabase_toToml: (a: number) => [number, number, number, number];
     readonly mdixbuilder_withTimestamp: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-    readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __externref_table_dealloc: (a: number) => void;
-    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __externref_drop_slice: (a: number, b: number) => void;
     readonly __wbindgen_start: () => void;
 }

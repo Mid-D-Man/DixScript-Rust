@@ -205,7 +205,10 @@ impl MdixDatabase {
             Err(e)  => MdixResult::from_py_err(e),
         }
     }
-
+// Inside `impl MdixDatabase` (non-#[pymethods] block):
+pub fn from_data_pub(data: DixData) -> Self {
+    MdixDatabase::from_data(data)
+}
     // ── Type inspection ────────────────────────────────────────────────────
 
     /// Returns `True` if the dotted path exists in the loaded data.

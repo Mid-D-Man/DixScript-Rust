@@ -1,6 +1,8 @@
 // csharp/src/MidManStudio.Mdix.Core/MdixMerge.cs
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using System.Text.Json;
 
 namespace MidManStudio.Mdix.Core
@@ -22,11 +24,14 @@ namespace MidManStudio.Mdix.Core
 
     /// <summary>
     /// Merges two or more loaded DixScript databases into a single new database.
-    /// All merge operations go through a JSON round-trip — DixScript-specific type
-    /// metadata (HexColor markers, Blob wrappers, Regex wrappers) is preserved as
-    /// string values in the merged output. Enum values are preserved as their resolved
-    /// integers. QuickFunc formulas are not re-evaluated — the merged database contains
-    /// only the resolved DATA values from each source.
+    ///
+    /// Pipeline: both databases are exported via mdix_to_json which produces a
+    /// flat hashmap serialised as JSON with dotted-path string keys
+    /// (e.g. "server.host", "server.port").  The two JSON objects are deep-merged
+    /// in managed C# code, then <see cref="LoadFromFlatDottedJson"/> rebuilds a
+    /// valid @DATA(...) source string from those flat keys and loads it with
+    /// MdixDatabase.LoadStr — bypassing the Rust mdix_from_json round-trip that
+    /// cannot handle dotted-path keys as flat DixScript property names.
     /// </summary>
     public static class MdixMerge
     {
@@ -37,12 +42,6 @@ namespace MidManStudio.Mdix.Core
         /// returns a new database containing the combined result.
         /// Neither input database is modified or disposed.
         /// </summary>
-        /// <param name="primary">The base database.</param>
-        /// <param name="secondary">The database to merge in.</param>
-        /// <param name="strategy">
-        /// How to handle keys that exist in both databases.
-        /// Defaults to <see cref="MdixMergeStrategy.PrimaryWins"/>.
-        /// </param>
         public static MdixResult<MdixDatabase> Merge(
             MdixDatabase primary,
             MdixDatabase secondary,
@@ -65,20 +64,13 @@ namespace MidManStudio.Mdix.Core
             if (mergedJsonResult.IsFailure)
                 return MdixResult<MdixDatabase>.Err(mergedJsonResult.Error);
 
-            return MdixConverter.FromJson(mergedJsonResult.SuccessResult);
+            return LoadFromFlatDottedJson(mergedJsonResult.SuccessResult);
         }
 
         /// <summary>
         /// Merges all databases in <paramref name="databases"/> left-to-right using
         /// <paramref name="strategy"/> and returns a single combined database.
-        /// The first database in the sequence is the base. Each subsequent database
-        /// is merged into the running result.
-        /// Neither the inputs nor the intermediate results are disposed — only the
-        /// final returned database requires disposal.
         /// </summary>
-        /// <exception cref="ArgumentException">
-        /// Thrown if <paramref name="databases"/> is empty.
-        /// </exception>
         public static MdixResult<MdixDatabase> MergeAll(
             IEnumerable<MdixDatabase> databases,
             MdixMergeStrategy strategy = MdixMergeStrategy.PrimaryWins)
@@ -123,9 +115,11 @@ namespace MidManStudio.Mdix.Core
 
             if (index == 1 && current != null)
             {
+                // Single database — return an independent copy via the same
+                // flat-dotted-JSON path so nested structures are preserved.
                 var singleJson = MdixConverter.ToJson(current, indented: false);
                 if (singleJson.IsFailure) return MdixResult<MdixDatabase>.Err(singleJson.Error);
-                return MdixConverter.FromJson(singleJson.SuccessResult);
+                return LoadFromFlatDottedJson(singleJson.SuccessResult);
             }
 
             return MdixResult<MdixDatabase>.Ok(current!);
@@ -133,8 +127,7 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Merges a raw JSON object string into an existing database and returns
-        /// the combined database. Useful when the secondary source comes from an
-        /// external JSON API rather than a loaded MdixDatabase.
+        /// the combined database.
         /// </summary>
         public static MdixResult<MdixDatabase> MergeJson(
             MdixDatabase primary,
@@ -158,7 +151,7 @@ namespace MidManStudio.Mdix.Core
             if (mergedJsonResult.IsFailure)
                 return MdixResult<MdixDatabase>.Err(mergedJsonResult.Error);
 
-            return MdixConverter.FromJson(mergedJsonResult.SuccessResult);
+            return LoadFromFlatDottedJson(mergedJsonResult.SuccessResult);
         }
 
         // ── Private — JSON deep merge ─────────────────────────────────────────
@@ -225,12 +218,10 @@ namespace MidManStudio.Mdix.Core
 
                 if (!result.TryGetValue(prop.Name, out var existing))
                 {
-                    // Key only in secondary — always add it.
                     result[prop.Name] = prop.Value.Clone();
                     continue;
                 }
 
-                // Key exists in both.
                 if (strategy == MdixMergeStrategy.ThrowOnConflict)
                 {
                     return MdixError.NativeError(
@@ -259,11 +250,193 @@ namespace MidManStudio.Mdix.Core
                 // Scalar or array conflict — apply strategy.
                 if (strategy == MdixMergeStrategy.SecondaryWins)
                     result[prop.Name] = prop.Value.Clone();
-                // PrimaryWins: existing value stays — no action needed.
+                // PrimaryWins: existing value stays.
             }
 
             return null;
         }
+
+        // ── Private — database reconstruction from flat-dotted JSON ───────────
+
+        /// <summary>
+        /// Rebuilds a <see cref="MdixDatabase"/> from the flat-dotted-key JSON that
+        /// <c>mdix_to_json</c> produces (e.g. <c>{"server.host":"x","server.port":8080}</c>).
+        ///
+        /// Groups dotted keys back into DixScript table-property syntax
+        /// (<c>server: host = "x", port = 8080</c>) so the DixLoader stores them
+        /// as the expected flat dotted paths internally.  Array values are emitted
+        /// with the group-array <c>::</c> syntax.  Indexed array item keys
+        /// (e.g. <c>tags[0]</c>) are skipped — they are redundant with the array.
+        ///
+        /// Two-tier ordering is respected: flat scalar properties first, then
+        /// table groups, then group arrays.
+        /// </summary>
+        private static MdixResult<MdixDatabase> LoadFromFlatDottedJson(string json)
+        {
+            Dictionary<string, JsonElement> entries;
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                    return MdixError.ParseError(
+                        "LoadFromFlatDottedJson: merged JSON root must be an object.");
+
+                entries = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                    entries[prop.Name] = prop.Value.Clone();
+            }
+            catch (JsonException ex)
+            {
+                return MdixError.ParseError(
+                    $"LoadFromFlatDottedJson: JSON parse error: {ex.Message}");
+            }
+
+            var flatScalars = new List<(string key, JsonElement value)>();
+            var tableGroups = new Dictionary<string, List<(string subKey, JsonElement value)>>(
+                StringComparer.Ordinal);
+            var groupArrays = new List<(string key, JsonElement value)>();
+
+            foreach (var kvp in entries)
+            {
+                var key   = kvp.Key;
+                var value = kvp.Value;
+
+                // Skip indexed array item keys like "tags[0]" — the array entry
+                // itself ("tags") carries the full set of items.
+                if (key.Contains('['))
+                    continue;
+
+                switch (value.ValueKind)
+                {
+                    case JsonValueKind.Array:
+                        groupArrays.Add((key, value));
+                        break;
+
+                    case JsonValueKind.Object:
+                        // Inline nested object (e.g. from real nested JSON passed to
+                        // MergeJson) — expand one level into a table group.
+                        if (!tableGroups.TryGetValue(key, out var objGroup))
+                        {
+                            objGroup = new List<(string, JsonElement)>();
+                            tableGroups[key] = objGroup;
+                        }
+                        foreach (var prop in value.EnumerateObject())
+                            objGroup.Add((prop.Name, prop.Value));
+                        break;
+
+                    default:
+                    {
+                        int lastDot = key.LastIndexOf('.');
+                        if (lastDot < 0)
+                        {
+                            // Simple top-level key — flat property.
+                            flatScalars.Add((key, value));
+                        }
+                        else
+                        {
+                            // Dotted key — group by prefix into a table property.
+                            var prefix = key.Substring(0, lastDot);
+                            var subKey = key.Substring(lastDot + 1);
+                            if (!tableGroups.TryGetValue(prefix, out var tGroup))
+                            {
+                                tGroup = new List<(string, JsonElement)>();
+                                tableGroups[prefix] = tGroup;
+                            }
+                            tGroup.Add((subKey, value));
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Build @DATA(...) with two-tier ordering:
+            //   tier 1 — flat scalar properties
+            //   tier 2 — table group properties + group arrays
+            var sb = new StringBuilder();
+            sb.AppendLine("@DATA(");
+
+            foreach (var (key, value) in flatScalars)
+            {
+                sb.Append("  ");
+                sb.Append(key);
+                sb.Append(" = ");
+                sb.AppendLine(FormatMdixScalar(value));
+            }
+
+            foreach (var (prefix, props) in tableGroups)
+            {
+                if (props.Count == 0) continue;
+                sb.Append("  ");
+                sb.Append(prefix);
+                sb.Append(": ");
+                sb.AppendLine(string.Join(", ",
+                    props.Select(p => $"{p.subKey} = {FormatMdixScalar(p.value)}")));
+            }
+
+            foreach (var (key, arr) in groupArrays)
+            {
+                sb.Append("  ");
+                sb.Append(key);
+                sb.Append(":: ");
+                var items = new List<string>();
+                foreach (var el in arr.EnumerateArray())
+                    items.Add(FormatMdixArrayItem(el));
+                sb.AppendLine(string.Join(", ", items));
+            }
+
+            sb.Append(")");
+
+            return MdixDatabase.LoadStr(sb.ToString());
+        }
+
+        /// <summary>
+        /// Formats a scalar <see cref="JsonElement"/> as a DixScript value literal.
+        /// </summary>
+        private static string FormatMdixScalar(JsonElement el)
+        {
+            return el.ValueKind switch
+            {
+                JsonValueKind.True   => "true",
+                JsonValueKind.False  => "false",
+                JsonValueKind.Null   => "null",
+                JsonValueKind.String =>
+                    $"\"{EscapeMdixString(el.GetString() ?? string.Empty)}\"",
+                JsonValueKind.Number =>
+                    el.TryGetInt64(out var lv)
+                        ? lv.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        : el.GetDouble()
+                             .ToString(System.Globalization.CultureInfo.InvariantCulture),
+                _ => "null",
+            };
+        }
+
+        /// <summary>
+        /// Formats an array item <see cref="JsonElement"/> as a DixScript value literal.
+        /// Objects are emitted as inline object literals <c>{ key = val, ... }</c>.
+        /// </summary>
+        private static string FormatMdixArrayItem(JsonElement el)
+        {
+            if (el.ValueKind == JsonValueKind.Object)
+            {
+                var pairs = new List<string>();
+                foreach (var prop in el.EnumerateObject())
+                    pairs.Add($"{prop.Name} = {FormatMdixScalar(prop.Value)}");
+                return $"{{ {string.Join(", ", pairs)} }}";
+            }
+            return FormatMdixScalar(el);
+        }
+
+        /// <summary>
+        /// Escapes a string value for use inside DixScript double-quoted literals.
+        /// </summary>
+        private static string EscapeMdixString(string s) =>
+            s.Replace("\\", "\\\\")
+             .Replace("\"", "\\\"")
+             .Replace("\n", "\\n")
+             .Replace("\r", "\\r")
+             .Replace("\t", "\\t");
+
+        // ── Private helpers — JSON utility ────────────────────────────────────
 
         private static Dictionary<string, object?> ConvertDictToObject(
             Dictionary<string, JsonElement> dict)

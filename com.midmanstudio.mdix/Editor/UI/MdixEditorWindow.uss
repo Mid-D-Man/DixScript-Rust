@@ -1,0 +1,342 @@
+/* ── Root ──────────────────────────────────────────────────────────────── */
+.mdix-root {
+    background-color: #080C14;
+    flex-direction: column;
+    flex-grow: 1;
+}
+
+/* ── Title bar ─────────────────────────────────────────────────────────── */
+.mdix-titlebar {
+    background-color: #0D1220;
+    flex-direction: row;
+    align-items: center;
+    padding: 0 12px;
+    height: 36px;
+    border-bottom-width: 1px;
+    border-bottom-color: #1A2540;
+}
+
+.mdix-titlebar__title {
+    color: #E8EDF5;
+    font-size: 13px;
+    -unity-font-style: bold;
+    flex-grow: 1;
+}
+
+.mdix-titlebar__file {
+    color: #7A98C4;
+    font-size: 11px;
+}
+
+/* ── Tab bar ────────────────────────────────────────────────────────────── */
+.mdix-tabbar {
+    background-color: #0D1220;
+    flex-direction: row;
+    align-items: flex-end;
+    padding: 0 12px;
+    height: 34px;
+    border-bottom-width: 1px;
+    border-bottom-color: #1A2540;
+}
+
+.mdix-tab {
+    color: #7A98C4;
+    font-size: 12px;
+    padding: 6px 16px;
+    margin-right: 2px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    cursor: link;
+}
+
+.mdix-tab:hover {
+    color: #B8C8E0;
+    background-color: #141E30;
+}
+
+.mdix-tab--active {
+    color: #E8EDF5;
+    background-color: #080C14;
+    border-top-width: 2px;
+    border-top-color: #3B7EF6;
+    -unity-font-style: bold;
+}
+
+/* ── Tab indicator dots ─────────────────────────────────────────────────── */
+.mdix-tab__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 3px;
+    margin-right: 6px;
+    background-color: #3B7EF6;
+}
+
+.mdix-tab__dot--warning {
+    background-color: #F0A030;
+}
+
+/* ── Toolbar ────────────────────────────────────────────────────────────── */
+.mdix-toolbar {
+    background-color: #0D1220;
+    flex-direction: row;
+    align-items: center;
+    padding: 4px 12px;
+    height: 32px;
+    border-bottom-width: 1px;
+    border-bottom-color: #1A2540;
+}
+
+.mdix-toolbar__spacer {
+    flex-grow: 1;
+}
+
+.mdix-btn {
+    background-color: #141E30;
+    color: #B8C8E0;
+    border-color: #1A2540;
+    border-width: 1px;
+    border-radius: 3px;
+    padding: 3px 10px;
+    font-size: 11px;
+    cursor: link;
+    margin-left: 4px;
+}
+
+.mdix-btn:hover {
+    background-color: #1A2A44;
+    color: #E8EDF5;
+    border-color: #3B7EF6;
+}
+
+.mdix-btn--primary {
+    background-color: #1E3A7A;
+    color: #E8EDF5;
+    border-color: #3B7EF6;
+}
+
+.mdix-btn--primary:hover {
+    background-color: #2448A0;
+}
+
+.mdix-btn--success {
+    background-color: #0F3020;
+    color: #6FD68F;
+    border-color: #2A7A48;
+}
+
+/* ── Status badge ───────────────────────────────────────────────────────── */
+.mdix-status {
+    flex-direction: row;
+    align-items: center;
+    padding: 0 8px;
+    margin-right: 8px;
+    font-size: 11px;
+    color: #6FD68F;
+}
+
+.mdix-status--error {
+    color: #F4836A;
+}
+
+/* ── Content panels ─────────────────────────────────────────────────────── */
+.mdix-panel {
+    flex-grow: 1;
+    background-color: #080C14;
+}
+
+/* ── Explorer tab ───────────────────────────────────────────────────────── */
+.mdix-explorer {
+    flex-direction: column;
+    flex-grow: 1;
+    padding: 0;
+}
+
+.mdix-section-header {
+    background-color: #0D1220;
+    color: #7A98C4;
+    font-size: 10px;
+    -unity-font-style: bold;
+    padding: 4px 12px;
+    letter-spacing: 1px;
+    border-bottom-width: 1px;
+    border-bottom-color: #1A2540;
+}
+
+/* Flat key-value rows */
+.mdix-kv-row {
+    flex-direction: row;
+    align-items: center;
+    padding: 4px 12px;
+    border-bottom-width: 1px;
+    border-bottom-color: #0F1828;
+    min-height: 28px;
+}
+
+.mdix-kv-row:hover {
+    background-color: #0F1828;
+}
+
+.mdix-kv__key {
+    color: #7A98C4;
+    font-size: 11px;
+    width: 180px;
+    flex-shrink: 0;
+}
+
+.mdix-kv__value {
+    color: #E8EDF5;
+    font-size: 11px;
+    flex-grow: 1;
+}
+
+.mdix-kv__type {
+    color: #3B7EF6;
+    font-size: 10px;
+    background-color: #0D1E38;
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 8px;
+}
+
+.mdix-kv__type--enum {
+    color: #E879A0;
+    background-color: #2A0D1E;
+}
+
+.mdix-kv__type--bool {
+    color: #F0A030;
+    background-color: #2A1800;
+}
+
+.mdix-kv__type--string {
+    color: #6FD68F;
+    background-color: #0D2018;
+}
+
+/* Array table */
+.mdix-table {
+    margin: 8px 12px;
+    border-width: 1px;
+    border-color: #1A2540;
+    border-radius: 4px;
+}
+
+.mdix-table__header-row {
+    background-color: #0D1220;
+    flex-direction: row;
+    border-bottom-width: 1px;
+    border-bottom-color: #1A2540;
+}
+
+.mdix-table__header-cell {
+    color: #7A98C4;
+    font-size: 10px;
+    -unity-font-style: bold;
+    padding: 6px 10px;
+    flex-grow: 1;
+    letter-spacing: 0.5px;
+}
+
+.mdix-table__row {
+    flex-direction: row;
+    border-bottom-width: 1px;
+    border-bottom-color: #0F1828;
+    min-height: 28px;
+    align-items: center;
+}
+
+.mdix-table__row:hover {
+    background-color: #0F1828;
+}
+
+.mdix-table__row--boss {
+    background-color: #1A1000;
+}
+
+.mdix-table__row--boss:hover {
+    background-color: #231500;
+}
+
+.mdix-table__cell {
+    color: #E8EDF5;
+    font-size: 11px;
+    padding: 4px 10px;
+    flex-grow: 1;
+}
+
+.mdix-table__cell--enum-boss {
+    color: #F0A030;
+}
+
+/* ── Editor tab ─────────────────────────────────────────────────────────── */
+.mdix-code-area {
+    flex-grow: 1;
+    background-color: #080C14;
+    color: #E8EDF5;
+    font-size: 13px;
+    -unity-font-style: normal;
+    padding: 12px;
+    border-width: 0;
+    white-space: pre;
+}
+
+/* ── Templates tab ──────────────────────────────────────────────────────── */
+.mdix-template-grid {
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 16px;
+}
+
+.mdix-template-card {
+    background-color: #0D1220;
+    border-color: #1A2540;
+    border-width: 1px;
+    border-radius: 6px;
+    width: 180px;
+    margin: 6px;
+    padding: 14px;
+    cursor: link;
+}
+
+.mdix-template-card:hover {
+    border-color: #3B7EF6;
+    background-color: #0F1828;
+}
+
+.mdix-template-card__title {
+    color: #E8EDF5;
+    font-size: 12px;
+    -unity-font-style: bold;
+    margin-bottom: 6px;
+}
+
+.mdix-template-card__desc {
+    color: #7A98C4;
+    font-size: 10px;
+    white-space: normal;
+}
+
+/* ── Status bar ─────────────────────────────────────────────────────────── */
+.mdix-statusbar {
+    background-color: #0D1220;
+    flex-direction: row;
+    align-items: center;
+    padding: 0 12px;
+    height: 22px;
+    border-top-width: 1px;
+    border-top-color: #1A2540;
+}
+
+.mdix-statusbar__item {
+    color: #7A98C4;
+    font-size: 10px;
+    margin-right: 16px;
+}
+
+.mdix-statusbar__item--ok {
+    color: #6FD68F;
+}
+
+.mdix-statusbar__item--error {
+    color: #F4836A;
+}

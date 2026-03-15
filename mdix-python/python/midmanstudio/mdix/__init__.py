@@ -46,9 +46,3 @@ __all__ = [
     "MdixBuilder",
     "__version__",
 ]
-```
-
----
-
-**`mdix-python/python/midmanstudio/mdix/py.typed`**
-```

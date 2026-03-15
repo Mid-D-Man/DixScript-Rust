@@ -1,0 +1,1076 @@
+{
+  "build": "17",
+  "branch": "master",
+  "commit": "a1bbc83d",
+  "date": "2026-03-15T23:27:55+01:00",
+  "python": "3.11",
+  "summary": {
+    "total": 145,
+    "passed": 133,
+    "failed": 11,
+    "skipped": 1,
+    "duration_s": 0.0
+  },
+  "suites": [
+    {
+      "name": "TestTwoTierOrdering",
+      "module": "tests/test_builder",
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_flat_before_grouped_is_valid",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_flat_after_grouped_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_multiple_table_properties_valid",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_flat_then_group_array_then_no_more_flat",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_reset_grouped_allows_new_flat",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_reset_clears_all",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestFlatValueTypes",
+      "module": "tests/test_builder",
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_set_string",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_int",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_bool_true",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_bool_false",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_float",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_double",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_hex_color_valid",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_hex_color_no_hash_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_array_ints",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_tuple_max_six",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_tuple_seven_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_enum",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_set_object",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestTier2GroupedData",
+      "module": "tests/test_builder",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_with_table_properties_dict",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_with_table_properties_kwargs",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_with_table_properties_mixed",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_with_table_properties_empty_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_with_group_array_scalars",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_with_group_array_objects",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_with_group_array_empty_path_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestConfigAndEnums",
+      "module": "tests/test_builder",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_set_config_appears_in_output",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_add_enum_auto_increment",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_add_enum_explicit_values",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_add_enum_empty_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_section_order_config_enums_data",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestFinalization",
+      "module": "tests/test_builder",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_serialize_produces_data_section",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_to_database_produces_readable_db",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_try_to_database_success",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_empty_builder_serialize_empty",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestLoading",
+      "module": "tests/test_database",
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_load_str_valid_source_succeeds",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_load_str_empty_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_load_str_malformed_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_context_manager_closes_on_exit",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_close_is_idempotent",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_entry_count_positive",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_from_json_valid_object",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_from_json_empty_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_from_json_array_toplevel_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_from_toml_valid",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_from_toml_empty_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestTypedGetters",
+      "module": "tests/test_database",
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_get_string_known_path",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_string_with_default",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_string_missing_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_int_known_path",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_int_with_default",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_bool_true",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_float_known",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_double_known",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_string_empty_path_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_nested_dotted_path",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_json_returns_valid_json",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestTypeInspection",
+      "module": "tests/test_database",
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_exists_present",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_exists_absent",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_type_int",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_type_string",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_type_bool",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_type_unknown",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_keys_top_level",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_array_length_array",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_get_array_length_non_array",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestExport",
+      "module": "tests/test_database",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_to_json_contains_values",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_to_json_indented_has_newlines",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_to_toml_contains_values",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_to_json_then_from_json_roundtrip",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_to_toml_then_from_toml_roundtrip",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestMdixNumpy",
+      "module": "tests/test_ml",
+      "passed": 6,
+      "failed": 7,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_store_and_load_float32_matrix",
+          "status": "failed",
+          "duration_ms": 0,
+          "output": "mdix-python/tests/test_ml.py:69: in test_store_and_load_float32_matrix\n    restored = MdixNumpy.load(db, \"weights\")\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/midmanstudio/mdix/ml.py:166: in load\n    b64_data     = db.get_string(f\"{path}.data\")\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE   midmanstudio.mdix.MdixError: [mdix:get_string] Type conversion failed for 'weights.data': Cannot convert blob to String"
+        },
+        {
+          "name": "test_store_and_load_int64_vector",
+          "status": "failed",
+          "duration_ms": 0,
+          "output": "mdix-python/tests/test_ml.py:78: in test_store_and_load_int64_vector\n    restored = MdixNumpy.load(db, \"ids\")\n               ^^^^^^^^^^^^^^^^^^^^^^^^^\n/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/midmanstudio/mdix/ml.py:166: in load\n    b64_data     = db.get_string(f\"{path}.data\")\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE   midmanstudio.mdix.MdixError: [mdix:get_string] Type conversion failed for 'ids.data': Cannot convert blob to String"
+        },
+        {
+          "name": "test_store_1d_array",
+          "status": "failed",
+          "duration_ms": 0,
+          "output": "mdix-python/tests/test_ml.py:86: in test_store_1d_array\n    restored = MdixNumpy.load(db, \"vec\")\n               ^^^^^^^^^^^^^^^^^^^^^^^^^\n/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/midmanstudio/mdix/ml.py:166: in load\n    b64_data     = db.get_string(f\"{path}.data\")\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE   midmanstudio.mdix.MdixError: [mdix:get_string] Type conversion failed for 'vec.data': Cannot convert blob to String"
+        },
+        {
+          "name": "test_store_3d_array",
+          "status": "failed",
+          "duration_ms": 0,
+          "output": "mdix-python/tests/test_ml.py:94: in test_store_3d_array\n    restored = MdixNumpy.load(db, \"cube\")\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^\n/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/midmanstudio/mdix/ml.py:166: in load\n    b64_data     = db.get_string(f\"{path}.data\")\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE   midmanstudio.mdix.MdixError: [mdix:get_string] Type conversion failed for 'cube.data': Cannot convert blob to String"
+        },
+        {
+          "name": "test_load_with_dtype_override",
+          "status": "failed",
+          "duration_ms": 0,
+          "output": "mdix-python/tests/test_ml.py:100: in test_load_with_dtype_override\n    restored = MdixNumpy.load(db, \"w\", dtype=np.float64)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/midmanstudio/mdix/ml.py:166: in load\n    b64_data     = db.get_string(f\"{path}.data\")\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE   midmanstudio.mdix.MdixError: [mdix:get_string] Type conversion failed for 'w.data': Cannot convert blob to Stri"
+        },
+        {
+          "name": "test_exists_true_after_store",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_exists_false_when_absent",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_array_info_returns_metadata",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_try_load_success",
+          "status": "failed",
+          "duration_ms": 0,
+          "output": "mdix-python/tests/test_ml.py:126: in test_try_load_success\n    assert result.is_success\nE   AssertionError: assert False\nE    +  where False = MdixResult.err('[mdix:get_string] Type conversion failed for 'w.data': Cannot convert blob to String').is_success"
+        },
+        {
+          "name": "test_try_load_failure_missing_path",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_store_non_array_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_store_empty_path_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_multiple_arrays_in_one_database",
+          "status": "failed",
+          "duration_ms": 0,
+          "output": "mdix-python/tests/test_ml.py:149: in test_multiple_arrays_in_one_database\n    restored_w = MdixNumpy.load(db, \"weights\")\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/midmanstudio/mdix/ml.py:166: in load\n    b64_data     = db.get_string(f\"{path}.data\")\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE   midmanstudio.mdix.MdixError: [mdix:get_string] Type conversion failed for 'weights.data': Cannot convert blob to String"
+        }
+      ]
+    },
+    {
+      "name": "TestMdixTensor",
+      "module": "tests/test_ml",
+      "passed": 0,
+      "failed": 1,
+      "skipped": 1,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_store_numpy_array",
+          "status": "failed",
+          "duration_ms": 0,
+          "output": "mdix-python/tests/test_ml.py:162: in test_store_numpy_array\n    restored = MdixTensor.load_numpy(db, \"t\")\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/midmanstudio/mdix/ml.py:281: in load_numpy\n    return MdixNumpy.load(db, path)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/midmanstudio/mdix/ml.py:162: in load\n    stored_dtype = db.get_string(f\"{path}.dtype\")\n        "
+        },
+        {
+          "name": "test_store_and_load_torch",
+          "status": "skipped",
+          "duration_ms": 0,
+          "output": "('/home/runner/work/DixScript-Rust/DixScript-Rust/mdix-python/tests/test_ml.py', 167, 'Skipped: torch not installed')"
+        }
+      ]
+    },
+    {
+      "name": "TestMdixDataFrame",
+      "module": "tests/test_ml",
+      "passed": 6,
+      "failed": 1,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_store_and_load_basic_frame",
+          "status": "failed",
+          "duration_ms": 0,
+          "output": "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/pandas/core/indexes/base.py:3641: in get_loc\n    return self._engine.get_loc(casted_key)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\npandas/_libs/index.pyx:168: in pandas._libs.index.IndexEngine.get_loc\n    ???\npandas/_libs/index.pyx:197: in pandas._libs.index.IndexEngine.get_loc\n    ???\npandas/_libs/hashtable_class_helper.pxi:7668: in pandas._libs.hashtable.PyObjectHashTable.get_item\n    ???\npandas/_libs/hashtable_class_helper"
+        },
+        {
+          "name": "test_store_and_load_numeric_columns",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_try_load_success",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_try_load_failure_missing_path",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_store_empty_dataframe_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_store_non_dataframe_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_column_filter_on_load",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestMdixMLConfig",
+      "module": "tests/test_ml",
+      "passed": 13,
+      "failed": 2,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_load_str_and_read_string",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_hyperparameter_present",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_hyperparameter_missing_uses_default",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_hyperparameter_below_min_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_hyperparameter_above_max_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_architecture_setting_valid",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_architecture_invalid_choice_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_dataset_path_present",
+          "status": "failed",
+          "duration_ms": 0,
+          "output": "mdix-python/tests/test_ml.py:286: in test_dataset_path_present\n    assert path == \"/data/train.csv\"\nE   AssertionError: assert None == '/data/train.csv'"
+        },
+        {
+          "name": "test_dataset_path_missing_optional",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_dataset_path_required_and_missing_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_training_int_setting",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_training_missing_uses_default",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_repr",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_weights_round_trip",
+          "status": "failed",
+          "duration_ms": 0,
+          "output": "mdix-python/tests/test_ml.py:319: in test_weights_round_trip\n    loaded = config.load_weights(\"kernel\")\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/midmanstudio/mdix/ml.py:650: in load_weights\n    return MdixNumpy.load(self._db, path)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/midmanstudio/mdix/ml.py:166: in load\n    b64_data     = db.get_string(f\"{path}.data\")\n"
+        },
+        {
+          "name": "test_weights_info",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestConstruction",
+      "module": "tests/test_result",
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_ok_is_success",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_err_is_failure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_ok_bool_true",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_err_bool_false",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_ok_value_accessible",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_err_message_accessible",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_value_on_failure_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_error_on_success_raises",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestUnwrapping",
+      "module": "tests/test_result",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_or_raise_on_success_returns_value",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_or_raise_on_failure_raises_mdix_error",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_unwrap_alias_of_or_raise",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_unwrap_or_success",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_unwrap_or_failure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_unwrap_or_else_factory_called_on_failure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_unwrap_or_else_factory_not_called_on_success",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestTransformation",
+      "module": "tests/test_result",
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_map_transforms_success",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_map_forwards_failure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_and_then_chains_success",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_and_then_short_circuits_failure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_ensure_passing_predicate",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_ensure_failing_predicate",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_ensure_on_failure_passthrough",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_or_returns_self_on_success",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_or_returns_fallback_on_failure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestBranching",
+      "module": "tests/test_result",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_fold_success_branch",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_fold_failure_branch",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestSideEffects",
+      "module": "tests/test_result",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_tap_called_on_success",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_tap_not_called_on_failure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_tap_error_called_on_failure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_tap_error_not_called_on_success",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    },
+    {
+      "name": "TestDatabaseRailway",
+      "module": "tests/test_result",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0,
+      "tests": [
+        {
+          "name": "test_try_load_str_success",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_try_load_str_failure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_chain_load_and_get",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_chain_with_map",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_chain_with_ensure",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_repr_ok",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        },
+        {
+          "name": "test_repr_err",
+          "status": "passed",
+          "duration_ms": 0,
+          "output": ""
+        }
+      ]
+    }
+  ]
+}

@@ -555,7 +555,29 @@ impl MdixBuilder {
         slf.arrays.push(GroupEntry { path: path.to_string(), items: formatted });
         Ok(slf.into())
     }
-
+/// Internal method used by the Python ML layer.
+/// Accepts pre-formatted mdix value strings so blob/special types
+/// can be stored in table property groups without going through
+/// the Python dict formatter which only handles scalars.
+#[doc(hidden)]
+fn _with_raw_table_properties(
+    mut slf: PyRefMut<'_, Self>,
+    path: &str,
+    raw_props: Vec<(String, String)>,
+) -> PyResult<Py<Self>> {
+    if path.is_empty() {
+        return Err(to_py_err("[mdix] Table path cannot be empty"));
+    }
+    if raw_props.is_empty() {
+        return Err(to_py_err("[mdix] raw_props cannot be empty"));
+    }
+    slf.has_grouped = true;
+    slf.tables.push(TableEntry {
+        path:       path.to_string(),
+        properties: raw_props,
+    });
+    Ok(slf.into())
+}
     // ── Finalization ───────────────────────────────────────────────────────
 
     /// Serialize all sections to a `.mdix` source string.

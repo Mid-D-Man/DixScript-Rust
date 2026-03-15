@@ -1,0 +1,10 @@
+
+<linker>
+  <!--
+    Preserve all MdixNative P/Invoke methods from IL2CPP stripping.
+    Without this, the native FFI calls are stripped in release builds
+    on IL2CPP platforms (iOS, Android, WebGL) and the library silently fails.
+  -->
+  <assembly fullname="MidManStudio.Mdix.Core" preserve="all"/>
+  <assembly fullname="MidManStudio.Mdix.Runtime" preserve="all"/>
+</linker>

@@ -12,8 +12,17 @@ pub struct MdixDatabase {
     inner: Option<DixData>,
 }
 
+// ── Non-pymethods helpers — must be in a plain impl block ─────────────────────
+// PyO3 does not allow non-exposed methods inside #[pymethods].
+// Placing them here avoids the "trait bound not satisfied" errors that occur
+// when PyO3's generated From/Into impls clash with method signatures.
 impl MdixDatabase {
     fn from_data(data: DixData) -> Self {
+        MdixDatabase { inner: Some(data) }
+    }
+
+    /// Called by MdixBuilder and the ML layer.
+    pub fn from_data_pub(data: DixData) -> Self {
         MdixDatabase { inner: Some(data) }
     }
 
@@ -26,12 +35,10 @@ impl MdixDatabase {
 impl MdixDatabase {
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
-    /// Context manager entry — returns `self`.
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
 
-    /// Context manager exit — frees the database.
     fn __exit__(
         &mut self,
         _exc_type: PyObject,
@@ -42,23 +49,19 @@ impl MdixDatabase {
         false
     }
 
-    /// Explicitly free the database. Safe to call multiple times.
     fn close(&mut self) {
         self.inner = None;
     }
 
-    /// Alias for `close()`.
     fn free(&mut self) {
         self.inner = None;
     }
 
-    /// `True` if the database is loaded and not yet freed.
     #[getter]
     fn is_valid(&self) -> bool {
         self.inner.is_some()
     }
 
-    /// Total number of entries in the loaded database.
     #[getter]
     fn entry_count(&self) -> PyResult<i32> {
         Ok(self.data()?.entry_count() as i32)
@@ -73,74 +76,60 @@ impl MdixDatabase {
 
     // ── Loading — raising ──────────────────────────────────────────────────
 
-    /// Load a `.mdix` file from disk. Raises `MdixError` on failure.
     #[staticmethod]
     fn load(path: &str) -> PyResult<MdixDatabase> {
         if path.is_empty() {
             return Err(invalid_path_err(path));
         }
-        let loader = DixLoader::new();
-        loader
+        DixLoader::new()
             .load_text(path, &DixLoadOptions::new())
             .map(MdixDatabase::from_data)
             .map_err(|e| runtime_err("load", e))
     }
 
-    /// Load from a raw `.mdix` source string. Raises `MdixError` on failure.
     #[staticmethod]
     fn load_str(source: &str) -> PyResult<MdixDatabase> {
         if source.is_empty() {
             return Err(invalid_path_err("source string is empty"));
         }
-        let loader = DixLoader::new();
-        loader
+        DixLoader::new()
             .load_from_str(source, &DixLoadOptions::new())
             .map(MdixDatabase::from_data)
             .map_err(|e| runtime_err("load_str", e))
     }
 
-    /// Load from a JSON object string. Raises `MdixError` on failure.
     #[staticmethod]
     fn from_json(json: &str) -> PyResult<MdixDatabase> {
         if json.is_empty() {
             return Err(invalid_path_err("json string is empty"));
         }
         let converter = DixConverter::new();
-        let ast = converter
-            .from_json(json)
+        let ast = converter.from_json(json)
             .map_err(|e| runtime_err("from_json", e))?;
-        let src = converter
-            .to_mdix(&ast, None)
+        let src = converter.to_mdix(&ast, None)
             .map_err(|e| runtime_err("from_json:reserialize", e))?;
-        let loader = DixLoader::new();
-        loader
+        DixLoader::new()
             .load_from_str(&src, &DixLoadOptions::new())
             .map(MdixDatabase::from_data)
             .map_err(|e| runtime_err("from_json:load", e))
     }
 
-    /// Load from a TOML string. Raises `MdixError` on failure.
     #[staticmethod]
     fn from_toml(toml: &str) -> PyResult<MdixDatabase> {
         if toml.is_empty() {
             return Err(invalid_path_err("toml string is empty"));
         }
         let converter = DixConverter::new();
-        let ast = converter
-            .from_toml(toml)
+        let ast = converter.from_toml(toml)
             .map_err(|e| runtime_err("from_toml", e))?;
-        let src = converter
-            .to_mdix(&ast, None)
+        let src = converter.to_mdix(&ast, None)
             .map_err(|e| runtime_err("from_toml:reserialize", e))?;
-        let loader = DixLoader::new();
-        loader
+        DixLoader::new()
             .load_from_str(&src, &DixLoadOptions::new())
             .map(MdixDatabase::from_data)
             .map_err(|e| runtime_err("from_toml:load", e))
     }
 
-    /// Load an encrypted `.mdix.enc` file.
-    /// `key_path` may be `None` to auto-detect next to the `.enc` file.
     #[staticmethod]
     #[pyo3(signature = (enc_path, key_path = None))]
     fn load_encrypted(enc_path: &str, key_path: Option<&str>) -> PyResult<MdixDatabase> {
@@ -151,22 +140,19 @@ impl MdixDatabase {
         if let Some(kp) = key_path {
             opts.key_file_path = Some(kp.to_string());
         }
-        let loader = DixLoader::new();
-        loader
+        DixLoader::new()
             .load_encrypted(enc_path, &opts)
             .map(MdixDatabase::from_data)
             .map_err(|e| runtime_err("load_encrypted", e))
     }
 
-    /// Load an encrypted `.mdix.enc` file using a password.
     #[staticmethod]
     fn load_encrypted_password(enc_path: &str, password: &str) -> PyResult<MdixDatabase> {
         if enc_path.is_empty() { return Err(invalid_path_err(enc_path)); }
         if password.is_empty() {
             return Err(crate::error::to_py_err("[mdix] password cannot be empty"));
         }
-        let loader = DixLoader::new();
-        loader
+        DixLoader::new()
             .load_encrypted(enc_path, &DixLoadOptions::with_password(password))
             .map(MdixDatabase::from_data)
             .map_err(|e| runtime_err("load_encrypted_password", e))
@@ -205,21 +191,13 @@ impl MdixDatabase {
             Err(e)  => MdixResult::from_py_err(e),
         }
     }
-// Inside `impl MdixDatabase` (non-#[pymethods] block):
-pub fn from_data_pub(data: DixData) -> Self {
-    MdixDatabase::from_data(data)
-}
+
     // ── Type inspection ────────────────────────────────────────────────────
 
-    /// Returns `True` if the dotted path exists in the loaded data.
     fn exists(&self, path: &str) -> PyResult<bool> {
         Ok(self.data()?.exists(path))
     }
 
-    /// Returns the value type string at `path`:
-    /// `"int"`, `"string"`, `"bool"`, `"float"`, `"double"`, `"array"`,
-    /// `"object"`, `"enum"`, `"date"`, `"timestamp"`, `"hex_color"`,
-    /// `"blob"`, `"regex"`, `"tuple"`, `"null"`, or `"unknown"`.
     fn get_type(&self, path: &str) -> PyResult<&'static str> {
         let data = self.data()?;
         Ok(match data.get_value(path) {
@@ -242,8 +220,6 @@ pub fn from_data_pub(data: DixData) -> Self {
         })
     }
 
-    /// Returns the number of items in the array at `path`.
-    /// Returns `-1` if the path is not an array.
     fn get_array_length(&self, path: &str) -> PyResult<i32> {
         let data = self.data()?;
         Ok(match data.get_value(path) {
@@ -252,8 +228,6 @@ pub fn from_data_pub(data: DixData) -> Self {
         })
     }
 
-    /// Returns direct child key names under `prefix`.
-    /// Pass `""` for top-level keys.
     #[pyo3(signature = (prefix = ""))]
     fn get_keys(&self, prefix: &str) -> PyResult<Vec<String>> {
         Ok(self.data()?.get_keys(prefix))
@@ -261,13 +235,11 @@ pub fn from_data_pub(data: DixData) -> Self {
 
     // ── Typed getters — raising ────────────────────────────────────────────
 
-    /// Get a string value. Raises `MdixError` if not found or wrong type.
-    /// Pass `default` to return a fallback instead of raising.
     #[pyo3(signature = (path, default = None))]
     fn get_string(&self, path: &str, default: Option<&str>) -> PyResult<String> {
         if path.is_empty() { return Err(invalid_path_err(path)); }
         match self.data()?.get::<String>(path) {
-            Ok(v) => Ok(v),
+            Ok(v)  => Ok(v),
             Err(e) => match default {
                 Some(d) => Ok(d.to_string()),
                 None    => Err(runtime_err("get_string", e)),
@@ -275,12 +247,11 @@ pub fn from_data_pub(data: DixData) -> Self {
         }
     }
 
-    /// Get an integer value. Raises `MdixError` if not found or wrong type.
     #[pyo3(signature = (path, default = None))]
     fn get_int(&self, path: &str, default: Option<i32>) -> PyResult<i32> {
         if path.is_empty() { return Err(invalid_path_err(path)); }
         match self.data()?.get::<i32>(path) {
-            Ok(v) => Ok(v),
+            Ok(v)  => Ok(v),
             Err(e) => match default {
                 Some(d) => Ok(d),
                 None    => Err(runtime_err("get_int", e)),
@@ -288,12 +259,11 @@ pub fn from_data_pub(data: DixData) -> Self {
         }
     }
 
-    /// Get a float value. Raises `MdixError` if not found or wrong type.
     #[pyo3(signature = (path, default = None))]
     fn get_float(&self, path: &str, default: Option<f32>) -> PyResult<f32> {
         if path.is_empty() { return Err(invalid_path_err(path)); }
         match self.data()?.get::<f64>(path).map(|v| v as f32) {
-            Ok(v) => Ok(v),
+            Ok(v)  => Ok(v),
             Err(e) => match default {
                 Some(d) => Ok(d),
                 None    => Err(runtime_err("get_float", e)),
@@ -301,12 +271,11 @@ pub fn from_data_pub(data: DixData) -> Self {
         }
     }
 
-    /// Get a double (Python `float`) value. Raises `MdixError` if not found.
     #[pyo3(signature = (path, default = None))]
     fn get_double(&self, path: &str, default: Option<f64>) -> PyResult<f64> {
         if path.is_empty() { return Err(invalid_path_err(path)); }
         match self.data()?.get::<f64>(path) {
-            Ok(v) => Ok(v),
+            Ok(v)  => Ok(v),
             Err(e) => match default {
                 Some(d) => Ok(d),
                 None    => Err(runtime_err("get_double", e)),
@@ -314,12 +283,11 @@ pub fn from_data_pub(data: DixData) -> Self {
         }
     }
 
-    /// Get a boolean value. Raises `MdixError` if not found or wrong type.
     #[pyo3(signature = (path, default = None))]
     fn get_bool(&self, path: &str, default: Option<bool>) -> PyResult<bool> {
         if path.is_empty() { return Err(invalid_path_err(path)); }
         match self.data()?.get::<bool>(path) {
-            Ok(v) => Ok(v),
+            Ok(v)  => Ok(v),
             Err(e) => match default {
                 Some(d) => Ok(d),
                 None    => Err(runtime_err("get_bool", e)),
@@ -327,8 +295,6 @@ pub fn from_data_pub(data: DixData) -> Self {
         }
     }
 
-    /// Get the JSON serialization of any value at `path`.
-    /// Useful for arrays, objects, tuples, and blobs.
     fn get_json(&self, path: &str) -> PyResult<String> {
         if path.is_empty() { return Err(invalid_path_err(path)); }
         let data = self.data()?;
@@ -339,7 +305,6 @@ pub fn from_data_pub(data: DixData) -> Self {
         }
     }
 
-    /// Get the enum type name at `path` (e.g. `"AIType"`).
     fn get_enum_name(&self, path: &str) -> PyResult<String> {
         if path.is_empty() { return Err(invalid_path_err(path)); }
         let data = self.data()?;
@@ -350,7 +315,6 @@ pub fn from_data_pub(data: DixData) -> Self {
         }
     }
 
-    /// Get the enum field name at `path` (e.g. `"BOSS"`).
     fn get_enum_field(&self, path: &str) -> PyResult<String> {
         if path.is_empty() { return Err(invalid_path_err(path)); }
         let data = self.data()?;
@@ -407,16 +371,14 @@ pub fn from_data_pub(data: DixData) -> Self {
 
     // ── Export ─────────────────────────────────────────────────────────────
 
-    /// Export the database as a JSON string.
     #[pyo3(signature = (indented = true))]
     fn to_json(&self, indented: bool) -> PyResult<String> {
-        let data = self.data()?;
+        let data    = self.data()?;
         let entries = data.to_hashmap();
-        let converter = DixConverter::new();
-        let ast = converter
-            .from_hashmap(entries)
+        let conv    = DixConverter::new();
+        let ast     = conv.from_hashmap(entries)
             .map_err(|e| runtime_err("to_json:ast", e))?;
-        let map = converter.to_hashmap(&ast);
+        let map = conv.to_hashmap(&ast);
         if indented {
             serde_json::to_string_pretty(&map)
         } else {
@@ -425,29 +387,23 @@ pub fn from_data_pub(data: DixData) -> Self {
         .map_err(|e| runtime_err("to_json:serialize", e))
     }
 
-    /// Export the database as a TOML string.
     fn to_toml(&self) -> PyResult<String> {
-        let data = self.data()?;
+        let data    = self.data()?;
         let entries = data.to_hashmap();
-        let converter = DixConverter::new();
-        let ast = converter
-            .from_hashmap(entries)
+        let conv    = DixConverter::new();
+        let ast     = conv.from_hashmap(entries)
             .map_err(|e| runtime_err("to_toml:ast", e))?;
-        converter
-            .to_toml(&ast)
+        conv.to_toml(&ast)
             .map_err(|e| runtime_err("to_toml:serialize", e))
     }
 
-    /// Re-serialize the database back to `.mdix` source text.
     fn to_mdix(&self) -> PyResult<String> {
-        let data = self.data()?;
+        let data    = self.data()?;
         let entries = data.to_hashmap();
-        let converter = DixConverter::new();
-        let ast = converter
-            .from_hashmap(entries)
+        let conv    = DixConverter::new();
+        let ast     = conv.from_hashmap(entries)
             .map_err(|e| runtime_err("to_mdix:ast", e))?;
-        converter
-            .to_mdix(&ast, Some(&DixFormatOptions::pretty()))
+        conv.to_mdix(&ast, Some(&DixFormatOptions::pretty()))
             .map_err(|e| runtime_err("to_mdix:serialize", e))
     }
-          }
+}

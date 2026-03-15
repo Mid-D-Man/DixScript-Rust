@@ -1,13 +1,11 @@
 //! Main orchestrator for DLM forward pipeline execution during compilation.
 //!
 //! Execution order: Auditor (start) → Compressor → Encryptor → Auditor (finalize).
-//! The auditor receives a `log_step` call after each phase so the audit trail
-//! contains timing and size data for every module that ran.
 
 use crate::Compiler::AST::{DixScript, DLMModuleType, DLMModuleSubtype};
 use crate::Compiler::DLM::{
     Auditor::{IAuditor, DiyAuditor, EnhancedAuditor},
-    Compressor::{ICompressor, GzipCompressor, Bzip2Compressor, LzmaCompressor},
+    Compressor::{ICompressor, GzipCompressor},
     Encryptor::{IEncryptor, XorEncryptor, Aes128Encryptor, Aes256Encryptor, Chacha20Encryptor},
     KeyManagement::KeyFileManager,
     dlm_pipeline_result::DLMPipelineResult,
@@ -17,6 +15,9 @@ use crate::ErrorManager::{ErrorManager, DebugConfig, DlmErrorType, ErrorSeverity
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::fs;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::Compiler::DLM::Compressor::{Bzip2Compressor, LzmaCompressor};
 
 pub struct DLMPipelineExecutor {
     error_manager:    ErrorManager,
@@ -57,7 +58,7 @@ impl DLMPipelineExecutor {
 
         if dlm_is_empty {
             self.error_manager.log_info("No DLM modules specified - skipping pipeline");
-            result.is_success    = true;
+            result.is_success     = true;
             result.processed_size = binary_data.len();
             result.processed_data = binary_data;
             result.total_duration = start_time.elapsed();
@@ -81,7 +82,7 @@ impl DLMPipelineExecutor {
             }
         };
 
-        let mut processed_data   = binary_data;
+        let mut processed_data                    = binary_data;
         let mut active_auditor: Option<Box<dyn IAuditor>> = None;
 
         // Phase 1: start auditor
@@ -98,7 +99,6 @@ impl DLMPipelineExecutor {
                         ErrorSeverity::Warning,
                     );
                     result.warnings.push(e);
-                    // Auditor failure is non-fatal — continue without auditing.
                 }
             }
         }
@@ -251,7 +251,11 @@ impl DLMPipelineExecutor {
     fn parse_dlm_section(
         &self,
         ast: &mut DixScript,
-    ) -> Result<(Option<Box<dyn IAuditor>>, Option<Box<dyn ICompressor>>, Option<Box<dyn IEncryptor>>), String> {
+    ) -> Result<(
+        Option<Box<dyn IAuditor>>,
+        Option<Box<dyn ICompressor>>,
+        Option<Box<dyn IEncryptor>>,
+    ), String> {
         let dlm = ast.dlm.as_ref().unwrap();
 
         if self.debug_config.is_enabled {
@@ -261,11 +265,10 @@ impl DLMPipelineExecutor {
             ));
         }
 
-        let mut auditor:    Option<Box<dyn IAuditor>>   = None;
+        let mut auditor:    Option<Box<dyn IAuditor>>    = None;
         let mut compressor: Option<Box<dyn ICompressor>> = None;
         let mut encryptor:  Option<Box<dyn IEncryptor>>  = None;
 
-        // Clone to avoid borrow conflict when creating the encryptor needs &mut ast.
         let modules: Vec<_> = dlm.modules.iter().cloned().collect();
 
         for module in &modules {
@@ -280,7 +283,9 @@ impl DLMPipelineExecutor {
                     encryptor = Some(self.create_encryptor(module.subtype, ast)?);
                 }
                 DLMModuleType::ParseError => {
-                    return Err("DLM section contains a parse error — check @DLM syntax".to_string());
+                    return Err(
+                        "DLM section contains a parse error — check @DLM syntax".to_string()
+                    );
                 }
             }
         }
@@ -315,15 +320,28 @@ impl DLMPipelineExecutor {
         &self,
         subtype: Option<DLMModuleSubtype>,
     ) -> Result<Box<dyn ICompressor>, String> {
-        let comp: Box<dyn ICompressor> = match subtype {
-            Some(DLMModuleSubtype::Gzip) | None => Box::new(GzipCompressor::new()),
-            Some(DLMModuleSubtype::Bzip2)       => Box::new(Bzip2Compressor::new()),
-            Some(DLMModuleSubtype::Lzma)        => Box::new(LzmaCompressor::new()),
-            Some(other) => {
-                return Err(format!("Unknown compressor subtype: {:?}", other));
+        match subtype {
+            Some(DLMModuleSubtype::Gzip) | None => {
+                Ok(Box::new(GzipCompressor::new()))
             }
-        };
-        Ok(comp)
+
+            #[cfg(not(target_arch = "wasm32"))]
+            Some(DLMModuleSubtype::Bzip2) => Ok(Box::new(Bzip2Compressor::new())),
+
+            #[cfg(not(target_arch = "wasm32"))]
+            Some(DLMModuleSubtype::Lzma) => Ok(Box::new(LzmaCompressor::new())),
+
+            #[cfg(target_arch = "wasm32")]
+            Some(DLMModuleSubtype::Bzip2) | Some(DLMModuleSubtype::Lzma) => {
+                Err(
+                    "bzip2 and lzma compression are not supported in WebAssembly builds. \
+                     Use DCompressor.gzip instead, or compress the file using the \
+                     native library first.".to_string()
+                )
+            }
+
+            Some(other) => Err(format!("Unknown compressor subtype: {:?}", other)),
+        }
     }
 
     fn create_encryptor(
@@ -345,10 +363,10 @@ impl DLMPipelineExecutor {
         let security = ast.security.as_ref().unwrap();
 
         let enc: Box<dyn IEncryptor> = match subtype {
-            Some(DLMModuleSubtype::Xor)          => Box::new(XorEncryptor::new(Some(security.clone()))),
-            Some(DLMModuleSubtype::Aes128)        => Box::new(Aes128Encryptor::new(Some(security.clone()))),
-            Some(DLMModuleSubtype::Aes256) | None => Box::new(Aes256Encryptor::new(Some(security.clone()))),
-            Some(DLMModuleSubtype::Chacha20)      => Box::new(Chacha20Encryptor::new(Some(security.clone()))),
+            Some(DLMModuleSubtype::Xor)           => Box::new(XorEncryptor::new(Some(security.clone()))),
+            Some(DLMModuleSubtype::Aes128)         => Box::new(Aes128Encryptor::new(Some(security.clone()))),
+            Some(DLMModuleSubtype::Aes256) | None  => Box::new(Aes256Encryptor::new(Some(security.clone()))),
+            Some(DLMModuleSubtype::Chacha20)       => Box::new(Chacha20Encryptor::new(Some(security.clone()))),
             Some(other) => {
                 return Err(format!("Unknown encryptor subtype: {:?}", other));
             }
@@ -357,7 +375,7 @@ impl DLMPipelineExecutor {
         Ok(enc)
     }
 
-    // ── Auditor start (separated so errors are non-fatal) ─────────────────────
+    // ── Auditor start ─────────────────────────────────────────────────────────
 
     fn start_auditor(
         &self,
@@ -399,12 +417,10 @@ impl DLMPipelineExecutor {
         let enc_path_str = enc_path.to_string_lossy().to_string();
         self.error_manager.log_info(&format!("Output file: {}", enc_path.display()));
 
-        // Determine sizes for the key file
         let compressed_size = result.metadata
             .get("compressor")
             .and_then(|m| m.get("compressed_size"))
             .and_then(|v| v.parse::<usize>().ok())
-            // If no compressor ran, compressed == original
             .unwrap_or(original_size);
 
         let key_manager = KeyFileManager::new(

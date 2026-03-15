@@ -16,7 +16,10 @@ use super::{
     ValueEncoder,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 const CONCURRENT_SERIALIZATION_ENABLED: bool = true;
+#[cfg(target_arch = "wasm32")]
+const CONCURRENT_SERIALIZATION_ENABLED: bool = false;
 
 const CANONICAL_SECTION_ORDER: &[SectionId] = &[
     SectionId::Config,
@@ -158,7 +161,9 @@ impl BinaryPacker {
             return self.collect_encode_results(results, sections);
         }
 
-        // Unreachable on WASM — should_use_concurrent returns false there.
+        // should_use_concurrent() always returns false on wasm32,
+        // so this is never reached at runtime. The cfg block above is
+        // compiled away on wasm32, leaving only this sequential fallback.
         #[cfg(target_arch = "wasm32")]
         self.encode_sections_sequential(ast, sections)
     }

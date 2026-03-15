@@ -6,11 +6,12 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
 pub fn init() {
-    #[cfg(feature = "console_error_panic_hook")]
+    // Install unconditionally — no feature flag needed.
+    // Without this, every Rust panic in WASM produces the useless
+    // "unreachable executed" browser message with no file or line info.
+    // With it, the browser console shows the exact panic location.
     console_error_panic_hook::set_once();
 }
 
-// Re-export the public JS-facing types so wasm-bindgen
-// sees them all from a single crate root.
 pub use builder::MdixBuilder;
 pub use database::MdixDatabase;

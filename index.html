@@ -47,6 +47,8 @@
     a.lsp:hover .desc { color: #58a6ff; }
     a.csharp:hover { border-color: #a371f7; color: #a371f7; }
     a.csharp:hover .desc { color: #a371f7; }
+    a.wasm:hover   { border-color: #39d353; color: #39d353; }
+    a.wasm:hover .desc { color: #39d353; }
 
     footer {
       margin-top: 24px; text-align: center;
@@ -109,8 +111,16 @@
         </div>
       </a>
 
+      <a class="wasm" href="wasm/">
+        <span class="icon">🌐</span>
+        <div class="info">
+          <span class="label">WASM Playground</span>
+          <span class="desc">@dixscript/core — live browser test of the WebAssembly package</span>
+        </div>
+      </a>
+
     </div>
-    <footer>Trigger: push with --publish-* / --ffi / --lsp / --mdix-cs · workflow_dispatch for manual runs</footer>
+    <footer>Trigger: push with --publish-* / --ffi / --lsp / --mdix-cs / --mdix-wasm · workflow_dispatch for manual runs</footer>
   </div>
 </body>
-</html>
+  </html>

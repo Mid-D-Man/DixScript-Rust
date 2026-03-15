@@ -1,0 +1,41 @@
+{
+  "name": "@dixscript/core",
+  "version": "1.0.0",
+  "description": "DixScript (.mdix) runtime for browser and Node.js via WebAssembly",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build:wasm": "wasm-pack build ../mdix-wasm --target bundler --out-dir ../npm/wasm-pkg --out-name mdix_wasm",
+    "build:ts": "tsc",
+    "build": "npm run build:wasm && npm run build:ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "dixscript",
+    "mdix",
+    "config",
+    "wasm",
+    "webassembly"
+  ],
+  "author": "MidManStudio",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mid-D-Man/DixScript-Rust.git"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

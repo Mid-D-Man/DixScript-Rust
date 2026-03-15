@@ -72,18 +72,32 @@ jobs:
           fi
           wasm-pack --version
 
-      # ── Step 1: build the Rust WASM crate ─────────────────────────────
-      - name: Build WASM crate (wasm-pack)
+      # ── Step 1: build bundler target for npm ──────────────────────────
+      - name: Build WASM crate — bundler target (for npm)
         run: |
           wasm-pack build mdix-wasm \
             --target bundler \
             --release \
             --out-dir ../npm/wasm-pkg \
             --out-name mdix_wasm
-          echo "wasm-pack output:"
+          echo "wasm-pack bundler output:"
           ls -lh npm/wasm-pkg/
 
-      # ── Step 2: build the TypeScript wrapper ──────────────────────────
+      # ── Step 2: build web target for GitHub Pages playground ──────────
+      # --target web produces JS that uses fetch() to load the .wasm file,
+      # which works on a plain static file server (GitHub Pages).
+      # --target bundler uses a static import that only bundlers understand.
+      - name: Build WASM crate — web target (for GitHub Pages playground)
+        run: |
+          wasm-pack build mdix-wasm \
+            --target web \
+            --release \
+            --out-dir ../npm/wasm-web \
+            --out-name mdix_wasm
+          echo "wasm-pack web output:"
+          ls -lh npm/wasm-web/
+
+      # ── Step 3: build the TypeScript wrapper ──────────────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -103,8 +117,10 @@ jobs:
         run: |
           echo "dist/ contents:"
           ls -lh dist/ || echo "dist/ not found"
-          echo "wasm-pkg/ contents:"
+          echo "wasm-pkg/ (bundler) contents:"
           ls -lh wasm-pkg/
+          echo "wasm-web/ (web) contents:"
+          ls -lh wasm-web/
         working-directory: npm
 
       - name: Upload build artifacts
@@ -115,6 +131,7 @@ jobs:
           path: |
             npm/dist/
             npm/wasm-pkg/
+            npm/wasm-web/
             npm/package-lock.json
           retention-days: 30
 
@@ -176,17 +193,23 @@ jobs:
             git worktree add --orphan -b gh-pages "$WORK"
           fi
 
-          # wasm/ directory — test page + wasm-pkg output
+          # wasm/ directory — test page + web-target wasm output
           mkdir -p "$WORK/wasm"
 
           # Copy test page
           cp .github/wasm-test-page.html "$WORK/wasm/index.html"
 
-          # Copy wasm-pack output (the .wasm binary and JS glue)
-          if [ -d "deploy/wasm-pkg" ]; then
-            cp deploy/wasm-pkg/mdix_wasm.js     "$WORK/wasm/mdix_wasm.js"     2>/dev/null || true
-            cp deploy/wasm-pkg/mdix_wasm_bg.wasm "$WORK/wasm/mdix_wasm_bg.wasm" 2>/dev/null || true
-            cp deploy/wasm-pkg/mdix_wasm.d.ts   "$WORK/wasm/mdix_wasm.d.ts"   2>/dev/null || true
+          # Copy the --target web output (fetch-based, works on GitHub Pages).
+          # These files come from wasm-web/, NOT wasm-pkg/ (which is bundler-only).
+          if [ -d "deploy/wasm-web" ]; then
+            cp deploy/wasm-web/mdix_wasm.js      "$WORK/wasm/mdix_wasm.js"      2>/dev/null || true
+            cp deploy/wasm-web/mdix_wasm_bg.wasm "$WORK/wasm/mdix_wasm_bg.wasm" 2>/dev/null || true
+            cp deploy/wasm-web/mdix_wasm.d.ts    "$WORK/wasm/mdix_wasm.d.ts"    2>/dev/null || true
+            echo "Deployed web-target WASM files:"
+            ls -lh "$WORK/wasm/"
+          else
+            echo "ERROR: wasm-web/ directory not found in deploy artifacts"
+            exit 1
           fi
 
           # Copy build metadata so the test page can show the build number
@@ -227,6 +250,9 @@ jobs:
           if [ "${{ needs.parse-trigger.outputs.run_wasm }}" != "true" ]; then
             echo "Skipped — commit message did not contain --mdix-wasm"
           fi
+          echo ""
+          echo "npm package uses:  --target bundler (wasm-pkg/)"
+          echo "playground uses:   --target web     (wasm-web/)"
           echo ""
           echo "Playground → https://mid-d-man.github.io/DixScript-Rust/wasm/"
           echo "NOTE: npm publish is blocked on develop branch."

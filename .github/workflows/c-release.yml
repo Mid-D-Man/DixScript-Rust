@@ -1,0 +1,444 @@
+name: MidManStudio.Mdix — C/C++ Package Release
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  # ── 1. Check trigger ───────────────────────────────────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      run_c: ${{ steps.decide.outputs.run_c }}
+    steps:
+      - name: Decide whether to run C package build
+        id: decide
+        run: |
+          RUN=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            MSG="${{ github.event.pull_request.title }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-c\b' && RUN=true || true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-c\b' && RUN=true || true
+          fi
+
+          echo "run_c=$RUN" >> $GITHUB_OUTPUT
+          echo "Run C build: $RUN"
+
+  # ── 2. Build — Linux x64 (.so) ────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_c == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-c-ffi-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-c-ffi-
+
+      - name: Build FFI — Linux x64
+        run: cargo build -p mdix-ffi --release --target x86_64-unknown-linux-gnu
+
+      - name: Collect Linux artifact
+        run: |
+          mkdir -p out/lib/linux-x64
+          cp target/x86_64-unknown-linux-gnu/release/libmdix_ffi.so \
+             out/lib/linux-x64/libmdix_ffi.so
+          ls -lh out/lib/linux-x64/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-linux-${{ github.run_number }}
+          path: out/
+          retention-days: 1
+
+  # ── 3. Build — Windows x64 MSVC (.dll + import lib) ──────────────────────
+  build-windows:
+    runs-on: windows-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_c == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: windows-c-ffi-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: windows-c-ffi-
+
+      - name: Build FFI — Windows x64 MSVC
+        run: cargo build -p mdix-ffi --release --target x86_64-pc-windows-msvc
+
+      - name: Collect Windows artifacts
+        shell: bash
+        run: |
+          mkdir -p out/lib/windows-x64
+
+          cp target/x86_64-pc-windows-msvc/release/mdix_ffi.dll \
+             out/lib/windows-x64/mdix_ffi.dll
+
+          # Rust cdylib on MSVC produces the import library as mdix_ffi.dll.lib
+          # Some versions produce mdix_ffi.lib — collect whichever exists.
+          IMPLIB=""
+          if [ -f "target/x86_64-pc-windows-msvc/release/mdix_ffi.dll.lib" ]; then
+            IMPLIB="target/x86_64-pc-windows-msvc/release/mdix_ffi.dll.lib"
+          elif [ -f "target/x86_64-pc-windows-msvc/release/mdix_ffi.lib" ]; then
+            IMPLIB="target/x86_64-pc-windows-msvc/release/mdix_ffi.lib"
+          fi
+
+          if [ -n "$IMPLIB" ]; then
+            cp "$IMPLIB" out/lib/windows-x64/mdix_ffi.lib
+            echo "Import library: $IMPLIB"
+          else
+            echo "WARNING: no import library found — MSVC linking will require manual .lib generation"
+            echo "See: https://learn.microsoft.com/en-us/cpp/build/reference/lib-reference"
+          fi
+
+          ls -lh out/lib/windows-x64/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-windows-${{ github.run_number }}
+          path: out/
+          retention-days: 1
+
+  # ── 4. Build — macOS universal (.dylib) ───────────────────────────────────
+  build-macos:
+    runs-on: macos-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_c == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: >-
+            x86_64-apple-darwin
+            aarch64-apple-darwin
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-c-ffi-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-c-ffi-
+
+      - name: Build FFI — macOS x64
+        run: cargo build -p mdix-ffi --release --target x86_64-apple-darwin
+
+      - name: Build FFI — macOS arm64
+        run: cargo build -p mdix-ffi --release --target aarch64-apple-darwin
+
+      - name: Lipo — universal dylib
+        run: |
+          lipo -create \
+            target/x86_64-apple-darwin/release/libmdix_ffi.dylib \
+            target/aarch64-apple-darwin/release/libmdix_ffi.dylib \
+            -output libmdix_ffi_universal.dylib
+          lipo -info libmdix_ffi_universal.dylib
+
+      - name: Collect macOS artifact
+        run: |
+          mkdir -p out/lib/macos
+          cp libmdix_ffi_universal.dylib out/lib/macos/libmdix_ffi.dylib
+          ls -lh out/lib/macos/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-macos-${{ github.run_number }}
+          path: out/
+          retention-days: 1
+
+  # ── 5. Assemble package ───────────────────────────────────────────────────
+  assemble-package:
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows, build-macos]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: c-linux-${{ github.run_number }}
+          path: native-linux/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: c-windows-${{ github.run_number }}
+          path: native-windows/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: c-macos-${{ github.run_number }}
+          path: native-macos/
+
+      - name: Assemble package directory
+        run: |
+          PKG="mdix-c-package"
+
+          # Headers
+          mkdir -p "$PKG/include"
+          cp mdix-c/include/mdix.h   "$PKG/include/mdix.h"
+          cp mdix-c/include/mdix.hpp "$PKG/include/mdix.hpp"
+
+          # CMakeLists.txt and README
+          cp mdix-c/CMakeLists.txt "$PKG/CMakeLists.txt"
+          cp mdix-c/README.md      "$PKG/README.md"
+
+          # Native libraries
+          mkdir -p "$PKG/lib/linux-x64"
+          mkdir -p "$PKG/lib/windows-x64"
+          mkdir -p "$PKG/lib/macos"
+
+          cp native-linux/lib/linux-x64/libmdix_ffi.so       "$PKG/lib/linux-x64/"
+          cp native-windows/lib/windows-x64/mdix_ffi.dll     "$PKG/lib/windows-x64/"
+          cp native-macos/lib/macos/libmdix_ffi.dylib         "$PKG/lib/macos/"
+
+          # Import library (optional — present on MSVC builds)
+          if [ -f "native-windows/lib/windows-x64/mdix_ffi.lib" ]; then
+            cp native-windows/lib/windows-x64/mdix_ffi.lib "$PKG/lib/windows-x64/"
+          fi
+
+          # Build metadata
+          cat > "$PKG/build-info.json" << EOF
+          {
+            "build":  "${{ github.run_number }}",
+            "commit": "${GITHUB_SHA:0:8}",
+            "branch": "${{ github.ref_name }}",
+            "date":   "$(date -u --iso-8601=seconds)"
+          }
+          EOF
+
+          echo "Package contents:"
+          find "$PKG" -type f | sort
+
+      - name: Verify required files
+        run: |
+          PKG="mdix-c-package"
+          MISSING=0
+          for f in \
+            "include/mdix.h" \
+            "include/mdix.hpp" \
+            "lib/linux-x64/libmdix_ffi.so" \
+            "lib/windows-x64/mdix_ffi.dll" \
+            "lib/macos/libmdix_ffi.dylib" \
+            "CMakeLists.txt" \
+            "README.md"
+          do
+            if [ ! -f "$PKG/$f" ]; then
+              echo "MISSING: $f"; MISSING=$((MISSING+1))
+            else
+              echo "OK: $f"
+            fi
+          done
+          [ $MISSING -eq 0 ] || { echo "ERROR: $MISSING file(s) missing"; exit 1; }
+
+      - name: Create zip
+        run: |
+          ZIP="mdix-c-package-build-${{ github.run_number }}.zip"
+          zip -r "$ZIP" mdix-c-package/
+          ls -lh "$ZIP"
+          echo "ZIP_NAME=$ZIP" >> $GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mdix-c-package-${{ github.run_number }}
+          path: mdix-c-package-build-${{ github.run_number }}.zip
+          retention-days: 90
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mdix-c-unpacked-${{ github.run_number }}
+          path: mdix-c-package/
+          retention-days: 1
+
+  # ── 6. Deploy build-info page to gh-pages ─────────────────────────────────
+  deploy-page:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, assemble-package]
+    if: |
+      always() &&
+      needs.assemble-package.result == 'success' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' ||
+       github.event_name == 'workflow_dispatch')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mdix-c-unpacked-${{ github.run_number }}
+          path: deploy/
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          COMMIT="${GITHUB_SHA:0:8}"
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/c"
+
+          # Write a simple build-info page
+          cat > "$WORK/c/index.html" << HTMLEOF
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>DixScript-Rust — C/C++ Package</title>
+            <style>
+              *{box-sizing:border-box;margin:0;padding:0}
+              body{font-family:'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#e6edf3;
+                   display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+              .card{background:#161b22;border:1px solid #30363d;border-radius:12px;
+                    padding:36px 40px;max-width:520px;width:100%}
+              h1{font-size:1.5rem;color:#f0883e;margin-bottom:4px}
+              .sub{color:#8b949e;font-size:0.82rem;margin-bottom:20px}
+              .divider{border:none;border-top:1px solid #30363d;margin:18px 0}
+              .meta{font-size:0.78rem;color:#484f58;display:flex;flex-direction:column;gap:6px}
+              .meta span strong{color:#8b949e}
+              .platforms{margin-top:20px;display:flex;flex-direction:column;gap:8px}
+              .plat{background:#1c2128;border:1px solid #30363d;border-radius:8px;
+                    padding:10px 14px;font-size:0.8rem;color:#c9d1d9}
+              .plat .label{font-weight:600;color:#e6edf3}
+              .plat .files{font-size:0.72rem;color:#484f58;margin-top:2px;font-family:monospace}
+              a.dl{display:inline-block;margin-top:20px;padding:9px 20px;border-radius:7px;
+                   border:1px solid #f0883e;color:#f0883e;font-size:0.84rem;text-decoration:none;
+                   transition:background 0.15s}
+              a.dl:hover{background:#2a1a0d}
+              a.back{display:inline-flex;align-items:center;gap:5px;font-size:0.78rem;
+                     color:#8b949e;text-decoration:none;margin-bottom:18px}
+              a.back:hover{color:#f0883e}
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <a class="back" href="../">← CI Dashboard</a>
+              <h1>C/C++ Package</h1>
+              <p class="sub">mdix-c — native library + headers for C99 and C++17</p>
+              <hr class="divider">
+              <div class="meta">
+                <span>Build <strong>#${BUILD_NUM}</strong></span>
+                <span>Commit <strong>${COMMIT}</strong></span>
+                <span>Branch <strong>${{ github.ref_name }}</strong></span>
+                <span>Date   <strong>$(date -u)</strong></span>
+              </div>
+              <div class="platforms">
+                <div class="plat">
+                  <div class="label">Linux x64</div>
+                  <div class="files">lib/linux-x64/libmdix_ffi.so</div>
+                </div>
+                <div class="plat">
+                  <div class="label">Windows x64 (MSVC)</div>
+                  <div class="files">lib/windows-x64/mdix_ffi.dll &nbsp;·&nbsp; mdix_ffi.lib</div>
+                </div>
+                <div class="plat">
+                  <div class="label">macOS universal (x64 + arm64)</div>
+                  <div class="files">lib/macos/libmdix_ffi.dylib</div>
+                </div>
+              </div>
+              <a class="dl"
+                 href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">
+                Download from Actions → Artifacts
+              </a>
+            </div>
+          </body>
+          </html>
+          HTMLEOF
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "C/C++ Package — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+          echo "Deployed → https://mid-d-man.github.io/DixScript-Rust/c/"
+
+  # ── 7. Summary ────────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-linux, build-windows, build-macos, assemble-package, deploy-page]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "============================================="
+          echo "  MidManStudio.Mdix — C/C++ Package"
+          echo "============================================="
+          echo "Build:       #${{ github.run_number }}"
+          echo "Branch:      ${{ github.ref_name }}"
+          echo "Trigger:     ${{ github.event_name }}"
+          echo ""
+          echo "Linux:       ${{ needs.build-linux.result   || 'skipped' }}"
+          echo "Windows:     ${{ needs.build-windows.result || 'skipped' }}"
+          echo "macOS:       ${{ needs.build-macos.result   || 'skipped' }}"
+          echo "Assemble:    ${{ needs.assemble-package.result || 'skipped' }}"
+          echo "Deploy page: ${{ needs.deploy-page.result   || 'skipped' }}"
+          echo ""
+          if [ "${{ needs.parse-trigger.outputs.run_c }}" != "true" ]; then
+            echo "Skipped — commit message did not contain --mdix-c"
+          elif [ "${{ needs.assemble-package.result }}" = "success" ]; then
+            echo "Artifact: mdix-c-package-${{ github.run_number }}"
+            echo "Download: Actions → this run → Artifacts"
+            echo "Info page: https://mid-d-man.github.io/DixScript-Rust/c/"
+          else
+            echo "Build failed — check job logs above."
+          fi

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript-Rust — C/C++ Package</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#e6edf3;
+         display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+    .card{background:#161b22;border:1px solid #30363d;border-radius:12px;
+          padding:36px 40px;max-width:520px;width:100%}
+    h1{font-size:1.5rem;color:#f0883e;margin-bottom:4px}
+    .sub{color:#8b949e;font-size:0.82rem;margin-bottom:20px}
+    .divider{border:none;border-top:1px solid #30363d;margin:18px 0}
+    .meta{font-size:0.78rem;color:#484f58;display:flex;flex-direction:column;gap:6px}
+    .meta span strong{color:#8b949e}
+    .platforms{margin-top:20px;display:flex;flex-direction:column;gap:8px}
+    .plat{background:#1c2128;border:1px solid #30363d;border-radius:8px;
+          padding:10px 14px;font-size:0.8rem;color:#c9d1d9}
+    .plat .label{font-weight:600;color:#e6edf3}
+    .plat .files{font-size:0.72rem;color:#484f58;margin-top:2px;font-family:monospace}
+    a.dl{display:inline-block;margin-top:20px;padding:9px 20px;border-radius:7px;
+         border:1px solid #f0883e;color:#f0883e;font-size:0.84rem;text-decoration:none;
+         transition:background 0.15s}
+    a.dl:hover{background:#2a1a0d}
+    a.back{display:inline-flex;align-items:center;gap:5px;font-size:0.78rem;
+           color:#8b949e;text-decoration:none;margin-bottom:18px}
+    a.back:hover{color:#f0883e}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <a class="back" href="../">← CI Dashboard</a>
+    <h1>C/C++ Package</h1>
+    <p class="sub">mdix-c — native library + headers for C99 and C++17</p>
+    <hr class="divider">
+    <div class="meta">
+      <span>Build <strong>#2</strong></span>
+      <span>Commit <strong>495a444a</strong></span>
+      <span>Branch <strong>master</strong></span>
+      <span>Date   <strong>Sun Mar 15 17:47:12 UTC 2026</strong></span>
+    </div>
+    <div class="platforms">
+      <div class="plat">
+        <div class="label">Linux x64</div>
+        <div class="files">lib/linux-x64/libmdix_ffi.so</div>
+      </div>
+      <div class="plat">
+        <div class="label">Windows x64 (MSVC)</div>
+        <div class="files">lib/windows-x64/mdix_ffi.dll &nbsp;·&nbsp; mdix_ffi.lib</div>
+      </div>
+      <div class="plat">
+        <div class="label">macOS universal (x64 + arm64)</div>
+        <div class="files">lib/macos/libmdix_ffi.dylib</div>
+      </div>
+    </div>
+    <a class="dl"
+       href="https://github.com/Mid-D-Man/DixScript-Rust/actions/runs/23115758002">
+      Download from Actions → Artifacts
+    </a>
+  </div>
+</body>
+</html>

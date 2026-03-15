@@ -49,6 +49,8 @@
     a.csharp:hover .desc { color: #a371f7; }
     a.wasm:hover   { border-color: #39d353; color: #39d353; }
     a.wasm:hover .desc { color: #39d353; }
+    a.c:hover      { border-color: #f0883e; color: #f0883e; }
+    a.c:hover .desc { color: #f0883e; }
 
     footer {
       margin-top: 24px; text-align: center;
@@ -119,8 +121,16 @@
         </div>
       </a>
 
+      <a class="c" href="c/">
+        <span class="icon">⚙️</span>
+        <div class="info">
+          <span class="label">C/C++ Package</span>
+          <span class="desc">mdix-c — native headers + libs for Linux, Windows, macOS</span>
+        </div>
+      </a>
+
     </div>
-    <footer>Trigger: push with --publish-* / --ffi / --lsp / --mdix-cs / --mdix-wasm · workflow_dispatch for manual runs</footer>
+    <footer>Trigger: push with --publish-* / --ffi / --lsp / --mdix-cs / --mdix-wasm / --mdix-c · workflow_dispatch for manual runs</footer>
   </div>
 </body>
-  </html>
+</html>

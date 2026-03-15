@@ -10,66 +10,16 @@ namespace MidManStudio.Mdix.Unity
 {
     /// <summary>
     /// Unity-specific helpers layered on top of the Core Dix API.
-    /// Handles coroutine loading, platform save paths, and main-thread
-    /// callback dispatch for async operations.
+    /// Handles coroutine loading, platform-correct save paths via MdixPaths,
+    /// and main-thread callback dispatch for async operations.
     /// </summary>
     public static class MdixUnityExtensions
     {
-        // ── Save / persistent data paths ─────────────────────────────────────
-
-        /// <summary>
-        /// Full path for a save file in Unity's persistent data directory.
-        /// This is the correct location for player save data on all platforms.
-        ///
-        /// Example: MdixSavePath("savegame") →
-        ///   Android: /data/data/com.company.game/files/savegame.mdix
-        ///   iOS:     .../Documents/savegame.mdix
-        ///   PC:      %APPDATA%/CompanyName/GameName/savegame.mdix
-        /// </summary>
-        public static string MdixSavePath(string fileName)
-        {
-            if (string.IsNullOrEmpty(fileName))
-                throw new ArgumentNullException(nameof(fileName));
-
-            if (!fileName.EndsWith(".mdix", StringComparison.OrdinalIgnoreCase))
-                fileName += ".mdix";
-
-            return Path.Combine(Application.persistentDataPath, fileName);
-        }
-
-        /// <summary>
-        /// Full path for an encrypted save file in Unity's persistent data directory.
-        /// </summary>
-        public static string MdixEncSavePath(string fileName)
-        {
-            if (string.IsNullOrEmpty(fileName))
-                throw new ArgumentNullException(nameof(fileName));
-
-            var baseName = Path.GetFileNameWithoutExtension(fileName);
-            return Path.Combine(Application.persistentDataPath, baseName + ".mdix.enc");
-        }
-
-        /// <summary>
-        /// Full path to a streaming asset .mdix file.
-        /// StreamingAssets is read-only at runtime on mobile — use this for
-        /// bundled read-only game data (enemy tables, item definitions, etc.).
-        /// For save data, use MdixSavePath() instead.
-        /// </summary>
-        public static string MdixStreamingPath(string relativePath)
-        {
-            if (string.IsNullOrEmpty(relativePath))
-                throw new ArgumentNullException(nameof(relativePath));
-
-            return Path.Combine(Application.streamingAssetsPath, relativePath);
-        }
-
         // ── MdixAsset load helpers ────────────────────────────────────────────
 
         /// <summary>
         /// Load a MdixDatabase from a MdixAsset reference.
         /// The caller must dispose the returned database.
-        ///
-        /// Returns a failed result if the asset is null or has no source data.
         /// </summary>
         public static MdixResult<MdixDatabase> LoadFrom(this MdixAsset asset)
         {
@@ -85,11 +35,11 @@ namespace MidManStudio.Mdix.Unity
         /// Deserialize a MdixAsset directly into a POCO of type T.
         /// No database handle to manage.
         /// </summary>
-        public static MdixResult<T> LoadAs<T>(this MdixAsset asset, string? prefix = null)
+        public static MdixResult<T> LoadAs<T>(
+            this MdixAsset asset, string? prefix = null)
         {
             if (asset == null)
-                return MdixError.NativeError(
-                    "LoadAs: asset reference is null.");
+                return MdixError.NativeError("LoadAs: asset reference is null.");
 
             return asset.LoadAs<T>(prefix);
         }
@@ -98,45 +48,35 @@ namespace MidManStudio.Mdix.Unity
 
         /// <summary>
         /// Load a .mdix file via coroutine.
-        /// Useful for loading from StreamingAssets on Android where file access
-        /// requires UnityWebRequest rather than direct File.Read.
+        /// On Android StreamingAssets requires UnityWebRequest — this handles
+        /// that automatically based on platform and path.
         ///
         /// Usage:
         ///   yield return MdixUnityExtensions.LoadCoroutine(
-        ///       path, result => { using var db = result.OrThrow(); ... });
+        ///       MdixPaths.StreamingFile("enemies.mdix"),
+        ///       result => { using var db = result.OrThrow(); ... });
         /// </summary>
         public static IEnumerator LoadCoroutine(
-            string                          path,
+            string                           path,
             Action<MdixResult<MdixDatabase>> onComplete)
         {
-            if (onComplete == null) throw new ArgumentNullException(nameof(onComplete));
+            if (onComplete == null)
+                throw new ArgumentNullException(nameof(onComplete));
 
             MdixResult<MdixDatabase>? result = null;
 
 #if UNITY_ANDROID && !UNITY_EDITOR
-            // On Android StreamingAssets lives inside the APK — use
-            // UnityWebRequest to read it, then parse the string.
             var www = UnityEngine.Networking.UnityWebRequest.Get(path);
             yield return www.SendWebRequest();
 
-            if (www.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
-            {
-                result = MdixError.IoError(
-                    $"LoadCoroutine: UnityWebRequest failed: {www.error}");
-            }
-            else
-            {
-                result = Dix.LoadStr(www.downloadHandler.text);
-            }
+            result = www.result != UnityEngine.Networking.UnityWebRequest.Result.Success
+                ? MdixError.IoError($"LoadCoroutine: {www.error}")
+                : Dix.LoadStr(www.downloadHandler.text);
+
             www.Dispose();
 #else
-            // All other platforms support direct file access.
-            // Run the blocking IO on a thread pool thread, yield until done.
             var task = Task.Run(() => Dix.Load(path));
-
-            while (!task.IsCompleted)
-                yield return null;
-
+            while (!task.IsCompleted) yield return null;
             result = task.Result;
 #endif
             onComplete(result!.Value);
@@ -145,97 +85,87 @@ namespace MidManStudio.Mdix.Unity
         // ── Async with main-thread callback ───────────────────────────────────
 
         /// <summary>
-        /// Asynchronously load a .mdix file, then invoke a callback on
-        /// the Unity main thread when complete.
-        ///
-        /// Safe to call from MonoBehaviour.Start() or any async Unity method.
-        /// The callback runs on the main thread — safe to use UnityEngine APIs.
-        ///
-        /// Usage:
-        ///   await MdixUnityExtensions.LoadAsync(path, result =>
-        ///   {
-        ///       using var db = result.OrThrow();
-        ///       healthText.text = db.GetInt("player.health").UnwrapOr(0).ToString();
-        ///   });
+        /// Asynchronously load a .mdix file, invoking the callback on the
+        /// Unity main thread when complete.
         /// </summary>
         public static async Task LoadAsync(
-            string                          path,
+            string                           path,
             Action<MdixResult<MdixDatabase>> onComplete,
-            CancellationToken               ct = default)
+            CancellationToken                ct = default)
         {
-            if (onComplete == null) throw new ArgumentNullException(nameof(onComplete));
+            if (onComplete == null)
+                throw new ArgumentNullException(nameof(onComplete));
 
             var result = await Dix.LoadAsync(path, ct).ConfigureAwait(false);
-
-            // Marshal back to main thread.
-            await MainThreadDispatcher.RunOnMainThreadAsync(() => onComplete(result));
+            await MainThreadDispatcher.RunOnMainThreadAsync(
+                () => onComplete(result));
         }
 
-        // ── Quick save helpers ────────────────────────────────────────────────
+        // ── Save helpers ──────────────────────────────────────────────────────
 
         /// <summary>
-        /// Save a POCO object to a .mdix file in persistentDataPath.
-        ///
-        /// Creates the file if it does not exist.
-        /// This is the simplest save-game pattern — call at checkpoint,
-        /// game over, or periodic autosave.
+        /// Serialize a POCO and save it to the mdix saves directory.
+        /// Directories are created automatically.
         ///
         /// Example:
-        ///   MdixUnityExtensions.Save("savegame", playerData);
+        ///   MdixUnityExtensions.Save("slot1", playerData);
+        ///   // writes to: persistentDataPath/mdix/saves/slot1.mdix
         /// </summary>
-        public static MdixResult<Unit> Save<T>(string fileName, T data, string? prefix = null)
+        public static MdixResult<Unit> Save<T>(
+            string  fileName,
+            T       data,
+            string? prefix = null)
         {
             if (data == null)
                 return MdixError.NativeError("Save: data cannot be null.");
 
+            MdixPaths.EnsureDirectoriesExist();
+
             using var builder = MdixBuilder.Create();
 
             var serResult = builder.Serialize(data, prefix);
-            if (serResult.IsFailure)
-                return serResult;
+            if (serResult.IsFailure) return serResult;
 
-            return builder.Save(MdixSavePath(fileName));
+            return builder.Save(MdixPaths.SaveFile(fileName));
         }
 
         /// <summary>
-        /// Load a POCO object from a .mdix save file in persistentDataPath.
-        /// Returns a failed result if the file does not exist.
+        /// Load a POCO from a save file in the mdix saves directory.
+        /// Returns a failed result if the file does not exist —
+        /// this is normal on first launch, not an error.
         ///
         /// Example:
-        ///   var result = MdixUnityExtensions.LoadSave<PlayerData>("savegame");
-        ///   var player = result.UnwrapOr(new PlayerData());
+        ///   var player = MdixUnityExtensions
+        ///       .LoadSave<PlayerData>("slot1")
+        ///       .UnwrapOr(new PlayerData());
         /// </summary>
-        public static MdixResult<T> LoadSave<T>(string fileName, string? prefix = null)
+        public static MdixResult<T> LoadSave<T>(
+            string  fileName,
+            string? prefix = null)
         {
-            var path = MdixSavePath(fileName);
+            var path = MdixPaths.SaveFile(fileName);
 
             if (!File.Exists(path))
                 return MdixError.IoError(
-                    $"LoadSave: no save file found at '{path}'. " +
-                    "This is normal on first launch.");
+                    $"LoadSave: no save file at '{path}'. " +
+                    "Normal on first launch — use UnwrapOr(defaultValue).");
 
             return Dix.Deserialize<T>(path, prefix);
         }
 
-        /// <summary>
-        /// Returns true if a save file with the given name exists in persistentDataPath.
-        /// </summary>
-        public static bool SaveExists(string fileName)
-        {
-            return File.Exists(MdixSavePath(fileName));
-        }
+        /// <summary>Returns true if a save file with the given name exists.</summary>
+        public static bool SaveExists(string fileName) =>
+            MdixPaths.SaveExists(fileName);
 
         /// <summary>
-        /// Delete a save file from persistentDataPath.
-        /// Safe to call even if the file does not exist.
+        /// Delete a save file. Safe to call if the file does not exist.
         /// </summary>
         public static MdixResult<Unit> DeleteSave(string fileName)
         {
-            var path = MdixSavePath(fileName);
+            var path = MdixPaths.SaveFile(fileName);
             try
             {
-                if (File.Exists(path))
-                    File.Delete(path);
+                if (File.Exists(path)) File.Delete(path);
                 return MdixResult<Unit>.Ok(Unit.Value);
             }
             catch (Exception ex)
@@ -244,37 +174,74 @@ namespace MidManStudio.Mdix.Unity
                     $"DeleteSave: failed to delete '{path}': {ex.Message}", ex);
             }
         }
+
+        // ── Config helpers ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Load a mutable config file from the mdix config directory.
+        /// Use this for configs that change at runtime (not bundled read-only data).
+        /// </summary>
+        public static MdixResult<T> LoadConfig<T>(
+            string  fileName,
+            string? prefix = null)
+        {
+            var path = MdixPaths.ConfigFile(fileName);
+
+            if (!File.Exists(path))
+                return MdixError.IoError(
+                    $"LoadConfig: no config file at '{path}'.");
+
+            return Dix.Deserialize<T>(path, prefix);
+        }
+
+        /// <summary>
+        /// Save a POCO to the mdix config directory.
+        /// </summary>
+        public static MdixResult<Unit> SaveConfig<T>(
+            string  fileName,
+            T       data,
+            string? prefix = null)
+        {
+            if (data == null)
+                return MdixError.NativeError("SaveConfig: data cannot be null.");
+
+            MdixPaths.EnsureDirectoriesExist();
+
+            using var builder = MdixBuilder.Create();
+            var serResult = builder.Serialize(data, prefix);
+            if (serResult.IsFailure) return serResult;
+
+            return builder.Save(MdixPaths.ConfigFile(fileName));
+        }
     }
 
     // ── MainThreadDispatcher ──────────────────────────────────────────────────
 
     /// <summary>
-    /// Minimal Unity main-thread dispatcher.
-    /// Used internally by MdixUnityExtensions to marshal async callbacks
-    /// back to the main thread.
-    ///
-    /// Automatically creates a hidden GameObject on first use.
-    /// The GameObject persists across scene loads (DontDestroyOnLoad).
+    /// Minimal Unity main-thread dispatcher used internally by
+    /// MdixUnityExtensions to marshal async callbacks back to the main thread.
+    /// Creates a hidden DontDestroyOnLoad GameObject on first use.
     /// </summary>
     internal sealed class MainThreadDispatcher : MonoBehaviour
     {
         private static MainThreadDispatcher? _instance;
-        private static readonly System.Collections.Concurrent.ConcurrentQueue<Action>
-            _queue = new System.Collections.Concurrent.ConcurrentQueue<Action>();
+
+        private static readonly
+            System.Collections.Concurrent.ConcurrentQueue<Action>
+            _queue = new();
 
         private static MainThreadDispatcher Instance
         {
             get
             {
-                if (_instance == null)
+                if (_instance != null) return _instance;
+
+                var go = new GameObject("[MdixMainThreadDispatcher]")
                 {
-                    var go = new GameObject("[MdixMainThreadDispatcher]")
-                    {
-                        hideFlags = HideFlags.HideAndDontSave
-                    };
-                    DontDestroyOnLoad(go);
-                    _instance = go.AddComponent<MainThreadDispatcher>();
-                }
+                    hideFlags = HideFlags.HideAndDontSave
+                };
+                DontDestroyOnLoad(go);
+                _instance = go.AddComponent<MainThreadDispatcher>();
                 return _instance;
             }
         }
@@ -286,7 +253,8 @@ namespace MidManStudio.Mdix.Unity
                 try   { action(); }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"[MdixMainThreadDispatcher] Unhandled exception: {ex}");
+                    Debug.LogError(
+                        $"[MdixMainThreadDispatcher] Unhandled exception: {ex}");
                 }
             }
         }
@@ -294,8 +262,7 @@ namespace MidManStudio.Mdix.Unity
         internal static Task RunOnMainThreadAsync(Action action)
         {
             var tcs = new TaskCompletionSource<bool>();
-
-            _ = Instance; // ensure the GameObject exists
+            _ = Instance;
 
             _queue.Enqueue(() =>
             {

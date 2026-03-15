@@ -1,0 +1,18 @@
+[package]
+name = "mdix-python"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.70"
+authors = ["MidManStudio"]
+description = "Python bindings for DixScript (.mdix) — MidManStudio"
+license = "MIT"
+repository = "https://github.com/Mid-D-Man/DixScript-Rust"
+
+[lib]
+name = "mdix_python"
+crate-type = ["cdylib"]
+
+[dependencies]
+dixscript  = { path = "../dixscript" }
+serde_json = "1.0"
+pyo3       = { version = "0.21", features = ["extension-module", "abi3-py38"] }

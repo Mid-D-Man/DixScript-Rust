@@ -10,7 +10,11 @@ use crate::Compiler::Utilities::{SecurityUtilities, CommentFilter};
 use crate::ErrorManager::{ErrorManager, ParseException, DebugConfig};
 use std::time::Instant;
 
+// Rayon requires OS threads — unavailable on wasm32-unknown-unknown.
+#[cfg(not(target_arch = "wasm32"))]
 const CONCURRENT_PARSING_ENABLED: bool = true;
+#[cfg(target_arch = "wasm32")]
+const CONCURRENT_PARSING_ENABLED: bool = false;
 
 struct SectionData {
     name:     String,
@@ -219,7 +223,7 @@ impl<'a> GeneralParser<'a> {
     }
 
     fn should_use_concurrent_parsing(&self, sections: &[SectionData]) -> bool {
-        // rayon requires OS threads — not available on wasm32-unknown-unknown.
+        // Rayon requires OS threads — not available on wasm32-unknown-unknown.
         if cfg!(target_arch = "wasm32") {
             return false;
         }
@@ -344,10 +348,6 @@ impl<'a> GeneralParser<'a> {
         Ok(())
     }
 
-    // Concurrent path is compiled only on non-WASM targets.
-    // On WASM, should_use_concurrent_parsing() always returns false so
-    // this method is never called, but we still need it to compile.
-    // The cfg gate on the rayon import keeps the dependency off WASM.
     fn parse_sections_concurrent(
         &self,
         sections: Vec<SectionData>,
@@ -371,15 +371,14 @@ impl<'a> GeneralParser<'a> {
                     Err(e)     => self.handle_section_error(&name, e)?,
                 }
             }
-            Ok(())
+            return Ok(());
         }
 
-        // Unreachable on WASM because should_use_concurrent_parsing returns false,
-        // but the compiler still needs a valid arm.
+        // should_use_concurrent_parsing() always returns false on wasm32,
+        // so this branch is never reached at runtime. The cfg block above
+        // is compiled away on wasm32, making this the only compiled arm.
         #[cfg(target_arch = "wasm32")]
-        {
-            self.parse_sections_sequential(sections, script)
-        }
+        self.parse_sections_sequential(sections, script)
     }
 
     fn parse_section_inner(

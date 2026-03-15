@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript WASM — Browser Playground</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117; color: #e6edf3;
+      min-height: 100vh; padding: 24px;
+    }
+    a { color: #39d353; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .back-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 0.82rem; color: #8b949e; margin-bottom: 20px;
+      transition: color 0.15s;
+    }
+    .back-link:hover { color: #39d353; text-decoration: none; }
+
+    h1 { font-size: 1.5rem; color: #39d353; margin-bottom: 4px; }
+    .subtitle { font-size: 0.8rem; color: #484f58; margin-bottom: 24px; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+
+    .panel {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 10px; overflow: hidden;
+    }
+    .panel-header {
+      padding: 10px 16px; font-size: 0.78rem; font-weight: 600;
+      background: #1c2128; border-bottom: 1px solid #30363d;
+      color: #8b949e; display: flex; align-items: center;
+      justify-content: space-between;
+    }
+    .panel-header .badge {
+      font-size: 0.68rem; padding: 2px 8px; border-radius: 4px;
+      background: #0d1117; color: #484f58; border: 1px solid #30363d;
+    }
+    textarea, .output {
+      width: 100%; padding: 14px 16px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 0.8rem; line-height: 1.5;
+      background: transparent; color: #e6edf3;
+      border: none; outline: none; resize: vertical;
+      min-height: 220px;
+    }
+    .output {
+      white-space: pre-wrap; word-break: break-all;
+      min-height: 220px; resize: none;
+      color: #3fb950;
+    }
+    .output.error { color: #f85149; }
+    .output.warn  { color: #d29922; }
+
+    .toolbar {
+      display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;
+    }
+    button {
+      padding: 8px 18px; border-radius: 6px; border: 1px solid #30363d;
+      background: #1c2128; color: #e6edf3; font-size: 0.82rem;
+      cursor: pointer; transition: border-color 0.15s, color 0.15s;
+    }
+    button:hover   { border-color: #39d353; color: #39d353; }
+    button.primary { border-color: #39d353; color: #39d353; }
+    button.primary:hover { background: #0f2d1a; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .status-bar {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 8px; padding: 10px 16px;
+      font-size: 0.78rem; color: #484f58;
+      margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #484f58; flex-shrink: 0;
+    }
+    .dot.ready   { background: #3fb950; }
+    .dot.loading { background: #d29922; animation: pulse 1s infinite; }
+    .dot.error   { background: #f85149; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    .meta-row {
+      display: flex; gap: 16px; flex-wrap: wrap;
+      font-size: 0.72rem; color: #484f58; margin-bottom: 20px;
+    }
+    .meta-row span { display: flex; align-items: center; gap: 4px; }
+    .meta-row strong { color: #8b949e; }
+
+    .test-suite {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 10px; margin-bottom: 12px; overflow: hidden;
+    }
+    .test-suite-header {
+      padding: 12px 16px; font-size: 0.82rem; font-weight: 600;
+      background: #1c2128; border-bottom: 1px solid #30363d;
+      color: #c9d1d9;
+    }
+    .test-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 16px; border-bottom: 1px solid #21262d;
+      font-size: 0.78rem;
+    }
+    .test-row:last-child { border-bottom: none; }
+    .test-badge {
+      flex-shrink: 0; width: 50px; font-size: 0.68rem; font-weight: 600;
+      text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
+      text-align: center;
+    }
+    .test-badge.pass { background: #0f2d1a; color: #3fb950; }
+    .test-badge.fail { background: #2d0f0f; color: #f85149; }
+    .test-name { flex: 1; font-family: monospace; color: #c9d1d9; }
+    .test-detail { font-size: 0.72rem; color: #484f58; }
+  </style>
+</head>
+<body>
+
+  <a class="back-link" href="../">← CI Dashboard</a>
+
+  <h1>WASM Playground</h1>
+  <p class="subtitle">@dixscript/core — live browser test · build <strong id="build-num">—</strong></p>
+
+  <div class="meta-row" id="meta-row" style="display:none">
+    <span>🌿 <strong id="meta-branch">—</strong></span>
+    <span>📝 <strong id="meta-commit">—</strong></span>
+    <span>🕐 <strong id="meta-date">—</strong></span>
+  </div>
+
+  <div class="status-bar">
+    <div class="dot loading" id="status-dot"></div>
+    <span id="status-text">Loading WebAssembly module…</span>
+  </div>
+
+  <div class="toolbar">
+    <button class="primary" onclick="runCode()" id="btn-run" disabled>▶ Run</button>
+    <button onclick="runBuiltinTests()" id="btn-tests" disabled>🧪 Run built-in tests</button>
+    <button onclick="clearOutput()">✕ Clear output</button>
+    <button onclick="loadExample('basic')">Example: basic</button>
+    <button onclick="loadExample('builder')">Example: builder</button>
+    <button onclick="loadExample('json')">Example: from JSON</button>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="panel-header">
+        Input — .mdix source
+        <span class="badge">editable</span>
+      </div>
+      <textarea id="editor" spellcheck="false">@DATA(
+  app_name = "DixScript WASM"
+  version  = 1
+  enabled  = true
+  server: host = "localhost", port = 8080
+)</textarea>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        Output
+        <span class="badge" id="output-badge">—</span>
+      </div>
+      <div class="output" id="output">Waiting for WASM module…</div>
+    </div>
+  </div>
+
+  <div id="test-results-container"></div>
+
+<script type="module">
+  // ── Meta ──────────────────────────────────────────────────────────────────
+  async function loadMeta() {
+    try {
+      const r = await fetch('meta.json');
+      if (!r.ok) return;
+      const m = await r.json();
+      document.getElementById('build-num').textContent   = m.build  || '—';
+      document.getElementById('meta-branch').textContent = m.branch || '—';
+      document.getElementById('meta-commit').textContent = m.commit || '—';
+      document.getElementById('meta-date').textContent   = m.date   ? new Date(m.date).toUTCString() : '—';
+      document.getElementById('meta-row').style.display  = 'flex';
+    } catch {}
+  }
+  loadMeta();
+
+  // ── WASM load ─────────────────────────────────────────────────────────────
+  let wasm = null;
+
+  function setStatus(state, text) {
+    const dot  = document.getElementById('status-dot');
+    const span = document.getElementById('status-text');
+    dot.className  = 'dot ' + state;
+    span.textContent = text;
+  }
+
+  async function initWasm() {
+    try {
+      setStatus('loading', 'Fetching mdix_wasm.js…');
+      const mod = await import('./mdix_wasm.js');
+      await mod.default();   // initialise the WASM binary
+      wasm = mod;
+      setStatus('ready', 'WebAssembly module ready');
+      document.getElementById('btn-run').disabled   = false;
+      document.getElementById('btn-tests').disabled = false;
+      document.getElementById('output').textContent = '// Module loaded. Press ▶ Run to execute the editor source.';
+      document.getElementById('output').className   = 'output';
+    } catch (e) {
+      setStatus('error', 'Failed to load WASM: ' + e.message);
+      document.getElementById('output').textContent = '// Error loading WASM:\n// ' + e.message;
+      document.getElementById('output').className   = 'output error';
+    }
+  }
+  initWasm();
+
+  // ── Code execution ────────────────────────────────────────────────────────
+  window.runCode = function () {
+    if (!wasm) return;
+    const src = document.getElementById('editor').value;
+    const out = document.getElementById('output');
+    const badge = document.getElementById('output-badge');
+
+    try {
+      const db = wasm.MdixDatabase.loadStr(src);
+      const lines = [];
+
+      lines.push('// Loaded successfully');
+      lines.push('// Entry count: ' + db.entryCount);
+      lines.push('');
+
+      const keys = db.getKeys('');
+      lines.push('// Top-level keys: ' + JSON.stringify(keys));
+      lines.push('');
+
+      lines.push('// JSON export:');
+      lines.push(db.toJson(true));
+
+      db.free();
+
+      out.textContent = lines.join('\n');
+      out.className   = 'output';
+      badge.textContent = 'ok';
+    } catch (e) {
+      out.textContent = '// Error:\n// ' + e.message;
+      out.className   = 'output error';
+      badge.textContent = 'error';
+    }
+  };
+
+  // ── Built-in test suite ───────────────────────────────────────────────────
+  window.runBuiltinTests = function () {
+    if (!wasm) return;
+
+    const container = document.getElementById('test-results-container');
+    container.innerHTML = '';
+
+    const suites = [
+      {
+        name: 'MdixDatabase — basic load and read',
+        tests: [
+          {
+            name: 'loadStr — valid source succeeds',
+            run: () => {
+              const db = wasm.MdixDatabase.loadStr('@DATA( x = 1 )');
+              const ok = db.isValid;
+              db.free();
+              if (!ok) throw new Error('isValid was false');
+            },
+          },
+          {
+            name: 'loadStr — empty source throws',
+            run: () => {
+              let threw = false;
+              try { wasm.MdixDatabase.loadStr(''); } catch { threw = true; }
+              if (!threw) throw new Error('Expected error for empty source');
+            },
+          },
+          {
+            name: 'getString — known path returns value',
+            run: () => {
+              const db  = wasm.MdixDatabase.loadStr('@DATA( greeting = "hello" )');
+              const val = db.getString('greeting');
+              db.free();
+              if (val !== 'hello') throw new Error('Expected "hello", got "' + val + '"');
+            },
+          },
+          {
+            name: 'getInt — known path returns value',
+            run: () => {
+              const db  = wasm.MdixDatabase.loadStr('@DATA( port = 8080 )');
+              const val = db.getInt('port');
+              db.free();
+              if (val !== 8080) throw new Error('Expected 8080, got ' + val);
+            },
+          },
+          {
+            name: 'getBool — known path returns value',
+            run: () => {
+              const db  = wasm.MdixDatabase.loadStr('@DATA( flag = true )');
+              const val = db.getBool('flag');
+              db.free();
+              if (val !== true) throw new Error('Expected true');
+            },
+          },
+          {
+            name: 'exists — present path returns true',
+            run: () => {
+              const db = wasm.MdixDatabase.loadStr('@DATA( x = 1 )');
+              const ok = db.exists('x');
+              db.free();
+              if (!ok) throw new Error('Expected exists to return true');
+            },
+          },
+          {
+            name: 'exists — absent path returns false',
+            run: () => {
+              const db = wasm.MdixDatabase.loadStr('@DATA( x = 1 )');
+              const ok = db.exists('missing');
+              db.free();
+              if (ok) throw new Error('Expected exists to return false');
+            },
+          },
+          {
+            name: 'getValueType — int returns "int"',
+            run: () => {
+              const db   = wasm.MdixDatabase.loadStr('@DATA( n = 42 )');
+              const type = db.getValueType('n');
+              db.free();
+              if (type !== 'int') throw new Error('Expected "int", got "' + type + '"');
+            },
+          },
+          {
+            name: 'getValueType — string returns "string"',
+            run: () => {
+              const db   = wasm.MdixDatabase.loadStr('@DATA( s = "hi" )');
+              const type = db.getValueType('s');
+              db.free();
+              if (type !== 'string') throw new Error('Expected "string", got "' + type + '"');
+            },
+          },
+          {
+            name: 'toJson — exports valid JSON',
+            run: () => {
+              const db   = wasm.MdixDatabase.loadStr('@DATA( port = 9000 )');
+              const json = db.toJson(false);
+              db.free();
+              const parsed = JSON.parse(json);
+              if (parsed.port !== 9000) throw new Error('Expected port 9000 in JSON');
+            },
+          },
+          {
+            name: 'free — double free does not throw',
+            run: () => {
+              const db = wasm.MdixDatabase.loadStr('@DATA( x = 1 )');
+              db.free();
+              db.free();
+            },
+          },
+        ],
+      },
+      {
+        name: 'MdixDatabase — nested table properties',
+        tests: [
+          {
+            name: 'table property — dotted path accessible',
+            run: () => {
+              const db  = wasm.MdixDatabase.loadStr('@DATA( server: host = "localhost", port = 8080 )');
+              const h   = db.getString('server.host');
+              const p   = db.getInt('server.port');
+              db.free();
+              if (h !== 'localhost') throw new Error('Expected "localhost"');
+              if (p !== 8080) throw new Error('Expected 8080');
+            },
+          },
+        ],
+      },
+      {
+        name: 'MdixDatabase — format conversion',
+        tests: [
+          {
+            name: 'fromJson — valid object produces readable database',
+            run: () => {
+              const db  = wasm.MdixDatabase.fromJson(JSON.stringify({ port: 8080, host: 'localhost' }));
+              const p   = db.getInt('port');
+              db.free();
+              if (p !== 8080) throw new Error('Expected 8080');
+            },
+          },
+          {
+            name: 'fromToml — valid table produces readable database',
+            run: () => {
+              const db  = wasm.MdixDatabase.fromToml('port = 8080\nhost = "localhost"\n');
+              const p   = db.getInt('port');
+              db.free();
+              if (p !== 8080) throw new Error('Expected 8080');
+            },
+          },
+          {
+            name: 'toJson then fromJson round-trip',
+            run: () => {
+              const orig     = wasm.MdixDatabase.loadStr('@DATA( port = 8080, host = "localhost", enabled = true )');
+              const json     = orig.toJson(false);
+              orig.free();
+              const restored = wasm.MdixDatabase.fromJson(json);
+              const p = restored.getInt('port');
+              const h = restored.getString('host');
+              const e = restored.getBool('enabled');
+              restored.free();
+              if (p !== 8080)        throw new Error('port mismatch');
+              if (h !== 'localhost') throw new Error('host mismatch');
+              if (e !== true)        throw new Error('enabled mismatch');
+            },
+          },
+        ],
+      },
+      {
+        name: 'MdixBuilder',
+        tests: [
+          {
+            name: 'new builder — isValid is true',
+            run: () => {
+              const b = new wasm.MdixBuilder();
+              if (!b.isValid) throw new Error('Expected isValid = true');
+              b.free();
+            },
+          },
+          {
+            name: 'withString then toDatabase — value readable',
+            run: () => {
+              const b  = new wasm.MdixBuilder();
+              const db = b.withString('name', 'TestApp').toDatabase();
+              const v  = db.getString('name');
+              db.free();
+              if (v !== 'TestApp') throw new Error('Expected "TestApp", got "' + v + '"');
+            },
+          },
+          {
+            name: 'withInt then toDatabase — value readable',
+            run: () => {
+              const b  = new wasm.MdixBuilder();
+              const db = b.withInt('port', 9000).toDatabase();
+              const v  = db.getInt('port');
+              db.free();
+              if (v !== 9000) throw new Error('Expected 9000, got ' + v);
+            },
+          },
+          {
+            name: 'withBool then toDatabase — value readable',
+            run: () => {
+              const b  = new wasm.MdixBuilder();
+              const db = b.withBool('ssl', true).toDatabase();
+              const v  = db.getBool('ssl');
+              db.free();
+              if (v !== true) throw new Error('Expected true');
+            },
+          },
+          {
+            name: 'two-tier violation — flat after grouped throws',
+            run: () => {
+              let threw = false;
+              try {
+                const b = new wasm.MdixBuilder();
+                b.withTableProperties('server', JSON.stringify({ port: 8080 }))
+                 .withString('name', 'MyApp');
+              } catch { threw = true; }
+              if (!threw) throw new Error('Expected two-tier violation error');
+            },
+          },
+          {
+            name: 'serialize — produces @DATA string',
+            run: () => {
+              const b   = new wasm.MdixBuilder();
+              const src = b.withString('x', 'hello').serialize();
+              if (!src.includes('@DATA(')) throw new Error('Expected @DATA( in output');
+            },
+          },
+        ],
+      },
+    ];
+
+    let totalPass = 0;
+    let totalFail = 0;
+
+    for (const suite of suites) {
+      const block = document.createElement('div');
+      block.className = 'test-suite';
+
+      const header = document.createElement('div');
+      header.className = 'test-suite-header';
+      header.textContent = suite.name;
+      block.appendChild(header);
+
+      for (const test of suite.tests) {
+        const row = document.createElement('div');
+        row.className = 'test-row';
+
+        const badge  = document.createElement('span');
+        const name   = document.createElement('span');
+        const detail = document.createElement('span');
+
+        name.className   = 'test-name';
+        detail.className = 'test-detail';
+        name.textContent = test.name;
+
+        try {
+          test.run();
+          badge.className   = 'test-badge pass';
+          badge.textContent = 'pass';
+          detail.textContent = '';
+          totalPass++;
+        } catch (e) {
+          badge.className   = 'test-badge fail';
+          badge.textContent = 'fail';
+          detail.textContent = e.message;
+          totalFail++;
+        }
+
+        row.appendChild(badge);
+        row.appendChild(name);
+        row.appendChild(detail);
+        block.appendChild(row);
+      }
+
+      container.appendChild(block);
+    }
+
+    const summary = document.createElement('div');
+    summary.className = 'status-bar';
+    summary.style.marginTop = '8px';
+    const dot  = document.createElement('div');
+    const text = document.createElement('span');
+    dot.className = 'dot ' + (totalFail === 0 ? 'ready' : 'error');
+    text.textContent = totalFail === 0
+      ? `All ${totalPass} tests passed`
+      : `${totalFail} failed, ${totalPass} passed`;
+    summary.appendChild(dot);
+    summary.appendChild(text);
+    container.appendChild(summary);
+  };
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  window.clearOutput = function () {
+    const out = document.getElementById('output');
+    out.textContent = '';
+    out.className   = 'output';
+    document.getElementById('output-badge').textContent = '—';
+    document.getElementById('test-results-container').innerHTML = '';
+  };
+
+  const examples = {
+    basic: `@DATA(\n  app_name = "DixScript WASM"\n  version  = 1\n  enabled  = true\n  server: host = "localhost", port = 8080\n)`,
+    builder: `// This example uses MdixBuilder in the Run panel.\n// Click ▶ Run to see the JSON export of the editor source.\n@ENUMS(\n  LogLevel { DEBUG, INFO, WARN, ERROR }\n)\n@DATA(\n  app_name = "MyGame"\n  port     = 8080\n  log_level<enum> = LogLevel.INFO\n  server: host = "game.local", port = 7070\n  enemies::\n    { name = "Goblin", hp = 50 },\n    { name = "Orc",    hp = 100 }\n)`,
+    json: `// Loaded from JSON — click ▶ Run\n// (editor input is ignored for fromJson example)\n`,
+  };
+
+  window.loadExample = function (key) {
+    document.getElementById('editor').value = examples[key] || '';
+  };
+</script>
+
+</body>
+    </html>

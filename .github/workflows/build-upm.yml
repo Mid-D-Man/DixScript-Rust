@@ -1,0 +1,519 @@
+name: MidManStudio.Mdix — Unity Package Build
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  # ── 1. Check trigger ───────────────────────────────────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      run_unity: ${{ steps.decide.outputs.run_unity }}
+    steps:
+      - name: Decide whether to run Unity package build
+        id: decide
+        run: |
+          RUN=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            MSG="${{ github.event.pull_request.title }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-unity' && RUN=true || true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-unity' && RUN=true || true
+          fi
+
+          echo "run_unity=$RUN" >> $GITHUB_OUTPUT
+          echo "Run Unity build: $RUN"
+
+  # ── 2. Build FFI — Linux x64 + Windows x64 + Android arm64 ───────────────
+  build-ffi-ubuntu:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_unity == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: >-
+            x86_64-unknown-linux-gnu
+            x86_64-pc-windows-gnu
+            aarch64-linux-android
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-ffi-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-ffi-
+
+      - name: Install cross-compilation tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            gcc-mingw-w64-x86-64 \
+            gcc-aarch64-linux-gnu
+
+      - name: Install Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r25c
+          add-to-path: true
+
+      - name: Configure Android linker
+        run: |
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml << 'EOF'
+          [target.aarch64-linux-android]
+          linker = "${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          EOF
+
+      - name: Build FFI — Linux x64
+        run: cargo build -p mdix-ffi --release --target x86_64-unknown-linux-gnu
+
+      - name: Build FFI — Windows x64
+        run: cargo build -p mdix-ffi --release --target x86_64-pc-windows-gnu
+
+      - name: Build FFI — Android arm64
+        run: cargo build -p mdix-ffi --release --target aarch64-linux-android
+
+      - name: Collect ubuntu artifacts
+        run: |
+          mkdir -p ffi-ubuntu/linux-x64
+          mkdir -p ffi-ubuntu/windows-x64
+          mkdir -p ffi-ubuntu/android-arm64
+
+          cp target/x86_64-unknown-linux-gnu/release/libmdix_ffi.so \
+             ffi-ubuntu/linux-x64/libmdix_ffi.so
+
+          cp target/x86_64-pc-windows-gnu/release/mdix_ffi.dll \
+             ffi-ubuntu/windows-x64/mdix_ffi.dll
+
+          cp target/aarch64-linux-android/release/libmdix_ffi.so \
+             ffi-ubuntu/android-arm64/libmdix_ffi.so
+
+          echo "Built files:"
+          find ffi-ubuntu -type f -exec ls -lh {} \;
+
+      - name: Upload ubuntu FFI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-ubuntu-${{ github.run_number }}
+          path: ffi-ubuntu/
+          retention-days: 1
+
+  # ── 3. Build FFI — macOS universal + iOS static ───────────────────────────
+  build-ffi-macos:
+    runs-on: macos-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_unity == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: >-
+            x86_64-apple-darwin
+            aarch64-apple-darwin
+            aarch64-apple-ios
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-ffi-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-ffi-
+
+      - name: Build FFI — macOS x64
+        run: cargo build -p mdix-ffi --release --target x86_64-apple-darwin
+
+      - name: Build FFI — macOS arm64 (Apple Silicon)
+        run: cargo build -p mdix-ffi --release --target aarch64-apple-darwin
+
+      - name: Lipo — macOS universal dylib
+        run: |
+          lipo -create \
+            target/x86_64-apple-darwin/release/libmdix_ffi.dylib \
+            target/aarch64-apple-darwin/release/libmdix_ffi.dylib \
+            -output libmdix_ffi_universal.dylib
+
+          echo "Universal dylib:"
+          lipo -info libmdix_ffi_universal.dylib
+
+      - name: Build FFI — iOS arm64 (static)
+        run: cargo build -p mdix-ffi --release --target aarch64-apple-ios
+
+      - name: Collect macOS artifacts
+        run: |
+          mkdir -p ffi-macos/macos-universal
+          mkdir -p ffi-macos/ios-arm64
+
+          cp libmdix_ffi_universal.dylib \
+             ffi-macos/macos-universal/libmdix_ffi.dylib
+
+          cp target/aarch64-apple-ios/release/libmdix_ffi.a \
+             ffi-macos/ios-arm64/libmdix_ffi.a
+
+          echo "Built files:"
+          find ffi-macos -type f -exec ls -lh {} \;
+
+      - name: Upload macOS FFI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-macos-${{ github.run_number }}
+          path: ffi-macos/
+          retention-days: 1
+
+  # ── 4. Build Core.dll + generate MdixNative.cs ───────────────────────────
+  build-core-dll:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_unity == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-core-dll-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-core-dll-
+
+      # Build FFI first — this generates MdixNative.cs via build.rs
+      - name: Build mdix-ffi (generates MdixNative.cs)
+        run: cargo build -p mdix-ffi --release
+
+      - name: Verify MdixNative.cs was generated
+        run: |
+          FILE="csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs"
+          if [ ! -f "$FILE" ]; then
+            echo "ERROR: MdixNative.cs not generated by build.rs"
+            exit 1
+          fi
+          echo "MdixNative.cs generated OK"
+          head -8 "$FILE"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '7.0.x'
+
+      - name: Restore NuGet packages
+        run: dotnet restore csharp/MidManStudio.Mdix.sln
+
+      - name: Build Core.dll (Release)
+        run: |
+          dotnet build \
+            csharp/src/MidManStudio.Mdix.Core/MidManStudio.Mdix.Core.csproj \
+            --configuration Release \
+            --no-restore \
+            -o dll-output/
+
+          echo "Built DLL:"
+          ls -lh dll-output/*.dll
+
+      - name: Upload Core.dll artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-dll-${{ github.run_number }}
+          path: dll-output/MidManStudio.Mdix.Core.dll
+          retention-days: 1
+
+  # ── 5. Assemble Unity package ─────────────────────────────────────────────
+  assemble-package:
+    runs-on: ubuntu-latest
+    needs: [build-ffi-ubuntu, build-ffi-macos, build-core-dll]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download ubuntu FFI
+        uses: actions/download-artifact@v4
+        with:
+          name: ffi-ubuntu-${{ github.run_number }}
+          path: ffi-ubuntu/
+
+      - name: Download macOS FFI
+        uses: actions/download-artifact@v4
+        with:
+          name: ffi-macos-${{ github.run_number }}
+          path: ffi-macos/
+
+      - name: Download Core.dll
+        uses: actions/download-artifact@v4
+        with:
+          name: core-dll-${{ github.run_number }}
+          path: core-dll/
+
+      - name: Assemble package directory
+        run: |
+          PKG="com.midmanstudio.mdix"
+
+          # ── Core DLL ───────────────────────────────────────────────────────
+          mkdir -p "$PKG/Runtime/Plugins"
+          cp core-dll/MidManStudio.Mdix.Core.dll \
+             "$PKG/Runtime/Plugins/MidManStudio.Mdix.Core.dll"
+
+          # ── Native — Linux x64 ─────────────────────────────────────────────
+          mkdir -p "$PKG/Runtime/Plugins/Linux/x86_64"
+          cp ffi-ubuntu/linux-x64/libmdix_ffi.so \
+             "$PKG/Runtime/Plugins/Linux/x86_64/libmdix_ffi.so"
+
+          # ── Native — Windows x64 ───────────────────────────────────────────
+          mkdir -p "$PKG/Runtime/Plugins/Windows/x86_64"
+          cp ffi-ubuntu/windows-x64/mdix_ffi.dll \
+             "$PKG/Runtime/Plugins/Windows/x86_64/mdix_ffi.dll"
+
+          # ── Native — Android arm64 ─────────────────────────────────────────
+          mkdir -p "$PKG/Runtime/Plugins/Android/arm64-v8a"
+          cp ffi-ubuntu/android-arm64/libmdix_ffi.so \
+             "$PKG/Runtime/Plugins/Android/arm64-v8a/libmdix_ffi.so"
+
+          # ── Native — macOS universal ───────────────────────────────────────
+          mkdir -p "$PKG/Runtime/Plugins/macOS"
+          cp ffi-macos/macos-universal/libmdix_ffi.dylib \
+             "$PKG/Runtime/Plugins/macOS/libmdix_ffi.dylib"
+
+          # ── Native — iOS static ────────────────────────────────────────────
+          mkdir -p "$PKG/Runtime/Plugins/iOS"
+          cp ffi-macos/ios-arm64/libmdix_ffi.a \
+             "$PKG/Runtime/Plugins/iOS/libmdix_ffi.a"
+
+          echo "Package contents:"
+          find "$PKG" -type f | sort
+
+      - name: Verify all required files present
+        run: |
+          PKG="com.midmanstudio.mdix"
+          MISSING=0
+
+          REQUIRED=(
+            "Runtime/Plugins/MidManStudio.Mdix.Core.dll"
+            "Runtime/Plugins/Linux/x86_64/libmdix_ffi.so"
+            "Runtime/Plugins/Windows/x86_64/mdix_ffi.dll"
+            "Runtime/Plugins/Android/arm64-v8a/libmdix_ffi.so"
+            "Runtime/Plugins/macOS/libmdix_ffi.dylib"
+            "Runtime/Plugins/iOS/libmdix_ffi.a"
+            "Runtime/MdixAsset.cs"
+            "Runtime/MdixBakeableAttribute.cs"
+            "Runtime/MdixInitializer.cs"
+            "Runtime/MdixKeyStorage.cs"
+            "Runtime/MdixPaths.cs"
+            "Runtime/MdixUnityExtensions.cs"
+            "Runtime/link.xml"
+            "Runtime/MidManStudio.Mdix.Runtime.asmdef"
+            "Editor/MdixImporter.cs"
+            "Editor/MdixBakeWizard.cs"
+            "Editor/MdixEditorWindow.cs"
+            "Editor/CreateMdixMenuItems.cs"
+            "Editor/UI/MdixEditorWindow.uxml"
+            "Editor/UI/MdixEditorWindow.uss"
+            "Editor/MidManStudio.Mdix.Editor.asmdef"
+            "package.json"
+          )
+
+          for f in "${REQUIRED[@]}"; do
+            if [ ! -f "$PKG/$f" ]; then
+              echo "MISSING: $PKG/$f"
+              MISSING=$((MISSING + 1))
+            else
+              echo "OK: $f"
+            fi
+          done
+
+          if [ $MISSING -gt 0 ]; then
+            echo ""
+            echo "ERROR: $MISSING required file(s) missing from package."
+            exit 1
+          fi
+
+          echo ""
+          echo "All required files present."
+
+      - name: Write build metadata into package.json
+        run: |
+          PKG="com.midmanstudio.mdix"
+          BUILD="${{ github.run_number }}"
+          COMMIT="${GITHUB_SHA:0:8}"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # Inject build info as a comment block at the bottom of package.json.
+          # Unity ignores unknown fields, so we add _build metadata safely.
+          python3 - << PYEOF
+          import json
+
+          with open("$PKG/package.json", "r") as f:
+              pkg = json.load(f)
+
+          pkg["_build"] = {
+              "number": "$BUILD",
+              "commit": "$COMMIT",
+              "date":   "$DATE",
+              "branch": "${{ github.ref_name }}"
+          }
+
+          with open("$PKG/package.json", "w") as f:
+              json.dump(pkg, f, indent=2)
+              f.write("\n")
+
+          print("package.json updated with build metadata.")
+          PYEOF
+
+      - name: Create downloadable zip
+        run: |
+          PKG="com.midmanstudio.mdix"
+          BUILD="${{ github.run_number }}"
+          ZIP_NAME="mdix-unity-package-build-${BUILD}.zip"
+
+          zip -r "$ZIP_NAME" "$PKG/"
+          ls -lh "$ZIP_NAME"
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Upload package zip (downloadable artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdix-unity-package-${{ github.run_number }}
+          path: mdix-unity-package-build-${{ github.run_number }}.zip
+          retention-days: 30
+
+      - name: Upload unpacked package (for upm branch)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdix-unity-unpacked-${{ github.run_number }}
+          path: com.midmanstudio.mdix/
+          retention-days: 1
+
+  # ── 6. Push to upm branch ────────────────────────────────────────────────
+  publish-upm:
+    runs-on: ubuntu-latest
+    needs: assemble-package
+    if: |
+      github.ref == 'refs/heads/master' ||
+      github.ref == 'refs/heads/main'   ||
+      github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download unpacked package
+        uses: actions/download-artifact@v4
+        with:
+          name: mdix-unity-unpacked-${{ github.run_number }}
+          path: upm-staging/
+
+      - name: Push to upm branch
+        run: |
+          git config user.name  "DixScript CI"
+          git config user.email "ci@dixscript.dev"
+
+          BUILD="${{ github.run_number }}"
+          COMMIT="${GITHUB_SHA:0:8}"
+          WORK=$(mktemp -d)
+
+          # Check out upm branch into a worktree.
+          # If the branch doesn't exist yet create it as an orphan.
+          if git ls-remote --exit-code --heads origin upm > /dev/null 2>&1; then
+            git fetch origin upm
+            git worktree add "$WORK" upm
+          else
+            git worktree add --orphan -b upm "$WORK"
+          fi
+
+          # Clear the worktree and replace with the new package contents.
+          # The upm branch is CI-owned — never manually edited.
+          find "$WORK" -mindepth 1 \
+            ! -path "$WORK/.git" \
+            ! -path "$WORK/.git/*" \
+            -delete
+
+          cp -r upm-staging/. "$WORK/"
+
+          cd "$WORK"
+          git add -A
+
+          if git diff --staged --quiet; then
+            echo "No changes to publish to upm branch."
+            exit 0
+          fi
+
+          git commit -m "chore: Unity package build #${BUILD} @ ${COMMIT} [skip ci]"
+
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            upm
+
+          echo "Published to upm branch."
+          echo "Install via UPM:"
+          echo "  https://github.com/${{ github.repository }}.git#upm"
+
+  # ── 7. Summary ───────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-ffi-ubuntu, build-ffi-macos, build-core-dll, assemble-package, publish-upm]
+    if: always()
+
+    steps:
+      - name: Print summary
+        run: |
+          echo "============================================="
+          echo "  MidManStudio.Mdix — Unity Package Build"
+          echo "============================================="
+          echo "Build:        #${{ github.run_number }}"
+          echo "Branch:       ${{ github.ref_name }}"
+          echo "Trigger:      ${{ github.event_name }}"
+          echo ""
+          echo "FFI (ubuntu): ${{ needs.build-ffi-ubuntu.result  || 'skipped' }}"
+          echo "FFI (macOS):  ${{ needs.build-ffi-macos.result   || 'skipped' }}"
+          echo "Core DLL:     ${{ needs.build-core-dll.result     || 'skipped' }}"
+          echo "Assemble:     ${{ needs.assemble-package.result   || 'skipped' }}"
+          echo "Publish UPM:  ${{ needs.publish-upm.result        || 'skipped' }}"
+          echo ""
+
+          if [ "${{ needs.parse-trigger.outputs.run_unity }}" != "true" ]; then
+            echo "Skipped — commit message did not contain --mdix-unity"
+          elif [ "${{ needs.assemble-package.result }}" = "success" ]; then
+            echo "Package artifact: mdix-unity-package-${{ github.run_number }}"
+            echo "Download from Actions → this run → Artifacts"
+            echo ""
+            echo "UPM install URL:"
+            echo "  https://github.com/${{ github.repository }}.git#upm"
+          else
+            echo "Build failed — check job logs above."
+          fi
+

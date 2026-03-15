@@ -190,6 +190,9 @@
   loadMeta();
 
   // ── WASM load ─────────────────────────────────────────────────────────────
+  // The playground uses --target web output. The init function (default export)
+  // accepts an explicit URL to the .wasm binary, which avoids any ambiguity on
+  // static file hosts like GitHub Pages.
   let wasm = null;
 
   function setStatus(state, text) {
@@ -203,7 +206,13 @@
     try {
       setStatus('loading', 'Fetching mdix_wasm.js…');
       const mod = await import('./mdix_wasm.js');
-      await mod.default();   // initialise the WASM binary
+
+      setStatus('loading', 'Initialising WebAssembly binary…');
+
+      // Pass an explicit URL to the .wasm file so fetch() can locate it
+      // regardless of the script's base URL on GitHub Pages.
+      await mod.default(new URL('./mdix_wasm_bg.wasm', import.meta.url));
+
       wasm = mod;
       setStatus('ready', 'WebAssembly module ready');
       document.getElementById('btn-run').disabled   = false;
@@ -564,4 +573,4 @@
 </script>
 
 </body>
-    </html>
+</html>

@@ -207,3 +207,89 @@ export class MdixDatabase {
 }
 
 export function init(): void;
+
+export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
+
+export interface InitOutput {
+    readonly memory: WebAssembly.Memory;
+    readonly __wbg_mdixbuilder_free: (a: number, b: number) => void;
+    readonly __wbg_mdixdatabase_free: (a: number, b: number) => void;
+    readonly init: () => void;
+    readonly mdixbuilder_addEnum: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixbuilder_free: (a: number) => void;
+    readonly mdixbuilder_isValid: (a: number) => number;
+    readonly mdixbuilder_new: () => number;
+    readonly mdixbuilder_serialize: (a: number) => [number, number, number, number];
+    readonly mdixbuilder_setConfig: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixbuilder_setConfigAuthor: (a: number, b: number, c: number) => [number, number, number];
+    readonly mdixbuilder_setConfigDebugMode: (a: number, b: number, c: number) => [number, number, number];
+    readonly mdixbuilder_setConfigEncoding: (a: number, b: number, c: number) => [number, number, number];
+    readonly mdixbuilder_setConfigVersion: (a: number, b: number, c: number) => [number, number, number];
+    readonly mdixbuilder_toDatabase: (a: number) => [number, number, number];
+    readonly mdixbuilder_withArray: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixbuilder_withBlob: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixbuilder_withBool: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly mdixbuilder_withDate: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixbuilder_withDouble: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly mdixbuilder_withEnumValue: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
+    readonly mdixbuilder_withFloat: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly mdixbuilder_withGroupArray: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixbuilder_withHexColor: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixbuilder_withInt: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly mdixbuilder_withObject: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixbuilder_withRegex: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixbuilder_withString: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixbuilder_withTableProperties: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixbuilder_withTuple: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly mdixdatabase_entryCount: (a: number) => [number, number, number];
+    readonly mdixdatabase_exists: (a: number, b: number, c: number) => [number, number, number];
+    readonly mdixdatabase_free: (a: number) => void;
+    readonly mdixdatabase_fromJson: (a: number, b: number) => [number, number, number];
+    readonly mdixdatabase_fromToml: (a: number, b: number) => [number, number, number];
+    readonly mdixdatabase_getArrayLength: (a: number, b: number, c: number) => [number, number, number];
+    readonly mdixdatabase_getBool: (a: number, b: number, c: number) => [number, number, number];
+    readonly mdixdatabase_getDouble: (a: number, b: number, c: number) => [number, number, number];
+    readonly mdixdatabase_getEnumField: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly mdixdatabase_getEnumName: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly mdixdatabase_getFloat: (a: number, b: number, c: number) => [number, number, number];
+    readonly mdixdatabase_getInt: (a: number, b: number, c: number) => [number, number, number];
+    readonly mdixdatabase_getJson: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly mdixdatabase_getKeys: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly mdixdatabase_getString: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly mdixdatabase_getValueType: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly mdixdatabase_isValid: (a: number) => number;
+    readonly mdixdatabase_loadStr: (a: number, b: number) => [number, number, number];
+    readonly mdixdatabase_toJson: (a: number, b: number) => [number, number, number, number];
+    readonly mdixdatabase_toMdix: (a: number) => [number, number, number, number];
+    readonly mdixdatabase_toToml: (a: number) => [number, number, number, number];
+    readonly mdixbuilder_withTimestamp: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __externref_drop_slice: (a: number, b: number) => void;
+    readonly __wbindgen_start: () => void;
+}
+
+export type SyncInitInput = BufferSource | WebAssembly.Module;
+
+/**
+ * Instantiates the given `module`, which can either be bytes or
+ * a precompiled `WebAssembly.Module`.
+ *
+ * @param {{ module: SyncInitInput }} module - Passing `SyncInitInput` directly is deprecated.
+ *
+ * @returns {InitOutput}
+ */
+export function initSync(module: { module: SyncInitInput } | SyncInitInput): InitOutput;
+
+/**
+ * If `module_or_path` is {RequestInfo} or {URL}, makes a request and
+ * for everything else, calls `WebAssembly.instantiate` directly.
+ *
+ * @param {{ module_or_path: InitInput | Promise<InitInput> }} module_or_path - Passing `InitInput` directly is deprecated.
+ *
+ * @returns {Promise<InitOutput>}
+ */
+export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput> } | InitInput | Promise<InitInput>): Promise<InitOutput>;

@@ -73,9 +73,6 @@ jobs:
           wasm-pack --version
 
       # ── Step 1: build the Rust WASM crate ─────────────────────────────
-      # This MUST run before the TypeScript build.
-      # Output lands in npm/wasm-pkg/ which tsconfig excludes from source
-      # but index.ts imports from at runtime.
       - name: Build WASM crate (wasm-pack)
         run: |
           wasm-pack build mdix-wasm \
@@ -94,26 +91,30 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install TypeScript dependencies
-        run: npm ci
+        run: |
+          npm install
+        working-directory: npm
+
+      - name: Generate package-lock.json for future runs
+        run: |
+          if [ ! -f "package-lock.json" ]; then
+            echo "No package-lock.json found — one has been generated in the artifact."
+            echo "Commit it to the repo to enable npm ci in future runs."
+          fi
         working-directory: npm
 
       - name: Build TypeScript wrapper
         run: npm run build:ts
         working-directory: npm
 
-      # ── Tests (placeholder — expand when you add wasm-bindgen-test) ───
-      - name: Run tests
-        run: |
-          echo "WASM unit tests — add wasm-pack test here when ready"
-
-      # ── Package check ──────────────────────────────────────────────────
+      # ── Verify output ──────────────────────────────────────────────────
       - name: Verify package contents
         run: |
-          cd npm
           echo "dist/ contents:"
-          ls -lh dist/
+          ls -lh dist/ || echo "dist/ not found"
           echo "wasm-pkg/ contents:"
           ls -lh wasm-pkg/
+        working-directory: npm
 
       - name: Upload build artifacts
         if: always()
@@ -123,12 +124,16 @@ jobs:
           path: |
             npm/dist/
             npm/wasm-pkg/
+            npm/package-lock.json
           retention-days: 30
 
-      # ── Publish to npm (only on master/main, not PRs) ─────────────────
+      # ── Publish to npm — only when ready, on specific branches ────────
+      # To publish: push to master/main/npm-wasm OR use workflow_dispatch.
+      # PRs and develop branch builds are test-only — no publish.
       - name: Publish to npm
         if: |
           github.event_name != 'pull_request' &&
+          github.ref != 'refs/heads/develop' &&
           (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' ||
            github.ref == 'refs/heads/npm-wasm' || github.event_name == 'workflow_dispatch')
         run: npm publish --access public
@@ -155,3 +160,6 @@ jobs:
           if [ "${{ needs.parse-trigger.outputs.run_wasm }}" != "true" ]; then
             echo "Skipped — commit message did not contain --mdix-wasm"
           fi
+          echo ""
+          echo "NOTE: Publish is blocked on develop branch."
+          echo "      Push to master/main/npm-wasm to publish to npm."

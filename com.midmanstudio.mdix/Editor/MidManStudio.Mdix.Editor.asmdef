@@ -1,0 +1,20 @@
+{
+    "name": "MidManStudio.Mdix.Editor",
+    "rootNamespace": "MidManStudio.Mdix.Unity.Editor",
+    "references": [
+        "MidManStudio.Mdix.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "MidManStudio.Mdix.Core.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -10,8 +10,6 @@ use crate::Compiler::Utilities::{SecurityUtilities, CommentFilter};
 use crate::ErrorManager::{ErrorManager, ParseException, DebugConfig};
 use std::time::Instant;
 
-/// Set to `false` to force sequential parsing globally (e.g. for profiling).
-/// The LSP path overrides this per-instance via `allow_concurrent: false`.
 const CONCURRENT_PARSING_ENABLED: bool = true;
 
 struct SectionData {
@@ -44,11 +42,7 @@ pub struct GeneralParser<'a> {
     debug_config:         DebugConfig,
     error_manager:        ErrorManager,
     position:             usize,
-
-    /// When `false`, rayon concurrent section parsing is skipped regardless
-    /// of `CONCURRENT_PARSING_ENABLED`. Set to `false` for the LSP path.
-    allow_concurrent: bool,
-
+    allow_concurrent:     bool,
     has_imports_enabled:    bool,
     has_enums_enabled:      bool,
     has_dlm_enabled:        bool,
@@ -57,10 +51,6 @@ pub struct GeneralParser<'a> {
 }
 
 impl<'a> GeneralParser<'a> {
-    /// Full constructor — caller supplies ErrorManager and concurrency flag.
-    ///
-    /// `allow_concurrent = true`  → CLI path, rayon enabled when conditions met.
-    /// `allow_concurrent = false` → LSP path, always sequential.
     pub fn new_with_error_manager(
         tokens:               Vec<Token>,
         config_section:       &'a ConfigSection,
@@ -123,7 +113,6 @@ impl<'a> GeneralParser<'a> {
         })
     }
 
-    /// CLI constructor — shared ErrorManager, rayon enabled.
     pub fn new(
         tokens:               Vec<Token>,
         config_section:       &'a ConfigSection,
@@ -138,7 +127,6 @@ impl<'a> GeneralParser<'a> {
         )
     }
 
-    /// LSP constructor — isolated ErrorManager, rayon disabled.
     pub fn new_for_lsp(
         tokens:               Vec<Token>,
         config_section:       &'a ConfigSection,
@@ -186,7 +174,7 @@ impl<'a> GeneralParser<'a> {
             ));
         }
 
-        let t_parse  = Instant::now();
+        let t_parse   = Instant::now();
         let use_rayon = self.should_use_concurrent_parsing(&sections);
 
         if use_rayon {
@@ -196,7 +184,9 @@ impl<'a> GeneralParser<'a> {
             self.parse_sections_concurrent(sections, &mut script)?;
         } else {
             if self.debug_config.is_enabled {
-                let reason = if !self.allow_concurrent {
+                let reason = if cfg!(target_arch = "wasm32") {
+                    "(wasm32 — sequential only)"
+                } else if !self.allow_concurrent {
                     "(allow_concurrent = false — LSP path)"
                 } else if !CONCURRENT_PARSING_ENABLED {
                     "(CONCURRENT_PARSING_ENABLED = false)"
@@ -228,11 +218,12 @@ impl<'a> GeneralParser<'a> {
         Ok(script)
     }
 
-    /// Rayon is worthwhile only when there are enough sections to justify the
-    /// thread-pool overhead, verbose debug is off (ordered output matters there),
-    /// the error strategy is not Halt (order-dependent recovery is simpler
-    /// sequentially), and the caller has not opted out via `allow_concurrent`.
     fn should_use_concurrent_parsing(&self, sections: &[SectionData]) -> bool {
+        // rayon requires OS threads — not available on wasm32-unknown-unknown.
+        if cfg!(target_arch = "wasm32") {
+            return false;
+        }
+
         CONCURRENT_PARSING_ENABLED
             && self.allow_concurrent
             && sections.len() >= 2
@@ -242,8 +233,6 @@ impl<'a> GeneralParser<'a> {
                 ErrorHandlingStrategy::Halt
             )
     }
-
-    // ── All methods below are unchanged from the previous response ────────────
 
     fn extract_all_sections(&mut self) -> Result<Vec<SectionData>, ParseException> {
         let mut sections = Vec::new();
@@ -355,28 +344,42 @@ impl<'a> GeneralParser<'a> {
         Ok(())
     }
 
+    // Concurrent path is compiled only on non-WASM targets.
+    // On WASM, should_use_concurrent_parsing() always returns false so
+    // this method is never called, but we still need it to compile.
+    // The cfg gate on the rayon import keeps the dependency off WASM.
     fn parse_sections_concurrent(
         &self,
         sections: Vec<SectionData>,
         script:   &mut DixScript,
     ) -> Result<(), ParseException> {
-        use rayon::prelude::*;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use rayon::prelude::*;
 
-        let results: Vec<(String, Result<ParsedSection, ParseException>)> = sections
-            .into_par_iter()
-            .map(|section| {
-                let result = self.parse_section_inner(&section);
-                (section.name, result)
-            })
-            .collect();
+            let results: Vec<(String, Result<ParsedSection, ParseException>)> = sections
+                .into_par_iter()
+                .map(|section| {
+                    let result = self.parse_section_inner(&section);
+                    (section.name, result)
+                })
+                .collect();
 
-        for (name, result) in results {
-            match result {
-                Ok(parsed) => self.assign_section_to_script(parsed, script),
-                Err(e)     => self.handle_section_error(&name, e)?,
+            for (name, result) in results {
+                match result {
+                    Ok(parsed) => self.assign_section_to_script(parsed, script),
+                    Err(e)     => self.handle_section_error(&name, e)?,
+                }
             }
+            Ok(())
         }
-        Ok(())
+
+        // Unreachable on WASM because should_use_concurrent_parsing returns false,
+        // but the compiler still needs a valid arm.
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.parse_sections_sequential(sections, script)
+        }
     }
 
     fn parse_section_inner(
@@ -512,10 +515,10 @@ impl<'a> GeneralParser<'a> {
     #[inline]
     fn is_section_allowed(&self, section_name: &str) -> bool {
         match section_name {
-            "DLM"             => self.has_dlm_enabled,
-            "IMPORTS"         => self.has_imports_enabled,
-            "QUICKFUNCS"      => self.has_quickfuncs_enabled,
-            "ENUMS"           => self.has_enums_enabled,
+            "DLM"               => self.has_dlm_enabled,
+            "IMPORTS"           => self.has_imports_enabled,
+            "QUICKFUNCS"        => self.has_quickfuncs_enabled,
+            "ENUMS"             => self.has_enums_enabled,
             "DATA" | "SECURITY" => true,
             _ => false,
         }

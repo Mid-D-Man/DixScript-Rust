@@ -17,7 +17,10 @@ use super::{
 };
 use crate::Compiler::AST::{ConfigSection, EnumsSection, DataSection, SecuritySection};
 
+#[cfg(not(target_arch = "wasm32"))]
 const CONCURRENT_DESERIALIZATION_ENABLED: bool = true;
+#[cfg(target_arch = "wasm32")]
+const CONCURRENT_DESERIALIZATION_ENABLED: bool = false;
 
 enum DecodedSection {
     Config(ConfigSection),
@@ -224,7 +227,9 @@ impl BinaryUnpacker {
             return self.collect_decode_results(results);
         }
 
-        // Unreachable on WASM — should_use_concurrent returns false there.
+        // should_use_concurrent() always returns false on wasm32,
+        // so this is never reached at runtime. The cfg block above is
+        // compiled away on wasm32, leaving only this sequential fallback.
         #[cfg(target_arch = "wasm32")]
         self.decode_sections_sequential(data, offsets)
     }

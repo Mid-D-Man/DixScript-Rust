@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.5/phpunit.xsd"
+    bootstrap="vendor/autoload.php"
+    colors="true"
+    stopOnFailure="false"
+    failOnRisky="true"
+    failOnWarning="true"
+    cacheDirectory=".phpunit.cache"
+>
+    <testsuites>
+        <testsuite name="MidManStudio.Mdix">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+
+    <coverage>
+        <include>
+            <directory suffix=".php">src</directory>
+        </include>
+    </coverage>
+
+    <php>
+        <!--
+            Set MDIX_LIB_PATH to an absolute path to override the default lib/
+            search location. The NativeLoader checks this before lib/libmdix_ffi.so.
+
+            Example:
+            <env name="MDIX_LIB_PATH" value="/path/to/target/release/libmdix_ffi.so"/>
+        -->
+    </php>
+
+    <logging>
+        <junit outputFile="test-results/junit.xml"/>
+    </logging>
+</phpunit>

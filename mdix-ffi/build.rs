@@ -1,29 +1,28 @@
 // mdix-ffi/build.rs
 //
-// Generates MdixNative.cs directly into the Core NuGet project's source tree.
-// Core is self-contained — it has no dependency on the Unity package.
-// The Unity package is a downstream consumer that receives a pre-built Core.dll.
+// Two code-generation steps run on every `cargo build -p mdix-ffi`:
 //
-// Output: csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs
+// 1. csbindgen  → csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs
+//    C# P/Invoke bindings consumed by the NuGet package and Unity plugin.
 //
-// Run `cargo build -p mdix-ffi` before opening the .sln in Rider.
-// Without it, Rider will show a compile error because Generated/MdixNative.cs
-// does not exist yet.
+// 2. cbindgen   → mdix-go/internal/include/mdix_ffi.h
+//    C header consumed by the Go package's cgo layer.
+//    Also useful for any future C/C++ consumer that doesn't use mdix-c directly.
 //
-// IMPORTANT: handle.rs is intentionally NOT passed to csbindgen.
-// csbindgen cannot emit opaque struct types. MdixHandle and MdixBuilderHandle
-// are void* on the C# side. lib.rs uses *mut c_void for all handle parameters,
-// casting internally — the documented csbindgen pattern for opaque types.
+// Neither generated file is tracked in git.  Run `cargo build -p mdix-ffi`
+// before opening the .sln in Rider or running `go build ./...`.
 
 fn main() {
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/handle.rs");
     println!("cargo:rerun-if-changed=src/error.rs");
     println!("cargo:rerun-if-changed=src/string_utils.rs");
+    println!("cargo:rerun-if-changed=cbindgen.toml");
 
-    let out_path = "../csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs";
+    // ── Step 1: csbindgen → MdixNative.cs ────────────────────────────────────
+    let cs_out = "../csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs";
 
-    if let Some(parent) = std::path::Path::new(out_path).parent() {
+    if let Some(parent) = std::path::Path::new(cs_out).parent() {
         std::fs::create_dir_all(parent).expect("failed to create Generated/ directory");
     }
 
@@ -34,6 +33,28 @@ fn main() {
         .csharp_namespace("MidManStudio.DixScript.Native")
         .csharp_class_name("MdixNative")
         .csharp_use_function_pointer(false)
-        .generate_csharp_file(out_path)
+        .generate_csharp_file(cs_out)
         .unwrap_or_else(|e| panic!("csbindgen failed: {}", e));
+
+    // ── Step 2: cbindgen → mdix_ffi.h ────────────────────────────────────────
+    let h_out = "../mdix-go/internal/include/mdix_ffi.h";
+
+    if let Some(parent) = std::path::Path::new(h_out).parent() {
+        std::fs::create_dir_all(parent).expect("failed to create mdix-go include/ directory");
+    }
+
+    let crate_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR not set");
+
+    let config = cbindgen::Config::from_file("cbindgen.toml")
+        .unwrap_or_else(|e| panic!("failed to read cbindgen.toml: {}", e));
+
+    cbindgen::Builder::new()
+        .with_crate(&crate_dir)
+        .with_config(config)
+        .generate()
+        .unwrap_or_else(|e| panic!("cbindgen failed: {}", e))
+        .write_to_file(h_out);
+
+    println!("cargo:warning=Generated {}", h_out);
 }

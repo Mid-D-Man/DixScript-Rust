@@ -62,17 +62,20 @@ class MdixNumpy:
     """
     Store and retrieve NumPy arrays in `.mdix` databases.
 
-    Arrays are stored as table property groups (tier-2) containing:
-      dtype, ndim, shape, size, order, data (base64 string).
+    Arrays are stored as a single flat string property containing a compact
+    JSON envelope:
+        {"dtype":"float32","ndim":2,"shape":[16,8],"size":128,"order":"C",
+         "data":"BASE64..."}
 
-    Storage format::
+    Using a flat (tier-1) string property avoids two problems that occur with
+    tier-2 table properties:
+      1. A runtime parser bug that causes very long table property lines (> ~400
+         chars) to be silently dropped when no tier-1 flat properties precede
+         them in the DATA section.
+      2. The tier-2 ordering constraint: after storing a numpy array via a table
+         property, no further tier-1 flat properties can be added.
 
-        weights: dtype = "float32", ndim = 2, shape = "784,256",
-                 size = 200704, order = "C", data = "base64..."
-
-    Note: the data field is stored as a plain base64 string (not a blob
-    literal) so that get_string() can retrieve it directly without type
-    conversion issues.
+    Flat string properties have neither limitation.
 
     Usage::
 
@@ -82,14 +85,11 @@ class MdixNumpy:
 
         arr = np.random.rand(784, 256).astype(np.float32)
 
-        # Store — must be called during tier-2 phase of builder
-        builder = (MdixBuilder()
-                   .set_string("model_name", "my_model")   # tier 1
-                   )
-        builder = MdixNumpy.store(builder, "weights", arr)  # tier 2
-        db = builder.to_database()
+        db = (MdixBuilder()
+              .set_string("model_name", "my_model")
+              )
+        db = MdixNumpy.store(db, "weights", arr).to_database()
 
-        # Retrieve
         restored = MdixNumpy.load(db, "weights")
         assert restored.shape == (784, 256)
     """
@@ -102,15 +102,18 @@ class MdixNumpy:
         order: str = "C",
     ) -> "MdixBuilder":
         """
-        Add a NumPy array to the builder as a tier-2 table property group.
+        Add a NumPy array to the builder as a flat string property.
 
-        Must be called after all tier-1 flat properties.
+        The entire array — metadata and base64-encoded bytes — is serialised
+        into a single compact JSON string stored at ``path``.  Because it is a
+        tier-1 flat property it can be added before or alongside other flat
+        properties, and does not trigger the two-tier ordering constraint.
 
         Args:
             builder: The ``MdixBuilder`` to add the array to.
             path:    Dotted path where the array will be stored.
             array:   The NumPy array to store.
-            order:   Memory layout ``"C"`` (row-major) or ``"F"`` (column-major).
+            order:   Memory layout ``"C"`` (row-major) or ``"F"`` (Fortran).
 
         Returns:
             The same builder for chaining.
@@ -124,26 +127,21 @@ class MdixNumpy:
                 f"[mdix:ml] Expected numpy.ndarray, got {type(array).__name__}"
             )
 
-        contiguous = np.ascontiguousarray(array) if order == "C" else np.asfortranarray(array)
-        raw_bytes  = contiguous.tobytes(order=order)
-        b64_data   = base64.b64encode(raw_bytes).decode("ascii")
-        shape_str  = ",".join(str(s) for s in array.shape)
+        contiguous = np.ascontiguousarray(array) if order == "C" \
+                     else np.asfortranarray(array)
+        raw_bytes = contiguous.tobytes(order=order)
+        b64_data  = base64.b64encode(raw_bytes).decode("ascii")
 
-        # Store data as a plain quoted string, NOT as b:("...") blob syntax.
-        # Using the blob literal type causes the runtime to store it as a Blob
-        # value which cannot be retrieved with get_string(). Plain strings are
-        # retrievable directly and the base64 encoding/decoding is handled here
-        # in Python, so no information is lost.
-        raw_props: List[Tuple[str, str]] = [
-            ("dtype",  f'"{array.dtype}"'),
-            ("ndim",   str(array.ndim)),
-            ("shape",  f'"{shape_str}"'),
-            ("size",   str(array.size)),
-            ("order",  f'"{order}"'),
-            ("data",   f'"{b64_data}"'),
-        ]
+        envelope = {
+            "dtype":  str(array.dtype),
+            "ndim":   array.ndim,
+            "shape":  list(array.shape),
+            "size":   array.size,
+            "order":  order,
+            "data":   b64_data,
+        }
 
-        return builder._with_raw_table_properties(path, raw_props)
+        return builder.set_string(path, json.dumps(envelope, separators=(",", ":")))
 
     @staticmethod
     def load(
@@ -157,8 +155,11 @@ class MdixNumpy:
         Args:
             db:    The loaded ``MdixDatabase``.
             path:  Dotted path where the array is stored.
-            dtype: Override the stored dtype (e.g. ``np.float64``).
-                   If ``None``, uses the dtype recorded in the database.
+            dtype: If given, the loaded array is cast to this dtype via
+                   ``.astype(dtype)`` after reconstruction.  The stored bytes
+                   are always decoded using the original stored dtype first,
+                   then converted — this preserves value semantics rather than
+                   reinterpreting raw bytes.
 
         Returns:
             The reconstructed NumPy array.
@@ -168,46 +169,35 @@ class MdixNumpy:
         """
         np = _require_numpy()
 
-        stored_dtype = db.get_string(f"{path}.dtype")
-        shape_str    = db.get_string(f"{path}.shape")
-        ndim         = db.get_int(f"{path}.ndim")
-        order_str    = db.get_string(f"{path}.order", "C")
+        raw = db.get_string(path)
 
-        # Retrieve the base64 data. The field is stored as a plain string so
-        # get_string() works directly. If for any reason the field was stored
-        # as a blob (older format), fall back to get_json() and extract the
-        # raw bytes from the JSON representation.
-        data_type = db.get_type(f"{path}.data")
-        if data_type == "string":
-            b64_data = db.get_string(f"{path}.data")
-        else:
-            # Fallback: retrieve via JSON and unwrap the string value.
-            raw = db.get_json(f"{path}.data")
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, str):
-                    b64_data = parsed
-                elif isinstance(parsed, dict):
-                    # Blob serialised as {"Blob": "..."} or similar
-                    b64_data = next(iter(parsed.values()))
-                else:
-                    b64_data = raw.strip('"')
-            except (json.JSONDecodeError, StopIteration):
-                b64_data = raw.strip('"')
+        try:
+            envelope = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            from . import MdixError
+            raise MdixError(
+                f"[mdix:ml] Failed to parse numpy envelope at '{path}': {exc}"
+            ) from exc
 
-        raw_bytes  = base64.b64decode(b64_data)
-        used_dtype = dtype if dtype is not None else np.dtype(stored_dtype)
+        stored_dtype = envelope["dtype"]
+        shape        = tuple(envelope["shape"])
+        order_str    = envelope.get("order", "C")
+        b64_data     = envelope["data"]
 
-        if shape_str:
-            shape = tuple(int(s) for s in shape_str.split(",") if s)
-        else:
-            shape = (-1,)
-
-        return (
-            np.frombuffer(raw_bytes, dtype=used_dtype)
+        raw_bytes = base64.b64decode(b64_data)
+        arr = (
+            np.frombuffer(raw_bytes, dtype=np.dtype(stored_dtype))
               .reshape(shape)
               .copy(order=order_str)  # type: ignore[arg-type]
         )
+
+        # Cast to the requested dtype AFTER reconstruction with the correct
+        # element count.  Do NOT reinterpret bytes with the new dtype because
+        # that changes the element count (e.g. float32→float64 halves it).
+        if dtype is not None and np.dtype(dtype) != np.dtype(stored_dtype):
+            arr = arr.astype(dtype)
+
+        return arr
 
     @staticmethod
     def try_load(
@@ -224,30 +214,49 @@ class MdixNumpy:
 
     @staticmethod
     def exists(db: "MdixDatabase", path: str) -> bool:
-        """Returns ``True`` if an array is stored at ``path``."""
-        return db.exists(f"{path}.dtype") and db.exists(f"{path}.data")
+        """Returns ``True`` if a numpy array is stored at ``path``."""
+        if not db.exists(path):
+            return False
+        # Confirm it is actually a numpy envelope rather than an unrelated
+        # string property at the same path.
+        if db.get_type(path) != "string":
+            return False
+        try:
+            envelope = json.loads(db.get_string(path))
+            return "dtype" in envelope and "data" in envelope
+        except Exception:
+            return False
 
     @staticmethod
     def array_info(db: "MdixDatabase", path: str) -> Dict[str, Any]:
         """
-        Returns metadata about the stored array without loading its data.
+        Return metadata about the stored array without decoding its data.
 
-        Returns a dict with keys: ``dtype``, ``ndim``, ``shape``, ``size``, ``order``.
+        Returns a dict with keys: ``dtype``, ``ndim``, ``shape``, ``size``,
+        ``order``.
         """
-        return {
-            "dtype": db.get_string(f"{path}.dtype", "unknown"),
-            "ndim":  db.get_int(f"{path}.ndim",   0),
-            "shape": db.get_string(f"{path}.shape", ""),
-            "size":  db.get_int(f"{path}.size",   0),
-            "order": db.get_string(f"{path}.order", "C"),
-        }
+        if not db.exists(path):
+            return {"dtype": "unknown", "ndim": 0, "shape": "", "size": 0,
+                    "order": "C"}
+        try:
+            envelope = json.loads(db.get_string(path))
+            return {
+                "dtype": envelope.get("dtype", "unknown"),
+                "ndim":  envelope.get("ndim",  0),
+                "shape": ",".join(str(s) for s in envelope.get("shape", [])),
+                "size":  envelope.get("size",  0),
+                "order": envelope.get("order", "C"),
+            }
+        except Exception:
+            return {"dtype": "unknown", "ndim": 0, "shape": "", "size": 0,
+                    "order": "C"}
 
 
 # ── MdixTensor ─────────────────────────────────────────────────────────────────
 
 class MdixTensor:
     """
-    Framework-agnostic tensor storage backed by NumPy serialization.
+    Framework-agnostic tensor storage backed by NumPy serialisation.
 
     Converts PyTorch tensors, TensorFlow tensors, and JAX arrays to NumPy
     before storage, and reconstructs them on load.
@@ -287,7 +296,7 @@ class MdixTensor:
         if "jax" in type_name:
             return np.array(tensor)
 
-        # Last resort — try numpy array conversion
+        # Last resort
         return np.asarray(tensor)
 
     @staticmethod
@@ -297,7 +306,7 @@ class MdixTensor:
         tensor: Any,
         order: str = "C",
     ) -> "MdixBuilder":
-        """Store any supported tensor type as a tier-2 table property group."""
+        """Store any supported tensor type as a flat string property."""
         arr = MdixTensor._to_numpy(tensor)
         return MdixNumpy.store(builder, path, arr, order=order)
 
@@ -323,7 +332,6 @@ class MdixTensor:
             import tensorflow as tf
         except ImportError as exc:
             raise ImportError("tensorflow is required for load_tf.") from exc
-        np = _require_numpy()
         arr = MdixNumpy.load(db, path)
         return tf.constant(arr)
 
@@ -334,11 +342,11 @@ class MdixDataFrame:
     """
     Store and retrieve Pandas DataFrames in `.mdix` databases.
 
-    DataFrames are stored as group arrays (tier-2)::
-
-        records::
-          { col1 = 1, col2 = "alpha" },
-          { col1 = 2, col2 = "beta" }
+    DataFrames are stored as a single flat string property containing a JSON
+    array of row objects (orient="records").  This is more robust than using
+    DixScript group arrays because it does not rely on the runtime's bracket-
+    index key access semantics (``records[0].name`` etc.), which are not
+    guaranteed to be stable across runtime versions.
 
     Usage::
 
@@ -363,11 +371,15 @@ class MdixDataFrame:
         orient: str = "records",
     ) -> "MdixBuilder":
         """
-        Add a DataFrame to the builder as a tier-2 group array.
+        Add a DataFrame to the builder as a flat string property.
+
+        The DataFrame is serialised to a JSON array of row objects and stored
+        at ``path`` as a single string value.  As a tier-1 flat property it
+        does not trigger the two-tier ordering constraint.
 
         Args:
             builder: The ``MdixBuilder`` to add the frame to.
-            path:    Dotted path for the array in the database.
+            path:    Dotted path for the stored data.
             df:      The Pandas ``DataFrame`` to store.
             orient:  Only ``"records"`` is currently supported.
 
@@ -383,8 +395,10 @@ class MdixDataFrame:
         if df.empty:
             raise ValueError("[mdix:ml] Cannot store an empty DataFrame")
 
-        rows = df.to_dict(orient="records")
-        return builder.with_group_array(path, rows)
+        rows     = df.to_dict(orient="records")
+        json_str = json.dumps(rows, default=str, separators=(",", ":"))
+
+        return builder.set_string(path, json_str)
 
     @staticmethod
     def load(
@@ -398,18 +412,32 @@ class MdixDataFrame:
         Args:
             db:      The loaded ``MdixDatabase``.
             path:    Dotted path where the frame is stored.
-            columns: If given, only these columns are included.
+            columns: If given, only these columns are included in the result.
 
         Returns:
             A Pandas ``DataFrame``.
         """
         pd = _require_pandas()
 
+        # New format: single flat string property containing JSON
+        if db.exists(path) and db.get_type(path) == "string":
+            raw = db.get_string(path)
+            try:
+                rows = json.loads(raw)
+                if isinstance(rows, list):
+                    df = pd.DataFrame(rows)
+                    if columns is not None:
+                        df = df[[c for c in columns if c in df.columns]]
+                    return df
+            except (json.JSONDecodeError, ValueError):
+                pass  # fall through to legacy group-array path
+
+        # Legacy format: group array (kept for backward compatibility)
         length = db.get_array_length(path)
         if length < 0:
             raise ValueError(
-                f"[mdix:ml] No array found at '{path}' — "
-                "expected a group array from MdixDataFrame.store()"
+                f"[mdix:ml] No DataFrame found at '{path}'. "
+                "Expected a value stored by MdixDataFrame.store()."
             )
 
         rows = []
@@ -439,7 +467,7 @@ class MdixDataFrame:
 
 
 def _read_scalar(db: "MdixDatabase", path: str) -> Any:
-    """Read any scalar value from `path` without knowing its type upfront."""
+    """Read any scalar value from ``path`` without knowing its type upfront."""
     t = db.get_type(path)
     if t == "int":    return db.get_int(path)
     if t == "bool":   return db.get_bool(path)
@@ -466,12 +494,12 @@ class MdixMLConfig:
         db     = MdixDatabase.load("run_config.mdix")
         config = MdixMLConfig(db)
 
-        lr      = config.hyperparameter("learning_rate", default=1e-3,
-                                         min_val=1e-7, max_val=1.0)
-        hidden  = config.architecture("hidden_size", default=256,
-                                       choices=[128, 256, 512, 1024])
-        data    = config.dataset_path("train_data", required=True)
-        epochs  = config.training("epochs", default=10, dtype=int)
+        lr     = config.hyperparameter("learning_rate", default=1e-3,
+                                        min_val=1e-7, max_val=1.0)
+        hidden = config.architecture("hidden_size", default=256,
+                                      choices=[128, 256, 512, 1024])
+        data   = config.dataset_path("train_data", required=True)
+        epochs = config.training("epochs", default=10, dtype=int)
     """
 
     def __init__(self, db: "MdixDatabase") -> None:
@@ -510,15 +538,11 @@ class MdixMLConfig:
         max_val: Optional[float] = None,
         dtype: type = float,
     ) -> Union[float, int]:
-        """
-        Read a numeric hyperparameter with optional range validation.
-        """
+        """Read a numeric hyperparameter with optional range validation."""
         if self._db.exists(path):
-            val = (
-                self._db.get_int(path)
-                if dtype is int
-                else self._db.get_double(path)
-            )
+            val = (self._db.get_int(path)
+                   if dtype is int
+                   else self._db.get_double(path))
         else:
             val = default
 
@@ -541,9 +565,7 @@ class MdixMLConfig:
         default: Any,
         choices: Optional[Sequence[Any]] = None,
     ) -> Any:
-        """
-        Read an architecture setting with optional enumeration validation.
-        """
+        """Read an architecture setting with optional enumeration validation."""
         if not self._db.exists(path):
             return default
 
@@ -569,9 +591,7 @@ class MdixMLConfig:
         required: bool = False,
         default: Optional[str] = None,
     ) -> Optional[str]:
-        """
-        Read a dataset file or directory path.
-        """
+        """Read a dataset file or directory path."""
         if self._db.exists(path):
             return self._db.get_string(path)
         if required and default is None:
@@ -588,9 +608,7 @@ class MdixMLConfig:
         default: Any,
         dtype: type = int,
     ) -> Any:
-        """
-        Read a training setting (epochs, batch size, seed, etc.).
-        """
+        """Read a training setting (epochs, batch size, seed, etc.)."""
         if not self._db.exists(path):
             return default
 
@@ -601,7 +619,8 @@ class MdixMLConfig:
 
     def label_map(self, path: str) -> Dict[str, int]:
         """
-        Read a label-to-integer mapping stored as an array of table entries.
+        Read a label-to-integer mapping.
+        Supports both array-of-objects and flat key→int formats.
         """
         result: Dict[str, int] = {}
 
@@ -609,8 +628,8 @@ class MdixMLConfig:
         if length >= 0:
             for i in range(length):
                 prefix = f"{path}[{i}]"
-                name   = self._db.get_string(f"{prefix}.name",  "")
-                idx    = self._db.get_int(f"{prefix}.id",  i)
+                name   = self._db.get_string(f"{prefix}.name", "")
+                idx    = self._db.get_int(f"{prefix}.id", i)
                 if name:
                     result[name] = idx
             return result
@@ -621,10 +640,10 @@ class MdixMLConfig:
                 result[key] = self._db.get_int(full)
         return result
 
-    def all_hyperparameters(self, prefix: str = "hyperparameters") -> Dict[str, Any]:
-        """
-        Return all values under ``prefix`` as a plain dict.
-        """
+    def all_hyperparameters(
+        self, prefix: str = "hyperparameters"
+    ) -> Dict[str, Any]:
+        """Return all values under ``prefix`` as a plain dict."""
         out: Dict[str, Any] = {}
         for key in self._db.get_keys(prefix):
             full = f"{prefix}.{key}"
@@ -637,10 +656,10 @@ class MdixMLConfig:
             )
         return out
 
-    # ── Numpy shortcuts ───────────────────────────────────────────────────────
+    # ── NumPy shortcuts ───────────────────────────────────────────────────────
 
     def load_weights(self, path: str) -> "np.ndarray":
-        """Load a NumPy array stored at ``path`` (shortcut for ``MdixNumpy.load``)."""
+        """Load a NumPy array stored at ``path``."""
         return MdixNumpy.load(self._db, path)
 
     def weights_info(self, path: str) -> Dict[str, Any]:

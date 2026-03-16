@@ -37,14 +37,18 @@ def int64_vector() -> np.ndarray:
 
 @pytest.fixture
 def ml_config_source() -> str:
+    # IMPORTANT: flat properties (tier-1) MUST come before table properties
+    # (tier-2) in DixScript's two-tier DATA ordering rule. Placing train_path
+    # and valid_path after the table properties caused them to be silently
+    # dropped, breaking test_dataset_path_present.
     return """
     @DATA(
       model_name = "bert-small"
       version    = 1
-      hyperparameters: learning_rate = 0.001, batch_size = 32, epochs = 10
-      architecture: hidden_size = 256, num_layers = 6, dropout = 0.1
       train_path = "/data/train.csv"
       valid_path = "/data/valid.csv"
+      hyperparameters: learning_rate = 0.001, batch_size = 32, epochs = 10
+      architecture: hidden_size = 256, num_layers = 6, dropout = 0.1
     )
     """
 

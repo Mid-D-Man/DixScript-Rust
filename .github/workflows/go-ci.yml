@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── Rust toolchain (needed to build mdix-ffi and generate the header) ───
+      # ── Rust toolchain ───────────────────────────────────────────────────────
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
@@ -76,7 +76,7 @@ jobs:
           go-version: '1.21'
           cache: true
 
-      # ── Build mdix-ffi (generates header AND native lib) ─────────────────────
+      # ── Build mdix-ffi ───────────────────────────────────────────────────────
       - name: Build mdix-ffi (generates mdix_ffi.h + libmdix_ffi.so)
         run: |
           cargo build -p mdix-ffi --release
@@ -119,7 +119,6 @@ jobs:
           TOTAL=0; PASSED=0; FAILED=0
 
           if [ -f test-output.txt ]; then
-            # Count --- PASS / --- FAIL lines
             PASSED=$(grep -c '^--- PASS' test-output.txt || true)
             FAILED=$(grep -c '^--- FAIL' test-output.txt || true)
             TOTAL=$((PASSED + FAILED))
@@ -154,7 +153,7 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-  # ── Step 3: collect and deploy results to gh-pages ───────────────────────────
+  # ── Step 3: collect, parse, and deploy results to gh-pages ───────────────────
   collect-and-deploy:
     runs-on: ubuntu-latest
     needs: [parse-trigger, build-and-test]
@@ -169,6 +168,14 @@ jobs:
       - name: Get Go version
         id: gover
         run: echo "ver=$(go version)" >> $GITHUB_OUTPUT
+
+      # Download the raw test output so we can parse it into suites
+      - name: Download test output artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: go-test-output-${{ github.run_number }}
+          path: go-test-artifact/
+        continue-on-error: true   # artifact absent if build-and-test was skipped
 
       - name: Generate go-results.json
         env:
@@ -185,7 +192,7 @@ jobs:
           TEST_FAILED_NAMES: ${{ needs.build-and-test.outputs.failed_names || '' }}
         run: |
           python3 - << 'PYEOF'
-          import json, os
+          import json, os, re
 
           def int_env(key):
               try:
@@ -195,6 +202,87 @@ jobs:
 
           raw_names = os.environ.get("TEST_FAILED_NAMES", "")
           failed_names = [n for n in raw_names.split("|") if n.strip()] if raw_names else []
+
+          # ── Parse test output into suites ─────────────────────────────────
+          suites = []
+          raw_output_path = "go-test-artifact/test-output.txt"
+
+          if os.path.exists(raw_output_path):
+              with open(raw_output_path, encoding="utf-8", errors="replace") as f:
+                  lines = f.readlines()
+
+              # Group tests by package (--- RUN lines are per-package between
+              # "=== RUN" headers and "ok / FAIL <package>" footers)
+              current_package = "unknown"
+              current_tests   = []
+              pkg_duration    = 0.0
+
+              RE_PKG_OK   = re.compile(r'^ok\s+(\S+)\s+([\d.]+)s')
+              RE_PKG_FAIL = re.compile(r'^FAIL\s+(\S+)\s*(?:\(([\d.]+)s\))?')
+              RE_PASS     = re.compile(r'^--- PASS:\s+(\S+)\s+\(([\d.]+)s\)')
+              RE_FAIL     = re.compile(r'^--- FAIL:\s+(\S+)\s+\(([\d.]+)s\)')
+              RE_RUN      = re.compile(r'^=== RUN\s+(\S+)')
+
+              for line in lines:
+                  line = line.rstrip()
+
+                  m = RE_RUN.match(line)
+                  if m:
+                      continue  # just tracking start, result comes later
+
+                  m = RE_PASS.match(line)
+                  if m:
+                      current_tests.append({
+                          "name":        m.group(1),
+                          "status":      "passed",
+                          "duration_ms": round(float(m.group(2)) * 1000, 1),
+                          "output":      "",
+                      })
+                      continue
+
+                  m = RE_FAIL.match(line)
+                  if m:
+                      current_tests.append({
+                          "name":        m.group(1),
+                          "status":      "failed",
+                          "duration_ms": round(float(m.group(2)) * 1000, 1),
+                          "output":      "",
+                      })
+                      continue
+
+                  m = RE_PKG_OK.match(line)
+                  if m:
+                      pkg_name     = m.group(1).split("/")[-1]
+                      pkg_duration = float(m.group(2))
+                      if current_tests:
+                          suites.append({
+                              "name":       pkg_name,
+                              "package":    m.group(1),
+                              "passed":     sum(1 for t in current_tests if t["status"] == "passed"),
+                              "failed":     sum(1 for t in current_tests if t["status"] == "failed"),
+                              "duration_s": pkg_duration,
+                              "tests":      current_tests,
+                          })
+                      current_tests   = []
+                      current_package = "unknown"
+                      continue
+
+                  m = RE_PKG_FAIL.match(line)
+                  if m:
+                      pkg_name     = m.group(1).split("/")[-1]
+                      pkg_duration = float(m.group(2)) if m.group(2) else 0.0
+                      if current_tests:
+                          suites.append({
+                              "name":       pkg_name,
+                              "package":    m.group(1),
+                              "passed":     sum(1 for t in current_tests if t["status"] == "passed"),
+                              "failed":     sum(1 for t in current_tests if t["status"] == "failed"),
+                              "duration_s": pkg_duration,
+                              "tests":      current_tests,
+                          })
+                      current_tests   = []
+                      current_package = "unknown"
+                      continue
 
           result = {
               "build":        os.environ.get("BUILD_NUM",  "0"),
@@ -211,6 +299,7 @@ jobs:
                   "duration_s":   int_env("TEST_DUR"),
                   "failed_names": failed_names,
               },
+              "suites": suites,
           }
 
           with open("go-results.json", "w") as f:
@@ -218,6 +307,15 @@ jobs:
 
           print(json.dumps(result, indent=2))
           PYEOF
+
+      # Build the HTML report by substituting placeholders in the template
+      - name: Build HTML report
+        run: |
+          cp .github/go-test-template.html go-test-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  go-test-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       go-test-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            go-test-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     go-test-index.html
 
       - name: Deploy to gh-pages
         run: |
@@ -235,8 +333,14 @@ jobs:
 
           mkdir -p "$WORK/go" "$WORK/go/builds/build_${BUILD_NUM}"
 
+          # Deploy JSON data
           cp go-results.json "$WORK/go/go-results.json"
           cp go-results.json "$WORK/go/builds/build_${BUILD_NUM}/go-results.json"
+
+          # Deploy HTML index — the template fetches go-results.json at runtime
+          cp go-test-index.html "$WORK/go/index.html"
+          cp go-test-index.html "$WORK/go/builds/build_${BUILD_NUM}/index.html"
+
           cp .github/landing-index.html "$WORK/index.html"
 
           cd "$WORK"

@@ -1,0 +1,323 @@
+name: DixScript — PHP CI
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Force run regardless of commit message'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  # ── Step 1: decide whether to run ────────────────────────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether to run PHP CI
+        id: decide
+        run: |
+          RUN=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-php' && RUN=true || true
+          fi
+          echo "should_run=$RUN" >> $GITHUB_OUTPUT
+          echo "PHP CI triggered: $RUN"
+
+  # ── Step 2: build Rust FFI + run PHP tests ────────────────────────────────────
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.should_run == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Rust toolchain ───────────────────────────────────────────────────────
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-php-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-php-
+
+      # ── Build mdix-ffi ───────────────────────────────────────────────────────
+      - name: Build mdix-ffi (generates libmdix_ffi.so)
+        run: |
+          cargo build -p mdix-ffi --release
+          echo "=== Native lib ==="
+          ls -lh target/release/libmdix_ffi.so || echo "libmdix_ffi.so not found"
+
+      # ── Stage native lib for PHP ─────────────────────────────────────────────
+      - name: Stage native lib in mdix-php/lib/
+        run: |
+          mkdir -p mdix-php/lib
+          cp target/release/libmdix_ffi.so mdix-php/lib/libmdix_ffi.so
+          echo "Staged: $(ls -lh mdix-php/lib/)"
+
+      # ── PHP setup ────────────────────────────────────────────────────────────
+      - name: Setup PHP 8.1
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: ffi
+          ini-values: ffi.enable=true
+          coverage: none
+
+      - name: Get PHP version
+        id: phpver
+        run: echo "ver=$(php --version | head -1)" >> $GITHUB_OUTPUT
+
+      # ── Composer install ─────────────────────────────────────────────────────
+      - name: Install Composer dependencies
+        working-directory: mdix-php
+        run: composer install --no-interaction --prefer-dist
+
+      # ── Run tests ────────────────────────────────────────────────────────────
+      - name: Run PHPUnit tests
+        id: phptest
+        continue-on-error: true
+        working-directory: mdix-php
+        env:
+          MDIX_LIB_PATH: ${{ github.workspace }}/mdix-php/lib/libmdix_ffi.so
+        run: |
+          mkdir -p test-results
+          php vendor/bin/phpunit \
+            --log-junit test-results/junit.xml \
+            --testdox \
+            2>&1 | tee test-output.txt
+          echo "TEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          exit 0
+
+      # ── Parse JUnit XML → JSON ───────────────────────────────────────────────
+      - name: Parse test results to JSON
+        env:
+          BUILD_NUM:    ${{ github.run_number }}
+          BRANCH:       ${{ github.ref_name }}
+          COMMIT:       ${{ github.sha }}
+          BUILD_DATE:   ${{ github.event.head_commit.timestamp }}
+          PHP_VERSION:  ${{ steps.phpver.outputs.ver }}
+        working-directory: mdix-php
+        run: |
+          python3 - << 'PYEOF'
+          import xml.etree.ElementTree as ET
+          import json, os, sys
+
+          junit_path = "test-results/junit.xml"
+          result = {
+              "build":       os.environ.get("BUILD_NUM",   "0"),
+              "branch":      os.environ.get("BRANCH",      "unknown"),
+              "commit":      os.environ.get("COMMIT",      "unknown")[:8],
+              "date":        os.environ.get("BUILD_DATE",  ""),
+              "php_version": os.environ.get("PHP_VERSION", "8.1"),
+              "package":     "midmanstudio/mdix",
+              "summary": {
+                  "total": 0, "passed": 0, "failed": 0,
+                  "errors": 0, "skipped": 0, "duration_s": 0.0,
+              },
+              "suites": [],
+          }
+
+          if not os.path.exists(junit_path):
+              print("No JUnit XML found — tests may not have run")
+              with open("php-results.json", "w") as f:
+                  json.dump(result, f, indent=2)
+              sys.exit(0)
+
+          tree = ET.parse(junit_path)
+          root = tree.getroot()
+
+          # Handle both <testsuites> and <testsuite> as root
+          suites_el = root.findall("testsuite") if root.tag == "testsuites" \
+                      else [root]
+
+          total = 0; passed = 0; failed = 0; errors = 0; skipped = 0
+          duration_total = 0.0
+
+          for suite_el in suites_el:
+              suite_name = suite_el.get("name", "unknown")
+              suite_tests = []
+              suite_dur   = float(suite_el.get("time", "0"))
+              duration_total += suite_dur
+
+              for tc in suite_el.findall("testcase"):
+                  tc_name = tc.get("name", "")
+                  tc_dur  = round(float(tc.get("time", "0")) * 1000, 2)
+                  total  += 1
+
+                  failure_el = tc.find("failure")
+                  error_el   = tc.find("error")
+                  skip_el    = tc.find("skipped")
+
+                  if failure_el is not None:
+                      status = "failed"
+                      output = (failure_el.text or "").strip()[:500]
+                      failed += 1
+                  elif error_el is not None:
+                      status = "failed"
+                      output = (error_el.text or "").strip()[:500]
+                      failed += 1
+                      errors += 1
+                  elif skip_el is not None:
+                      status  = "skipped"
+                      output  = ""
+                      skipped += 1
+                  else:
+                      status = "passed"
+                      output = ""
+                      passed += 1
+
+                  suite_tests.append({
+                      "name":        tc_name,
+                      "status":      status,
+                      "duration_ms": tc_dur,
+                      "output":      output,
+                  })
+
+              result["suites"].append({
+                  "name":       suite_name,
+                  "passed":     sum(1 for t in suite_tests if t["status"] == "passed"),
+                  "failed":     sum(1 for t in suite_tests if t["status"] == "failed"),
+                  "skipped":    sum(1 for t in suite_tests if t["status"] == "skipped"),
+                  "duration_s": round(suite_dur, 4),
+                  "tests":      suite_tests,
+              })
+
+          result["summary"] = {
+              "total":      total,
+              "passed":     passed,
+              "failed":     failed,
+              "errors":     errors,
+              "skipped":    skipped,
+              "duration_s": round(duration_total, 3),
+          }
+
+          with open("php-results.json", "w") as f:
+              json.dump(result, f, indent=2)
+
+          print(f"Suites:{len(result['suites'])}  "
+                f"Total:{total}  Passed:{passed}  "
+                f"Failed:{failed}  Skipped:{skipped}")
+          PYEOF
+
+      # ── Build HTML report ────────────────────────────────────────────────────
+      - name: Build HTML report
+        working-directory: mdix-php
+        run: |
+          cp ../.github/php-test-template.html php-test-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  php-test-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       php-test-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            php-test-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     php-test-index.html
+
+      # ── Upload artifacts ─────────────────────────────────────────────────────
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: php-test-results-${{ github.run_number }}
+          path: |
+            mdix-php/php-results.json
+            mdix-php/php-test-index.html
+            mdix-php/test-output.txt
+            mdix-php/test-results/junit.xml
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ── Step 3: deploy to gh-pages ───────────────────────────────────────────────
+  deploy-results:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test]
+    if: |
+      always() &&
+      needs.build-and-test.result == 'success' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' ||
+       github.event_name == 'workflow_dispatch')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: php-test-results-${{ github.run_number }}
+          path: deploy/
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/php" "$WORK/php/builds/build_${BUILD_NUM}"
+
+          cp deploy/php-results.json    "$WORK/php/php-results.json"
+          cp deploy/php-test-index.html "$WORK/php/index.html"
+          cp deploy/php-results.json    "$WORK/php/builds/build_${BUILD_NUM}/php-results.json"
+          cp deploy/php-test-index.html "$WORK/php/builds/build_${BUILD_NUM}/index.html"
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "PHP CI — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+          echo "Deployed → https://mid-d-man.github.io/DixScript-Rust/php/"
+
+  # ── Step 4: summary ──────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test, deploy-results]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "============================================="
+          echo "  DixScript — PHP CI Summary"
+          echo "============================================="
+          echo "Build:   #${{ github.run_number }}"
+          echo "Branch:  ${{ github.ref_name }}"
+          echo "Tests:   ${{ needs.build-and-test.result  || 'skipped' }}"
+          echo "Deploy:  ${{ needs.deploy-results.result  || 'skipped' }}"
+          echo ""
+          if [ "${{ needs.parse-trigger.outputs.should_run }}" != "true" ]; then
+            echo "Skipped — commit message did not contain --mdix-php"
+          fi
+          echo ""
+          echo "Results → https://mid-d-man.github.io/DixScript-Rust/php/"

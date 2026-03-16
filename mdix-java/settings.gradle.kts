@@ -1,1 +1,1 @@
-rootProject.name = "mdix-java"
+rootProject.name = "dixscript-java"

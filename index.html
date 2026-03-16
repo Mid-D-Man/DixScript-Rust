@@ -53,6 +53,10 @@
     a.c:hover .desc { color: #f0883e; }
     a.python:hover { border-color: #2ea8a0; color: #2ea8a0; }
     a.python:hover .desc { color: #2ea8a0; }
+    a.go:hover     { border-color: #00acd7; color: #00acd7; }
+    a.go:hover .desc { color: #00acd7; }
+    a.java:hover   { border-color: #f89820; color: #f89820; }
+    a.java:hover .desc { color: #f89820; }
 
     footer {
       margin-top: 24px; text-align: center;
@@ -139,9 +143,25 @@
         </div>
       </a>
 
+      <a class="go" href="go/">
+        <span class="icon">🔵</span>
+        <div class="info">
+          <span class="label">Go Tests</span>
+          <span class="desc">dixscript-go — go test suite via cgo bridge</span>
+        </div>
+      </a>
+
+      <a class="java" href="java/">
+        <span class="icon">☕</span>
+        <div class="info">
+          <span class="label">Java / Kotlin Tests</span>
+          <span class="desc">dixscript-java — JUnit 5 + Kotlin coroutine tests via JNI</span>
+        </div>
+      </a>
+
     </div>
     <footer>
-      Trigger: --publish-* / --ffi / --lsp / --mdix-cs / --mdix-wasm / --mdix-c / --mdix-py
+      Trigger: --ffi / --lsp / --mdix-cs / --mdix-wasm / --mdix-c / --mdix-py / --mdix-go / --mdix-java
       · workflow_dispatch for manual runs
     </footer>
   </div>

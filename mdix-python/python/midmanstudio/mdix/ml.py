@@ -63,12 +63,16 @@ class MdixNumpy:
     Store and retrieve NumPy arrays in `.mdix` databases.
 
     Arrays are stored as table property groups (tier-2) containing:
-      dtype, ndim, shape, size, order, data (blob).
+      dtype, ndim, shape, size, order, data (base64 string).
 
     Storage format::
 
         weights: dtype = "float32", ndim = 2, shape = "784,256",
-                 size = 200704, order = "C", data = b:("base64...")
+                 size = 200704, order = "C", data = "base64..."
+
+    Note: the data field is stored as a plain base64 string (not a blob
+    literal) so that get_string() can retrieve it directly without type
+    conversion issues.
 
     Usage::
 
@@ -125,13 +129,18 @@ class MdixNumpy:
         b64_data   = base64.b64encode(raw_bytes).decode("ascii")
         shape_str  = ",".join(str(s) for s in array.shape)
 
+        # Store data as a plain quoted string, NOT as b:("...") blob syntax.
+        # Using the blob literal type causes the runtime to store it as a Blob
+        # value which cannot be retrieved with get_string(). Plain strings are
+        # retrievable directly and the base64 encoding/decoding is handled here
+        # in Python, so no information is lost.
         raw_props: List[Tuple[str, str]] = [
             ("dtype",  f'"{array.dtype}"'),
             ("ndim",   str(array.ndim)),
             ("shape",  f'"{shape_str}"'),
             ("size",   str(array.size)),
             ("order",  f'"{order}"'),
-            ("data",   f'b:("{b64_data}")'),
+            ("data",   f'"{b64_data}"'),
         ]
 
         return builder._with_raw_table_properties(path, raw_props)
@@ -163,11 +172,28 @@ class MdixNumpy:
         shape_str    = db.get_string(f"{path}.shape")
         ndim         = db.get_int(f"{path}.ndim")
         order_str    = db.get_string(f"{path}.order", "C")
-        b64_data     = db.get_string(f"{path}.data")
 
-        # Strip b:("...") wrapper if the runtime returns the raw literal
-        if b64_data.startswith('b:("') and b64_data.endswith('")'):
-            b64_data = b64_data[4:-2]
+        # Retrieve the base64 data. The field is stored as a plain string so
+        # get_string() works directly. If for any reason the field was stored
+        # as a blob (older format), fall back to get_json() and extract the
+        # raw bytes from the JSON representation.
+        data_type = db.get_type(f"{path}.data")
+        if data_type == "string":
+            b64_data = db.get_string(f"{path}.data")
+        else:
+            # Fallback: retrieve via JSON and unwrap the string value.
+            raw = db.get_json(f"{path}.data")
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, str):
+                    b64_data = parsed
+                elif isinstance(parsed, dict):
+                    # Blob serialised as {"Blob": "..."} or similar
+                    b64_data = next(iter(parsed.values()))
+                else:
+                    b64_data = raw.strip('"')
+            except (json.JSONDecodeError, StopIteration):
+                b64_data = raw.strip('"')
 
         raw_bytes  = base64.b64decode(b64_data)
         used_dtype = dtype if dtype is not None else np.dtype(stored_dtype)
@@ -415,9 +441,9 @@ class MdixDataFrame:
 def _read_scalar(db: "MdixDatabase", path: str) -> Any:
     """Read any scalar value from `path` without knowing its type upfront."""
     t = db.get_type(path)
-    if t == "int":   return db.get_int(path)
-    if t == "bool":  return db.get_bool(path)
-    if t == "float": return db.get_float(path)
+    if t == "int":    return db.get_int(path)
+    if t == "bool":   return db.get_bool(path)
+    if t == "float":  return db.get_float(path)
     if t == "double": return db.get_double(path)
     return db.get_string(path, None)
 
@@ -486,13 +512,6 @@ class MdixMLConfig:
     ) -> Union[float, int]:
         """
         Read a numeric hyperparameter with optional range validation.
-
-        Args:
-            path:    Dotted path in the database.
-            default: Value returned when the path is absent.
-            min_val: Raise ``ValueError`` if value < min_val.
-            max_val: Raise ``ValueError`` if value > max_val.
-            dtype:   ``float`` or ``int`` — coerces the stored value.
         """
         if self._db.exists(path):
             val = (
@@ -524,12 +543,6 @@ class MdixMLConfig:
     ) -> Any:
         """
         Read an architecture setting with optional enumeration validation.
-
-        Args:
-            path:    Dotted path in the database.
-            default: Value returned when the path is absent.
-            choices: If given, raises ``ValueError`` when the value is
-                     not in this sequence.
         """
         if not self._db.exists(path):
             return default
@@ -558,11 +571,6 @@ class MdixMLConfig:
     ) -> Optional[str]:
         """
         Read a dataset file or directory path.
-
-        Args:
-            path:     Dotted path in the database.
-            required: Raise ``MdixError`` if absent and no default given.
-            default:  Fallback when path is absent and not required.
         """
         if self._db.exists(path):
             return self._db.get_string(path)
@@ -582,11 +590,6 @@ class MdixMLConfig:
     ) -> Any:
         """
         Read a training setting (epochs, batch size, seed, etc.).
-
-        Args:
-            path:    Dotted path in the database.
-            default: Value returned when the path is absent.
-            dtype:   ``int``, ``float``, ``bool``, or ``str``.
         """
         if not self._db.exists(path):
             return default
@@ -599,13 +602,6 @@ class MdixMLConfig:
     def label_map(self, path: str) -> Dict[str, int]:
         """
         Read a label-to-integer mapping stored as an array of table entries.
-
-        Expected format::
-
-            label_map: name = "cat", id = 0
-            # OR as flat key-value pairs under a prefix
-
-        Returns a ``{label_name: integer_id}`` dict.
         """
         result: Dict[str, int] = {}
 
@@ -628,8 +624,6 @@ class MdixMLConfig:
     def all_hyperparameters(self, prefix: str = "hyperparameters") -> Dict[str, Any]:
         """
         Return all values under ``prefix`` as a plain dict.
-
-        Useful for logging or passing to experiment trackers.
         """
         out: Dict[str, Any] = {}
         for key in self._db.get_keys(prefix):

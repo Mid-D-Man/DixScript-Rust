@@ -1,0 +1,16 @@
+{
+  "build": "2",
+  "branch": "master",
+  "commit": "4c61700d",
+  "date": "2026-03-16T06:44:19+01:00",
+  "go_version": "go version go1.24.13 linux/amd64",
+  "package": "github.com/Mid-D-Man/dixscript-go",
+  "tests": {
+    "status": "success",
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "duration_s": 0,
+    "failed_names": []
+  }
+}

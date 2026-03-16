@@ -1,0 +1,222 @@
+name: DixScript — Java/Kotlin CI
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Force run regardless of commit message'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether to run Java/Kotlin CI
+        id: decide
+        run: |
+          RUN=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-java' && RUN=true || true
+          fi
+          echo "should_run=$RUN" >> $GITHUB_OUTPUT
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.should_run == 'true'
+    outputs:
+      status:       ${{ steps.result.outputs.status }}
+      total:        ${{ steps.result.outputs.total }}
+      passed:       ${{ steps.result.outputs.passed }}
+      failed:       ${{ steps.result.outputs.failed }}
+      duration_s:   ${{ steps.result.outputs.duration_s }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Rust toolchain ────────────────────────────────────────────────────────
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-java-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-java-
+
+      # ── Java / Kotlin toolchain ───────────────────────────────────────────────
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      # ── Build Rust JNI library ────────────────────────────────────────────────
+      - name: Build mdix-java native lib
+        run: |
+          cargo build -p mdix-java --release
+          echo "=== Native lib ==="
+          ls -lh target/release/libmdix_java.so || echo "not found"
+
+      # ── Copy native lib into resources (Gradle buildNativeLib does this too) ──
+      - name: Stage native lib for tests
+        run: |
+          mkdir -p mdix-java/src/main/resources/native/linux-x86_64
+          cp target/release/libmdix_java.so \
+             mdix-java/src/main/resources/native/linux-x86_64/
+
+      # ── Build + test ──────────────────────────────────────────────────────────
+      - name: Gradle build and test
+        id: gradle-test
+        continue-on-error: true
+        working-directory: mdix-java
+        run: |
+          START=$(date +%s)
+          ./gradlew test --no-daemon 2>&1 | tee test-output.txt
+          TEST_EXIT=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "TEST_EXIT=$TEST_EXIT"          >> $GITHUB_ENV
+          echo "DURATION_S=$((END - START))"   >> $GITHUB_ENV
+          exit 0
+
+      - name: Parse test results
+        id: result
+        if: always()
+        working-directory: mdix-java
+        run: |
+          # Parse from JUnit XML reports produced by Gradle
+          TOTAL=0; PASSED=0; FAILED=0
+          for f in build/test-results/test/*.xml; do
+            [ -f "$f" ] || continue
+            T=$(grep -oP '(?<=tests=")[0-9]+' "$f" | head -1 || echo 0)
+            F=$(grep -oP '(?<=failures=")[0-9]+' "$f" | head -1 || echo 0)
+            E=$(grep -oP '(?<=errors=")[0-9]+' "$f" | head -1 || echo 0)
+            TOTAL=$((TOTAL + T))
+            FAILED=$((FAILED + F + E))
+            PASSED=$((PASSED + T - F - E))
+          done
+
+          if [ "${TEST_EXIT:-0}" != "0" ]; then STATUS=failed; else STATUS=success; fi
+
+          echo "status=$STATUS"              >> $GITHUB_OUTPUT
+          echo "total=$TOTAL"               >> $GITHUB_OUTPUT
+          echo "passed=$PASSED"             >> $GITHUB_OUTPUT
+          echo "failed=$FAILED"             >> $GITHUB_OUTPUT
+          echo "duration_s=${DURATION_S:-0}" >> $GITHUB_OUTPUT
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-test-results-${{ github.run_number }}
+          path: |
+            mdix-java/build/test-results/
+            mdix-java/build/reports/tests/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  collect-and-deploy:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test]
+    if: always() && needs.parse-trigger.outputs.should_run == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate java-results.json
+        env:
+          BUILD_NUM:   ${{ github.run_number }}
+          BRANCH:      ${{ github.ref_name }}
+          COMMIT:      ${{ github.sha }}
+          BUILD_DATE:  ${{ github.event.head_commit.timestamp }}
+          TEST_STATUS: ${{ needs.build-and-test.outputs.status     || 'skipped' }}
+          TEST_TOTAL:  ${{ needs.build-and-test.outputs.total      || '0' }}
+          TEST_PASSED: ${{ needs.build-and-test.outputs.passed     || '0' }}
+          TEST_FAILED: ${{ needs.build-and-test.outputs.failed     || '0' }}
+          TEST_DUR:    ${{ needs.build-and-test.outputs.duration_s || '0' }}
+        run: |
+          python3 - << 'PYEOF'
+          import json, os
+          def int_env(k): 
+              try: return int(os.environ.get(k,"0"))
+              except: return 0
+          result = {
+              "build":   os.environ.get("BUILD_NUM","0"),
+              "branch":  os.environ.get("BRANCH","unknown"),
+              "commit":  os.environ.get("COMMIT","unknown")[:8],
+              "date":    os.environ.get("BUILD_DATE",""),
+              "package": "com.midmanstudio:dixscript-java",
+              "tests": {
+                  "status":     os.environ.get("TEST_STATUS","skipped"),
+                  "total":      int_env("TEST_TOTAL"),
+                  "passed":     int_env("TEST_PASSED"),
+                  "failed":     int_env("TEST_FAILED"),
+                  "duration_s": int_env("TEST_DUR"),
+              },
+          }
+          with open("java-results.json","w") as f: json.dump(result,f,indent=2)
+          print(json.dumps(result,indent=2))
+          PYEOF
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+          mkdir -p "$WORK/java" "$WORK/java/builds/build_${BUILD_NUM}"
+          cp java-results.json "$WORK/java/java-results.json"
+          cp java-results.json "$WORK/java/builds/build_${BUILD_NUM}/java-results.json"
+          cp .github/landing-index.html "$WORK/index.html"
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then echo "Nothing to deploy"; exit 0; fi
+          git commit -m "DixScript Java CI — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test, collect-and-deploy]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "================================================"
+          echo "  DixScript — Java/Kotlin CI Summary"
+          echo "================================================"
+          echo "Build:  #${{ github.run_number }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Tests:  ${{ needs.build-and-test.result || 'skipped' }}"
+          echo "Deploy: ${{ needs.collect-and-deploy.result || 'skipped' }}"
+          echo ""
+          echo "Results: https://mid-d-man.github.io/DixScript-Rust/java/"

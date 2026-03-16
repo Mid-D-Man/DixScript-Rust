@@ -1,0 +1,31 @@
+[package]
+name = "mdix-java"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.70"
+authors = ["MidManStudio"]
+description = "JNI bridge for DixScript — Java and Kotlin native bindings"
+license = "MIT"
+repository = "https://github.com/Mid-D-Man/DixScript-Rust"
+
+[lib]
+name = "mdix_java"
+# cdylib   → libmdix_java.so / mdix_java.dll / libmdix_java.dylib
+# System.loadLibrary("mdix_java") on the Java side.
+crate-type = ["cdylib"]
+
+[dependencies]
+dixscript = { path = "../dixscript" }
+jni        = { version = "0.21", default-features = false }
+serde_json = "1.0"
+
+[profile.release]
+opt-level     = 3
+lto           = true
+codegen-units = 1
+strip         = true
+debug         = false
+
+[profile.dev]
+opt-level = 0
+debug     = true

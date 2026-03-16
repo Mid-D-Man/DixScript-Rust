@@ -9,161 +9,115 @@
     body {
       font-family: 'Segoe UI', system-ui, sans-serif;
       background: #0d1117; color: #e6edf3;
-      display: flex; align-items: center;
-      justify-content: center; min-height: 100vh; padding: 24px;
+      min-height: 100vh; padding: 40px 24px;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+    h1 { font-size: 1.8rem; font-weight: 700; color: #e6edf3; margin-bottom: 6px; }
+    .subtitle { font-size: 0.82rem; color: #484f58; margin-bottom: 40px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
     }
     .card {
-      background: #161b22; border: 1px solid #30363d;
-      border-radius: 12px; padding: 36px 40px;
-      max-width: 480px; width: 100%;
+      background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+      padding: 24px 20px; text-decoration: none; color: inherit;
+      transition: border-color .15s, background .15s;
+      display: flex; flex-direction: column; gap: 10px;
     }
-    h1 { font-size: 1.6rem; color: #79c0ff; margin-bottom: 4px; }
-    .subtitle { color: #8b949e; font-size: 0.83rem; margin-bottom: 6px; }
-    .divider { border: none; border-top: 1px solid #30363d; margin: 18px 0; }
-    .links { display: flex; flex-direction: column; gap: 10px; }
-    a {
-      display: flex; align-items: center; gap: 12px;
-      background: #1c2128; border: 1px solid #30363d;
-      border-radius: 8px; padding: 13px 16px;
-      text-decoration: none; color: #e6edf3;
-      font-size: 0.88rem; transition: border-color 0.15s, color 0.15s;
+    .card:hover { border-color: #58a6ff; background: #1c2128; }
+    .card-icon { font-size: 1.8rem; line-height: 1; }
+    .card-title { font-size: 1rem; font-weight: 700; color: #e6edf3; }
+    .card-lang  { font-size: 0.72rem; color: #8b949e; }
+    .card-badge {
+      display: inline-block; font-size: 0.65rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 2px 8px; border-radius: 4px; margin-top: auto;
     }
-    a:hover { border-color: #79c0ff; color: #79c0ff; }
-    a:hover .desc { color: #79c0ff; opacity: 0.7; }
-    .icon { font-size: 1.25rem; flex-shrink: 0; width: 28px; text-align: center; }
-    .info { display: flex; flex-direction: column; gap: 1px; }
-    .label { font-weight: 600; }
-    .desc  { font-size: 0.74rem; color: #484f58; transition: color 0.15s; }
-
-    a.tests:hover  { border-color: #3fb950; color: #3fb950; }
-    a.tests:hover .desc { color: #3fb950; }
-    a.bench:hover  { border-color: #f78166; color: #f78166; }
-    a.bench:hover .desc { color: #f78166; }
-    a.flame:hover  { border-color: #e3b341; color: #e3b341; }
-    a.flame:hover .desc { color: #e3b341; }
-    a.ffi:hover    { border-color: #a371f7; color: #a371f7; }
-    a.ffi:hover .desc { color: #a371f7; }
-    a.lsp:hover    { border-color: #58a6ff; color: #58a6ff; }
-    a.lsp:hover .desc { color: #58a6ff; }
-    a.csharp:hover { border-color: #a371f7; color: #a371f7; }
-    a.csharp:hover .desc { color: #a371f7; }
-    a.wasm:hover   { border-color: #39d353; color: #39d353; }
-    a.wasm:hover .desc { color: #39d353; }
-    a.c:hover      { border-color: #f0883e; color: #f0883e; }
-    a.c:hover .desc { color: #f0883e; }
-    a.python:hover { border-color: #2ea8a0; color: #2ea8a0; }
-    a.python:hover .desc { color: #2ea8a0; }
-    a.go:hover     { border-color: #00acd7; color: #00acd7; }
-    a.go:hover .desc { color: #00acd7; }
-    a.java:hover   { border-color: #f89820; color: #f89820; }
-    a.java:hover .desc { color: #f89820; }
-
+    .badge-rust   { background: #2a1500; color: #e05d20; border: 1px solid #7d3800; }
+    .badge-go     { background: #002832; color: #00acd7; border: 1px solid #005f80; }
+    .badge-java   { background: #2a1800; color: #f89820; border: 1px solid #7d4a00; }
+    .badge-python { background: #0f2a28; color: #2ea8a0; border: 1px solid #1a5c57; }
+    .badge-php    { background: #1a1f3a; color: #8892bf; border: 1px solid #3a4080; }
+    .badge-csharp { background: #1a0a2a; color: #9b4dca; border: 1px solid #5a1e90; }
     footer {
-      margin-top: 24px; text-align: center;
-      font-size: 0.72rem; color: #30363d;
+      margin-top: 48px; font-size: 0.72rem; color: #484f58; text-align: center;
     }
+    footer a { color: #484f58; text-decoration: none; }
+    footer a:hover { color: #8b949e; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>DixScript-Rust</h1>
-    <p class="subtitle">MidManStudio — CI Result Dashboard</p>
-    <hr class="divider">
-    <div class="links">
+<div class="container">
 
-      <a class="tests" href="tests/">
-        <span class="icon">✅</span>
-        <div class="info">
-          <span class="label">Test Results</span>
-          <span class="desc">cargo test — per-suite breakdown with captured output</span>
-        </div>
-      </a>
+  <h1>DixScript-Rust</h1>
+  <p class="subtitle">MidManStudio · CI Dashboard · Results per language</p>
 
-      <a class="bench" href="bench/">
-        <span class="icon">📊</span>
-        <div class="info">
-          <span class="label">Benchmarks</span>
-          <span class="desc">criterion — throughput and latency across all suites</span>
-        </div>
-      </a>
+  <div class="grid">
 
-      <a class="flame" href="flame/">
-        <span class="icon">🔥</span>
-        <div class="info">
-          <span class="label">Flamegraphs</span>
-          <span class="desc">perf + cargo-flamegraph — profiling for hot paths</span>
-        </div>
-      </a>
+    <a class="card" href="tests/">
+      <div class="card-icon">🦀</div>
+      <div class="card-title">Rust Tests</div>
+      <div class="card-lang">dixscript core · mdix-cli · mdix-lsp</div>
+      <span class="card-badge badge-rust">Rust</span>
+    </a>
 
-      <a class="ffi" href="ffi/">
-        <span class="icon">🔗</span>
-        <div class="info">
-          <span class="label">FFI Builds</span>
-          <span class="desc">mdix-ffi — cdylib / staticlib for Linux and macOS</span>
-        </div>
-      </a>
+    <a class="card" href="bench/">
+      <div class="card-icon">📊</div>
+      <div class="card-title">Benchmarks</div>
+      <div class="card-lang">Criterion · throughput · lexer · runtime</div>
+      <span class="card-badge badge-rust">Rust</span>
+    </a>
 
-      <a class="lsp" href="lsp/">
-        <span class="icon">🧠</span>
-        <div class="info">
-          <span class="label">LSP Tests</span>
-          <span class="desc">mdix-lsp — unit + integration tests with latency per capability</span>
-        </div>
-      </a>
+    <a class="card" href="flame/">
+      <div class="card-icon">🔥</div>
+      <div class="card-title">Flamegraphs</div>
+      <div class="card-lang">perf · cargo-flamegraph · bench profile</div>
+      <span class="card-badge badge-rust">Rust</span>
+    </a>
 
-      <a class="csharp" href="csharp/">
-        <span class="icon">📦</span>
-        <div class="info">
-          <span class="label">C# Core Tests</span>
-          <span class="desc">dotnet test — MidManStudio.Mdix.Core managed + native tests</span>
-        </div>
-      </a>
+    <a class="card" href="go/">
+      <div class="card-icon">🔵</div>
+      <div class="card-title">Go Tests</div>
+      <div class="card-lang">dixscript-go · cgo · FFI bindings</div>
+      <span class="card-badge badge-go">Go</span>
+    </a>
 
-      <a class="wasm" href="wasm/">
-        <span class="icon">🌐</span>
-        <div class="info">
-          <span class="label">WASM Playground</span>
-          <span class="desc">@dixscript/core — live browser test of the WebAssembly package</span>
-        </div>
-      </a>
+    <a class="card" href="java/">
+      <div class="card-icon">☕</div>
+      <div class="card-title">Java / Kotlin Tests</div>
+      <div class="card-lang">dixscript-java · JNI · Gradle</div>
+      <span class="card-badge badge-java">Java</span>
+    </a>
 
-      <a class="c" href="c/">
-        <span class="icon">⚙️</span>
-        <div class="info">
-          <span class="label">C/C++ Package</span>
-          <span class="desc">mdix-c — native headers + libs for Linux, Windows, macOS</span>
-        </div>
-      </a>
+    <a class="card" href="python/">
+      <div class="card-icon">🐍</div>
+      <div class="card-title">Python Tests</div>
+      <div class="card-lang">midmanstudio-mdix · PyO3 · maturin</div>
+      <span class="card-badge badge-python">Python</span>
+    </a>
 
-      <a class="python" href="python/">
-        <span class="icon">🐍</span>
-        <div class="info">
-          <span class="label">Python Tests</span>
-          <span class="desc">midmanstudio-mdix — pytest suite including numpy/pandas ML tests</span>
-        </div>
-      </a>
+    <a class="card" href="php/">
+      <div class="card-icon">🐘</div>
+      <div class="card-title">PHP Tests</div>
+      <div class="card-lang">midmanstudio/mdix · PHP FFI · PHPUnit</div>
+      <span class="card-badge badge-php">PHP</span>
+    </a>
 
-      <a class="go" href="go/">
-        <span class="icon">🔵</span>
-        <div class="info">
-          <span class="label">Go Tests</span>
-          <span class="desc">dixscript-go — go test suite via cgo bridge</span>
-        </div>
-      </a>
+    <a class="card" href="ffi/">
+      <div class="card-icon">🔗</div>
+      <div class="card-title">FFI Builds</div>
+      <div class="card-lang">C# NuGet · mdix-ffi · native libs</div>
+      <span class="card-badge badge-csharp">C#</span>
+    </a>
 
-      <a class="java" href="java/">
-        <span class="icon">☕</span>
-        <div class="info">
-          <span class="label">Java / Kotlin Tests</span>
-          <span class="desc">dixscript-java — JUnit 5 + Kotlin coroutine tests via JNI</span>
-        </div>
-      </a>
-
-    </div>
-    <footer>
-      Trigger: --ffi / --lsp / --mdix-cs / --mdix-wasm / --mdix-c / --mdix-py / --mdix-go / --mdix-java
-      · workflow_dispatch for manual runs
-    </footer>
   </div>
+
+  <footer>
+    <a href="https://github.com/Mid-D-Man/DixScript-Rust">github.com/Mid-D-Man/DixScript-Rust</a>
+    &nbsp;·&nbsp; MIT License
+  </footer>
+
+</div>
 </body>
 </html>

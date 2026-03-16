@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Mon Mar 16 13:14:24 UTC 2026
+Generated: Mon Mar 16 13:18:24 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: cd33778520c83f923bfa4a63466c7ef9f196f581
+Commit: ce0138a3ce30c490329345cf0a48929fb9dedd13
 Branch: master
 ==================================
 
@@ -16,7 +16,7 @@ Benchmark Files:
 
 Configuration Files:
 ===================
-Cargo.toml....
+Cargo.toml
 README.md
 rustfmt.toml
 

@@ -1,6 +1,5 @@
-
 [workspace]
-members = ["dixscript", "mdix-cli", "mdix-lsp", "mdix-ffi", "mdix-wasm", "mdix-python"]
+members = ["dixscript", "mdix-cli", "mdix-lsp", "mdix-ffi", "mdix-wasm", "mdix-python", "mdix-java"]
 resolver = "2"
 
 [profile.release]
@@ -18,4 +17,3 @@ debug     = true
 opt-level = "s"
 # resolver 2 is required for proper feature unification across workspace members.
 # Without it, optional features can leak across crates in surprising ways.
-

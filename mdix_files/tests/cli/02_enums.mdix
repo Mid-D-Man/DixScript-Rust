@@ -1,0 +1,23 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "CLI Test — Enums"
+  features -> "advanced"
+)
+
+@ENUMS(
+  Environment { DEV = 1, STAGING = 2, PROD = 3 }
+  LogLevel    { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3 }
+  Status      { ACTIVE, INACTIVE, PENDING }
+)
+
+@DATA(
+  app_name          = "EnumApp"
+  port              = 9090
+  current_env<enum> = Environment.PROD
+  log_level<enum>   = LogLevel.INFO
+  status<enum>      = Status.ACTIVE
+
+  server: host = "prod.example.com", port = 443, ssl = true
+
+  environments:: "development", "staging", "production"
+)

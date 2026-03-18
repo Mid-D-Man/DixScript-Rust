@@ -1,0 +1,52 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "CLI Test — Game Config"
+  features -> "advanced"
+)
+
+@ENUMS(
+  WeaponClass { PISTOL = 1, RIFLE = 2, SHOTGUN = 3, SNIPER = 4 }
+  Rarity      { COMMON, UNCOMMON, RARE, EPIC, LEGENDARY }
+)
+
+@QUICKFUNCS(
+  ~weapon<object>(id<string>, name<string>, class<enum>, damage<int>, rarity<enum>) {
+    return {
+      id     = id
+      name   = name
+      class  = class
+      damage = damage
+      rarity = rarity
+    }
+  }
+
+  ~enemy<object>(id<string>, name<string>, health<int>, xp<int>) {
+    return {
+      id     = id
+      name   = name
+      health = health
+      xp     = xp
+    }
+  }
+)
+
+@DATA(
+  game_title        = "Project Alpha"
+  game_version      = "0.1.0"
+  build_number<int> = 1001
+
+  game_settings: max_players<int> = 4, match_duration<int> = 300, friendly_fire<bool> = false
+
+  weapons::
+    weapon("WPN_001", "Standard Pistol", WeaponClass.PISTOL,  25, Rarity.COMMON),
+    weapon("WPN_002", "Assault Rifle",   WeaponClass.RIFLE,   45, Rarity.UNCOMMON),
+    weapon("WPN_003", "Combat Shotgun",  WeaponClass.SHOTGUN, 65, Rarity.RARE),
+    weapon("WPN_004", "Sniper Rifle",    WeaponClass.SNIPER,  90, Rarity.EPIC)
+
+  enemies::
+    enemy("ENE_001", "Grunt",      50,  10),
+    enemy("ENE_002", "Soldier",   100,  25),
+    enemy("ENE_003", "Commander", 200, 100)
+
+  spawn_locations:: "alpha", "bravo", "charlie", "delta"
+)

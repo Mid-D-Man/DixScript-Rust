@@ -1,4 +1,3 @@
-
 name: Update Project Structure
 
 on:
@@ -24,7 +23,9 @@ jobs:
         run: |
           echo "=== Updating DixScript Rust project structure ==="
           mkdir -p "others"
-          
+
+          WORKSPACE_MEMBERS="dixscript mdix-cli mdix-ffi mdix-wasm mdix-python mdix-java mdix-lsp mdix-c"
+
           {
             echo "Project Structure Documentation - DixScript Rust Port"
             echo "Generated: $(date -u)"
@@ -33,36 +34,113 @@ jobs:
             echo "Branch: ${{ github.ref_name }}"
             echo "=================================="
             echo
+
+            echo "Workspace Members:"
+            echo "=================="
+            for member in $WORKSPACE_MEMBERS; do
+              if [ -d "$member" ]; then
+                echo "  ✓ $member/"
+              fi
+            done
+            echo
+
             echo "Source Files:"
             echo "============"
-            find src -type f -name "*.rs" | sort
+            found_src=0
+            for member in $WORKSPACE_MEMBERS; do
+              if [ -d "$member/src" ]; then
+                while IFS= read -r f; do
+                  echo "  $f"
+                  found_src=1
+                done < <(find "$member/src" -type f -name "*.rs" | sort)
+              fi
+            done
+            [ "$found_src" -eq 0 ] && echo "  (none found)"
             echo
+
             echo "Test Files:"
             echo "==========="
-            find tests -type f -name "*.rs" 2>/dev/null | sort || echo "No tests directory"
+            found_test=0
+            for member in $WORKSPACE_MEMBERS; do
+              if [ -d "$member/tests" ]; then
+                while IFS= read -r f; do
+                  echo "  $f"
+                  found_test=1
+                done < <(find "$member/tests" -type f -name "*.rs" | sort)
+              fi
+            done
+            [ "$found_test" -eq 0 ] && echo "  (none found)"
             echo
+
             echo "Benchmark Files:"
-            echo "==============="
-            find benches -type f -name "*.rs" 2>/dev/null | sort || echo "No benches directory"
-            echo
-            echo "Configuration Files:"
-            echo "==================="
-            ls -1 *.toml *.md 2>/dev/null | sort
-            echo
-            echo "Total Rust Files:"
             echo "================"
-            echo "Source: $(find src -type f -name "*.rs" | wc -l)"
-            echo "Tests: $(find tests -type f -name "*.rs" 2>/dev/null | wc -l || echo 0)"
-            echo "Benches: $(find benches -type f -name "*.rs" 2>/dev/null | wc -l || echo 0)"
+            found_bench=0
+            for member in $WORKSPACE_MEMBERS; do
+              if [ -d "$member/benches" ]; then
+                while IFS= read -r f; do
+                  echo "  $f"
+                  found_bench=1
+                done < <(find "$member/benches" -type f -name "*.rs" | sort)
+              fi
+            done
+            [ "$found_bench" -eq 0 ] && echo "  (none found)"
+            echo
+
+            echo "DixScript Sample Files (.mdix):"
+            echo "================================"
+            if [ -d "mdix_files" ]; then
+              find mdix_files -name "*.mdix" -type f | sort | sed 's/^/  /'
+            else
+              echo "  (none found)"
+            fi
+            echo
+
+            echo "Configuration Files (root):"
+            echo "==========================="
+            ls -1 *.toml *.md 2>/dev/null | sort | sed 's/^/  /' || echo "  (none found)"
+            echo
+
+            echo "GitHub Workflows:"
+            echo "================="
+            ls -1 .github/workflows/*.yml 2>/dev/null | sort | sed 's/^/  /' || echo "  (none found)"
+            echo
+
+            echo "Total Rust File Counts:"
+            echo "======================="
+            src_count=0
+            test_count=0
+            bench_count=0
+            for member in $WORKSPACE_MEMBERS; do
+              [ -d "$member/src" ]    && src_count=$((src_count   + $(find "$member/src"    -name "*.rs" -type f | wc -l)))
+              [ -d "$member/tests" ]  && test_count=$((test_count + $(find "$member/tests"  -name "*.rs" -type f | wc -l)))
+              [ -d "$member/benches" ] && bench_count=$((bench_count + $(find "$member/benches" -name "*.rs" -type f | wc -l)))
+            done
+            echo "  Source files:    $src_count"
+            echo "  Test files:      $test_count"
+            echo "  Benchmark files: $bench_count"
+            echo "  Total:           $((src_count + test_count + bench_count))"
+            echo
+
+            echo "Per-Member Breakdown:"
+            echo "===================="
+            for member in $WORKSPACE_MEMBERS; do
+              if [ -d "$member" ]; then
+                s=0; t=0; b=0
+                [ -d "$member/src" ]     && s=$(find "$member/src"    -name "*.rs" -type f | wc -l)
+                [ -d "$member/tests" ]   && t=$(find "$member/tests"  -name "*.rs" -type f | wc -l)
+                [ -d "$member/benches" ] && b=$(find "$member/benches" -name "*.rs" -type f | wc -l)
+                echo "  $member: src=$s  tests=$t  benches=$b"
+              fi
+            done
           } > "others/ProjectStructure.txt"
-          
+
           cat "others/ProjectStructure.txt"
 
       - name: Commit Updated Project Structure
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action - DixScript Rust"
-          
+
           if ! git diff --quiet "others/ProjectStructure.txt" 2>/dev/null; then
             git add "others/ProjectStructure.txt"
             git commit -m "Auto-update DixScript Rust project structure [skip ci]"

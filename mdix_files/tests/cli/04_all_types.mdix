@@ -1,0 +1,31 @@
+@CONFIG(
+  version -> "1.0.0"
+  author  -> "CLI Test — All Data Types"
+)
+
+@DATA(
+  int_pos<int>       = 42
+  int_neg<int>       = -17
+  float_val<float>   = 3.14f
+  double_val<double> = 2.718281828
+  str_dq<string>     = "Hello DixScript"
+  str_sq<string>     = 'Single quotes work'
+  bool_t<bool>       = true
+  bool_f<bool>       = false
+  hex_color<hex>     = #FF5733
+  hex_lit<hex>       = 0xDEAD
+  date_val<date>     = 2025-06-15
+  ts_val<timestamp>  = 2025-06-15T09:30:00Z
+  null_val           = null
+  blob_val           = b:("SGVsbG8gV29ybGQ=")
+  regex_val          = r:("^[a-zA-Z0-9]+$")
+  tuple_val          = t:(1, "text", true)
+  int_array          = [1, 2, 3, 4, 5]
+  str_array          = ["alpha", "beta", "gamma"]
+  nested_array       = [[1, 2], [3, 4]]
+  simple_obj         = { id = 1, name = "TypesObj", active = true }
+
+  metadata: created<date> = 2025-01-01, version = "1.0.0", build<int> = 100
+
+  color_names:: "red", "green", "blue"
+)

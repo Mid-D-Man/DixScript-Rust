@@ -1,0 +1,47 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "CLI Test — QuickFuncs"
+  features -> "advanced"
+)
+
+@ENUMS(
+  Tier { FREE = 1, PRO = 2, ENTERPRISE = 3 }
+)
+
+@QUICKFUNCS(
+  ~makeServer<object>(host<string>, port<int>, ssl<bool>) {
+    return {
+      host = host
+      port = port
+      ssl  = ssl
+    }
+  }
+
+  ~makeUser<object>(name<string>, role<string>, active<bool>) {
+    return {
+      name   = name
+      role   = role
+      active = active
+    }
+  }
+
+  ~tierLabel<string>(tier<enum>) {
+    return tier == Tier.FREE       ? "Free Tier" :
+           tier == Tier.PRO        ? "Pro Tier"  : "Enterprise Tier"
+  }
+)
+
+@DATA(
+  app_name       = "FuncApp"
+  app_tier<enum> = Tier.PRO
+  tier_name      = tierLabel(Tier.PRO)
+
+  servers::
+    makeServer("primary.local",   8080, false),
+    makeServer("secondary.local", 8081, false),
+    makeServer("backup.local",    8082, false)
+
+  admins::
+    makeUser("alice", "admin", true),
+    makeUser("bob",   "admin", true)
+)

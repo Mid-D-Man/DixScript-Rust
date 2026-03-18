@@ -1,0 +1,29 @@
+@CONFIG(
+  version -> "1.0.0"
+  author  -> "CLI Test — App Config with DLM"
+)
+
+@DLM(
+  DCompressor.gzip
+  DEncryptor.aes256
+)
+
+@DATA(
+  service_name    = "ProductionService"
+  service_version = "2.0.0"
+  environment     = "production"
+
+  server:        host = "prod.internal.example.com", port = 8443, ssl = true, timeout<int> = 30
+
+  database:      host = "db.internal.example.com", port<int> = 5432, name = "prod_db", pool_size<int> = 20
+
+  feature_flags: new_dashboard<bool> = true, beta_api<bool> = false, analytics<bool> = true
+
+  allowed_origins:: "https://app.example.com", "https://admin.example.com"
+
+  admin_emails:: "ops@example.com", "devops@example.com"
+)
+
+@SECURITY(
+  encryption -> { mode = "keyfile", algorithm = "aes256-gcm" }
+)

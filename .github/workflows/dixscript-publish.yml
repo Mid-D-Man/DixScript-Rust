@@ -16,6 +16,7 @@ on:
           - tests
           - bench
           - flame
+          - cli
           - all
 
 permissions:
@@ -32,31 +33,35 @@ jobs:
     outputs:
       run_tests: ${{ steps.decide.outputs.run_tests }}
       run_bench: ${{ steps.decide.outputs.run_bench }}
-      run_flame:  ${{ steps.decide.outputs.run_flame }}
+      run_flame: ${{ steps.decide.outputs.run_flame }}
+      run_cli:   ${{ steps.decide.outputs.run_cli }}
     steps:
       - name: Decide what to publish
         id: decide
         run: |
-          T=false; B=false; F=false
+          T=false; B=false; F=false; C=false
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             case "${{ github.event.inputs.publish_type }}" in
               tests) T=true ;;
               bench) B=true ;;
-              flame)  F=true ;;
-              all)   T=true; B=true; F=true ;;
+              flame) F=true ;;
+              cli)   C=true ;;
+              all)   T=true; B=true; F=true; C=true ;;
             esac
           else
             MSG="${{ github.event.head_commit.message }}"
             echo "$MSG" | grep -qiE '\-\-publish-(tests|all)' && T=true || true
             echo "$MSG" | grep -qiE '\-\-publish-(bench|all)' && B=true || true
             echo "$MSG" | grep -qiE '\-\-publish-(flame|all)' && F=true || true
+            echo "$MSG" | grep -qiE '\-\-publish-(cli|all)'   && C=true || true
           fi
 
           echo "run_tests=$T" >> $GITHUB_OUTPUT
           echo "run_bench=$B" >> $GITHUB_OUTPUT
-          echo "run_flame=$F"  >> $GITHUB_OUTPUT
-          echo "Tests=$T  Bench=$B  Flame=$F"
+          echo "run_flame=$F" >> $GITHUB_OUTPUT
+          echo "run_cli=$C"   >> $GITHUB_OUTPUT
+          echo "Tests=$T  Bench=$B  Flame=$F  Cli=$C"
 
   # ── 2. Run tests ───────────────────────────────────────────────────────────
   run-tests:
@@ -96,7 +101,6 @@ jobs:
           cargo test --color=never --no-fail-fast -- --show-output 2>&1 | tee test-raw.txt
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT=${TEST_EXIT_CODE}" >> $GITHUB_ENV
-
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             echo "Tests failed with exit code ${TEST_EXIT_CODE} — continuing to generate report"
           else
@@ -177,7 +181,6 @@ jobs:
                       cur_name  = 'lib (unit tests)'
                       cur_tests = []
                       cur_dur   = 0.0
-
                   tname, status, dur = m.group(1), m.group(2), m.group(3)
                   cur_tests.append({
                       'name':        tname,
@@ -226,13 +229,6 @@ jobs:
               json.dump(result, f, indent=2)
 
           print(f"Suites:{len(suites)}  Total:{total}  Passed:{passed}  Failed:{failed}")
-          print(f"Output captured for {len(test_output)} tests")
-          if failed > 0:
-              print("FAILED tests:")
-              for s in suites:
-                  for t in s['tests']:
-                      if t['status'] == 'failed':
-                          print(f"  {s['name']}::{t['name']}")
           PYEOF
 
       - name: Build HTML report
@@ -432,9 +428,6 @@ jobs:
               json.dump(result, f, indent=2)
 
           print(f"Suites:{len(suites)}  Benchmarks:{len(benches)}")
-          for s in suites:
-              for b in s['benchmarks']:
-                  print(f"  {s['name']}/{b['name']}: {b['mean_ns']:.1f} ns")
           PYEOF
 
       - name: Build HTML report
@@ -486,42 +479,26 @@ jobs:
         run: |
           echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
           echo 0  | sudo tee /proc/sys/kernel/kptr_restrict
-          echo "perf_event_paranoid=$(cat /proc/sys/kernel/perf_event_paranoid)"
-          echo "kptr_restrict=$(cat /proc/sys/kernel/kptr_restrict)"
 
       - name: Install perf and create kernel-version symlink
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y linux-tools-common linux-tools-generic 2>/dev/null || true
           sudo apt-get install -y linux-tools-$(uname -r) 2>/dev/null || true
-
-          KERNEL_VER=$(uname -r)
           PERF_BIN=$(find /usr/lib/linux-tools -name "perf" -type f 2>/dev/null | sort | tail -1)
-
           if [ -n "$PERF_BIN" ]; then
-            echo "Found perf binary: $PERF_BIN"
             sudo ln -sf "$PERF_BIN" /usr/local/bin/perf
-            sudo mkdir -p "/usr/lib/linux-tools/${KERNEL_VER}"
-            if [ ! -f "/usr/lib/linux-tools/${KERNEL_VER}/perf" ]; then
-              sudo ln -sf "$PERF_BIN" "/usr/lib/linux-tools/${KERNEL_VER}/perf"
-              echo "Symlinked perf -> /usr/lib/linux-tools/${KERNEL_VER}/perf"
-            fi
-          else
-            echo "WARNING: no perf binary found under /usr/lib/linux-tools"
+            sudo mkdir -p "/usr/lib/linux-tools/$(uname -r)"
+            sudo ln -sf "$PERF_BIN" "/usr/lib/linux-tools/$(uname -r)/perf" 2>/dev/null || true
           fi
-
-          echo ""
-          echo "perf version check:"
-          perf --version || echo "WARNING: perf not available via PATH"
-          ls -la "/usr/lib/linux-tools/${KERNEL_VER}/" 2>/dev/null || echo "kernel-specific dir empty"
+          perf --version || echo "WARNING: perf not available"
 
       - name: Install cargo-flamegraph
         run: |
           cargo install flamegraph --locked 2>/dev/null || \
           cargo install flamegraph          2>/dev/null || true
-          cargo flamegraph --version 2>/dev/null || echo "WARNING: cargo-flamegraph not installed"
 
-      - name: Pre-build bench targets (bench profile)
+      - name: Pre-build bench targets
         continue-on-error: true
         run: |
           cargo build --profile bench \
@@ -541,37 +518,17 @@ jobs:
         run: |
           mkdir -p flame-output
           export PATH="$HOME/.cargo/bin:$PATH"
-
-          if ! command -v perf &>/dev/null; then
-            echo "perf not on PATH — skipping flamegraph generation"
-            exit 0
-          fi
-
-          if ! cargo flamegraph --version &>/dev/null 2>&1; then
-            echo "cargo-flamegraph not installed — skipping flamegraph generation"
-            exit 0
-          fi
+          if ! command -v perf &>/dev/null; then exit 0; fi
+          if ! cargo flamegraph --version &>/dev/null 2>&1; then exit 0; fi
 
           run_flame() {
-            local target="$1"
-            local outfile="$2"
-
-            echo ""
-            echo "--- flamegraph: $target ---"
-
-            cargo flamegraph \
-              --profile bench \
-              --bench "$target" \
-              --output "flame-output/${outfile}.svg" \
-              --no-inline \
-              -- --bench \
-              2>&1 || true
-
+            local target="$1" outfile="$2"
+            cargo flamegraph --profile bench --bench "$target" \
+              --output "flame-output/${outfile}.svg" --no-inline -- --bench 2>&1 || true
             if [ -f "flame-output/${outfile}.svg" ] && \
                [ "$(wc -c < "flame-output/${outfile}.svg")" -gt 512 ]; then
-              echo "OK: ${outfile}.svg ($(wc -c < "flame-output/${outfile}.svg") bytes)"
+              echo "OK: ${outfile}.svg"
             else
-              echo "SKIP: $outfile (empty or missing SVG — check perf output above)"
               rm -f "flame-output/${outfile}.svg"
             fi
           }
@@ -586,19 +543,13 @@ jobs:
           run_flame "binary_serialization_benchmark" "binary_serialization_benchmark"
           run_flame "runtime_benchmark"              "runtime_benchmark"
 
-          echo ""
-          echo "Generated flamegraphs:"
-          ls -lh flame-output/*.svg 2>/dev/null || echo "(none produced)"
-
       - name: Build flamegraph index HTML
         run: |
           BUILD_NUM="${{ github.run_number }}"
           BRANCH="${{ github.ref_name }}"
           COMMIT="${GITHUB_SHA:0:8}"
           DATE="$(date -u)"
-
           mkdir -p flame-output
-
           CARDS_FILE="$(mktemp)"
           SVG_COUNT=0
 
@@ -610,15 +561,7 @@ jobs:
           <div class="card" data-name="${name}">
             <div class="card-header">
               <h2>🔥 ${name}</h2>
-              <span class="card-hint">Click frames to zoom · Right-click to reset</span>
               <div class="card-actions">
-                <div class="height-row">
-                  <span style="font-size:0.72rem;color:#484f58">Height:</span>
-                  <button class="height-btn" onclick="setHeight('${name}', 320)">S</button>
-                  <button class="height-btn active" onclick="setHeight('${name}', 520)">M</button>
-                  <button class="height-btn" onclick="setHeight('${name}', 800)">L</button>
-                  <button class="height-btn" onclick="setHeight('${name}', 1100)">XL</button>
-                </div>
                 <a class="btn btn-download" href="${name}.svg" download="${name}.svg">Download SVG</a>
                 <a class="btn btn-open" href="${name}.svg" target="_blank">Open</a>
               </div>
@@ -632,35 +575,17 @@ jobs:
           done
 
           if [ "$SVG_COUNT" -eq 0 ]; then
-            cat > "$CARDS_FILE" << NOEOF
-          <div class="card">
-            <div class="no-graph">
-              <p>No flamegraphs were generated.</p>
-              <p style="font-size:0.78rem;margin-top:8px">
-                Check the <strong>Install perf and create kernel-version symlink</strong>
-                and <strong>Generate flamegraphs</strong> step logs for the specific error.
-                Common causes: (1) perf binary found via PATH but kernel-version symlink
-                missing — the install step now creates both; (2) <code>lto</code> was set
-                to <code>"thin"</code> in <code>[profile.bench]</code> which breaks DWARF
-                stack unwinding — ensure <code>lto = false</code> in Cargo.toml.
-              </p>
-            </div>
-          </div>
-          NOEOF
+            echo '<div class="card"><div class="no-graph"><p>No flamegraphs generated.</p></div></div>' > "$CARDS_FILE"
           fi
 
           cp .github/flame-results-template.html flame-output/index.html
-
           python3 - "$CARDS_FILE" << 'PYEOF'
           import sys
-          cards = open(sys.argv[1], encoding='utf-8').read()
-          html_path = 'flame-output/index.html'
-          content = open(html_path, encoding='utf-8').read()
-          content = content.replace('CARDS_PLACEHOLDER', cards)
-          open(html_path, 'w', encoding='utf-8').write(content)
-          print(f"Injected {len(cards)} bytes of card HTML into index.html")
+          cards    = open(sys.argv[1], encoding='utf-8').read()
+          html     = open('flame-output/index.html', encoding='utf-8').read()
+          html     = html.replace('CARDS_PLACEHOLDER', cards)
+          open('flame-output/index.html', 'w', encoding='utf-8').write(html)
           PYEOF
-
           rm -f "$CARDS_FILE"
 
           sed -i "s/BUILD_NUM_PLACEHOLDER/${BUILD_NUM}/g" flame-output/index.html
@@ -676,15 +601,100 @@ jobs:
           path: flame-output/
           retention-days: 30
 
-  # ── 5. Deploy to gh-pages ──────────────────────────────────────────────────
+  # ── 5. CLI Tests ───────────────────────────────────────────────────────────
+  run-cli-test:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_cli == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Get Rust version
+        id: rustver
+        run: echo "ver=$(rustc --version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-cli-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build mdix-cli
+        run: |
+          echo "=== Building mdix-cli (debug) ==="
+          cargo build -p mdix-cli
+          echo "Binary: $(ls -lh target/debug/mdix)"
+
+      - name: Verify test fixture files exist
+        run: |
+          echo "=== Checking test fixtures ==="
+          for f in \
+            mdix_files/tests/cli/01_basic.mdix \
+            mdix_files/tests/cli/02_enums.mdix \
+            mdix_files/tests/cli/03_quickfuncs.mdix \
+            mdix_files/tests/cli/04_all_types.mdix \
+            mdix_files/tests/cli/05_game_config.mdix \
+            mdix_files/tests/cli/06_app_config.mdix; do
+            if [ -f "$f" ]; then
+              echo "  ✓ $f"
+            else
+              echo "  ✗ MISSING: $f"
+            fi
+          done
+
+      - name: Run CLI test suite
+        continue-on-error: true
+        env:
+          BUILD_NUM:    ${{ github.run_number }}
+          BRANCH:       ${{ github.ref_name }}
+          COMMIT:       ${{ github.sha }}
+          BUILD_DATE:   ${{ github.event.head_commit.timestamp }}
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+          MDIX_BINARY:  target/debug/mdix
+        run: |
+          python3 tools/run_cli_tests.py
+          echo "CLI_TEST_EXIT=$?" >> $GITHUB_ENV
+
+      - name: Build HTML report
+        env:
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+        run: |
+          cp .github/dixscript-cli-test.html cli-test-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  cli-test-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       cli-test-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            cli-test-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     cli-test-index.html
+          sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        cli-test-index.html
+
+      - name: Upload CLI test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-test-results-${{ github.run_number }}
+          path: |
+            cli-test-results.json
+            cli-test-index.html
+          retention-days: 30
+
+  # ── 6. Deploy to gh-pages ──────────────────────────────────────────────────
   deploy-results:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, run-tests, run-bench, run-flame]
+    needs: [parse-trigger, run-tests, run-bench, run-flame, run-cli-test]
     if: |
       always() &&
-      (needs.run-tests.result  == 'success' ||
-       needs.run-bench.result  == 'success' ||
-       needs.run-flame.result  == 'success')
+      (needs.run-tests.result    == 'success' ||
+       needs.run-bench.result    == 'success' ||
+       needs.run-flame.result    == 'success' ||
+       needs.run-cli-test.result == 'success')
 
     steps:
       - uses: actions/checkout@v4
@@ -709,6 +719,13 @@ jobs:
         with:
           name: flamegraph-${{ github.run_number }}
           path: deploy/flame/
+
+      - name: Download CLI test results
+        if: needs.run-cli-test.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-test-results-${{ github.run_number }}
+          path: deploy/cli/
 
       - name: Deploy to gh-pages
         run: |
@@ -750,8 +767,15 @@ jobs:
             echo "Flamegraphs deployed"
           fi
 
-          # Always write the canonical landing page from the template.
-          # The template already includes all four links including FFI.
+          if [ -d "deploy/cli" ]; then
+            mkdir -p "$WORK/cli" "$WORK/cli/builds/build_${BUILD_NUM}"
+            cp deploy/cli/cli-test-results.json "$WORK/cli/cli-test-results.json"
+            cp deploy/cli/cli-test-index.html   "$WORK/cli/index.html"
+            cp deploy/cli/cli-test-results.json "$WORK/cli/builds/build_${BUILD_NUM}/cli-test-results.json"
+            cp deploy/cli/cli-test-index.html   "$WORK/cli/builds/build_${BUILD_NUM}/index.html"
+            echo "CLI test results deployed"
+          fi
+
           cp .github/landing-index.html "$WORK/index.html"
 
           cd "$WORK"
@@ -765,13 +789,12 @@ jobs:
             "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
             gh-pages
           echo ""
-          echo "Deployed to gh-pages"
-          echo "  https://mid-d-man.github.io/DixScript-Rust/"
+          echo "Deployed → https://mid-d-man.github.io/DixScript-Rust/"
 
-  # ── 6. Summary ─────────────────────────────────────────────────────────────
+  # ── 7. Summary ─────────────────────────────────────────────────────────────
   summary:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, run-tests, run-bench, run-flame, deploy-results]
+    needs: [parse-trigger, run-tests, run-bench, run-flame, run-cli-test, deploy-results]
     if: always()
     steps:
       - name: Print summary
@@ -781,9 +804,10 @@ jobs:
           echo "======================================================="
           echo "Build:     #${{ github.run_number }}"
           echo "Branch:    ${{ github.ref_name }}"
-          echo "Tests:     ${{ needs.run-tests.result  || 'skipped' }}"
-          echo "Bench:     ${{ needs.run-bench.result  || 'skipped' }}"
-          echo "Flame:     ${{ needs.run-flame.result  || 'skipped' }}"
+          echo "Tests:     ${{ needs.run-tests.result     || 'skipped' }}"
+          echo "Bench:     ${{ needs.run-bench.result     || 'skipped' }}"
+          echo "Flame:     ${{ needs.run-flame.result     || 'skipped' }}"
+          echo "CLI:       ${{ needs.run-cli-test.result  || 'skipped' }}"
           echo "Deploy:    ${{ needs.deploy-results.result || 'skipped' }}"
           echo ""
           echo "View results: https://mid-d-man.github.io/DixScript-Rust/"

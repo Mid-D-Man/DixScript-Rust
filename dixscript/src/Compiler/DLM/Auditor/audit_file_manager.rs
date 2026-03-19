@@ -1,8 +1,8 @@
+// dixscript/src/Compiler/DLM/Auditor/audit_file_manager.rs
 //! Centralizes all `.mdix.au` file I/O: write, rotate, lock, and read-back.
 //!
-//! Mirrors the role of KeyFileManager for key files.
 //! All write operations follow: unlock → write → re-lock.
-//! pub(crate) — external consumers use AuditFileReader (read-only).
+//! pub(crate) — external consumers use AuditFileParser (read-only).
 
 use super::audit_file_data::{AuditEntryRecord, AuditFileConfig, AuditFileData};
 use super::audit_file_format::{AuditFileParser, AuditFileWriter};
@@ -25,7 +25,7 @@ impl AuditFileManager {
         &self.audit_file_path
     }
 
-    // ── Read operations (no unlock needed) ───────────────────────────────────
+    // ── Read operations (no unlock needed — read-only files are still readable) ──
 
     /// Load the full audit data from disk. Returns None if file does not exist.
     pub(crate) fn load(&self) -> Option<AuditFileData> {
@@ -55,9 +55,11 @@ impl AuditFileManager {
     /// Rotates to an archive first if the entry limit is reached.
     pub(crate) fn append_entry(
         &self,
-        entry:       &AuditEntryRecord,
-        config:      &AuditFileConfig,
+        entry:  &AuditEntryRecord,
+        config: &AuditFileConfig,
     ) -> Result<(), String> {
+        // Rotation may rename the existing file; unlock it first for Windows
+        // compatibility (read-only files cannot be renamed on Windows).
         self.rotate_if_needed()?;
 
         let path        = Path::new(&self.audit_file_path);
@@ -72,7 +74,6 @@ impl AuditFileManager {
 
         // Always re-lock, even if the write failed.
         if let Err(e) = file_permissions::set_readonly(path) {
-            // Log only — do not mask the original write error.
             eprintln!("[AuditFileManager] Warning: could not re-lock audit file: {}", e);
         }
 
@@ -83,21 +84,28 @@ impl AuditFileManager {
 
     /// Rename the audit file to an archive when the entry limit is reached.
     ///
-    /// Renaming a read-only file requires only write permission on the
-    /// parent directory, not on the file itself — works on both Unix and Windows.
+    /// Unlocks before rename for Windows compatibility — on Windows a read-only
+    /// file cannot be renamed. On Unix the rename only requires write permission
+    /// on the parent directory, but we unlock anyway for safety.
     fn rotate_if_needed(&self) -> Result<(), String> {
         let count = self.count_entries();
         if count < self.max_entries { return Ok(()); }
 
+        let path = Path::new(&self.audit_file_path);
+        if path.exists() {
+            file_permissions::set_writable(path)
+                .map_err(|e| format!("Cannot unlock audit file for rotation: {}", e))?;
+        }
+
         let ts      = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let archive = self.audit_file_path.replace(
-            ".mdix.au",
-            &format!(".mdix.au.archive_{}", ts),
-        );
+        // Append the timestamp suffix — works regardless of file extension.
+        let archive = format!("{}.archive_{}", self.audit_file_path, ts);
 
         std::fs::rename(&self.audit_file_path, &archive)
             .map_err(|e| format!("Failed to rotate audit file: {}", e))?;
 
+        // The archived file is intentionally left without a read-only lock;
+        // it has been renamed so is no longer the active write target.
         Ok(())
     }
 
@@ -112,6 +120,7 @@ impl AuditFileManager {
         entry.index        = existing_count + 1;
 
         if !file_exists {
+            // New file: write header + first entry in a single atomic write.
             let content = format!(
                 "{}{}",
                 AuditFileWriter::write_header(config),
@@ -120,6 +129,7 @@ impl AuditFileManager {
             std::fs::write(&self.audit_file_path, content)
                 .map_err(|e| format!("Failed to create audit file: {}", e))?;
         } else {
+            // Existing file: append just the new entry block.
             let mut file = OpenOptions::new()
                 .append(true)
                 .open(&self.audit_file_path)
@@ -130,4 +140,4 @@ impl AuditFileManager {
 
         Ok(())
     }
-  }
+}

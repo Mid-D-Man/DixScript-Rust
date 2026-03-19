@@ -1,6 +1,8 @@
 //! Main orchestrator for DLM forward pipeline execution during compilation.
 //!
 //! Execution order: Auditor (start) → Compressor → Encryptor → Auditor (finalize).
+//! All three output files (.mdix.enc, .mdix.key, .mdix.au) are locked
+//! read-only immediately after writing.
 
 use crate::Compiler::AST::{DixScript, DLMModuleType, DLMModuleSubtype};
 use crate::Compiler::DLM::{
@@ -10,7 +12,7 @@ use crate::Compiler::DLM::{
     KeyManagement::KeyFileManager,
     dlm_pipeline_result::DLMPipelineResult,
 };
-use crate::Compiler::Utilities::SecurityUtilities;
+use crate::Compiler::Utilities::{SecurityUtilities, file_permissions};
 use crate::ErrorManager::{ErrorManager, DebugConfig, DlmErrorType, ErrorSeverity};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -30,11 +32,10 @@ impl DLMPipelineExecutor {
     pub fn new(
         source_file_path: impl AsRef<Path>,
         output_directory: impl AsRef<Path>,
-        debug_mode: crate::Compiler::Core::Config::DebugMode,
+        debug_mode:       crate::Compiler::Core::Config::DebugMode,
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
         let debug_config  = DebugConfig::from_debug_mode(debug_mode);
-
         DLMPipelineExecutor {
             error_manager,
             debug_config,
@@ -57,7 +58,7 @@ impl DLMPipelineExecutor {
             .unwrap_or(true);
 
         if dlm_is_empty {
-            self.error_manager.log_info("No DLM modules specified - skipping pipeline");
+            self.error_manager.log_info("No DLM modules specified — skipping pipeline");
             result.is_success     = true;
             result.processed_size = binary_data.len();
             result.processed_data = binary_data;
@@ -69,12 +70,8 @@ impl DLMPipelineExecutor {
             Ok(modules) => modules,
             Err(e) => {
                 self.error_manager.add_dlm_error(
-                    DlmErrorType::ModuleExecutionFailed,
-                    e.clone(),
-                    Some(self.base_name()),
-                    None,
-                    None,
-                    ErrorSeverity::Fatal,
+                    DlmErrorType::ModuleExecutionFailed, e.clone(),
+                    Some(self.base_name()), None, None, ErrorSeverity::Fatal,
                 );
                 result.errors.push(e);
                 result.total_duration = start_time.elapsed();
@@ -82,21 +79,18 @@ impl DLMPipelineExecutor {
             }
         };
 
-        let mut processed_data                    = binary_data;
+        let mut processed_data                             = binary_data;
         let mut active_auditor: Option<Box<dyn IAuditor>> = None;
 
         // Phase 1: start auditor
         if let Some(mut aud) = auditor {
-            match self.start_auditor(&mut *aud, ast, &processed_data) {
+            match aud.start_audit(ast, &processed_data) {
                 Ok(_)  => { active_auditor = Some(aud); }
                 Err(e) => {
                     self.error_manager.add_dlm_error(
-                        DlmErrorType::ModuleExecutionFailed,
-                        e.clone(),
-                        Some(self.base_name()),
-                        Some("DAuditor".to_string()),
-                        None,
-                        ErrorSeverity::Warning,
+                        DlmErrorType::ModuleExecutionFailed, e.clone(),
+                        Some(self.base_name()), Some("DAuditor".to_string()),
+                        None, ErrorSeverity::Warning,
                     );
                     result.warnings.push(e);
                 }
@@ -127,7 +121,7 @@ impl DLMPipelineExecutor {
 
                     let ratio = 1.0 - (out_size as f64 / pre_compress_size as f64);
                     self.error_manager.log_info(&format!(
-                        "Compression complete: {} -> {} bytes ({:.1}% reduction)",
+                        "Compression: {} -> {} bytes ({:.1}% reduction)",
                         pre_compress_size, out_size, ratio * 100.0,
                     ));
 
@@ -135,12 +129,9 @@ impl DLMPipelineExecutor {
                 }
                 Err(e) => {
                     self.error_manager.add_dlm_error(
-                        DlmErrorType::ModuleExecutionFailed,
-                        e.clone(),
-                        Some(self.base_name()),
-                        Some(comp.module_name().to_string()),
-                        None,
-                        ErrorSeverity::Fatal,
+                        DlmErrorType::ModuleExecutionFailed, e.clone(),
+                        Some(self.base_name()), Some(comp.module_name().to_string()),
+                        None, ErrorSeverity::Fatal,
                     );
                     if let Some(ref mut aud) = active_auditor {
                         let _ = aud.finalize_audit();
@@ -175,7 +166,7 @@ impl DLMPipelineExecutor {
                     }
 
                     self.error_manager.log_info(&format!(
-                        "Encryption complete: {} -> {} bytes",
+                        "Encryption: {} -> {} bytes",
                         pre_encrypt_size, out_size,
                     ));
 
@@ -183,12 +174,9 @@ impl DLMPipelineExecutor {
                 }
                 Err(e) => {
                     self.error_manager.add_dlm_error(
-                        DlmErrorType::ModuleExecutionFailed,
-                        e.clone(),
-                        Some(self.base_name()),
-                        Some(enc.module_name().to_string()),
-                        None,
-                        ErrorSeverity::Fatal,
+                        DlmErrorType::ModuleExecutionFailed, e.clone(),
+                        Some(self.base_name()), Some(enc.module_name().to_string()),
+                        None, ErrorSeverity::Fatal,
                     );
                     if let Some(ref mut aud) = active_auditor {
                         let _ = aud.finalize_audit();
@@ -204,28 +192,23 @@ impl DLMPipelineExecutor {
         result.compression_ratio = 1.0 - (result.processed_size as f64 / original_size as f64);
         result.processed_data    = processed_data;
 
-        // Phase 4: finalize auditor
+        // Phase 4: finalize auditor — this also re-locks the .au file
         if let Some(ref mut aud) = active_auditor {
             if let Err(e) = aud.finalize_audit() {
                 self.error_manager.add_dlm_error(
-                    DlmErrorType::ModuleExecutionFailed,
-                    e.clone(),
-                    Some(self.base_name()),
-                    Some("DAuditor".to_string()),
-                    None,
-                    ErrorSeverity::Warning,
+                    DlmErrorType::ModuleExecutionFailed, e.clone(),
+                    Some(self.base_name()), Some("DAuditor".to_string()),
+                    None, ErrorSeverity::Warning,
                 );
                 result.warnings.push(format!("Audit finalization warning: {}", e));
             }
         }
 
-        // Phase 5: write output files
+        // Phase 5: write .mdix.enc and .mdix.key, then lock both
         if let Err(e) = self.generate_output_files(&mut result, original_size) {
             self.error_manager.add_dlm_error(
-                DlmErrorType::ModuleExecutionFailed,
-                e.clone(),
-                Some(self.base_name()),
-                None,
+                DlmErrorType::ModuleExecutionFailed, e.clone(),
+                Some(self.base_name()), None,
                 Some("Check output directory write permissions".to_string()),
                 ErrorSeverity::Warning,
             );
@@ -296,7 +279,7 @@ impl DLMPipelineExecutor {
     fn create_auditor(
         &self,
         subtype: Option<DLMModuleSubtype>,
-        ast: &DixScript,
+        ast:     &DixScript,
     ) -> Result<Box<dyn IAuditor>, String> {
         let aud: Box<dyn IAuditor> = match subtype {
             Some(DLMModuleSubtype::Diy) | None => {
@@ -309,9 +292,7 @@ impl DLMPipelineExecutor {
                     ast.clone(),
                 ))
             }
-            Some(other) => {
-                return Err(format!("Unknown auditor subtype: {:?}", other));
-            }
+            Some(other) => return Err(format!("Unknown auditor subtype: {:?}", other)),
         };
         Ok(aud)
     }
@@ -321,9 +302,7 @@ impl DLMPipelineExecutor {
         subtype: Option<DLMModuleSubtype>,
     ) -> Result<Box<dyn ICompressor>, String> {
         match subtype {
-            Some(DLMModuleSubtype::Gzip) | None => {
-                Ok(Box::new(GzipCompressor::new()))
-            }
+            Some(DLMModuleSubtype::Gzip) | None => Ok(Box::new(GzipCompressor::new())),
 
             #[cfg(not(target_arch = "wasm32"))]
             Some(DLMModuleSubtype::Bzip2) => Ok(Box::new(Bzip2Compressor::new())),
@@ -332,13 +311,10 @@ impl DLMPipelineExecutor {
             Some(DLMModuleSubtype::Lzma) => Ok(Box::new(LzmaCompressor::new())),
 
             #[cfg(target_arch = "wasm32")]
-            Some(DLMModuleSubtype::Bzip2) | Some(DLMModuleSubtype::Lzma) => {
-                Err(
-                    "bzip2 and lzma compression are not supported in WebAssembly builds. \
-                     Use DCompressor.gzip instead, or compress the file using the \
-                     native library first.".to_string()
-                )
-            }
+            Some(DLMModuleSubtype::Bzip2) | Some(DLMModuleSubtype::Lzma) => Err(
+                "bzip2 and lzma are not supported in WebAssembly builds. \
+                 Use DCompressor.gzip instead.".to_string()
+            ),
 
             Some(other) => Err(format!("Unknown compressor subtype: {:?}", other)),
         }
@@ -347,7 +323,7 @@ impl DLMPipelineExecutor {
     fn create_encryptor(
         &self,
         subtype: Option<DLMModuleSubtype>,
-        ast: &mut DixScript,
+        ast:     &mut DixScript,
     ) -> Result<Box<dyn IEncryptor>, String> {
         ast.security = Some(SecurityUtilities::ensure_valid_security_section(
             ast.security.take(),
@@ -363,41 +339,21 @@ impl DLMPipelineExecutor {
         let security = ast.security.as_ref().unwrap();
 
         let enc: Box<dyn IEncryptor> = match subtype {
-            Some(DLMModuleSubtype::Xor)           => Box::new(XorEncryptor::new(Some(security.clone()))),
-            Some(DLMModuleSubtype::Aes128)         => Box::new(Aes128Encryptor::new(Some(security.clone()))),
-            Some(DLMModuleSubtype::Aes256) | None  => Box::new(Aes256Encryptor::new(Some(security.clone()))),
-            Some(DLMModuleSubtype::Chacha20)       => Box::new(Chacha20Encryptor::new(Some(security.clone()))),
-            Some(other) => {
-                return Err(format!("Unknown encryptor subtype: {:?}", other));
-            }
+            Some(DLMModuleSubtype::Xor)                => Box::new(XorEncryptor::new(Some(security.clone()))),
+            Some(DLMModuleSubtype::Aes128)             => Box::new(Aes128Encryptor::new(Some(security.clone()))),
+            Some(DLMModuleSubtype::Aes256) | None      => Box::new(Aes256Encryptor::new(Some(security.clone()))),
+            Some(DLMModuleSubtype::Chacha20)           => Box::new(Chacha20Encryptor::new(Some(security.clone()))),
+            Some(other) => return Err(format!("Unknown encryptor subtype: {:?}", other)),
         };
 
         Ok(enc)
-    }
-
-    // ── Auditor start ─────────────────────────────────────────────────────────
-
-    fn start_auditor(
-        &self,
-        auditor: &mut dyn IAuditor,
-        ast: &DixScript,
-        data: &[u8],
-    ) -> Result<(), String> {
-        let audit_result = auditor.start_audit(ast, data)?;
-        if self.debug_config.is_enabled {
-            self.error_manager.log_debug(&format!(
-                "[DLMPipelineExecutor] Auditor started: {}",
-                audit_result.audit_file_path,
-            ));
-        }
-        Ok(())
     }
 
     // ── Output file generation ────────────────────────────────────────────────
 
     fn generate_output_files(
         &self,
-        result: &mut DLMPipelineResult,
+        result:        &mut DLMPipelineResult,
         original_size: usize,
     ) -> Result<(), String> {
         if result.metadata.is_empty() {
@@ -411,8 +367,8 @@ impl DLMPipelineExecutor {
 
         let enc_path = self.output_directory.join(format!("{}.mdix.enc", base_name));
 
-        fs::write(&enc_path, &result.processed_data)
-            .map_err(|e| format!("Failed to write encrypted file: {}", e))?;
+        // Write .mdix.enc then immediately lock it.
+        self.write_enc_file(&enc_path, &result.processed_data)?;
 
         let enc_path_str = enc_path.to_string_lossy().to_string();
         self.error_manager.log_info(&format!("Output file: {}", enc_path.display()));
@@ -423,6 +379,7 @@ impl DLMPipelineExecutor {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(original_size);
 
+        // KeyFileManager::create_key_file handles unlock → write → re-lock internally.
         let key_manager = KeyFileManager::new(
             self.source_file_path.to_string_lossy().to_string(),
             self.output_directory.to_string_lossy().to_string(),
@@ -442,6 +399,27 @@ impl DLMPipelineExecutor {
         result.key_file_path       = Some(key_file_path);
 
         Ok(())
+    }
+
+    /// Write the encrypted payload to disk and lock it read-only.
+    ///
+    /// If the file already exists from a previous compilation it is unlocked
+    /// first, overwritten, then re-locked.
+    fn write_enc_file(&self, path: &Path, data: &[u8]) -> Result<(), String> {
+        if path.exists() {
+            file_permissions::set_writable(path)
+                .map_err(|e| format!("Cannot unlock .mdix.enc for writing: {}", e))?;
+        }
+
+        let result = fs::write(path, data)
+            .map_err(|e| format!("Failed to write encrypted file: {}", e));
+
+        // Always re-lock even if the write failed.
+        if let Err(e) = file_permissions::set_readonly(path) {
+            self.error_manager.log_warning(&format!("Could not lock .mdix.enc read-only: {}", e));
+        }
+
+        result
     }
 
     // ── Utility ───────────────────────────────────────────────────────────────

@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript — CLI Test Results · Build #BUILD_NUM_PLACEHOLDER</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117; color: #e6edf3;
+      padding: 32px 24px; min-height: 100vh;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    /* ── Header ── */
+    header { border-bottom: 2px solid #f78166; padding-bottom: 18px; margin-bottom: 28px; }
+    header h1 { font-size: 1.9rem; color: #f78166; }
+    header h1 span { color: #e6edf3; }
+    .meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+    .meta-item { background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      padding: 5px 12px; font-size: 0.82rem; }
+    .meta-item strong { color: #f78166; }
+
+    /* ── Nav ── */
+    .nav-links { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+    .nav-link { display: inline-flex; align-items: center; gap: 5px; color: #8b949e;
+      font-size: 0.80rem; text-decoration: none; padding: 5px 12px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      transition: color 0.15s, border-color 0.15s; }
+    .nav-link:hover { color: #e6edf3; border-color: #8b949e; }
+
+    /* ── Banner ── */
+    .banner { border-radius: 8px; padding: 14px 20px; margin-bottom: 24px;
+      font-weight: 600; font-size: 0.95rem; }
+    .banner.pass    { background: #0f2a1a; border: 1px solid #2ea043; color: #3fb950; }
+    .banner.fail    { background: #2a0f0f; border: 1px solid #f85149; color: #f85149; }
+    .banner.loading { background: #1c2128; border: 1px solid #30363d; color: #8b949e; }
+
+    /* ── Stat grid ── */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px; margin-bottom: 24px; }
+    .stat-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      padding: 14px 16px; }
+    .stat-card .s-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.6px;
+      color: #484f58; margin-bottom: 6px; }
+    .stat-card .s-value { font-size: 1.5rem; font-weight: 700; }
+    .stat-card .s-sub   { font-size: 0.72rem; color: #8b949e; margin-top: 2px; }
+
+    /* ── Toolbar ── */
+    .toolbar { display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+    .toolbar-title { font-size: 1rem; font-weight: 700;
+      border-left: 3px solid #f78166; padding-left: 10px; }
+    .toolbar-right { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .filter-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .filter-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e;
+      padding: 5px 14px; border-radius: 6px; font-size: 0.80rem; cursor: pointer;
+      transition: all 0.15s; }
+    .filter-btn:hover { border-color: #8b949e; color: #e6edf3; }
+    .filter-btn.active { border-color: #f78166; color: #f78166;
+      background: rgba(247,129,102,0.1); font-weight: 600; }
+
+    /* ── Search ── */
+    .search-wrap { position: relative; }
+    .search-box { background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+      padding: 6px 32px 6px 12px; border-radius: 6px; font-size: 0.82rem;
+      outline: none; transition: border-color 0.15s, box-shadow 0.15s; width: 260px; }
+    .search-box:focus { border-color: #f78166; box-shadow: 0 0 0 3px rgba(247,129,102,0.15); }
+    .search-box::placeholder { color: #484f58; }
+    .search-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: #484f58; cursor: pointer;
+      font-size: 0.85rem; display: none; padding: 2px 4px; border-radius: 3px; }
+    .search-clear:hover { color: #8b949e; }
+    .search-clear.visible { display: block; }
+    .search-count { font-size: 0.75rem; color: #484f58; white-space: nowrap; align-self: center; }
+
+    /* ── Suite ── */
+    .suite { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      margin-bottom: 14px; overflow: hidden; }
+    .suite-header { display: flex; align-items: center; gap: 12px;
+      padding: 12px 16px; cursor: pointer; user-select: none;
+      transition: background 0.15s; }
+    .suite-header:hover { background: #1c2128; }
+    .suite-chevron { color: #484f58; font-size: 0.8rem; transition: transform 0.2s; flex-shrink: 0; }
+    .suite.open .suite-chevron { transform: rotate(90deg); }
+    .suite-name  { font-weight: 700; font-size: 0.95rem; flex: 1; min-width: 0; }
+    .suite-file  { font-size: 0.72rem; color: #484f58; font-family: monospace;
+      max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .suite-badges { display: flex; gap: 6px; margin-left: auto; flex-shrink: 0; }
+    .badge { display: inline-flex; align-items: center; gap: 4px;
+      font-size: 0.72rem; font-weight: 700; padding: 3px 8px; border-radius: 10px; }
+    .badge-pass { background: rgba(63,185,80,0.15);  border: 1px solid #2ea043; color: #3fb950; }
+    .badge-fail { background: rgba(248,81,73,0.15);  border: 1px solid #f85149; color: #f85149; }
+    .suite-body { display: none; border-top: 1px solid #30363d; }
+    .suite.open .suite-body { display: block; }
+
+    /* ── Table ── */
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    thead th { padding: 8px 14px; text-align: left; color: #484f58;
+      font-size: 0.70rem; text-transform: uppercase; letter-spacing: 0.5px;
+      border-bottom: 1px solid #30363d; background: #0d1117; white-space: nowrap; }
+    thead th.right { text-align: right; }
+    tbody tr.cmd-row { border-bottom: 1px solid #21262d; }
+    tbody tr.cmd-row:last-of-type { border-bottom: none; }
+    tbody tr.cmd-row:hover td { background: #1c2128; }
+    td { padding: 9px 14px; vertical-align: middle; }
+
+    /* ── Status dot ── */
+    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+    .dot-pass { background: #3fb950; }
+    .dot-fail { background: #f85149; }
+    .cmd-name-cell { display: flex; align-items: center; gap: 9px; cursor: pointer; }
+    .cmd-name { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.80rem; }
+    .status-text { font-weight: 600; font-size: 0.80rem; }
+    .status-passed { color: #3fb950; }
+    .status-failed { color: #f85149; }
+    .exit-badge { font-family: monospace; font-size: 0.75rem; color: #8b949e; }
+    .exit-badge.nonzero { color: #f85149; }
+    .elapsed { color: #484f58; font-size: 0.75rem; white-space: nowrap; }
+
+    /* ── Row action buttons ── */
+    .row-actions { display: flex; gap: 5px; justify-content: flex-end; }
+    .action-btn { background: none; border: 1px solid #30363d; color: #484f58;
+      padding: 3px 8px; border-radius: 5px; font-size: 0.70rem; cursor: pointer;
+      transition: all 0.15s; white-space: nowrap; }
+    .action-btn:hover { border-color: #f78166; color: #f78166;
+      background: rgba(247,129,102,0.05); }
+    .action-btn.copied { border-color: #3fb950 !important; color: #3fb950 !important; }
+
+    /* ── Expanded output ── */
+    tr.cmd-detail td { padding: 0; }
+    .detail-box { background: #0d1117; border-top: 1px solid #30363d;
+      padding: 14px 18px; display: none; }
+    .detail-box.visible { display: block; }
+    .detail-header { display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px; }
+    .detail-label { font-size: 0.70rem; text-transform: uppercase;
+      letter-spacing: 0.6px; color: #484f58; }
+    .detail-actions { display: flex; gap: 6px; }
+    .detail-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e;
+      padding: 4px 10px; border-radius: 5px; font-size: 0.72rem; cursor: pointer;
+      transition: all 0.15s; }
+    .detail-btn:hover { border-color: #f78166; color: #f78166; }
+    .detail-btn.copied { border-color: #3fb950; color: #3fb950; }
+    .cmd-full { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.75rem;
+      color: #79c0ff; margin-bottom: 10px; word-break: break-all; }
+    .out-section { margin-bottom: 10px; }
+    .out-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px;
+      color: #484f58; margin-bottom: 4px; }
+    .out-block { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.75rem;
+      color: #8b949e; white-space: pre-wrap; line-height: 1.6;
+      max-height: 280px; overflow-y: auto; word-break: break-all;
+      background: #161b22; border: 1px solid #21262d; border-radius: 6px;
+      padding: 10px 12px; }
+    .out-block.stdout span.ok  { color: #3fb950; }
+    .out-block.stdout span.warn{ color: #e3b341; }
+    .out-block.stderr { border-color: rgba(248,81,73,0.3); color: #f85149; }
+    .out-empty { color: #484f58; font-style: italic; font-size: 0.78rem; }
+
+    /* ── No results ── */
+    .no-results { text-align: center; padding: 32px; color: #484f58; font-size: 0.85rem; }
+    .hidden { display: none !important; }
+
+    /* ── Toast ── */
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #161b22;
+      border: 1px solid #3fb950; color: #3fb950; padding: 10px 18px;
+      border-radius: 8px; font-size: 0.82rem; font-weight: 600; z-index: 9999;
+      transform: translateY(80px); opacity: 0; transition: all 0.25s ease;
+      pointer-events: none; }
+    .toast.show { transform: translateY(0); opacity: 1; }
+
+    /* ── Footer ── */
+    footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid #30363d;
+      color: #484f58; font-size: 0.76rem; text-align: center; }
+
+    .click-hint { font-size: 0.72rem; color: #484f58; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="nav-links">
+    <a class="nav-link" href="../tests/">✅ Test Results</a>
+    <a class="nav-link" href="../bench/">📊 Benchmarks</a>
+    <a class="nav-link" href="../flame/">🔥 Flamegraphs</a>
+  </div>
+
+  <header>
+    <h1>🖥️ DixScript <span>— CLI Test Results</span></h1>
+    <p style="color:#8b949e;margin-top:5px">MidManStudio | DixScript-Rust · mdix CLI Commands</p>
+    <div class="meta">
+      <div class="meta-item"><strong>Build:</strong> #BUILD_NUM_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Branch:</strong> BRANCH_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Commit:</strong> COMMIT_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Date:</strong> DATE_PLACEHOLDER</div>
+      <div class="meta-item"><strong>Rust:</strong> RUST_VERSION_PLACEHOLDER</div>
+    </div>
+  </header>
+
+  <div class="banner loading" id="banner">⏳ Loading CLI test results…</div>
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="s-label">Total</div>
+      <div class="s-value" id="s-total">—</div>
+      <div class="s-sub">commands run</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Passed</div>
+      <div class="s-value" id="s-passed" style="color:#3fb950">—</div>
+      <div class="s-sub">✓</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Failed</div>
+      <div class="s-value" id="s-failed" style="color:#f85149">—</div>
+      <div class="s-sub">✗</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-label">Suites</div>
+      <div class="s-value" id="s-suites">—</div>
+      <div class="s-sub">fixture files</div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="toolbar-title">Command Suites</div>
+    <div class="toolbar-right">
+      <div class="filter-row" id="filter-row">
+        <button class="filter-btn active" data-filter="all"    onclick="setFilter('all')">All</button>
+        <button class="filter-btn"        data-filter="passed" onclick="setFilter('passed')">Passed</button>
+        <button class="filter-btn"        data-filter="failed" onclick="setFilter('failed')">Failed</button>
+      </div>
+      <div class="search-wrap">
+        <input class="search-box" id="search-box" placeholder="🔍 Search commands…"
+               oninput="applyFilters()" />
+        <button class="search-clear" id="search-clear" onclick="clearSearch()" title="Clear">✕</button>
+      </div>
+      <span class="search-count" id="search-count"></span>
+    </div>
+  </div>
+
+  <p class="click-hint">💡 Click any row to expand stdout / stderr · Rows marked ✗ show real binary output</p>
+
+  <div id="suites-container"></div>
+  <div class="no-results hidden" id="no-results">No commands match your search.</div>
+
+  <footer>DixScript-Rust CLI Tests — MidManStudio — Build #BUILD_NUM_PLACEHOLDER</footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let ALL_DATA      = null;
+let currentFilter = 'all';
+let currentSearch = '';
+
+// ── Clipboard ──────────────────────────────────────────────────────────────
+
+async function copyText(text, btn, label) {
+  label = label || 'Copied!';
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
+  }
+  showToast(label);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = '✓ ' + msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ── Formatting ─────────────────────────────────────────────────────────────
+
+function fmtMs(ms) {
+  if (!ms) return '—';
+  if (ms < 1000) return ms + 'ms';
+  return (ms / 1000).toFixed(1) + 's';
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function colorizeStdout(text) {
+  return escHtml(text)
+    .replace(/(^✓[^\n]*)/gm, '<span class="ok">$1</span>')
+    .replace(/(^⚠[^\n]*)/gm, '<span class="warn">$1</span>');
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+
+function renderAll(data) {
+  ALL_DATA = data;
+
+  const allPass = data.summary.failed === 0;
+  const banner  = document.getElementById('banner');
+  banner.className = 'banner ' + (allPass ? 'pass' : 'fail');
+  banner.textContent = allPass
+    ? `✅ All ${data.summary.passed} CLI commands passed — Build #${data.build}`
+    : `❌ ${data.summary.failed} command(s) FAILED — ${data.summary.passed} passed — Build #${data.build}`;
+
+  document.getElementById('s-total').textContent  = data.summary.total;
+  document.getElementById('s-passed').textContent = data.summary.passed;
+  document.getElementById('s-failed').textContent = data.summary.failed;
+  document.getElementById('s-suites').textContent = data.suites.length;
+
+  const container = document.getElementById('suites-container');
+  container.innerHTML = '';
+  data.suites.forEach((suite, si) => container.appendChild(buildSuite(suite, si)));
+}
+
+function buildSuite(suite, si) {
+  const div = document.createElement('div');
+  div.className   = 'suite' + (suite.failed > 0 ? ' open' : '');
+  div.dataset.suite = si;
+
+  const passB = suite.passed > 0
+    ? `<span class="badge badge-pass">✓ ${suite.passed}</span>` : '';
+  const failB = suite.failed > 0
+    ? `<span class="badge badge-fail">✗ ${suite.failed}</span>` : '';
+  const fileSpan = suite.file
+    ? `<span class="suite-file">${escHtml(suite.file)}</span>` : '';
+
+  div.innerHTML = `
+    <div class="suite-header" onclick="toggleSuite(this)">
+      <span class="suite-chevron">▶</span>
+      <div style="flex:1;min-width:0">
+        <div class="suite-name">${escHtml(suite.name)}</div>
+        ${fileSpan}
+      </div>
+      <div class="suite-badges">${passB}${failB}</div>
+    </div>
+    <div class="suite-body">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:50%">Command</th>
+            <th>Status</th>
+            <th class="right">Exit</th>
+            <th class="right">Time</th>
+            <th class="right" style="width:80px">Output</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-${si}"></tbody>
+      </table>
+    </div>`;
+
+  const tbody = div.querySelector(`#tbody-${si}`);
+  (suite.commands || []).forEach((cmd, ci) => {
+    const isPassed = cmd.status === 'passed';
+    const dotCls   = isPassed ? 'dot-pass' : 'dot-fail';
+    const stCls    = isPassed ? 'status-passed' : 'status-failed';
+    const stTxt    = isPassed ? 'passed' : 'FAILED';
+    const exitCls  = cmd.exit_code === 0 ? 'exit-badge' : 'exit-badge nonzero';
+    const hasOut   = (cmd.stdout && cmd.stdout.trim()) || (cmd.stderr && cmd.stderr.trim());
+
+    const mainTr = document.createElement('tr');
+    mainTr.className = 'cmd-row';
+    mainTr.dataset.status = cmd.status;
+    mainTr.dataset.name   = cmd.name.toLowerCase();
+    mainTr.innerHTML = `
+      <td>
+        <div class="cmd-name-cell" onclick="toggleDetail(${si},${ci})">
+          <div class="dot ${dotCls}"></div>
+          <span class="cmd-name">${escHtml(cmd.name)}</span>
+        </div>
+      </td>
+      <td><span class="${stCls} status-text">${stTxt}</span></td>
+      <td class="right"><span class="${exitCls}">${cmd.exit_code}</span></td>
+      <td class="right"><span class="elapsed">${fmtMs(cmd.elapsed_ms)}</span></td>
+      <td>
+        <div class="row-actions">
+          <button class="action-btn" title="Copy full command"
+            onclick="copyText(${JSON.stringify(cmd.full_command)}, this, 'Command copied')">⎘ Cmd</button>
+          ${hasOut
+            ? `<button class="action-btn" onclick="toggleDetail(${si},${ci})">↕ Out</button>`
+            : `<button class="action-btn" style="opacity:0.3" disabled>↕ Out</button>`}
+        </div>
+      </td>`;
+
+    const detTr = document.createElement('tr');
+    detTr.className = 'cmd-detail';
+    detTr.dataset.status = cmd.status;
+    detTr.dataset.name   = cmd.name.toLowerCase();
+
+    const stdout = (cmd.stdout || '').trim();
+    const stderr = (cmd.stderr || '').trim();
+    const fullReport = `Command: ${cmd.full_command}\nExit: ${cmd.exit_code}\n`
+      + (stdout ? `\nstdout:\n${stdout}` : '')
+      + (stderr ? `\nstderr:\n${stderr}` : '');
+
+    detTr.innerHTML = `<td colspan="5">
+      <div class="detail-box" id="det-${si}-${ci}">
+        <div class="detail-header">
+          <div class="detail-label">Output — ${escHtml(cmd.name)}</div>
+          <div class="detail-actions">
+            <button class="detail-btn"
+              onclick="copyText(${JSON.stringify(fullReport)}, this, 'Report copied')">
+              ⎘ Copy report
+            </button>
+          </div>
+        </div>
+        <div class="cmd-full">$ ${escHtml(cmd.full_command)}</div>
+        ${stdout
+          ? `<div class="out-section">
+               <div class="out-label">stdout</div>
+               <div class="out-block stdout">${colorizeStdout(stdout)}</div>
+             </div>`
+          : `<div class="out-empty" style="margin-bottom:8px">No stdout captured</div>`}
+        ${stderr
+          ? `<div class="out-section">
+               <div class="out-label">stderr</div>
+               <div class="out-block stderr">${escHtml(stderr)}</div>
+             </div>`
+          : ''}
+      </div>
+    </td>`;
+
+    tbody.appendChild(mainTr);
+    tbody.appendChild(detTr);
+  });
+
+  return div;
+}
+
+// ── Controls ───────────────────────────────────────────────────────────────
+
+function toggleSuite(hdr) {
+  hdr.closest('.suite').classList.toggle('open');
+}
+
+function toggleDetail(si, ci) {
+  const box = document.getElementById(`det-${si}-${ci}`);
+  if (box) box.classList.toggle('visible');
+}
+
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.filter === f));
+  applyFilters();
+}
+
+function clearSearch() {
+  document.getElementById('search-box').value = '';
+  document.getElementById('search-clear').classList.remove('visible');
+  currentSearch = '';
+  applyFilters();
+}
+
+function applyFilters() {
+  currentSearch = document.getElementById('search-box').value.toLowerCase().trim();
+  document.getElementById('search-clear').classList.toggle('visible', currentSearch.length > 0);
+
+  let visible = 0, total = 0;
+
+  document.querySelectorAll('.cmd-row').forEach(row => {
+    const status   = row.dataset.status;
+    const name     = row.dataset.name || '';
+    const filterOk = currentFilter === 'all' || status === currentFilter;
+    const searchOk = !currentSearch || name.includes(currentSearch);
+    const hide     = !(filterOk && searchOk);
+    row.classList.toggle('hidden', hide);
+    const det = row.nextElementSibling;
+    if (det && det.classList.contains('cmd-detail'))
+      det.classList.toggle('hidden', hide);
+    if (!hide) visible++;
+    total++;
+  });
+
+  const countEl = document.getElementById('search-count');
+  if (currentSearch || currentFilter !== 'all') {
+    countEl.textContent = `${visible} / ${total} commands`;
+  } else {
+    countEl.textContent = '';
+  }
+
+  if (currentSearch || currentFilter !== 'all') {
+    document.querySelectorAll('.suite').forEach(suite => {
+      if (suite.querySelectorAll('.cmd-row:not(.hidden)').length > 0)
+        suite.classList.add('open');
+    });
+  }
+
+  document.getElementById('no-results').classList.toggle('hidden', visible > 0);
+}
+
+// ── Fetch ──────────────────────────────────────────────────────────────────
+
+fetch('cli-test-results.json')
+  .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+  .then(data => renderAll(data))
+  .catch(err => {
+    const banner = document.getElementById('banner');
+    banner.className = 'banner fail';
+    banner.textContent = `❌ Failed to load cli-test-results.json: ${err.message}`;
+    document.getElementById('suites-container').innerHTML = `
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;
+        padding:28px;text-align:center;color:#8b949e;">
+        <p>No CLI test data available.</p>
+        <p style="margin-top:8px;font-size:0.80rem">
+          Trigger the workflow with <strong>cli</strong> or <strong>all</strong>
+          to generate results.
+        </p>
+      </div>`;
+  });
+</script>
+</body>
+  </html>

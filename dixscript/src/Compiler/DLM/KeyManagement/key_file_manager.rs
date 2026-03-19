@@ -1,18 +1,21 @@
-//! Key file manager — creates and reads `.dixscript.key` files using `.dixscript` syntax.
+//! Key file manager — creates and reads `.mdix.key` files.
+//!
+//! Key files are locked read-only immediately after creation.
+//! Recompilation unlocks, overwrites, then re-locks.
 
 use super::key_file_data::*;
 use super::key_file_format::{MdixKeyWriter, MdixKeyParser};
 use crate::Compiler::DLM::dlm_module_base::DLMModuleBase;
+use crate::Compiler::Utilities::file_permissions;
 use crate::ErrorManager::{DlmErrorType, ErrorSeverity};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-/// Manages `.dixscript.key` file creation and reading.
 pub struct KeyFileManager {
-    base:               DLMModuleBase,
-    source_file_path:   String,
-    output_directory:   String,
+    base:             DLMModuleBase,
+    source_file_path: String,
+    output_directory: String,
 }
 
 impl KeyFileManager {
@@ -26,78 +29,79 @@ impl KeyFileManager {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /// Build and write the `.dixscript.key` file from module metadata HashMaps.
+    /// Build and write the `.mdix.key` file from module metadata.
     ///
+    /// If a key file already exists it is unlocked, overwritten, then re-locked.
     /// `sizes` is `(original_bytes, compressed_bytes, encrypted_bytes)`.
     pub fn create_key_file(
         &self,
-        compiled_file_path: &str,
+        compiled_file_path:   &str,
         compression_metadata: Option<HashMap<String, String>>,
         encryption_metadata:  Option<HashMap<String, String>>,
         audit_metadata:       Option<HashMap<String, String>>,
         sizes:                (usize, usize, usize),
     ) -> Result<String, String> {
         if self.base.is_debug_enabled() {
-            self.base.log_debug("Building .dixscript.key file");
+            self.base.log_debug("Building .mdix.key file");
         }
 
         let (original_size, compressed_size, encrypted_size) = sizes;
+        let key_file_path = self.key_file_path(compiled_file_path);
+
+        if let Some(parent) = Path::new(&key_file_path).parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create key file directory: {}", e))?;
+        }
 
         let mut data = KeyFileData::new();
 
-        // Source / output references
-        data.config.source_file = Some(self.source_file_path.clone());
-        data.file_info.source_file  = Some(self.source_file_path.clone());
-        data.file_info.output_file  = Some(compiled_file_path.to_string());
+        data.config.source_file        = Some(self.source_file_path.clone());
+        data.file_info.source_file     = Some(self.source_file_path.clone());
+        data.file_info.output_file     = Some(compiled_file_path.to_string());
         data.file_info.original_size   = original_size;
         data.file_info.compressed_size = compressed_size;
         data.file_info.encrypted_size  = encrypted_size;
 
-        // Derive encryption mode from presence of KDF fields
         let is_password_mode = encryption_metadata
             .as_ref()
             .map(|m| m.contains_key("kdf_algorithm"))
             .unwrap_or(false);
+
         data.config.key_type = if is_password_mode {
             "password".to_string()
         } else {
             "keyfile".to_string()
         };
 
-        // Build module list and pipeline from which metadata maps are present
         let mut modules: Vec<String> = Vec::with_capacity(3);
         if let Some(ref am) = audit_metadata {
-            if let Some(name) = am.get("module_name") {
-                modules.push(name.clone());
-            }
+            if let Some(name) = am.get("module_name") { modules.push(name.clone()); }
         }
         if let Some(ref cm) = compression_metadata {
-            if let Some(name) = cm.get("module_name") {
-                modules.push(name.clone());
-            }
+            if let Some(name) = cm.get("module_name") { modules.push(name.clone()); }
         }
         if let Some(ref em) = encryption_metadata {
-            if let Some(name) = em.get("module_name") {
-                modules.push(name.clone());
-            }
+            if let Some(name) = em.get("module_name") { modules.push(name.clone()); }
         }
 
         data.pipeline.modules_used   = modules.clone();
         data.pipeline.reversal_order = modules.into_iter().rev().collect();
 
-        // Encryption metadata
         if let Some(ref em) = encryption_metadata {
             let algorithm      = em.get("algorithm").cloned().unwrap_or_default();
             let iv             = em.get("iv").cloned().unwrap_or_default();
-            let security_level = em.get("security_level").cloned().unwrap_or_else(|| "HIGH".to_string());
+            let security_level = em.get("security_level").cloned()
+                .unwrap_or_else(|| "HIGH".to_string());
             let key_length     = em.get("key_length")
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(32);
 
             let kdf = if em.contains_key("kdf_algorithm") {
                 Some(KDFParameters {
-                    algorithm:   em.get("kdf_algorithm").cloned().unwrap_or_else(|| "argon2id".to_string()),
-                    kdf_version: em.get("kdf_version").cloned().unwrap_or_else(|| "1.3".to_string()),
+                    algorithm:   em.get("kdf_algorithm").cloned()
+                        .unwrap_or_else(|| "argon2id".to_string()),
+                    kdf_version: em.get("kdf_version").cloned()
+                        .unwrap_or_else(|| "1.3".to_string()),
                     memory:      em.get("kdf_memory").and_then(|v| v.parse().ok()).unwrap_or(65536),
                     iterations:  em.get("kdf_iterations").and_then(|v| v.parse().ok()).unwrap_or(3),
                     parallelism: em.get("kdf_parallelism").and_then(|v| v.parse().ok()).unwrap_or(4),
@@ -118,7 +122,6 @@ impl KeyFileManager {
             });
         }
 
-        // Compression metadata
         if let Some(ref cm) = compression_metadata {
             data.key_data.compression = Some(CompressionKeyData {
                 algorithm:         cm.get("algorithm").cloned().unwrap_or_default(),
@@ -128,34 +131,17 @@ impl KeyFileManager {
             });
         }
 
-        // Serialise to .dixscript text and write
-        let key_file_path = self.key_file_path(compiled_file_path);
-
-        if let Some(parent) = Path::new(&key_file_path).parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create key file directory: {}", e))?;
-        }
-
         let content = MdixKeyWriter::write(&data);
 
-        fs::write(&key_file_path, content).map_err(|e| {
-            let msg = format!("Failed to write key file: {}", e);
-            self.base.error_manager().add_dlm_error(
-                DlmErrorType::InvocationFailed,
-                msg.clone(),
-                Some(self.base.module_name().to_string()),
-                None,
-                Some(format!("Check write permissions for: {}", key_file_path)),
-                ErrorSeverity::Error,
-            );
-            msg
-        })?;
+        self.write_locked(&key_file_path, content.as_bytes())?;
 
         self.base.log_info(&format!("Key file written: {}", key_file_path));
         Ok(key_file_path)
     }
 
-    /// Read and parse an existing `.dixscript.key` file.
+    /// Read and parse an existing `.mdix.key` file.
+    ///
+    /// Reading a read-only file requires no permission change.
     pub fn read_key_file(&self, key_file_path: &str) -> Result<KeyFileData, String> {
         if !Path::new(key_file_path).exists() {
             let msg = format!("Key file not found: {}", key_file_path);
@@ -164,7 +150,7 @@ impl KeyFileManager {
                 msg.clone(),
                 Some(self.base.module_name().to_string()),
                 None,
-                Some("Ensure the .dixscript.key file is in the expected location".to_string()),
+                Some("Ensure the .mdix.key file is in the expected location".to_string()),
                 ErrorSeverity::Error,
             );
             return Err(msg);
@@ -203,24 +189,20 @@ impl KeyFileManager {
         Ok(data)
     }
 
-    /// Extract a `HashMap<String, String>` suitable for passing to
-    /// `IEncryptor::initialize` from the parsed key file data.
+    /// Extract an `IEncryptor::initialize`-compatible config map from parsed key data.
     pub fn extract_encryption_config(
         &self,
         data: &KeyFileData,
     ) -> Option<HashMap<String, String>> {
         let enc = data.key_data.encryption.as_ref()?;
-
         let mut config = HashMap::with_capacity(12);
         config.insert("algorithm".to_string(),      enc.algorithm.clone());
         config.insert("key_length".to_string(),     enc.key_length.to_string());
         config.insert("iv".to_string(),             enc.iv.clone());
         config.insert("security_level".to_string(), enc.security_level.clone());
-
-        if let Some(ref key_data) = enc.key_data {
-            config.insert("key_data".to_string(), key_data.clone());
+        if let Some(ref kd) = enc.key_data {
+            config.insert("key_data".to_string(), kd.clone());
         }
-
         if let Some(ref kdf) = enc.kdf {
             config.insert("kdf_algorithm".to_string(),   kdf.algorithm.clone());
             config.insert("kdf_version".to_string(),     kdf.kdf_version.clone());
@@ -230,18 +212,15 @@ impl KeyFileManager {
             config.insert("salt".to_string(),            kdf.salt.clone());
             config.insert("salt_length".to_string(),     kdf.salt_length.to_string());
         }
-
         Some(config)
     }
 
-    /// Extract a `HashMap<String, String>` suitable for passing to
-    /// `ICompressor::initialize` from the parsed key file data.
+    /// Extract an `ICompressor::initialize`-compatible config map from parsed key data.
     pub fn extract_compression_config(
         &self,
         data: &KeyFileData,
     ) -> Option<HashMap<String, String>> {
         let comp = data.key_data.compression.as_ref()?;
-
         let mut config = HashMap::with_capacity(4);
         config.insert("algorithm".to_string(), comp.algorithm.clone());
         if let Some(ref level) = comp.compression_level {
@@ -254,13 +233,45 @@ impl KeyFileManager {
 
     /// Whether the key file was created in password mode.
     pub fn is_password_protected(&self, data: &KeyFileData) -> bool {
-        data.is_password_mode() && data.key_data.encryption
-            .as_ref()
-            .map(|e| e.kdf.is_some())
-            .unwrap_or(false)
+        data.is_password_mode()
+            && data.key_data.encryption
+                .as_ref()
+                .map(|e| e.kdf.is_some())
+                .unwrap_or(false)
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
+
+    /// Unlock (if existing) → write → re-lock.
+    fn write_locked(&self, path: &str, content: &[u8]) -> Result<(), String> {
+        let p           = Path::new(path);
+        let file_exists = p.exists();
+
+        if file_exists {
+            file_permissions::set_writable(p)
+                .map_err(|e| format!("Cannot unlock key file for writing: {}", e))?;
+        }
+
+        let result = fs::write(p, content).map_err(|e| {
+            let msg = format!("Failed to write key file: {}", e);
+            self.base.error_manager().add_dlm_error(
+                DlmErrorType::InvocationFailed,
+                msg.clone(),
+                Some(self.base.module_name().to_string()),
+                None,
+                Some(format!("Check write permissions for: {}", path)),
+                ErrorSeverity::Error,
+            );
+            msg
+        });
+
+        // Always re-lock, even if the write failed.
+        if let Err(e) = file_permissions::set_readonly(p) {
+            self.base.log_warning(&format!("Could not lock key file read-only: {}", e));
+        }
+
+        result
+    }
 
     fn key_file_path(&self, compiled_file_path: &str) -> String {
         let stem = Path::new(compiled_file_path)

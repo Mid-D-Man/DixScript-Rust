@@ -7,6 +7,7 @@ pub mod security_utilities;
 pub mod symbol_table;
 pub mod path_builder;
 pub mod comment_filter;
+pub mod file_permissions;
 
 pub use identifier_pattern_analyzer::{
     IdentifierPatternAnalyzer,

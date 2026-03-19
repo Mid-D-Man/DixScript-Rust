@@ -1,0 +1,1258 @@
+{
+  "build": "601",
+  "branch": "master",
+  "commit": "a9c5a1c3",
+  "date": "2026-03-19T05:23:23+01:00",
+  "rust_version": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+  "summary": {
+    "total": 132,
+    "passed": 122,
+    "failed": 10
+  },
+  "suites": [
+    {
+      "name": "01_basic.mdix",
+      "file": "mdix_files/tests/cli/01_basic.mdix",
+      "passed": 18,
+      "failed": 0,
+      "commands": [
+        {
+          "name": "validate",
+          "full_command": "mdix validate mdix_files/tests/cli/01_basic.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 mdix_files/tests/cli/01_basic.mdix is valid\n  tokens                   39\n  warnings                 0\n  completed in 3.86ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --strict",
+          "full_command": "mdix validate --strict mdix_files/tests/cli/01_basic.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 mdix_files/tests/cli/01_basic.mdix is valid\n  tokens                   39\n  warnings                 0\n  completed in 3.64ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --json",
+          "full_command": "mdix validate --json mdix_files/tests/cli/01_basic.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "{\n  \"success\": true,\n  \"data\": {\n    \"file\": \"mdix_files/tests/cli/01_basic.mdix\",\n    \"token_count\": 39,\n    \"warning_count\": 0,\n    \"warnings\": [],\n    \"elapsed_ms\": 3.584649\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --quiet",
+          "full_command": "mdix validate --quiet mdix_files/tests/cli/01_basic.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compile --skip-dlm",
+          "full_command": "mdix compile --skip-dlm mdix_files/tests/cli/01_basic.mdix -o /tmp/mdix_cli_test/compile_out",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.646] [Info] Loading text file: mdix_files/tests/cli/01_basic.mdix\u001b[0m\n\u001b[97m[04:24:24.650] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.650] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.650] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.650] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.650] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.650] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/cli/01_basic.mdix\n  original size            259 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compile --skip-dlm --json",
+          "full_command": "mdix compile --skip-dlm --json mdix_files/tests/cli/01_basic.mdix -o /tmp/mdix_cli_test/compile_json_out",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.653] [Info] Loading text file: mdix_files/tests/cli/01_basic.mdix\u001b[0m\n\u001b[97m[04:24:24.656] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.656] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.656] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.656] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.656] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.656] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"source_path\": \"mdix_files/tests/cli/01_basic.mdix\",\n    \"generated_files\": [],\n    \"original_size\": 259,\n    \"modules_applied\": [],\n    \"elapsed_ms\": 3.871087\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "inspect",
+          "full_command": "mdix inspect mdix_files/tests/cli/01_basic.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.662] [Info] Loading text file: mdix_files/tests/cli/01_basic.mdix\u001b[0m\n\u001b[97m[04:24:24.663] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.663] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.663] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.663] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.663] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.663] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/01_basic.mdix\n  size                     259 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @DATA\n\nData\n\u2500\u2500\u2500\u2500\n  keys                     12\n  enums                    0\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "inspect --keys",
+          "full_command": "mdix inspect --keys mdix_files/tests/cli/01_basic.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.669] [Info] Loading text file: mdix_files/tests/cli/01_basic.mdix\u001b[0m\n\u001b[97m[04:24:24.669] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.669] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.670] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.670] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.670] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.670] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/01_basic.mdix\n  size                     259 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @DATA\n\nData\n\u2500\u2500\u2500\u2500\n  keys                     12\n  enums                    0\n\nKeys\n\u2500\u2500\u2500\u2500\n  path         type  \n  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  \u2500\u2500\u2500\u2500\u2500\u2500\n  app_name     string\n  debug        bool  \n  port         int   \n  server.host  string\n  server.port  int   \n  server.ssl   bool  \n  tags         array \n  tags[0]      string\n  tags[1]      string\n  tags[2]      string\n  timeout      int   \n  version      string\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "inspect --sections",
+          "full_command": "mdix inspect --sections mdix_files/tests/cli/01_basic.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.676] [Info] Loading text file: mdix_files/tests/cli/01_basic.mdix\u001b[0m\n\u001b[97m[04:24:24.676] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.676] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.676] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.676] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.676] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.676] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/01_basic.mdix\n  size                     259 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @DATA\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "inspect --json",
+          "full_command": "mdix inspect --json mdix_files/tests/cli/01_basic.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.683] [Info] Loading text file: mdix_files/tests/cli/01_basic.mdix\u001b[0m\n\u001b[97m[04:24:24.683] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.683] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.683] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.683] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.683] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.683] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"file_path\": \"mdix_files/tests/cli/01_basic.mdix\",\n    \"file_size\": 259,\n    \"sections\": [\n      \"@CONFIG\",\n      \"@DATA\"\n    ],\n    \"key_count\": 12,\n    \"enum_count\": 0,\n    \"dlm_modules\": [],\n    \"version\": \"1.0.0\",\n    \"keys\": null\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "convert --to json",
+          "full_command": "mdix convert --to json mdix_files/tests/cli/01_basic.mdix -o /tmp/mdix_cli_test/out.json",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.686] [Info] Loading text file: mdix_files/tests/cli/01_basic.mdix\u001b[0m\n\u001b[97m[04:24:24.689] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.689] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.689] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.689] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.689] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.689] [Info] Text file loaded successfully\u001b[0m\n\u2713 Converted to /tmp/mdix_cli_test/out.json\n  input                    259 B\n  output                   284 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "convert --to toml",
+          "full_command": "mdix convert --to toml mdix_files/tests/cli/01_basic.mdix -o /tmp/mdix_cli_test/out.toml",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.692] [Info] Loading text file: mdix_files/tests/cli/01_basic.mdix\u001b[0m\n\u001b[97m[04:24:24.696] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.696] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.696] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.696] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.696] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.696] [Info] Text file loaded successfully\u001b[0m\n\u2713 Converted to /tmp/mdix_cli_test/out.toml\n  input                    259 B\n  output                   245 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "convert --to json --json",
+          "full_command": "mdix convert --to json --json mdix_files/tests/cli/01_basic.mdix -o /tmp/mdix_cli_test/out_env.json",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.699] [Info] Loading text file: mdix_files/tests/cli/01_basic.mdix\u001b[0m\n\u001b[97m[04:24:24.702] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.702] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.702] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.702] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.702] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.702] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"input_path\": \"mdix_files/tests/cli/01_basic.mdix\",\n    \"output_path\": \"/tmp/mdix_cli_test/out_env.json\",\n    \"input_size\": \"259 B\",\n    \"output_size\": \"284 B\",\n    \"size_ratio\": \"109.7%\",\n    \"elapsed_ms\": 3.9073759999999997\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compact",
+          "full_command": "mdix compact mdix_files/tests/cli/01_basic.mdix -o /tmp/mdix_cli_test/out.compact.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.compact.mdix\n  original                 259 B\n  compacted                259 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode minify",
+          "full_command": "mdix compact --mode minify mdix_files/tests/cli/01_basic.mdix -o /tmp/mdix_cli_test/out.min.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.min.mdix\n  original                 259 B\n  compacted                193 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode strip-comments",
+          "full_command": "mdix compact --mode strip-comments mdix_files/tests/cli/01_basic.mdix -o /tmp/mdix_cli_test/out.stripped.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.stripped.mdix\n  original                 259 B\n  compacted                259 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --ratio",
+          "full_command": "mdix compact --ratio mdix_files/tests/cli/01_basic.mdix -o /tmp/mdix_cli_test/out.ratio.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.ratio.mdix\n  original                 259 B\n  compacted                259 B\n  ratio                    0.0% reduction\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "format --check",
+          "full_command": "mdix format --check mdix_files/tests/cli/01_basic.mdix",
+          "status": "passed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:24.718] [Info] Loading text file: mdix_files/tests/cli/01_basic.mdix\u001b[0m\n\u001b[97m[04:24:24.718] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.718] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.718] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.718] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.718] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.718] [Info] Text file loaded successfully\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 Basic\",\n]\n\u2717 mdix_files/tests/cli/01_basic.mdix is not formatted \u2014 run without --check to fix\n",
+          "elapsed_ms": 6
+        }
+      ]
+    },
+    {
+      "name": "02_enums.mdix",
+      "file": "mdix_files/tests/cli/02_enums.mdix",
+      "passed": 18,
+      "failed": 0,
+      "commands": [
+        {
+          "name": "validate",
+          "full_command": "mdix validate mdix_files/tests/cli/02_enums.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 mdix_files/tests/cli/02_enums.mdix is valid\n  tokens                   97\n  warnings                 0\n  completed in 3.77ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --strict",
+          "full_command": "mdix validate --strict mdix_files/tests/cli/02_enums.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 mdix_files/tests/cli/02_enums.mdix is valid\n  tokens                   97\n  warnings                 0\n  completed in 3.74ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --json",
+          "full_command": "mdix validate --json mdix_files/tests/cli/02_enums.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "{\n  \"success\": true,\n  \"data\": {\n    \"file\": \"mdix_files/tests/cli/02_enums.mdix\",\n    \"token_count\": 97,\n    \"warning_count\": 0,\n    \"warnings\": [],\n    \"elapsed_ms\": 3.6811510000000003\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --quiet",
+          "full_command": "mdix validate --quiet mdix_files/tests/cli/02_enums.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compile --skip-dlm",
+          "full_command": "mdix compile --skip-dlm mdix_files/tests/cli/02_enums.mdix -o /tmp/mdix_cli_test/compile_out",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.746] [Info] Loading text file: mdix_files/tests/cli/02_enums.mdix\u001b[0m\n\u001b[97m[04:24:24.750] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.750] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.750] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.750] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.750] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.750] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/cli/02_enums.mdix\n  original size            554 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compile --skip-dlm --json",
+          "full_command": "mdix compile --skip-dlm --json mdix_files/tests/cli/02_enums.mdix -o /tmp/mdix_cli_test/compile_json_out",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.752] [Info] Loading text file: mdix_files/tests/cli/02_enums.mdix\u001b[0m\n\u001b[97m[04:24:24.756] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.756] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.756] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.756] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.756] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.756] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"source_path\": \"mdix_files/tests/cli/02_enums.mdix\",\n    \"generated_files\": [],\n    \"original_size\": 554,\n    \"modules_applied\": [],\n    \"elapsed_ms\": 4.0056199999999995\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "inspect",
+          "full_command": "mdix inspect mdix_files/tests/cli/02_enums.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.762] [Info] Loading text file: mdix_files/tests/cli/02_enums.mdix\u001b[0m\n\u001b[97m[04:24:24.763] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.763] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.763] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.763] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.763] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.763] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/02_enums.mdix\n  size                     554 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @ENUMS\n  @DATA\n\nData\n\u2500\u2500\u2500\u2500\n  keys                     12\n  enums                    3\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "inspect --keys",
+          "full_command": "mdix inspect --keys mdix_files/tests/cli/02_enums.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.769] [Info] Loading text file: mdix_files/tests/cli/02_enums.mdix\u001b[0m\n\u001b[97m[04:24:24.770] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.770] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.770] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.770] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.770] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.770] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/02_enums.mdix\n  size                     554 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @ENUMS\n  @DATA\n\nData\n\u2500\u2500\u2500\u2500\n  keys                     12\n  enums                    3\n\nKeys\n\u2500\u2500\u2500\u2500\n  path             type  \n  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  \u2500\u2500\u2500\u2500\u2500\u2500\n  app_name         string\n  current_env      enum  \n  environments     array \n  environments[0]  string\n  environments[1]  string\n  environments[2]  string\n  log_level        enum  \n  port             int   \n  server.host      string\n  server.port      int   \n  server.ssl       bool  \n  status           enum  \n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "inspect --sections",
+          "full_command": "mdix inspect --sections mdix_files/tests/cli/02_enums.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.777] [Info] Loading text file: mdix_files/tests/cli/02_enums.mdix\u001b[0m\n\u001b[97m[04:24:24.777] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.777] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.777] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.777] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.777] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.777] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/02_enums.mdix\n  size                     554 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @ENUMS\n  @DATA\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "inspect --json",
+          "full_command": "mdix inspect --json mdix_files/tests/cli/02_enums.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.784] [Info] Loading text file: mdix_files/tests/cli/02_enums.mdix\u001b[0m\n\u001b[97m[04:24:24.784] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.784] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.784] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.784] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.784] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.784] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"file_path\": \"mdix_files/tests/cli/02_enums.mdix\",\n    \"file_size\": 554,\n    \"sections\": [\n      \"@CONFIG\",\n      \"@ENUMS\",\n      \"@DATA\"\n    ],\n    \"key_count\": 12,\n    \"enum_count\": 3,\n    \"dlm_modules\": [],\n    \"version\": \"1.0.0\",\n    \"keys\": null\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "convert --to json",
+          "full_command": "mdix convert --to json mdix_files/tests/cli/02_enums.mdix -o /tmp/mdix_cli_test/out.json",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.787] [Info] Loading text file: mdix_files/tests/cli/02_enums.mdix\u001b[0m\n\u001b[97m[04:24:24.791] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.791] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.791] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.791] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.791] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.791] [Info] Text file loaded successfully\u001b[0m\n\u2713 Converted to /tmp/mdix_cli_test/out.json\n  input                    554 B\n  output                   581 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "convert --to toml",
+          "full_command": "mdix convert --to toml mdix_files/tests/cli/02_enums.mdix -o /tmp/mdix_cli_test/out.toml",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.794] [Info] Loading text file: mdix_files/tests/cli/02_enums.mdix\u001b[0m\n\u001b[97m[04:24:24.798] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.798] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.798] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.798] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.798] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.798] [Info] Text file loaded successfully\u001b[0m\n\u2713 Converted to /tmp/mdix_cli_test/out.toml\n  input                    554 B\n  output                   476 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "convert --to json --json",
+          "full_command": "mdix convert --to json --json mdix_files/tests/cli/02_enums.mdix -o /tmp/mdix_cli_test/out_env.json",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.801] [Info] Loading text file: mdix_files/tests/cli/02_enums.mdix\u001b[0m\n\u001b[97m[04:24:24.804] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.804] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.805] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.805] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.805] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.805] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"input_path\": \"mdix_files/tests/cli/02_enums.mdix\",\n    \"output_path\": \"/tmp/mdix_cli_test/out_env.json\",\n    \"input_size\": \"554 B\",\n    \"output_size\": \"581 B\",\n    \"size_ratio\": \"104.9%\",\n    \"elapsed_ms\": 4.125295\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compact",
+          "full_command": "mdix compact mdix_files/tests/cli/02_enums.mdix -o /tmp/mdix_cli_test/out.compact.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.compact.mdix\n  original                 554 B\n  compacted                554 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode minify",
+          "full_command": "mdix compact --mode minify mdix_files/tests/cli/02_enums.mdix -o /tmp/mdix_cli_test/out.min.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.min.mdix\n  original                 554 B\n  compacted                412 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode strip-comments",
+          "full_command": "mdix compact --mode strip-comments mdix_files/tests/cli/02_enums.mdix -o /tmp/mdix_cli_test/out.stripped.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.stripped.mdix\n  original                 554 B\n  compacted                554 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --ratio",
+          "full_command": "mdix compact --ratio mdix_files/tests/cli/02_enums.mdix -o /tmp/mdix_cli_test/out.ratio.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.ratio.mdix\n  original                 554 B\n  compacted                554 B\n  ratio                    0.0% reduction\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "format --check",
+          "full_command": "mdix format --check mdix_files/tests/cli/02_enums.mdix",
+          "status": "passed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:24.821] [Info] Loading text file: mdix_files/tests/cli/02_enums.mdix\u001b[0m\n\u001b[97m[04:24:24.821] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.821] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.821] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.821] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.821] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.821] [Info] Text file loaded successfully\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Enums\\\"\\n  features -> \\\"advanced\",\n]\n\u2717 mdix_files/tests/cli/02_enums.mdix is not formatted \u2014 run without --check to fix\n",
+          "elapsed_ms": 6
+        }
+      ]
+    },
+    {
+      "name": "03_quickfuncs.mdix",
+      "file": "mdix_files/tests/cli/03_quickfuncs.mdix",
+      "passed": 18,
+      "failed": 0,
+      "commands": [
+        {
+          "name": "validate",
+          "full_command": "mdix validate mdix_files/tests/cli/03_quickfuncs.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:24.828] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.828] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u2713 mdix_files/tests/cli/03_quickfuncs.mdix is valid\n  tokens                   191\n  warnings                 0\n  completed in 3.86ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --strict",
+          "full_command": "mdix validate --strict mdix_files/tests/cli/03_quickfuncs.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:24.834] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.834] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u2713 mdix_files/tests/cli/03_quickfuncs.mdix is valid\n  tokens                   191\n  warnings                 0\n  completed in 3.87ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --json",
+          "full_command": "mdix validate --json mdix_files/tests/cli/03_quickfuncs.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:24.840] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.840] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"file\": \"mdix_files/tests/cli/03_quickfuncs.mdix\",\n    \"token_count\": 191,\n    \"warning_count\": 0,\n    \"warnings\": [],\n    \"elapsed_ms\": 3.93633\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --quiet",
+          "full_command": "mdix validate --quiet mdix_files/tests/cli/03_quickfuncs.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:24.847] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.847] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compile --skip-dlm",
+          "full_command": "mdix compile --skip-dlm mdix_files/tests/cli/03_quickfuncs.mdix -o /tmp/mdix_cli_test/compile_out",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.849] [Info] Loading text file: mdix_files/tests/cli/03_quickfuncs.mdix\u001b[0m\n\u001b[91m[04:24:24.853] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.853] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.853] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.853] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.853] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.853] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.853] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.853] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/cli/03_quickfuncs.mdix\n  original size            965 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compile --skip-dlm --json",
+          "full_command": "mdix compile --skip-dlm --json mdix_files/tests/cli/03_quickfuncs.mdix -o /tmp/mdix_cli_test/compile_json_out",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.856] [Info] Loading text file: mdix_files/tests/cli/03_quickfuncs.mdix\u001b[0m\n\u001b[91m[04:24:24.860] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.860] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.860] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.860] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.860] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.860] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.860] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.860] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"source_path\": \"mdix_files/tests/cli/03_quickfuncs.mdix\",\n    \"generated_files\": [],\n    \"original_size\": 965,\n    \"modules_applied\": [],\n    \"elapsed_ms\": 4.10649\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "inspect",
+          "full_command": "mdix inspect mdix_files/tests/cli/03_quickfuncs.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:24.866] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.866] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.866] [Info] Loading text file: mdix_files/tests/cli/03_quickfuncs.mdix\u001b[0m\n\u001b[91m[04:24:24.867] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.867] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.867] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.867] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.867] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.867] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.867] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.867] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/03_quickfuncs.mdix\n  size                     965 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @ENUMS\n  @DATA\n\nData\n\u2500\u2500\u2500\u2500\n  keys                     4\n  enums                    1\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "inspect --keys",
+          "full_command": "mdix inspect --keys mdix_files/tests/cli/03_quickfuncs.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:24.873] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.873] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.873] [Info] Loading text file: mdix_files/tests/cli/03_quickfuncs.mdix\u001b[0m\n\u001b[91m[04:24:24.874] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.874] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.874] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.874] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.874] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.874] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.874] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.874] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/03_quickfuncs.mdix\n  size                     965 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @ENUMS\n  @DATA\n\nData\n\u2500\u2500\u2500\u2500\n  keys                     4\n  enums                    1\n\nKeys\n\u2500\u2500\u2500\u2500\n  path      type  \n  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  \u2500\u2500\u2500\u2500\u2500\u2500\n  admins    array \n  app_name  string\n  app_tier  enum  \n  servers   array \n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "inspect --sections",
+          "full_command": "mdix inspect --sections mdix_files/tests/cli/03_quickfuncs.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:24.880] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.880] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.881] [Info] Loading text file: mdix_files/tests/cli/03_quickfuncs.mdix\u001b[0m\n\u001b[91m[04:24:24.881] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.881] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.881] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.881] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.881] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.881] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.881] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.881] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/03_quickfuncs.mdix\n  size                     965 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @ENUMS\n  @DATA\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "inspect --json",
+          "full_command": "mdix inspect --json mdix_files/tests/cli/03_quickfuncs.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:24.887] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.887] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.888] [Info] Loading text file: mdix_files/tests/cli/03_quickfuncs.mdix\u001b[0m\n\u001b[91m[04:24:24.888] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.888] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.888] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.888] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.888] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.888] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.888] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.888] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"file_path\": \"mdix_files/tests/cli/03_quickfuncs.mdix\",\n    \"file_size\": 965,\n    \"sections\": [\n      \"@CONFIG\",\n      \"@ENUMS\",\n      \"@DATA\"\n    ],\n    \"key_count\": 4,\n    \"enum_count\": 1,\n    \"dlm_modules\": [],\n    \"version\": \"1.0.0\",\n    \"keys\": null\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "convert --to json",
+          "full_command": "mdix convert --to json mdix_files/tests/cli/03_quickfuncs.mdix -o /tmp/mdix_cli_test/out.json",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.891] [Info] Loading text file: mdix_files/tests/cli/03_quickfuncs.mdix\u001b[0m\n\u001b[91m[04:24:24.895] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.895] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.895] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.895] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.895] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.895] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.895] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.895] [Info] Text file loaded successfully\u001b[0m\n\u2713 Converted to /tmp/mdix_cli_test/out.json\n  input                    965 B\n  output                   146 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "convert --to toml",
+          "full_command": "mdix convert --to toml mdix_files/tests/cli/03_quickfuncs.mdix -o /tmp/mdix_cli_test/out.toml",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.897] [Info] Loading text file: mdix_files/tests/cli/03_quickfuncs.mdix\u001b[0m\n\u001b[91m[04:24:24.901] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.901] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.901] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.901] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.901] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.901] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.901] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.901] [Info] Text file loaded successfully\u001b[0m\n\u2713 Converted to /tmp/mdix_cli_test/out.toml\n  input                    965 B\n  output                   106 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "convert --to json --json",
+          "full_command": "mdix convert --to json --json mdix_files/tests/cli/03_quickfuncs.mdix -o /tmp/mdix_cli_test/out_env.json",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.904] [Info] Loading text file: mdix_files/tests/cli/03_quickfuncs.mdix\u001b[0m\n\u001b[91m[04:24:24.908] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.908] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.908] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.908] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.908] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.908] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.908] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.908] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"input_path\": \"mdix_files/tests/cli/03_quickfuncs.mdix\",\n    \"output_path\": \"/tmp/mdix_cli_test/out_env.json\",\n    \"input_size\": \"965 B\",\n    \"output_size\": \"146 B\",\n    \"size_ratio\": \"15.1%\",\n    \"elapsed_ms\": 4.158277\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compact",
+          "full_command": "mdix compact mdix_files/tests/cli/03_quickfuncs.mdix -o /tmp/mdix_cli_test/out.compact.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.compact.mdix\n  original                 965 B\n  compacted                965 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode minify",
+          "full_command": "mdix compact --mode minify mdix_files/tests/cli/03_quickfuncs.mdix -o /tmp/mdix_cli_test/out.min.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.min.mdix\n  original                 965 B\n  compacted                701 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode strip-comments",
+          "full_command": "mdix compact --mode strip-comments mdix_files/tests/cli/03_quickfuncs.mdix -o /tmp/mdix_cli_test/out.stripped.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.stripped.mdix\n  original                 965 B\n  compacted                965 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --ratio",
+          "full_command": "mdix compact --ratio mdix_files/tests/cli/03_quickfuncs.mdix -o /tmp/mdix_cli_test/out.ratio.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.ratio.mdix\n  original                 965 B\n  compacted                965 B\n  ratio                    0.0% reduction\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "format --check",
+          "full_command": "mdix format --check mdix_files/tests/cli/03_quickfuncs.mdix",
+          "status": "passed",
+          "exit_code": 1,
+          "stdout": "\u001b[91m[04:24:24.924] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.924] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.924] [Info] Loading text file: mdix_files/tests/cli/03_quickfuncs.mdix\u001b[0m\n\u001b[91m[04:24:24.925] [Error] [Parser] [DX001L9C7] Fatal: MissingToken at line 9, column 7\nMessage: Expected ',' or '}' in object literal, found port\nSource:\n       port = port\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:24.925] [Error] [Parser] [DX000L12C3] Fatal: UnexpectedToken at line 12, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:24.925] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.925] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.925] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.925] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.925] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.925] [Info] Text file loaded successfully\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]\n\u2717 mdix_files/tests/cli/03_quickfuncs.mdix is not formatted \u2014 run without --check to fix\n",
+          "elapsed_ms": 7
+        }
+      ]
+    },
+    {
+      "name": "04_all_types.mdix",
+      "file": "mdix_files/tests/cli/04_all_types.mdix",
+      "passed": 17,
+      "failed": 1,
+      "commands": [
+        {
+          "name": "validate",
+          "full_command": "mdix validate mdix_files/tests/cli/04_all_types.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 mdix_files/tests/cli/04_all_types.mdix is valid\n  tokens                   179\n  warnings                 0\n  completed in 7.52ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 9
+        },
+        {
+          "name": "validate --strict",
+          "full_command": "mdix validate --strict mdix_files/tests/cli/04_all_types.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 mdix_files/tests/cli/04_all_types.mdix is valid\n  tokens                   179\n  warnings                 0\n  completed in 7.38ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 9
+        },
+        {
+          "name": "validate --json",
+          "full_command": "mdix validate --json mdix_files/tests/cli/04_all_types.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "{\n  \"success\": true,\n  \"data\": {\n    \"file\": \"mdix_files/tests/cli/04_all_types.mdix\",\n    \"token_count\": 179,\n    \"warning_count\": 0,\n    \"warnings\": [],\n    \"elapsed_ms\": 7.506453\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 9
+        },
+        {
+          "name": "validate --quiet",
+          "full_command": "mdix validate --quiet mdix_files/tests/cli/04_all_types.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 9
+        },
+        {
+          "name": "compile --skip-dlm",
+          "full_command": "mdix compile --skip-dlm mdix_files/tests/cli/04_all_types.mdix -o /tmp/mdix_cli_test/compile_out",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.967] [Info] Loading text file: mdix_files/tests/cli/04_all_types.mdix\u001b[0m\n\u001b[97m[04:24:24.975] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.975] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.975] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.975] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.975] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.975] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/cli/04_all_types.mdix\n  original size            958 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 10
+        },
+        {
+          "name": "compile --skip-dlm --json",
+          "full_command": "mdix compile --skip-dlm --json mdix_files/tests/cli/04_all_types.mdix -o /tmp/mdix_cli_test/compile_json_out",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.977] [Info] Loading text file: mdix_files/tests/cli/04_all_types.mdix\u001b[0m\n\u001b[97m[04:24:24.985] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.985] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.985] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.985] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.985] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.985] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"source_path\": \"mdix_files/tests/cli/04_all_types.mdix\",\n    \"generated_files\": [],\n    \"original_size\": 958,\n    \"modules_applied\": [],\n    \"elapsed_ms\": 7.7361629999999995\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 10
+        },
+        {
+          "name": "inspect",
+          "full_command": "mdix inspect mdix_files/tests/cli/04_all_types.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:24.995] [Info] Loading text file: mdix_files/tests/cli/04_all_types.mdix\u001b[0m\n\u001b[97m[04:24:24.996] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:24.996] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:24.996] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:24.996] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:24.996] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:24.996] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/04_all_types.mdix\n  size                     958 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @DATA\n\nData\n\u2500\u2500\u2500\u2500\n  keys                     30\n  enums                    0\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 10
+        },
+        {
+          "name": "inspect --keys",
+          "full_command": "mdix inspect --keys mdix_files/tests/cli/04_all_types.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.006] [Info] Loading text file: mdix_files/tests/cli/04_all_types.mdix\u001b[0m\n\u001b[97m[04:24:25.007] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.007] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.007] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.007] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.007] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.007] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/04_all_types.mdix\n  size                     958 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @DATA\n\nData\n\u2500\u2500\u2500\u2500\n  keys                     30\n  enums                    0\n\nKeys\n\u2500\u2500\u2500\u2500\n  path               type     \n  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  blob_val           blob     \n  bool_f             bool     \n  bool_t             bool     \n  color_names        array    \n  color_names[0]     string   \n  color_names[1]     string   \n  color_names[2]     string   \n  date_val           date     \n  double_val         double   \n  float_val          float    \n  hex_color          hexcolor \n  hex_lit            int      \n  int_array          array    \n  int_neg            int      \n  int_pos            int      \n  metadata.build     int      \n  metadata.created   date     \n  metadata.version   string   \n  nested_array       array    \n  null_val           null     \n  regex_val          regex    \n  simple_obj         object   \n  simple_obj.active  bool     \n  simple_obj.id      int      \n  simple_obj.name    string   \n  str_array          array    \n  str_dq             string   \n  str_sq             string   \n  ts_val             timestamp\n  tuple_val          tuple    \n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 11
+        },
+        {
+          "name": "inspect --sections",
+          "full_command": "mdix inspect --sections mdix_files/tests/cli/04_all_types.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.018] [Info] Loading text file: mdix_files/tests/cli/04_all_types.mdix\u001b[0m\n\u001b[97m[04:24:25.019] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.019] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.019] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.019] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.019] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.019] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/04_all_types.mdix\n  size                     958 B\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @DATA\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 11
+        },
+        {
+          "name": "inspect --json",
+          "full_command": "mdix inspect --json mdix_files/tests/cli/04_all_types.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.029] [Info] Loading text file: mdix_files/tests/cli/04_all_types.mdix\u001b[0m\n\u001b[97m[04:24:25.030] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.030] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.030] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.030] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.030] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.030] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"file_path\": \"mdix_files/tests/cli/04_all_types.mdix\",\n    \"file_size\": 958,\n    \"sections\": [\n      \"@CONFIG\",\n      \"@DATA\"\n    ],\n    \"key_count\": 30,\n    \"enum_count\": 0,\n    \"dlm_modules\": [],\n    \"version\": \"1.0.0\",\n    \"keys\": null\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 10
+        },
+        {
+          "name": "convert --to json",
+          "full_command": "mdix convert --to json mdix_files/tests/cli/04_all_types.mdix -o /tmp/mdix_cli_test/out.json",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.032] [Info] Loading text file: mdix_files/tests/cli/04_all_types.mdix\u001b[0m\n\u001b[97m[04:24:25.040] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.040] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.040] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.040] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.040] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.040] [Info] Text file loaded successfully\u001b[0m\n\u2713 Converted to /tmp/mdix_cli_test/out.json\n  input                    958 B\n  output                   1.0 KB\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 10
+        },
+        {
+          "name": "convert --to toml",
+          "full_command": "mdix convert --to toml mdix_files/tests/cli/04_all_types.mdix -o /tmp/mdix_cli_test/out.toml",
+          "status": "failed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.043] [Info] Loading text file: mdix_files/tests/cli/04_all_types.mdix\u001b[0m\n\u001b[97m[04:24:25.050] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.051] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.051] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.051] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.051] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.051] [Info] Text file loaded successfully\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n\u2717 Conversion error: invalid type: null, expected any valid TOML value at line 1 column 603\n",
+          "elapsed_ms": 10
+        },
+        {
+          "name": "convert --to json --json",
+          "full_command": "mdix convert --to json --json mdix_files/tests/cli/04_all_types.mdix -o /tmp/mdix_cli_test/out_env.json",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.053] [Info] Loading text file: mdix_files/tests/cli/04_all_types.mdix\u001b[0m\n\u001b[97m[04:24:25.061] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.061] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.061] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.061] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.061] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.061] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"input_path\": \"mdix_files/tests/cli/04_all_types.mdix\",\n    \"output_path\": \"/tmp/mdix_cli_test/out_env.json\",\n    \"input_size\": \"958 B\",\n    \"output_size\": \"1.0 KB\",\n    \"size_ratio\": \"107.8%\",\n    \"elapsed_ms\": 7.841651999999999\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n",
+          "elapsed_ms": 10
+        },
+        {
+          "name": "compact",
+          "full_command": "mdix compact mdix_files/tests/cli/04_all_types.mdix -o /tmp/mdix_cli_test/out.compact.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.compact.mdix\n  original                 958 B\n  compacted                958 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode minify",
+          "full_command": "mdix compact --mode minify mdix_files/tests/cli/04_all_types.mdix -o /tmp/mdix_cli_test/out.min.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.min.mdix\n  original                 958 B\n  compacted                802 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode strip-comments",
+          "full_command": "mdix compact --mode strip-comments mdix_files/tests/cli/04_all_types.mdix -o /tmp/mdix_cli_test/out.stripped.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.stripped.mdix\n  original                 958 B\n  compacted                958 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --ratio",
+          "full_command": "mdix compact --ratio mdix_files/tests/cli/04_all_types.mdix -o /tmp/mdix_cli_test/out.ratio.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.ratio.mdix\n  original                 958 B\n  compacted                958 B\n  ratio                    0.0% reduction\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "format --check",
+          "full_command": "mdix format --check mdix_files/tests/cli/04_all_types.mdix",
+          "status": "passed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.082] [Info] Loading text file: mdix_files/tests/cli/04_all_types.mdix\u001b[0m\n\u001b[97m[04:24:25.082] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.082] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.082] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.082] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.082] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.082] [Info] Text file loaded successfully\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 All Data Types\",\n]\n\u2717 mdix_files/tests/cli/04_all_types.mdix is not formatted \u2014 run without --check to fix\n",
+          "elapsed_ms": 11
+        }
+      ]
+    },
+    {
+      "name": "05_game_config.mdix",
+      "file": "mdix_files/tests/cli/05_game_config.mdix",
+      "passed": 18,
+      "failed": 0,
+      "commands": [
+        {
+          "name": "validate",
+          "full_command": "mdix validate mdix_files/tests/cli/05_game_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:25.089] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.089] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u2713 mdix_files/tests/cli/05_game_config.mdix is valid\n  tokens                   280\n  warnings                 0\n  completed in 3.99ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --strict",
+          "full_command": "mdix validate --strict mdix_files/tests/cli/05_game_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:25.095] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.095] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u2713 mdix_files/tests/cli/05_game_config.mdix is valid\n  tokens                   280\n  warnings                 0\n  completed in 3.94ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --json",
+          "full_command": "mdix validate --json mdix_files/tests/cli/05_game_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:25.102] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.102] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"file\": \"mdix_files/tests/cli/05_game_config.mdix\",\n    \"token_count\": 280,\n    \"warning_count\": 0,\n    \"warnings\": [],\n    \"elapsed_ms\": 3.98923\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --quiet",
+          "full_command": "mdix validate --quiet mdix_files/tests/cli/05_game_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:25.108] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.108] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compile --skip-dlm",
+          "full_command": "mdix compile --skip-dlm mdix_files/tests/cli/05_game_config.mdix -o /tmp/mdix_cli_test/compile_out",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.111] [Info] Loading text file: mdix_files/tests/cli/05_game_config.mdix\u001b[0m\n\u001b[91m[04:24:25.115] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.115] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.115] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.115] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.115] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.115] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.115] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.115] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/cli/05_game_config.mdix\n  original size            1.3 KB\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compile --skip-dlm --json",
+          "full_command": "mdix compile --skip-dlm --json mdix_files/tests/cli/05_game_config.mdix -o /tmp/mdix_cli_test/compile_json_out",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.118] [Info] Loading text file: mdix_files/tests/cli/05_game_config.mdix\u001b[0m\n\u001b[91m[04:24:25.122] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.122] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.122] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.122] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.122] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.122] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.122] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.122] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"source_path\": \"mdix_files/tests/cli/05_game_config.mdix\",\n    \"generated_files\": [],\n    \"original_size\": 1373,\n    \"modules_applied\": [],\n    \"elapsed_ms\": 4.204313\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "inspect",
+          "full_command": "mdix inspect mdix_files/tests/cli/05_game_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:25.128] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.128] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.129] [Info] Loading text file: mdix_files/tests/cli/05_game_config.mdix\u001b[0m\n\u001b[91m[04:24:25.129] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.129] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.129] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.129] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.129] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.129] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.129] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.129] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/05_game_config.mdix\n  size                     1.3 KB\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @ENUMS\n  @DATA\n\nData\n\u2500\u2500\u2500\u2500\n  keys                     13\n  enums                    2\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "inspect --keys",
+          "full_command": "mdix inspect --keys mdix_files/tests/cli/05_game_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:25.136] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.136] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.136] [Info] Loading text file: mdix_files/tests/cli/05_game_config.mdix\u001b[0m\n\u001b[91m[04:24:25.136] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.136] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.136] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.136] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.137] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.137] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.137] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.137] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/05_game_config.mdix\n  size                     1.3 KB\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @ENUMS\n  @DATA\n\nData\n\u2500\u2500\u2500\u2500\n  keys                     13\n  enums                    2\n\nKeys\n\u2500\u2500\u2500\u2500\n  path                          type  \n  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  \u2500\u2500\u2500\u2500\u2500\u2500\n  build_number                  int   \n  enemies                       array \n  game_settings.friendly_fire   bool  \n  game_settings.match_duration  int   \n  game_settings.max_players     int   \n  game_title                    string\n  game_version                  string\n  spawn_locations               array \n  spawn_locations[0]            string\n  spawn_locations[1]            string\n  spawn_locations[2]            string\n  spawn_locations[3]            string\n  weapons                       array \n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "inspect --sections",
+          "full_command": "mdix inspect --sections mdix_files/tests/cli/05_game_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:25.143] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.143] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.143] [Info] Loading text file: mdix_files/tests/cli/05_game_config.mdix\u001b[0m\n\u001b[91m[04:24:25.144] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.144] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.144] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.144] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.144] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.144] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.144] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.144] [Info] Text file loaded successfully\u001b[0m\n\nFile\n\u2500\u2500\u2500\u2500\n  path                     mdix_files/tests/cli/05_game_config.mdix\n  size                     1.3 KB\n  version                  1.0.0\n\nSections\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  @CONFIG\n  @ENUMS\n  @DATA\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "inspect --json",
+          "full_command": "mdix inspect --json mdix_files/tests/cli/05_game_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[91m[04:24:25.150] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.150] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.150] [Info] Loading text file: mdix_files/tests/cli/05_game_config.mdix\u001b[0m\n\u001b[91m[04:24:25.151] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.151] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.151] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.151] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.151] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.151] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.151] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.151] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"file_path\": \"mdix_files/tests/cli/05_game_config.mdix\",\n    \"file_size\": 1373,\n    \"sections\": [\n      \"@CONFIG\",\n      \"@ENUMS\",\n      \"@DATA\"\n    ],\n    \"key_count\": 13,\n    \"enum_count\": 2,\n    \"dlm_modules\": [],\n    \"version\": \"1.0.0\",\n    \"keys\": null\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "convert --to json",
+          "full_command": "mdix convert --to json mdix_files/tests/cli/05_game_config.mdix -o /tmp/mdix_cli_test/out.json",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.154] [Info] Loading text file: mdix_files/tests/cli/05_game_config.mdix\u001b[0m\n\u001b[91m[04:24:25.158] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.158] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.158] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.158] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.158] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.158] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.158] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.158] [Info] Text file loaded successfully\u001b[0m\n\u2713 Converted to /tmp/mdix_cli_test/out.json\n  input                    1.3 KB\n  output                   448 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "convert --to toml",
+          "full_command": "mdix convert --to toml mdix_files/tests/cli/05_game_config.mdix -o /tmp/mdix_cli_test/out.toml",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.161] [Info] Loading text file: mdix_files/tests/cli/05_game_config.mdix\u001b[0m\n\u001b[91m[04:24:25.164] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.164] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.165] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.165] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.165] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.165] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.165] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.165] [Info] Text file loaded successfully\u001b[0m\n\u2713 Converted to /tmp/mdix_cli_test/out.toml\n  input                    1.3 KB\n  output                   407 B\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "convert --to json --json",
+          "full_command": "mdix convert --to json --json mdix_files/tests/cli/05_game_config.mdix -o /tmp/mdix_cli_test/out_env.json",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.168] [Info] Loading text file: mdix_files/tests/cli/05_game_config.mdix\u001b[0m\n\u001b[91m[04:24:25.171] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.171] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.172] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.172] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.172] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.172] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.172] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.172] [Info] Text file loaded successfully\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"input_path\": \"mdix_files/tests/cli/05_game_config.mdix\",\n    \"output_path\": \"/tmp/mdix_cli_test/out_env.json\",\n    \"input_size\": \"1.3 KB\",\n    \"output_size\": \"448 B\",\n    \"size_ratio\": \"32.6%\",\n    \"elapsed_ms\": 4.413606\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compact",
+          "full_command": "mdix compact mdix_files/tests/cli/05_game_config.mdix -o /tmp/mdix_cli_test/out.compact.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.compact.mdix\n  original                 1.3 KB\n  compacted                1.3 KB\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode minify",
+          "full_command": "mdix compact --mode minify mdix_files/tests/cli/05_game_config.mdix -o /tmp/mdix_cli_test/out.min.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.min.mdix\n  original                 1.3 KB\n  compacted                1.0 KB\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode strip-comments",
+          "full_command": "mdix compact --mode strip-comments mdix_files/tests/cli/05_game_config.mdix -o /tmp/mdix_cli_test/out.stripped.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.stripped.mdix\n  original                 1.3 KB\n  compacted                1.3 KB\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --ratio",
+          "full_command": "mdix compact --ratio mdix_files/tests/cli/05_game_config.mdix -o /tmp/mdix_cli_test/out.ratio.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.ratio.mdix\n  original                 1.3 KB\n  compacted                1.3 KB\n  ratio                    0.0% reduction\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "format --check",
+          "full_command": "mdix format --check mdix_files/tests/cli/05_game_config.mdix",
+          "status": "passed",
+          "exit_code": 1,
+          "stdout": "\u001b[91m[04:24:25.188] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.188] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.188] [Info] Loading text file: mdix_files/tests/cli/05_game_config.mdix\u001b[0m\n\u001b[91m[04:24:25.189] [Error] [Parser] [DX001L10C7] Fatal: MissingToken at line 10, column 7\nMessage: Expected ',' or '}' in object literal, found name\nSource:\n       name   = name\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[04:24:25.189] [Error] [Parser] [DX000L15C3] Fatal: UnexpectedToken at line 15, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[04:24:25.189] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.189] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.189] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.189] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.189] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[04:24:25.189] [Info] Text file loaded successfully\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"CLI Test \u2014 Game Config\\\"\\n  features -> \\\"advanced\",\n]\n\u2717 mdix_files/tests/cli/05_game_config.mdix is not formatted \u2014 run without --check to fix\n",
+          "elapsed_ms": 7
+        }
+      ]
+    },
+    {
+      "name": "06_app_config.mdix",
+      "file": "mdix_files/tests/cli/06_app_config.mdix",
+      "passed": 9,
+      "failed": 9,
+      "commands": [
+        {
+          "name": "validate",
+          "full_command": "mdix validate mdix_files/tests/cli/06_app_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.195] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.195] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.195] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.195] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.195] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u2713 mdix_files/tests/cli/06_app_config.mdix is valid\n  tokens                   111\n  warnings                 0\n  completed in 3.90ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --strict",
+          "full_command": "mdix validate --strict mdix_files/tests/cli/06_app_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.201] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.201] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.201] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.201] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.201] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u2713 mdix_files/tests/cli/06_app_config.mdix is valid\n  tokens                   111\n  warnings                 0\n  completed in 3.84ms\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --json",
+          "full_command": "mdix validate --json mdix_files/tests/cli/06_app_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.208] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.208] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.208] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.208] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.208] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n{\n  \"success\": true,\n  \"data\": {\n    \"file\": \"mdix_files/tests/cli/06_app_config.mdix\",\n    \"token_count\": 111,\n    \"warning_count\": 0,\n    \"warnings\": [],\n    \"elapsed_ms\": 3.85093\n  }\n}\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "validate --quiet",
+          "full_command": "mdix validate --quiet mdix_files/tests/cli/06_app_config.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u001b[97m[04:24:25.214] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.214] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.214] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.214] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.214] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n",
+          "elapsed_ms": 6
+        },
+        {
+          "name": "compile --skip-dlm",
+          "full_command": "mdix compile --skip-dlm mdix_files/tests/cli/06_app_config.mdix -o /tmp/mdix_cli_test/compile_out",
+          "status": "failed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.217] [Info] Loading text file: mdix_files/tests/cli/06_app_config.mdix\u001b[0m\n\u001b[97m[04:24:25.223] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.223] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.223] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.223] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.223] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.223] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.223] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.223] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.223] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.223] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[04:24:25.223] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.223] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.224] [Info] Binary serialization complete: 1111 bytes\u001b[0m\n\u001b[97m[04:24:25.224] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[04:24:25.224] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.224] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.225] [Info] Compression complete: 1111 -> 664 bytes (40.2% reduction)\u001b[0m\n\u001b[91m[04:24:25.225] [Error] [DLM] [DXDLM002] Error: InvalidFunctionSignature\nLibrary Path: DEncryptor.aes256\nMessage: Encryption key not set\nQuick Fixes:\n  - Check parameter types match\n  - Verify return type is correct\n  - Review library API documentation\n\u001b[0m\n\u001b[91m[04:24:25.225] [Error] [DLM] [DXDLM012] Fatal: ModuleExecutionFailed\nLibrary Path: 06_app_config.mdix\nFunction: DEncryptor.aes256\nMessage: Encryption key not set\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n\u2717 Compile error: DLM pipeline failed: [\"Encryption key not set\"]\n",
+          "elapsed_ms": 11
+        },
+        {
+          "name": "compile --skip-dlm --json",
+          "full_command": "mdix compile --skip-dlm --json mdix_files/tests/cli/06_app_config.mdix -o /tmp/mdix_cli_test/compile_json_out",
+          "status": "failed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.228] [Info] Loading text file: mdix_files/tests/cli/06_app_config.mdix\u001b[0m\n\u001b[97m[04:24:25.232] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.232] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.232] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.232] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.232] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.232] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.232] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.232] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.232] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.232] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[04:24:25.232] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.232] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.233] [Info] Binary serialization complete: 1111 bytes\u001b[0m\n\u001b[97m[04:24:25.233] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[04:24:25.233] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.233] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.233] [Info] Compression complete: 1111 -> 664 bytes (40.2% reduction)\u001b[0m\n\u001b[91m[04:24:25.233] [Error] [DLM] [DXDLM002] Error: InvalidFunctionSignature\nLibrary Path: DEncryptor.aes256\nMessage: Encryption key not set\nQuick Fixes:\n  - Check parameter types match\n  - Verify return type is correct\n  - Review library API documentation\n\u001b[0m\n\u001b[91m[04:24:25.233] [Error] [DLM] [DXDLM012] Fatal: ModuleExecutionFailed\nLibrary Path: 06_app_config.mdix\nFunction: DEncryptor.aes256\nMessage: Encryption key not set\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n{\n  \"success\": false,\n  \"error\": \"Compile error: DLM pipeline failed: [\\\"Encryption key not set\\\"]\"\n}\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "inspect",
+          "full_command": "mdix inspect mdix_files/tests/cli/06_app_config.mdix",
+          "status": "failed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.240] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.240] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.240] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.240] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.240] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.240] [Info] Loading text file: mdix_files/tests/cli/06_app_config.mdix\u001b[0m\n\u001b[97m[04:24:25.240] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.240] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.240] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.240] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.240] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.240] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.240] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.240] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.240] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.240] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[04:24:25.241] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.241] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.241] [Info] Binary serialization complete: 1111 bytes\u001b[0m\n\u001b[97m[04:24:25.241] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[04:24:25.241] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.241] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.242] [Info] Compression complete: 1111 -> 667 bytes (40.0% reduction)\u001b[0m\n\u001b[91m[04:24:25.242] [Error] [DLM] [DXDLM002] Error: InvalidFunctionSignature\nLibrary Path: DEncryptor.aes256\nMessage: Encryption key not set\nQuick Fixes:\n  - Check parameter types match\n  - Verify return type is correct\n  - Review library API documentation\n\u001b[0m\n\u001b[91m[04:24:25.242] [Error] [DLM] [DXDLM012] Fatal: ModuleExecutionFailed\nLibrary Path: 06_app_config.mdix\nFunction: DEncryptor.aes256\nMessage: Encryption key not set\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n\u2717 Compile error: DLM pipeline failed: [\"Encryption key not set\"]\n",
+          "elapsed_ms": 8
+        },
+        {
+          "name": "inspect --keys",
+          "full_command": "mdix inspect --keys mdix_files/tests/cli/06_app_config.mdix",
+          "status": "failed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.248] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.248] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.248] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.248] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.248] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.248] [Info] Loading text file: mdix_files/tests/cli/06_app_config.mdix\u001b[0m\n\u001b[97m[04:24:25.249] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.249] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.249] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.249] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.249] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.249] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.249] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.249] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.249] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.249] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[04:24:25.249] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.249] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.249] [Info] Binary serialization complete: 1111 bytes\u001b[0m\n\u001b[97m[04:24:25.250] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[04:24:25.250] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.250] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.250] [Info] Compression complete: 1111 -> 663 bytes (40.3% reduction)\u001b[0m\n\u001b[91m[04:24:25.250] [Error] [DLM] [DXDLM002] Error: InvalidFunctionSignature\nLibrary Path: DEncryptor.aes256\nMessage: Encryption key not set\nQuick Fixes:\n  - Check parameter types match\n  - Verify return type is correct\n  - Review library API documentation\n\u001b[0m\n\u001b[91m[04:24:25.250] [Error] [DLM] [DXDLM012] Fatal: ModuleExecutionFailed\nLibrary Path: 06_app_config.mdix\nFunction: DEncryptor.aes256\nMessage: Encryption key not set\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n\u2717 Compile error: DLM pipeline failed: [\"Encryption key not set\"]\n",
+          "elapsed_ms": 8
+        },
+        {
+          "name": "inspect --sections",
+          "full_command": "mdix inspect --sections mdix_files/tests/cli/06_app_config.mdix",
+          "status": "failed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.256] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.257] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.257] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.257] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.257] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.257] [Info] Loading text file: mdix_files/tests/cli/06_app_config.mdix\u001b[0m\n\u001b[97m[04:24:25.257] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.257] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.257] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.257] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.257] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.257] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.257] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.257] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.257] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.257] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[04:24:25.257] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.257] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.258] [Info] Binary serialization complete: 1111 bytes\u001b[0m\n\u001b[97m[04:24:25.258] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[04:24:25.258] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.258] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.259] [Info] Compression complete: 1111 -> 669 bytes (39.8% reduction)\u001b[0m\n\u001b[91m[04:24:25.259] [Error] [DLM] [DXDLM002] Error: InvalidFunctionSignature\nLibrary Path: DEncryptor.aes256\nMessage: Encryption key not set\nQuick Fixes:\n  - Check parameter types match\n  - Verify return type is correct\n  - Review library API documentation\n\u001b[0m\n\u001b[91m[04:24:25.259] [Error] [DLM] [DXDLM012] Fatal: ModuleExecutionFailed\nLibrary Path: 06_app_config.mdix\nFunction: DEncryptor.aes256\nMessage: Encryption key not set\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n\u2717 Compile error: DLM pipeline failed: [\"Encryption key not set\"]\n",
+          "elapsed_ms": 8
+        },
+        {
+          "name": "inspect --json",
+          "full_command": "mdix inspect --json mdix_files/tests/cli/06_app_config.mdix",
+          "status": "failed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.265] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.265] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.265] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.265] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.265] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.265] [Info] Loading text file: mdix_files/tests/cli/06_app_config.mdix\u001b[0m\n\u001b[97m[04:24:25.265] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.265] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.265] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.265] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.265] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.266] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.266] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.266] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.266] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.266] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[04:24:25.266] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.266] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.266] [Info] Binary serialization complete: 1111 bytes\u001b[0m\n\u001b[97m[04:24:25.266] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[04:24:25.266] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.266] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.267] [Info] Compression complete: 1111 -> 665 bytes (40.1% reduction)\u001b[0m\n\u001b[91m[04:24:25.267] [Error] [DLM] [DXDLM002] Error: InvalidFunctionSignature\nLibrary Path: DEncryptor.aes256\nMessage: Encryption key not set\nQuick Fixes:\n  - Check parameter types match\n  - Verify return type is correct\n  - Review library API documentation\n\u001b[0m\n\u001b[91m[04:24:25.267] [Error] [DLM] [DXDLM012] Fatal: ModuleExecutionFailed\nLibrary Path: 06_app_config.mdix\nFunction: DEncryptor.aes256\nMessage: Encryption key not set\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n{\"error\":\"Compile error: DLM pipeline failed: [\\\"Encryption key not set\\\"]\",\"success\":false}\n",
+          "elapsed_ms": 8
+        },
+        {
+          "name": "convert --to json",
+          "full_command": "mdix convert --to json mdix_files/tests/cli/06_app_config.mdix -o /tmp/mdix_cli_test/out.json",
+          "status": "failed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.270] [Info] Loading text file: mdix_files/tests/cli/06_app_config.mdix\u001b[0m\n\u001b[97m[04:24:25.273] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.273] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.273] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.273] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.273] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.274] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.274] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.274] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.274] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.274] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[04:24:25.274] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.274] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.274] [Info] Binary serialization complete: 1111 bytes\u001b[0m\n\u001b[97m[04:24:25.274] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[04:24:25.274] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.274] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.275] [Info] Compression complete: 1111 -> 661 bytes (40.5% reduction)\u001b[0m\n\u001b[91m[04:24:25.275] [Error] [DLM] [DXDLM002] Error: InvalidFunctionSignature\nLibrary Path: DEncryptor.aes256\nMessage: Encryption key not set\nQuick Fixes:\n  - Check parameter types match\n  - Verify return type is correct\n  - Review library API documentation\n\u001b[0m\n\u001b[91m[04:24:25.275] [Error] [DLM] [DXDLM012] Fatal: ModuleExecutionFailed\nLibrary Path: 06_app_config.mdix\nFunction: DEncryptor.aes256\nMessage: Encryption key not set\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n\u2717 Conversion error: DLM pipeline failed: [\"Encryption key not set\"]\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "convert --to toml",
+          "full_command": "mdix convert --to toml mdix_files/tests/cli/06_app_config.mdix -o /tmp/mdix_cli_test/out.toml",
+          "status": "failed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.278] [Info] Loading text file: mdix_files/tests/cli/06_app_config.mdix\u001b[0m\n\u001b[97m[04:24:25.281] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.281] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.281] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.281] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.281] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.281] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.281] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.281] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.281] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.281] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[04:24:25.281] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.281] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.282] [Info] Binary serialization complete: 1111 bytes\u001b[0m\n\u001b[97m[04:24:25.282] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[04:24:25.282] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.282] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.283] [Info] Compression complete: 1111 -> 663 bytes (40.3% reduction)\u001b[0m\n\u001b[91m[04:24:25.283] [Error] [DLM] [DXDLM002] Error: InvalidFunctionSignature\nLibrary Path: DEncryptor.aes256\nMessage: Encryption key not set\nQuick Fixes:\n  - Check parameter types match\n  - Verify return type is correct\n  - Review library API documentation\n\u001b[0m\n\u001b[91m[04:24:25.283] [Error] [DLM] [DXDLM012] Fatal: ModuleExecutionFailed\nLibrary Path: 06_app_config.mdix\nFunction: DEncryptor.aes256\nMessage: Encryption key not set\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n\u2717 Conversion error: DLM pipeline failed: [\"Encryption key not set\"]\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "convert --to json --json",
+          "full_command": "mdix convert --to json --json mdix_files/tests/cli/06_app_config.mdix -o /tmp/mdix_cli_test/out_env.json",
+          "status": "failed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.285] [Info] Loading text file: mdix_files/tests/cli/06_app_config.mdix\u001b[0m\n\u001b[97m[04:24:25.289] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.289] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.289] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.289] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.289] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.289] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.289] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.289] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.289] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.289] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[04:24:25.289] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.289] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.290] [Info] Binary serialization complete: 1111 bytes\u001b[0m\n\u001b[97m[04:24:25.290] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[04:24:25.290] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.290] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.291] [Info] Compression complete: 1111 -> 665 bytes (40.1% reduction)\u001b[0m\n\u001b[91m[04:24:25.291] [Error] [DLM] [DXDLM002] Error: InvalidFunctionSignature\nLibrary Path: DEncryptor.aes256\nMessage: Encryption key not set\nQuick Fixes:\n  - Check parameter types match\n  - Verify return type is correct\n  - Review library API documentation\n\u001b[0m\n\u001b[91m[04:24:25.291] [Error] [DLM] [DXDLM012] Fatal: ModuleExecutionFailed\nLibrary Path: 06_app_config.mdix\nFunction: DEncryptor.aes256\nMessage: Encryption key not set\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n{\"error\":\"Conversion error: DLM pipeline failed: [\\\"Encryption key not set\\\"]\",\"success\":false}\n",
+          "elapsed_ms": 7
+        },
+        {
+          "name": "compact",
+          "full_command": "mdix compact mdix_files/tests/cli/06_app_config.mdix -o /tmp/mdix_cli_test/out.compact.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.compact.mdix\n  original                 748 B\n  compacted                748 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode minify",
+          "full_command": "mdix compact --mode minify mdix_files/tests/cli/06_app_config.mdix -o /tmp/mdix_cli_test/out.min.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.min.mdix\n  original                 748 B\n  compacted                621 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --mode strip-comments",
+          "full_command": "mdix compact --mode strip-comments mdix_files/tests/cli/06_app_config.mdix -o /tmp/mdix_cli_test/out.stripped.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.stripped.mdix\n  original                 748 B\n  compacted                748 B\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compact --ratio",
+          "full_command": "mdix compact --ratio mdix_files/tests/cli/06_app_config.mdix -o /tmp/mdix_cli_test/out.ratio.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Compacted \u2192 /tmp/mdix_cli_test/out.ratio.mdix\n  original                 748 B\n  compacted                748 B\n  ratio                    0.0% reduction\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "format --check",
+          "full_command": "mdix format --check mdix_files/tests/cli/06_app_config.mdix",
+          "status": "passed",
+          "exit_code": 1,
+          "stdout": "\u001b[97m[04:24:25.307] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.307] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.307] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.307] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.307] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.307] [Info] Loading text file: mdix_files/tests/cli/06_app_config.mdix\u001b[0m\n\u001b[97m[04:24:25.308] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.308] [Info] [SecurityUtilities] Missing 'key_length' field - defaulting to 32\u001b[0m\n\u001b[97m[04:24:25.308] [Info] [SecurityUtilities] Missing 'validation' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.308] [Info] [SecurityUtilities] Missing 'keystore' entry - adding defaults\u001b[0m\n\u001b[97m[04:24:25.308] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.308] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[04:24:25.308] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[04:24:25.308] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[04:24:25.308] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[04:24:25.308] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[04:24:25.308] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.308] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.309] [Info] Binary serialization complete: 1111 bytes\u001b[0m\n\u001b[97m[04:24:25.309] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[04:24:25.309] [Info] [SecurityUtilities] Encryption algorithm detected: aes256-gcm\u001b[0m\n\u001b[97m[04:24:25.309] [Info] [SecurityUtilities] \u2705 SECURITY section validated with 3 entries\u001b[0m\n\u001b[97m[04:24:25.309] [Info] Compression complete: 1111 -> 668 bytes (39.9% reduction)\u001b[0m\n\u001b[91m[04:24:25.309] [Error] [DLM] [DXDLM002] Error: InvalidFunctionSignature\nLibrary Path: DEncryptor.aes256\nMessage: Encryption key not set\nQuick Fixes:\n  - Check parameter types match\n  - Verify return type is correct\n  - Review library API documentation\n\u001b[0m\n\u001b[91m[04:24:25.309] [Error] [DLM] [DXDLM012] Fatal: ModuleExecutionFailed\nLibrary Path: 06_app_config.mdix\nFunction: DEncryptor.aes256\nMessage: Encryption key not set\n\u001b[0m\n",
+          "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\nConfig validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"CLI Test \u2014 App Config with DLM\",\n]\n\u2717 Compile error: DLM pipeline failed: [\"Encryption key not set\"]\n",
+          "elapsed_ms": 8
+        }
+      ]
+    },
+    {
+      "name": "global (no fixture)",
+      "file": null,
+      "passed": 24,
+      "failed": 0,
+      "commands": [
+        {
+          "name": "create basic",
+          "full_command": "mdix create /tmp/mdix_cli_test/new_basic.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Created /tmp/mdix_cli_test/new_basic.mdix (template: basic)\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "create --force (overwrite)",
+          "full_command": "mdix create --force /tmp/mdix_cli_test/new_basic.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Created /tmp/mdix_cli_test/new_basic.mdix (template: basic)\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "create --template advanced",
+          "full_command": "mdix create --template advanced /tmp/mdix_cli_test/new_advanced.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Created /tmp/mdix_cli_test/new_advanced.mdix (template: advanced)\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "create --template security",
+          "full_command": "mdix create --template security /tmp/mdix_cli_test/new_security.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Created /tmp/mdix_cli_test/new_security.mdix (template: security)\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "create --template dlm",
+          "full_command": "mdix create --template dlm /tmp/mdix_cli_test/new_dlm.mdix",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Created /tmp/mdix_cli_test/new_dlm.mdix (template: dlm)\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "create unknown template (expect fail)",
+          "full_command": "mdix create --template badtemplate /tmp/mdix_cli_test/bad.mdix",
+          "status": "passed",
+          "exit_code": 3,
+          "stdout": "",
+          "stderr": "\u2717 Invalid argument: Unknown template 'badtemplate'. Available: basic, advanced, security, dlm\n",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "key generate aes256",
+          "full_command": "mdix key generate --output /tmp/mdix_cli_test/test_aes256.mdix.key --algorithm aes256",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Key file generated: /tmp/mdix_cli_test/test_aes256.mdix.key\n  algorithm                aes256\n  key length               32 bytes\n  mode                     keyfile\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "key generate aes128",
+          "full_command": "mdix key generate --output /tmp/mdix_cli_test/test_aes128.mdix.key --algorithm aes128",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Key file generated: /tmp/mdix_cli_test/test_aes128.mdix.key\n  algorithm                aes128\n  key length               16 bytes\n  mode                     keyfile\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "key generate chacha20",
+          "full_command": "mdix key generate --output /tmp/mdix_cli_test/test_chacha20.mdix.key --algorithm chacha20",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Key file generated: /tmp/mdix_cli_test/test_chacha20.mdix.key\n  algorithm                chacha20\n  key length               32 bytes\n  mode                     keyfile\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "key generate --password",
+          "full_command": "mdix key generate --password --output /tmp/mdix_cli_test/test_pw.mdix.key",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Key file generated: /tmp/mdix_cli_test/test_pw.mdix.key\n  algorithm                aes256\n  key length               32 bytes\n  mode                     password\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "key validate",
+          "full_command": "mdix key validate /tmp/mdix_cli_test/test_aes256.mdix.key",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 /tmp/mdix_cli_test/test_aes256.mdix.key is valid\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "key validate missing (expect exit 2)",
+          "full_command": "mdix key validate /tmp/mdix_cli_test/ghost.mdix.key",
+          "status": "passed",
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "\u2717 File not found: /tmp/mdix_cli_test/ghost.mdix.key\n",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "key info",
+          "full_command": "mdix key info /tmp/mdix_cli_test/test_aes256.mdix.key",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\nKey File Info\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  algorithm                aes256-gcm\n  key length               32 bytes\n  mode                     keyfile\n  compression              false\n  created                  2026-03-19T04:24:25+00:00\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "key info --json",
+          "full_command": "mdix key info --json /tmp/mdix_cli_test/test_aes256.mdix.key",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "{\n  \"success\": true,\n  \"data\": {\n    \"algorithm\": \"aes256-gcm\",\n    \"key_length\": 32,\n    \"mode\": \"keyfile\",\n    \"has_compression\": false,\n    \"created\": \"2026-03-19T04:24:25+00:00\"\n  }\n}\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "config list",
+          "full_command": "mdix config list",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "Config file: /home/runner/.dixscript/config.toml\n\n  key                       value              \n  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  default_output_directory  ./output  (default)\n  default_indent_size       2         (default)\n  use_tabs                  false     (default)\n  color_output              true      (default)\n  auto_find_key_files       true      (default)\n  key_search_paths                    (default)\n  pretty_print_json         true      (default)\n  show_warnings             true      (default)\n  max_error_display         50        (default)\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "config list --json",
+          "full_command": "mdix --json config list",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "{\n  \"success\": true,\n  \"data\": {\n    \"auto_find_key_files\": \"true\",\n    \"color_output\": \"true\",\n    \"default_indent_size\": \"2\",\n    \"default_output_directory\": \"./output\",\n    \"key_search_paths\": \"\",\n    \"max_error_display\": \"50\",\n    \"pretty_print_json\": \"true\",\n    \"show_warnings\": \"true\",\n    \"use_tabs\": \"false\"\n  }\n}\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "config get default_indent_size",
+          "full_command": "mdix config get default_indent_size",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "2\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "config get unknown key (expect fail)",
+          "full_command": "mdix config get no_such_key_xyz",
+          "status": "passed",
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "\u2717 Config error: Unknown config key: 'no_such_key_xyz'\n",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "config set default_indent_size 4",
+          "full_command": "mdix config set default_indent_size 4",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Set default_indent_size = 4\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "config reset default_indent_size",
+          "full_command": "mdix config reset default_indent_size",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Reset default_indent_size to default\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "config reset all",
+          "full_command": "mdix config reset",
+          "status": "passed",
+          "exit_code": 0,
+          "stdout": "\u2713 Reset all config to defaults\n",
+          "stderr": "",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "validate nonexistent file (expect exit 2)",
+          "full_command": "mdix validate /tmp/mdix_cli_test/ghost.mdix",
+          "status": "passed",
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "\u2717 File not found: /tmp/mdix_cli_test/ghost.mdix\n",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "compile nonexistent file (expect exit 2)",
+          "full_command": "mdix compile /tmp/mdix_cli_test/ghost.mdix",
+          "status": "passed",
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "\u2717 File not found: /tmp/mdix_cli_test/ghost.mdix\n",
+          "elapsed_ms": 2
+        },
+        {
+          "name": "convert unknown format (expect exit 4)",
+          "full_command": "mdix convert mdix_files/tests/cli/01_basic.mdix --to xyz -o /tmp/mdix_cli_test/bad.xyz",
+          "status": "passed",
+          "exit_code": 4,
+          "stdout": "",
+          "stderr": "\u2717 Unsupported format: Unsupported format 'xyz'. Use: mdix, json, toml\n",
+          "elapsed_ms": 2
+        }
+      ]
+    }
+  ]
+}

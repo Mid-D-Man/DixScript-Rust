@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Thu Mar 19 12:13:49 UTC 2026
+Generated: Thu Mar 19 12:15:53 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 82867c41b73bb98419556e8591c13fad8e83d82e
+Commit: dd6bff822b963618d359bd92d72876d3d7b83cb7
 Branch: master
 ==================================
 
@@ -129,6 +129,7 @@ Source Files:
   dixscript/src/Compiler/Core/general_semantics_analyzer.rs
   dixscript/src/Compiler/Core/mod.rs
   dixscript/src/Compiler/DLM/Auditor/audit_file_data.rs
+  dixscript/src/Compiler/DLM/Auditor/audit_file_format.rs
   dixscript/src/Compiler/DLM/Auditor/audit_file_manager.rs
   dixscript/src/Compiler/DLM/Auditor/auditor_trait.rs
   dixscript/src/Compiler/DLM/Auditor/auditor_utilities.rs
@@ -341,14 +342,14 @@ GitHub Workflows:
 
 Total Rust File Counts:
 =======================
-  Source files:    261
+  Source files:    262
   Test files:      10
   Benchmark files: 9
-  Total:           280
+  Total:           281
 
 Per-Member Breakdown:
 ====================
-  dixscript: src=208  tests=4  benches=9
+  dixscript: src=209  tests=4  benches=9
   mdix-cli: src=25  tests=5  benches=0
   mdix-ffi: src=4  tests=0  benches=0
   mdix-wasm: src=4  tests=0  benches=0

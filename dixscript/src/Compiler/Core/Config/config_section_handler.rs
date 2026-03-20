@@ -19,11 +19,6 @@ pub struct ConfigSectionHandler {
 }
 
 impl ConfigSectionHandler {
-    /// Primary constructor — caller supplies the ErrorManager instance.
-    ///
-    /// For the CLI this will be `ErrorManager::get_shared_instance()`.
-    /// For the LSP this will be a per-document isolated instance created
-    /// before the pipeline starts.
     pub fn new_with_error_manager(
         logger: Option<std::sync::Arc<std::sync::Mutex<MID_Logger>>>,
         error_manager: ErrorManager,
@@ -42,26 +37,14 @@ impl ConfigSectionHandler {
         }
     }
 
-    /// Backward-compatible constructor for the CLI path.
-    ///
-    /// Acquires the process-wide shared ErrorManager so all existing call
-    /// sites continue to work without modification.
     pub fn new(logger: Option<std::sync::Arc<std::sync::Mutex<MID_Logger>>>) -> Self {
         Self::new_with_error_manager(logger, ErrorManager::get_shared_instance())
     }
 
-    /// Returns a clone of the injected ErrorManager handle.
-    ///
-    /// The LSP analyzer can use this to call `force_strategy` after
-    /// `process_config_section` completes, overriding whatever the file
-    /// requested in @CONFIG.
     pub fn error_manager(&self) -> ErrorManager {
         self.error_manager.clone()
     }
 
-    /// Main entry point — processes @CONFIG and initialises VersionManager and ErrorManager.
-    ///
-    /// Must be called before any other pipeline stage.
     pub fn process_config_section(&mut self, input_string: &str) -> ProcessConfigResult {
         self.log_info("Starting CONFIG section extraction");
 
@@ -133,12 +116,6 @@ impl ConfigSectionHandler {
         result
     }
 
-    /// Pushes the parsed @CONFIG values into the injected ErrorManager and
-    /// initialises VersionManager.
-    ///
-    /// This is the only place `update_settings` is called.  For the LSP path
-    /// the caller should invoke `error_manager().force_strategy(...)` after
-    /// this method returns if it needs to override the file's preference.
     fn initialize_singletons(&mut self, result: &mut ProcessConfigResult) {
         let settings = ConfigSchema::extract_operational_settings(&result.config_section);
         self.debug_config = DebugConfig::from_debug_mode(settings.debug_mode);
@@ -349,7 +326,7 @@ impl ConfigSectionHandler {
     ) -> Result<ConfigParseResult, String> {
         let content = self.extract_config_content_optimized(config_string)?;
 
-        if content.is_empty() {
+        if content.trim().is_empty() {
             self.log_warning("CONFIG section empty - using defaults");
             return Ok(ConfigParseResult {
                 config_section: ConfigSchema::create_minimal_config(),
@@ -412,9 +389,12 @@ impl ConfigSectionHandler {
         result
     }
 
+    /// Split config content on commas OR newlines (both are valid entry separators
+    /// per the grammar — commas are optional). Splits are not performed inside
+    /// string literals.
     fn split_config_entries<'a>(&self, content: &'a str) -> Vec<&'a str> {
-        let mut entries = Vec::new();
-        let mut start = 0;
+        let mut entries: Vec<&'a str> = Vec::new();
+        let mut start = 0usize;
         let mut inside_string = false;
         let mut string_delimiter = '\0';
         let mut escape_next = false;
@@ -424,6 +404,7 @@ impl ConfigSectionHandler {
                 escape_next = false;
                 continue;
             }
+
             if (c == '"' || c == '\'') && !inside_string {
                 inside_string = true;
                 string_delimiter = c;
@@ -434,17 +415,22 @@ impl ConfigSectionHandler {
                     inside_string = false;
                     string_delimiter = '\0';
                 }
-            } else if c == ',' {
+            } else if c == ',' || c == '\n' || c == '\r' {
+                // Push whatever we have between start and here.
+                // Use byte_offset so we can get a valid &str slice.
                 entries.push(&content[start..byte_offset]);
-                start = byte_offset + 1;
+                start = byte_offset + c.len_utf8();
             }
         }
 
-        if start < content.len() {
+        // Trailing segment after the last separator
+        if start <= content.len() {
             entries.push(&content[start..]);
         }
 
-        entries
+        // Remove whitespace-only entries — these arise from consecutive
+        // separators (e.g. \r\n produces two split points) or trailing separators.
+        entries.into_iter().filter(|e| !e.trim().is_empty()).collect()
     }
 
     #[inline]
@@ -501,9 +487,7 @@ impl ConfigSectionHandler {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Result types
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Result types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct ProcessConfigResult {
@@ -553,4 +537,4 @@ pub struct ConfigParseResult {
 struct ConfigEntriesParseResult {
     entries: HashMap<String, String>,
     warnings: Vec<String>,
-}
+                            }

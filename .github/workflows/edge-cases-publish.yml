@@ -49,6 +49,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: parse-trigger
     if: needs.parse-trigger.outputs.run_edge == 'true'
+    outputs:
+      edge_results_uploaded:  ${{ steps.upload-main.outputs.artifact-id != '' }}
+      dlm_files_uploaded:     ${{ steps.upload-dlm.outputs.artifact-id != '' }}
+      binary_uploaded:        ${{ steps.upload-binary.outputs.artifact-id != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -100,7 +104,7 @@ jobs:
           done
           echo "=== DLM fixtures ==="
           for f in mdix_files/tests/dlm/*.mdix; do
-            echo "  ✓ $f"
+            [ -f "$f" ] && echo "  ✓ $f" || echo "  ✗ MISSING: $f"
           done
           echo "=== Binary fixture ==="
           [ -f "mdix_files/tests/binary/serialize_target.mdix" ] \
@@ -121,6 +125,7 @@ jobs:
           echo "TEST_EXIT=$?" >> $GITHUB_ENV
 
       - name: Build HTML report
+        if: always()
         env:
           RUST_VERSION: ${{ steps.rustver.outputs.ver }}
         run: |
@@ -131,28 +136,48 @@ jobs:
           sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     edge-cases-index.html
           sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        edge-cases-index.html
 
-      - name: Upload all artifacts
+      - name: Ensure output directories exist
         if: always()
+        run: |
+          mkdir -p edge-case-output/dlm
+          mkdir -p binary-output
+          # Create placeholder results file if python script did not produce one
+          if [ ! -f edge-case-results.json ]; then
+            echo '{"build":"${{ github.run_number }}","branch":"${{ github.ref_name }}","commit":"${{ github.sha }}","date":"","summary":{"imports_passed":0,"imports_failed":0,"cyclic_passed":0,"cyclic_failed":0,"binary_passed":0,"dlm_passed":0,"dlm_failed":0,"total_passed":0,"total_failed":0},"import_tests":[],"cyclic_tests":[],"binary_capture":{"status":"failed","exit_code":-1,"stderr":"Test runner did not produce results","size_bytes":null,"sections":null,"b64":null,"hex_dump":null},"dlm_tests":[]}' \
+              > edge-case-results.json
+          fi
+          # Create placeholder binary output if capture did not run
+          if [ ! -f binary-output/serialize_target.bin ]; then
+            echo "placeholder" > binary-output/serialize_target.placeholder
+          fi
+          # Create placeholder dlm output if dlm tests did not run
+          if [ -z "$(ls -A edge-case-output/dlm 2>/dev/null)" ]; then
+            echo "placeholder" > edge-case-output/dlm/.placeholder
+          fi
+
+      - name: Upload main artifacts
+        if: always()
+        id: upload-main
         uses: actions/upload-artifact@v4
         with:
           name: edge-case-results-${{ github.run_number }}
           path: |
             edge-case-results.json
             edge-cases-index.html
-            binary-output/
-            edge-case-output/
           retention-days: 30
 
-      - name: Upload DLM produced files separately
+      - name: Upload DLM produced files
         if: always()
+        id: upload-dlm
         uses: actions/upload-artifact@v4
         with:
           name: dlm-produced-files-${{ github.run_number }}
           path: edge-case-output/dlm/
           retention-days: 30
 
-      - name: Upload raw binary output separately
+      - name: Upload raw binary output
         if: always()
+        id: upload-binary
         uses: actions/upload-artifact@v4
         with:
           name: binary-serialization-${{ github.run_number }}
@@ -163,28 +188,57 @@ jobs:
   deploy-results:
     runs-on: ubuntu-latest
     needs: [parse-trigger, run-edge-cases]
-    if: always() && needs.run-edge-cases.result == 'success'
+    if: always() && needs.run-edge-cases.result != 'skipped'
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download artifacts
+      - name: Download main artifacts
+        id: dl-main
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: edge-case-results-${{ github.run_number }}
           path: deploy/edge/
 
       - name: Download DLM files
+        id: dl-dlm
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: dlm-produced-files-${{ github.run_number }}
           path: deploy/edge/dlm-files/
 
       - name: Download binary output
+        id: dl-binary
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: binary-serialization-${{ github.run_number }}
           path: deploy/edge/binary/
+
+      - name: Ensure deploy directories have content
+        run: |
+          mkdir -p deploy/edge deploy/edge/dlm-files deploy/edge/binary
+
+          # If main download failed, create a minimal fallback
+          if [ ! -f deploy/edge/edge-case-results.json ]; then
+            echo '{"build":"${{ github.run_number }}","branch":"${{ github.ref_name }}","commit":"${{ github.sha }}","date":"","summary":{"total_passed":0,"total_failed":0},"import_tests":[],"cyclic_tests":[],"binary_capture":{"status":"failed"},"dlm_tests":[]}' \
+              > deploy/edge/edge-case-results.json
+          fi
+
+          if [ ! -f deploy/edge/edge-cases-index.html ]; then
+            cp .github/edge-cases-template.html deploy/edge/edge-cases-index.html
+            sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g" deploy/edge/edge-cases-index.html
+            sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"      deploy/edge/edge-cases-index.html
+            sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"           deploy/edge/edge-cases-index.html
+            sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                    deploy/edge/edge-cases-index.html
+            sed -i "s|RUST_VERSION_PLACEHOLDER|unknown|g"               deploy/edge/edge-cases-index.html
+          fi
+
+          # Remove placeholder files before deploying
+          find deploy/ -name "*.placeholder" -delete 2>/dev/null || true
+          find deploy/ -name ".placeholder"  -delete 2>/dev/null || true
 
       - name: Deploy to gh-pages
         run: |
@@ -203,12 +257,37 @@ jobs:
 
           mkdir -p "$WORK/edge" "$WORK/edge/builds/build_${BUILD_NUM}"
 
-          cp deploy/edge/edge-case-results.json "$WORK/edge/edge-case-results.json"
-          cp deploy/edge/edge-cases-index.html  "$WORK/edge/index.html"
-          cp -r deploy/edge/dlm-files           "$WORK/edge/dlm-files"  2>/dev/null || true
-          cp -r deploy/edge/binary              "$WORK/edge/binary"      2>/dev/null || true
+          # Copy main results
+          if [ -f deploy/edge/edge-case-results.json ]; then
+            cp deploy/edge/edge-case-results.json "$WORK/edge/edge-case-results.json"
+          fi
 
-          cp -r deploy/edge/. "$WORK/edge/builds/build_${BUILD_NUM}/"
+          if [ -f deploy/edge/edge-cases-index.html ]; then
+            cp deploy/edge/edge-cases-index.html "$WORK/edge/index.html"
+          fi
+
+          # Copy DLM files if they exist and are not just placeholders
+          if [ -d deploy/edge/dlm-files ] && [ -n "$(ls -A deploy/edge/dlm-files 2>/dev/null)" ]; then
+            mkdir -p "$WORK/edge/dlm-files"
+            cp -r deploy/edge/dlm-files/. "$WORK/edge/dlm-files/"
+          fi
+
+          # Copy binary output if it exists and is not just placeholders
+          if [ -d deploy/edge/binary ] && [ -n "$(ls -A deploy/edge/binary 2>/dev/null)" ]; then
+            mkdir -p "$WORK/edge/binary"
+            cp -r deploy/edge/binary/. "$WORK/edge/binary/"
+          fi
+
+          # Archive copy for this build
+          if [ -f "$WORK/edge/edge-case-results.json" ]; then
+            cp "$WORK/edge/edge-case-results.json" \
+               "$WORK/edge/builds/build_${BUILD_NUM}/edge-case-results.json"
+          fi
+          if [ -f "$WORK/edge/index.html" ]; then
+            cp "$WORK/edge/index.html" \
+               "$WORK/edge/builds/build_${BUILD_NUM}/index.html"
+          fi
+
           cp .github/landing-index.html "$WORK/index.html"
 
           cd "$WORK"

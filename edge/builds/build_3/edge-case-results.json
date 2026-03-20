@@ -1,0 +1,275 @@
+{
+  "build": "3",
+  "branch": "master",
+  "commit": "0fde602c",
+  "date": "2026-03-20T10:02:08+01:00",
+  "summary": {
+    "imports_passed": 4,
+    "imports_failed": 1,
+    "cyclic_passed": 0,
+    "cyclic_failed": 1,
+    "binary_passed": 0,
+    "dlm_passed": 5,
+    "dlm_failed": 5,
+    "total_passed": 9,
+    "total_failed": 8
+  },
+  "import_tests": [
+    {
+      "id": "01",
+      "name": "Basic enum and type access via alias",
+      "file": "01_basic_import.mdix",
+      "status": "passed",
+      "exit_code": 0,
+      "stdout": "\u001b[97m[09:02:58.505] [Info] Loading text file: mdix_files/tests/imports/01_basic_import.mdix\u001b[0m\n\u001b[91m[09:02:58.509] [Error] [Parser] [DX016L3C1] Fatal: InvalidLiteral at line 3, column 1\nMessage: Import path must end with '.mdix', got: base_types.mdix\nSource:\n )EOF\n ^--\n\u001b[0m\n\u001b[97m[09:02:58.509] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[09:02:58.509] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[09:02:58.509] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[09:02:58.509] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[09:02:58.509] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[09:02:58.509] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/imports/01_basic_import.mdix\n  original size            435 B",
+      "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"Import Test 01 \u2014 Basic Enum and Type Access via Alias\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"Import Test 01 \u2014 Basic Enum and Type Access via Alias\\\"\\n  features -> \\\"advanced\",\n]",
+      "elapsed_ms": 7
+    },
+    {
+      "id": "02",
+      "name": "Imported funcs called inside local QuickFuncs",
+      "file": "02_alias_funcs_in_quickfuncs.mdix",
+      "status": "passed",
+      "exit_code": 0,
+      "stdout": "\u001b[97m[09:02:58.513] [Info] Loading text file: mdix_files/tests/imports/02_alias_funcs_in_quickfuncs.mdix\u001b[0m\n\u001b[91m[09:02:58.517] [Error] [Parser] [DX016L3C1] Fatal: InvalidLiteral at line 3, column 1\nMessage: Import path must end with '.mdix', got: base_types.mdix\nSource:\n )EOF\n ^--\n\u001b[0m\n\u001b[91m[09:02:58.546] [Error] [Parser] [DX001L16C7] Fatal: MissingToken at line 16, column 7\nMessage: Expected ',' or '}' in object literal, found item\nSource:\n       item = item\n       ^--\nQuick Fixes:\n  - Insert missing token\n  - Check surrounding syntax\n\u001b[0m\n\u001b[91m[09:02:58.546] [Error] [Parser] [DX000L18C3] Fatal: UnexpectedToken at line 18, column 3\nMessage: Expected '~' to start function definition, found }\nSource:\n   }\n   ^--\nSuggestion: Each QuickFunction must begin with '~'\nQuick Fixes:\n  - Remove unexpected token\n  - Replace with expected token\n\u001b[0m\n\u001b[97m[09:02:58.546] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[09:02:58.546] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[09:02:58.547] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[09:02:58.547] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[09:02:58.547] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[09:02:58.547] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/imports/02_alias_funcs_in_quickfuncs.mdix\n  original size            1004 B",
+      "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"Import Test 02 \u2014 Imported Funcs Called Inside Local QuickFuncs\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"Import Test 02 \u2014 Imported Funcs Called Inside Local QuickFuncs\\\"\\n  features -> \\\"advanced\",\n]",
+      "elapsed_ms": 37
+    },
+    {
+      "id": "03",
+      "name": "Imported funcs called directly in DATA",
+      "file": "03_alias_funcs_in_data.mdix",
+      "status": "passed",
+      "exit_code": 0,
+      "stdout": "\u001b[97m[09:02:58.550] [Info] Loading text file: mdix_files/tests/imports/03_alias_funcs_in_data.mdix\u001b[0m\n\u001b[91m[09:02:58.554] [Error] [Parser] [DX016L3C1] Fatal: InvalidLiteral at line 3, column 1\nMessage: Import path must end with '.mdix', got: base_types.mdix\nSource:\n )EOF\n ^--\n\u001b[0m\n\u001b[97m[09:02:58.555] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[09:02:58.555] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[09:02:58.555] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[09:02:58.555] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[09:02:58.555] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[09:02:58.555] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/imports/03_alias_funcs_in_data.mdix\n  original size            1018 B",
+      "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"Import Test 03 \u2014 Imported Funcs Called Directly in DATA\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"Import Test 03 \u2014 Imported Funcs Called Directly in DATA\\\"\\n  features -> \\\"advanced\",\n]",
+      "elapsed_ms": 7
+    },
+    {
+      "id": "04",
+      "name": "Imported function calls nested inside other imported calls",
+      "file": "04_funcs_in_funcs.mdix",
+      "status": "failed",
+      "exit_code": 1,
+      "stdout": "\u001b[97m[09:02:58.558] [Info] Loading text file: mdix_files/tests/imports/04_funcs_in_funcs.mdix\u001b[0m\n\u001b[91m[09:02:58.562] [Error] [Parser] [DX016L3C1] Fatal: InvalidLiteral at line 3, column 1\nMessage: Import path must end with '.mdix', got: base_types.mdix\nSource:\n )EOF\n ^--\n\u001b[0m\n\u001b[97m[09:02:58.591] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[09:02:58.591] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[09:02:58.591] [Info] AST enhancement complete: 2 enhancements applied\u001b[0m\n\u001b[97m[09:02:58.591] [Info] Starting value resolution\u001b[0m",
+      "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"Import Test 04 \u2014 Imported Function Calls Nested Inside Other Imported Calls\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"Import Test 04 \u2014 Imported Function Calls Nested Inside Other Imported Calls\\\"\\n  features -> \\\"advanced\",\n]\n\u2717 Compile error: Value resolution failed: [\"Invalid enum access at Base.Rarity.COMMON: Namespace 'Base' not found\"]",
+      "elapsed_ms": 36
+    },
+    {
+      "id": "05",
+      "name": "Imported enum values passed as arguments to imported functions",
+      "file": "05_enum_in_funcs.mdix",
+      "status": "passed",
+      "exit_code": 0,
+      "stdout": "\u001b[97m[09:02:58.595] [Info] Loading text file: mdix_files/tests/imports/05_enum_in_funcs.mdix\u001b[0m\n\u001b[91m[09:02:58.599] [Error] [Parser] [DX016L3C3] Fatal: InvalidLiteral at line 3, column 3\nMessage: Import path must end with '.mdix', got: base_types.mdix\nSource:\n   Helpers from game_helpers.mdix\n   ^--\n\u001b[0m\n\u001b[97m[09:02:58.599] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[09:02:58.599] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[09:02:58.599] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[09:02:58.599] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[09:02:58.599] [Info] No DLM modules - returning resolved AST only\u001b[0m\n\u001b[97m[09:02:58.599] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/imports/05_enum_in_funcs.mdix\n  original size            1.3 KB",
+      "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"Import Test 05 \u2014 Imported Enum Values Passed Into Imported Function Calls\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"Import Test 05 \u2014 Imported Enum Values Passed Into Imported Function Calls\\\"\\n  features -> \\\"advanced\",\n]",
+      "elapsed_ms": 7
+    }
+  ],
+  "cyclic_tests": [
+    {
+      "name": "Cyclic import A \u2192 B \u2192 A",
+      "status": "failed",
+      "exit_code": 0,
+      "error_detected": false,
+      "keyword_found": true,
+      "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author   -> \\\"Cyclic Import Detection \u2014 File A imports B which imports A\\\"\\n  features -> \\\"advanced' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author   -> \\\"Cyclic Import Detection \u2014 File A imports B which imports A\\\"\\n  features -> \\\"advanced\",\n]",
+      "elapsed_ms": 7
+    }
+  ],
+  "binary_capture": {
+    "status": "failed",
+    "exit_code": 101,
+    "stderr": "\u001b[1m\u001b[33mwarning\u001b[0m: profiles for the non root package will be ignored, specify profiles at the workspace root:\npackage:   /home/runner/work/DixScript-Rust/DixScript-Rust/mdix-ffi/Cargo.toml\nworkspace: /home/runner/work/DixScript-Rust/DixScript-Rust/Cargo.toml\n\u001b[1m\u001b[33mwarning\u001b[0m: profiles for the non root package will be ignored, specify profiles at the workspace root:\npackage:   /home/runner/work/DixScript-Rust/DixScript-Rust/mdix-java/Cargo.toml\nworkspace: /home/runner/work/DixScript-Rust/DixScript-Rust/Cargo.toml\n\u001b[1m\u001b[92m   Compiling\u001b[0m dixscript v1.0.0 (/home/runner/work/DixScript-Rust/DixScript-Rust/dixscript)\n\u001b[1m\u001b[33mwarning\u001b[0m\u001b[1m: type `MID_Logger` should have an upper camel case name\u001b[0m\n  \u001b[1m\u001b[94m--> \u001b[0mdixscript/src/Utilities/mid_logger.rs:17:12\n   \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m17\u001b[0m \u001b[1m\u001b[94m|\u001b[0m pub struct MID_Logger {\n   \u001b[1m\u001b[94m|\u001b[0m            \u001b[1m\u001b[33m^^^^^^^^^^\u001b[0m \u001b[1m\u001b[33mhelp: convert the identifier to upper camel case: `MidLogger`\u001b[0m\n   \u001b[1m\u001b[94m|\u001b[0m\n   \u001b[1m\u001b[94m= \u001b[0m\u001b[1mnote\u001b[0m: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default\n\n\u001b[1m\u001b[33mwarning\u001b[0m\u001b[1m: unexpected `cfg` condition value: `debug_logging`\u001b[0m\n   \u001b[1m\u001b[94m--> \u001b[0mdixscript/src/Utilities/mid_logger.rs:293:15\n    \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m293\u001b[0m \u001b[1m\u001b[94m|\u001b[0m         #[cfg(feature = \"debug_logging\")]\n    \u001b[1m\u001b[94m|\u001b[0m               \u001b[1m\u001b[33m^^^^^^^^^^^^^^^^^^^^^^^^^\u001b[0m\n    \u001b[1m\u001b[94m|\u001b[0m\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mnote\u001b[0m: expected values for `feature` are: `async-trait`, `cloud_imports`, `cue_cli_available`, `default`, `reqwest`, `tokio`, and `url`\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mhelp\u001b[0m: consider adding `debug_logging` as a feature in `Cargo.toml`\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mnote\u001b[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mnote\u001b[0m: `#[warn(unexpected_cfgs)]` on by default\n\n\u001b[1m\u001b[33mwarning\u001b[0m\u001b[1m: unexpected `cfg` condition value: `debug_logging`\u001b[0m\n   \u001b[1m\u001b[94m--> \u001b[0mdixscript/src/Utilities/mid_logger.rs:297:19\n    \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m297\u001b[0m \u001b[1m\u001b[94m|\u001b[0m         #[cfg(not(feature = \"debug_logging\"))]\n    \u001b[1m\u001b[94m|\u001b[0m                   \u001b[1m\u001b[33m^^^^^^^^^^^^^^^^^^^^^^^^^\u001b[0m\n    \u001b[1m\u001b[94m|\u001b[0m\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mnote\u001b[0m: expected values for `feature` are: `async-trait`, `cloud_imports`, `cue_cli_available`, `default`, `reqwest`, `tokio`, and `url`\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mhelp\u001b[0m: consider adding `debug_logging` as a feature in `Cargo.toml`\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mnote\u001b[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration\n\n\u001b[1m\u001b[33mwarning\u001b[0m\u001b[1m: unexpected `cfg` condition value: `verbose_logging`\u001b[0m\n   \u001b[1m\u001b[94m--> \u001b[0mdixscript/src/Utilities/mid_logger.rs:305:15\n    \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m305\u001b[0m \u001b[1m\u001b[94m|\u001b[0m         #[cfg(feature = \"verbose_logging\")]\n    \u001b[1m\u001b[94m|\u001b[0m               \u001b[1m\u001b[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^\u001b[0m\n    \u001b[1m\u001b[94m|\u001b[0m\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mnote\u001b[0m: expected values for `feature` are: `async-trait`, `cloud_imports`, `cue_cli_available`, `default`, `reqwest`, `tokio`, and `url`\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mhelp\u001b[0m: consider adding `verbose_logging` as a feature in `Cargo.toml`\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mnote\u001b[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration\n\n\u001b[1m\u001b[33mwarning\u001b[0m\u001b[1m: unexpected `cfg` condition value: `verbose_logging`\u001b[0m\n   \u001b[1m\u001b[94m--> \u001b[0mdixscript/src/Utilities/mid_logger.rs:309:19\n    \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m309\u001b[0m \u001b[1m\u001b[94m|\u001b[0m         #[cfg(not(feature = \"verbose_logging\"))]\n    \u001b[1m\u001b[94m|\u001b[0m                   \u001b[1m\u001b[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^\u001b[0m\n    \u001b[1m\u001b[94m|\u001b[0m\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mnote\u001b[0m: expected values for `feature` are: `async-trait`, `cloud_imports`, `cue_cli_available`, `default`, `reqwest`, `tokio`, and `url`\n    \u001b[1m\u001b[94m= \u001b",
+    "size_bytes": null,
+    "sections": null,
+    "b64": null,
+    "hex_path": null,
+    "bin_path": null
+  },
+  "dlm_tests": [
+    {
+      "id": "01",
+      "name": "GZip compression",
+      "file": "01_gzip.mdix",
+      "encrypted": false,
+      "compressed": true,
+      "audited": false,
+      "status": "passed",
+      "exit_code": 0,
+      "stdout": "\u001b[97m[09:03:07.738] [Info] Loading text file: mdix_files/tests/dlm/01_gzip.mdix\u001b[0m\n\u001b[97m[09:03:07.742] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[09:03:07.742] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[09:03:07.742] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[09:03:07.742] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[09:03:07.742] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[09:03:07.743] [Info] Binary serialization complete: 656 bytes\u001b[0m\n\u001b[97m[09:03:07.743] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[09:03:07.743] [Info] Compression: 656 -> 460 bytes (29.9% reduction)\u001b[0m\n\u001b[97m[09:03:07.744] [Info] Output file: edge-case-output/dlm/01/01_gzip.mdix.enc\u001b[0m\n\u001b[97m[09:03:07.744] [Info] [KeyFileManager] Key file written: edge-case-output/dlm/01/01_gzip.mdix.mdix.key\u001b[0m\n\u001b[97m[09:03:07.744] [Info] Key file: edge-case-output/dlm/01/01_gzip.mdix.mdix.key\u001b[0m\n\u001b[97m[09:03:07.744] [Info] DLM pipeline complete: 1 modules, 656 -> 460 bytes, 0.85ms\u001b[0m\n\u001b[97m[09:03:07.744] [Info] DLM pipeline complete: 1 modules executed\u001b[0m\n\u001b[97m[09:03:07.744] [Info] Generated encrypted file: edge-case-output/dlm/01/01_gzip.mdix.enc\u001b[0m\n\u001b[97m[09:03:07.744] [Info] Generated key file: edge-case-output/dlm/01/01_gzip.mdix.mdix.key\u001b[0m\n\u001b[97m[09:03:07.744] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/dlm/01_gzip.mdix\n  original size            493 B\n  modules                  DCompressor.gzip\n\nGenerated files\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  \u2192 DCompressor.gzip",
+      "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"DLM Test \u2014 GZip Compression Only' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"DLM Test \u2014 GZip Compression Only\",\n]",
+      "elapsed_ms": 10,
+      "output_files": [
+        {
+          "name": "01_gzip.mdix.enc",
+          "size_bytes": 460,
+          "path": "edge-case-output/dlm/01/01_gzip.mdix.enc"
+        },
+        {
+          "name": "01_gzip.mdix.mdix.key",
+          "size_bytes": 724,
+          "path": "edge-case-output/dlm/01/01_gzip.mdix.mdix.key"
+        }
+      ],
+      "roundtrip": null
+    },
+    {
+      "id": "02",
+      "name": "BZip2 compression",
+      "file": "02_bzip2.mdix",
+      "encrypted": false,
+      "compressed": true,
+      "audited": false,
+      "status": "passed",
+      "exit_code": 0,
+      "stdout": "\u001b[97m[09:03:07.749] [Info] Loading text file: mdix_files/tests/dlm/02_bzip2.mdix\u001b[0m\n\u001b[97m[09:03:07.753] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[09:03:07.753] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[09:03:07.753] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[09:03:07.753] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[09:03:07.753] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[09:03:07.754] [Info] Binary serialization complete: 657 bytes\u001b[0m\n\u001b[97m[09:03:07.754] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[09:03:07.754] [Info] Compression: 657 -> 493 bytes (25.0% reduction)\u001b[0m\n\u001b[97m[09:03:07.754] [Info] Output file: edge-case-output/dlm/02/02_bzip2.mdix.enc\u001b[0m\n\u001b[97m[09:03:07.754] [Info] [KeyFileManager] Key file written: edge-case-output/dlm/02/02_bzip2.mdix.mdix.key\u001b[0m\n\u001b[97m[09:03:07.755] [Info] Key file: edge-case-output/dlm/02/02_bzip2.mdix.mdix.key\u001b[0m\n\u001b[97m[09:03:07.755] [Info] DLM pipeline complete: 1 modules, 657 -> 493 bytes, 0.65ms\u001b[0m\n\u001b[97m[09:03:07.755] [Info] DLM pipeline complete: 1 modules executed\u001b[0m\n\u001b[97m[09:03:07.755] [Info] Generated encrypted file: edge-case-output/dlm/02/02_bzip2.mdix.enc\u001b[0m\n\u001b[97m[09:03:07.755] [Info] Generated key file: edge-case-output/dlm/02/02_bzip2.mdix.mdix.key\u001b[0m\n\u001b[97m[09:03:07.755] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/dlm/02_bzip2.mdix\n  original size            496 B\n  modules                  DCompressor.bzip2\n\nGenerated files\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  \u2192 DCompressor.bzip2",
+      "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"DLM Test \u2014 BZip2 Compression Only' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"DLM Test \u2014 BZip2 Compression Only\",\n]",
+      "elapsed_ms": 9,
+      "output_files": [
+        {
+          "name": "02_bzip2.mdix.enc",
+          "size_bytes": 493,
+          "path": "edge-case-output/dlm/02/02_bzip2.mdix.enc"
+        },
+        {
+          "name": "02_bzip2.mdix.mdix.key",
+          "size_bytes": 697,
+          "path": "edge-case-output/dlm/02/02_bzip2.mdix.mdix.key"
+        }
+      ],
+      "roundtrip": null
+    },
+    {
+      "id": "03",
+      "name": "LZMA compression",
+      "file": "03_lzma.mdix",
+      "encrypted": false,
+      "compressed": true,
+      "audited": false,
+      "status": "passed",
+      "exit_code": 0,
+      "stdout": "\u001b[97m[09:03:07.758] [Info] Loading text file: mdix_files/tests/dlm/03_lzma.mdix\u001b[0m\n\u001b[97m[09:03:07.763] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[09:03:07.763] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[09:03:07.763] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[09:03:07.763] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[09:03:07.763] [Info] DCompressor/DEncryptor detected - generating binary files\u001b[0m\n\u001b[97m[09:03:07.763] [Info] Binary serialization complete: 656 bytes\u001b[0m\n\u001b[97m[09:03:07.763] [Info] DLM pipeline execution started\u001b[0m\n\u001b[97m[09:03:07.767] [Info] Compression: 656 -> 496 bytes (24.4% reduction)\u001b[0m\n\u001b[97m[09:03:07.767] [Info] Output file: edge-case-output/dlm/03/03_lzma.mdix.enc\u001b[0m\n\u001b[97m[09:03:07.768] [Info] [KeyFileManager] Key file written: edge-case-output/dlm/03/03_lzma.mdix.mdix.key\u001b[0m\n\u001b[97m[09:03:07.768] [Info] Key file: edge-case-output/dlm/03/03_lzma.mdix.mdix.key\u001b[0m\n\u001b[97m[09:03:07.768] [Info] DLM pipeline complete: 1 modules, 656 -> 496 bytes, 4.36ms\u001b[0m\n\u001b[97m[09:03:07.768] [Info] DLM pipeline complete: 1 modules executed\u001b[0m\n\u001b[97m[09:03:07.768] [Info] Generated encrypted file: edge-case-output/dlm/03/03_lzma.mdix.enc\u001b[0m\n\u001b[97m[09:03:07.768] [Info] Generated key file: edge-case-output/dlm/03/03_lzma.mdix.mdix.key\u001b[0m\n\u001b[97m[09:03:07.768] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/dlm/03_lzma.mdix\n  original size            493 B\n  modules                  DCompressor.lzma\n\nGenerated files\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  \u2192 DCompressor.lzma",
+      "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"DLM Test \u2014 LZMA Compression Only' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"DLM Test \u2014 LZMA Compression Only\",\n]",
+      "elapsed_ms": 13,
+      "output_files": [
+        {
+          "name": "03_lzma.mdix.enc",
+          "size_bytes": 496,
+          "path": "edge-case-output/dlm/03/03_lzma.mdix.enc"
+        },
+        {
+          "name": "03_lzma.mdix.mdix.key",
+          "size_bytes": 690,
+          "path": "edge-case-output/dlm/03/03_lzma.mdix.mdix.key"
+        }
+      ],
+      "roundtrip": null
+    },
+    {
+      "id": "04",
+      "name": "AES-128 password encryption",
+      "file": "04_aes128_password.mdix",
+      "encrypted": true,
+      "compressed": false,
+      "audited": false,
+      "status": "failed",
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "error: unexpected argument '--password' found\n\n  tip: to pass '--password' as a value, use '-- --password'\n\nUsage: mdix compile --output <OUTPUT> <FILE>\n\nFor more information, try '--help'.",
+      "elapsed_ms": 3,
+      "output_files": [],
+      "roundtrip": null
+    },
+    {
+      "id": "05",
+      "name": "AES-256 password encryption",
+      "file": "05_aes256_password.mdix",
+      "encrypted": true,
+      "compressed": false,
+      "audited": false,
+      "status": "failed",
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "error: unexpected argument '--password' found\n\n  tip: to pass '--password' as a value, use '-- --password'\n\nUsage: mdix compile --output <OUTPUT> <FILE>\n\nFor more information, try '--help'.",
+      "elapsed_ms": 2,
+      "output_files": [],
+      "roundtrip": null
+    },
+    {
+      "id": "06",
+      "name": "ChaCha20 password encryption",
+      "file": "06_chacha20_password.mdix",
+      "encrypted": true,
+      "compressed": false,
+      "audited": false,
+      "status": "failed",
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "error: unexpected argument '--password' found\n\n  tip: to pass '--password' as a value, use '-- --password'\n\nUsage: mdix compile --output <OUTPUT> <FILE>\n\nFor more information, try '--help'.",
+      "elapsed_ms": 2,
+      "output_files": [],
+      "roundtrip": null
+    },
+    {
+      "id": "07",
+      "name": "DIY auditor (.mdix.au)",
+      "file": "07_diy_audit.mdix",
+      "encrypted": false,
+      "compressed": false,
+      "audited": true,
+      "status": "passed",
+      "exit_code": 0,
+      "stdout": "\u001b[97m[09:03:07.780] [Info] Loading text file: mdix_files/tests/dlm/07_diy_audit.mdix\u001b[0m\n\u001b[97m[09:03:07.784] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[09:03:07.784] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[09:03:07.784] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[09:03:07.784] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[09:03:07.784] [Info] DAuditor only - generating .dixscript.au file\u001b[0m\n\u001b[97m[09:03:07.785] [Info] [DAuditor.diy] Starting DIY audit\u001b[0m\n\u001b[97m[09:03:07.785] [Info] [DAuditor.diy] DIY audit started: 68c6215d\u001b[0m\n\u001b[97m[09:03:07.785] [Info] [DAuditor.diy] Finalizing DIY audit\u001b[0m\n\u001b[97m[09:03:07.785] [Info] [DAuditor.diy] DIY audit finalized: mdix_files/tests/dlm/07_diy_audit.mdix.au\u001b[0m\n\u001b[97m[09:03:07.785] [Info] Audit file created: mdix_files/tests/dlm/07_diy_audit.mdix.au\u001b[0m\n\u001b[97m[09:03:07.785] [Info] Generated audit file: mdix_files/tests/dlm/07_diy_audit.mdix.au\u001b[0m\n\u001b[97m[09:03:07.785] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/dlm/07_diy_audit.mdix\n  original size            495 B\n  modules                  DAuditor\n\nGenerated files\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  \u2192 DAuditor",
+      "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"DLM Test \u2014 DIY Auditor (produces .mdix.au)' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"DLM Test \u2014 DIY Auditor (produces .mdix.au)\",\n]",
+      "elapsed_ms": 8,
+      "output_files": [],
+      "roundtrip": null
+    },
+    {
+      "id": "08",
+      "name": "Enhanced auditor (.mdix.au)",
+      "file": "08_enhanced_audit.mdix",
+      "encrypted": false,
+      "compressed": false,
+      "audited": true,
+      "status": "passed",
+      "exit_code": 0,
+      "stdout": "\u001b[97m[09:03:07.788] [Info] Loading text file: mdix_files/tests/dlm/08_enhanced_audit.mdix\u001b[0m\n\u001b[97m[09:03:07.793] [Info] Running AST enhancement\u001b[0m\n\u001b[97m[09:03:07.793] [Info] Starting AST enhancement\u001b[0m\n\u001b[97m[09:03:07.793] [Info] AST enhancement complete: 0 enhancements applied\u001b[0m\n\u001b[97m[09:03:07.793] [Info] Skipping value resolution (no functions or no data)\u001b[0m\n\u001b[97m[09:03:07.793] [Info] DAuditor only - generating .dixscript.au file\u001b[0m\n\u001b[97m[09:03:07.793] [Info] [DAuditor.enhanced] Starting Enhanced audit with smart diff\u001b[0m\n\u001b[97m[09:03:07.793] [Info] [DAuditor.enhanced] Initial compilation \u2014 no previous audit to compare\u001b[0m\n\u001b[97m[09:03:07.793] [Info] [DAuditor.enhanced] Enhanced audit started: 0874d357\u001b[0m\n\u001b[97m[09:03:07.793] [Info] [DAuditor.enhanced] Finalizing Enhanced audit\u001b[0m\n\u001b[97m[09:03:07.794] [Info] [DAuditor.enhanced] Enhanced audit finalized: mdix_files/tests/dlm/08_enhanced_audit.mdix.au\u001b[0m\n\u001b[97m[09:03:07.794] [Info] [DAuditor.enhanced] Compilation ID: 0874d357\u001b[0m\n\u001b[97m[09:03:07.794] [Info] [DAuditor.enhanced] Changes detected: 0\u001b[0m\n\u001b[97m[09:03:07.794] [Info] [DAuditor.enhanced] Total compilations in file: 1\u001b[0m\n\u001b[97m[09:03:07.794] [Info] Audit file created: mdix_files/tests/dlm/08_enhanced_audit.mdix.au\u001b[0m\n\u001b[97m[09:03:07.794] [Info] Generated audit file: mdix_files/tests/dlm/08_enhanced_audit.mdix.au\u001b[0m\n\u001b[97m[09:03:07.794] [Info] Text file loaded successfully\u001b[0m\n\u2713 Compiled mdix_files/tests/dlm/08_enhanced_audit.mdix\n  original size            510 B\n  modules                  DAuditor\n\nGenerated files\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  \u2192 DAuditor",
+      "stderr": "Config validation warnings: [\n    \"Invalid version: '1.0.0\\\"\\n  author  -> \\\"DLM Test \u2014 Enhanced Auditor (produces .mdix.au)' - using default. Error: Invalid version format: 1.0.0\\\"\\n  author  -> \\\"DLM Test \u2014 Enhanced Auditor (produces .mdix.au)\",\n]",
+      "elapsed_ms": 9,
+      "output_files": [],
+      "roundtrip": null
+    },
+    {
+      "id": "09",
+      "name": "GZip then AES-256",
+      "file": "09_gzip_aes256.mdix",
+      "encrypted": true,
+      "compressed": true,
+      "audited": false,
+      "status": "failed",
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "error: unexpected argument '--password' found\n\n  tip: to pass '--password' as a value, use '-- --password'\n\nUsage: mdix compile --output <OUTPUT> <FILE>\n\nFor more information, try '--help'.",
+      "elapsed_ms": 5,
+      "output_files": [],
+      "roundtrip": null
+    },
+    {
+      "id": "10",
+      "name": "Full pipeline: GZip+AES-256+Audit",
+      "file": "10_full_pipeline.mdix",
+      "encrypted": true,
+      "compressed": true,
+      "audited": true,
+      "status": "failed",
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "error: unexpected argument '--password' found\n\n  tip: to pass '--password' as a value, use '-- --password'\n\nUsage: mdix compile --output <OUTPUT> <FILE>\n\nFor more information, try '--help'.",
+      "elapsed_ms": 2,
+      "output_files": [],
+      "roundtrip": null
+    }
+  ]
+}

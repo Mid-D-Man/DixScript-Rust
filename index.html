@@ -11,7 +11,7 @@
       background: #0d1117; color: #e6edf3;
       min-height: 100vh; padding: 40px 24px;
     }
-    .container { max-width: 900px; margin: 0 auto; }
+    .container { max-width: 960px; margin: 0 auto; }
     h1 { font-size: 1.8rem; font-weight: 700; color: #e6edf3; margin-bottom: 6px; }
     .subtitle { font-size: 0.82rem; color: #484f58; margin-bottom: 40px; }
     .grid {
@@ -40,6 +40,12 @@
     .badge-python { background: #0f2a28; color: #2ea8a0; border: 1px solid #1a5c57; }
     .badge-php    { background: #1a1f3a; color: #8892bf; border: 1px solid #3a4080; }
     .badge-csharp { background: #1a0a2a; color: #9b4dca; border: 1px solid #5a1e90; }
+    .badge-test   { background: #0f1e3a; color: #79c0ff; border: 1px solid #1f4080; }
+    .section-label {
+      font-size: 0.70rem; text-transform: uppercase; letter-spacing: 0.8px;
+      color: #484f58; margin-bottom: 12px; margin-top: 32px;
+      padding-bottom: 6px; border-bottom: 1px solid #21262d;
+    }
     footer {
       margin-top: 48px; font-size: 0.72rem; color: #484f58; text-align: center;
     }
@@ -51,8 +57,9 @@
 <div class="container">
 
   <h1>DixScript-Rust</h1>
-  <p class="subtitle">MidManStudio · CI Dashboard · Results per language</p>
+  <p class="subtitle">MidManStudio · CI Dashboard · Build results per category</p>
 
+  <div class="section-label">Core Results</div>
   <div class="grid">
 
     <a class="card" href="tests/">
@@ -82,6 +89,18 @@
       <div class="card-lang">perf · cargo-flamegraph · bench profile</div>
       <span class="card-badge badge-rust">Rust</span>
     </a>
+
+    <a class="card" href="edge/">
+      <div class="card-icon">🔬</div>
+      <div class="card-title">Edge Cases</div>
+      <div class="card-lang">imports · cyclic detection · DLM pipeline · binary capture</div>
+      <span class="card-badge badge-test">Special</span>
+    </a>
+
+  </div>
+
+  <div class="section-label">Language Wrappers</div>
+  <div class="grid">
 
     <a class="card" href="go/">
       <div class="card-icon">🔵</div>

@@ -1,0 +1,29 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Import Test 05 — Imported Enum Values Passed Into Imported Function Calls"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  Base    from "base_types.mdix"
+  Helpers from "game_helpers.mdix"
+)
+
+@DATA(
+  test_name = "05_enum_in_funcs"
+
+  epic_sword<object>      = Base.makeItem("W001", "Excalibur",     Base.ItemType.WEAPON, Base.Rarity.EPIC,      Base.scaledValue(100, Base.Rarity.EPIC))
+  legendary_armor<object> = Base.makeItem("A001", "Mythril Plate", Base.ItemType.ARMOR,  Base.Rarity.LEGENDARY, Base.scaledValue(90,  Base.Rarity.LEGENDARY))
+  rare_relic<object>      = Base.makeItem("Q001", "Ancient Relic", Base.ItemType.QUEST,  Base.Rarity.RARE,      Base.scaledValue(50,  Base.Rarity.RARE))
+
+  normal_enemy<object>   = Helpers.makeEnemy("E001", "Forest Troll", 100, Helpers.Difficulty.NORMAL)
+  nightmare_boss<object> = Helpers.makeEnemy("E002", "Elder Dragon", 800, Helpers.Difficulty.NIGHTMARE)
+
+  rare_drop<object> = Helpers.lootDrop("E001", Base.Rarity.RARE)
+  epic_drop<object> = Helpers.lootDrop("E002", Base.Rarity.EPIC)
+
+  boss_table::
+    Helpers.makeEnemy("B001", "Goblin Chieftain", 150, Helpers.Difficulty.NORMAL),
+    Helpers.makeEnemy("B002", "Stone Golem",      300, Helpers.Difficulty.HARD),
+    Helpers.makeEnemy("B003", "Lich King",        600, Helpers.Difficulty.NIGHTMARE)
+)

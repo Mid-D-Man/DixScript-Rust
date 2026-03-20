@@ -1,0 +1,34 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Import Test 04 — Imported Function Calls Nested Inside Other Imported Calls"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  Base from "base_types.mdix"
+)
+
+@QUICKFUNCS(
+  ~buildTieredLoot<object>(tier<int>, name<string>) {
+    let rarity<enum> = tier == 1 ? Base.Rarity.COMMON :
+                       tier == 2 ? Base.Rarity.RARE   : Base.Rarity.LEGENDARY
+    return Base.makeItem(
+      $"TLOOT_{tier}",
+      name,
+      Base.ItemType.QUEST,
+      rarity,
+      Base.scaledValue(Base.scaledValue(5, rarity), rarity)
+    )
+  }
+)
+
+@DATA(
+  test_name = "04_funcs_in_funcs"
+
+  tier1_drop<object> = buildTieredLoot(1, "Broken Fragment")
+  tier2_drop<object> = buildTieredLoot(2, "Runed Shard")
+  tier3_drop<object> = buildTieredLoot(3, "World Stone")
+
+  nested_common<int>    = Base.scaledValue(Base.scaledValue(10, Base.Rarity.COMMON),    Base.Rarity.COMMON)
+  nested_legendary<int> = Base.scaledValue(Base.scaledValue(10, Base.Rarity.LEGENDARY), Base.Rarity.LEGENDARY)
+)

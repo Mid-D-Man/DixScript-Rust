@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Fri Mar 20 05:17:18 UTC 2026
+Generated: Fri Mar 20 05:18:10 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 34f48122c2bd63c845244f8537ac6a6d99ec6d15
+Commit: 680d38ba172d5c100c8f00ba6d44117ab593acc2
 Branch: master
 ==================================
 
@@ -350,6 +350,7 @@ GitHub Workflows:
   .github/workflows/build-upm.yml
   .github/workflows/c-release.yml
   .github/workflows/dixscript-publish.yml
+  .github/workflows/edge-cases-publish.yml
   .github/workflows/ffi-ci.yml
   .github/workflows/go-ci.yml
   .github/workflows/java-ci.yml

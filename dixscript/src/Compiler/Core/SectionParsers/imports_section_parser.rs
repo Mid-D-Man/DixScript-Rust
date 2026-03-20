@@ -1,4 +1,3 @@
-// src/Compiler/Core/SectionParsers/imports_section_parser.rs
 //! Parser for the `@IMPORTS(...)` section.
 //!
 //! ```text
@@ -51,6 +50,29 @@ impl<'a> ImportsSectionParser<'a> {
                 operational_settings.error_handling_strategy
             ));
         }
+
+        ImportsSectionParser {
+            tokens,
+            operational_settings,
+            error_manager,
+            debug_config,
+            position: 0,
+            last_position: usize::MAX,
+            stuck_count: 0,
+            iteration_count: 0,
+            max_iterations,
+            has_encountered_errors: false,
+        }
+    }
+
+    pub fn new_with_error_manager(
+        tokens: &'a [Token],
+        operational_settings: &'a OperationalSettings,
+        error_manager: ErrorManager,
+    ) -> Self {
+        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
+        let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
+        let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
 
         ImportsSectionParser {
             tokens,
@@ -137,11 +159,13 @@ impl<'a> ImportsSectionParser<'a> {
                 }
             }
 
+            // Commas between declarations are optional.
             if self.is_current_symbol(',') {
                 self.advance();
             } else if self.is_current_symbol(')') {
                 break;
             } else if !self.is_at_end() {
+                // If the next token looks like the start of another declaration, continue.
                 if matches!(self.current().token_type, TokenType::Identifier(_)) {
                     continue;
                 }
@@ -250,9 +274,9 @@ impl<'a> ImportsSectionParser<'a> {
                     return None;
                 }
                 if is_cloud {
-                    "cloud://invalid/path.dixscript".to_string()
+                    "cloud://invalid/path.mdix".to_string()
                 } else {
-                    "invalid_path.dixscript".to_string()
+                    "invalid_path.mdix".to_string()
                 }
             }
         };
@@ -334,7 +358,10 @@ impl<'a> ImportsSectionParser<'a> {
             let current = self.current().clone();
             self.report_error(
                 ParseErrorType::InvalidIdentifier,
-                &format!("'{}' is a reserved contextual identifier and cannot be used as an import alias", alias),
+                &format!(
+                    "'{}' is a reserved contextual identifier and cannot be used as an import alias",
+                    alias
+                ),
                 &current,
             );
             return false;
@@ -344,7 +371,10 @@ impl<'a> ImportsSectionParser<'a> {
             let current = self.current().clone();
             self.report_error(
                 ParseErrorType::InvalidIdentifier,
-                &format!("'{}' is a built-in object name and cannot be used as an import alias", alias),
+                &format!(
+                    "'{}' is a built-in object name and cannot be used as an import alias",
+                    alias
+                ),
                 &current,
             );
             return false;
@@ -387,7 +417,7 @@ impl<'a> ImportsSectionParser<'a> {
                         path
                     ));
                 }
-                if !path_without_query.ends_with(".dixscript") {
+                if !path_without_query.ends_with(".mdix") {
                     let current = self.current().clone();
                     self.report_error(
                         ParseErrorType::InvalidLiteral,
@@ -431,7 +461,8 @@ impl<'a> ImportsSectionParser<'a> {
             return false;
         }
 
-        if !path_without_query.ends_with(".dixscript") {
+        // Local path — must end with .mdix
+        if !path_without_query.ends_with(".mdix") {
             let current = self.current().clone();
             self.report_error(
                 ParseErrorType::InvalidLiteral,
@@ -662,4 +693,4 @@ fn is_valid_identifier(name: &str) -> bool {
                 && chars.all(|c| c.is_alphanumeric() || c == '_')
         }
     }
-}
+    }

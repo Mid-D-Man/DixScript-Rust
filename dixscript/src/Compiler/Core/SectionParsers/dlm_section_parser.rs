@@ -14,7 +14,7 @@
 
 use crate::Compiler::AST::{DLMSection, DLMModule, Position, DLMModuleType, DLMModuleSubtype};
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
-use crate::ErrorManager::{ErrorManager, ParseErrorType,DebugConfig};
+use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::Core::Tokenizer::token::SectionId;
 
@@ -37,33 +37,56 @@ pub struct DlmSectionParser<'a> {
 
 impl<'a> DlmSectionParser<'a> {
     pub fn new(tokens: &'a [Token], operational_settings: &'a OperationalSettings) -> Self {
-    let error_manager = ErrorManager::get_shared_instance();
-    let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
+        let error_manager = ErrorManager::get_shared_instance();
+        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
 
-    let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
-    let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
+        let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
+        let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
 
-    if debug_config.is_enabled {
-        error_manager.log_debug(&format!(
-            "DLM parser: {} tokens, strategy: {:?}",
-            tokens.len(),
-            operational_settings.error_handling_strategy
-        ));
+        if debug_config.is_enabled {
+            error_manager.log_debug(&format!(
+                "DLM parser: {} tokens, strategy: {:?}",
+                tokens.len(),
+                operational_settings.error_handling_strategy
+            ));
+        }
+
+        DlmSectionParser {
+            tokens,
+            operational_settings,
+            error_manager,
+            debug_config,
+            position: 0,
+            last_position: usize::MAX,
+            stuck_count: 0,
+            iteration_count: 0,
+            max_iterations,
+            has_encountered_errors: false,
+        }
     }
 
-    DlmSectionParser {
-        tokens,
-        operational_settings,
-        error_manager,
-        debug_config,
-        position: 0,
-        last_position: usize::MAX,
-        stuck_count: 0,
-        iteration_count: 0,
-        max_iterations,
-        has_encountered_errors: false,
+    pub fn new_with_error_manager(
+        tokens: &'a [Token],
+        operational_settings: &'a OperationalSettings,
+        error_manager: ErrorManager,
+    ) -> Self {
+        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
+        let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
+        let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
+
+        DlmSectionParser {
+            tokens,
+            operational_settings,
+            error_manager,
+            debug_config,
+            position: 0,
+            last_position: usize::MAX,
+            stuck_count: 0,
+            iteration_count: 0,
+            max_iterations,
+            has_encountered_errors: false,
+        }
     }
-}
 
     pub fn parse_section(&mut self) -> Option<DLMSection> {
         let section_start_pos = Position::from_token(self.current());
@@ -118,6 +141,7 @@ impl<'a> DlmSectionParser<'a> {
                 }
             }
 
+            // Commas between modules are optional.
             if self.is_current_symbol(',') {
                 self.advance();
             } else if self.is_current_symbol(')') {
@@ -370,15 +394,15 @@ impl<'a> DlmSectionParser<'a> {
     }
 
     fn should_terminate_loop(&self) -> bool {
-    if self.iteration_count >= self.max_iterations {
-        self.error_manager.log_error(&format!(
-            "DLM parser exceeded {} iterations — possible infinite loop",
-            self.max_iterations
-        ));
-        return true;
+        if self.iteration_count >= self.max_iterations {
+            self.error_manager.log_error(&format!(
+                "DLM parser exceeded {} iterations — possible infinite loop",
+                self.max_iterations
+            ));
+            return true;
+        }
+        false
     }
-    false
-}
 
     fn force_advance(&mut self) -> bool {
         if self.is_at_end() {

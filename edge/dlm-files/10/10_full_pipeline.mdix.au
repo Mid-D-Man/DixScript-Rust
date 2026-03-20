@@ -1,0 +1,23 @@
+// DixScript Audit File v1.0.0
+// Generated: 2026-03-20T09:57:17Z
+// Source: 10_full_pipeline.mdix
+
+@AUDIT_CONFIG(
+  source_file -> "10_full_pipeline.mdix",
+  max_entries -> 100,
+  format -> "structured",
+  created -> "2026-03-20T09:57:17Z",
+)
+
+// ─── Compilation History ────────────────────────────────────────────────────
+
+compilation_1:
+  index -> 1,
+  compilation_id -> "93dc566b",
+  timestamp -> "2026-03-20T09:57:17Z",
+  source_checksum -> "sha256:764944d67066bc78f098c0910d1739b56ab9f55e9dd3472f22c06e2675fc0c4e",
+  status -> "SUCCESS",
+  modules_executed -> "DCompressor.gzip",
+  execution_time_ms -> 0.59,
+  changes_summary -> "Initial compilation"
+

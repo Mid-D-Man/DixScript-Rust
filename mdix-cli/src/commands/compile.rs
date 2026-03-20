@@ -9,7 +9,7 @@ use crate::services::compilation::{self, CompileOpts};
 
 #[derive(Args)]
 pub struct CompileArgs {
-    /// Path to the .dixscript file
+    /// Path to the .mdix file
     pub file: PathBuf,
 
     /// Output directory for generated files
@@ -19,6 +19,11 @@ pub struct CompileArgs {
     /// Skip the DLM pipeline
     #[arg(long)]
     pub skip_dlm: bool,
+
+    /// Password for DLM encryption (password mode only — required when
+    /// @SECURITY specifies mode = "password")
+    #[arg(long)]
+    pub password: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -34,6 +39,7 @@ pub fn run(args: CompileArgs, global: &GlobalOpts) -> i32 {
     let opts = CompileOpts {
         output_dir: args.output.clone(),
         skip_dlm:   args.skip_dlm,
+        password:   args.password.clone(),
     };
 
     match compilation::compile(&args.file, &opts) {
@@ -76,4 +82,4 @@ pub fn run(args: CompileArgs, global: &GlobalOpts) -> i32 {
             handle_error(&e, false)
         }
     }
-  }
+}

@@ -140,8 +140,6 @@ impl KeyFileManager {
     }
 
     /// Read and parse an existing `.mdix.key` file.
-    ///
-    /// Reading a read-only file requires no permission change.
     pub fn read_key_file(&self, key_file_path: &str) -> Result<KeyFileData, String> {
         if !Path::new(key_file_path).exists() {
             let msg = format!("Key file not found: {}", key_file_path);
@@ -189,7 +187,6 @@ impl KeyFileManager {
         Ok(data)
     }
 
-    /// Extract an `IEncryptor::initialize`-compatible config map from parsed key data.
     pub fn extract_encryption_config(
         &self,
         data: &KeyFileData,
@@ -215,7 +212,6 @@ impl KeyFileManager {
         Some(config)
     }
 
-    /// Extract an `ICompressor::initialize`-compatible config map from parsed key data.
     pub fn extract_compression_config(
         &self,
         data: &KeyFileData,
@@ -231,7 +227,6 @@ impl KeyFileManager {
         Some(config)
     }
 
-    /// Whether the key file was created in password mode.
     pub fn is_password_protected(&self, data: &KeyFileData) -> bool {
         data.is_password_mode()
             && data.key_data.encryption
@@ -242,7 +237,6 @@ impl KeyFileManager {
 
     // ── Private ───────────────────────────────────────────────────────────────
 
-    /// Unlock (if existing) → write → re-lock.
     fn write_locked(&self, path: &str, content: &[u8]) -> Result<(), String> {
         let p           = Path::new(path);
         let file_exists = p.exists();
@@ -265,7 +259,6 @@ impl KeyFileManager {
             msg
         });
 
-        // Always re-lock, even if the write failed.
         if let Err(e) = file_permissions::set_readonly(p) {
             self.base.log_warning(&format!("Could not lock key file read-only: {}", e));
         }
@@ -273,14 +266,30 @@ impl KeyFileManager {
         result
     }
 
+    /// Derive the `.mdix.key` path from the compiled output path.
+    ///
+    /// Strips `.mdix.enc` or `.enc` from the end so that
+    /// `output/01_gzip.mdix.enc` → `output/01_gzip.mdix.key`
+    /// rather than the incorrect `output/01_gzip.mdix.mdix.key`.
     fn key_file_path(&self, compiled_file_path: &str) -> String {
-        let stem = Path::new(compiled_file_path)
-            .file_stem()
+        let name = Path::new(compiled_file_path)
+            .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("output");
 
+        // Strip compound suffix first, then fallback to single-extension strip.
+        let base = if name.ends_with(".mdix.enc") {
+            &name[..name.len() - ".mdix.enc".len()]
+        } else if name.ends_with(".enc") {
+            &name[..name.len() - ".enc".len()]
+        } else if name.ends_with(".mdix") {
+            &name[..name.len() - ".mdix".len()]
+        } else {
+            name
+        };
+
         Path::new(&self.output_directory)
-            .join(format!("{}.mdix.key", stem))
+            .join(format!("{}.mdix.key", base))
             .to_string_lossy()
             .to_string()
     }

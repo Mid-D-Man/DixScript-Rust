@@ -1,0 +1,247 @@
+name: DixScript — Edge Cases, DLM & Binary Tests
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      test_scope:
+        description: 'Which tests to run'
+        required: true
+        default: 'all'
+        type: choice
+        options: [imports, dlm, binary, all]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  # ── 1. Decide what to run ───────────────────────────────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      run_edge: ${{ steps.decide.outputs.run_edge }}
+    steps:
+      - name: Decide whether to run edge case tests
+        id: decide
+        run: |
+          RUN=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            MSG="${{ github.event.pull_request.title }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-special\b|\-\-publish-(edge|all)\b' && RUN=true || true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-special\b|\-\-publish-(edge|all)\b' && RUN=true || true
+          fi
+
+          echo "run_edge=$RUN" >> $GITHUB_OUTPUT
+          echo "Run edge tests: $RUN"
+
+  # ── 2. Build, test, capture ─────────────────────────────────────────────────
+  run-edge-cases:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_edge == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Get Rust version
+        id: rustver
+        run: echo "ver=$(rustc --version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-edge-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build mdix-cli
+        run: |
+          echo "=== Building mdix-cli ==="
+          cargo build -p mdix-cli
+          echo "Binary: $(ls -lh target/debug/mdix)"
+
+      - name: Build binary_capture example
+        run: |
+          echo "=== Building binary_capture example ==="
+          cargo build --example binary_capture -p dixscript
+          echo "Example: $(ls -lh target/debug/examples/binary_capture)"
+
+      - name: Verify test fixture files
+        run: |
+          echo "=== Import fixtures ==="
+          for f in \
+            mdix_files/tests/imports/base_types.mdix \
+            mdix_files/tests/imports/game_helpers.mdix \
+            mdix_files/tests/imports/01_basic_import.mdix \
+            mdix_files/tests/imports/02_alias_funcs_in_quickfuncs.mdix \
+            mdix_files/tests/imports/03_alias_funcs_in_data.mdix \
+            mdix_files/tests/imports/04_funcs_in_funcs.mdix \
+            mdix_files/tests/imports/05_enum_in_funcs.mdix \
+            mdix_files/tests/imports/circular_a.mdix \
+            mdix_files/tests/imports/circular_b.mdix; do
+            [ -f "$f" ] && echo "  ✓ $f" || echo "  ✗ MISSING: $f"
+          done
+          echo "=== DLM fixtures ==="
+          for f in mdix_files/tests/dlm/*.mdix; do
+            echo "  ✓ $f"
+          done
+          echo "=== Binary fixture ==="
+          [ -f "mdix_files/tests/binary/serialize_target.mdix" ] \
+            && echo "  ✓ serialize_target.mdix" \
+            || echo "  ✗ MISSING: serialize_target.mdix"
+
+      - name: Run all edge case tests
+        continue-on-error: true
+        env:
+          BUILD_NUM:          ${{ github.run_number }}
+          BRANCH:             ${{ github.ref_name }}
+          COMMIT:             ${{ github.sha }}
+          BUILD_DATE:         ${{ github.event.head_commit.timestamp }}
+          MDIX_BINARY:        target/debug/mdix
+          DLM_TEST_PASSWORD:  ${{ secrets.DLM_TEST_PASSWORD || 'dixscript_ci_test_password_2025' }}
+        run: |
+          python3 tools/run_edge_case_tests.py
+          echo "TEST_EXIT=$?" >> $GITHUB_ENV
+
+      - name: Build HTML report
+        env:
+          RUST_VERSION: ${{ steps.rustver.outputs.ver }}
+        run: |
+          cp .github/edge-cases-template.html edge-cases-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  edge-cases-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       edge-cases-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            edge-cases-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     edge-cases-index.html
+          sed -i "s|RUST_VERSION_PLACEHOLDER|${RUST_VERSION}|g"        edge-cases-index.html
+
+      - name: Upload all artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-case-results-${{ github.run_number }}
+          path: |
+            edge-case-results.json
+            edge-cases-index.html
+            binary-output/
+            edge-case-output/
+          retention-days: 30
+
+      - name: Upload DLM produced files separately
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dlm-produced-files-${{ github.run_number }}
+          path: edge-case-output/dlm/
+          retention-days: 30
+
+      - name: Upload raw binary output separately
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-serialization-${{ github.run_number }}
+          path: binary-output/
+          retention-days: 30
+
+  # ── 3. Deploy to gh-pages ───────────────────────────────────────────────────
+  deploy-results:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, run-edge-cases]
+    if: always() && needs.run-edge-cases.result == 'success'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: edge-case-results-${{ github.run_number }}
+          path: deploy/edge/
+
+      - name: Download DLM files
+        uses: actions/download-artifact@v4
+        with:
+          name: dlm-produced-files-${{ github.run_number }}
+          path: deploy/edge/dlm-files/
+
+      - name: Download binary output
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-serialization-${{ github.run_number }}
+          path: deploy/edge/binary/
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            echo "Creating fresh gh-pages branch"
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/edge" "$WORK/edge/builds/build_${BUILD_NUM}"
+
+          cp deploy/edge/edge-case-results.json "$WORK/edge/edge-case-results.json"
+          cp deploy/edge/edge-cases-index.html  "$WORK/edge/index.html"
+          cp -r deploy/edge/dlm-files           "$WORK/edge/dlm-files"  2>/dev/null || true
+          cp -r deploy/edge/binary              "$WORK/edge/binary"      2>/dev/null || true
+
+          cp -r deploy/edge/. "$WORK/edge/builds/build_${BUILD_NUM}/"
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "Edge Cases — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+          echo "Deployed → https://mid-d-man.github.io/DixScript-Rust/edge/"
+
+  # ── 4. Summary ──────────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, run-edge-cases, deploy-results]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "================================================="
+          echo "  DixScript — Edge Cases Summary"
+          echo "================================================="
+          echo "Build:   #${{ github.run_number }}"
+          echo "Branch:  ${{ github.ref_name }}"
+          echo "Trigger: ${{ github.event_name }}"
+          echo "Tests:   ${{ needs.run-edge-cases.result  || 'skipped' }}"
+          echo "Deploy:  ${{ needs.deploy-results.result  || 'skipped' }}"
+          echo ""
+          if [ "${{ needs.parse-trigger.outputs.run_edge }}" != "true" ]; then
+            echo "Skipped — commit message did not contain --mdix-special or --publish-edge"
+          fi
+          echo ""
+          echo "Results → https://mid-d-man.github.io/DixScript-Rust/edge/"

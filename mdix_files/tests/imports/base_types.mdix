@@ -1,0 +1,38 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Importable — Base Types Library"
+  features -> "advanced"
+)
+
+@ENUMS(
+  Rarity   { COMMON = 0, UNCOMMON = 1, RARE = 2, EPIC = 3, LEGENDARY = 4 }
+  ItemType { WEAPON = 1, ARMOR = 2, CONSUMABLE = 3, QUEST = 4 }
+)
+
+@QUICKFUNCS(
+  ~rarityMultiplier<int>(rarity<enum>) {
+    return rarity == Rarity.COMMON    ? 1  :
+           rarity == Rarity.UNCOMMON  ? 2  :
+           rarity == Rarity.RARE      ? 3  :
+           rarity == Rarity.EPIC      ? 5  : 10
+  }
+
+  ~scaledValue<int>(base<int>, rarity<enum>) {
+    return base * rarityMultiplier(rarity)
+  }
+
+  ~makeItem<object>(id<string>, name<string>, itemType<enum>, rarity<enum>, baseValue<int>) {
+    return {
+      id         = id
+      name       = name
+      item_type  = itemType
+      rarity     = rarity
+      sell_value = scaledValue(baseValue, rarity)
+    }
+  }
+)
+
+@DATA(
+  schema  = "base_types"
+  version = "1.0.0"
+)

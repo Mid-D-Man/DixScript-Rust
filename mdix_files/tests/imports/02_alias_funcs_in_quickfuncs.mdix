@@ -1,0 +1,36 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Import Test 02 — Imported Funcs Called Inside Local QuickFuncs"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  Base from "base_types.mdix"
+)
+
+@ENUMS(
+  Slot { HEAD = 1, CHEST = 2, LEGS = 3, HANDS = 4, FEET = 5 }
+)
+
+@QUICKFUNCS(
+  ~makeGearPiece<object>(slot<enum>, name<string>, rarity<enum>) {
+    let id<string>   = $"GEAR_{slot}"
+    let value<int>   = Base.scaledValue(40, rarity)
+    let item<object> = Base.makeItem(id, name, Base.ItemType.ARMOR, rarity, value)
+    return {
+      slot = slot
+      item = item
+    }
+  }
+)
+
+@DATA(
+  test_name = "02_alias_funcs_in_quickfuncs"
+
+  gear::
+    makeGearPiece(Slot.HEAD,  "Iron Helm",          Base.Rarity.COMMON),
+    makeGearPiece(Slot.CHEST, "Chain Mail",          Base.Rarity.UNCOMMON),
+    makeGearPiece(Slot.LEGS,  "Enchanted Greaves",   Base.Rarity.RARE),
+    makeGearPiece(Slot.HANDS, "Crystal Gauntlets",   Base.Rarity.EPIC),
+    makeGearPiece(Slot.FEET,  "Legendary Sabatons",  Base.Rarity.LEGENDARY)
+)

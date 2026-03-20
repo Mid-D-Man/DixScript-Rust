@@ -1,0 +1,13 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Cyclic Import Detection — File A imports B which imports A"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  B from "circular_b.mdix"
+)
+
+@DATA(
+  source = "circular_a"
+)

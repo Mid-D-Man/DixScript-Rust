@@ -1,14 +1,16 @@
-// src/Compiler/Core/SectionParsers/security_section_parser.rs
 //! Parser for the `@SECURITY(...)` section.
 //!
 //! ```text
-//! SecuritySection  ::= "@SECURITY(" SecurityEntry (","? SecurityEntry)* ")"
-//! SecurityEntry    ::= SecurityBlockKey "->" "{" SecurityFieldList? "}"
-//! SecurityBlockKey ::= "encryption" | "validation" | "keystore" | "override" | "metadata"
+//! SecuritySection   ::= "@SECURITY(" SecurityEntry (","? SecurityEntry)* ")"
+//! SecurityEntry     ::= SecurityBlockKey "->" "{" SecurityFieldList? "}"
+//! SecurityBlockKey  ::= "encryption" | "validation" | "keystore" | "override" | "metadata"
 //! SecurityFieldList ::= SecurityField ("," SecurityField)*
-//! SecurityField    ::= Identifier "=" SecurityValue
-//! SecurityValue    ::= StringLiteral | Integer | Boolean | HexLiteral | "auto"
+//! SecurityField     ::= Identifier "=" SecurityValue
+//! SecurityValue     ::= StringLiteral | Integer | Boolean | HexLiteral | "auto"
 //! ```
+//!
+//! Commas between SecurityEntry blocks are optional.
+//! Commas between SecurityField entries within a block are required.
 
 use crate::Compiler::AST::{SecuritySection, SecurityEntry, SecurityField, Position, Value};
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
@@ -62,7 +64,8 @@ impl<'a> SecuritySectionParser<'a> {
             has_encountered_errors: false,
         }
     }
-pub fn new_with_error_manager(
+
+    pub fn new_with_error_manager(
         tokens: &'a [Token],
         operational_settings: &'a OperationalSettings,
         error_manager: ErrorManager,
@@ -74,7 +77,7 @@ pub fn new_with_error_manager(
         SecuritySectionParser {
             tokens,
             operational_settings,
-            error_manager,      // use what was passed in, not get_shared_instance()
+            error_manager,
             debug_config,
             position: 0,
             last_position: usize::MAX,
@@ -84,6 +87,7 @@ pub fn new_with_error_manager(
             has_encountered_errors: false,
         }
     }
+
     pub fn parse_section(&mut self) -> Option<SecuritySection> {
         let section_start_pos = Position::from_token(self.current());
         self.reset_parse_state();
@@ -120,6 +124,7 @@ pub fn new_with_error_manager(
                 continue;
             }
 
+            // Skip optional commas between entries at the outer level.
             if self.is_current_symbol(',') {
                 self.advance();
                 continue;
@@ -219,6 +224,7 @@ pub fn new_with_error_manager(
         }
 
         let mut fields = Vec::with_capacity(4);
+        let mut need_comma = false;
 
         while !self.is_at_end() && !self.is_current_symbol('}') && !self.should_terminate_loop() {
             self.track_progress();
@@ -230,9 +236,43 @@ pub fn new_with_error_manager(
                 continue;
             }
 
-            if self.is_current_symbol(',') {
-                self.advance();
-                continue;
+            // After the first field, a comma is required before the next field.
+            if need_comma {
+                if self.is_current_symbol(',') {
+                    self.advance();
+                    // Allow trailing comma before '}'.
+                    if self.is_current_symbol('}') {
+                        break;
+                    }
+                } else if !self.is_current_symbol('}') {
+                    // Missing comma between fields — report but recover if possible.
+                    let current = self.current().clone();
+                    let msg = format!(
+                        "Expected ',' between fields in security block '{}', found {}",
+                        block_key,
+                        current.get_token_value()
+                    );
+                    self.report_error(ParseErrorType::MissingToken, &msg, &current);
+                    if self.should_halt_section() {
+                        return None;
+                    }
+                    // Recover: if the current token looks like a field key, continue anyway.
+                    if !matches!(
+                        self.current().token_type,
+                        TokenType::Identifier(_) | TokenType::Keyword(_)
+                    ) {
+                        if self.operational_settings.error_handling_strategy
+                            == ErrorHandlingStrategy::Recover
+                        {
+                            if !self.recover_in_fields() {
+                                self.ensure_progress();
+                            }
+                        } else {
+                            self.ensure_progress();
+                        }
+                        continue;
+                    }
+                }
             }
 
             match self.parse_security_field() {
@@ -242,6 +282,7 @@ pub fn new_with_error_manager(
                             .log_debug(&format!("  SECURITY field: {}", field.key));
                     }
                     fields.push(field);
+                    need_comma = true;
                 }
                 None => {
                     if self.should_halt_section() {
@@ -324,7 +365,6 @@ pub fn new_with_error_manager(
                 self.advance();
                 Some(key)
             }
-            // Block keys and field keys may arrive as Keyword(&'static str)
             TokenType::Keyword(k) => {
                 let key = k.to_string();
                 self.advance();
@@ -338,8 +378,6 @@ pub fn new_with_error_manager(
         }
     }
 
-    /// Parse a value valid inside a `@SECURITY` block.
-    /// Captures position before advancing so the Value carries source location.
     fn parse_security_value(&mut self) -> Option<Value> {
         let pos = Position::from_token(self.current());
 
@@ -368,7 +406,6 @@ pub fn new_with_error_manager(
                 value: *b,
                 position: pos,
             }),
-            // Hex integer stored as Integer value — no HexLiteral variant in Value
             TokenType::HexLiteral(h) => Some(Value::Integer {
                 value: *h,
                 position: pos,
@@ -377,14 +414,12 @@ pub fn new_with_error_manager(
                 value: h.clone(),
                 position: pos,
             }),
-            // "auto" arrives as Identifier (not in any keyword PHF map)
             TokenType::Identifier(id) if id.eq_ignore_ascii_case("auto") => {
                 Some(Value::String {
                     value: "auto".to_string(),
                     position: pos,
                 })
             }
-            // true/false/null are Keyword(&'static str) — compare with == per finalization
             TokenType::Keyword(k) if *k == "true" => Some(Value::Boolean {
                 value: true,
                 position: pos,
@@ -404,16 +439,13 @@ pub fn new_with_error_manager(
         value
     }
 
-    /// Consume a `->` token.
-    /// `->` is emitted as `TokenType::SwitchCase` by the lexer.
-    /// Handles the two-symbol fallback in case the lexer emits separate `-` and `>`.
+    /// Consume a `->` token (`TokenType::SwitchCase`), with a two-symbol fallback.
     #[inline]
     fn match_arrow(&mut self) -> bool {
         if matches!(self.current().token_type, TokenType::SwitchCase) {
             self.advance();
             return true;
         }
-        // Fallback: separate '-' '>' symbols
         if matches!(self.current().token_type, TokenType::Symbol('-'))
             && self.position + 1 < self.tokens.len()
             && matches!(self.tokens[self.position + 1].token_type, TokenType::Symbol('>'))

@@ -1,0 +1,23 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Import Test 03 — Imported Funcs Called Directly in DATA"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  Base from "base_types.mdix"
+)
+
+@DATA(
+  test_name = "03_alias_funcs_in_data"
+
+  common_sword<object>   = Base.makeItem("W001", "Rusty Sword",    Base.ItemType.WEAPON,     Base.Rarity.COMMON,    50)
+  rare_staff<object>     = Base.makeItem("W002", "Mystic Staff",   Base.ItemType.WEAPON,     Base.Rarity.RARE,      80)
+  epic_shield<object>    = Base.makeItem("A001", "Dragon Shield",  Base.ItemType.ARMOR,      Base.Rarity.EPIC,      60)
+  legendary_ring<object> = Base.makeItem("Q001", "Ring of Power",  Base.ItemType.QUEST,      Base.Rarity.LEGENDARY, 30)
+
+  loot_table::
+    Base.makeItem("L001", "Health Vial",     Base.ItemType.CONSUMABLE, Base.Rarity.COMMON,    20),
+    Base.makeItem("L002", "Mana Crystal",    Base.ItemType.CONSUMABLE, Base.Rarity.UNCOMMON,  35),
+    Base.makeItem("L003", "Phoenix Feather", Base.ItemType.CONSUMABLE, Base.Rarity.LEGENDARY, 100)
+)

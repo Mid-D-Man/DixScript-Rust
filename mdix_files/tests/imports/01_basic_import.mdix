@@ -1,0 +1,18 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Import Test 01 — Basic Enum and Type Access via Alias"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  Base from "base_types.mdix"
+)
+
+@DATA(
+  test_name            = "01_basic_import"
+  default_rarity<enum> = Base.Rarity.COMMON
+  best_rarity<enum>    = Base.Rarity.LEGENDARY
+  weapon_type<enum>    = Base.ItemType.WEAPON
+  armor_type<enum>     = Base.ItemType.ARMOR
+  base_multiplier<int> = 3
+)

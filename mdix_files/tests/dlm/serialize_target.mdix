@@ -1,0 +1,29 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Binary Serialization Capture — Representative File"
+  features -> "advanced"
+)
+
+@ENUMS(
+  Priority { LOW = 1, MEDIUM = 2, HIGH = 3, CRITICAL = 4 }
+  Status   { PENDING = 0, ACTIVE = 1, DONE = 2, FAILED = 3 }
+)
+
+@DATA(
+  service       = "BinaryTestService"
+  version       = "1.0.0"
+  build<int>    = 42
+  active<bool>  = true
+  score<double> = 3.14159265358979
+  color<hex>    = #FF5733
+  started<date> = 2025-01-01
+
+  job_priority<enum> = Priority.HIGH
+  job_status<enum>   = Status.ACTIVE
+
+  config: host = "test.internal", port<int> = 9000, ssl<bool> = true, timeout<int> = 60
+
+  tags:: "binary", "test", "serialization", "criterion"
+
+  metadata: created<date> = 2025-01-01, author = "DixScript CI", build_num<int> = 42
+)

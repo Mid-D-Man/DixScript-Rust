@@ -1,0 +1,47 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Importable — Game Helpers Library"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  Base from "base_types.mdix"
+)
+
+@ENUMS(
+  Difficulty { EASY = 1, NORMAL = 2, HARD = 3, NIGHTMARE = 4 }
+)
+
+@QUICKFUNCS(
+  ~difficultyLabel<string>(d<enum>) {
+    return d == Difficulty.EASY      ? "Easy"      :
+           d == Difficulty.NORMAL    ? "Normal"    :
+           d == Difficulty.HARD      ? "Hard"      : "Nightmare"
+  }
+
+  ~makeEnemy<object>(id<string>, name<string>, baseHealth<int>, d<enum>) {
+    let label<string> = difficultyLabel(d)
+    let health<int>   = baseHealth * d
+    return {
+      id         = id
+      name       = $"{name} [{label}]"
+      health     = health
+      difficulty = d
+    }
+  }
+
+  ~lootDrop<object>(enemyId<string>, rarity<enum>) {
+    return Base.makeItem(
+      $"LOOT_{enemyId}",
+      $"Drop from {enemyId}",
+      Base.ItemType.CONSUMABLE,
+      rarity,
+      Base.scaledValue(25, rarity)
+    )
+  }
+)
+
+@DATA(
+  schema  = "game_helpers"
+  version = "1.0.0"
+)

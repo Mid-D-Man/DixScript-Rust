@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Fri Mar 20 05:05:47 UTC 2026
+Generated: Fri Mar 20 05:06:18 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: c1a3256b7781f28e50dc8311719527fdfbd230a1
+Commit: 876f57953794aa8bba35552d56b3c97131332ece
 Branch: master
 ==================================
 
@@ -321,6 +321,7 @@ DixScript Sample Files (.mdix):
   mdix_files/tests/imports/01_basic_import.mdix
   mdix_files/tests/imports/02_alias_funcs_in_quickfuncs.mdix
   mdix_files/tests/imports/03_alias_funcs_in_data.mdix
+  mdix_files/tests/imports/04_funcs_in_funcs.mdix
   mdix_files/tests/imports/base_types.mdix
   mdix_files/tests/imports/game_helpers.mdix
 

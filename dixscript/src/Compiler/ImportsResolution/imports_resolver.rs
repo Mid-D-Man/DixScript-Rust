@@ -3,6 +3,23 @@
 //!
 //! Cloud download support requires the `cloud_imports` cargo feature.
 //! Local file imports work without any optional features.
+//!
+//! ## Cycle detection
+//!
+//! The resolver keeps two path sets — `visiting` (currently on the call stack)
+//! and `visited` (fully processed).  A cycle is detected when
+//! `resolve_import_recursive` is entered for a path that is already in
+//! `visiting`.
+//!
+//! **Critical invariant:** `parse_imported_file` must set
+//! `skip_imports_resolution = true` in the settings it passes to
+//! `GeneralSemanticAnalyzer`.  If that flag were `false` the semantic analyser
+//! would spin up a *new* `ImportsResolver` instance that has no knowledge of
+//! the outer resolver's `visiting` set.  That new instance would recurse
+//! indefinitely on any cycle, overflowing the stack before the outer guard
+//! ever fires.  By skipping resolution inside the semantic analyser we ensure
+//! that ALL recursive resolution goes through this resolver's single
+//! `resolve_import_recursive` entry-point where the cycle guard lives.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -246,6 +263,10 @@ impl<'a> ImportsResolver<'a> {
             }
         };
 
+        // ── Cycle guard ───────────────────────────────────────────────────────
+        // If this path is already on the call stack we have a circular
+        // dependency.  Report it and return false immediately — no further
+        // recursion.
         if self.visiting.contains(&normalized_path) {
             let cycle_path = self.build_cycle_path(&normalized_path);
             let cycle_chain = self.build_cycle_chain_list(&normalized_path);
@@ -264,6 +285,7 @@ impl<'a> ImportsResolver<'a> {
             return false;
         }
 
+        // Already fully processed in a prior branch — skip without re-doing work.
         if self.visited.contains(&normalized_path) {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!(
@@ -274,6 +296,7 @@ impl<'a> ImportsResolver<'a> {
             return true;
         }
 
+        // Mark as in-progress BEFORE recursing so nested calls see it.
         self.visiting.insert(normalized_path.clone());
         self.import_stack.push(normalized_path.clone());
 
@@ -337,6 +360,39 @@ impl<'a> ImportsResolver<'a> {
                         );
                         return false;
                     }
+                }
+
+                // ── Early cycle check before parsing ─────────────────────────
+                // Normalise the nested path and check the visiting set *before*
+                // calling parse_imported_file.  This is the second line of
+                // defence: parse_imported_file itself does not resolve imports
+                // (skip_imports_resolution = true), but if for any reason the
+                // path is already on the stack we catch it here without even
+                // opening the file.
+                let normalized_nested = if Self::is_cloud_url(&nested_path) {
+                    Self::strip_query_parameters(&nested_path)
+                } else {
+                    match std::fs::canonicalize(&nested_path) {
+                        Ok(p) => p.to_string_lossy().to_string(),
+                        Err(_) => nested_path.clone(),
+                    }
+                };
+
+                if self.visiting.contains(&normalized_nested) {
+                    let cycle_path = self.build_cycle_path(&normalized_nested);
+                    let cycle_chain = self.build_cycle_chain_list(&normalized_nested);
+                    self.error_manager.add_imports_resolution_error(
+                        ImportsResolutionErrorType::CircularDependency,
+                        format!("Circular dependency detected: {}", cycle_path),
+                        nested_import.alias.clone(),
+                        Some(nested_import.path.clone()),
+                        Some(normalized_nested.clone()),
+                        Some(cycle_chain),
+                        0,
+                        0,
+                        None,
+                    );
+                    return false;
                 }
 
                 let nested_ast =
@@ -469,7 +525,17 @@ impl<'a> ImportsResolver<'a> {
 
         let mut import_settings = self.operational_settings.clone();
         import_settings.source_file_path = Some(resolved_path.to_string());
-        import_settings.skip_imports_resolution = false;
+        // ── CRITICAL ─────────────────────────────────────────────────────────
+        // Do NOT allow the semantic analyser called below to start its own
+        // ImportsResolver.  That new resolver would have empty `visiting` /
+        // `visited` sets and would recurse infinitely on any cycle before the
+        // outer resolver's cycle guard fires, causing a stack overflow.
+        //
+        // All recursive import resolution for this file is handled by the
+        // outer resolver's resolve_import_inner, which already iterates over
+        // ast.imports and calls resolve_import_recursive (with the shared
+        // `visiting` set) for every nested dependency.
+        import_settings.skip_imports_resolution = true;
 
         if self.debug_config.is_enabled {
             self.error_manager
@@ -523,6 +589,10 @@ impl<'a> ImportsResolver<'a> {
             ));
         }
 
+        // import_settings already has skip_imports_resolution = true, so the
+        // analyser will parse and validate the file's own content but will NOT
+        // try to load transitive imports.  Those are handled by
+        // resolve_import_inner above.
         let semantic_analyzer = GeneralSemanticAnalyzer::new(&ast, &import_settings);
         let semantic_result = semantic_analyzer.analyze();
 

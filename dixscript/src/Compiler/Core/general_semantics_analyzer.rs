@@ -204,8 +204,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
         let had_errors_before = self.error_manager.has_errors();
 
-        // Phase 2: pass error_manager into ImportsSectionAnalyzer.
-        // For now it acquires get_shared_instance() internally.
         let mut imports_analyzer = ImportsSectionAnalyzer::new(
             &self.symbol_table,
             self.operational_settings,
@@ -263,7 +261,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
         if self.debug_config.is_enabled {
             self.error_manager.log_info(&format!(
-                "Phase 3: resolving {} imports",
+                "Phase 3: resolving {} import(s) from disk",
                 imports.imports.len()
             ));
         }
@@ -285,10 +283,29 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             return true;
         }
 
-        let parsed_imports = HashMap::new();
+        // Derive the base directory from the source file being compiled.
+        // All relative import paths are resolved against this directory.
+        let base_dir = self
+            .operational_settings
+            .source_file_path
+            .as_deref()
+            .and_then(|p| std::path::Path::new(p).parent())
+            .and_then(|p| p.to_str())
+            .unwrap_or(".");
+
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "Phase 3: base_dir='{}' for import resolution",
+                base_dir
+            ));
+        }
+
         let mut imports_resolver =
             ImportsResolver::new(&mut self.symbol_table, self.operational_settings);
-        let resolve_success = imports_resolver.resolve_imports(&parsed_imports);
+
+        // Use the new entry point that actually reads files from disk.
+        let resolve_success =
+            imports_resolver.resolve_from_imports_section(imports, base_dir);
 
         if !resolve_success {
             self.error_manager.log_error("Import resolution failed");

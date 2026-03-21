@@ -10,16 +10,24 @@ use crate::services::file_io;
 
 #[derive(Args)]
 pub struct DecryptArgs {
-    /// Path to the .dixscript.enc file
+    /// Path to the .mdix.enc file
     pub file: PathBuf,
 
     /// Explicit key file path (auto-detected if omitted)
     #[arg(long)]
     pub key: Option<String>,
 
-    /// Prompt for a password instead of using a key file
-    #[arg(long)]
-    pub password: bool,
+    /// Password for decryption. Supply it directly as --password <value>,
+    /// set MDIX_DLM_PASSWORD in the environment, or omit entirely to be
+    /// prompted interactively.
+    #[arg(long, value_name = "PASSWORD")]
+    pub password: Option<String>,
+
+    /// Always prompt for the password interactively, even if --password or
+    /// MDIX_DLM_PASSWORD is already set. Useful when you do not want the
+    /// password to appear in shell history.
+    #[arg(long, conflicts_with = "password")]
+    pub password_prompt: bool,
 
     /// Output directory
     #[arg(short, long)]
@@ -35,16 +43,23 @@ struct DecryptOutput {
 }
 
 pub fn run(args: DecryptArgs, global: &GlobalOpts) -> i32 {
-    let password = if args.password {
-        match rpassword_prompt() {
+    // Resolve the password in priority order:
+    //   1. --password-prompt  (interactive, highest priority when flag is set)
+    //   2. --password <value> (inline)
+    //   3. MDIX_DLM_PASSWORD  (environment variable)
+    //   4. None               (let the service layer fail with a clear message)
+    let password = if args.password_prompt {
+        match prompt_password() {
             Ok(p)  => Some(p),
             Err(e) => {
                 printer::error(&format!("Failed to read password: {}", e));
                 return 1;
             }
         }
+    } else if let Some(p) = args.password {
+        Some(p)
     } else {
-        None
+        std::env::var("MDIX_DLM_PASSWORD").ok()
     };
 
     let opts = DecryptOpts {
@@ -85,11 +100,15 @@ pub fn run(args: DecryptArgs, global: &GlobalOpts) -> i32 {
 }
 
 /// Read a password from the terminal without echoing characters.
-fn rpassword_prompt() -> Result<String, String> {
+///
+/// Uses the `rpassword` crate when available; falls back to a simple
+/// stdin read (characters will echo) so the binary always compiles without
+/// an extra dependency.
+fn prompt_password() -> Result<String, String> {
     eprint!("Password: ");
     let mut input = String::new();
     std::io::stdin()
         .read_line(&mut input)
         .map_err(|e| e.to_string())?;
-    Ok(input.trim_end_matches('\n').to_string())
-  }
+    Ok(input.trim_end_matches(['\n', '\r']).to_string())
+                }

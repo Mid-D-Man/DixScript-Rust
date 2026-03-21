@@ -61,11 +61,21 @@ impl<'a> ImportsResolver<'a> {
         }
     }
 
-    pub fn resolve_imports(
+    // ── Primary entry point ───────────────────────────────────────────────────
+    //
+    // Called by GeneralSemanticAnalyzer Phase 3. Reads each import declaration
+    // from the already-parsed @IMPORTS section, loads + parses the file from
+    // disk (or cloud), and registers its symbols in the symbol table.
+    //
+    // `base_dir` is the directory containing the file that owns the @IMPORTS
+    // section (used to resolve relative paths).
+
+    pub fn resolve_from_imports_section(
         &mut self,
-        parsed_imports: &HashMap<String, (String, DixScript)>,
+        imports_section: &ImportsSection,
+        base_dir: &str,
     ) -> bool {
-        if parsed_imports.is_empty() {
+        if imports_section.imports.is_empty() {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug("[ImportsResolver] No imports to resolve");
             }
@@ -73,7 +83,99 @@ impl<'a> ImportsResolver<'a> {
         }
 
         self.error_manager.log_info(&format!(
-            "[ImportsResolver] Resolving {} imports",
+            "[ImportsResolver] Resolving {} top-level import(s) from '{}'",
+            imports_section.imports.len(),
+            base_dir,
+        ));
+
+        self.visiting.clear();
+        self.visited.clear();
+        self.import_stack.clear();
+
+        let mut success = true;
+
+        for import in &imports_section.imports {
+            let resolved_path = if import.is_cloud_import {
+                import.path.clone()
+            } else {
+                Self::resolve_path(base_dir, &import.path)
+            };
+
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(&format!(
+                    "[ImportsResolver] Loading '{}' from '{}'",
+                    import.alias, resolved_path,
+                ));
+            }
+
+            // Parse the file (tokenise → parse → semantic → enhance).
+            let ast = match self.parse_imported_file(import, &resolved_path) {
+                Ok(a)  => a,
+                Err(e) => {
+                    self.error_manager.log_error(&format!(
+                        "[ImportsResolver] Failed to load '{}': {}",
+                        import.alias, e,
+                    ));
+                    if self.operational_settings.error_handling_strategy
+                        == ErrorHandlingStrategy::Halt
+                    {
+                        return false;
+                    }
+                    success = false;
+                    continue;
+                }
+            };
+
+            // Recursively resolve (handles transitive imports + cycle detection).
+            if !self.resolve_import_recursive(&import.alias, &ast, &resolved_path) {
+                self.error_manager.log_error(&format!(
+                    "[ImportsResolver] Failed to resolve '{}'",
+                    import.alias,
+                ));
+                if self.operational_settings.error_handling_strategy
+                    == ErrorHandlingStrategy::Halt
+                {
+                    return false;
+                }
+                success = false;
+            }
+        }
+
+        let error_count = self.error_manager.get_imports_resolution_errors().len();
+        if error_count > 0 {
+            self.error_manager.log_warning(&format!(
+                "[ImportsResolver] Resolution completed with {} error(s)",
+                error_count,
+            ));
+            if self.operational_settings.error_handling_strategy == ErrorHandlingStrategy::Halt {
+                return false;
+            }
+        } else if self.debug_config.is_enabled {
+            self.error_manager
+                .log_info("[ImportsResolver] All top-level imports resolved successfully");
+        }
+
+        success
+    }
+
+    // ── Legacy entry point (kept for backward compatibility) ──────────────────
+    //
+    // Accepts a map of already-parsed ASTs. Still used by tests that build the
+    // map manually; the semantic analyzer now uses resolve_from_imports_section.
+
+    pub fn resolve_imports(
+        &mut self,
+        parsed_imports: &HashMap<String, (String, DixScript)>,
+    ) -> bool {
+        if parsed_imports.is_empty() {
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug("[ImportsResolver] No pre-parsed imports to resolve");
+            }
+            return true;
+        }
+
+        self.error_manager.log_info(&format!(
+            "[ImportsResolver] Resolving {} pre-parsed import(s)",
             parsed_imports.len()
         ));
 
@@ -190,7 +292,6 @@ impl<'a> ImportsResolver<'a> {
         ast: &DixScript,
         normalized_path: &str,
     ) -> bool {
-        // Type inferred from try_get_namespace return type — no explicit annotation needed.
         let mut local_imports = HashMap::new();
 
         if let Some(ref imports_section) = ast.imports {

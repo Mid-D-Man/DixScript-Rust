@@ -148,7 +148,8 @@ impl<'a> ImportsSectionAnalyzer<'a> {
 
         if lower.starts_with("http://") && !Self::is_local_address(url) {
             self.error_manager.log_warning(&format!(
-                "[ImportsAnalyzer] Cloud import '{}' uses insecure HTTP. Use HTTPS for non-local URLs.",
+                "[ImportsAnalyzer] Cloud import '{}' uses insecure HTTP. \
+                 Use HTTPS for non-local URLs.",
                 import.alias
             ));
         }
@@ -173,9 +174,9 @@ impl<'a> ImportsSectionAnalyzer<'a> {
         }
 
         if let Some(path_start) = after_scheme.find('/') {
-            let path_part    = &after_scheme[path_start..];
-            let path_no_qs   = path_part.split('?').next().unwrap_or(path_part);
-            if !path_no_qs.to_ascii_lowercase().ends_with(".dixscript") {
+            let path_part  = &after_scheme[path_start..];
+            let path_no_qs = path_part.split('?').next().unwrap_or(path_part);
+            if !path_no_qs.to_ascii_lowercase().ends_with(".mdix") {
                 self.error_manager.log_warning(&format!(
                     "[ImportsAnalyzer] Cloud import '{}' URL '{}' does not end in .mdix",
                     import.alias, url
@@ -208,7 +209,7 @@ impl<'a> ImportsSectionAnalyzer<'a> {
             return;
         }
 
-        if !lower.ends_with(".dixscript") {
+        if !lower.ends_with(".mdix") {
             self.error_manager.log_warning(&format!(
                 "[ImportsAnalyzer] Import '{}' path '{}' does not end in .mdix",
                 import.alias, path
@@ -266,7 +267,8 @@ impl<'a> ImportsSectionAnalyzer<'a> {
             "sha256" => {
                 if hex.len() != 64 {
                     self.error_manager.log_error(&format!(
-                        "[ImportsAnalyzer] Import '{}' sha256 hash must be 64 hex characters, got {}",
+                        "[ImportsAnalyzer] Import '{}' sha256 hash must be 64 hex characters, \
+                         got {}",
                         import.alias, hex.len()
                     ));
                 }
@@ -274,7 +276,8 @@ impl<'a> ImportsSectionAnalyzer<'a> {
             "sha512" => {
                 if hex.len() != 128 {
                     self.error_manager.log_error(&format!(
-                        "[ImportsAnalyzer] Import '{}' sha512 hash must be 128 hex characters, got {}",
+                        "[ImportsAnalyzer] Import '{}' sha512 hash must be 128 hex characters, \
+                         got {}",
                         import.alias, hex.len()
                     ));
                 }
@@ -314,4 +317,4 @@ impl<'a> ImportsSectionAnalyzer<'a> {
             || lower.contains("::1")
             || lower.contains("0.0.0.0")
     }
-    }
+}

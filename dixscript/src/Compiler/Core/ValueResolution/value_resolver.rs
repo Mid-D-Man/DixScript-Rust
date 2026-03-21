@@ -1223,178 +1223,168 @@ impl<'a> ValueResolver<'a> {
 
 
     // ==================== PHASE 4: ITERATIVE RESOLUTION ====================
+fn execute_iterative_resolution(
+    &mut self,
+    function_calls: Vec<FunctionCallInfo>,
+) -> (usize, Vec<String>) {
+    let total = function_calls.len();
 
-    fn execute_iterative_resolution(
-        &mut self,
-        function_calls: Vec<FunctionCallInfo>,
-    ) -> (usize, Vec<String>) {
-        let total = function_calls.len();
+    let dynamic_limit = (total * 3).max(MIN_CAPACITY * 4);
+    let max_iterations = dynamic_limit.min(MAX_RESOLUTION_ITERATIONS);
 
-        let dynamic_limit = (total * 3).max(MIN_CAPACITY * 4);
-        let max_iterations = dynamic_limit.min(MAX_RESOLUTION_ITERATIONS);
+    let mut resolved_count = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+    let mut iteration = 0usize;
 
-        let mut resolved_count = 0usize;
-        let mut errors: Vec<String> = Vec::new();
-        let mut iteration = 0usize;
+    let mut pending: Vec<(FunctionCallInfo, bool)> =
+        function_calls.into_iter().map(|c| (c, false)).collect();
 
-        let mut pending: Vec<(FunctionCallInfo, bool)> =
-            function_calls.into_iter().map(|c| (c, false)).collect();
+    loop {
+        if pending.iter().all(|(_, r)| *r) {
+            break;
+        }
 
-        loop {
-            if pending.iter().all(|(_, r)| *r) {
-                break;
+        iteration += 1;
+
+        if iteration > max_iterations {
+            let stuck: Vec<String> = pending
+                .iter()
+                .filter(|(_, r)| !r)
+                .map(|(c, _)| c.location.clone())
+                .collect();
+            errors.push(
+                ResolverError::CircularDependency { stuck_calls: stuck }.to_string(),
+            );
+            break;
+        }
+
+        let mut resolved_this_pass = 0usize;
+
+        for i in 0..pending.len() {
+            if pending[i].1 {
+                continue;
             }
 
-            iteration += 1;
-
-            if iteration > max_iterations {
-                let stuck: Vec<String> = pending
-                    .iter()
-                    .filter(|(_, r)| !r)
-                    .map(|(c, _)| c.location.clone())
-                    .collect();
-                errors.push(
-                    ResolverError::CircularDependency { stuck_calls: stuck }.to_string(),
-                );
-                break;
+            if self.has_unresolved_dependencies(&pending[i].0) {
+                continue;
             }
 
-            let mut resolved_this_pass = 0usize;
+            if let Err(e) = self.validate_function_scope(&pending[i].0) {
+                errors.push(e.to_string());
+                pending[i].1 = true;
+                continue;
+            }
 
-            for i in 0..pending.len() {
-                if pending[i].1 {
-                    continue;
-                }
+            let call_start = Instant::now();
+            let result = self.execute_call_raw(&pending[i].0);
+            let call_dur = call_start.elapsed();
 
-                if self.has_unresolved_dependencies(&pending[i].0) {
-                    continue;
-                }
+            match result {
+                Ok(dix_value) => {
+                    let location  = pending[i].0.location.clone();
+                    let fn_name   = pending[i].0.function_name.clone();
+                    let ns_name   = pending[i].0.namespace_name.clone();
+                    let scope     = pending[i].0.scope.clone();
+                    let pos       = pending[i].0.position;
+                    let arg_strs: Vec<String> = pending[i]
+                        .0
+                        .arguments
+                        .iter()
+                        .map(|a| format!("{:?}", a))
+                        .collect();
 
-                if let Err(e) = self.validate_function_scope(&pending[i].0) {
-                    errors.push(e.to_string());
+                    let new_value = Self::convert_dix_value_to_value(&dix_value, pos);
+                    self.replace_value_in_ast_by_location(&location, pos, new_value);
+                    self.data_context
+                        .borrow_mut()
+                        .insert(location.clone(), dix_value.clone());
+                    self.resolved_values
+                        .insert(location.clone(), dix_value.clone());
+
+                    if self.debug_config.is_enabled {
+                        self.error_manager.log_info(&format!(
+                            "[iter {}] resolved {} ({:.3}ms)",
+                            iteration,
+                            location,
+                            call_dur.as_secs_f64() * 1000.0
+                        ));
+                    }
+
+                    self.resolution_history.push(ResolutionRecord {
+                        function_name:  fn_name,
+                        namespace_name: ns_name,
+                        location,
+                        scope,
+                        arguments:      arg_strs,
+                        result:         Some(dix_value),
+                        success:        true,
+                        error_message:  String::new(),
+                        timestamp:      Utc::now(),
+                    });
+
                     pending[i].1 = true;
-                    continue;
+                    resolved_count += 1;
+                    resolved_this_pass += 1;
                 }
 
-                let resolved_args = match self.resolve_call_arguments(&pending[i].0) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        errors.push(e.to_string());
-                        pending[i].1 = true;
-                        continue;
-                    }
-                };
+                Err(interp_err) => {
+                    let location = pending[i].0.location.clone();
+                    let fn_name  = pending[i].0.function_name.clone();
+                    let ns_name  = pending[i].0.namespace_name.clone();
+                    let scope    = pending[i].0.scope.clone();
+                    let arg_strs: Vec<String> = pending[i]
+                        .0
+                        .arguments
+                        .iter()
+                        .map(|a| format!("{:?}", a))
+                        .collect();
 
-                let call_start = Instant::now();
-                let result = self.execute_call(&pending[i].0, resolved_args);
-                let call_dur = call_start.elapsed();
+                    let resolver_err = ResolverError::ExecutionFailed {
+                        function: fn_name.clone(),
+                        location: location.clone(),
+                        inner:    interp_err,
+                    };
 
-                match result {
-                    Ok(dix_value) => {
-                        let location = pending[i].0.location.clone();
-                        let fn_name = pending[i].0.function_name.clone();
-                        let ns_name = pending[i].0.namespace_name.clone();
-                        let scope = pending[i].0.scope.clone();
-                        let pos = pending[i].0.position;
-                        let arg_strs: Vec<String> = pending[i]
-                            .0
-                            .arguments
-                            .iter()
-                            .map(|a| format!("{:?}", a))
-                            .collect();
+                    self.resolution_history.push(ResolutionRecord {
+                        function_name:  fn_name,
+                        namespace_name: ns_name,
+                        location,
+                        scope,
+                        arguments:      arg_strs,
+                        result:         None,
+                        success:        false,
+                        error_message:  resolver_err.to_string(),
+                        timestamp:      Utc::now(),
+                    });
 
-                        let new_value = Self::convert_dix_value_to_value(&dix_value, pos);
-                        self.replace_value_in_ast_by_location(&location, pos, new_value);
-                        self.data_context
-                            .borrow_mut()
-                            .insert(location.clone(), dix_value.clone());
-                        self.resolved_values
-                            .insert(location.clone(), dix_value.clone());
-
-                        if self.debug_config.is_enabled {
-                            self.error_manager.log_info(&format!(
-                                "[iter {}] resolved {} ({:.3}ms)",
-                                iteration,
-                                location,
-                                call_dur.as_secs_f64() * 1000.0
-                            ));
-                        }
-
-                        self.resolution_history.push(ResolutionRecord {
-                            function_name: fn_name,
-                            namespace_name: ns_name,
-                            location,
-                            scope,
-                            arguments: arg_strs,
-                            result: Some(dix_value),
-                            success: true,
-                            error_message: String::new(),
-                            timestamp: Utc::now(),
-                        });
-
-                        pending[i].1 = true;
-                        resolved_count += 1;
-                        resolved_this_pass += 1;
-                    }
-
-                    Err(interp_err) => {
-                        let location = pending[i].0.location.clone();
-                        let fn_name = pending[i].0.function_name.clone();
-                        let ns_name = pending[i].0.namespace_name.clone();
-                        let scope = pending[i].0.scope.clone();
-                        let arg_strs: Vec<String> = pending[i]
-                            .0
-                            .arguments
-                            .iter()
-                            .map(|a| format!("{:?}", a))
-                            .collect();
-
-                        let resolver_err = ResolverError::ExecutionFailed {
-                            function: fn_name.clone(),
-                            location: location.clone(),
-                            inner: interp_err,
-                        };
-
-                        self.resolution_history.push(ResolutionRecord {
-                            function_name: fn_name,
-                            namespace_name: ns_name,
-                            location,
-                            scope,
-                            arguments: arg_strs,
-                            result: None,
-                            success: false,
-                            error_message: resolver_err.to_string(),
-                            timestamp: Utc::now(),
-                        });
-
-                        errors.push(resolver_err.to_string());
-                        pending[i].1 = true;
-                    }
+                    errors.push(resolver_err.to_string());
+                    pending[i].1 = true;
                 }
-            }
-
-            if resolved_this_pass == 0 && pending.iter().any(|(_, r)| !r) {
-                let stuck: Vec<String> = pending
-                    .iter()
-                    .filter(|(_, r)| !r)
-                    .map(|(c, _)| c.location.clone())
-                    .collect();
-                errors.push(
-                    ResolverError::CircularDependency { stuck_calls: stuck }.to_string(),
-                );
-                break;
             }
         }
 
-        if self.debug_config.is_enabled {
-            self.error_manager.log_info(&format!(
-                "[Phase 4] done — {}/{} resolved, {} iterations used (limit: {})",
-                resolved_count, total, iteration, max_iterations
-            ));
+        if resolved_this_pass == 0 && pending.iter().any(|(_, r)| !r) {
+            let stuck: Vec<String> = pending
+                .iter()
+                .filter(|(_, r)| !r)
+                .map(|(c, _)| c.location.clone())
+                .collect();
+            errors.push(
+                ResolverError::CircularDependency { stuck_calls: stuck }.to_string(),
+            );
+            break;
         }
-
-        (resolved_count, errors)
     }
+
+    if self.debug_config.is_enabled {
+        self.error_manager.log_info(&format!(
+            "[Phase 4] done — {}/{} resolved, {} iterations used (limit: {})",
+            resolved_count, total, iteration, max_iterations
+        ));
+    }
+
+    (resolved_count, errors)
+}
 
     fn execute_call(
         &mut self,

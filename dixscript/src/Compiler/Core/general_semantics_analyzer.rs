@@ -15,6 +15,7 @@ use crate::Compiler::Core::{
 };
 use crate::Compiler::Core::SectionAnalyzers::*;
 use crate::Compiler::Utilities::SymbolTable;
+use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 use crate::Compiler::VersionControl::VersionConstraints;
 use crate::Compiler::ImportsResolution::ImportsResolver;
 use crate::ErrorManager::{DebugConfig, ErrorManager};
@@ -74,6 +75,60 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         operational_settings: &'a OperationalSettings,
     ) -> Self {
         Self::new_with_error_manager(ast, operational_settings, ErrorManager::get_shared_instance())
+    }
+
+    /// Constructor used when analyzing an imported file that has transitive
+    /// dependencies already resolved by the outer ImportsResolver.
+    ///
+    /// Seeds the internal SymbolTable with namespace entries from
+    /// `seed_namespaces` before analysis begins.  Only namespace slots are
+    /// copied — enums, functions, data variables, and all other fields start
+    /// empty so that this file's own symbols never pollute the outer table.
+    ///
+    /// `skip_imports_resolution` must be set to `true` in `operational_settings`
+    /// by the caller (imports_resolver::parse_imported_file already does this).
+    /// The seeded namespaces make phase-3 unnecessary; the cycle guard in the
+    /// outer ImportsResolver remains the single authority on import traversal.
+    pub fn new_with_seed_namespaces(
+        ast:                  &'a DixScript,
+        operational_settings: &'a OperationalSettings,
+        error_manager:        ErrorManager,
+        seed_namespaces:      &HashMap<String, ImportedNamespace>,
+    ) -> Self {
+        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
+
+        let is_advanced            = operational_settings.is_advanced_mode();
+        let has_imports_enabled    = is_advanced || operational_settings.is_feature_enabled("imports");
+        let has_enums_enabled      = is_advanced || operational_settings.is_feature_enabled("enums");
+        let has_quickfuncs_enabled = is_advanced || operational_settings.is_feature_enabled("quickfuncs");
+        let has_dlm_enabled        = is_advanced || operational_settings.is_feature_enabled("dlm");
+
+        let mut symbol_table = SymbolTable::new();
+        symbol_table.seed_namespaces_from_map(seed_namespaces);
+
+        if debug_config.is_enabled {
+            let em = ErrorManager::get_shared_instance();
+            em.log_debug(&format!(
+                "[GeneralSemanticAnalyzer] Seeded symbol table with {} namespace(s): [{}]",
+                seed_namespaces.len(),
+                seed_namespaces.keys().cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+
+        GeneralSemanticAnalyzer {
+            ast,
+            operational_settings,
+            symbol_table,
+            error_manager,
+            debug_config,
+            analysis_result: SemanticAnalysisResult::new(),
+            stopwatch: Instant::now(),
+            skip_validation: false,
+            has_imports_enabled,
+            has_enums_enabled,
+            has_quickfuncs_enabled,
+            has_dlm_enabled,
+        }
     }
 
     pub fn analyze(mut self) -> SemanticAnalysisResult {

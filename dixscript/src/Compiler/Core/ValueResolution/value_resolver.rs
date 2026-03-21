@@ -21,7 +21,7 @@ use crate::Compiler::AST::{
     PropertyAssignment, Value,
 };
 use crate::Compiler::Core::DebugMode;
-use crate::Compiler::Utilities::{PathBuilder, SymbolTable};
+use crate::Compiler::Utilities::{PathBuilder, SymbolTable, ImportedNamespace};
 use crate::ErrorManager::{DebugConfig, ErrorManager};
 
 use super::ast_walker::ASTWalker;

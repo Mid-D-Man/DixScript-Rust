@@ -14,8 +14,8 @@ use rustc_hash::FxHashMap;
 use crate::Builtins::Core::{DixType, DixValue};
 use crate::Builtins::Resolver::builtin_call_resolver;
 use crate::Compiler::AST::{
-    Expression, Position, QuickFunction, QuickFuncParam, QuickFuncStatement,
-    SwitchCase, Value, ObjectProperty,
+    Expression, ObjectProperty, Position, QuickFunction, QuickFuncParam,
+    QuickFuncStatement, SwitchCase, Value,
 };
 use crate::Compiler::Core::DebugMode;
 use crate::Compiler::Utilities::SymbolTable;
@@ -134,30 +134,39 @@ impl From<String> for InterpreterError {
 impl std::fmt::Display for InterpreterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InterpreterError::RecursionLimitExceeded { function_name, position, depth, limit } => {
-                write!(
-                    f,
-                    "Recursion limit exceeded in '{}' at {} (depth: {}, limit: {})",
-                    function_name, position, depth, limit
-                )
-            }
-            InterpreterError::UndefinedVariable { name, function_name, position, checked_scopes } => {
-                write!(
-                    f,
-                    "Undefined variable '{}' in function '{}' at {} (checked: {})",
-                    name, function_name, position, checked_scopes
-                )
-            }
+            InterpreterError::RecursionLimitExceeded {
+                function_name,
+                position,
+                depth,
+                limit,
+            } => write!(
+                f,
+                "Recursion limit exceeded in '{}' at {} (depth: {}, limit: {})",
+                function_name, position, depth, limit
+            ),
+            InterpreterError::UndefinedVariable {
+                name,
+                function_name,
+                position,
+                checked_scopes,
+            } => write!(
+                f,
+                "Undefined variable '{}' in function '{}' at {} (checked: {})",
+                name, function_name, position, checked_scopes
+            ),
             InterpreterError::UndefinedFunction { name, position } => {
                 write!(f, "Undefined function '{}' at {}", name, position)
             }
-            InterpreterError::ParameterCountMismatch { expected, got, required, position } => {
-                write!(
-                    f,
-                    "Parameter count mismatch at {}: expected {}, got {} (required: {})",
-                    position, expected, got, required
-                )
-            }
+            InterpreterError::ParameterCountMismatch {
+                expected,
+                got,
+                required,
+                position,
+            } => write!(
+                f,
+                "Parameter count mismatch at {}: expected {}, got {} (required: {})",
+                position, expected, got, required
+            ),
             InterpreterError::DivisionByZero { position } => {
                 write!(f, "Division by zero at {}", position)
             }
@@ -973,6 +982,7 @@ impl<'a> FunctionInterpreter<'a> {
 
         Ok(DixValue::null())
     }
+
 fn evaluate_expression(
         &mut self,
         expr: &Expression,
@@ -1095,15 +1105,12 @@ fn evaluate_expression(
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        // Bitwise operators are dispatched first — they share the ArithmeticOp variant.
         if matches!(operator, "<<" | ">>" | "&" | "|" | "^") {
             return self.evaluate_bitwise_op(
                 left, operator, right, position, context, scope_context, namespace,
             );
         }
 
-        // Extended operators handled before general evaluation to avoid
-        // evaluating both operands unnecessarily.
         match operator {
             "%%" => {
                 return self.evaluate_circular_modulo(
@@ -1298,50 +1305,50 @@ fn evaluate_expression(
     }
 
     fn evaluate_comparison_op(
-    &mut self,
-    left: &Expression,
-    operator: &str,
-    right: &Expression,
-    position: Position,
-    context: &mut ExecutionContext,
-    scope_context: &FxHashMap<String, String>,
-    namespace: Option<&ImportedNamespace>,
-) -> Result<DixValue, InterpreterError> {
-    let left_val =
-        self.evaluate_expression(left, context, scope_context, namespace)?;
-    let right_val =
-        self.evaluate_expression(right, context, scope_context, namespace)?;
+        &mut self,
+        left: &Expression,
+        operator: &str,
+        right: &Expression,
+        position: Position,
+        context: &mut ExecutionContext,
+        scope_context: &FxHashMap<String, String>,
+        namespace: Option<&ImportedNamespace>,
+    ) -> Result<DixValue, InterpreterError> {
+        let left_val =
+            self.evaluate_expression(left, context, scope_context, namespace)?;
+        let right_val =
+            self.evaluate_expression(right, context, scope_context, namespace)?;
 
-    let result: Result<bool, InterpreterError> = match operator {
-        "==" => Ok(left_val.equal_to(&right_val)),
-        "!=" => Ok(!left_val.equal_to(&right_val)),
-        "<" => left_val.less_than(&right_val).map_err(|e| {
-            InterpreterError::InvalidOperation { message: e, position }
-        }),
-        ">" => left_val.greater_than(&right_val).map_err(|e| {
-            InterpreterError::InvalidOperation { message: e, position }
-        }),
-        "<=" => {
-            let less = left_val
-                .less_than(&right_val)
-                .map_err(|e| InterpreterError::InvalidOperation { message: e, position })?;
-            Ok(less || left_val.equal_to(&right_val))
-        }
-        ">=" => {
-            let greater = left_val
-                .greater_than(&right_val)
-                .map_err(|e| InterpreterError::InvalidOperation { message: e, position })?;
-            Ok(greater || left_val.equal_to(&right_val))
-        }
-        _ => {
-            return Err(InterpreterError::InvalidOperation {
-                message: format!("Unknown comparison operator: {}", operator),
-                position,
-            })
-        }
-    };
+        let result: Result<bool, InterpreterError> = match operator {
+            "==" => Ok(left_val.equal_to(&right_val)),
+            "!=" => Ok(!left_val.equal_to(&right_val)),
+            "<" => left_val.less_than(&right_val).map_err(|e| {
+                InterpreterError::InvalidOperation { message: e, position }
+            }),
+            ">" => left_val.greater_than(&right_val).map_err(|e| {
+                InterpreterError::InvalidOperation { message: e, position }
+            }),
+            "<=" => {
+                let less = left_val
+                    .less_than(&right_val)
+                    .map_err(|e| InterpreterError::InvalidOperation { message: e, position })?;
+                Ok(less || left_val.equal_to(&right_val))
+            }
+            ">=" => {
+                let greater = left_val
+                    .greater_than(&right_val)
+                    .map_err(|e| InterpreterError::InvalidOperation { message: e, position })?;
+                Ok(greater || left_val.equal_to(&right_val))
+            }
+            _ => {
+                return Err(InterpreterError::InvalidOperation {
+                    message: format!("Unknown comparison operator: {}", operator),
+                    position,
+                })
+            }
+        };
 
-    Ok(DixValue::from_bool(result?))
+        Ok(DixValue::from_bool(result?))
     }
 
     fn evaluate_logical_op(
@@ -1688,6 +1695,14 @@ fn evaluate_expression(
             })
     }
 
+    // =========================================================================
+    // THE FIX: evaluate_quick_func_call and evaluate_imported_function_call
+    //
+    // Root cause: arguments were raw Expression nodes evaluated inside the
+    // callee's empty context. They must be evaluated in the CALLER's context
+    // first, then passed as already-resolved Value nodes to the callee.
+    // =========================================================================
+
     fn evaluate_quick_func_call(
         &mut self,
         name: &str,
@@ -1697,7 +1712,7 @@ fn evaluate_expression(
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        // Lambda registry takes priority — check before heap-allocating a clone.
+        // Lambda registry takes priority.
         if let Some(lambda) = self.lambda_registry.get(name).cloned() {
             if self.debug_config.is_enabled {
                 self.error_manager
@@ -1708,7 +1723,26 @@ fn evaluate_expression(
             );
         }
 
-        // Check current namespace functions.
+        // FIX: evaluate all arguments in the CALLER's context before constructing
+        // the callee's context. This prevents parameter names from the callee's
+        // own signature (e.g. "rarity", "baseValue") from being looked up in an
+        // empty execution context during bind_parameters.
+        let evaluated_args = self.evaluate_arguments_in_caller_context(
+            arguments, position, context, scope_context, namespace,
+        )?;
+
+        // Wrap each resolved DixValue as a literal Expression::Value so that
+        // bind_parameters can call evaluate_expression on them safely — they
+        // will simply return the wrapped value immediately.
+        let literal_args: Vec<Expression> = evaluated_args
+            .iter()
+            .map(|dv| Expression::Value {
+                value: self.dix_value_to_ast_value(dv, position),
+                position,
+            })
+            .collect();
+
+        // Check current namespace functions first.
         if let Some(ns) = namespace {
             if let Some(func_info) = ns.functions.get(name) {
                 if self.debug_config.is_enabled {
@@ -1721,7 +1755,7 @@ fn evaluate_expression(
                 let mut nested_context = ExecutionContext::new(name, None);
                 return self.execute(
                     &func_ast,
-                    arguments,
+                    &literal_args,
                     &mut nested_context,
                     scope_context,
                     namespace,
@@ -1729,8 +1763,7 @@ fn evaluate_expression(
             }
         }
 
-        // Clone to release the immutable borrow on self.quick_functions before
-        // execute() takes a mutable borrow.
+        // Clone to release immutable borrow before execute() takes mutable borrow.
         let function = self
             .quick_functions
             .iter()
@@ -1742,7 +1775,7 @@ fn evaluate_expression(
             })?;
 
         let mut nested_context = ExecutionContext::new(name, None);
-        self.execute(&function, arguments, &mut nested_context, scope_context, None)
+        self.execute(&function, &literal_args, &mut nested_context, scope_context, None)
     }
 
     fn evaluate_imported_function_call(
@@ -1760,6 +1793,21 @@ fn evaluate_expression(
                 namespace_name, function_name
             ));
         }
+
+        // FIX: evaluate all arguments in the CALLER's context first.
+        // The callee is in a different namespace and its execution context
+        // starts empty — it cannot see the caller's local variables.
+        let evaluated_args = self.evaluate_arguments_in_caller_context(
+            arguments, position, context, scope_context, None,
+        )?;
+
+        let literal_args: Vec<Expression> = evaluated_args
+            .iter()
+            .map(|dv| Expression::Value {
+                value: self.dix_value_to_ast_value(dv, position),
+                position,
+            })
+            .collect();
 
         // Resolve and clone the function AST before taking a mutable borrow.
         let (func_ast, target_namespace) = {
@@ -1792,11 +1840,94 @@ fn evaluate_expression(
 
         self.execute(
             &func_ast,
-            arguments,
+            &literal_args,
             &mut imported_context,
             scope_context,
             Some(ns_ref),
         )
+    }
+
+    // =========================================================================
+    // Helpers for the fixed call sites
+    // =========================================================================
+
+    /// Evaluate every argument expression in the *caller's* context, returning
+    /// a vec of resolved DixValues. Called before constructing any callee context.
+    fn evaluate_arguments_in_caller_context(
+        &mut self,
+        arguments: &[Expression],
+        position: Position,
+        context: &mut ExecutionContext,
+        scope_context: &FxHashMap<String, String>,
+        namespace: Option<&ImportedNamespace>,
+    ) -> Result<Vec<DixValue>, InterpreterError> {
+        let mut evaluated = Vec::with_capacity(arguments.len());
+        for (i, arg) in arguments.iter().enumerate() {
+            let val = self
+                .evaluate_expression(arg, context, scope_context, namespace)
+                .map_err(|e| InterpreterError::ParameterEvalFailed {
+                    index: i,
+                    param_name: format!("arg{}", i),
+                    inner: Box::new(e),
+                    position: arg.position(),
+                })?;
+            evaluated.push(val);
+        }
+        Ok(evaluated)
+    }
+
+    /// Convert a DixValue back to a lightweight AST Value literal so it can be
+    /// passed to execute() → bind_parameters() → evaluate_expression(), which
+    /// will return it immediately without any variable lookup.
+    fn dix_value_to_ast_value(&self, dix: &DixValue, position: Position) -> Value {
+        match dix.get_type() {
+            DixType::Int       => Value::Integer { value: dix.as_int(), position },
+            DixType::Float     => Value::Float   { value: dix.as_float(), position },
+            DixType::Double    => Value::Double  { value: dix.as_double(), position },
+            DixType::String    => Value::String  { value: dix.as_string(), position },
+            DixType::Bool      => Value::Boolean { value: dix.as_bool(), position },
+            DixType::Null      => Value::Null { position },
+            DixType::Hex       => Value::HexColor { value: dix.as_string(), position },
+            DixType::Blob      => Value::PrefixedConstructor {
+                prefix: "b".to_string(),
+                arguments: vec![Value::String {
+                    value: dix.as_blob_base64().unwrap_or_default(),
+                    position,
+                }],
+                position,
+            },
+            DixType::Regex     => Value::PrefixedConstructor {
+                prefix: "r".to_string(),
+                arguments: vec![Value::String {
+                    value: dix.as_string(),
+                    position,
+                }],
+                position,
+            },
+            DixType::Array | DixType::Tuple => {
+                let values: Vec<Value> = dix
+                    .as_array()
+                    .iter()
+                    .map(|item| self.dix_value_to_ast_value(item, position))
+                    .collect();
+                Value::Array { values, position }
+            }
+            DixType::Object    => {
+                let properties: Vec<ObjectProperty> = dix
+                    .as_object()
+                    .iter()
+                    .map(|(key, val)| ObjectProperty {
+                        key: key.clone(),
+                        value: self.dix_value_to_ast_value(val, position),
+                        position,
+                    })
+                    .collect();
+                Value::Object { properties, position }
+            }
+            DixType::Date      => Value::Date      { value: dix.as_string(), position },
+            DixType::Timestamp => Value::Timestamp { value: dix.as_string(), position },
+            _                  => Value::String    { value: dix.as_string(), position },
+        }
     }
 
     fn invoke_lambda(
@@ -1864,14 +1995,14 @@ fn evaluate_expression(
             Value::Expression { expr, .. } => {
                 self.evaluate_expression(expr, context, scope_context, namespace)
             }
-            Value::Integer { value, .. } => Ok(DixValue::from_int(*value)),
-            Value::Float { value, .. } => Ok(DixValue::from_float(*value)),
-            Value::Double { value, .. } => Ok(DixValue::from_double(*value)),
-            Value::ScientificNotation { value, .. } => Ok(DixValue::from_double(*value)),
-            Value::String { value, .. } => Ok(DixValue::from_string(value.clone())),
-            Value::Boolean { value, .. } => Ok(DixValue::from_bool(*value)),
-            Value::Null { .. } => Ok(DixValue::null()),
-            Value::HexColor { value, .. } => Ok(DixValue::from_hex(value.clone())),
+            Value::Integer { value, .. }           => Ok(DixValue::from_int(*value)),
+            Value::Float { value, .. }             => Ok(DixValue::from_float(*value)),
+            Value::Double { value, .. }            => Ok(DixValue::from_double(*value)),
+            Value::ScientificNotation { value, .. }=> Ok(DixValue::from_double(*value)),
+            Value::String { value, .. }            => Ok(DixValue::from_string(value.clone())),
+            Value::Boolean { value, .. }           => Ok(DixValue::from_bool(*value)),
+            Value::Null { .. }                     => Ok(DixValue::null()),
+            Value::HexColor { value, .. }          => Ok(DixValue::from_hex(value.clone())),
 
             Value::Array { values, position }
             | Value::NestedArray { values, position, .. } => {
@@ -1982,7 +2113,6 @@ fn evaluate_expression(
             )?;
             dix_obj.insert(prop.key.clone(), value);
         }
-        // DixValue::from_object accepts HashMap; convert via collect if needed.
         Ok(DixValue::from_object(dix_obj.into_iter().collect()))
     }
 
@@ -1997,7 +2127,6 @@ fn evaluate_expression(
     ) -> Result<DixValue, InterpreterError> {
         match prefix.to_lowercase().as_str() {
             "t" => {
-                // Tuples are capped at 6 elements per the grammar.
                 let cap = arguments.len().min(6);
                 let mut tuple_values = Vec::with_capacity(cap);
                 for arg in arguments.iter().take(6) {
@@ -2065,7 +2194,6 @@ fn evaluate_expression(
             ));
         }
 
-        // Pre-allocate with the template length as a reasonable lower bound.
         let mut result = String::with_capacity(template.len() + expressions.len() * 8);
         result.push_str(template);
 
@@ -2082,8 +2210,6 @@ fn evaluate_expression(
                 ));
             }
 
-            // replace returns a new String; avoid repeated allocations by
-            // assigning back in place.
             result = result.replace(&placeholder, &value_string);
         }
 
@@ -2098,76 +2224,78 @@ fn evaluate_expression(
     }
 }
 
-// Human-readable variant name — used exclusively on debug/error paths.
-// Zero allocation: returns &'static str.
+// =============================================================================
+// Diagnostic helpers — zero allocation, used only on debug/error paths
+// =============================================================================
+
 fn statement_variant_name(stmt: &QuickFuncStatement) -> &'static str {
     match stmt {
-        QuickFuncStatement::Return { .. } => "Return",
-        QuickFuncStatement::Assignment { .. } => "Assignment",
-        QuickFuncStatement::ArithmeticAssignment { .. } => "ArithmeticAssignment",
-        QuickFuncStatement::If { .. } => "If",
-        QuickFuncStatement::Switch { .. } => "Switch",
-        QuickFuncStatement::Log { .. } => "Log",
+        QuickFuncStatement::Return { .. }              => "Return",
+        QuickFuncStatement::Assignment { .. }          => "Assignment",
+        QuickFuncStatement::ArithmeticAssignment { .. }=> "ArithmeticAssignment",
+        QuickFuncStatement::If { .. }                  => "If",
+        QuickFuncStatement::Switch { .. }              => "Switch",
+        QuickFuncStatement::Log { .. }                 => "Log",
         QuickFuncStatement::VariableDeclaration { .. } => "VariableDeclaration",
         QuickFuncStatement::ExpressionStatement { .. } => "ExpressionStatement",
-        QuickFuncStatement::ObjectCreation { .. } => "ObjectCreation",
+        QuickFuncStatement::ObjectCreation { .. }      => "ObjectCreation",
     }
 }
 
 fn value_variant_name(value: &Value) -> &'static str {
     match value {
-        Value::Integer { .. } => "Integer",
-        Value::Float { .. } => "Float",
-        Value::Double { .. } => "Double",
+        Value::Integer { .. }            => "Integer",
+        Value::Float { .. }              => "Float",
+        Value::Double { .. }             => "Double",
         Value::ScientificNotation { .. } => "ScientificNotation",
-        Value::String { .. } => "String",
-        Value::Boolean { .. } => "Boolean",
+        Value::String { .. }             => "String",
+        Value::Boolean { .. }            => "Boolean",
         Value::InterpolatedString { .. } => "InterpolatedString",
-        Value::HexColor { .. } => "HexColor",
-        Value::Date { .. } => "Date",
-        Value::Timestamp { .. } => "Timestamp",
-        Value::Null { .. } => "Null",
-        Value::Array { .. } => "Array",
-        Value::NestedArray { .. } => "NestedArray",
-        Value::Object { .. } => "Object",
-        Value::PrefixedConstructor { .. } => "PrefixedConstructor",
-        Value::EnumValue { .. } => "EnumValue",
-        Value::Identifier { .. } => "Identifier",
-        Value::QuickFuncCall { .. } => "QuickFuncCall",
-        Value::Expression { .. } => "Expression",
-        Value::Range { .. } => "Range",
-        Value::Lambda { .. } => "Lambda",
-        Value::ParseError { .. } => "ParseError",
-        Value::Error { .. } => "Error",
-        Value::Unknown { .. } => "Unknown",
+        Value::HexColor { .. }           => "HexColor",
+        Value::Date { .. }               => "Date",
+        Value::Timestamp { .. }          => "Timestamp",
+        Value::Null { .. }               => "Null",
+        Value::Array { .. }              => "Array",
+        Value::NestedArray { .. }        => "NestedArray",
+        Value::Object { .. }             => "Object",
+        Value::PrefixedConstructor { .. }=> "PrefixedConstructor",
+        Value::EnumValue { .. }          => "EnumValue",
+        Value::Identifier { .. }         => "Identifier",
+        Value::QuickFuncCall { .. }      => "QuickFuncCall",
+        Value::Expression { .. }         => "Expression",
+        Value::Range { .. }              => "Range",
+        Value::Lambda { .. }             => "Lambda",
+        Value::ParseError { .. }         => "ParseError",
+        Value::Error { .. }              => "Error",
+        Value::Unknown { .. }            => "Unknown",
     }
 }
 
 fn expr_variant_name(expr: &Expression) -> &'static str {
     match expr {
-        Expression::Identifier { .. } => "Identifier",
+        Expression::Identifier { .. }          => "Identifier",
         Expression::QualifiedIdentifier { .. } => "QualifiedIdentifier",
-        Expression::FunctionCall { .. } => "FunctionCall",
-        Expression::QuickFuncCall { .. } => "QuickFuncCall",
-        Expression::DixFunctionCall { .. } => "DixFunctionCall",
-        Expression::StaticMethodCall { .. } => "StaticMethodCall",
-        Expression::InstanceMethodCall { .. } => "InstanceMethodCall",
-        Expression::BuiltinFunction { .. } => "BuiltinFunction",
-        Expression::StaticFunction { .. } => "StaticFunction",
-        Expression::ImportedFunctionCall { .. } => "ImportedFunctionCall",
-        Expression::ArithmeticOp { .. } => "ArithmeticOp",
-        Expression::BitwiseOp { .. } => "BitwiseOp",
-        Expression::ComparisonOp { .. } => "ComparisonOp",
-        Expression::LogicalOp { .. } => "LogicalOp",
-        Expression::UnaryOp { .. } => "UnaryOp",
-        Expression::ConfigAccess { .. } => "ConfigAccess",
-        Expression::EnumAccess { .. } => "EnumAccess",
-        Expression::ObjectAccess { .. } => "ObjectAccess",
-        Expression::PropertyAccess { .. } => "PropertyAccess",
-        Expression::IndexAccess { .. } => "IndexAccess",
-        Expression::Value { .. } => "Value",
-        Expression::Parenthesized { .. } => "Parenthesized",
-        Expression::Conditional { .. } => "Conditional",
-        Expression::TypeCast { .. } => "TypeCast",
+        Expression::FunctionCall { .. }        => "FunctionCall",
+        Expression::QuickFuncCall { .. }       => "QuickFuncCall",
+        Expression::DixFunctionCall { .. }     => "DixFunctionCall",
+        Expression::StaticMethodCall { .. }    => "StaticMethodCall",
+        Expression::InstanceMethodCall { .. }  => "InstanceMethodCall",
+        Expression::BuiltinFunction { .. }     => "BuiltinFunction",
+        Expression::StaticFunction { .. }      => "StaticFunction",
+        Expression::ImportedFunctionCall { .. }=> "ImportedFunctionCall",
+        Expression::ArithmeticOp { .. }        => "ArithmeticOp",
+        Expression::BitwiseOp { .. }           => "BitwiseOp",
+        Expression::ComparisonOp { .. }        => "ComparisonOp",
+        Expression::LogicalOp { .. }           => "LogicalOp",
+        Expression::UnaryOp { .. }             => "UnaryOp",
+        Expression::ConfigAccess { .. }        => "ConfigAccess",
+        Expression::EnumAccess { .. }          => "EnumAccess",
+        Expression::ObjectAccess { .. }        => "ObjectAccess",
+        Expression::PropertyAccess { .. }      => "PropertyAccess",
+        Expression::IndexAccess { .. }         => "IndexAccess",
+        Expression::Value { .. }               => "Value",
+        Expression::Parenthesized { .. }       => "Parenthesized",
+        Expression::Conditional { .. }         => "Conditional",
+        Expression::TypeCast { .. }            => "TypeCast",
     }
 }

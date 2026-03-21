@@ -11,15 +11,36 @@
 //! `resolve_import_recursive` is entered for a path that is already in
 //! `visiting`.
 //!
-//! **Critical invariant:** `parse_imported_file` must set
-//! `skip_imports_resolution = true` in the settings it passes to
-//! `GeneralSemanticAnalyzer`.  If that flag were `false` the semantic analyser
-//! would spin up a *new* `ImportsResolver` instance that has no knowledge of
-//! the outer resolver's `visiting` set.  That new instance would recurse
-//! indefinitely on any cycle, overflowing the stack before the outer guard
-//! ever fires.  By skipping resolution inside the semantic analyser we ensure
-//! that ALL recursive resolution goes through this resolver's single
-//! `resolve_import_recursive` entry-point where the cycle guard lives.
+//! ## Two-phase import processing
+//!
+//! Each imported file is processed in two distinct phases:
+//!
+//! **Phase 1 — `read_and_parse_raw`**: read file content, verify hash,
+//! tokenize, parse. Returns a raw `DixScript` AST with no semantic analysis
+//! or enhancement. This is intentionally lightweight so that the call can be
+//! made before all transitive dependencies are resolved.
+//!
+//! **Phase 2 — `analyze_and_enhance`**: called from `resolve_import_inner`
+//! AFTER all transitive dependencies have been registered in
+//! `self.symbol_table`. Seeds the analyzer's internal `SymbolTable` with
+//! only the namespace entries the file actually imports, then runs
+//! `GeneralSemanticAnalyzer` and `GeneralAstEnhancer`. This ensures that
+//! `QualifiedIdentifier` nodes in QuickFuncs bodies (e.g. `Base.Rarity.EPIC`)
+//! are correctly resolved to `EnumAccess` nodes regardless of the order
+//! imports are declared.
+//!
+//! **Why this fixes the bug:** The old `parse_imported_file` did both phases
+//! in one shot before transitive deps were registered. That meant the
+//! enhancer had no namespace info and left `Base.Rarity` as a
+//! `PropertyAccess` chain. At runtime the interpreter tried to look up
+//! `Base` as a local variable and failed.
+//!
+//! **Critical invariant:** `parse_imported_file` set
+//! `skip_imports_resolution = true` to prevent the semantic analyser from
+//! spinning up a *new* `ImportsResolver` that had no knowledge of the outer
+//! resolver's `visiting` set. That flag is preserved in `analyze_and_enhance`
+//! for exactly the same reason — the seeded namespaces make phase-3
+//! unnecessary and the cycle guard stays intact.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -36,6 +57,7 @@ use crate::Compiler::Core::{
 };
 use crate::Compiler::Core::Tokenizer::Tokenizer;
 use crate::Compiler::Utilities::{FunctionSignature, ParameterInfo, QuickFunctionInfo, SymbolTable};
+use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 use crate::ErrorManager::{DebugConfig, ErrorManager, ImportsResolutionErrorType};
 use super::HashVerifier;
 
@@ -81,11 +103,10 @@ impl<'a> ImportsResolver<'a> {
     // ── Primary entry point ───────────────────────────────────────────────────
     //
     // Called by GeneralSemanticAnalyzer Phase 3. Reads each import declaration
-    // from the already-parsed @IMPORTS section, loads + parses the file from
-    // disk (or cloud), and registers its symbols in the symbol table.
-    //
-    // `base_dir` is the directory containing the file that owns the @IMPORTS
-    // section (used to resolve relative paths).
+    // from the already-parsed @IMPORTS section, loads + parses the raw AST from
+    // disk (or cloud), and then resolves it recursively. Enhancement of each
+    // file's AST happens inside resolve_import_inner after all transitive deps
+    // are in the symbol table.
 
     pub fn resolve_from_imports_section(
         &mut self,
@@ -125,8 +146,8 @@ impl<'a> ImportsResolver<'a> {
                 ));
             }
 
-            // Parse the file (tokenise → parse → semantic → enhance).
-            let ast = match self.parse_imported_file(import, &resolved_path) {
+            // Phase 1: read and parse only — no semantic analysis or enhancement yet.
+            let raw_ast = match self.read_and_parse_raw(import, &resolved_path) {
                 Ok(a)  => a,
                 Err(e) => {
                     self.error_manager.log_error(&format!(
@@ -143,8 +164,8 @@ impl<'a> ImportsResolver<'a> {
                 }
             };
 
-            // Recursively resolve (handles transitive imports + cycle detection).
-            if !self.resolve_import_recursive(&import.alias, &ast, &resolved_path) {
+            // Recursively resolve transitive deps and then enhance.
+            if !self.resolve_import_recursive(&import.alias, &raw_ast, &resolved_path) {
                 self.error_manager.log_error(&format!(
                     "[ImportsResolver] Failed to resolve '{}'",
                     import.alias,
@@ -177,8 +198,9 @@ impl<'a> ImportsResolver<'a> {
 
     // ── Legacy entry point (kept for backward compatibility) ──────────────────
     //
-    // Accepts a map of already-parsed ASTs. Still used by tests that build the
-    // map manually; the semantic analyzer now uses resolve_from_imports_section.
+    // Accepts a map of already-parsed raw ASTs. Still used by tests that build
+    // the map manually. Enhancement now happens inside resolve_import_inner
+    // so passing raw ASTs here is correct.
 
     pub fn resolve_imports(
         &mut self,
@@ -251,7 +273,7 @@ impl<'a> ImportsResolver<'a> {
     fn resolve_import_recursive(
         &mut self,
         alias: &str,
-        ast: &DixScript,
+        raw_ast: &DixScript,
         absolute_path: &str,
     ) -> bool {
         let normalized_path = if Self::is_cloud_url(absolute_path) {
@@ -264,11 +286,8 @@ impl<'a> ImportsResolver<'a> {
         };
 
         // ── Cycle guard ───────────────────────────────────────────────────────
-        // If this path is already on the call stack we have a circular
-        // dependency.  Report it and return false immediately — no further
-        // recursion.
         if self.visiting.contains(&normalized_path) {
-            let cycle_path = self.build_cycle_path(&normalized_path);
+            let cycle_path  = self.build_cycle_path(&normalized_path);
             let cycle_chain = self.build_cycle_chain_list(&normalized_path);
 
             self.error_manager.add_imports_resolution_error(
@@ -285,7 +304,7 @@ impl<'a> ImportsResolver<'a> {
             return false;
         }
 
-        // Already fully processed in a prior branch — skip without re-doing work.
+        // Already fully processed — skip.
         if self.visited.contains(&normalized_path) {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!(
@@ -296,11 +315,11 @@ impl<'a> ImportsResolver<'a> {
             return true;
         }
 
-        // Mark as in-progress BEFORE recursing so nested calls see it.
+        // Mark in-progress BEFORE recursing.
         self.visiting.insert(normalized_path.clone());
         self.import_stack.push(normalized_path.clone());
 
-        let result = self.resolve_import_inner(alias, ast, &normalized_path);
+        let result = self.resolve_import_inner(alias, raw_ast, &normalized_path);
 
         self.import_stack.pop();
         self.visiting.remove(&normalized_path);
@@ -312,12 +331,17 @@ impl<'a> ImportsResolver<'a> {
     fn resolve_import_inner(
         &mut self,
         alias: &str,
-        ast: &DixScript,
+        raw_ast: &DixScript,
         normalized_path: &str,
     ) -> bool {
         let mut local_imports = HashMap::new();
 
-        if let Some(ref imports_section) = ast.imports {
+        // ── Step 1: Resolve all transitive dependencies FIRST ─────────────────
+        //
+        // By the time this block completes, self.symbol_table contains every
+        // namespace that raw_ast's own @IMPORTS section declares. This is the
+        // key invariant that allows Step 2 to seed the analyzer correctly.
+        if let Some(ref imports_section) = raw_ast.imports {
             let nested_base_dir = if Self::is_cloud_url(normalized_path) {
                 Self::get_cloud_url_directory(normalized_path)
             } else {
@@ -362,13 +386,7 @@ impl<'a> ImportsResolver<'a> {
                     }
                 }
 
-                // ── Early cycle check before parsing ─────────────────────────
-                // Normalise the nested path and check the visiting set *before*
-                // calling parse_imported_file.  This is the second line of
-                // defence: parse_imported_file itself does not resolve imports
-                // (skip_imports_resolution = true), but if for any reason the
-                // path is already on the stack we catch it here without even
-                // opening the file.
+                // ── Early cycle check before reading ─────────────────────────
                 let normalized_nested = if Self::is_cloud_url(&nested_path) {
                     Self::strip_query_parameters(&nested_path)
                 } else {
@@ -379,7 +397,7 @@ impl<'a> ImportsResolver<'a> {
                 };
 
                 if self.visiting.contains(&normalized_nested) {
-                    let cycle_path = self.build_cycle_path(&normalized_nested);
+                    let cycle_path  = self.build_cycle_path(&normalized_nested);
                     let cycle_chain = self.build_cycle_chain_list(&normalized_nested);
                     self.error_manager.add_imports_resolution_error(
                         ImportsResolutionErrorType::CircularDependency,
@@ -395,15 +413,17 @@ impl<'a> ImportsResolver<'a> {
                     return false;
                 }
 
-                let nested_ast =
-                    match self.parse_imported_file(nested_import, &nested_path) {
+                // Phase 1 only — parse raw, no enhancement yet.
+                let nested_raw =
+                    match self.read_and_parse_raw(nested_import, &nested_path) {
                         Ok(a) => a,
                         Err(_) => return false,
                     };
 
+                // Recurse — registers the nested namespace in self.symbol_table.
                 if !self.resolve_import_recursive(
                     &nested_import.alias,
-                    &nested_ast,
+                    &nested_raw,
                     &nested_path,
                 ) {
                     return false;
@@ -417,11 +437,52 @@ impl<'a> ImportsResolver<'a> {
             }
         }
 
-        let functions = Self::extract_global_functions(ast.quick_functions.as_ref(), alias);
-        let enums = Self::extract_enums(ast.enums.as_ref());
+        // ── Step 2: All transitive deps are now registered ────────────────────
+        //
+        // Build the minimal seed: only the namespace entries that correspond to
+        // what this file's @IMPORTS actually declares. For a file like
+        // game_helpers.mdix which only imports Base, this is a single entry.
+        // We clone only those entries — the rest of the outer symbol table
+        // (enums, functions, data vars) is never touched.
+        let seed_namespaces: HashMap<String, ImportedNamespace> =
+            if let Some(ref imports_section) = raw_ast.imports {
+                imports_section
+                    .imports
+                    .iter()
+                    .filter_map(|imp| {
+                        self.symbol_table
+                            .namespaces
+                            .get(&imp.alias)
+                            .map(|ns| (imp.alias.clone(), ns.clone()))
+                    })
+                    .collect()
+            } else {
+                HashMap::new()
+            };
 
         if self.debug_config.is_enabled {
-            if let Some(ref qf) = ast.quick_functions {
+            self.error_manager.log_debug(&format!(
+                "[ImportsResolver] Seeding '{}' enhancement with {} namespace(s): [{}]",
+                alias,
+                seed_namespaces.len(),
+                seed_namespaces.keys().cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+
+        // Phase 2: semantic analysis + AST enhancement with full namespace context.
+        let enhanced_ast =
+            match self.analyze_and_enhance(raw_ast, normalized_path, alias, &seed_namespaces) {
+                Ok(a)  => a,
+                Err(_) => return false,
+            };
+
+        // ── Step 3: Extract symbols from the correctly enhanced AST ───────────
+        let functions =
+            Self::extract_global_functions(enhanced_ast.quick_functions.as_ref(), alias);
+        let enums = Self::extract_enums(enhanced_ast.enums.as_ref());
+
+        if self.debug_config.is_enabled {
+            if let Some(ref qf) = enhanced_ast.quick_functions {
                 let skipped = qf.functions.len().saturating_sub(functions.len());
                 self.error_manager.log_debug(&format!(
                     "[ImportsResolver] Extracted {}/{} functions from '{}' ({} scoped, not exported)",
@@ -454,7 +515,14 @@ impl<'a> ImportsResolver<'a> {
         true
     }
 
-    fn parse_imported_file(
+    // ── Phase 1: Read and parse raw AST ──────────────────────────────────────
+    //
+    // Reads file content, verifies hash, tokenizes, and parses.
+    // Returns the raw DixScript AST with NO semantic analysis or enhancement.
+    // Enhancement is deferred to analyze_and_enhance which is called after
+    // all transitive dependencies are registered in self.symbol_table.
+
+    fn read_and_parse_raw(
         &mut self,
         import: &ImportDeclaration,
         resolved_path: &str,
@@ -502,9 +570,12 @@ impl<'a> ImportsResolver<'a> {
                 .log_debug("[ImportsResolver] Tokenizing imported file");
         }
 
+        let mut import_settings = self.operational_settings.clone();
+        import_settings.source_file_path = Some(resolved_path.to_string());
+
         let tokenizer = Tokenizer::new(
             &config_result.cleaned_input_string,
-            self.operational_settings,
+            &import_settings,
         );
         let token_result = tokenizer.tokenize();
 
@@ -523,20 +594,6 @@ impl<'a> ImportsResolver<'a> {
             return Err("Tokenization produced no tokens".to_string());
         }
 
-        let mut import_settings = self.operational_settings.clone();
-        import_settings.source_file_path = Some(resolved_path.to_string());
-        // ── CRITICAL ─────────────────────────────────────────────────────────
-        // Do NOT allow the semantic analyser called below to start its own
-        // ImportsResolver.  That new resolver would have empty `visiting` /
-        // `visited` sets and would recurse infinitely on any cycle before the
-        // outer resolver's cycle guard fires, causing a stack overflow.
-        //
-        // All recursive import resolution for this file is handled by the
-        // outer resolver's resolve_import_inner, which already iterates over
-        // ast.imports and calls resolve_import_recursive (with the shared
-        // `visiting` set) for every nested dependency.
-        import_settings.skip_imports_resolution = true;
-
         if self.debug_config.is_enabled {
             self.error_manager
                 .log_debug("[ImportsResolver] Parsing imported file");
@@ -547,20 +604,20 @@ impl<'a> ImportsResolver<'a> {
             &config_result.config_section,
             &import_settings,
         )
-            .map_err(|e| {
-                self.error_manager.add_imports_resolution_error(
-                    ImportsResolutionErrorType::ParseError,
-                    format!("Failed to create parser: {}", e),
-                    import.alias.clone(),
-                    Some(import.path.clone()),
-                    Some(resolved_path.to_string()),
-                    None,
-                    0,
-                    0,
-                    None,
-                );
-                format!("Failed to create parser: {}", e)
-            })?;
+        .map_err(|e| {
+            self.error_manager.add_imports_resolution_error(
+                ImportsResolutionErrorType::ParseError,
+                format!("Failed to create parser: {}", e),
+                import.alias.clone(),
+                Some(import.path.clone()),
+                Some(resolved_path.to_string()),
+                None,
+                0,
+                0,
+                None,
+            );
+            format!("Failed to create parser: {}", e)
+        })?;
 
         let mut ast = general_parser.parse().map_err(|e| {
             let parse_errors = self.error_manager.get_parse_errors();
@@ -582,18 +639,46 @@ impl<'a> ImportsResolver<'a> {
 
         ast.config = Some(config_result.config_section);
 
+        Ok(ast)
+    }
+
+    // ── Phase 2: Semantic analysis and AST enhancement ────────────────────────
+    //
+    // Called from resolve_import_inner AFTER all transitive dependencies have
+    // been registered in self.symbol_table. Seeds a fresh SymbolTable with
+    // only the namespace entries the file actually declares in its @IMPORTS,
+    // then runs semantic analysis and AST enhancement.
+    //
+    // skip_imports_resolution = true is preserved so the semantic analyzer
+    // does not create a new ImportsResolver — the outer resolver's cycle
+    // guard remains the single authority on import traversal.
+
+    fn analyze_and_enhance(
+        &mut self,
+        raw_ast: &DixScript,
+        resolved_path: &str,
+        alias: &str,
+        seed_namespaces: &HashMap<String, ImportedNamespace>,
+    ) -> Result<DixScript, String> {
+        let mut import_settings = self.operational_settings.clone();
+        import_settings.source_file_path = Some(resolved_path.to_string());
+        // CRITICAL: keep this true — see module-level doc comment.
+        import_settings.skip_imports_resolution = true;
+
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
-                "[ImportsResolver] Running semantic analysis on imported file '{}'",
-                import.alias
+                "[ImportsResolver] Running semantic analysis on '{}' with {} seeded namespace(s)",
+                alias,
+                seed_namespaces.len()
             ));
         }
 
-        // import_settings already has skip_imports_resolution = true, so the
-        // analyser will parse and validate the file's own content but will NOT
-        // try to load transitive imports.  Those are handled by
-        // resolve_import_inner above.
-        let semantic_analyzer = GeneralSemanticAnalyzer::new(&ast, &import_settings);
+        let semantic_analyzer = GeneralSemanticAnalyzer::new_with_seed_namespaces(
+            raw_ast,
+            &import_settings,
+            self.error_manager.clone(),
+            seed_namespaces,
+        );
         let semantic_result = semantic_analyzer.analyze();
 
         if !semantic_result.is_success {
@@ -607,57 +692,57 @@ impl<'a> ImportsResolver<'a> {
                 ImportsResolutionErrorType::ParseError,
                 format!(
                     "Semantic analysis failed for '{}': {} (total: {} errors)",
-                    import.alias,
+                    alias,
                     summary,
                     semantic_result.errors.len()
                 ),
-                import.alias.clone(),
-                Some(import.path.clone()),
+                alias.to_string(),
+                Some(resolved_path.to_string()),
                 Some(resolved_path.to_string()),
                 None,
                 0,
                 0,
                 None,
             );
-            return Err(format!("Semantic analysis failed for '{}'", import.alias));
+            return Err(format!("Semantic analysis failed for '{}'", alias));
         }
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
-                "[ImportsResolver] Running AST enhancement on imported file '{}'",
-                import.alias
+                "[ImportsResolver] Running AST enhancement on '{}'",
+                alias
             ));
         }
 
         let ast_enhancer = GeneralAstEnhancer::new(&import_settings);
-        let enhancement_result = ast_enhancer.enhance(&ast, Some(&semantic_result));
+        let enhancement_result = ast_enhancer.enhance(raw_ast, Some(&semantic_result));
 
         if !enhancement_result.is_success {
             self.error_manager.add_imports_resolution_error(
                 ImportsResolutionErrorType::ParseError,
                 format!(
                     "AST enhancement failed for '{}': {} errors, {} warnings",
-                    import.alias,
+                    alias,
                     enhancement_result.errors.len(),
                     enhancement_result.warnings.len()
                 ),
-                import.alias.clone(),
-                Some(import.path.clone()),
+                alias.to_string(),
+                Some(resolved_path.to_string()),
                 Some(resolved_path.to_string()),
                 None,
                 0,
                 0,
                 None,
             );
-            return Err(format!("AST enhancement failed for '{}'", import.alias));
+            return Err(format!("AST enhancement failed for '{}'", alias));
         }
 
         let enhanced_ast = enhancement_result.enhanced_ast;
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
-                "[ImportsResolver] Processed imported file '{}' ({} functions)",
-                import.alias,
+                "[ImportsResolver] Processed '{}' ({} functions)",
+                alias,
                 enhanced_ast
                     .quick_functions
                     .as_ref()
@@ -791,11 +876,11 @@ impl<'a> ImportsResolver<'a> {
             let is_global = match &func.scope_list {
                 None => true,
                 Some(scopes)
-                if scopes.len() == 1
-                    && scopes[0].eq_ignore_ascii_case("global") =>
-                    {
-                        true
-                    }
+                    if scopes.len() == 1
+                        && scopes[0].eq_ignore_ascii_case("global") =>
+                {
+                    true
+                }
                 _ => false,
             };
 

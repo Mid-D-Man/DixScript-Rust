@@ -26,6 +26,9 @@ pub struct DLMPipelineExecutor {
     debug_config:     DebugConfig,
     source_file_path: PathBuf,
     output_directory: PathBuf,
+    /// Password read once from MDIX_DLM_PASSWORD at construction time.
+    /// Present only when the environment variable is set.
+    password:         Option<String>,
 }
 
 impl DLMPipelineExecutor {
@@ -36,11 +39,14 @@ impl DLMPipelineExecutor {
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
         let debug_config  = DebugConfig::from_debug_mode(debug_mode);
+        let password      = std::env::var("MDIX_DLM_PASSWORD").ok();
+
         DLMPipelineExecutor {
             error_manager,
             debug_config,
             source_file_path: source_file_path.as_ref().to_path_buf(),
             output_directory: output_directory.as_ref().to_path_buf(),
+            password,
         }
     }
 
@@ -192,7 +198,7 @@ impl DLMPipelineExecutor {
         result.compression_ratio = 1.0 - (result.processed_size as f64 / original_size as f64);
         result.processed_data    = processed_data;
 
-        // Phase 4: finalize auditor — this also re-locks the .au file
+        // Phase 4: finalize auditor
         if let Some(ref mut aud) = active_auditor {
             if let Err(e) = aud.finalize_audit() {
                 self.error_manager.add_dlm_error(
@@ -204,7 +210,7 @@ impl DLMPipelineExecutor {
             }
         }
 
-        // Phase 5: write .mdix.enc and .mdix.key, then lock both
+        // Phase 5: write .mdix.enc and .mdix.key
         if let Err(e) = self.generate_output_files(&mut result, original_size) {
             self.error_manager.add_dlm_error(
                 DlmErrorType::ModuleExecutionFailed, e.clone(),
@@ -338,13 +344,32 @@ impl DLMPipelineExecutor {
 
         let security = ast.security.as_ref().unwrap();
 
-        let enc: Box<dyn IEncryptor> = match subtype {
+        let mut enc: Box<dyn IEncryptor> = match subtype {
             Some(DLMModuleSubtype::Xor)                => Box::new(XorEncryptor::new(Some(security.clone()))),
             Some(DLMModuleSubtype::Aes128)             => Box::new(Aes128Encryptor::new(Some(security.clone()))),
             Some(DLMModuleSubtype::Aes256) | None      => Box::new(Aes256Encryptor::new(Some(security.clone()))),
             Some(DLMModuleSubtype::Chacha20)           => Box::new(Chacha20Encryptor::new(Some(security.clone()))),
             Some(other) => return Err(format!("Unknown encryptor subtype: {:?}", other)),
         };
+
+        // In password mode, the encryptor derives the key from a password via Argon2.
+        // Supply the password so the encryptor can do that derivation before encrypt() is called.
+        let mode = SecurityUtilities::get_encryption_mode(security);
+        if mode.eq_ignore_ascii_case("password") {
+            let password = self.password.as_deref().ok_or_else(|| {
+                "Encryption mode is 'password' but no password was provided. \
+                 Pass --password <pw> to the compile command or set MDIX_DLM_PASSWORD.".to_string()
+            })?;
+
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(
+                    "[DLMPipelineExecutor] Supplying password to encryptor for key derivation"
+                );
+            }
+
+            enc.set_password(password)
+                .map_err(|e| format!("Failed to initialise encryption password: {}", e))?;
+        }
 
         Ok(enc)
     }
@@ -367,7 +392,6 @@ impl DLMPipelineExecutor {
 
         let enc_path = self.output_directory.join(format!("{}.mdix.enc", base_name));
 
-        // Write .mdix.enc then immediately lock it.
         self.write_enc_file(&enc_path, &result.processed_data)?;
 
         let enc_path_str = enc_path.to_string_lossy().to_string();
@@ -379,7 +403,6 @@ impl DLMPipelineExecutor {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(original_size);
 
-        // KeyFileManager::create_key_file handles unlock → write → re-lock internally.
         let key_manager = KeyFileManager::new(
             self.source_file_path.to_string_lossy().to_string(),
             self.output_directory.to_string_lossy().to_string(),
@@ -401,10 +424,6 @@ impl DLMPipelineExecutor {
         Ok(())
     }
 
-    /// Write the encrypted payload to disk and lock it read-only.
-    ///
-    /// If the file already exists from a previous compilation it is unlocked
-    /// first, overwritten, then re-locked.
     fn write_enc_file(&self, path: &Path, data: &[u8]) -> Result<(), String> {
         if path.exists() {
             file_permissions::set_writable(path)
@@ -414,7 +433,6 @@ impl DLMPipelineExecutor {
         let result = fs::write(path, data)
             .map_err(|e| format!("Failed to write encrypted file: {}", e));
 
-        // Always re-lock even if the write failed.
         if let Err(e) = file_permissions::set_readonly(path) {
             self.error_manager.log_warning(&format!("Could not lock .mdix.enc read-only: {}", e));
         }

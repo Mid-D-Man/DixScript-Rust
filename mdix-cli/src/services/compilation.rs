@@ -94,12 +94,52 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
     let t = Instant::now();
 
     let mut load_opts = DixLoadOptions::new();
+
     if let Some(ref kp) = opts.key_file_path {
+        // Explicit key path supplied by the caller.
         load_opts.key_file_path = Some(kp.clone());
+    } else {
+        // Auto-detect: strip .mdix.enc (or .enc) from the encrypted filename
+        // and append .mdix.key.
+        //
+        // Without this, DixLoader would naively append .mdix.key to the full
+        // encrypted filename, producing nonsense like
+        // "foo.mdix.enc.mdix.key" instead of "foo.mdix.key".
+        let enc_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        let base = if enc_name.ends_with(".mdix.enc") {
+            &enc_name[..enc_name.len() - ".mdix.enc".len()]
+        } else if enc_name.ends_with(".enc") {
+            &enc_name[..enc_name.len() - ".enc".len()]
+        } else {
+            enc_name
+        };
+
+        let key_filename = format!("{}.mdix.key", base);
+        let parent = path.parent().unwrap_or(Path::new("."));
+        let key_candidate = parent.join(&key_filename);
+
+        if key_candidate.exists() {
+            load_opts.key_file_path = Some(key_candidate.to_string_lossy().to_string());
+        } else {
+            // Surface a clear error rather than letting DixLoader produce a
+            // confusing "file not found" message with a mangled filename.
+            return Err(CliError::KeyError(format!(
+                "Key file '{}' not found. Searched in: {}",
+                key_filename,
+                parent.display()
+            )));
+        }
     }
+
     if let Some(ref pw) = opts.password {
         load_opts.password = Some(pw.clone());
+        std::env::set_var("MDIX_DLM_PASSWORD", pw);
     }
+
     if let Some(ref dir) = opts.output_dir {
         load_opts.output_directory = Some(dir.clone());
     }
@@ -108,6 +148,10 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
     loader
         .load_encrypted(path.to_str().unwrap_or(""), &load_opts)
         .map_err(CliError::CompileError)?;
+
+    if opts.password.is_some() {
+        std::env::remove_var("MDIX_DLM_PASSWORD");
+    }
 
     let output_dir = opts.output_dir.as_deref().unwrap_or(".");
     let stem = path
@@ -124,4 +168,4 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
         encrypted_size,
         elapsed: t.elapsed(),
     })
-}
+        }

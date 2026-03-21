@@ -407,9 +407,6 @@ impl DLMReverseExecutor {
             #[cfg(not(target_arch = "wasm32"))]
             "lzma" => Ok(Box::new(LzmaCompressor::new())),
 
-            // On WASM, bzip2/lzma compressed files cannot be decompressed.
-            // The user must process the file with the native library first,
-            // then load the resulting plain .mdix via loadStr().
             #[cfg(target_arch = "wasm32")]
             "bzip2" | "lzma" => {
                 Err(format!(
@@ -452,8 +449,10 @@ impl DLMReverseExecutor {
             .unwrap_or("unknown")
             .to_string();
 
-        if let Some(stripped) = name.strip_suffix(".enc")       { name = stripped.to_string(); }
-        if let Some(stripped) = name.strip_suffix(".dixscript")  { name = stripped.to_string(); }
+        // Strip compound suffix first, then single extension.
+        // Previously this stripped ".dixscript" — must be ".mdix".
+        if let Some(stripped) = name.strip_suffix(".enc")  { name = stripped.to_string(); }
+        if let Some(stripped) = name.strip_suffix(".mdix") { name = stripped.to_string(); }
 
         let candidate = dir.join(format!("{}.mdix", name));
 

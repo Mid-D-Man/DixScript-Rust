@@ -1869,28 +1869,28 @@ fn evaluate_enum_access(
 
     /// Evaluate every argument expression in the *caller's* context, returning
     /// a vec of resolved DixValues. Called before constructing any callee context.
-    fn evaluate_arguments_in_caller_context(
-        &mut self,
-        arguments: &[Expression],
-        position: Position,
-        context: &mut ExecutionContext,
-        scope_context: &FxHashMap<String, String>,
-        namespace: Option<&ImportedNamespace>,
-    ) -> Result<Vec<DixValue>, InterpreterError> {
-        let mut evaluated = Vec::with_capacity(arguments.len());
-        for (i, arg) in arguments.iter().enumerate() {
-            let val = self
-                .evaluate_expression(arg, context, scope_context, namespace)
-                .map_err(|e| InterpreterError::ParameterEvalFailed {
-                    index: i,
-                    param_name: format!("arg{}", i),
-                    inner: Box::new(e),
-                    position: arg.position(),
-                })?;
-            evaluated.push(val);
-        }
-        Ok(evaluated)
+    pub fn evaluate_arguments_in_caller_context(
+    &mut self,
+    arguments: &[Expression],
+    position: Position,
+    context: &mut ExecutionContext,
+    scope_context: &FxHashMap<String, String>,
+    namespace: Option<&ImportedNamespace>,
+) -> Result<Vec<DixValue>, InterpreterError> {
+    let mut evaluated = Vec::with_capacity(arguments.len());
+    for (i, arg) in arguments.iter().enumerate() {
+        let val = self
+            .evaluate_expression(arg, context, scope_context, namespace)
+            .map_err(|e| InterpreterError::ParameterEvalFailed {
+                index: i,
+                param_name: format!("arg{}", i),
+                inner: Box::new(e),
+                position: arg.position(),
+            })?;
+        evaluated.push(val);
     }
+    Ok(evaluated)
+        }
 
     /// Convert a DixValue back to a lightweight AST Value literal so it can be
     /// passed to execute() → bind_parameters() → evaluate_expression(), which

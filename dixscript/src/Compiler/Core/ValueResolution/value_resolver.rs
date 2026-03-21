@@ -1386,71 +1386,92 @@ fn execute_iterative_resolution(
     (resolved_count, errors)
 }
 
-    fn execute_call(
-        &mut self,
-        call: &FunctionCallInfo,
-        arguments: Vec<DixValue>,
-    ) -> Result<DixValue, InterpreterError> {
-        let expr_args: Vec<Expression> = arguments
-            .iter()
-            .map(|dv| Expression::Value {
-                value: Self::convert_dix_value_to_value(dv, call.position),
-                position: call.position,
-            })
-            .collect();
+    fn execute_call_raw(
+    &mut self,
+    call: &FunctionCallInfo,
+) -> Result<DixValue, InterpreterError> {
+    // At DATA level there are no local variables — create an empty top-level
+    // context. The interpreter resolves identifiers via data_context.
+    let mut top_level_ctx = ExecutionContext::new("<data>", None);
 
-        match &call.namespace_name {
-            Some(ns_name) => {
-                let func_ast = {
-                    let ns = self
-                        .symbol_table
-                        .try_get_namespace(ns_name)
-                        .ok_or_else(|| InterpreterError::UndefinedFunction {
-                            name: format!("{}.{}", ns_name, call.function_name),
-                            position: call.position,
-                        })?;
-                    ns.functions
-                        .get(&call.function_name)
-                        .ok_or_else(|| InterpreterError::UndefinedFunction {
-                            name: format!("{}.{}", ns_name, call.function_name),
-                            position: call.position,
-                        })?
-                        .ast
-                        .clone()
-                };
+    // Evaluate every argument in the top-level context. This correctly handles
+    // nested ImportedFunctionCalls, QuickFuncCalls, arithmetic, enum accesses —
+    // anything the interpreter knows how to evaluate.
+    let evaluated_args = self.interpreter.evaluate_arguments_in_caller_context(
+        &call.arguments,
+        call.position,
+        &mut top_level_ctx,
+        &call.scope_context,
+        None,
+    )?;
 
-                let ns = self.symbol_table.try_get_namespace(ns_name).unwrap();
-                let mut ctx = ExecutionContext::new(&call.function_name, None);
-                self.interpreter.execute(
-                    &func_ast,
-                    &expr_args,
-                    &mut ctx,
-                    &call.scope_context,
-                    Some(ns),
-                )
-            }
+    // Wrap resolved DixValues as literal Expression::Value nodes so that
+    // interpreter.execute → bind_parameters → evaluate_expression returns
+    // them immediately without any further lookup.
+    let expr_args: Vec<Expression> = evaluated_args
+        .iter()
+        .map(|dv| Expression::Value {
+            value: Self::convert_dix_value_to_value(dv, call.position),
+            position: call.position,
+        })
+        .collect();
 
-            None => {
-                let function_clone = self
-                    .interpreter
-                    .find_function(&call.function_name)
+    match &call.namespace_name {
+        Some(ns_name) => {
+            let (func_ast, target_namespace) = {
+                let ns = self
+                    .symbol_table
+                    .try_get_namespace(ns_name)
                     .ok_or_else(|| InterpreterError::UndefinedFunction {
-                        name: call.function_name.clone(),
+                        name: format!("{}.{}", ns_name, call.function_name),
+                        position: call.position,
+                    })?;
+                let func_ast = ns
+                    .functions
+                    .get(&call.function_name)
+                    .ok_or_else(|| InterpreterError::UndefinedFunction {
+                        name: format!("{}.{}", ns_name, call.function_name),
                         position: call.position,
                     })?
+                    .ast
                     .clone();
+                (func_ast, ns as *const ImportedNamespace)
+            };
 
-                let mut ctx = ExecutionContext::new(&call.function_name, None);
-                self.interpreter.execute(
-                    &function_clone,
-                    &expr_args,
-                    &mut ctx,
-                    &call.scope_context,
-                    None,
-                )
-            }
+            // SAFETY: symbol_table lives for 'a which outlives this call.
+            let ns_ref: &ImportedNamespace = unsafe { &*target_namespace };
+            let fqn = format!("{}.{}", ns_name, call.function_name);
+            let mut ctx = ExecutionContext::new(&fqn, None);
+            self.interpreter.execute(
+                &func_ast,
+                &expr_args,
+                &mut ctx,
+                &call.scope_context,
+                Some(ns_ref),
+            )
+        }
+
+        None => {
+            let function_clone = self
+                .interpreter
+                .find_function(&call.function_name)
+                .ok_or_else(|| InterpreterError::UndefinedFunction {
+                    name: call.function_name.clone(),
+                    position: call.position,
+                })?
+                .clone();
+
+            let mut ctx = ExecutionContext::new(&call.function_name, None);
+            self.interpreter.execute(
+                &function_clone,
+                &expr_args,
+                &mut ctx,
+                &call.scope_context,
+                None,
+            )
         }
     }
+}
 
     // ==================== PHASE 4 HELPERS ====================
 

@@ -1472,47 +1472,47 @@ impl<'a> ValueResolver<'a> {
     }
 
     fn expr_has_unresolved_ref(
-        expr: &Expression,
-        ctx: &FxHashMap<String, DixValue>,
-    ) -> bool {
-        match expr {
-            Expression::Identifier { name, .. } => !ctx.contains_key(name.as_str()),
-            // After Phase 1 these should all be Value::Integer already; if not,
-            // they are still resolvable by the interpreter — not a blocking dep.
-            Expression::EnumAccess { .. } => false,
-            Expression::QuickFuncCall { .. } | Expression::ImportedFunctionCall { .. } => true,
-            Expression::ArithmeticOp { left, right, .. } => {
-                Self::expr_has_unresolved_ref(left, ctx)
-                    || Self::expr_has_unresolved_ref(right, ctx)
-            }
-            Expression::BitwiseOp { left, right, .. } => {
-                Self::expr_has_unresolved_ref(left, ctx)
-                    || Self::expr_has_unresolved_ref(right, ctx)
-            }
-            Expression::ComparisonOp { left, right, .. } => {
-                Self::expr_has_unresolved_ref(left, ctx)
-                    || Self::expr_has_unresolved_ref(right, ctx)
-            }
-            Expression::LogicalOp { left, right, .. } => {
-                Self::expr_has_unresolved_ref(left, ctx)
-                    || Self::expr_has_unresolved_ref(right, ctx)
-            }
-            Expression::Conditional { condition, true_value, false_value, .. } => {
-                Self::expr_has_unresolved_ref(condition, ctx)
-                    || Self::expr_has_unresolved_ref(true_value, ctx)
-                    || Self::expr_has_unresolved_ref(false_value, ctx)
-            }
-            Expression::Value { value, .. } => Self::value_has_unresolved_ref(value, ctx),
-            Expression::PropertyAccess { object, .. } => {
-                Self::expr_has_unresolved_ref(object, ctx)
-            }
-            Expression::IndexAccess { object, index, .. } => {
-                Self::expr_has_unresolved_ref(object, ctx)
-                    || Self::expr_has_unresolved_ref(index, ctx)
-            }
-            _ => false,
+    expr: &Expression,
+    ctx: &FxHashMap<String, DixValue>,
+) -> bool {
+    match expr {
+        Expression::Identifier { name, .. } => !ctx.contains_key(name.as_str()),
+
+        // After Phase 1 enum pre-resolution these are already Integer literals —
+        // but keep the guard as a safety net.
+        Expression::EnumAccess { .. } => false,
+
+        // FIX: a nested call is only "unresolved" if its own arguments contain
+        // something we cannot evaluate yet. If all its args are literals/resolved,
+        // it is safe to execute — the interpreter will evaluate it inline.
+        Expression::QuickFuncCall { arguments, .. }
+        | Expression::ImportedFunctionCall { arguments, .. } => {
+            arguments.iter().any(|a| Self::expr_has_unresolved_ref(a, ctx))
         }
+
+        Expression::ArithmeticOp { left, right, .. }
+        | Expression::BitwiseOp { left, right, .. }
+        | Expression::ComparisonOp { left, right, .. }
+        | Expression::LogicalOp { left, right, .. } => {
+            Self::expr_has_unresolved_ref(left, ctx)
+                || Self::expr_has_unresolved_ref(right, ctx)
+        }
+        Expression::Conditional { condition, true_value, false_value, .. } => {
+            Self::expr_has_unresolved_ref(condition, ctx)
+                || Self::expr_has_unresolved_ref(true_value, ctx)
+                || Self::expr_has_unresolved_ref(false_value, ctx)
+        }
+        Expression::Value { value, .. } => Self::value_has_unresolved_ref(value, ctx),
+        Expression::PropertyAccess { object, .. } => {
+            Self::expr_has_unresolved_ref(object, ctx)
+        }
+        Expression::IndexAccess { object, index, .. } => {
+            Self::expr_has_unresolved_ref(object, ctx)
+                || Self::expr_has_unresolved_ref(index, ctx)
+        }
+        _ => false,
     }
+}
 
     fn value_has_unresolved_ref(value: &Value, ctx: &FxHashMap<String, DixValue>) -> bool {
         match value {

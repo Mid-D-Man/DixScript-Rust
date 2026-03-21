@@ -17,38 +17,32 @@ use super::{SectionAnalysisResult, SemanticErrorInfo, SemanticWarningInfo};
 
 // ==================== ERROR TYPE CONSTANTS ====================
 
-const ERROR_ORDERING_VIOLATION:        &str = "ORDERING_VIOLATION";
-const ERROR_DUPLICATE_TABLE_PATH:      &str = "DUPLICATE_TABLE_PATH";
+const ERROR_ORDERING_VIOLATION:         &str = "ORDERING_VIOLATION";
+const ERROR_DUPLICATE_TABLE_PATH:       &str = "DUPLICATE_TABLE_PATH";
 const ERROR_DUPLICATE_GROUP_ARRAY_PATH: &str = "DUPLICATE_GROUP_ARRAY_PATH";
-const ERROR_RESERVED_KEYWORD:          &str = "RESERVED_KEYWORD";
-const ERROR_TYPE_MISMATCH:             &str = "TYPE_MISMATCH";
-const ERROR_NESTING_TOO_DEEP:          &str = "NESTING_TOO_DEEP";
-const ERROR_ARRAY_NOT_HOMOGENEOUS:     &str = "ARRAY_NOT_HOMOGENEOUS";
-const ERROR_DUPLICATE_PROPERTY:        &str = "DUPLICATE_PROPERTY";
-const ERROR_TUPLE_TOO_LARGE:           &str = "TUPLE_TOO_LARGE";
-const ERROR_ENUM_NOT_FOUND:            &str = "ENUM_NOT_FOUND";
-const ERROR_ENUM_VALUE_NOT_FOUND:      &str = "ENUM_VALUE_NOT_FOUND";
-const ERROR_FUNCTION_NOT_FOUND:        &str = "FUNCTION_NOT_FOUND";
-const ERROR_INVALID_EXPRESSION:        &str = "INVALID_EXPRESSION";
-const ERROR_INVALID_BLOB_CONTENT:      &str = "INVALID_BLOB_CONTENT";
-const ERROR_INVALID_REGEX_PATTERN:     &str = "INVALID_REGEX_PATTERN";
+const ERROR_RESERVED_KEYWORD:           &str = "RESERVED_KEYWORD";
+const ERROR_TYPE_MISMATCH:              &str = "TYPE_MISMATCH";
+const ERROR_NESTING_TOO_DEEP:           &str = "NESTING_TOO_DEEP";
+const ERROR_ARRAY_NOT_HOMOGENEOUS:      &str = "ARRAY_NOT_HOMOGENEOUS";
+const ERROR_DUPLICATE_PROPERTY:         &str = "DUPLICATE_PROPERTY";
+const ERROR_TUPLE_TOO_LARGE:            &str = "TUPLE_TOO_LARGE";
+const ERROR_ENUM_NOT_FOUND:             &str = "ENUM_NOT_FOUND";
+const ERROR_ENUM_VALUE_NOT_FOUND:       &str = "ENUM_VALUE_NOT_FOUND";
+const ERROR_FUNCTION_NOT_FOUND:         &str = "FUNCTION_NOT_FOUND";
+const ERROR_INVALID_EXPRESSION:         &str = "INVALID_EXPRESSION";
+const ERROR_INVALID_BLOB_CONTENT:       &str = "INVALID_BLOB_CONTENT";
+const ERROR_INVALID_REGEX_PATTERN:      &str = "INVALID_REGEX_PATTERN";
 
 const MAX_NESTING_DEPTH:  usize = 5;
 const MAX_TUPLE_ELEMENTS: usize = 6;
 
-// Compiled once per process; never re-created per call.
 lazy_static! {
-    // Extracts the quoted path and trailing text from context strings such as
-    // "table property 'server.config'" or "group array 'items[0]'"
     static ref CONTEXT_QUOTE_RE: Regex =
         Regex::new(r"'([^']+)'(.*)").unwrap();
 
-    // Strips array subscripts ([0], [12], …) from path strings before table-path extraction.
     static ref ARRAY_INDEX_RE: Regex =
         Regex::new(r"\[\d+\]").unwrap();
 
-    // Detects object-property context strings produced by validate_object_property,
-    // e.g. "object property 'server'"
     static ref OBJECT_PROP_CONTEXT_RE: Regex =
         Regex::new(r"object property '([^']+)'").unwrap();
 }
@@ -59,11 +53,9 @@ pub struct DataSectionAnalyzer<'a> {
     error_manager:           ErrorManager,
     debug_config:            DebugConfig,
 
-    // Mutable validation state reset at the start of each analyze() call.
     declared_table_paths:    FxHashSet<String>,
     current_nesting_depth:   usize,
 
-    // Output indexes consumed by the runtime key resolver.
     short_name_to_full_paths: FxHashMap<String, Vec<String>>,
     path_to_type:             FxHashMap<String, DataType>,
 }
@@ -138,7 +130,6 @@ impl<'a> DataSectionAnalyzer<'a> {
         result
     }
 
-    /// Returns the built path indexes for downstream compiler phases.
     #[inline]
     pub fn get_indexes(
         &self,
@@ -300,8 +291,6 @@ impl<'a> DataSectionAnalyzer<'a> {
             return;
         }
 
-        // The visitor holds &SymbolTable; explicit block ensures it is dropped
-        // before the add_data_variable call that requires &mut SymbolTable.
         let context = format!("property '{}'", name);
         let inferred_type = {
             let visitor = TypeInferenceVisitor::new(symbol_table, None);
@@ -454,8 +443,6 @@ impl<'a> DataSectionAnalyzer<'a> {
 
         let mut first_item_type: Option<DataType> = None;
 
-        // Explicit block: visitor (immutable borrow) must be dropped before
-        // the add_data_variable call that requires &mut SymbolTable.
         {
             let visitor = TypeInferenceVisitor::new(symbol_table, None);
 
@@ -698,7 +685,6 @@ impl<'a> DataSectionAnalyzer<'a> {
             _ => return DataType::Object,
         };
 
-        // &str borrows from the String fields owned by `properties` — no allocation.
         let mut seen_keys: FxHashSet<&str> =
             FxHashSet::with_capacity_and_hasher(properties.len(), Default::default());
         self.current_nesting_depth += 1;
@@ -885,7 +871,6 @@ impl<'a> DataSectionAnalyzer<'a> {
 
         let arg = &arguments[0];
         if let Value::String { value: str_val, .. } = arg {
-            // Regex::new here is intentional: str_val is user-supplied, not a fixed pattern.
             if Regex::new(str_val).is_err() {
                 self.add_error(
                     result,
@@ -908,7 +893,63 @@ impl<'a> DataSectionAnalyzer<'a> {
         Some(DataType::Regex)
     }
 
+    // ==================== ENUM VALUE VALIDATION ====================
+    //
+    // Handles three cases:
+    //   1. Local enum:              Rarity.COMMON          → enum_name="Rarity",  value="COMMON"
+    //   2. Namespaced enum (2-part): Base.Rarity           → treated as namespace lookup
+    //   3. Namespaced enum (3-part): Base.Rarity.COMMON    → namespace="Base", enum="Rarity", value="COMMON"
+    //
+    // The parser may emit the full dotted string as `enum_name` when it cannot
+    // resolve the namespace at parse time, so we split on '.' here to handle all
+    // three forms.
+
     fn validate_enum_value(
+        &self,
+        enum_name: &str,
+        enum_value: &str,
+        position: Position,
+        context: &str,
+        symbol_table: &SymbolTable,
+        result: &mut SectionAnalysisResult,
+    ) -> DataType {
+        // Fast path — local enum (no dot in name).
+        if !enum_name.contains('.') {
+            return self.validate_local_enum(
+                enum_name, enum_value, position, context, symbol_table, result,
+            );
+        }
+
+        // Dotted name — split and treat as namespaced enum.
+        // Supported forms after splitting:
+        //   ["Namespace", "EnumName"]          — enum_value already supplied separately
+        //   ["Namespace", "EnumName", "VALUE"] — value embedded in the name string
+        let parts: Vec<&str> = enum_name.splitn(3, '.').collect();
+
+        match parts.as_slice() {
+            [namespace, enum_nm] => {
+                // Form: Namespace.EnumName  with value supplied separately.
+                self.validate_namespaced_enum(
+                    namespace, enum_nm, enum_value, position, context, symbol_table, result,
+                )
+            }
+            [namespace, enum_nm, embedded_value] => {
+                // Form: Namespace.EnumName.VALUE — value was embedded in the name string.
+                self.validate_namespaced_enum(
+                    namespace, enum_nm, embedded_value, position, context, symbol_table, result,
+                )
+            }
+            _ => {
+                // Unexpected shape — fall back to a local lookup.
+                self.validate_local_enum(
+                    enum_name, enum_value, position, context, symbol_table, result,
+                )
+            }
+        }
+    }
+
+    /// Validate a plain (non-namespaced) enum access.
+    fn validate_local_enum(
         &self,
         enum_name: &str,
         enum_value: &str,
@@ -942,12 +983,92 @@ impl<'a> DataSectionAnalyzer<'a> {
 
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!(
-                "  Validated enum value: {}.{}", enum_name, enum_value
+                "  Validated local enum value: {}.{}", enum_name, enum_value
             ));
         }
 
         DataType::Enum
     }
+
+    /// Validate a namespaced enum access: `Namespace.EnumName.VALUE`.
+    fn validate_namespaced_enum(
+        &self,
+        namespace: &str,
+        enum_name: &str,
+        enum_value: &str,
+        position: Position,
+        context: &str,
+        symbol_table: &SymbolTable,
+        result: &mut SectionAnalysisResult,
+    ) -> DataType {
+        match symbol_table.get_namespaced_enum(namespace, enum_name) {
+            None => {
+                // Namespace may not be loaded yet — check if namespace exists at all.
+                if !symbol_table.is_imported_namespace(namespace) {
+                    self.add_error(
+                        result,
+                        ERROR_ENUM_NOT_FOUND,
+                        &format!(
+                            "Namespace '{}' not found — import it with @IMPORTS in {}",
+                            namespace, context
+                        ),
+                        position,
+                        Some(&format!(
+                            "Add: {} from \"path/to/file.mdix\" in @IMPORTS",
+                            namespace
+                        )),
+                    );
+                } else {
+                    self.add_error(
+                        result,
+                        ERROR_ENUM_NOT_FOUND,
+                        &format!(
+                            "Enum '{}' not found in namespace '{}' in {}",
+                            enum_name, namespace, context
+                        ),
+                        position,
+                        Some(&format!(
+                            "Check that '{}' exports enum '{}'",
+                            namespace, enum_name
+                        )),
+                    );
+                }
+            }
+            Some(fields) => {
+                if !fields.contains_key(enum_value) {
+                    let valid: Vec<&String> = fields.keys().collect();
+                    self.add_error(
+                        result,
+                        ERROR_ENUM_VALUE_NOT_FOUND,
+                        &format!(
+                            "Enum value '{}.{}.{}' not found in {}",
+                            namespace, enum_name, enum_value, context
+                        ),
+                        position,
+                        Some(&format!(
+                            "Valid values: {}",
+                            valid.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                        )),
+                    );
+                } else if self.debug_config.is_verbose {
+                    self.error_manager.log_debug(&format!(
+                        "  Validated namespaced enum: {}.{}.{}",
+                        namespace, enum_name, enum_value
+                    ));
+                }
+            }
+        }
+
+        DataType::Enum
+    }
+
+    // ==================== FUNCTION CALL VALIDATION ====================
+    //
+    // Handles two cases:
+    //   1. Local function:      makeItem(...)         → function_name="makeItem"
+    //   2. Namespaced function: Base.makeItem(...)    → function_name="Base.makeItem"
+    //
+    // The parser may emit the full dotted string as `function_name`.
 
     fn validate_function_call_value(
         &mut self,
@@ -959,6 +1080,16 @@ impl<'a> DataSectionAnalyzer<'a> {
         _visitor: &TypeInferenceVisitor,
         result: &mut SectionAnalysisResult,
     ) -> Option<DataType> {
+        // Namespaced call: "Namespace.FunctionName"
+        if let Some(dot_pos) = function_name.find('.') {
+            let namespace     = &function_name[..dot_pos];
+            let func_name     = &function_name[dot_pos + 1..];
+            return self.validate_namespaced_function_call(
+                namespace, func_name, position, context, symbol_table, result,
+            );
+        }
+
+        // Local function call.
         if !symbol_table.has_function(function_name) {
             self.add_error(
                 result,
@@ -972,13 +1103,69 @@ impl<'a> DataSectionAnalyzer<'a> {
 
         if self.debug_config.is_verbose {
             self.error_manager.log_debug(&format!(
-                "  Validated function call: {}()", function_name
+                "  Validated local function call: {}()", function_name
             ));
         }
 
         symbol_table
             .try_get_function(function_name)
             .and_then(|sig| sig.return_type)
+    }
+
+    /// Validate a namespaced function call: `Namespace.FunctionName(...)`.
+    fn validate_namespaced_function_call(
+        &self,
+        namespace: &str,
+        func_name: &str,
+        position: Position,
+        context: &str,
+        symbol_table: &SymbolTable,
+        result: &mut SectionAnalysisResult,
+    ) -> Option<DataType> {
+        if !symbol_table.is_imported_namespace(namespace) {
+            self.add_error(
+                result,
+                ERROR_FUNCTION_NOT_FOUND,
+                &format!(
+                    "Namespace '{}' not found — import it with @IMPORTS in {}",
+                    namespace, context
+                ),
+                position,
+                Some(&format!(
+                    "Add: {} from \"path/to/file.mdix\" in @IMPORTS",
+                    namespace
+                )),
+            );
+            return None;
+        }
+
+        match symbol_table.get_namespaced_function(namespace, func_name) {
+            None => {
+                self.add_error(
+                    result,
+                    ERROR_FUNCTION_NOT_FOUND,
+                    &format!(
+                        "Function '{}.{}' not found in {}",
+                        namespace, func_name, context
+                    ),
+                    position,
+                    Some(&format!(
+                        "Check that '{}' exports function '{}'",
+                        namespace, func_name
+                    )),
+                );
+                None
+            }
+            Some(info) => {
+                if self.debug_config.is_verbose {
+                    self.error_manager.log_debug(&format!(
+                        "  Validated namespaced function call: {}.{}()",
+                        namespace, func_name
+                    ));
+                }
+                info.signature.return_type
+            }
+        }
     }
 
     // ==================== TYPE SYSTEM ====================
@@ -1003,9 +1190,6 @@ impl<'a> DataSectionAnalyzer<'a> {
         false
     }
 
-    // Extracts the DATA-relative table path from a context string such as
-    // "table property 'server.config'" -> "server" (strips the last segment).
-    // Returns an empty string when no quoted path is present.
     fn extract_table_path_from_context(context: &str) -> String {
         let Some(captures) = CONTEXT_QUOTE_RE.captures(context) else {
             return String::new();
@@ -1083,4 +1267,4 @@ impl<'a> DataSectionAnalyzer<'a> {
             self.error_manager.log_warning(message);
         }
     }
-                                        }
+}

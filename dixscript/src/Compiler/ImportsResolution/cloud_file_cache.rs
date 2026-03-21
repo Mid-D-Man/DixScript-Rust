@@ -142,7 +142,7 @@ impl CloudFileCache {
                                     .path()
                                     .extension()
                                     .and_then(|s| s.to_str())
-                                    == Some("dixscript")
+                                    == Some("mdix")
                                 {
                                     cached_file_count += 1;
                                     if let Ok(meta) = sub_entry.metadata() {

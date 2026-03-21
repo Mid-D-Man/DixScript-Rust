@@ -1775,100 +1775,94 @@ impl<'a> QuickFuncsSectionParser<'a> {
     }
 
     fn parse_object_literal(&mut self) -> Value {
-        let obj_pos = Position::from_token(self.current());
+    let obj_pos = Position::from_token(self.current());
 
-        if !self.expect_symbol('{') {
-            return Value::Object { properties: Vec::new(), position: obj_pos };
-        }
-
-        let mut properties = Vec::with_capacity(estimate_properties_count(self.tokens.len()));
-
-        while !self.is_at_end() && !self.check_symbol('}') {
-            self.skip_whitespace();
-            if self.check_symbol('}') { break; }
-
-            let prop_pos = Position::from_token(self.current());
-
-            // Property name: identifier, contextual keyword, or quoted string
-            let prop_name_opt: Option<String> = match &self.current().token_type {
-                TokenType::Identifier(id) => {
-                    let name = id.clone(); self.advance(); Some(name)
-                }
-                TokenType::Keyword(kw)
-                if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
-                    {
-                        let name = kw.to_string(); self.advance(); Some(name)
-                    }
-                TokenType::String(s) => {
-                    let name = s.clone(); self.advance(); Some(name)
-                }
-                _ => {
-                    let cur = self.current().clone();
-                    self.error_manager.add_parse_error(
-                        ParseErrorType::UnexpectedToken,
-                        format!("Expected property name, found {}", cur.get_token_value()),
-                        cur.line, cur.column, None,
-                        self.get_source_line(&cur),
-                    );
-                    self.advance();
-                    None
-                }
-            };
-
-            let prop_name = match prop_name_opt {
-                Some(n) => n,
-                None => continue,
-            };
-
-            self.skip_whitespace();
-
-            if !self.check_symbol(':') && !self.check_symbol('=') {
-                let cur = self.current().clone();
-                self.error_manager.add_parse_error(
-                    ParseErrorType::MissingToken,
-                    format!("Expected ':' or '=' after property '{}'", prop_name),
-                    cur.line, cur.column, None,
-                    self.get_source_line(&cur),
-                );
-                // Recover: skip to next comma or closing brace
-                while !self.is_at_end() && !self.check_symbol(',') && !self.check_symbol('}') {
-                    self.advance();
-                }
-                continue;
-            }
-
-            self.advance(); // consume ':' or '='
-            self.skip_whitespace();
-
-            let val_expr = self.parse_expression(0);
-            let prop_value = self.convert_expression_to_value(val_expr);
-
-            properties.push(ObjectProperty::new(prop_name, prop_value, prop_pos));
-            self.skip_whitespace();
-
-            if self.check_symbol(',') {
-                self.advance();
-                self.skip_whitespace();
-                if self.check_symbol('}') { break; }
-            } else if self.check_symbol('}') {
-                break;
-            } else {
-                let cur = self.current().clone();
-                self.error_manager.add_parse_error(
-                    ParseErrorType::MissingToken,
-                    format!("Expected ',' or '}}' in object literal, found {}", cur.get_token_value()),
-                    cur.line, cur.column, None,
-                    self.get_source_line(&cur),
-                );
-                break;
-            }
-        }
-
-        if self.check_symbol('}') { self.advance(); }
-
-        Value::Object { properties, position: obj_pos }
+    if !self.expect_symbol('{') {
+        return Value::Object { properties: Vec::new(), position: obj_pos };
     }
 
+    let mut properties = Vec::with_capacity(estimate_properties_count(self.tokens.len()));
+
+    while !self.is_at_end() && !self.check_symbol('}') {
+        self.skip_whitespace();
+        if self.check_symbol('}') { break; }
+
+        let prop_pos = Position::from_token(self.current());
+
+        // Property name: identifier, contextual keyword, or quoted string
+        let prop_name_opt: Option<String> = match &self.current().token_type {
+            TokenType::Identifier(id) => {
+                let name = id.clone(); self.advance(); Some(name)
+            }
+            TokenType::Keyword(kw)
+            if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
+                {
+                    let name = kw.to_string(); self.advance(); Some(name)
+                }
+            TokenType::String(s) => {
+                let name = s.clone(); self.advance(); Some(name)
+            }
+            _ => {
+                let cur = self.current().clone();
+                self.error_manager.add_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    format!("Expected property name, found {}", cur.get_token_value()),
+                    cur.line, cur.column, None,
+                    self.get_source_line(&cur),
+                );
+                self.advance();
+                None
+            }
+        };
+
+        let prop_name = match prop_name_opt {
+            Some(n) => n,
+            None => continue,
+        };
+
+        self.skip_whitespace();
+
+        if !self.check_symbol(':') && !self.check_symbol('=') {
+            let cur = self.current().clone();
+            self.error_manager.add_parse_error(
+                ParseErrorType::MissingToken,
+                format!("Expected ':' or '=' after property '{}'", prop_name),
+                cur.line, cur.column, None,
+                self.get_source_line(&cur),
+            );
+            // Recover: skip to next comma, newline separator, or closing brace
+            while !self.is_at_end() && !self.check_symbol(',') && !self.check_symbol('}') {
+                self.advance();
+            }
+            continue;
+        }
+
+        self.advance(); // consume ':' or '='
+        self.skip_whitespace();
+
+        let val_expr = self.parse_expression(0);
+        let prop_value = self.convert_expression_to_value(val_expr);
+
+        properties.push(ObjectProperty::new(prop_name, prop_value, prop_pos));
+        self.skip_whitespace();
+
+        // Comma is optional — newline-separated properties are valid DixScript.
+        // If there is a comma, consume it and continue.
+        // If next token is '}', the outer while condition handles exit.
+        // Otherwise just loop — skip_whitespace already consumed the newline.
+        if self.check_symbol(',') {
+            self.advance();
+            self.skip_whitespace();
+            // Trailing comma before closing brace is fine
+            if self.check_symbol('}') { break; }
+        }
+        // No else-error here — absence of comma is not an error in DixScript
+    }
+
+    if self.check_symbol('}') { self.advance(); }
+
+    Value::Object { properties, position: obj_pos }
+        }
     fn parse_tuple_constructor(&mut self) -> Expression {
         let pos = Position::from_token(self.current());
         self.advance();

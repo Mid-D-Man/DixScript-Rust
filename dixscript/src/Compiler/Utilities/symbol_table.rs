@@ -19,26 +19,26 @@ use crate::Compiler::AST::expressions::Expression;
 pub struct SymbolTable {
     /// Imported namespaces: Alias -> ImportedNamespace
     pub namespaces: HashMap<String, ImportedNamespace>,
-    
+
     /// Enum definitions: EnumName -> { FieldName -> Value }
     pub enums: HashMap<String, HashMap<String, i32>>,
-    
+
     /// Function definitions: FunctionName -> FunctionSignature
     pub functions: HashMap<String, FunctionSignature>,
-    
+
     /// Data section variables: VariableName -> VariableInfo
     pub data_variables: HashMap<String, VariableInfo>,
-    
+
     /// Built-in static objects (Dix, Math, DateTime, etc.)
     /// CRITICAL: Must be populated via populate_builtin_objects()
     pub builtin_static_objects: Vec<String>,
-    
+
     /// Built-in Dix functions (deprecated - use StaticObjectRegistry)
     pub dix_functions: HashMap<String, DixFunctionSignature>,
-    
+
     /// Config keys: key -> value
     pub configs: HashMap<String, String>,
-    
+
     /// Current scope stack for nested scope resolution
     scope_stack: Vec<String>,
 }
@@ -57,9 +57,9 @@ impl SymbolTable {
             scope_stack: Vec::new(),
         }
     }
-    
+
     // ==================== CRITICAL: BUILTIN POPULATION ====================
-    
+
     /// CRITICAL METHOD: Populates builtin_static_objects from StaticObjectRegistry
     ///
     /// MUST be called after StaticObjectRegistry::initialize() and before semantic analysis!
@@ -80,108 +80,133 @@ impl SymbolTable {
             "IpAddress".to_string(),
         ];
     }
-    
+
     /// Check if builtin objects have been populated (for diagnostics)
     pub fn are_builtin_objects_populated(&self) -> bool {
         !self.builtin_static_objects.is_empty()
     }
-    
+
+    // ==================== SEED FROM OUTER TABLE ====================
+
+    /// Seed this symbol table's namespace entries from a provided map.
+    ///
+    /// Only namespace entries are copied — enums, functions, data variables,
+    /// and all other fields remain untouched. This is used when analyzing an
+    /// imported file that has transitive dependencies: the outer ImportsResolver
+    /// has already registered those dependencies; we copy only the relevant
+    /// namespace slots so that QualifiedIdentifier resolution during AST
+    /// enhancement can see them without polluting the outer table with this
+    /// file's own symbols.
+    ///
+    /// Entries already present in this table are NOT overwritten, so a file's
+    /// own namespace registrations (from a previous pass) are preserved.
+    pub fn seed_namespaces_from_map(
+        &mut self,
+        source: &HashMap<String, ImportedNamespace>,
+    ) {
+        for (alias, namespace) in source {
+            self.namespaces
+                .entry(alias.clone())
+                .or_insert_with(|| namespace.clone());
+        }
+    }
+
     // ==================== ENUM OPERATIONS ====================
-    
+
     /// Add enum definition
     pub fn add_enum(&mut self, enum_name: String, field_mapping: HashMap<String, i32>) {
         self.enums.insert(enum_name, field_mapping);
     }
-    
+
     /// Check if enum exists
     pub fn has_enum(&self, enum_name: &str) -> bool {
         self.enums.contains_key(enum_name)
     }
-    
+
     /// Get enum field mapping
     pub fn try_get_enum(&self, enum_name: &str) -> Option<&HashMap<String, i32>> {
         self.enums.get(enum_name)
     }
-    
+
     /// Check if enum field exists
     pub fn has_enum_field(&self, enum_name: &str, field_name: &str) -> bool {
         self.enums.get(enum_name)
             .map(|fields| fields.contains_key(field_name))
             .unwrap_or(false)
     }
-    
+
     /// Get enum field value
     pub fn try_get_enum_field_value(&self, enum_name: &str, field_name: &str) -> Option<i32> {
         self.enums.get(enum_name)
             .and_then(|fields| fields.get(field_name).copied())
     }
-    
+
     // ==================== CONFIG OPERATIONS ====================
-    
+
     /// Add config key
     pub fn add_config_key(&mut self, config_key: String, config_entry: String) {
         self.configs.insert(config_key, config_entry);
     }
-    
+
     /// Check if config key exists
     pub fn has_config(&self, config_key: &str) -> bool {
         self.configs.contains_key(config_key)
     }
-    
+
     /// Get config value
     pub fn get_config(&self, config_key: &str) -> Option<&String> {
         self.configs.get(config_key)
     }
-    
+
     // ==================== FUNCTION OPERATIONS ====================
-    
+
     /// Add function definition
     pub fn add_function(&mut self, function_name: String, signature: FunctionSignature) {
         self.functions.insert(function_name, signature);
     }
-    
+
     /// Check if function exists
     pub fn has_function(&self, function_name: &str) -> bool {
         self.functions.contains_key(function_name)
     }
-    
+
     /// Get function signature
     pub fn try_get_function(&self, function_name: &str) -> Option<&FunctionSignature> {
         self.functions.get(function_name)
     }
-    
+
     // ==================== DATA VARIABLE OPERATIONS ====================
-    
+
     /// Add data section variable
     pub fn add_data_variable(&mut self, variable_name: String, info: VariableInfo) {
         self.data_variables.insert(variable_name, info);
     }
-    
+
     /// Check if data variable exists
     pub fn has_data_variable(&self, variable_name: &str) -> bool {
         self.data_variables.contains_key(variable_name)
     }
-    
+
     /// Get data variable info
     pub fn try_get_data_variable(&self, variable_name: &str) -> Option<&VariableInfo> {
         self.data_variables.get(variable_name)
     }
-    
+
     // ==================== BUILTIN REGISTRY OPERATIONS ====================
-    
+
     /// Add builtin static object
     pub fn add_builtin_static_object(&mut self, object_name: String) {
         if !self.builtin_static_objects.contains(&object_name) {
             self.builtin_static_objects.push(object_name);
         }
     }
-    
+
     /// Check if builtin static object exists
     pub fn is_builtin_static_object(&self, object_name: &str) -> bool {
         self.builtin_static_objects.iter()
             .any(|obj| obj.to_string() == object_name)
     }
-    
+
     /// Add Dix function
     pub fn add_dix_function(
         &mut self,
@@ -198,43 +223,43 @@ impl SymbolTable {
             },
         );
     }
-    
+
     /// Check if Dix function exists
     pub fn has_dix_function(&self, function_name: &str) -> bool {
         self.dix_functions.contains_key(function_name)
     }
-    
+
     /// Get Dix function signature
     pub fn try_get_dix_function(&self, function_name: &str) -> Option<&DixFunctionSignature> {
         self.dix_functions.get(function_name)
     }
-    
+
     // ==================== SCOPE OPERATIONS ====================
-    
+
     /// Enter a new scope
     pub fn enter_scope(&mut self, scope_name: String) {
         self.scope_stack.push(scope_name);
     }
-    
+
     /// Exit current scope
     pub fn exit_scope(&mut self) {
         self.scope_stack.pop();
     }
-    
+
     /// Get current scope name
     pub fn get_current_scope(&self) -> String {
         self.scope_stack.last()
             .cloned()
             .unwrap_or_else(|| "global".to_string())
     }
-    
+
     /// Get full scope stack
     pub fn get_scope_stack(&self) -> Vec<String> {
         self.scope_stack.clone()
     }
-    
+
     // ==================== NAMESPACE OPERATIONS ====================
-    
+
     /// Register imported namespace
     pub fn register_namespace(
         &mut self,
@@ -251,20 +276,20 @@ impl SymbolTable {
             enums,
             local_imports,
         };
-        
+
         self.namespaces.insert(alias, ns);
     }
-    
+
     /// Check if namespace is imported
     pub fn is_imported_namespace(&self, alias: &str) -> bool {
         self.namespaces.contains_key(alias)
     }
-    
+
     /// Get imported namespace
     pub fn try_get_namespace(&self, alias: &str) -> Option<&ImportedNamespace> {
         self.namespaces.get(alias)
     }
-    
+
     /// Get namespaced function
     pub fn get_namespaced_function(
         &self,
@@ -274,7 +299,7 @@ impl SymbolTable {
         self.namespaces.get(namespace_name)
             .and_then(|ns| ns.functions.get(function_name))
     }
-    
+
     /// Get namespaced enum
     pub fn get_namespaced_enum(
         &self,
@@ -284,7 +309,7 @@ impl SymbolTable {
         self.namespaces.get(namespace_name)
             .and_then(|ns| ns.enums.get(enum_name))
     }
-    
+
     /// Check if namespace has local import
     pub fn is_imported_by_namespace(
         &self,
@@ -295,7 +320,7 @@ impl SymbolTable {
             .map(|ns| ns.local_imports.contains_key(import_alias))
             .unwrap_or(false)
     }
-    
+
     /// Get namespace's local import
     pub fn get_namespace_local_import(
         &self,
@@ -305,9 +330,9 @@ impl SymbolTable {
         self.namespaces.get(namespace_name)
             .and_then(|ns| ns.local_imports.get(import_alias))
     }
-    
+
     // ==================== UTILITY OPERATIONS ====================
-    
+
     /// Clear all symbol table data
     pub fn clear(&mut self) {
         self.enums.clear();
@@ -319,13 +344,13 @@ impl SymbolTable {
         self.configs.clear();
         self.scope_stack.clear();
     }
-    
+
     /// Get total number of symbols
     pub fn get_total_symbols(&self) -> usize {
         let namespace_symbols: usize = self.namespaces.values()
             .map(|ns| ns.functions.len() + ns.enums.len())
             .sum();
-        
+
         self.enums.len()
             + self.functions.len()
             + self.data_variables.len()
@@ -333,7 +358,7 @@ impl SymbolTable {
             + self.dix_functions.len()
             + namespace_symbols
     }
-    
+
     /// Get symbol counts by category
     pub fn get_symbol_counts(&self) -> HashMap<String, usize> {
         let mut counts = HashMap::new();
@@ -392,7 +417,7 @@ impl std::fmt::Display for FunctionSignature {
         } else {
             String::new()
         };
-        
+
         write!(
             f,
             "~{}<{:?}>{}({})",
@@ -420,7 +445,7 @@ impl std::fmt::Display for ParameterInfo {
         } else {
             String::new()
         };
-        
+
         write!(f, "{}<{:?}>{}", self.name, self.param_type, default_str)
     }
 }
@@ -451,7 +476,7 @@ impl std::fmt::Display for VariableInfo {
         } else {
             format!("<{:?}>", self.declared_type)
         };
-        
+
         write!(f, "{}{} in {}", self.name, type_str, self.scope)
     }
 }
@@ -510,4 +535,4 @@ impl std::fmt::Display for QuickFunctionInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.signature)
     }
-  }
+}

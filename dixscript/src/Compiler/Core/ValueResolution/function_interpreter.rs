@@ -1630,56 +1630,72 @@ fn evaluate_expression(
         }
     }
 
-    fn evaluate_enum_access(
-        &self,
-        namespace_name: Option<&str>,
-        enum_name: &str,
-        value: &str,
-        position: Position,
-        namespace: Option<&ImportedNamespace>,
-    ) -> Result<DixValue, InterpreterError> {
-        if let Some(ns_name) = namespace_name {
-            if self.debug_config.is_enabled {
-                self.error_manager.log_debug(&format!(
-                    "[EnumAccess] Imported: {}.{}.{}",
-                    ns_name, enum_name, value
-                ));
-            }
-
-            let ns = self
-                .resolve_namespace(ns_name, namespace)
-                .ok_or_else(|| InterpreterError::NamespaceNotFound {
-                    name: ns_name.to_string(),
-                    position,
-                })?;
-
-            let enum_fields =
-                ns.enums.get(enum_name).ok_or_else(|| {
-                    InterpreterError::InvalidEnumAccess {
-                        location: format!("{}.{}.{}", ns_name, enum_name, value),
-                        position,
-                    }
-                })?;
-
-            let field_value =
-                enum_fields.get(value).ok_or_else(|| {
-                    InterpreterError::InvalidEnumAccess {
-                        location: format!("{}.{}.{}", ns_name, enum_name, value),
-                        position,
-                    }
-                })?;
-
-            return Ok(DixValue::from_int(*field_value));
+fn evaluate_enum_access(
+    &self,
+    namespace_name: Option<&str>,
+    enum_name: &str,
+    value: &str,
+    position: Position,
+    namespace: Option<&ImportedNamespace>,
+) -> Result<DixValue, InterpreterError> {
+    if let Some(ns_name) = namespace_name {
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "[EnumAccess] Imported: {}.{}.{}",
+                ns_name, enum_name, value
+            ));
         }
 
-        self.symbol_table
-            .try_get_enum_field_value(enum_name, value)
-            .map(DixValue::from_int)
-            .ok_or_else(|| InterpreterError::InvalidEnumAccess {
-                location: format!("{}.{}", enum_name, value),
+        let ns = self
+            .resolve_namespace(ns_name, namespace)
+            .ok_or_else(|| InterpreterError::NamespaceNotFound {
+                name: ns_name.to_string(),
                 position,
-            })
+            })?;
+
+        let enum_fields = ns.enums.get(enum_name).ok_or_else(|| {
+            InterpreterError::InvalidEnumAccess {
+                location: format!("{}.{}.{}", ns_name, enum_name, value),
+                position,
+            }
+        })?;
+
+        let field_value = enum_fields.get(value).ok_or_else(|| {
+            InterpreterError::InvalidEnumAccess {
+                location: format!("{}.{}.{}", ns_name, enum_name, value),
+                position,
+            }
+        })?;
+
+        return Ok(DixValue::from_int(*field_value));
     }
+
+    // FIX: when executing inside an imported namespace function, that namespace's
+    // own @ENUMS are not in self.symbol_table (the caller's table). Check the
+    // current execution namespace's enums first before falling back globally.
+    if let Some(current_ns) = namespace {
+        if let Some(fields) = current_ns.enums.get(enum_name) {
+            if let Some(&int_val) = fields.get(value) {
+                if self.debug_config.is_verbose {
+                    self.error_manager.log_debug(&format!(
+                        "[EnumAccess] Resolved '{}' from current namespace enums",
+                        format!("{}.{}", enum_name, value)
+                    ));
+                }
+                return Ok(DixValue::from_int(int_val));
+            }
+        }
+    }
+
+    // Fall back to the global (caller's) symbol table for locally-defined enums.
+    self.symbol_table
+        .try_get_enum_field_value(enum_name, value)
+        .map(DixValue::from_int)
+        .ok_or_else(|| InterpreterError::InvalidEnumAccess {
+            location: format!("{}.{}", enum_name, value),
+            position,
+        })
+}
 
     fn evaluate_config_access(
         &self,

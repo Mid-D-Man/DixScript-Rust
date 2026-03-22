@@ -1,4 +1,4 @@
-// dixscript-cli/src/services/key_service.rs
+// mdix-cli/src/services/key_service.rs
 //! Wraps KeyFileManager for key generation and inspection.
 
 use std::path::Path;
@@ -22,10 +22,10 @@ pub struct KeyInfo {
     pub created:         String,
 }
 
-/// Generate a new `.dixscript.key` file with a random key and IV.
+/// Generate a new `.mdix.key` file with a random key and IV.
 pub fn generate_key_file(
-    output_path: &str,
-    algorithm: &str,
+    output_path:   &str,
+    algorithm:     &str,
     password_mode: bool,
 ) -> Result<KeyGenResult, CliError> {
     use rand::RngCore;
@@ -39,9 +39,9 @@ pub fn generate_key_file(
     crate::services::file_io::ensure_dir(Path::new(dir))?;
 
     let key_length: usize = match algorithm.to_lowercase().as_str() {
-        "aes128" => 16,
+        "aes128"            => 16,
         "aes256" | "chacha20" => 32,
-        _ => 32,
+        _                   => 32,
     };
 
     // AES-GCM and ChaCha20-Poly1305 both use a 12-byte nonce.
@@ -52,7 +52,6 @@ pub fn generate_key_file(
     rand::thread_rng().fill_bytes(&mut key_bytes);
     rand::thread_rng().fill_bytes(&mut iv_bytes);
 
-    // Bind to a local so the temporary String lives past the match.
     let algo_lower = algorithm.to_lowercase();
     let algo_label = match algo_lower.as_str() {
         "aes128"   => "aes128-gcm",
@@ -90,7 +89,7 @@ pub fn generate_key_file(
     })
 }
 
-/// Validate an existing `.dixscript.key` file.
+/// Validate an existing `.mdix.key` file.
 pub fn validate_key_file(key_path: &str) -> Result<(), CliError> {
     if !Path::new(key_path).exists() {
         return Err(CliError::FileNotFound(Path::new(key_path).to_path_buf()));
@@ -110,7 +109,7 @@ pub fn validate_key_file(key_path: &str) -> Result<(), CliError> {
     Ok(())
 }
 
-/// Read metadata from a `.dixscript.key` file without full validation.
+/// Read metadata from a `.mdix.key` file without full validation.
 pub fn get_key_info(key_path: &str) -> Result<KeyInfo, CliError> {
     if !Path::new(key_path).exists() {
         return Err(CliError::FileNotFound(Path::new(key_path).to_path_buf()));
@@ -134,7 +133,6 @@ pub fn get_key_info(key_path: &str) -> Result<KeyInfo, CliError> {
         })
         .unwrap_or_else(|| ("unknown".to_string(), 0, "unknown".to_string()));
 
-    // `generated` is a DateTime<Utc>; format it as an RFC 3339 string.
     let created = data.config.generated.to_rfc3339();
 
     Ok(KeyInfo {
@@ -144,4 +142,4 @@ pub fn get_key_info(key_path: &str) -> Result<KeyInfo, CliError> {
         has_compression: data.key_data.compression.is_some(),
         created,
     })
-        }
+}

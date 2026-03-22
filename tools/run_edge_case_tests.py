@@ -14,7 +14,9 @@ BUILD_DATE  = os.environ.get("BUILD_DATE",  "")
 DLM_PW      = os.environ.get("DLM_TEST_PASSWORD", "dixscript_ci_test_password_2025")
 IMPORTS_DIR = "mdix_files/tests/imports"
 DLM_DIR     = "mdix_files/tests/dlm"
-BINARY_DIR  = "mdix_files/tests/binary"
+# serialize_target.mdix lives in the dlm fixtures directory — there is no
+# separate "binary" directory in this workspace.
+BINARY_FIXTURE = "mdix_files/tests/dlm/serialize_target.mdix"
 OUT_DLM     = "edge-case-output/dlm"
 OUT_BINARY  = "binary-output"
 OUT_INSPECT = "edge-case-output/inspect"
@@ -117,18 +119,15 @@ def collect_output_files(output_subdir, source_file_path=None):
     files = []
     if os.path.isdir(output_subdir):
         for f in sorted(os.listdir(output_subdir)):
-            # Skip subdirectories and placeholder files
             fp = os.path.join(output_subdir, f)
             if os.path.isfile(fp) and not f.endswith(".placeholder") and not f.startswith("."):
                 files.append({"name": f, "size_bytes": os.path.getsize(fp), "path": fp})
 
-    # Auditor writes .au file next to the source — check there too
     if source_file_path:
         source_dir  = os.path.dirname(source_file_path)
         source_stem = os.path.splitext(os.path.basename(source_file_path))[0]
         au_path = os.path.join(source_dir, f"{source_stem}.mdix.au")
         if os.path.isfile(au_path):
-            # Copy it to the output subdir so it appears in the results
             import shutil
             dest = os.path.join(output_subdir, f"{source_stem}.mdix.au")
             shutil.copy2(au_path, dest)
@@ -151,12 +150,10 @@ def run_dlm_tests():
         out_subdir = os.path.join(OUT_DLM, t["id"])
         os.makedirs(out_subdir, exist_ok=True)
 
-        # Build compile command — pass --password only when supported and needed
         compile_cmd = [BINARY, "compile", src_path, "--output", out_subdir]
         extra_env   = {}
         if t["password_mode"]:
             compile_cmd += ["--password", DLM_PW]
-            # Also set env var so encryptors that read from environment work
             extra_env["MDIX_DLM_PASSWORD"] = DLM_PW
 
         compile_r  = run(compile_cmd, extra_env=extra_env)
@@ -164,7 +161,6 @@ def run_dlm_tests():
 
         output_files = collect_output_files(out_subdir, src_path)
 
-        # Round-trip for encrypted files
         roundtrip = None
         if compile_ok and t["encrypted"] and output_files:
             enc_files = [f for f in output_files if f["name"].endswith(".enc")]
@@ -228,20 +224,18 @@ def run_dlm_tests():
 def run_binary_capture():
     os.makedirs(OUT_BINARY, exist_ok=True)
 
-    # First try running the pre-built example binary directly
     example_binary = "target/debug/examples/binary_capture"
     if os.path.isfile(example_binary):
         r = run([
             example_binary,
-            "mdix_files/tests/binary/serialize_target.mdix",
+            BINARY_FIXTURE,
             OUT_BINARY,
         ])
     else:
-        # Fall back to cargo run
         r = run([
             "cargo", "run", "--example", "binary_capture",
             "--manifest-path", "dixscript/Cargo.toml", "--",
-            "mdix_files/tests/binary/serialize_target.mdix",
+            BINARY_FIXTURE,
             OUT_BINARY,
         ], timeout=180)
 

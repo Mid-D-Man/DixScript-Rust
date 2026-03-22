@@ -1,4 +1,4 @@
-// dixscript-cli/src/main.rs
+// mdix-cli/src/main.rs
 //! Entry point — parses global flags, dispatches to subcommands.
 
 mod commands;
@@ -15,9 +15,9 @@ use commands::{
 
 #[derive(Parser)]
 #[command(
-    name = "dixscript",
+    name    = "mdix",
     version = "1.0.0",
-    about = "DixScript (.dixscript) file toolchain",
+    about   = "DixScript (.mdix) file toolchain",
     long_about = None,
 )]
 pub struct Cli {
@@ -43,21 +43,21 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Validate a .dixscript file without compiling
+    /// Validate a .mdix file without compiling
     Validate(ValidateArgs),
-    /// Compile a .dixscript file through the full pipeline
+    /// Compile a .mdix file through the full pipeline
     Compile(CompileArgs),
-    /// Decrypt a .dixscript.enc file
+    /// Decrypt a .mdix.enc file
     Decrypt(DecryptArgs),
-    /// Convert between .dixscript and other formats (json, toml, yaml)
+    /// Convert between .mdix and other formats (json, toml)
     Convert(ConvertArgs),
-    /// Create a new .dixscript file from a template
+    /// Create a new .mdix file from a template
     Create(CreateArgs),
-    /// Format a .dixscript file in-place
+    /// Format a .mdix file in-place
     Format(FormatArgs),
-    /// Compact or minify a .dixscript file
+    /// Compact or minify a .mdix file
     Compact(CompactArgs),
-    /// Inspect the structure of a .dixscript file
+    /// Inspect the structure of a .mdix file
     Inspect(InspectArgs),
     /// Key file management
     Key(KeyArgs),
@@ -74,22 +74,22 @@ fn main() {
 
     let global = commands::GlobalOpts {
         verbose: cli.verbose,
-        quiet: cli.quiet,
-        json: cli.json,
+        quiet:   cli.quiet,
+        json:    cli.json,
     };
 
     let exit_code = match cli.command {
-        Commands::Validate(args)  => commands::validate::run(args, &global),
-        Commands::Compile(args)   => commands::compile::run(args, &global),
-        Commands::Decrypt(args)   => commands::decrypt::run(args, &global),
-        Commands::Convert(args)   => commands::convert::run(args, &global),
-        Commands::Create(args)    => commands::create::run(args, &global),
-        Commands::Format(args)    => commands::format::run(args, &global),
-        Commands::Compact(args)   => commands::compact::run(args, &global),
-        Commands::Inspect(args)   => commands::inspect::run(args, &global),
-        Commands::Key(args)       => commands::key::run(args, &global),
-        Commands::Config(args)    => commands::config::run(args, &global),
+        Commands::Validate(args) => commands::validate::run(args, &global),
+        Commands::Compile(args)  => commands::compile::run(args, &global),
+        Commands::Decrypt(args)  => commands::decrypt::run(args, &global),
+        Commands::Convert(args)  => commands::convert::run(args, &global),
+        Commands::Create(args)   => commands::create::run(args, &global),
+        Commands::Format(args)   => commands::format::run(args, &global),
+        Commands::Compact(args)  => commands::compact::run(args, &global),
+        Commands::Inspect(args)  => commands::inspect::run(args, &global),
+        Commands::Key(args)      => commands::key::run(args, &global),
+        Commands::Config(args)   => commands::config::run(args, &global),
     };
 
     std::process::exit(exit_code);
-      }
+}

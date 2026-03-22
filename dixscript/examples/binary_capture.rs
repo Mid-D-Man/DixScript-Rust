@@ -14,10 +14,12 @@ use dixscript::Compiler::Core::{
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    // serialize_target.mdix lives in the dlm fixtures directory — there is no
+    // separate "binary" fixtures directory in this workspace.
     let input_path = args
         .get(1)
         .map(String::as_str)
-        .unwrap_or("mdix_files/tests/binary/serialize_target.mdix");
+        .unwrap_or("mdix_files/tests/dlm/serialize_target.mdix");
     let output_dir = args.get(2).map(String::as_str).unwrap_or("binary-output");
 
     let source = fs::read_to_string(input_path)

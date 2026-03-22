@@ -1,0 +1,13 @@
+# Tell GitHub's Linguist to highlight .mdix files using TOML syntax.
+# This is a temporary approximation until DixScript is submitted to
+# github-linguist/linguist as a first-class language.
+*.mdix linguist-language=TOML
+
+# Treat .mdix files as text (no line-ending conversion)
+*.mdix text eol=lf
+
+# Treat compiled/encrypted output as binary
+*.mdix.enc binary
+*.mdix.key binary
+*.mdix.au  binary
+*.bin      binary

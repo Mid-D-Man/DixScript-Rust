@@ -106,10 +106,10 @@ jobs:
           for f in mdix_files/tests/dlm/*.mdix; do
             [ -f "$f" ] && echo "  ✓ $f" || echo "  ✗ MISSING: $f"
           done
-          echo "=== Binary fixture ==="
-          [ -f "mdix_files/tests/binary/serialize_target.mdix" ] \
+          echo "=== Binary fixture (lives in dlm/) ==="
+          [ -f "mdix_files/tests/dlm/serialize_target.mdix" ] \
             && echo "  ✓ serialize_target.mdix" \
-            || echo "  ✗ MISSING: serialize_target.mdix"
+            || echo "  ✗ MISSING: mdix_files/tests/dlm/serialize_target.mdix"
 
       - name: Run all edge case tests
         continue-on-error: true

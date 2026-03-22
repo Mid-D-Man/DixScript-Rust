@@ -45,7 +45,10 @@ pub fn suffixed_output_path(input: &Path, suffix: &str) -> PathBuf {
     parent.join(format!("{}.{}.{}", stem, suffix, ext))
 }
 
-/// Return `CliError::InvalidArgument` if `path` does not end in `.mdix` or `.dixscript`.
+/// Return `CliError::InvalidArgument` if `path` does not end in `.mdix`.
+///
+/// The legacy `.dixscript` extension is accepted as a fallback alias so that
+/// users migrating from the C# implementation are not immediately broken.
 pub fn validate_mdix_extension(path: &Path) -> Result<(), CliError> {
     match path.extension().and_then(|e| e.to_str()) {
         Some("mdix") | Some("dixscript") => Ok(()),

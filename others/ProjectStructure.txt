@@ -12,6 +12,7 @@ Workspace Members:
   ✓ mdix-ffi/
   ✓ mdix-wasm/
   ✓ mdix-python/
+
   ✓ mdix-java/
   ✓ mdix-lsp/
   ✓ mdix-c/

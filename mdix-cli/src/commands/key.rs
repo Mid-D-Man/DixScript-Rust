@@ -1,4 +1,4 @@
-// dixscript-cli/src/commands/key.rs
+// mdix-cli/src/commands/key.rs
 
 use clap::{Args, Subcommand};
 use serde::Serialize;
@@ -14,18 +14,18 @@ pub struct KeyArgs {
 
 #[derive(Subcommand)]
 pub enum KeySubcommand {
-    /// Generate a new .dixscript.key file
+    /// Generate a new .mdix.key file
     Generate(KeyGenerateArgs),
-    /// Validate an existing .dixscript.key file
+    /// Validate an existing .mdix.key file
     Validate(KeyValidateArgs),
-    /// Show metadata from a .dixscript.key file
+    /// Show metadata from a .mdix.key file
     Info(KeyInfoArgs),
 }
 
 #[derive(Args)]
 pub struct KeyGenerateArgs {
     /// Output path for the generated key file
-    #[arg(long, default_value = "output.dixscript.key")]
+    #[arg(long, default_value = "output.mdix.key")]
     pub output: String,
 
     /// Encryption algorithm: aes128 | aes256 | chacha20
@@ -39,13 +39,13 @@ pub struct KeyGenerateArgs {
 
 #[derive(Args)]
 pub struct KeyValidateArgs {
-    /// Path to the .dixscript.key file
+    /// Path to the .mdix.key file
     pub keyfile: String,
 }
 
 #[derive(Args)]
 pub struct KeyInfoArgs {
-    /// Path to the .dixscript.key file
+    /// Path to the .mdix.key file
     pub keyfile: String,
 }
 
@@ -103,7 +103,7 @@ fn run_validate(args: KeyValidateArgs, global: &GlobalOpts) -> i32 {
         Ok(()) => {
             if global.json {
                 json_output::print_result(serde_json::json!({
-                    "valid": true,
+                    "valid":   true,
                     "keyfile": args.keyfile
                 }));
                 return 0;
@@ -132,14 +132,14 @@ fn run_info(args: KeyInfoArgs, global: &GlobalOpts) -> i32 {
             }
             if !global.quiet {
                 printer::section("Key File Info");
-                printer::kv("algorithm",       &info.algorithm);
-                printer::kv("key length",      &format!("{} bytes", info.key_length));
-                printer::kv("mode",            &info.mode);
-                printer::kv("compression",     &info.has_compression.to_string());
-                printer::kv("created",         &info.created);
+                printer::kv("algorithm",   &info.algorithm);
+                printer::kv("key length",  &format!("{} bytes", info.key_length));
+                printer::kv("mode",        &info.mode);
+                printer::kv("compression", &info.has_compression.to_string());
+                printer::kv("created",     &info.created);
             }
             0
         }
         Err(e) => handle_error(&e, global.json),
     }
-  }
+}

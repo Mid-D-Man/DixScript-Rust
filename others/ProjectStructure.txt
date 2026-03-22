@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Sun Mar 22 12:35:00 UTC 2026
+Generated: Sun Mar 22 12:35:41 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 0d3be38acdead1a0e61e1b1074af61822f337623
+Commit: 97aabc91868f004cafd9eb265e7639041b6fb5c0
 Branch: master
 ==================================
 
@@ -143,7 +143,6 @@ Source Files:
   dixscript/src/Compiler/DLM/Compressor/mod.rs
   dixscript/src/Compiler/DLM/Encryptor/aes128_encryptor.rs
   dixscript/src/Compiler/DLM/Encryptor/aes256_encryptor.rs
-  dixscript/src/Compiler/DLM/Encryptor/argon2_kdf.rs
   dixscript/src/Compiler/DLM/Encryptor/chacha20_encryptor.rs
   dixscript/src/Compiler/DLM/Encryptor/encryptor_trait.rs
   dixscript/src/Compiler/DLM/Encryptor/mod.rs
@@ -363,14 +362,14 @@ GitHub Workflows:
 
 Total Rust File Counts:
 =======================
-  Source files:    262
+  Source files:    261
   Test files:      10
   Benchmark files: 9
-  Total:           281
+  Total:           280
 
 Per-Member Breakdown:
 ====================
-  dixscript: src=209  tests=4  benches=9
+  dixscript: src=208  tests=4  benches=9
   mdix-cli: src=25  tests=5  benches=0
   mdix-ffi: src=4  tests=0  benches=0
   mdix-wasm: src=4  tests=0  benches=0

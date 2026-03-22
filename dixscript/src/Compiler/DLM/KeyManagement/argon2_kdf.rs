@@ -4,10 +4,7 @@
 use crate::Compiler::AST::SecuritySection;
 use crate::ErrorManager::{ErrorManager, DlmErrorType};
 use std::collections::HashMap;
-use argon2::{
-    Argon2,
-    Algorithm, Version, Params,
-};
+use argon2::{Argon2, Algorithm, Version, Params};
 
 /// Argon2id Key Derivation Function
 /// Memory-hard KDF resistant to GPU/ASIC attacks
@@ -75,7 +72,7 @@ impl Argon2KDF {
             .find(|e| e.block_key.eq_ignore_ascii_case("encryption"));
 
         let Some(block) = encryption_block else {
-            return (65536, 3, 4); // 64 MB, 3 iterations, 4 threads
+            return (65536, 3, 4);
         };
 
         let memory      = Self::get_int_field(&block.fields, "kdf_memory",      65536);
@@ -113,15 +110,13 @@ impl Argon2KDF {
 
     // ── Public ────────────────────────────────────────────────────────────────
 
-    /// Load existing salt (alternative to `from_params_with_salt` when a
-    /// `SecuritySection` is available but the salt needs to be overridden
-    /// for decryption).
+    /// Load existing salt (for decryption when a `SecuritySection` is available
+    /// but the salt needs to be overridden from the key file).
     pub fn load_salt(&mut self, existing_salt: Vec<u8>) -> Result<(), String> {
         if existing_salt.len() != 32 {
             return Err("Invalid salt — must be 32 bytes".to_string());
         }
         self.salt = existing_salt;
-
         if self.error_manager.get_debug_mode() != crate::Compiler::Core::Config::DebugMode::Off {
             self.error_manager.log_debug("[Argon2KDF] Loaded existing salt");
         }
@@ -135,7 +130,8 @@ impl Argon2KDF {
                 DlmErrorType::KeyGenerationFailed,
                 "Password cannot be empty".to_string(),
                 Some("Argon2KDF".to_string()),
-                None, None,
+                None,
+                None,
                 crate::ErrorManager::ErrorSeverity::Error,
             );
             return Err("Password cannot be empty".to_string());
@@ -146,7 +142,8 @@ impl Argon2KDF {
                 DlmErrorType::KeyGenerationFailed,
                 "Key length must be 16 (AES-128) or 32 (AES-256/ChaCha20)".to_string(),
                 Some("Argon2KDF".to_string()),
-                None, None,
+                None,
+                None,
                 crate::ErrorManager::ErrorSeverity::Error,
             );
             return Err("Key length must be 16 or 32 bytes".to_string());
@@ -176,7 +173,8 @@ impl Argon2KDF {
                 DlmErrorType::KeyGenerationFailed,
                 msg.clone(),
                 Some("Argon2KDF".to_string()),
-                None, None,
+                None,
+                None,
                 crate::ErrorManager::ErrorSeverity::Error,
             );
             msg
@@ -270,16 +268,15 @@ mod tests {
         let kdf  = Argon2KDF::new(&make_security(65536, 3, 4));
         let key  = kdf.derive_key("test_password", 32).unwrap();
         assert_eq!(key.len(), 32);
-        // deterministic with the same salt
         let key2 = kdf.derive_key("test_password", 32).unwrap();
         assert_eq!(key, key2);
     }
 
     #[test]
     fn test_salt_loading() {
-        let mut kdf      = Argon2KDF::new(&make_security(65536, 3, 4));
-        let original     = kdf.salt().to_vec();
-        let new_salt     = vec![42u8; 32];
+        let mut kdf  = Argon2KDF::new(&make_security(65536, 3, 4));
+        let original = kdf.salt().to_vec();
+        let new_salt = vec![42u8; 32];
         kdf.load_salt(new_salt.clone()).unwrap();
         assert_eq!(kdf.salt(), &new_salt[..]);
         assert_ne!(kdf.salt(), &original[..]);
@@ -313,12 +310,10 @@ mod tests {
 
     #[test]
     fn test_forward_reverse_key_match() {
-        // Simulate the full encrypt→decrypt key derivation round-trip.
-        let fwd_kdf  = Argon2KDF::new(&make_security(65536, 3, 4));
-        let fwd_key  = fwd_kdf.derive_key("shared_password", 32).unwrap();
-        let salt     = fwd_kdf.salt().to_vec();
+        let fwd_kdf = Argon2KDF::new(&make_security(65536, 3, 4));
+        let fwd_key = fwd_kdf.derive_key("shared_password", 32).unwrap();
+        let salt    = fwd_kdf.salt().to_vec();
 
-        // Reverse pipeline uses params + salt read back from the .mdix.key file.
         let rev_kdf = Argon2KDF::from_params_with_salt(65536, 3, 4, salt).unwrap();
         let rev_key = rev_kdf.derive_key("shared_password", 32).unwrap();
 
@@ -338,11 +333,9 @@ mod tests {
         assert_eq!(metadata["kdf_parallelism"], "4");
         assert_eq!(metadata["salt_length"],     "32");
 
-        // Salt must round-trip through base64
         let decoded = general_purpose::STANDARD
             .decode(&metadata["salt"])
             .unwrap();
         assert_eq!(decoded, kdf.salt());
     }
-                  }
-}
+            }

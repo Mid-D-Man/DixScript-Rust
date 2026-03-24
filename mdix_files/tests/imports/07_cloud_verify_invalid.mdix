@@ -1,0 +1,17 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Cloud Import Test 07 — Wrong Hash (expected to fail with HashMismatch)"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  Base from_cloud "https://dixscript-docs.pages.dev/api/registry/base_types.mdix"
+    verify "0000000000000000000000000000000000000000000000000000000000000000"
+)
+
+@DATA(
+  test_name = "07_cloud_verify_invalid"
+  item<object> = Base.makeItem(
+    "BAD001", "Should Not Compile", Base.ItemType.WEAPON, Base.Rarity.COMMON, 1
+  )
+)

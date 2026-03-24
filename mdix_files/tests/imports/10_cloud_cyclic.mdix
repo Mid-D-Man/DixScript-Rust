@@ -1,0 +1,15 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Cloud Import Test 10 — Cloud Cyclic Detection (expected to fail)"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  A from_cloud "https://dixscript-docs.pages.dev/api/registry/circular_cloud_a.mdix"
+)
+
+@DATA(
+  test_name = "10_cloud_cyclic"
+  note      = "Compiler must detect the cloud A -> cloud B -> cloud A cycle and error out"
+  source    = A.source
+)

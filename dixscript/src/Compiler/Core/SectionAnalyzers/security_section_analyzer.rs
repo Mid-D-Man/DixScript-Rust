@@ -214,7 +214,16 @@ impl<'a> SecuritySectionAnalyzer<'a> {
             operational_settings,
         }
     }
-
+pub fn new_with_error_manager(
+    operational_settings: &'a OperationalSettings,
+    error_manager: ErrorManager,
+) -> Self {
+    SecuritySectionAnalyzer {
+        error_manager,
+        debug_config: DebugConfig::from_debug_mode(operational_settings.debug_mode),
+        operational_settings,
+    }
+}
     pub fn analyze(
         &mut self,
         section: &SecuritySection,

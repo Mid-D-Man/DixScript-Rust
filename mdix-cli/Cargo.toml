@@ -1,9 +1,5 @@
 [package]
 name = "mdix-cli"
-# Package name on crates.io is mdix-cli.
-# Binary name (what gets installed) is mdix — see [[bin]] below.
-# The name "dix" was rejected: conflicts with the existing "dix" crate on
-# crates.io (Diff Nix tool). "mdix" is clean and matches the file extension.
 version = "1.0.0"
 edition = "2021"
 rust-version = "1.70"
@@ -18,55 +14,30 @@ categories = ["command-line-utilities"]
 name = "mdix"
 path = "src/main.rs"
 
-# =============================================================================
-# Runtime dependencies
-# =============================================================================
 [dependencies]
-# Core library — path dep within the workspace, no version needed
 dixscript  = { path = "../dixscript" }
 
-# CLI argument parsing
 clap       = { version = "4", features = ["derive", "env"] }
 
-# Config file (de)serialisation — ~/.mdix/config.toml
 serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml       = "0.8"
 
-# Terminal output
 colored    = "2.0"
-
-# Error propagation in main and service layer
 anyhow     = "1.0"
-
-# Key generation — random bytes for key and IV
 rand       = "0.8"
-
-# Base64 encoding for generated key material
 base64     = "0.21"
-
-# Temp file naming during format conversion
 uuid       = { version = "1.0", features = ["v4"] }
-
-# Platform config directory (~/.dixscript/config.toml)
 dirs       = "5.0"
 
-# Progress bars for long-running compile/decrypt operations (optional)
-# Enable with: cargo build -p mdix-cli --features progress
 indicatif  = { version = "0.17", optional = true }
 
-# =============================================================================
-# Feature flags
-# =============================================================================
 [features]
-default  = []
-progress = ["indicatif"]
+default       = []
+progress      = ["indicatif"]
+cloud_imports = ["dixscript/cloud_imports"]
 
-# =============================================================================
-# Dev / test dependencies
-# =============================================================================
 [dev-dependencies]
 tempfile   = "3.10"
-# Integration test helpers — run real binary, assert exit codes and output
 assert_cmd = "2.0"
 predicates = "3.0"

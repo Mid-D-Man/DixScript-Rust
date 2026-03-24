@@ -17,17 +17,24 @@
     .nav-links { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
     .nav-link { display: inline-flex; align-items: center; gap: 5px; color: #8b949e; font-size: 0.80rem; text-decoration: none; padding: 5px 12px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; transition: color .15s, border-color .15s; }
     .nav-link:hover { color: #e6edf3; border-color: #8b949e; }
-    .banner { border-radius: 8px; padding: 14px 20px; margin-bottom: 24px; font-weight: 600; font-size: 0.95rem; }
+    .banner { border-radius: 8px; padding: 14px 20px; margin-bottom: 12px; font-weight: 600; font-size: 0.95rem; }
     .banner.pass    { background: #0f2a1a; border: 1px solid #2ea043; color: #3fb950; }
     .banner.fail    { background: #2a0f0f; border: 1px solid #f85149; color: #f85149; }
     .banner.loading { background: #1c2128; border: 1px solid #30363d; color: #8b949e; }
+    .cloud-banner { border-radius: 8px; padding: 10px 16px; margin-bottom: 24px; font-size: 0.85rem; display: flex; align-items: center; gap: 10px; }
+    .cloud-banner.online  { background: rgba(63,185,80,.07);  border: 1px solid rgba(63,185,80,.3);  color: #3fb950; }
+    .cloud-banner.offline { background: rgba(227,179,65,.07); border: 1px solid rgba(227,179,65,.3); color: #e3b341; }
+    .cloud-banner.loading { background: #1c2128; border: 1px solid #30363d; color: #8b949e; }
+    .cloud-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .cloud-dot.on  { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+    .cloud-dot.off { background: #e3b341; }
     .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 28px; }
     .stat-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px 16px; }
     .stat-card .s-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.6px; color: #484f58; margin-bottom: 6px; }
     .stat-card .s-value { font-size: 1.5rem; font-weight: 700; }
     .stat-card .s-sub { font-size: 0.72rem; color: #8b949e; margin-top: 2px; }
-    .tab-nav { display: flex; gap: 0; margin-bottom: 0; border-bottom: 1px solid #30363d; }
-    .tab-btn { background: #161b22; border: 1px solid #30363d; border-bottom: none; color: #8b949e; padding: 9px 20px; font-size: 0.85rem; cursor: pointer; margin-right: 4px; border-radius: 6px 6px 0 0; transition: all .15s; }
+    .tab-nav { display: flex; gap: 0; flex-wrap: wrap; margin-bottom: 0; border-bottom: 1px solid #30363d; }
+    .tab-btn { background: #161b22; border: 1px solid #30363d; border-bottom: none; color: #8b949e; padding: 9px 16px; font-size: 0.82rem; cursor: pointer; margin-right: 4px; margin-bottom: -1px; border-radius: 6px 6px 0 0; transition: all .15s; white-space: nowrap; }
     .tab-btn:hover { color: #e6edf3; }
     .tab-btn.active { border-color: #f78166; color: #f78166; background: #1c2128; font-weight: 600; }
     .tab-panel { display: none; background: #161b22; border: 1px solid #30363d; border-radius: 0 6px 6px 6px; padding: 20px; margin-bottom: 24px; }
@@ -38,9 +45,12 @@
     tbody tr:last-child { border-bottom: none; }
     tbody tr:hover td { background: #1c2128; }
     td { padding: 9px 14px; vertical-align: top; }
-    .pass-badge { background: rgba(63,185,80,.15); border: 1px solid #2ea043; color: #3fb950; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
-    .fail-badge { background: rgba(248,81,73,.15); border: 1px solid #f85149; color: #f85149; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+    .pass-badge   { background: rgba(63,185,80,.15);  border: 1px solid #2ea043; color: #3fb950; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+    .fail-badge   { background: rgba(248,81,73,.15);  border: 1px solid #f85149; color: #f85149; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+    .skip-badge   { background: rgba(227,179,65,.12); border: 1px solid rgba(227,179,65,.4); color: #e3b341; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+    .expect-badge { background: rgba(88,166,255,.12); border: 1px solid rgba(88,166,255,.4); color: #58a6ff; font-size: .68rem; padding: 2px 7px; border-radius: 8px; white-space: nowrap; }
     .section-title { font-size: 1rem; font-weight: 700; border-left: 3px solid #f78166; padding-left: 10px; margin-bottom: 14px; }
+    .section-sub   { font-size: 0.80rem; color: #484f58; margin-bottom: 12px; }
     pre.output-block { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.73rem; color: #8b949e; background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 10px 12px; overflow-x: auto; max-height: 200px; overflow-y: auto; white-space: pre; }
     pre.hex-block { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.72rem; color: #79c0ff; background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 10px 12px; overflow: auto; max-height: 400px; white-space: pre; }
     .b64-block { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.70rem; color: #e3b341; background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 10px 12px; overflow-x: auto; word-break: break-all; max-height: 120px; overflow-y: auto; }
@@ -61,10 +71,12 @@
     .file-chip { display: inline-flex; align-items: center; gap: 5px; background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 3px 8px; font-size: .72rem; font-family: monospace; margin: 2px; }
     .file-chip a { color: #58a6ff; text-decoration: none; }
     .file-chip a:hover { text-decoration: underline; }
+    .offline-notice { background: rgba(227,179,65,.06); border: 1px solid rgba(227,179,65,.25); border-radius: 8px; padding: 20px 24px; color: #e3b341; font-size: 0.875rem; line-height: 1.7; }
     .toast { position: fixed; bottom: 24px; right: 24px; background: #161b22; border: 1px solid #3fb950; color: #3fb950; padding: 10px 18px; border-radius: 8px; font-size: .82rem; font-weight: 600; z-index: 9999; transform: translateY(80px); opacity: 0; transition: all .25s ease; pointer-events: none; }
     .toast.show { transform: translateY(0); opacity: 1; }
     footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid #30363d; color: #484f58; font-size: .76rem; text-align: center; }
-    .hidden { display: none !important; }
+    .keyword-hit  { color: #3fb950; font-size: .75rem; }
+    .keyword-miss { color: #f85149; font-size: .75rem; }
   </style>
 </head>
 <body>
@@ -78,8 +90,8 @@
   </div>
 
   <header>
-    <h1>🔬 DixScript <span>— Edge Cases, DLM & Binary</span></h1>
-    <p style="color:#8b949e;margin-top:5px">MidManStudio | DixScript-Rust · Imports · Cyclic Detection · DLM Pipeline · Binary Serialization</p>
+    <h1>🔬 DixScript <span>— Edge Cases, DLM, Cloud Imports & Binary</span></h1>
+    <p style="color:#8b949e;margin-top:5px">MidManStudio | DixScript-Rust · Local Imports · Cloud Imports · Cyclic Detection · DLM Pipeline · Binary Serialization</p>
     <div class="meta">
       <div class="meta-item"><strong>Build:</strong> #BUILD_NUM_PLACEHOLDER</div>
       <div class="meta-item"><strong>Branch:</strong> BRANCH_PLACEHOLDER</div>
@@ -91,46 +103,70 @@
 
   <div class="banner loading" id="banner">Loading results…</div>
 
+  <div class="cloud-banner loading" id="cloud-banner">
+    <div class="cloud-dot" id="cloud-dot"></div>
+    <span id="cloud-banner-text">Checking registry status…</span>
+  </div>
+
   <div class="stat-grid">
     <div class="stat-card"><div class="s-label">Total Passed</div><div class="s-value" id="s-passed" style="color:#3fb950">—</div><div class="s-sub">all categories</div></div>
     <div class="stat-card"><div class="s-label">Total Failed</div><div class="s-value" id="s-failed" style="color:#f85149">—</div><div class="s-sub">all categories</div></div>
-    <div class="stat-card"><div class="s-label">Import Tests</div><div class="s-value" id="s-imports">—</div><div class="s-sub">5 test files</div></div>
+    <div class="stat-card"><div class="s-label">Total Skipped</div><div class="s-value" id="s-skipped" style="color:#e3b341">—</div><div class="s-sub">offline only</div></div>
+    <div class="stat-card"><div class="s-label">Local Imports</div><div class="s-value" id="s-imports">—</div><div class="s-sub">5 test files</div></div>
+    <div class="stat-card"><div class="s-label">Cloud Imports</div><div class="s-value" id="s-cloud-imports">—</div><div class="s-sub">4 scenarios</div></div>
+    <div class="stat-card"><div class="s-label">Cloud Cyclic</div><div class="s-value" id="s-cloud-cyclic">—</div><div class="s-sub">detection</div></div>
     <div class="stat-card"><div class="s-label">DLM Modules</div><div class="s-value" id="s-dlm">—</div><div class="s-sub">10 configurations</div></div>
-    <div class="stat-card"><div class="s-label">Cyclic Guard</div><div class="s-value" id="s-cyclic">—</div><div class="s-sub">detection</div></div>
+    <div class="stat-card"><div class="s-label">Local Cyclic</div><div class="s-value" id="s-cyclic">—</div><div class="s-sub">filesystem</div></div>
     <div class="stat-card"><div class="s-label">Binary Capture</div><div class="s-value" id="s-binary">—</div><div class="s-sub">BinaryPacker</div></div>
   </div>
 
   <div class="tab-nav">
-    <button class="tab-btn active" onclick="showTab('imports')">📥 Imports (5)</button>
-    <button class="tab-btn"        onclick="showTab('cyclic')">🔄 Cyclic Detection</button>
-    <button class="tab-btn"        onclick="showTab('binary')">🗜️ Binary Serialization</button>
-    <button class="tab-btn"        onclick="showTab('dlm')">🔐 DLM Pipeline (10)</button>
+    <button class="tab-btn active"  onclick="showTab('imports',       this)">📥 Local Imports (5)</button>
+    <button class="tab-btn"         onclick="showTab('cyclic',        this)">🔄 Local Cyclic</button>
+    <button class="tab-btn"         onclick="showTab('cloud-imports', this)">☁️ Cloud Imports (4)</button>
+    <button class="tab-btn"         onclick="showTab('cloud-cyclic',  this)">🔄☁️ Cloud Cyclic</button>
+    <button class="tab-btn"         onclick="showTab('binary',        this)">🗜️ Binary</button>
+    <button class="tab-btn"         onclick="showTab('dlm',           this)">🔐 DLM Pipeline (10)</button>
   </div>
 
-  <!-- IMPORTS TAB -->
+  <!-- LOCAL IMPORTS TAB -->
   <div class="tab-panel active" id="tab-imports">
-    <div class="section-title">Import Test Cases</div>
-    <p style="font-size:.80rem;color:#484f58;margin-bottom:12px">Tests all import scenarios: alias enum access, alias func calls inside QuickFuncs and DATA, nested imported calls, and enum values as function arguments across imported namespaces including transitive imports via game_helpers → base_types.</p>
+    <div class="section-title">Local Import Test Cases</div>
+    <p class="section-sub">Alias enum access, alias func calls inside QuickFuncs and DATA, nested imported calls, and enum values as function arguments across imported namespaces including transitive imports via game_helpers → base_types.</p>
     <table>
       <thead><tr><th>ID</th><th>Test Name</th><th>File</th><th>Status</th><th>Time</th><th>Output</th></tr></thead>
       <tbody id="import-tbody"></tbody>
     </table>
   </div>
 
-  <!-- CYCLIC TAB -->
+  <!-- LOCAL CYCLIC TAB -->
   <div class="tab-panel" id="tab-cyclic">
-    <div class="section-title">Cyclic Import Detection</div>
-    <p style="font-size:.80rem;color:#484f58;margin-bottom:12px">circular_a.mdix imports circular_b.mdix which imports circular_a.mdix. The compiler must detect this and return an error without hanging.</p>
+    <div class="section-title">Local Cyclic Import Detection</div>
+    <p class="section-sub">circular_a.mdix imports circular_b.mdix which imports circular_a.mdix. The compiler must detect this and return an error without hanging. Tests the filesystem import graph walker.</p>
     <table>
-      <thead><tr><th>Test</th><th>Status</th><th>Exit Code</th><th>Error Detected</th><th>Error Message</th></tr></thead>
+      <thead><tr><th>Test</th><th>Status</th><th>Exit Code</th><th>Error Detected</th><th>Keyword Found</th><th>Error Output</th></tr></thead>
       <tbody id="cyclic-tbody"></tbody>
     </table>
+  </div>
+
+  <!-- CLOUD IMPORTS TAB -->
+  <div class="tab-panel" id="tab-cloud-imports">
+    <div class="section-title">Cloud Import Tests</div>
+    <p class="section-sub">Tests fetching importable .mdix packages from the live Cloudflare R2 registry at dixscript-docs.pages.dev. Tests 07 and 08 are expected to fail — a pass means the compiler correctly produced an error. Skipped when the registry is unreachable.</p>
+    <div id="cloud-imports-content"></div>
+  </div>
+
+  <!-- CLOUD CYCLIC TAB -->
+  <div class="tab-panel" id="tab-cloud-cyclic">
+    <div class="section-title">Cloud Cyclic Import Detection</div>
+    <p class="section-sub">circular_cloud_a.mdix imports circular_cloud_b.mdix via from_cloud, which imports circular_cloud_a.mdix via from_cloud. The compiler must detect the HTTP-level cycle without hanging or making infinite requests. Skipped when the registry is unreachable.</p>
+    <div id="cloud-cyclic-content"></div>
   </div>
 
   <!-- BINARY TAB -->
   <div class="tab-panel" id="tab-binary">
     <div class="section-title">Binary Serialization Output — BinaryPacker Raw</div>
-    <p style="font-size:.80rem;color:#484f58;margin-bottom:14px">Output of <code style="color:#79c0ff">BinaryPacker::pack()</code> on <code style="color:#79c0ff">serialize_target.mdix</code> — before any DLM pipeline. Copy the base64 string to apply your own compression algorithm.</p>
+    <p class="section-sub">Output of <code style="color:#79c0ff">BinaryPacker::pack()</code> on <code style="color:#79c0ff">serialize_target.mdix</code> — before any DLM pipeline. Copy the base64 string to apply your own compression algorithm.</p>
     <div id="binary-section">
       <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
         <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px 18px">
@@ -144,7 +180,6 @@
           <div style="font-size:.72rem;color:#8b949e">serialized</div>
         </div>
       </div>
-
       <div style="margin-bottom:18px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <div style="font-size:.80rem;font-weight:600">Base64 — Copy and decode to apply your own compression</div>
@@ -152,7 +187,6 @@
         </div>
         <div class="b64-block" id="bin-b64">—</div>
       </div>
-
       <div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <div style="font-size:.80rem;font-weight:600">Hex Dump (xxd format)</div>
@@ -166,7 +200,7 @@
   <!-- DLM TAB -->
   <div class="tab-panel" id="tab-dlm">
     <div class="section-title">DLM Pipeline Tests — All Modules</div>
-    <p style="font-size:.80rem;color:#484f58;margin-bottom:12px">Each DLM module tested independently plus combinations. Encrypted tests run full round-trip: compile → decrypt → inspect original vs reconstructed.</p>
+    <p class="section-sub">Each DLM module tested independently plus combinations. Encrypted tests run full round-trip: compile → decrypt → inspect original vs reconstructed.</p>
     <table>
       <thead><tr><th>ID</th><th>Configuration</th><th>Status</th><th>Enc</th><th>Cmp</th><th>Aud</th><th>Produced Files</th><th>Round-trip</th><th></th></tr></thead>
       <tbody id="dlm-tbody"></tbody>
@@ -182,11 +216,11 @@
 let ALL_DATA = null;
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
-function showTab(name) {
+function showTab(name, btn) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
-  event.currentTarget.classList.add('active');
+  if (btn) btn.classList.add('active');
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -200,41 +234,99 @@ function showToast(msg) {
 
 async function copyText(text, btn, label) {
   try { await navigator.clipboard.writeText(text); }
-  catch { const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
-  if (btn) { const orig = btn.textContent; btn.textContent = '✓ Copied'; btn.classList.add('copied'); setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800); }
+  catch {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+  }
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied'; btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
+  }
   showToast(label || 'Copied');
 }
 
-function copyB64(btn)  { copyText(ALL_DATA?.binary_capture?.b64 || '', btn, 'Base64 copied — paste and decode to apply your compression'); }
-function copyHex(btn)  { copyText(document.getElementById('bin-hex').textContent, btn, 'Hex dump copied'); }
+function copyB64(btn) { copyText(ALL_DATA?.binary_capture?.b64 || '', btn, 'Base64 copied'); }
+function copyHex(btn) { copyText(document.getElementById('bin-hex').textContent, btn, 'Hex dump copied'); }
 
-// ── Render ────────────────────────────────────────────────────────────────────
-function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function badge(status) { return status === 'passed' ? '<span class="pass-badge">✓ PASS</span>' : '<span class="fail-badge">✗ FAIL</span>'; }
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
-function renderAll(data) {
-  ALL_DATA = data;
-  const sum = data.summary;
+function badge(status) {
+  if (status === 'passed')  return '<span class="pass-badge">✓ PASS</span>';
+  if (status === 'skipped') return '<span class="skip-badge">— SKIP</span>';
+  return '<span class="fail-badge">✗ FAIL</span>';
+}
+
+function toggleDetail(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+
+// ── Cloud banner ──────────────────────────────────────────────────────────────
+function renderCloudBanner(cloud) {
+  if (!cloud) return;
+  const banner = document.getElementById('cloud-banner');
+  const dot    = document.getElementById('cloud-dot');
+  const text   = document.getElementById('cloud-banner-text');
+
+  if (cloud.available) {
+    banner.className = 'cloud-banner online';
+    dot.className    = 'cloud-dot on';
+    text.textContent =
+      `Registry online — ${cloud.registry_base}  (${cloud.latency_ms}ms)`;
+  } else {
+    banner.className = 'cloud-banner offline';
+    dot.className    = 'cloud-dot off';
+    text.textContent =
+      `Registry offline — cloud import tests skipped. Error: ${cloud.error || 'unreachable'}`;
+  }
+}
+
+// ── Render: overall summary ───────────────────────────────────────────────────
+function renderSummary(data) {
+  const sum   = data.summary;
   const allOk = sum.total_failed === 0;
 
   document.getElementById('banner').className = 'banner ' + (allOk ? 'pass' : 'fail');
   document.getElementById('banner').textContent = allOk
     ? `✅ All ${sum.total_passed} edge case tests passed — Build #${data.build}`
-    : `❌ ${sum.total_failed} test(s) FAILED — ${sum.total_passed} passed — Build #${data.build}`;
+    : `❌ ${sum.total_failed} test(s) FAILED — ${sum.total_passed} passed — ${sum.total_skipped || 0} skipped — Build #${data.build}`;
 
   document.getElementById('s-passed').textContent  = sum.total_passed;
   document.getElementById('s-failed').textContent  = sum.total_failed;
-  document.getElementById('s-imports').textContent = `${sum.imports_passed}/${sum.imports_passed + sum.imports_failed}`;
-  document.getElementById('s-dlm').textContent     = `${sum.dlm_passed}/${sum.dlm_passed + sum.dlm_failed}`;
-  document.getElementById('s-cyclic').textContent  = sum.cyclic_passed > 0 ? '✓' : '✗';
-  document.getElementById('s-binary').textContent  = sum.binary_passed > 0 ? '✓' : '✗';
+  document.getElementById('s-skipped').textContent = sum.total_skipped || 0;
 
-  renderImports(data.import_tests);
-  renderCyclic(data.cyclic_tests);
-  renderBinary(data.binary_capture);
-  renderDLM(data.dlm_tests);
+  document.getElementById('s-imports').textContent =
+    `${sum.imports_passed}/${sum.imports_passed + sum.imports_failed}`;
+
+  const cip = sum.cloud_imports_passed || 0;
+  const cif = sum.cloud_imports_failed || 0;
+  const cis = sum.cloud_imports_skipped || 0;
+  document.getElementById('s-cloud-imports').textContent =
+    cis > 0 ? `SKIP` : `${cip}/${cip + cif}`;
+
+  const ccp = sum.cloud_cyclic_passed || 0;
+  const ccf = sum.cloud_cyclic_failed || 0;
+  const ccs = sum.cloud_cyclic_skipped || 0;
+  document.getElementById('s-cloud-cyclic').textContent =
+    ccs > 0 ? 'SKIP' : (ccp > 0 ? '✓' : '✗');
+
+  document.getElementById('s-dlm').textContent =
+    `${sum.dlm_passed}/${sum.dlm_passed + sum.dlm_failed}`;
+
+  document.getElementById('s-cyclic').textContent =
+    sum.cyclic_passed > 0 ? '✓' : '✗';
+
+  document.getElementById('s-binary').textContent =
+    sum.binary_passed > 0 ? '✓' : '✗';
 }
 
+// ── Render: local imports ─────────────────────────────────────────────────────
 function renderImports(tests) {
   const tbody = document.getElementById('import-tbody');
   tbody.innerHTML = '';
@@ -247,37 +339,163 @@ function renderImports(tests) {
       <td style="font-family:monospace;font-size:.78rem;color:#484f58">${esc(t.file)}</td>
       <td>${badge(t.status)}</td>
       <td style="font-size:.75rem;color:#484f58">${t.elapsed_ms}ms</td>
-      <td>${hasOut ? `<button class="expand-btn" onclick="toggleDetail('imp-${i}')">↕ Show</button>` : '<span style="color:#484f58;font-size:.72rem">—</span>'}</td>
-    `;
+      <td>${hasOut
+        ? `<button class="expand-btn" onclick="toggleDetail('imp-${i}')">↕ Show</button>`
+        : '<span style="color:#484f58;font-size:.72rem">—</span>'}</td>`;
     tbody.appendChild(tr);
     if (hasOut) {
       const dr = document.createElement('tr');
       dr.className = 'detail-row';
       dr.innerHTML = `<td colspan="6"><div class="detail-inner" id="imp-${i}">
-        ${t.stderr ? `<div style="margin-bottom:8px"><div class="diff-label">stderr</div><pre class="output-block" style="color:#f85149">${esc(t.stderr)}</pre></div>` : ''}
-        ${t.stdout ? `<div><div class="diff-label">stdout</div><pre class="output-block">${esc(t.stdout)}</pre></div>` : ''}
+        ${t.stderr ? `<div style="margin-bottom:8px"><div class="diff-label">stderr</div>
+          <pre class="output-block" style="color:#f85149">${esc(t.stderr)}</pre></div>` : ''}
+        ${t.stdout ? `<div><div class="diff-label">stdout</div>
+          <pre class="output-block">${esc(t.stdout)}</pre></div>` : ''}
       </div></td>`;
       tbody.appendChild(dr);
     }
   });
 }
 
+// ── Render: local cyclic ──────────────────────────────────────────────────────
 function renderCyclic(tests) {
   const tbody = document.getElementById('cyclic-tbody');
   tbody.innerHTML = '';
   (tests || []).forEach(t => {
+    const kwHtml = t.keyword_found === true
+      ? '<span class="keyword-hit">✓ found</span>'
+      : t.keyword_found === false
+        ? '<span class="keyword-miss">✗ not found</span>'
+        : '<span style="color:#484f58">—</span>';
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${esc(t.name)}</td>
       <td>${badge(t.status)}</td>
       <td style="font-family:monospace;color:${t.exit_code !== 0 ? '#3fb950' : '#f85149'}">${t.exit_code}</td>
-      <td>${t.error_detected ? '<span style="color:#3fb950">Yes — error returned</span>' : '<span style="color:#f85149">No — did not error</span>'}</td>
-      <td><pre class="output-block" style="max-height:80px">${esc(t.stderr || '(no output)')}</pre></td>
-    `;
+      <td>${t.error_detected
+        ? '<span style="color:#3fb950">Yes</span>'
+        : '<span style="color:#f85149">No</span>'}</td>
+      <td>${kwHtml}</td>
+      <td><pre class="output-block" style="max-height:80px">${esc(t.stderr || '(no output)')}</pre></td>`;
     tbody.appendChild(tr);
   });
 }
 
+// ── Render: cloud imports ─────────────────────────────────────────────────────
+function renderCloudImports(tests, cloudAvailable) {
+  const container = document.getElementById('cloud-imports-content');
+  container.innerHTML = '';
+
+  if (!cloudAvailable || (tests && tests.length > 0 && tests[0].skipped)) {
+    container.innerHTML = `
+      <div class="offline-notice">
+        <strong>Cloud tests skipped</strong> — The Cloudflare Pages registry was unreachable at build time.
+        These tests run when <code>https://dixscript-docs.pages.dev/api/registry/</code> is accessible.
+        Re-run the workflow once the registry is deployed to see results.
+      </div>`;
+    return;
+  }
+
+  const table = document.createElement('table');
+  table.innerHTML = `
+    <thead><tr>
+      <th>ID</th><th>Test Name</th><th>File</th>
+      <th>Expected</th><th>Status</th><th>Exit</th><th>Keyword</th><th>Time</th><th></th>
+    </tr></thead>`;
+  const tbody = document.createElement('tbody');
+
+  (tests || []).forEach((t, i) => {
+    const expectedHtml = t.expected_pass
+      ? '<span class="expect-badge">success</span>'
+      : '<span class="expect-badge" style="border-color:rgba(248,81,73,.4);color:#f85149">error</span>';
+
+    const kwHtml = t.error_keyword_found === true
+      ? '<span class="keyword-hit">✓ found</span>'
+      : t.error_keyword_found === false
+        ? '<span class="keyword-miss">✗ not found</span>'
+        : '<span style="color:#484f58">—</span>';
+
+    const hasOut = t.stderr || t.stdout;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-family:monospace;color:#8b949e">${esc(t.id)}</td>
+      <td>${esc(t.name)}</td>
+      <td style="font-family:monospace;font-size:.75rem;color:#484f58">${esc(t.file)}</td>
+      <td>${expectedHtml}</td>
+      <td>${badge(t.status)}</td>
+      <td style="font-family:monospace;font-size:.78rem;color:${t.exit_code === 0 ? '#3fb950' : '#f85149'}">${t.exit_code ?? '—'}</td>
+      <td>${kwHtml}</td>
+      <td style="font-size:.75rem;color:#484f58">${t.elapsed_ms}ms</td>
+      <td>${hasOut
+        ? `<button class="expand-btn" onclick="toggleDetail('ci-${i}')">↕</button>`
+        : '—'}</td>`;
+    tbody.appendChild(tr);
+
+    if (hasOut) {
+      const dr = document.createElement('tr');
+      dr.className = 'detail-row';
+      dr.innerHTML = `<td colspan="9"><div class="detail-inner" id="ci-${i}">
+        ${t.stderr ? `<div style="margin-bottom:8px"><div class="diff-label">stderr</div>
+          <pre class="output-block" style="color:#f85149">${esc(t.stderr)}</pre></div>` : ''}
+        ${t.stdout ? `<div><div class="diff-label">stdout</div>
+          <pre class="output-block">${esc(t.stdout)}</pre></div>` : ''}
+      </div></td>`;
+      tbody.appendChild(dr);
+    }
+  });
+
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+
+// ── Render: cloud cyclic ──────────────────────────────────────────────────────
+function renderCloudCyclic(tests, cloudAvailable) {
+  const container = document.getElementById('cloud-cyclic-content');
+  container.innerHTML = '';
+
+  if (!cloudAvailable || (tests && tests.length > 0 && tests[0].skipped)) {
+    container.innerHTML = `
+      <div class="offline-notice">
+        <strong>Cloud cyclic tests skipped</strong> — Registry unreachable at build time.
+        This test verifies the compiler detects cycles in HTTP-fetched import graphs without hanging.
+      </div>`;
+    return;
+  }
+
+  const table = document.createElement('table');
+  table.innerHTML = `
+    <thead><tr>
+      <th>Test</th><th>Status</th><th>Exit Code</th>
+      <th>Error Detected</th><th>Keyword Found</th><th>Time</th><th>Error Output</th>
+    </tr></thead>`;
+  const tbody = document.createElement('tbody');
+
+  (tests || []).forEach(t => {
+    const kwHtml = t.keyword_found === true
+      ? '<span class="keyword-hit">✓ found</span>'
+      : t.keyword_found === false
+        ? '<span class="keyword-miss">✗ not found</span>'
+        : '<span style="color:#484f58">—</span>';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${esc(t.name)}</td>
+      <td>${badge(t.status)}</td>
+      <td style="font-family:monospace;color:${t.exit_code !== 0 ? '#3fb950' : '#f85149'}">${t.exit_code ?? '—'}</td>
+      <td>${t.error_detected
+        ? '<span style="color:#3fb950">Yes — error returned</span>'
+        : '<span style="color:#f85149">No — did not error</span>'}</td>
+      <td>${kwHtml}</td>
+      <td style="font-size:.75rem;color:#484f58">${t.elapsed_ms}ms</td>
+      <td><pre class="output-block" style="max-height:80px">${esc(t.stderr || '(no output)')}</pre></td>`;
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+
+// ── Render: binary ────────────────────────────────────────────────────────────
 function renderBinary(b) {
   if (!b) return;
   document.getElementById('bin-size').textContent     = b.size_bytes ?? '—';
@@ -286,17 +504,26 @@ function renderBinary(b) {
   document.getElementById('bin-hex').textContent      = b.hex_dump || '(not captured)';
 }
 
+// ── Render: DLM ───────────────────────────────────────────────────────────────
 function renderDLM(tests) {
   const tbody = document.getElementById('dlm-tbody');
   tbody.innerHTML = '';
   (tests || []).forEach((t, i) => {
     const filesHtml = (t.output_files || []).map(f =>
-      `<span class="file-chip"><a href="dlm-files/${t.id}/${f.name}" download="${f.name}">${esc(f.name)}</a> <span style="color:#484f58">${(f.size_bytes/1024).toFixed(1)}KB</span></span>`
+      `<span class="file-chip">
+        <a href="dlm-files/${t.id}/${f.name}" download="${f.name}">${esc(f.name)}</a>
+        <span style="color:#484f58">${(f.size_bytes / 1024).toFixed(1)}KB</span>
+      </span>`
     ).join('') || '<span style="color:#484f58;font-size:.72rem">none</span>';
 
     const rt = t.roundtrip;
-    const rtHtml = !rt ? '<span style="color:#484f58;font-size:.72rem">—</span>'
-      : `${badge(rt.status)} ${rt.match === true ? '<span class="match-yes">exact match</span>' : rt.match === false ? '<span class="match-no">mismatch</span>' : ''}`;
+    const rtHtml = !rt
+      ? '<span style="color:#484f58;font-size:.72rem">—</span>'
+      : `${badge(rt.status)} ${rt.match === true
+          ? '<span class="match-yes">exact match</span>'
+          : rt.match === false
+            ? '<span class="match-no">mismatch</span>'
+            : ''}`;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -308,49 +535,67 @@ function renderDLM(tests) {
       <td style="text-align:center">${t.audited    ? '<span style="color:#e3b341">✓</span>' : '<span style="color:#484f58">—</span>'}</td>
       <td>${filesHtml}</td>
       <td>${rtHtml}</td>
-      <td><button class="expand-btn" onclick="toggleDetail('dlm-${i}')">↕</button></td>
-    `;
+      <td><button class="expand-btn" onclick="toggleDetail('dlm-${i}')">↕</button></td>`;
     tbody.appendChild(tr);
 
-    const rt2 = t.roundtrip;
     const dr = document.createElement('tr');
     dr.className = 'detail-row';
     dr.innerHTML = `<td colspan="9"><div class="detail-inner" id="dlm-${i}">
-      ${t.stderr ? `<div style="margin-bottom:10px"><div class="diff-label">Compile stderr</div><pre class="output-block" style="color:#f85149">${esc(t.stderr)}</pre></div>` : ''}
-      ${t.stdout ? `<div style="margin-bottom:10px"><div class="diff-label">Compile stdout</div><pre class="output-block">${esc(t.stdout)}</pre></div>` : ''}
-      ${rt2 ? `
-        <div style="margin-top:8px"><div class="diff-label" style="margin-bottom:8px">Round-trip comparison (original inspect vs decrypted inspect)</div>
-        <div class="diff-grid">
-          <div>
-            <div class="diff-label">Original</div>
-            <pre class="output-block">${esc(rt2.original_inspect || '(not available)')}</pre>
+      ${t.stderr ? `<div style="margin-bottom:10px"><div class="diff-label">Compile stderr</div>
+        <pre class="output-block" style="color:#f85149">${esc(t.stderr)}</pre></div>` : ''}
+      ${t.stdout ? `<div style="margin-bottom:10px"><div class="diff-label">Compile stdout</div>
+        <pre class="output-block">${esc(t.stdout)}</pre></div>` : ''}
+      ${rt ? `
+        <div style="margin-top:8px">
+          <div class="diff-label" style="margin-bottom:8px">Round-trip comparison</div>
+          <div class="diff-grid">
+            <div>
+              <div class="diff-label">Original</div>
+              <pre class="output-block">${esc(rt.original_inspect || '(not available)')}</pre>
+            </div>
+            <div>
+              <div class="diff-label">Reconstructed after decrypt</div>
+              <pre class="output-block">${esc(rt.restored_inspect || '(not available)')}</pre>
+            </div>
           </div>
-          <div>
-            <div class="diff-label">Reconstructed after decrypt</div>
-            <pre class="output-block">${esc(rt2.restored_inspect || '(not available)')}</pre>
-          </div>
-        </div>
-        ${rt2.match !== null ? `<div style="margin-top:8px;font-size:.82rem">Match: ${rt2.match ? '<span class="match-yes">exact</span>' : '<span class="match-no">differs — check stderr</span>'}</div>` : ''}
-        ${rt2.stderr ? `<div style="margin-top:8px"><div class="diff-label">Decrypt stderr</div><pre class="output-block" style="color:#f85149;max-height:80px">${esc(rt2.stderr)}</pre></div>` : ''}
+          ${rt.match !== null && rt.match !== undefined
+            ? `<div style="margin-top:8px;font-size:.82rem">Match: ${rt.match
+                ? '<span class="match-yes">exact</span>'
+                : '<span class="match-no">differs</span>'}</div>`
+            : ''}
+          ${rt.stderr ? `<div style="margin-top:8px"><div class="diff-label">Decrypt stderr</div>
+            <pre class="output-block" style="color:#f85149;max-height:80px">${esc(rt.stderr)}</pre></div>` : ''}
         </div>` : ''}
     </div></td>`;
     tbody.appendChild(dr);
   });
 }
 
-function toggleDetail(id) {
-  const el = document.getElementById(id);
-  if (el) el.classList.toggle('open');
+// ── Render all ────────────────────────────────────────────────────────────────
+function renderAll(data) {
+  ALL_DATA = data;
+
+  renderCloudBanner(data.cloud);
+  renderSummary(data);
+  renderImports(data.import_tests);
+  renderCyclic(data.cyclic_tests);
+  renderCloudImports(data.cloud_import_tests, data.cloud?.available);
+  renderCloudCyclic(data.cloud_cyclic_tests,  data.cloud?.available);
+  renderBinary(data.binary_capture);
+  renderDLM(data.dlm_tests);
 }
 
-// ── Fetch ─────────────────────────────────────────────────────────────────────
+// ── Fetch results ─────────────────────────────────────────────────────────────
 fetch('edge-case-results.json')
   .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
   .then(data => renderAll(data))
   .catch(err => {
     document.getElementById('banner').className = 'banner fail';
-    document.getElementById('banner').textContent = `Failed to load edge-case-results.json: ${err.message}`;
+    document.getElementById('banner').textContent =
+      `Failed to load edge-case-results.json: ${err.message}`;
+    document.getElementById('cloud-banner').className = 'cloud-banner offline';
+    document.getElementById('cloud-banner-text').textContent = 'Results unavailable';
   });
 </script>
 </body>
-  </html>
+</html>

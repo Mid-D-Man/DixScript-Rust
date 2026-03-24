@@ -42,11 +42,11 @@ chacha20poly1305 = "0.10"
 argon2           = "0.5"
 hex              = "0.4"
 
-# Cloud-import deps — optional
-reqwest     = { version = "0.11", features = ["json"], optional = true }
-tokio       = { version = "1",    features = ["full"], optional = true }
-async-trait = { version = "0.1",                       optional = true }
-url         = { version = "2.5",                       optional = true }
+# Cloud import deps — always enabled
+reqwest     = { version = "0.11", features = ["json"] }
+tokio       = { version = "1",    features = ["full"] }
+async-trait = "0.1"
+url         = "2.5"
 
 # ── Native-only deps (C libraries or OS threads — excluded from WASM) ─────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -106,6 +106,5 @@ name    = "runtime_benchmark"
 harness = false
 
 [features]
-default = []
-cloud_imports     = ["reqwest", "tokio", "async-trait", "url"]
+default           = []
 cue_cli_available = []

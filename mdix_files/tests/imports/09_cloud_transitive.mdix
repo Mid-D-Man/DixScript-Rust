@@ -1,0 +1,23 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Cloud Import Test 09 — Transitive Cloud Import (game_helpers -> base_types)"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  Helpers from_cloud "https://dixscript-docs.pages.dev/api/registry/game_helpers.mdix"
+)
+
+@DATA(
+  test_name = "09_cloud_transitive"
+
+  normal_enemy<object>   = Helpers.makeEnemy("CE001", "Cloud Troll",  100, Helpers.Difficulty.NORMAL)
+  hard_enemy<object>     = Helpers.makeEnemy("CE002", "Cloud Golem",  300, Helpers.Difficulty.HARD)
+  nightmare_boss<object> = Helpers.makeEnemy("CE003", "Cloud Dragon", 800, Helpers.Difficulty.NIGHTMARE)
+
+  enemy_roster::
+    Helpers.makeEnemy("CE004", "Cloud Goblin",    50, Helpers.Difficulty.EASY),
+    Helpers.makeEnemy("CE005", "Cloud Skeleton",  75, Helpers.Difficulty.NORMAL),
+    Helpers.makeEnemy("CE006", "Cloud Wraith",   150, Helpers.Difficulty.HARD),
+    Helpers.makeEnemy("CE007", "Cloud Lich",     500, Helpers.Difficulty.NIGHTMARE)
+)

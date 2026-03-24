@@ -32,7 +32,20 @@ impl<'a> ImportsSectionAnalyzer<'a> {
             current_file_path: current_file_path.to_string(),
         }
     }
-
+pub fn new_with_error_manager(
+    symbol_table:         &'a SymbolTable,
+    operational_settings: &'a OperationalSettings,
+    current_file_path:    &str,
+    error_manager:        ErrorManager,
+) -> Self {
+    ImportsSectionAnalyzer {
+        error_manager,
+        debug_config:      DebugConfig::from_debug_mode(operational_settings.debug_mode),
+        symbol_table,
+        operational_settings,
+        current_file_path: current_file_path.to_string(),
+    }
+}
     pub fn analyze(&mut self, imports_section: Option<&ImportsSection>) {
         let section = match imports_section {
             Some(s) if !s.imports.is_empty() => s,

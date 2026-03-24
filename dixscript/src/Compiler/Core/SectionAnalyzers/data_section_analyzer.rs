@@ -72,7 +72,16 @@ impl<'a> DataSectionAnalyzer<'a> {
             path_to_type:             FxHashMap::default(),
         }
     }
-
+pub fn new_with_error_manager(
+    operational_settings: &'a OperationalSettings,
+    error_manager: ErrorManager,
+) -> Self {
+    DataSectionAnalyzer {
+        error_manager,
+        debug_config: DebugConfig::from_debug_mode(operational_settings.debug_mode),
+        operational_settings,
+    }
+}
     pub fn analyze(
         &mut self,
         section: &DataSection,

@@ -1,15 +1,11 @@
 // src/Compiler/ImportsResolution/imports_resolver.rs
-//! Recursive import resolution with cycle detection and optional cloud download.
-//!
-//! Cloud download support requires the `cloud_imports` cargo feature.
-//! Local file imports work without any optional features.
+//! Recursive import resolution with cycle detection and cloud download.
 //!
 //! ## Cycle detection
 //!
 //! The resolver keeps two path sets — `visiting` (currently on the call stack)
-//! and `visited` (fully processed).  A cycle is detected when
-//! `resolve_import_recursive` is entered for a path that is already in
-//! `visiting`.
+//! and `visited` (fully processed). A cycle is detected when
+//! `resolve_import_recursive` is entered for a path already in `visiting`.
 //!
 //! ## Two-phase import processing
 //!
@@ -17,30 +13,18 @@
 //!
 //! **Phase 1 — `read_and_parse_raw`**: read file content, verify hash,
 //! tokenize, parse. Returns a raw `DixScript` AST with no semantic analysis
-//! or enhancement. This is intentionally lightweight so that the call can be
-//! made before all transitive dependencies are resolved.
+//! or enhancement.
 //!
 //! **Phase 2 — `analyze_and_enhance`**: called from `resolve_import_inner`
 //! AFTER all transitive dependencies have been registered in
 //! `self.symbol_table`. Seeds the analyzer's internal `SymbolTable` with
 //! only the namespace entries the file actually imports, then runs
-//! `GeneralSemanticAnalyzer` and `GeneralAstEnhancer`. This ensures that
-//! `QualifiedIdentifier` nodes in QuickFuncs bodies (e.g. `Base.Rarity.EPIC`)
-//! are correctly resolved to `EnumAccess` nodes regardless of the order
-//! imports are declared.
+//! `GeneralSemanticAnalyzer` and `GeneralAstEnhancer`.
 //!
-//! **Why this fixes the bug:** The old `parse_imported_file` did both phases
-//! in one shot before transitive deps were registered. That meant the
-//! enhancer had no namespace info and left `Base.Rarity` as a
-//! `PropertyAccess` chain. At runtime the interpreter tried to look up
-//! `Base` as a local variable and failed.
-//!
-//! **Critical invariant:** `parse_imported_file` set
-//! `skip_imports_resolution = true` to prevent the semantic analyser from
-//! spinning up a *new* `ImportsResolver` that had no knowledge of the outer
-//! resolver's `visiting` set. That flag is preserved in `analyze_and_enhance`
-//! for exactly the same reason — the seeded namespaces make phase-3
-//! unnecessary and the cycle guard stays intact.
+//! **Critical invariant:** `skip_imports_resolution = true` is preserved in
+//! `analyze_and_enhance` to prevent the semantic analyser from spinning up a
+//! new `ImportsResolver` that has no knowledge of the outer resolver's
+//! `visiting` set.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -59,17 +43,13 @@ use crate::Compiler::Core::Tokenizer::Tokenizer;
 use crate::Compiler::Utilities::{FunctionSignature, ParameterInfo, QuickFunctionInfo, SymbolTable};
 use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 use crate::ErrorManager::{DebugConfig, ErrorManager, ImportsResolutionErrorType};
-use super::HashVerifier;
-
-#[cfg(feature = "cloud_imports")]
-use super::{CloudFileCache, CloudProviderFactory};
+use super::{HashVerifier, CloudFileCache, CloudProviderFactory};
 
 pub struct ImportsResolver<'a> {
     symbol_table: &'a mut SymbolTable,
     operational_settings: &'a OperationalSettings,
     error_manager: ErrorManager,
     debug_config: DebugConfig,
-    #[cfg(feature = "cloud_imports")]
     cloud_cache: CloudFileCache,
     visiting: HashSet<String>,
     visited: HashSet<String>,
@@ -83,8 +63,6 @@ impl<'a> ImportsResolver<'a> {
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
         let debug_config = DebugConfig::from_debug_mode(error_manager.get_debug_mode());
-
-        #[cfg(feature = "cloud_imports")]
         let cloud_cache = CloudFileCache::new(error_manager.clone());
 
         ImportsResolver {
@@ -92,7 +70,6 @@ impl<'a> ImportsResolver<'a> {
             operational_settings,
             error_manager,
             debug_config,
-            #[cfg(feature = "cloud_imports")]
             cloud_cache,
             visiting: HashSet::new(),
             visited: HashSet::new(),
@@ -104,9 +81,7 @@ impl<'a> ImportsResolver<'a> {
     //
     // Called by GeneralSemanticAnalyzer Phase 3. Reads each import declaration
     // from the already-parsed @IMPORTS section, loads + parses the raw AST from
-    // disk (or cloud), and then resolves it recursively. Enhancement of each
-    // file's AST happens inside resolve_import_inner after all transitive deps
-    // are in the symbol table.
+    // disk (or cloud), and then resolves it recursively.
 
     pub fn resolve_from_imports_section(
         &mut self,
@@ -146,7 +121,6 @@ impl<'a> ImportsResolver<'a> {
                 ));
             }
 
-            // Phase 1: read and parse only — no semantic analysis or enhancement yet.
             let raw_ast = match self.read_and_parse_raw(import, &resolved_path) {
                 Ok(a)  => a,
                 Err(e) => {
@@ -164,7 +138,6 @@ impl<'a> ImportsResolver<'a> {
                 }
             };
 
-            // Recursively resolve transitive deps and then enhance.
             if !self.resolve_import_recursive(&import.alias, &raw_ast, &resolved_path) {
                 self.error_manager.log_error(&format!(
                     "[ImportsResolver] Failed to resolve '{}'",
@@ -196,11 +169,7 @@ impl<'a> ImportsResolver<'a> {
         success
     }
 
-    // ── Legacy entry point (kept for backward compatibility) ──────────────────
-    //
-    // Accepts a map of already-parsed raw ASTs. Still used by tests that build
-    // the map manually. Enhancement now happens inside resolve_import_inner
-    // so passing raw ASTs here is correct.
+    // ── Legacy entry point ────────────────────────────────────────────────────
 
     pub fn resolve_imports(
         &mut self,
@@ -218,7 +187,6 @@ impl<'a> ImportsResolver<'a> {
             parsed_imports.len()
         ));
 
-        #[cfg(feature = "cloud_imports")]
         if self.debug_config.is_enabled {
             let stats = self.cloud_cache.get_statistics();
             self.error_manager.log_debug(&format!("[ImportsResolver] Cache statistics: {}", stats));
@@ -243,7 +211,6 @@ impl<'a> ImportsResolver<'a> {
                     "[ImportsResolver] Failed to resolve import '{}'",
                     alias
                 ));
-
                 if self.operational_settings.error_handling_strategy
                     == ErrorHandlingStrategy::Halt
                 {
@@ -304,7 +271,6 @@ impl<'a> ImportsResolver<'a> {
             return false;
         }
 
-        // Already fully processed — skip.
         if self.visited.contains(&normalized_path) {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!(
@@ -315,7 +281,6 @@ impl<'a> ImportsResolver<'a> {
             return true;
         }
 
-        // Mark in-progress BEFORE recursing.
         self.visiting.insert(normalized_path.clone());
         self.import_stack.push(normalized_path.clone());
 
@@ -337,10 +302,6 @@ impl<'a> ImportsResolver<'a> {
         let mut local_imports = HashMap::new();
 
         // ── Step 1: Resolve all transitive dependencies FIRST ─────────────────
-        //
-        // By the time this block completes, self.symbol_table contains every
-        // namespace that raw_ast's own @IMPORTS section declares. This is the
-        // key invariant that allows Step 2 to seed the analyzer correctly.
         if let Some(ref imports_section) = raw_ast.imports {
             let nested_base_dir = if Self::is_cloud_url(normalized_path) {
                 Self::get_cloud_url_directory(normalized_path)
@@ -386,7 +347,6 @@ impl<'a> ImportsResolver<'a> {
                     }
                 }
 
-                // ── Early cycle check before reading ─────────────────────────
                 let normalized_nested = if Self::is_cloud_url(&nested_path) {
                     Self::strip_query_parameters(&nested_path)
                 } else {
@@ -413,14 +373,12 @@ impl<'a> ImportsResolver<'a> {
                     return false;
                 }
 
-                // Phase 1 only — parse raw, no enhancement yet.
                 let nested_raw =
                     match self.read_and_parse_raw(nested_import, &nested_path) {
                         Ok(a) => a,
                         Err(_) => return false,
                     };
 
-                // Recurse — registers the nested namespace in self.symbol_table.
                 if !self.resolve_import_recursive(
                     &nested_import.alias,
                     &nested_raw,
@@ -437,13 +395,7 @@ impl<'a> ImportsResolver<'a> {
             }
         }
 
-        // ── Step 2: All transitive deps are now registered ────────────────────
-        //
-        // Build the minimal seed: only the namespace entries that correspond to
-        // what this file's @IMPORTS actually declares. For a file like
-        // game_helpers.mdix which only imports Base, this is a single entry.
-        // We clone only those entries — the rest of the outer symbol table
-        // (enums, functions, data vars) is never touched.
+        // ── Step 2: Seed namespaces for enhancement ───────────────────────────
         let seed_namespaces: HashMap<String, ImportedNamespace> =
             if let Some(ref imports_section) = raw_ast.imports {
                 imports_section
@@ -469,14 +421,13 @@ impl<'a> ImportsResolver<'a> {
             ));
         }
 
-        // Phase 2: semantic analysis + AST enhancement with full namespace context.
         let enhanced_ast =
             match self.analyze_and_enhance(raw_ast, normalized_path, alias, &seed_namespaces) {
                 Ok(a)  => a,
                 Err(_) => return false,
             };
 
-        // ── Step 3: Extract symbols from the correctly enhanced AST ───────────
+        // ── Step 3: Extract symbols ───────────────────────────────────────────
         let functions =
             Self::extract_global_functions(enhanced_ast.quick_functions.as_ref(), alias);
         let enums = Self::extract_enums(enhanced_ast.enums.as_ref());
@@ -516,11 +467,6 @@ impl<'a> ImportsResolver<'a> {
     }
 
     // ── Phase 1: Read and parse raw AST ──────────────────────────────────────
-    //
-    // Reads file content, verifies hash, tokenizes, and parses.
-    // Returns the raw DixScript AST with NO semantic analysis or enhancement.
-    // Enhancement is deferred to analyze_and_enhance which is called after
-    // all transitive dependencies are registered in self.symbol_table.
 
     fn read_and_parse_raw(
         &mut self,
@@ -643,15 +589,6 @@ impl<'a> ImportsResolver<'a> {
     }
 
     // ── Phase 2: Semantic analysis and AST enhancement ────────────────────────
-    //
-    // Called from resolve_import_inner AFTER all transitive dependencies have
-    // been registered in self.symbol_table. Seeds a fresh SymbolTable with
-    // only the namespace entries the file actually declares in its @IMPORTS,
-    // then runs semantic analysis and AST enhancement.
-    //
-    // skip_imports_resolution = true is preserved so the semantic analyzer
-    // does not create a new ImportsResolver — the outer resolver's cycle
-    // guard remains the single authority on import traversal.
 
     fn analyze_and_enhance(
         &mut self,
@@ -662,7 +599,7 @@ impl<'a> ImportsResolver<'a> {
     ) -> Result<DixScript, String> {
         let mut import_settings = self.operational_settings.clone();
         import_settings.source_file_path = Some(resolved_path.to_string());
-        // CRITICAL: keep this true — see module-level doc comment.
+        // CRITICAL: prevent a nested ImportsResolver from being created.
         import_settings.skip_imports_resolution = true;
 
         if self.debug_config.is_enabled {
@@ -760,7 +697,13 @@ impl<'a> ImportsResolver<'a> {
         resolved_path: &str,
     ) -> Result<String, String> {
         if import.is_cloud_import {
-            self.read_cloud_content(import)
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(&format!(
+                    "[ImportsResolver] Downloading cloud import: {}",
+                    import.path
+                ));
+            }
+            self.download_cloud_file_sync(&import.path, &import.alias)
         } else {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!(
@@ -785,27 +728,6 @@ impl<'a> ImportsResolver<'a> {
         }
     }
 
-    #[cfg(feature = "cloud_imports")]
-    fn read_cloud_content(&mut self, import: &ImportDeclaration) -> Result<String, String> {
-        if self.debug_config.is_enabled {
-            self.error_manager.log_debug(&format!(
-                "[ImportsResolver] Downloading cloud import: {}",
-                import.path
-            ));
-        }
-        self.download_cloud_file_sync(&import.path, &import.alias)
-    }
-
-    #[cfg(not(feature = "cloud_imports"))]
-    fn read_cloud_content(&mut self, import: &ImportDeclaration) -> Result<String, String> {
-        Err(format!(
-            "Cloud imports require the 'cloud_imports' cargo feature. \
-             Import '{}' at '{}' cannot be resolved.",
-            import.alias, import.path
-        ))
-    }
-
-    #[cfg(feature = "cloud_imports")]
     fn download_cloud_file_sync(
         &mut self,
         cloud_url: &str,

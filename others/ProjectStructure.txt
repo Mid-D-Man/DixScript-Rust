@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Tue Mar 24 07:20:36 UTC 2026
+Generated: Tue Mar 24 07:33:24 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 10ee7eb0763ad135e3d0ae34c94a2b8897bca142
+Commit: 6983dc3c19337acb0344b36ba7bf865b59d4aa08
 Branch: master
 ==================================
 
@@ -336,6 +336,7 @@ DixScript Sample Files (.mdix):
   mdix_files/tests/imports/06_cloud_basic.mdix
   mdix_files/tests/imports/07_cloud_verify_invalid.mdix
   mdix_files/tests/imports/09_cloud_transitive.mdix
+  mdix_files/tests/imports/10_cloud_cyclic.mdix
   mdix_files/tests/imports/base_types.mdix
   mdix_files/tests/imports/circular_a.mdix
   mdix_files/tests/imports/circular_b.mdix

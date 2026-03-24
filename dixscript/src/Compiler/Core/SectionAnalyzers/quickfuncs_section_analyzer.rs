@@ -117,7 +117,16 @@ impl<'a> QuickFuncsSectionAnalyzer<'a> {
             operational_settings,
         }
     }
-
+pub fn new_with_error_manager(
+    operational_settings: &'a OperationalSettings,
+    error_manager: ErrorManager,
+) -> Self {
+    QuickFuncsSectionAnalyzer {
+        error_manager,
+        debug_config: DebugConfig::from_debug_mode(operational_settings.debug_mode),
+        operational_settings,
+    }
+}
     /// Depth limit scales with AST size; capped to avoid runaway recursion.
     #[inline]
     fn calculate_max_depth(ast_size: usize) -> usize {

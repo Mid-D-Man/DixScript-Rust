@@ -1,0 +1,25 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Cloud Import Test 06 — Basic Cloud Import, No Verification"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  Base from_cloud "https://dixscript-docs.pages.dev/api/registry/base_types.mdix"
+)
+
+@DATA(
+  test_name            = "06_cloud_basic"
+  default_rarity<enum> = Base.Rarity.COMMON
+  best_rarity<enum>    = Base.Rarity.LEGENDARY
+  weapon_type<enum>    = Base.ItemType.WEAPON
+
+  cloud_item<object> = Base.makeItem(
+    "C001", "Cloud Sword", Base.ItemType.WEAPON, Base.Rarity.RARE, 100
+  )
+
+  loot_table::
+    Base.makeItem("C002", "Cloud Shield",  Base.ItemType.ARMOR,      Base.Rarity.UNCOMMON,  80),
+    Base.makeItem("C003", "Cloud Potion",  Base.ItemType.CONSUMABLE, Base.Rarity.COMMON,    20),
+    Base.makeItem("C004", "Cloud Relic",   Base.ItemType.QUEST,      Base.Rarity.LEGENDARY, 200)
+)

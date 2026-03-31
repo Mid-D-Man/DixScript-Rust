@@ -1,0 +1,22 @@
+# mdix-lua/Cargo.toml
+[package]
+name        = "mdix-lua"
+version     = "1.0.0"
+edition     = "2021"
+rust-version = "1.70"
+authors     = ["MidManStudio"]
+description = "Lua 5.4 bindings for DixScript (.mdix) — MidManStudio"
+license     = "MIT"
+repository  = "https://github.com/Mid-D-Man/DixScript-Rust"
+
+[lib]
+# lib name must match what Lua's require() looks for.
+# require("mdix") → mdix.so / mdix.dll / mdix.dylib
+# Cargo produces libmdix.so — see README for renaming step.
+name       = "mdix"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dixscript   = { path = "../dixscript" }
+mlua        = { version = "0.10", features = ["lua54", "vendored"] }
+serde_json  = "1.0"

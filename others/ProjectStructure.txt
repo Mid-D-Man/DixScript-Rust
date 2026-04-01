@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Wed Apr  1 02:20:59 UTC 2026
+Generated: Wed Apr  1 02:21:51 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 26a12c1ca1bb880a49993cb7707aead0b7e45b1d
+Commit: 14441296e4261971b019b02bbb376d842ad2c593
 Branch: master
 ==================================
 
@@ -358,6 +358,7 @@ GitHub Workflows:
   .github/workflows/go-ci.yml
   .github/workflows/java-ci.yml
   .github/workflows/lsp-ci.yml
+  .github/workflows/lua-ci.yml
   .github/workflows/mdix-core-cs-publish.yml
   .github/workflows/php-ci.yml
   .github/workflows/python-publish.yml

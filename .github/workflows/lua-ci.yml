@@ -1,0 +1,221 @@
+name: MidManStudio.Mdix — Lua Tests
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  # ── 1. Check trigger ───────────────────────────────────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      run_lua: ${{ steps.decide.outputs.run_lua }}
+    steps:
+      - name: Decide whether to run Lua tests
+        id: decide
+        run: |
+          RUN=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            MSG="${{ github.event.pull_request.title }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-lua\b' && RUN=true || true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-lua\b' && RUN=true || true
+          fi
+
+          echo "run_lua=$RUN" >> $GITHUB_OUTPUT
+          echo "Run Lua tests: $RUN"
+
+  # ── 2. Build library + run tests ──────────────────────────────────────────
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_lua == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Get Rust version
+        id: rustver
+        run: echo "ver=$(rustc --version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-lua-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-lua-
+
+      - name: Build mdix-lua
+        run: |
+          echo "=== Building mdix-lua (release) ==="
+          cargo build -p mdix-lua --release
+          echo "Library: $(ls -lh target/release/libmdix.so)"
+
+      - name: Install Lua 5.4
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y lua5.4 liblua5.4-dev 2>/dev/null || true
+          lua5.4 -v || lua54 -v || lua -v
+
+      - name: Verify test fixtures exist
+        run: |
+          echo "=== Checking test files ==="
+          for f in \
+            mdix-lua/tests/framework.lua \
+            mdix-lua/tests/test_basic.lua \
+            mdix-lua/tests/test_builder.lua \
+            mdix-lua/tests/test_types.lua \
+            mdix-lua/tests/run_tests.lua; do
+            if [ -f "$f" ]; then echo "  ✓ $f"
+            else echo "  ✗ MISSING: $f"
+            fi
+          done
+
+      - name: Run Lua test suite
+        continue-on-error: true
+        env:
+          BUILD_NUM:  ${{ github.run_number }}
+          BRANCH:     ${{ github.ref_name }}
+          COMMIT:     ${{ github.sha }}
+          BUILD_DATE: ${{ github.event.head_commit.timestamp }}
+        run: |
+          python3 tools/run_lua_tests.py
+          echo "LUA_TEST_EXIT=$?" >> $GITHUB_ENV
+
+      - name: Ensure results file exists
+        if: always()
+        run: |
+          if [ ! -f lua-test-results.json ]; then
+            echo "WARNING: lua-test-results.json missing — writing placeholder"
+            cat > lua-test-results.json << 'EOF'
+          {
+            "build":       "${{ github.run_number }}",
+            "branch":      "${{ github.ref_name }}",
+            "commit":      "${GITHUB_SHA:0:8}",
+            "date":        "",
+            "lua_version": "unknown",
+            "tests":       {"total":0,"passed":0,"failed":0,"duration_s":0},
+            "suites":      []
+          }
+          EOF
+          fi
+
+      - name: Build HTML report
+        if: always()
+        run: |
+          cp .github/lua-test-template.html lua-test-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g" lua-test-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"      lua-test-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"           lua-test-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                   lua-test-index.html
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lua-test-results-${{ github.run_number }}
+          path: |
+            lua-test-results.json
+            lua-test-index.html
+          retention-days: 30
+
+  # ── 3. Deploy to gh-pages ────────────────────────────────────────────────
+  deploy-results:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test]
+    if: |
+      always() &&
+      needs.build-and-test.result == 'success' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' ||
+       github.event_name == 'workflow_dispatch')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lua-test-results-${{ github.run_number }}
+          path: deploy/
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            echo "Creating fresh gh-pages branch"
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/lua" "$WORK/lua/builds/build_${BUILD_NUM}"
+
+          # Copy the results JSON as the filename the HTML template fetches
+          cp deploy/lua-test-results.json "$WORK/lua/lua-results.json"
+          cp deploy/lua-test-index.html   "$WORK/lua/index.html"
+
+          # Per-build archive
+          cp deploy/lua-test-results.json "$WORK/lua/builds/build_${BUILD_NUM}/lua-results.json"
+          cp deploy/lua-test-index.html   "$WORK/lua/builds/build_${BUILD_NUM}/index.html"
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "Lua Tests — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+          echo "Deployed → https://mid-d-man.github.io/DixScript-Rust/lua/"
+
+  # ── 4. Summary ───────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test, deploy-results]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "============================================="
+          echo "  MidManStudio.Mdix — Lua Test Summary"
+          echo "============================================="
+          echo "Build:   #${{ github.run_number }}"
+          echo "Branch:  ${{ github.ref_name }}"
+          echo "Trigger: ${{ github.event_name }}"
+          echo "Tests:   ${{ needs.build-and-test.result  || 'skipped' }}"
+          echo "Deploy:  ${{ needs.deploy-results.result  || 'skipped' }}"
+          echo ""
+          if [ "${{ needs.parse-trigger.outputs.run_lua }}" != "true" ]; then
+            echo "Skipped — commit message did not contain --mdix-lua"
+          fi
+          echo ""
+          echo "Results → https://mid-d-man.github.io/DixScript-Rust/lua/"

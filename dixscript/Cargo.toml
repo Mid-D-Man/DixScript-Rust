@@ -4,11 +4,11 @@ version = "1.0.0"
 edition = "2021"
 rust-version = "1.70"
 authors = ["MidManStudio"]
-description = "DixScript - Secure data interchange format with built-in encryption"
+description = "Config, code, and encryption in one file — a data interchange format with compile-time functions, AES-256/ChaCha20 built-in, and cross-platform FFI"
 license = "MIT"
 repository = "https://github.com/Mid-D-Man/DixScript-Rust"
-keywords = ["config", "data", "encryption", "serialization"]
-categories = ["config", "encoding", "data-structures"]
+keywords = ["config", "encryption", "serialization", "data-format", "gamedev"]
+categories = ["config", "encoding", "data-structures", "cryptography"]
 
 [lib]
 name = "dixscript"
@@ -24,14 +24,14 @@ serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml       = "0.8"
 
-phf        = { version = "0.11", features = ["macros"] }
-memchr     = "2.7"
-base64     = "0.21"
-regex      = "1.10"
-itertools  = "0.13"
+phf         = { version = "0.11", features = ["macros"] }
+memchr      = "2.7"
+base64      = "0.21"
+regex       = "1.10"
+itertools   = "0.13"
 lazy_static = "1.4"
-unicase    = "2.7"
-rustc-hash = "2.0"
+unicase     = "2.7"
+rustc-hash  = "2.0"
 
 sha2 = "0.10"
 

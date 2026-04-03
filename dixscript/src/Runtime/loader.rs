@@ -20,8 +20,8 @@ use super::dix_data::DixData;
 
 /// Internal loader for DixScript files.
 ///
-/// Each `DixLoader` instance owns an isolated `ErrorManager` so that
-/// loading multiple files never mixes error state between calls.
+/// Each `DixLoader` owns an isolated `ErrorManager` so loading multiple
+/// files never mixes error state between calls.
 pub struct DixLoader {
     error_manager: ErrorManager,
     key_resolver:  KeyFileResolver,
@@ -30,8 +30,6 @@ pub struct DixLoader {
 impl DixLoader {
     pub fn new() -> Self {
         DixLoader {
-            // Isolated so that parallel loads or sequential loads in a game
-            // runtime never share or accumulate error state.
             error_manager: ErrorManager::new_isolated(),
             key_resolver:  KeyFileResolver::new(),
         }
@@ -39,7 +37,6 @@ impl DixLoader {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /// Load a plain `.dixscript` file from disk.
     pub fn load_text(
         &self,
         mdix_path: &str,
@@ -87,10 +84,6 @@ impl DixLoader {
         ))
     }
 
-    /// Load DixScript source directly from a string (no disk access).
-    ///
-    /// DLM file-output steps are skipped because there is no source path to
-    /// anchor output to. Use `load_text` if you need `.enc` / `.key` output.
     pub fn load_from_str(
         &self,
         source: &str,
@@ -125,7 +118,6 @@ impl DixLoader {
         ))
     }
 
-    /// Load an encrypted `.dixscript.enc` file from disk.
     pub fn load_encrypted(
         &self,
         enc_path: &str,
@@ -164,10 +156,6 @@ impl DixLoader {
         self.decrypt_and_deserialize(&encrypted_data, &key_resolution, enc_path, options)
     }
 
-    /// Load directly from raw encrypted bytes and key file content.
-    ///
-    /// Useful when both payload and key come from a network response or
-    /// secrets manager without touching the filesystem.
     pub fn load_from_encrypted_bytes(
         &self,
         encrypted_bytes: &[u8],
@@ -198,7 +186,7 @@ impl DixLoader {
                 msg.clone(),
                 Some("DixLoader.load_from_encrypted_bytes".to_string()),
                 0, 0, vec![],
-                Some("Provide the full .dixscript.key file content".to_string()),
+                Some("Provide the full .mdix.key file content".to_string()),
             );
             return Err(msg);
         }
@@ -251,13 +239,14 @@ impl DixLoader {
 
         if key_data.is_password_mode && options.password.is_none() {
             let msg = "Password required for decryption. \
-                       Provide one via DixLoadOptions::with_password().";
+                       Rust API: use DixLoadOptions::with_password(). \
+                       FFI callers: use mdix_load_encrypted_password() instead of mdix_load_encrypted().";
             self.error_manager.add_runtime_error(
                 RuntimeErrorType::InvalidOperation,
                 msg.to_string(),
                 Some("DixLoader.decrypt_and_deserialize".to_string()),
                 0, 0, vec![],
-                Some("Use DixLoadOptions::with_password()".to_string()),
+                Some("Provide the password used during compilation.".to_string()),
             );
             return Err(msg.to_string());
         }
@@ -436,7 +425,7 @@ impl DixLoader {
         let has_encryptor  = dlm_section.modules.iter().any(|m| m.module_type == DLMModuleType::DEncryptor);
 
         if has_auditor && !has_compressor && !has_encryptor {
-            self.error_manager.log_info("DAuditor only - generating .dixscript.au file");
+            self.error_manager.log_info("DAuditor only - generating .mdix.au file");
             let audit_file = self.generate_audit_only(ast, source_file_path, options)?;
             result.applied_modules.push("DAuditor".to_string());
             result.generated_audit_file = Some(audit_file);
@@ -514,8 +503,8 @@ impl DixLoader {
         fs::create_dir_all(output_dir)
             .map_err(|e| format!("Failed to create output directory {}: {}", output_dir, e))?;
 
-        let dlm_section      = ast.dlm.as_ref().unwrap();
-        let auditor_module   = dlm_section.modules.iter()
+        let dlm_section    = ast.dlm.as_ref().unwrap();
+        let auditor_module = dlm_section.modules.iter()
             .find(|m| m.module_type == DLMModuleType::DAuditor)
             .ok_or_else(|| "DAuditor module not found in DLM section".to_string())?;
 
@@ -545,7 +534,7 @@ impl DixLoader {
     // ── Key file parsing ──────────────────────────────────────────────────────
 
     fn parse_key_file_content(&self, key_content: &str) -> Result<LoaderKeyMetadata, String> {
-        let temp_dir     = std::env::temp_dir();
+        let temp_dir      = std::env::temp_dir();
         let temp_key_file = temp_dir.join(format!(
             "temp_mdixkey_{}.mdix.key", uuid::Uuid::new_v4()
         ));
@@ -712,13 +701,9 @@ mod tests {
 
     #[test]
     fn test_sequential_loads_dont_accumulate_errors() {
-        // Two loaders loading nonexistent files should each have exactly
-        // one error, not two — because each loader has isolated error state.
         let loader = DixLoader::new();
         let _ = loader.load_text("nonexistent_a.mdix", &DixLoadOptions::new());
         let _ = loader.load_text("nonexistent_b.mdix", &DixLoadOptions::new());
-        // After the second load, clear_errors() was called, so only the
-        // second file's error should be present.
         let errors = loader.error_manager.get_runtime_errors();
         assert_eq!(errors.len(), 1, "only the most recent load's error should remain");
     }

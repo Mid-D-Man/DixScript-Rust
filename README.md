@@ -1,3 +1,157 @@
+# DixScript: The Swiss Army Knife of Data Formats
+
+**Config, Code, and Crypto in One `.mdix` File**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
+[![Status](https://img.shields.io/badge/status-beta-blue.svg)]()
+
+> **"I built this because I was tired of copy-pasting the same JSON config blocks 500 times. Turns out other people hate that too."**  
+> — Mid-D-Man, Creator
+
+---
+
+## ⚠️ Beta — Not Yet Production Battle-Tested
+
+**The Rust port is feature-complete but has not yet seen wide production use.** The API is stable and the compiler pipeline is fully implemented. Use it in your own projects, test it, and give feedback — but treat it as beta for anything mission-critical until v1.0.0 is officially published.
+
+| Package | Status |
+|---------|--------|
+| `dixscript` (core Rust library) | ✅ Feature-complete, API stable |
+| `mdix-cli` | ✅ All commands implemented |
+| `mdix-ffi` / C# bindings | ⏳ Bindings generated, packaging pending |
+| `mdix-go` | ⏳ Header generated, Go wrapper pending |
+| `mdix-java` / `mdix-python` | ⏳ Pending runtime wrappers |
+| `mdix-wasm` | ⏳ Pending wasm-bindgen annotations |
+| `mdix-c` | ⏳ Header stable, examples pending |
+
+The C# prototype (`https://github.com/Mid-D-Man/DixScript`) remains the reference implementation for the language itself.
+
+---
+
+## The Origin Story (Or: How Scope Creep Turned Into a Format)
+
+**Started as:** A quick hack to make a mobile game's remote config less painful.
+
+**The Problem:** The game had weapons, camos, attainment missions, and shop data spread across Unity Remote Config as massive nested JSON blobs. Adding a single new field to a camo definition meant updating it in dozens of places. One typo and suddenly every weapon in the game was broken at runtime — with no error until the player hit that screen.
+
+Here's a real slice of what that looked like:
+```json
+{
+  "EquipableItemCamoClassId": "ALL_SMG_CAMOS_CONFIG",
+  "InventoryItemCamos": [
+    {
+      "MainItemId": "ALIYAHOO419",
+      "MainItemClass": "BASIC_SMG",
+      "CamoRaritySubClass": [
+        {
+          "RaritySubClassId": "Aliyahoo419_Basic_Camos",
+          "MainItemCamos": [
+            {
+              "CamoId": "ALIYAHOO419",
+              "CamoIndex": 0,
+              "CamoAvailableInSeason": "1",
+              "CamoRarity": "Basic",
+              "CamoAtlasSpriteName": "Aliyahoo419(Clone)",
+              "CamoInGameName": "Aliyahoo419",
+              "CamoType": "Sprite",
+              "MaterialAddress": "Null"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+This is just the **camo config** for one weapon class. Three separate blobs, hundreds of lines, all duplicating the same structure.
+
+**The Solution:** "What if the shape of a camo was defined once, and I just filled in the data?"
+
+**The Result:** The same config in DixScript:
+```dixscript
+@ENUMS(
+  WeaponClass { BASIC_SMG, RUNIC_SMG, LEGENDARY_SMG }
+  CamoRarity  { Basic, Rare, Epic, Legendary, Runic }
+  CamoType    { Sprite, SpriteAndMaterial }
+)
+
+@QUICKFUNCS(
+  ~camo<object>(id, index<int>, rarity<enum>, sprite, inGameName, type<enum>) {
+    return {
+      CamoId                = id
+      CamoIndex             = index
+      CamoAvailableInSeason = "1"
+      CamoRarity            = rarity
+      CamoAtlasSpriteName   = $"{sprite}(Clone)"
+      CamoInGameName        = inGameName
+      CamoType              = type
+      MaterialAddress       = "Null"
+    }
+  }
+
+  ~rarityClass<object>(subClassId, camos) {
+    return { RaritySubClassId = subClassId, MainItemCamos = camos }
+  }
+
+  ~weapon<object>(itemId, class<enum>, rarityClasses) {
+    return { MainItemId = itemId, MainItemClass = class, CamoRaritySubClass = rarityClasses }
+  }
+)
+
+@DATA(
+  EquipableItemCamoClassId = "ALL_SMG_CAMOS_CONFIG"
+
+  InventoryItemCamos::
+    weapon("ALIYAHOO419", WeaponClass.BASIC_SMG, [
+      rarityClass("Aliyahoo419_Basic_Camos", [
+        camo("ALIYAHOO419", 0, CamoRarity.Basic, "Aliyahoo419", "Aliyahoo419", CamoType.Sprite)
+      ]),
+      rarityClass("Aliyahoo419_Epic_Camos", [
+        camo("ALIYAHOO419_HORIZON", 0, CamoRarity.Rare, "Aliyahoo419_Horizon", "Aliyahoo419-Horizon", CamoType.Sprite),
+        camo("ALIYAHOO419_ROSE",    1, CamoRarity.Epic, "Aliyahoo419_Rose",    "Aliyahoo419-Rose",    CamoType.Sprite)
+      ])
+    ])
+)
+```
+
+| Config | JSON (formatted) | DixScript | Reduction |
+|--------|-----------------|-----------|-----------|
+| `ALL_SMG_CAMOS_CONFIG` | ~350 lines | ~110 lines | **69%** |
+| `ALL_SMG_EQ_AND_CAMO_ATTAINMENT_CONFIGS` | ~280 lines | ~90 lines | **68%** |
+| `ALL_SMG_UNIQUE_CAMOS_MISSIONS_CONFIG` | ~230 lines | ~75 lines | **67%** |
+| **All 3 configs combined** | **~860 lines** | **~275 lines** | **~68%** |
+
+---
+
+## What Is DixScript?
+
+**DixScript** is a data interchange format that combines:
+- 📦 **Configuration** (like TOML)
+- 🔧 **Compile-time functions** (like Jsonnet, but less cryptic)
+- 🔒 **Built-in encryption** (AES-256-GCM, not an afterthought)
+- 🗜️ **Automatic compression** (gzip/bzip2/lzma)
+- 📋 **Type safety** (enums, strong typing when you want it)
+- 🎯 **Zero runtime dependencies** (pure Rust, or C# in the original)
+
+**All in one file with a `.mdix` extension.**
+
+---
+
+## Why DixScript Exists (The Problem It Solves)
+
+### The Config File Problem
+
+Modern projects have **config sprawl**:
+/config
+├── base.json          # 500 lines
+├── development.json   # 300 lines (80% duplicated from base)
+├── production.json    # 400 lines (90% duplicated)
+├── secrets.env        # Separate encryption
+├── validation.js      # Separate validation logic
+├── build.sh           # Compresses everything
+└── deploy.yaml        # References all of the above
 **You change one setting** → Update 3 files → Run 2 scripts → Hope you didn't break something.
 
 ### The DixScript Solution

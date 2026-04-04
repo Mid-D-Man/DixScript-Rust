@@ -9,6 +9,7 @@ Workspace Members:
 ==================
   ✓ dixscript/
   ✓ mdix-cli/
+
   ✓ mdix-ffi/
   ✓ mdix-wasm/
   ✓ mdix-python/

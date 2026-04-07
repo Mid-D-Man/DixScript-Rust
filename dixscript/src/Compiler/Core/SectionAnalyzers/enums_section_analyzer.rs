@@ -1,4 +1,4 @@
-// src/Compiler/Core/SectionAnalyzers/enums_section_analyzer.rs
+
 //! Semantic validation of the @ENUMS section and symbol table population.
 
 use crate::Compiler::AST::{EnumsSection, EnumDeclaration, EnumField, Position};

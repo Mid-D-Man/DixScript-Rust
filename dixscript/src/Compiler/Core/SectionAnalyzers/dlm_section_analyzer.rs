@@ -1,4 +1,4 @@
-// src/Compiler/Core/SectionAnalyzers/dlm_section_analyzer.rs
+
 //! Semantic validation of the @DLM section.
 
 use crate::Compiler::AST::{DLMSection, DLMModule, DLMModuleType, DLMModuleSubtype, Position};

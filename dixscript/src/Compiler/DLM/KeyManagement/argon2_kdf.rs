@@ -34,7 +34,21 @@ impl Argon2KDF {
 
         Argon2KDF { error_manager, salt, memory_size_kb, iterations, parallelism }
     }
+    pub fn new_with_error_manager(security_config: &SecuritySection,error_manager: ErrorManager) -> Self {
 
+        let (memory_size_kb, iterations, parallelism) =
+            Self::load_configuration(security_config);
+        let salt = Self::generate_salt();
+
+        if error_manager.get_debug_mode() != crate::Compiler::Core::Config::DebugMode::Off {
+            error_manager.log_debug(&format!(
+                "[Argon2KDF] Initialized: memory={}KB, iterations={}, parallelism={}",
+                memory_size_kb, iterations, parallelism
+            ));
+        }
+
+        Argon2KDF { error_manager, salt, memory_size_kb, iterations, parallelism }
+    }
     /// Create Argon2KDF directly from stored params and an existing salt.
     ///
     /// Used in the reverse (decryption) pipeline when no `SecuritySection` is

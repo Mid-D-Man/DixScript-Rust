@@ -1,10 +1,10 @@
-[97m[10:42:03.584] [Info] Loading text file: /Users/midman/Desktop/DixScript-Rust/mdix-cli/tests/fixtures/basic.mdix[0m
-[97m[10:42:03.586] [Info] Running AST enhancement[0m
-[97m[10:42:03.586] [Info] Starting AST enhancement[0m
-[97m[10:42:03.586] [Info] AST enhancement complete: 0 enhancements applied[0m
-[97m[10:42:03.586] [Info] Skipping value resolution (no functions or no data)[0m
-[97m[10:42:03.586] [Info] No DLM modules - returning resolved AST only[0m
-[97m[10:42:03.586] [Info] Text file loaded successfully[0m
+[97m[12:44:15.757] [Info] Loading text file: /Users/midman/Desktop/DixScript-Rust/mdix-cli/tests/fixtures/basic.mdix[0m
+[97m[12:44:15.758] [Info] Running AST enhancement[0m
+[97m[12:44:15.758] [Info] Starting AST enhancement[0m
+[97m[12:44:15.758] [Info] AST enhancement complete: 0 enhancements applied[0m
+[97m[12:44:15.758] [Info] Skipping value resolution (no functions or no data)[0m
+[97m[12:44:15.758] [Info] No DLM modules - returning resolved AST only[0m
+[97m[12:44:15.758] [Info] Text file loaded successfully[0m
 {
   "success": true,
   "data": {

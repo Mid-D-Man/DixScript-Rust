@@ -53,6 +53,6 @@ pub use statements::{QuickFuncStatement, SwitchCase};
 pub use quickfuncs::{QuickFuncsSection, QuickFunction, QuickFuncParam};
 pub use root::DixScript;
 
-// Optional: Re-export helpers if you want them available at module level
+
 pub use helpers::*;
 pub use Visitors::*;

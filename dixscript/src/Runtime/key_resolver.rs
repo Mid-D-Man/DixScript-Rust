@@ -1,4 +1,3 @@
-// src/Runtime/key_resolver.rs
 
 use crate::Compiler::DLM::KeyManagement::{KeyFileManager, KeyFileData, EncryptionKeyData};
 use crate::ErrorManager::{ErrorManager, DlmErrorType, ErrorSeverity};
@@ -23,7 +22,7 @@ pub struct KeyFileResolution {
     pub file_path:           Option<PathBuf>,
 }
 
-/// Locates and reads the `.dixscript.key` file for a given encrypted file.
+/// Locates and reads the `.mdix.key` file for a given encrypted file.
 pub struct KeyFileResolver {
     error_manager: ErrorManager,
 }
@@ -107,7 +106,7 @@ impl KeyFileResolver {
 
         let base_stem = file_name
             .strip_suffix(".enc").unwrap_or(file_name)
-            .strip_suffix(".dixscript").unwrap_or(file_name);
+            .strip_suffix(".mdix").unwrap_or(file_name);
 
         let mut search_dirs: Vec<PathBuf> = vec![dir.to_path_buf()];
         if let Some(ref paths) = options.key_file_search_paths {
@@ -418,7 +417,7 @@ mod tests {
 
     #[test]
     fn test_raw_bytes_empty_key_fails() {
-        let resolver = KeyResolver::new("test.dixscript".to_string());
+        let resolver = KeyResolver::new("test.mdix".to_string());
         let result   = resolver.resolve(&KeySource::RawBytes {
             key_bytes: vec![],
             iv_bytes:  vec![0u8; 12],
@@ -430,7 +429,7 @@ mod tests {
 
     #[test]
     fn test_raw_bytes_wrong_key_length_for_aes128() {
-        let resolver = KeyResolver::new("test.dixscript".to_string());
+        let resolver = KeyResolver::new("test.mdix".to_string());
         let result   = resolver.resolve(&KeySource::RawBytes {
             key_bytes: vec![0u8; 32],
             iv_bytes:  vec![0u8; 12],
@@ -442,7 +441,7 @@ mod tests {
 
     #[test]
     fn test_raw_bytes_correct_aes256() {
-        let resolver = KeyResolver::new("test.dixscript".to_string());
+        let resolver = KeyResolver::new("test.mdix".to_string());
         let result   = resolver.resolve(&KeySource::RawBytes {
             key_bytes: vec![0u8; 32],
             iv_bytes:  vec![0u8; 12],
@@ -456,9 +455,9 @@ mod tests {
 
     #[test]
     fn test_empty_password_fails() {
-        let resolver = KeyResolver::new("test.dixscript".to_string());
+        let resolver = KeyResolver::new("test.mdix".to_string());
         let result   = resolver.resolve(&KeySource::Password {
-            key_file_path: "nonexistent.dixscript.key".to_string(),
+            key_file_path: "nonexistent.mdix.key".to_string(),
             password:      "".to_string(),
         });
         assert!(result.is_err());
@@ -467,8 +466,8 @@ mod tests {
 
     #[test]
     fn test_each_resolver_has_isolated_error_state() {
-        let resolver_a = KeyResolver::new("a.dixscript".to_string());
-        let resolver_b = KeyResolver::new("b.dixscript".to_string());
+        let resolver_a = KeyResolver::new("a.mdix".to_string());
+        let resolver_b = KeyResolver::new("b.mdix".to_string());
 
         let _ = resolver_a.resolve(&KeySource::RawBytes {
             key_bytes: vec![],

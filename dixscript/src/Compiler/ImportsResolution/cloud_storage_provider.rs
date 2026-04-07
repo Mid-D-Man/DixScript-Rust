@@ -1,4 +1,4 @@
-// src/Compiler/ImportsResolution/cloud_storage_provider.rs
+
 //! Trait and error types for pluggable cloud storage backends.
 
 use std::fmt;

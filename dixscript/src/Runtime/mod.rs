@@ -1,7 +1,6 @@
-// src/Runtime/mod.rs
 
 //! Runtime - Public API for loading and using .dixscript files
-//!
+//! dixscriptus
 //! ## Core Types
 //! - `DixData` - Loaded data container with flattened access
 //! - `DixValue` - Runtime value representation

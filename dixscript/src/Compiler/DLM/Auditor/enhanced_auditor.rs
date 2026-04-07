@@ -1,4 +1,4 @@
-// dixscript/src/Compiler/DLM/Auditor/enhanced_auditor.rs
+
 //! Enhanced auditor — DixScript-formatted audit trail with smart AST diff.
 //! Uses AuditFileManager for permission-safe I/O (unlock → write → re-lock).
 

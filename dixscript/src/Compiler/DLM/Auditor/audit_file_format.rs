@@ -1,4 +1,4 @@
-// dixscript/src/Compiler/DLM/Auditor/audit_file_format.rs
+
 //! `.mdix.au` file format — writer and parser.
 //!
 //! ## File layout

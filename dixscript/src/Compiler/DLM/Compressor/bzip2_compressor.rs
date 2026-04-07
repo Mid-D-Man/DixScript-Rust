@@ -94,7 +94,7 @@ impl ICompressor for Bzip2Compressor {
 
         if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
-                "✅ BZIP2 compression complete: {} → {} bytes ({:.1}% reduction)",
+                " BZIP2 compression complete: {} → {} bytes ({:.1}% reduction)",
                 data.len(),
                 compressed.len(),
                 ratio * 100.0
@@ -151,7 +151,7 @@ impl ICompressor for Bzip2Compressor {
 
         if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
-                "✅ BZIP2 decompression complete: {} → {} bytes",
+                " BZIP2 decompression complete: {} → {} bytes",
                 compressed_data.len(),
                 decompressed.len()
             ));

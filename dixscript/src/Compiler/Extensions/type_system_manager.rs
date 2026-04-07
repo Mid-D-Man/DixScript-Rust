@@ -1,4 +1,4 @@
-// src/Compiler/Extensions/type_system_manager.rs
+
 //! Type System Manager v1.0.0 - Pure functions for type operations
 //!
 //! All methods are stateless utility functions.

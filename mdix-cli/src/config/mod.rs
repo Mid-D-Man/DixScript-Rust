@@ -1,4 +1,4 @@
-// dixscript-cli/src/config/mod.rs
+
 //! CLI configuration stored at ~/.dixscript/config.toml
 
 pub mod cli_config;

@@ -1,4 +1,4 @@
-// src/Compiler/ImportsResolution/imports_resolver.rs
+
 //! Recursive import resolution with cycle detection and cloud download.
 //!
 //! ## Cycle detection

@@ -5,7 +5,7 @@ use std::collections::HashSet;
 /// Scans QuickFunction AST nodes to collect all function-to-function calls
 /// Builds the call graph by visiting every expression and statement
 ///
-/// CRITICAL: Properly tracks lambda parameters and local variables
+/// Properly tracks lambda parameters and local variables
 /// to avoid treating lambda invocations as function calls
 ///
 /// Handles:
@@ -150,7 +150,7 @@ impl<'a> FunctionCallCollector<'a> {
     fn analyze_expression(&mut self, expr: &Expression) {
         match expr {
             Expression::QuickFuncCall { name, arguments, .. } => {
-                // CRITICAL FIX: Check if it's a lambda/local variable invocation
+                //Check if it's a lambda/local variable invocation
                 if self.is_in_local_scope(name) {
                     // This is a lambda invocation or local variable call
                     // DON'T add to call graph, just analyze arguments

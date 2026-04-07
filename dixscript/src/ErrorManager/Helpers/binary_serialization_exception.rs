@@ -1,4 +1,3 @@
-// src/ErrorManager/helpers/binary_serialization_exception.rs
 
 use std::fmt;
 

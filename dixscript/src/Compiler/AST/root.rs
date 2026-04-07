@@ -8,7 +8,7 @@ use super::data::DataSection;
 use super::security::SecuritySection;
 
 /// Main DixScript AST structure
-/// Represents a complete parsed .dixscript file
+/// Represents a complete parsed .mdix file
 #[derive(Debug, Clone, PartialEq)]
 pub struct DixScript {
     pub config: Option<ConfigSection>,

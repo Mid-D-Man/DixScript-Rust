@@ -2,7 +2,7 @@
 //
 // Two code-generation steps run on every `cargo build -p mdix-ffi`:
 //
-// 1. csbindgen  → csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs
+// 1. csbindgen  → mdix-csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs
 //    C# P/Invoke bindings consumed by the NuGet package and Unity plugin.
 //
 // 2. cbindgen   → mdix-go/internal/include/mdix_ffi.h
@@ -20,7 +20,7 @@ fn main() {
     println!("cargo:rerun-if-changed=cbindgen.toml");
 
     // ── Step 1: csbindgen → MdixNative.cs ────────────────────────────────────
-    let cs_out = "../csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs";
+    let cs_out = "../mdix-csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs";
 
     if let Some(parent) = std::path::Path::new(cs_out).parent() {
         std::fs::create_dir_all(parent).expect("failed to create Generated/ directory");

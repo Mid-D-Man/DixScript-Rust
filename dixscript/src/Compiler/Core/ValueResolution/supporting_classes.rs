@@ -1,4 +1,4 @@
-// src/Compiler/Core/ValueResolution/supporting_classes.rs
+
 //! Shared types for the value resolution pipeline.
 
 use std::fmt;

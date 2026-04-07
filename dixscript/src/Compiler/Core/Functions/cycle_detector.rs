@@ -27,7 +27,6 @@ impl CycleDetectionValidator {
             operational_settings,
         }
     }
-    
     /// Main entry point: Validate function calls in a QuickFuncs section
     /// Returns true if validation passed (no cycles), false otherwise
     pub fn validate_function_calls(&self, section: &QuickFuncsSection) -> bool {

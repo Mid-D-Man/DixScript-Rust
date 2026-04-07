@@ -8,7 +8,7 @@
  *
  * Setup:
  *   1. cargo build  (from DixScript-Rust/ workspace root)
- *   2. cd vscode-mdix-test && npm install && npm run compile
+ *   2. cd vscode-mdix-test && mdix-npm install && mdix-npm run compile
  *   3. Open vscode-mdix-test/ in VS Code and press F5 to launch the
  *      Extension Development Host with a .mdix file open.
  *

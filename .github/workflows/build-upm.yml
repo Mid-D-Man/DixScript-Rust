@@ -262,7 +262,7 @@ jobs:
           dotnet-version: '7.0.x'
 
       - name: Restore NuGet packages
-        run: dotnet restore csharp/MidManStudio.Mdix.sln
+        run: dotnet restore mdix-csharp/MidManStudio.Mdix.sln
 
       - name: Build Core.dll (Release)
         run: |

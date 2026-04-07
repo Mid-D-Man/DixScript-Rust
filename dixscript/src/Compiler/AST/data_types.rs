@@ -1,4 +1,3 @@
-// src/Compiler/AST/data_types.rs
 
 /// All supported data types for DixScript
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -19,7 +18,7 @@ pub enum DataType {
     Enum,
     Any,
     Function,
-    Range, // Not implemented (probably won't - we have array.range() built-in)
+    Range, // Not implemented (probably won't - we have array.range() built-in but im to lazy to deal with it)
 }
 
 impl std::fmt::Display for DataType {

@@ -1,4 +1,3 @@
-// src/Compiler/mod.rs
 
 //! Compiler - Lexer, Parser, Semantic Analysis, Code Generation
 

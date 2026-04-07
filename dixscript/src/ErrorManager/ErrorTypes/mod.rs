@@ -1,4 +1,3 @@
-// src/ErrorManager/ErrorTypes/mod.rs
 
 //! Error type definitions
 

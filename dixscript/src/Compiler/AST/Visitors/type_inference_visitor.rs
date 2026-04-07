@@ -1,4 +1,3 @@
-// src/Compiler/AST/Visitors/type_inference_visitor.rs
 
 use crate::Compiler::AST::*;
 use crate::Compiler::Utilities::SymbolTable;

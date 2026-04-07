@@ -1,4 +1,3 @@
-// src/ErrorManager/Helpers/source_line_extensions.rs
 
 use crate::Compiler::Core::Tokenizer::Token;
 

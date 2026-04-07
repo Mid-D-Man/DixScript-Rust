@@ -1,4 +1,3 @@
-// dixscript-cli/src/commands/create.rs
 
 use std::path::PathBuf;
 use clap::Args;
@@ -9,7 +8,7 @@ use crate::services::file_io;
 
 #[derive(Args)]
 pub struct CreateArgs {
-    /// Output .dixscript file path
+    /// Output .mdix file path
     pub file: PathBuf,
 
     /// Template: basic | advanced | security | dlm

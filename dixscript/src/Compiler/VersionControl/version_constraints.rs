@@ -1,4 +1,4 @@
-// src/Compiler/VersionControl/version_constraints.rs
+
 //! Version Constraints - Validates DixScript features against version requirements
 //! Uses native Rust collections (no DixCore wrappers)
 

@@ -1,4 +1,3 @@
-// mdix-cli/src/services/file_io.rs
 
 use std::path::{Path, PathBuf};
 use crate::commands::CliError;

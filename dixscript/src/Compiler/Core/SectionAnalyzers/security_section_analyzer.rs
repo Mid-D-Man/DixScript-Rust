@@ -1,4 +1,4 @@
-// src/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs
+
 //! Semantic validation of the @SECURITY section.
 
 use crate::Compiler::AST::{SecuritySection, SecurityEntry, SecurityField, Value, Position};

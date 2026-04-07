@@ -1,4 +1,3 @@
-// src/ErrorManager/helpers/runtime_exception.rs
 
 use std::fmt;
 

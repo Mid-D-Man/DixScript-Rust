@@ -1,4 +1,4 @@
-// dixscript-cli/src/commands/mod.rs
+
 //! Shared command types and the CliError enum used across all subcommands.
 
 pub mod compact;

@@ -1,4 +1,4 @@
-// dixscript-cli/src/services/validation.rs
+
 //! Wraps the dixscript compilation pipeline up to semantic analysis.
 
 use std::path::Path;

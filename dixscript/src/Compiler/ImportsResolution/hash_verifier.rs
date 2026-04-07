@@ -1,4 +1,4 @@
-// src/Compiler/ImportsResolution/hash_verifier.rs
+
 //! SHA-256 and SHA-512 hash verification for import file integrity.
 
 use sha2::{Digest, Sha256, Sha512};

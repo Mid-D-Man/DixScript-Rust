@@ -1,4 +1,4 @@
-// src/Compiler/Core/ValueResolution/value_resolver.rs
+
 //! Orchestrates compile-time value resolution across five phases.
 //!
 //! Phase 1: Enum pre-resolution — EnumValue/EnumAccess → Integer.
@@ -140,6 +140,16 @@ impl<'a> ValueResolver<'a> {
         debug_mode: DebugMode,
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
+self.new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
+    }
+
+    pub fn new_with_error_manager(
+        ast: DixScript,
+        symbol_table: &'a SymbolTable,
+        debug_mode: DebugMode,
+        error_manager:ErrorManager
+    ) -> Self {
+
         let debug_config = DebugConfig::from_debug_mode(debug_mode);
 
         let func_count = ast
@@ -196,7 +206,6 @@ impl<'a> ValueResolver<'a> {
             error_manager,
         }
     }
-
     // ==================== MAIN ORCHESTRATION ====================
 
     pub fn resolve(mut self) -> ValueResolutionResult {

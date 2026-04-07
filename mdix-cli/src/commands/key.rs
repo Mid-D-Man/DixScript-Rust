@@ -1,4 +1,3 @@
-// mdix-cli/src/commands/key.rs
 
 use clap::{Args, Subcommand};
 use serde::Serialize;

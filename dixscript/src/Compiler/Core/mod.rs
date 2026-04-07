@@ -1,4 +1,3 @@
-// src/Compiler/Core/mod.rs
 
 //! Core - Lexer, Parser, Semantic Analyzer, AST Enhancer
 

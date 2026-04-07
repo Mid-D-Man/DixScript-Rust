@@ -1,4 +1,3 @@
-// dixscript-cli/src/commands/compact.rs
 
 use std::path::PathBuf;
 use clap::Args;
@@ -10,10 +9,10 @@ use dixscript::Runtime::DixCompactor;
 
 #[derive(Args)]
 pub struct CompactArgs {
-    /// Path to the .dixscript file
+    /// Path to the .mdix file
     pub file: PathBuf,
 
-    /// Output file path (defaults to <name>.compact.dixscript)
+    /// Output file path (defaults to <name>.compact.mdix)
     #[arg(short, long)]
     pub output: Option<String>,
 

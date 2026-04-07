@@ -1,4 +1,3 @@
-// src/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs
 
 use crate::Compiler::AST::{
     DataSection, DataEntry, TablePath, PropertyAssignment, Value, Position, DataType,
@@ -62,24 +61,20 @@ pub struct DataSectionAnalyzer<'a> {
 
 impl<'a> DataSectionAnalyzer<'a> {
     pub fn new(operational_settings: &'a OperationalSettings) -> Self {
-        DataSectionAnalyzer {
-            debug_config:  DebugConfig::from_debug_mode(operational_settings.debug_mode),
-            error_manager: ErrorManager::get_shared_instance(),
-            operational_settings,
-            declared_table_paths:     FxHashSet::default(),
-            current_nesting_depth:    0,
-            short_name_to_full_paths: FxHashMap::default(),
-            path_to_type:             FxHashMap::default(),
-        }
+      self.new_with_error_manager(OperationalSettings,ErrorManager::get_shared_instance())
     }
 pub fn new_with_error_manager(
     operational_settings: &'a OperationalSettings,
-    error_manager: ErrorManager,
+    _error_manager: ErrorManager,
 ) -> Self {
     DataSectionAnalyzer {
-        error_manager,
-        debug_config: DebugConfig::from_debug_mode(operational_settings.debug_mode),
+        debug_config:  DebugConfig::from_debug_mode(operational_settings.debug_mode),
+        error_manager: _error_manager,
         operational_settings,
+        declared_table_paths:     FxHashSet::default(),
+        current_nesting_depth:    0,
+        short_name_to_full_paths: FxHashMap::default(),
+        path_to_type:             FxHashMap::default(),
     }
 }
     pub fn analyze(

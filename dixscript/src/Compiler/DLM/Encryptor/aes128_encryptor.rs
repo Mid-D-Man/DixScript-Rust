@@ -170,7 +170,7 @@ impl IEncryptor for Aes128Encryptor {
             );
         }
 
-        self.base.log_info("✅ AES-128 key derived successfully");
+        self.base.log_info(" AES-128 key derived successfully");
         Ok(())
     }
 
@@ -228,7 +228,7 @@ impl IEncryptor for Aes128Encryptor {
 
         if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
-                "✅ AES-128-GCM encryption complete: {} → {} bytes",
+                " AES-128-GCM encryption complete: {} → {} bytes",
                 data.len(),
                 encrypted.len()
             ));
@@ -297,7 +297,7 @@ impl IEncryptor for Aes128Encryptor {
 
         if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
-                "✅ AES-128-GCM decryption complete: {} → {} bytes",
+                " AES-128-GCM decryption complete: {} → {} bytes",
                 encrypted_data.len(),
                 plaintext.len()
             ));

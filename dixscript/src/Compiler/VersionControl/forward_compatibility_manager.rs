@@ -1,4 +1,4 @@
-// src/Compiler/VersionControl/forward_compatibility_manager.rs
+
 //! Forward Compatibility Manager - Handles unknown features from future versions
 //!
 //! Simplified framework for DixScript v1.0.0

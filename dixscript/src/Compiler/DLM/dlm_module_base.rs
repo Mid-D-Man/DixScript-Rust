@@ -34,7 +34,24 @@ impl DLMModuleBase {
             is_verbose_enabled,
         }
     }
+    pub fn new_with_error_manager(module_name: impl Into<String>, priority: i32, error_manager: ErrorManager,
+    ) -> Self {
 
+        let debug_mode = error_manager.get_debug_mode();
+
+        let (is_debug_enabled, is_verbose_enabled) = match debug_mode {
+            DebugMode::Off => (false, false),
+            DebugMode::Regular => (true, false),
+            DebugMode::Verbose => (true, true),
+        };
+        DLMModuleBase {
+            error_manager,
+            module_name: module_name.into(),
+            priority,
+            is_debug_enabled,
+            is_verbose_enabled,
+        }
+    }
     /// Get module name
     pub fn module_name(&self) -> &str {
         &self.module_name

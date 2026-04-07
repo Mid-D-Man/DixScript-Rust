@@ -1,4 +1,4 @@
-// src/Compiler/Core/SectionAnalyzers/imports_section_analyzer.rs
+
 //! Semantic validation of the @IMPORTS section.
 //!
 //! Validates aliases, paths, cloud URL structure, and hash format before

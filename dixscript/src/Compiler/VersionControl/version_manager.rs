@@ -1,4 +1,4 @@
-// src/Compiler/VersionControl/version_manager.rs
+
 //! Version Manager - Manages DixScript version features and compatibility
 //!
 //! SINGLETON PATTERN using LazyLock (thread-safe, zero-cost after first access)

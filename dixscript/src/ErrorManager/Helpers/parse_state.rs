@@ -1,4 +1,3 @@
-// src/ErrorManager/Helpers/parse_state.rs
 
 /// Parser state tracking for error recovery
 #[derive(Debug, Clone)]

@@ -1,4 +1,3 @@
-// src/ErrorManager/Helpers/semantics_exception.rs
 
 use std::fmt;
 

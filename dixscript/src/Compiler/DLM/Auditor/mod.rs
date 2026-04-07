@@ -1,4 +1,4 @@
-// dixscript/src/Compiler/DLM/Auditor/mod.rs
+
 //! Auditor — compilation audit trail modules.
 
 mod audit_file_data;

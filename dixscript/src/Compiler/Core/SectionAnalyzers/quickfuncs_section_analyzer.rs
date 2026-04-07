@@ -1,4 +1,4 @@
-// src/Compiler/Core/SectionAnalyzers/quickfuncs_section_analyzer.rs
+
 //! QuickFunctions Section Analyzer — semantic validation for @QUICKFUNCS.
 //!
 //! Validates function signatures, parameters, return types, local variable

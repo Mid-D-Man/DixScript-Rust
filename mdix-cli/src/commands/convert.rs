@@ -1,4 +1,3 @@
-// dixscript-cli/src/commands/convert.rs
 
 use std::path::PathBuf;
 use clap::Args;
@@ -13,7 +12,7 @@ pub struct ConvertArgs {
     /// Input file path
     pub file: PathBuf,
 
-    /// Target format: json, toml, dixscript
+    /// Target format: json, toml, mdix
     #[arg(long)]
     pub to: String,
 

@@ -1,5 +1,4 @@
-// src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs
-//
+
 // QuickFunctions Section Parser v1.0.0
 //
 // SPEC (BENF grammar):

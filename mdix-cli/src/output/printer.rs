@@ -1,4 +1,4 @@
-// dixscript-cli/src/output/printer.rs
+
 //! Colored terminal output helpers.
 //!
 //! All functions respect `colored::control::set_override(false)` — pass

@@ -1,4 +1,4 @@
-// mdix-cli/src/services/key_service.rs
+
 //! Wraps KeyFileManager for key generation and inspection.
 
 use std::path::Path;

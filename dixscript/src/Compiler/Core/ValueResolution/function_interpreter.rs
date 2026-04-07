@@ -1,4 +1,4 @@
-// src/Compiler/Core/ValueResolution/function_interpreter.rs
+
 //! Executes QuickFunction bodies at compile time.
 //!
 //! Parameter threading eliminates mutable field swapping. DebugConfig is
@@ -206,6 +206,16 @@ impl<'a> FunctionInterpreter<'a> {
         debug_mode: DebugMode,
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
+       self.new_with_error_manager(symbol_table,quick_functions,data_context,debug_mode,error_manager)
+    }
+    pub fn new_with_error_manager(
+        symbol_table: &'a SymbolTable,
+        quick_functions: Vec<QuickFunction>,
+        data_context: Rc<RefCell<FxHashMap<String, DixValue>>>,
+        debug_mode: DebugMode,
+        error_manager:ErrorManager
+    ) -> Self {
+
         let func_count = quick_functions.len();
 
         FunctionInterpreter {
@@ -223,7 +233,6 @@ impl<'a> FunctionInterpreter<'a> {
             error_manager,
         }
     }
-
     pub fn update_data_context(&mut self, key: String, value: DixValue) {
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(

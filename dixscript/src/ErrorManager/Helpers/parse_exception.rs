@@ -1,4 +1,3 @@
-// src/ErrorManager/Helpers/parse_exception.rs
 
 use std::fmt;
 

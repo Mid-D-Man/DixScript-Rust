@@ -1,5 +1,3 @@
-// src/Compiler/Utilities/identifier_pattern_analyzer.rs
-//  v1.0.0 - Resolved all ownership and borrowing issues
 
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::AST::Position;

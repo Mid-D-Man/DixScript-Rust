@@ -7,7 +7,7 @@ members = [
     "mdix-wasm",
     "mdix-python",
     "mdix-java",
-    "mdix-lua",       # ← add this
+    "mdix-lua"
 ]
 resolver = "2"
 

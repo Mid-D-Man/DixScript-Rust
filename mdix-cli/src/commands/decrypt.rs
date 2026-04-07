@@ -1,4 +1,3 @@
-// dixscript-cli/src/commands/decrypt.rs
 
 use std::path::PathBuf;
 use clap::Args;

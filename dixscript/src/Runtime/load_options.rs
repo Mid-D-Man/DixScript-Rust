@@ -1,4 +1,3 @@
-// src/Runtime/load_options.rs
 
 use std::time::Duration;
 use crate::Compiler::VersionControl::CompatibilityMode;
@@ -16,7 +15,7 @@ pub struct DixLoadOptions {
     /// Password for decryption (password mode)
     pub password: Option<String>,
     
-    /// Explicit key file path (if not in same directory as .dixscript.enc)
+    /// Explicit key file path (if not in same directory as .mdix.enc)
     pub key_file_path: Option<String>,
     
     /// Direct key file content (e.g., from secure vault)
@@ -33,7 +32,7 @@ pub struct DixLoadOptions {
     /// Allow loading key files from content string (default: false for security)
     pub allow_direct_key_content: bool,
     
-    /// Output directory for generated files (.dixscript.enc, .dixscript.key, .dixscript.au)
+    /// Output directory for generated files (.mdix.enc, .mdix.key, .mdix.au)
     /// If None, uses same directory as source file
     pub output_directory: Option<String>,
     

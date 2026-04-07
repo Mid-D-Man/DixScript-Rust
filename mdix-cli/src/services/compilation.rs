@@ -1,4 +1,4 @@
-// dixscript-cli/src/services/compilation.rs
+
 //! Wraps the full dixscript compilation and load pipeline.
 
 use std::path::Path;

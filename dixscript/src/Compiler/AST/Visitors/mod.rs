@@ -1,4 +1,3 @@
-// src/Compiler/AST/Visitors/mod.rs
 
 //! AST Visitors - Non-destructive traversal patterns for semantic analysis
 //!

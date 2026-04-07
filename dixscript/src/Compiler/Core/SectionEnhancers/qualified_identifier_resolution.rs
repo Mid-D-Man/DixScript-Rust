@@ -1,4 +1,4 @@
-// src/Compiler/Core/SectionEnhancers/qualified_identifier_resolution.rs
+
 //! Resolution metadata for QualifiedIdentifier nodes
 //! Tracks what type a qualified identifier actually resolves to
 

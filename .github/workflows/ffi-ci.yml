@@ -115,7 +115,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: MdixNative-cs-${{ github.run_number }}
-          path: csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs
+          path: mdix-csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs
           retention-days: 30
           if-no-files-found: error
 

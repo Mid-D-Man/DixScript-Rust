@@ -1,4 +1,3 @@
-// src/ErrorManager/Helpers/dlm_pipeline_exception.rs
 
 use crate::ErrorManager::DlmErrorType;
 use std::fmt;

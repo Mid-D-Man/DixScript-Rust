@@ -1,6 +1,5 @@
-// src/Utilities/parser_collection_helper.rs
 
-//! OPTIMIZATION: Pre-allocate collections with estimated capacities
+//! OPTIMIZATION HELPER: Pre-allocate collections with estimated capacities
 //! Reduces memory allocations by 15-20% (no Vec growth overhead)
 
 /// Estimate properties count from token count

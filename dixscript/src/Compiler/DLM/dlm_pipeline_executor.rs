@@ -49,7 +49,24 @@ impl DLMPipelineExecutor {
             password,
         }
     }
+    pub fn new_with_error_manager(
+        source_file_path: impl AsRef<Path>,
+        output_directory: impl AsRef<Path>,
+        debug_mode:       crate::Compiler::Core::Config::DebugMode,
+        error_manager: ErrorManager
+    ) -> Self {
 
+        let debug_config  = DebugConfig::from_debug_mode(debug_mode);
+        let password      = std::env::var("MDIX_DLM_PASSWORD").ok();
+
+        DLMPipelineExecutor {
+            error_manager,
+            debug_config,
+            source_file_path: source_file_path.as_ref().to_path_buf(),
+            output_directory: output_directory.as_ref().to_path_buf(),
+            password,
+        }
+    }
     // ── Main entry point ──────────────────────────────────────────────────────
 
     pub fn execute(&self, ast: &mut DixScript, binary_data: Vec<u8>) -> DLMPipelineResult {

@@ -44,7 +44,24 @@ impl DLMReverseExecutor {
             password,
         }
     }
+    pub fn new_with_error_manager(
+        encrypted_file_path: impl AsRef<Path>,
+        key_file_path: impl AsRef<Path>,
+        password: Option<String>,
+        debug_mode: crate::Compiler::Core::Config::DebugMode,
+        error_manager: ErrorManager
+    ) -> Self {
 
+        let debug_config  = DebugConfig::from_debug_mode(debug_mode);
+
+        DLMReverseExecutor {
+            error_manager,
+            debug_config,
+            encrypted_file_path: encrypted_file_path.as_ref().to_path_buf(),
+            key_file_path:       key_file_path.as_ref().to_path_buf(),
+            password,
+        }
+    }
     // ── Main entry point ──────────────────────────────────────────────────────
 
     pub fn execute(&self) -> DLMReverseResult {

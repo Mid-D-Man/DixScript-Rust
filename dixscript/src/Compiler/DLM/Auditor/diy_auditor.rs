@@ -1,4 +1,4 @@
-// dixscript/src/Compiler/DLM/Auditor/diy_auditor.rs
+
 //! Simple DIY auditor — records compilation events using AuditFileManager
 //! for permission-safe, structured `.mdix.au` I/O.
 

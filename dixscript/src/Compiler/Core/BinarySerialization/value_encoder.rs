@@ -20,7 +20,11 @@ impl ValueEncoder {
             error_manager: ErrorManager::get_shared_instance(),
         }
     }
-
+    pub fn new_with_error_manager(_error_manager:ErrorManager) -> Self {
+        ValueEncoder {
+            error_manager: _error_manager,
+        }
+    }
     // ==================== MAIN ENCODE ENTRY POINT ====================
 
     /// Encode any AST value to binary

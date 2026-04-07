@@ -1,4 +1,3 @@
-// src/Compiler/Utilities/mod.rs
 
 //! Compiler utilities
 

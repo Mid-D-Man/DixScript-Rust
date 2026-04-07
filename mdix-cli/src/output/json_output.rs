@@ -1,4 +1,4 @@
-// dixscript-cli/src/output/json_output.rs
+
 //! Wraps any serializable result in a standard JSON envelope.
 //!
 //! All `--json` output goes through `print_result` so the shape is

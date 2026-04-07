@@ -1,4 +1,4 @@
-//! `.dixscript.key` file format — writer and parser.
+//! `.mdix.key` file format — writer and parser.
 //!
 //! The format mirrors the DixScript section syntax so key files are
 //! human-readable and consistent with the rest of the toolchain.
@@ -28,11 +28,11 @@ const SEC_FILE_INFO:   &str = "@KEY_FILE_INFO";
 // Writer
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Serialises a [`KeyFileData`] to `.dixscript` text.
+/// Serialises a [`KeyFileData`] to `.mdix` text.
 pub struct MdixKeyWriter;
 
 impl MdixKeyWriter {
-    /// Produce the complete `.dixscript.key` file content.
+    /// Produce the complete `.mdix.key` file content.
     pub fn write(data: &KeyFileData) -> String {
         // Estimate: ~600 base + ~500 encryption-with-KDF + ~200 compression
         let mut out = String::with_capacity(1400);
@@ -153,7 +153,7 @@ impl MdixKeyWriter {
 // Parser
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Deserialises `.dixscript.key` text back to [`KeyFileData`].
+/// Deserialises `.mdix.key` text back to [`KeyFileData`].
 pub struct MdixKeyParser;
 
 impl MdixKeyParser {

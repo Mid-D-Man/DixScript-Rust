@@ -33,7 +33,19 @@ impl BinarySerializationContext {
             statistics: BinarySerializationStatistics::new(),
         }
     }
+    pub fn new_with_error_manager(error_manager: ErrorManager) -> Self {
 
+        let debug_mode = error_manager.get_debug_mode();
+        let debug_config = DebugConfig::from_debug_mode(debug_mode);
+
+        BinarySerializationContext {
+            error_manager,
+            debug_config,
+            scope_stack: Vec::new(),
+            current_nesting_depth: 0,
+            statistics: BinarySerializationStatistics::new(),
+        }
+    }
     /// Merge statistics collected by a parallel section task into this context.
     pub fn merge_statistics(&mut self, other: BinarySerializationStatistics) {
         for (k, v) in other.value_counts {

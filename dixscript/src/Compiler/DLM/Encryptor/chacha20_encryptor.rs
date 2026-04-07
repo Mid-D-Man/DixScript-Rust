@@ -171,7 +171,7 @@ impl IEncryptor for Chacha20Encryptor {
             );
         }
 
-        self.base.log_info("✅ ChaCha20 key derived successfully");
+        self.base.log_info(" ChaCha20 key derived successfully");
         Ok(())
     }
 
@@ -232,7 +232,7 @@ impl IEncryptor for Chacha20Encryptor {
 
         if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
-                "✅ ChaCha20-Poly1305 encryption complete: {} → {} bytes",
+                " ChaCha20-Poly1305 encryption complete: {} → {} bytes",
                 data.len(),
                 encrypted.len()
             ));
@@ -301,7 +301,7 @@ impl IEncryptor for Chacha20Encryptor {
 
         if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
-                "✅ ChaCha20-Poly1305 decryption complete: {} → {} bytes",
+                " ChaCha20-Poly1305 decryption complete: {} → {} bytes",
                 encrypted_data.len(),
                 plaintext.len()
             ));

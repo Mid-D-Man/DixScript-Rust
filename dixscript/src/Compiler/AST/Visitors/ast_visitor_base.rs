@@ -1,4 +1,3 @@
-// src/Compiler/AST/Visitors/ast_visitor_base.rs
 
 use crate::Compiler::AST::*;
 

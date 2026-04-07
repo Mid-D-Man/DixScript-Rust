@@ -1,4 +1,4 @@
-// dixscript-cli/src/output/table.rs
+
 //! Minimal aligned table formatter — no external dependencies.
 
 use colored::Colorize;

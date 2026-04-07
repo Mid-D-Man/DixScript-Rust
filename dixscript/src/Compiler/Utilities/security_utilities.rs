@@ -6,7 +6,6 @@
 //! - Passes Position information for better error reporting
 //! - Uses ErrorManager properly for warnings/errors
 //! - More idiomatic Rust patterns
-//! - Fixed v1.0.1: Resolved value-after-move issues
 
 use crate::Compiler::AST::*;
 use crate::ErrorManager::{ErrorManager, GeneralErrorType};

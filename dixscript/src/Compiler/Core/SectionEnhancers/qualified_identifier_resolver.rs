@@ -29,7 +29,16 @@ impl QualifiedIdentifierResolver {
             debug_config,
         }
     }
-
+    pub fn new_with_error_manager(
+        resolutions: HashMap<QualifiedIdentifierKey, QualifiedIdentifierResolution>,
+        debug_config: DebugConfig,error_manager:ErrorManager
+    ) -> Self {
+        QualifiedIdentifierResolver {
+            resolutions: resolutions.into_iter().collect(),
+            error_manager,
+            debug_config,
+        }
+    }
     // ==================== STATEMENT RESOLUTION ====================
 
     pub fn resolve_statement(&self, statement: &QuickFuncStatement) -> QuickFuncStatement {

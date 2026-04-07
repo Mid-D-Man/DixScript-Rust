@@ -1,5 +1,5 @@
-// tests/fixtures/function_calls_heavy.mdix
-// Heavy function calls test for value resolution benchmarking
+//! tests/fixtures/function_calls_heavy.mdix
+//! Heavy function calls test for value resolution benchmarking
 
 @CONFIG(
     version -> "1.0.0",

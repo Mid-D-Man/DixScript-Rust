@@ -1,4 +1,3 @@
-// src/ErrorManager/Helpers/mod.rs
 
 //! Error management helper types and utilities
 

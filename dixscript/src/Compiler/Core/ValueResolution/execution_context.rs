@@ -1,4 +1,4 @@
-// src/Compiler/Core/ValueResolution/execution_context.rs
+
 //! Scoped variable environment for QuickFunction execution.
 //!
 //! Parent context uses `Rc<RefCell<…>>` for shared mutable access.

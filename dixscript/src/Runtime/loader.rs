@@ -1,5 +1,3 @@
-// src/Runtime/loader.rs
-
 use std::fs;
 use std::path::Path;
 use chrono::Utc;
@@ -301,6 +299,8 @@ impl DixLoader {
         source_text: &str,
         source_file_path: &str,
     ) -> Result<DixScript, String> {
+
+
         let mut config_handler  = ConfigSectionHandler::new(None);
         let config_result       = config_handler.process_config_section(source_text);
 

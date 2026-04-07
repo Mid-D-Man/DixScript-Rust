@@ -1,5 +1,4 @@
-// src/Compiler/Core/ValueResolution/mod.rs
-//!
+
 //! # Value Resolution — compile-time QuickFunction execution
 //!
 //! ## Pipeline phases

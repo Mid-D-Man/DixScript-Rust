@@ -1,4 +1,3 @@
-// dixscript-cli/src/commands/compile.rs
 
 use std::path::PathBuf;
 use clap::Args;

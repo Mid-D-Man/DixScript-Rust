@@ -139,7 +139,7 @@ impl ICompressor for GzipCompressor {
 
         if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
-                "✅ GZIP compression complete: {} → {} bytes ({:.1}% reduction)",
+                " GZIP compression complete: {} → {} bytes ({:.1}% reduction)",
                 data.len(),
                 compressed.len(),
                 ratio * 100.0
@@ -196,7 +196,7 @@ impl ICompressor for GzipCompressor {
 
         if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
-                "✅ GZIP decompression complete: {} → {} bytes",
+                " GZIP decompression complete: {} → {} bytes",
                 compressed_data.len(),
                 decompressed.len()
             ));

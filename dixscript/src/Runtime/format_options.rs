@@ -1,4 +1,3 @@
-// src/Runtime/format_options.rs
 
 /// Formatting options for DixScript conversion and export
 /// 

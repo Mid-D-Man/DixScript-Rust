@@ -20,7 +20,11 @@ impl ValueDecoder {
             error_manager: ErrorManager::get_shared_instance(),
         }
     }
-
+    pub fn new_with_error_manager(_error_manager:ErrorManager) -> Self {
+        ValueDecoder {
+            error_manager: _error_manager,
+        }
+    }
     // ==================== MAIN DECODE ENTRY POINT ====================
 
     /// Decode any value from binary

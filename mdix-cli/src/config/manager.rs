@@ -1,4 +1,4 @@
-// dixscript-cli/src/config/manager.rs
+
 //! Loads and saves CliConfig at ~/.dixscript/config.toml.
 //!
 //! The config directory is created on first write. Reads return defaults if

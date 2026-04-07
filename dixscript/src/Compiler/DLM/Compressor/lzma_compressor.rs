@@ -93,7 +93,7 @@ impl ICompressor for LzmaCompressor {
 
         if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
-                "✅ LZMA compression complete: {} → {} bytes ({:.1}% reduction)",
+                " LZMA compression complete: {} → {} bytes ({:.1}% reduction)",
                 data.len(),
                 compressed.len(),
                 ratio * 100.0
@@ -150,7 +150,7 @@ impl ICompressor for LzmaCompressor {
 
         if self.base.is_debug_enabled() {
             self.base.log_info(&format!(
-                "✅ LZMA decompression complete: {} → {} bytes",
+                " LZMA decompression complete: {} → {} bytes",
                 compressed_data.len(),
                 decompressed.len()
             ));

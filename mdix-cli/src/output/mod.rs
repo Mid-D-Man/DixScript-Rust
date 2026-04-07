@@ -1,4 +1,4 @@
-// dixscript-cli/src/output/mod.rs
+
 //! Output layer — colored terminal printing, JSON wrapping, simple tables.
 
 pub mod json_output;

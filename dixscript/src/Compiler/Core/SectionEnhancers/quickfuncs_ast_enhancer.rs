@@ -1,4 +1,4 @@
-// src/Compiler/Core/SectionEnhancers/quickfuncs_ast_enhancer.rs
+
 //! Enhances the @QUICKFUNCS section with compile-time completions.
 //!
 //! Applies parameter default values from type annotations and resolves
@@ -29,7 +29,14 @@ impl<'a> QuickFunctionsAstEnhancer<'a> {
             enhancement_count: 0,
         }
     }
-
+    pub fn new_with_error_manager(operational_settings: &'a OperationalSettings,error_manager:ErrorManager) -> Self {
+        QuickFunctionsAstEnhancer {
+            debug_config: DebugConfig::from_debug_mode(operational_settings.debug_mode),
+            error_manager,
+            operational_settings,
+            enhancement_count: 0,
+        }
+    }
     pub fn enhance(
         &mut self,
         section: &QuickFuncsSection,

@@ -1,4 +1,3 @@
-// src/Runtime/compactor.rs
 
 /// Utilities for compacting and minifying DixScript files
 /// 

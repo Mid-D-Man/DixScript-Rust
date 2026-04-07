@@ -1,4 +1,4 @@
-// dixscript/src/Compiler/DLM/Auditor/audit_file_manager.rs
+
 //! Centralizes all `.mdix.au` file I/O: write, rotate, lock, and read-back.
 //!
 //! All write operations follow: unlock → write → re-lock.

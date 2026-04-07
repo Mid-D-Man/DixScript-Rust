@@ -1,4 +1,4 @@
-// src/Compiler/ImportsResolution/mod.rs
+
 //! File and cloud import resolution pipeline.
 
 pub mod hash_verifier;

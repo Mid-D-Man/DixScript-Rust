@@ -1,4 +1,4 @@
-// src/Compiler/ImportsResolution/cloud_file_cache.rs
+
 //! Local filesystem cache for cloud-downloaded imports.
 //!
 //! Cache root: ~/.mdix_cache (Linux/macOS) or %LOCALAPPDATA%/mdix_cache (Windows).

@@ -1,4 +1,3 @@
-// src/Compiler/Core/SectionParsers/mod.rs
 
 //! Section parsers for different DixScript sections
 

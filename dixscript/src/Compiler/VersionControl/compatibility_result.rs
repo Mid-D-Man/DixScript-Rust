@@ -1,4 +1,4 @@
-// src/Compiler/VersionControl/compatibility_result.rs
+
 //! Compatibility check results for version management
 
 use std::fmt;

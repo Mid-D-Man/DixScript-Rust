@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// Resolves and manages `.dixscript.au` file paths, keeping audit history in the
+/// Resolves and manages `.mdix.au` file paths, keeping audit history in the
 /// source directory for consistent tracking across compilations.
 pub struct AuditorPathUtils;
 

@@ -1,4 +1,3 @@
-// mdix-cli/src/services/conversion.rs
 
 use std::path::Path;
 use std::time::Instant;

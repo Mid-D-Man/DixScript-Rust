@@ -1,4 +1,4 @@
-// src/Compiler/Core/ValueResolution/ast_walker.rs
+
 //! ASTWalker — discovers every QuickFunction call inside @DATA.
 //!
 //! Responsibilities:

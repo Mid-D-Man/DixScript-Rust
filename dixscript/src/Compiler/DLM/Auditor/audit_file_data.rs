@@ -1,4 +1,4 @@
-// dixscript/src/Compiler/DLM/Auditor/audit_file_data.rs
+
 //! In-memory data model for `.mdix.au` audit files.
 //! Mirrors the role of KeyFileData for .mdix.key files.
 

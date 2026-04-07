@@ -1,4 +1,3 @@
-// src/ErrorManager/Helpers/tokenization_exception.rs
 
 use std::fmt;
 

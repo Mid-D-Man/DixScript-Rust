@@ -1,4 +1,4 @@
-// src/Compiler/Extensions/mod.rs
+
 //! Extensions - Type system and utilities
 
 mod type_system_manager;

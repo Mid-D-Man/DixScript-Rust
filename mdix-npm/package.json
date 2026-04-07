@@ -17,7 +17,7 @@
     "README.md"
   ],
   "scripts": {
-    "build:wasm": "wasm-pack build ../mdix-wasm --target bundler --out-dir ../npm/wasm-pkg --out-name mdix_wasm",
+    "build:wasm": "wasm-pack build ../mdix-wasm --target bundler --out-dir /wasm-pkg --out-name mdix_wasm",
     "build:ts": "tsc",
     "build": "npm run build:wasm && npm run build:ts",
     "prepublishOnly": "npm run build"

@@ -1,4 +1,4 @@
-// src/Compiler/Core/SectionEnhancers/mod.rs
+
 //! AST enhancers for different sections
 
 pub mod qualified_identifier_resolution;

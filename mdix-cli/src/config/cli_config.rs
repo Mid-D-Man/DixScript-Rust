@@ -1,4 +1,4 @@
-// dixscript-cli/src/config/cli_config.rs
+
 //! CliConfig struct — all user-adjustable preferences with serde defaults.
 
 use serde::{Deserialize, Serialize};

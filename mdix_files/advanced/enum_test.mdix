@@ -1,3 +1,19 @@
+@CONFIG(
+  version -> "1.0.0"
+  features -> "advanced"
+  error_handling -> "halt"
+)
+
 @ENUMS(
     TestEnum { FIRST = 1, SECOND = 2, THIRD = 3 }
 )
+@DATA(
+
+ duman = 419
+ duke<int> = 5
+ friday = "123"
+
+ okTodo: tree = #fffff
+ not:: 3,43,3,5
+)
+

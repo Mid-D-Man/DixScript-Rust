@@ -22,12 +22,8 @@ pub struct QuickFunctionsAstEnhancer<'a> {
 
 impl<'a> QuickFunctionsAstEnhancer<'a> {
     pub fn new(operational_settings: &'a OperationalSettings) -> Self {
-        QuickFunctionsAstEnhancer {
-            debug_config: DebugConfig::from_debug_mode(operational_settings.debug_mode),
-            error_manager: ErrorManager::get_shared_instance(),
-            operational_settings,
-            enhancement_count: 0,
-        }
+        Self::new_with_error_manager(operational_settings,ErrorManager::get_shared_instance())
+
     }
     pub fn new_with_error_manager(operational_settings: &'a OperationalSettings,error_manager:ErrorManager) -> Self {
         QuickFunctionsAstEnhancer {
@@ -79,7 +75,7 @@ impl<'a> QuickFunctionsAstEnhancer<'a> {
                 section.functions.len(),
                 self.enhancement_count
             ));
-            if let Some(r) = analysis_result {
+            if  let  Some(r) = analysis_result {
                 self.error_manager.log_info(&format!(
                     "Resolved {} qualified identifiers",
                     r.qualified_id_resolutions.len()

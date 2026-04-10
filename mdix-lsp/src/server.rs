@@ -1,4 +1,4 @@
-// mdix-lsp/src/server.rs
+
 //! Backend — implements the tower-lsp LanguageServer trait.
 //!
 //! Owns a DashMap of open documents. A tokio Mutex serialises pipeline

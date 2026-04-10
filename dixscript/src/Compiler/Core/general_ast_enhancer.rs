@@ -95,7 +95,7 @@ impl<'a> GeneralAstEnhancer<'a> {
 
         // Phase 2: pass error_manager into QuickFunctionsAstEnhancer.
         // For now it acquires get_shared_instance() internally.
-        let mut enhancer       = QuickFunctionsAstEnhancer::new(self.operational_settings);
+        let mut enhancer       = QuickFunctionsAstEnhancer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
         let enhanced_section   = enhancer.enhance(quickfuncs_section, quickfuncs_analysis);
         let count              = enhancer.get_enhancement_count();
 

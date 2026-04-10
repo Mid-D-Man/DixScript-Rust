@@ -3,7 +3,7 @@ members = [
     "dixscript",
     "mdix-cli",
     "mdix-lsp",
-    "mdix-ffi",
+  #  "mdix-ffi",
     "mdix-wasm",
     "mdix-python",
     "mdix-java",

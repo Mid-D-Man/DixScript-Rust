@@ -140,7 +140,7 @@ impl<'a> ValueResolver<'a> {
         debug_mode: DebugMode,
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
-self.new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
+Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
     }
 
     pub fn new_with_error_manager(
@@ -177,11 +177,12 @@ self.new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             ),
         ));
 
-        let interpreter = FunctionInterpreter::new(
+        let interpreter = FunctionInterpreter::new_with_error_manager(
             symbol_table,
             quick_functions,
             Rc::clone(&data_context),
             debug_mode,
+           error_manager.clone()
         );
 
         Resolver::initialize();

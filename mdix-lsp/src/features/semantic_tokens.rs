@@ -1,4 +1,4 @@
-// mdix-lsp/src/features/semantic_tokens.rs
+
 //! Semantic token provider.
 //!
 //! Maps DixScript TokenType variants to LSP SemanticTokenType indices

@@ -208,11 +208,7 @@ pub struct SecuritySectionAnalyzer<'a> {
 
 impl<'a> SecuritySectionAnalyzer<'a> {
     pub fn new(operational_settings: &'a OperationalSettings) -> Self {
-        SecuritySectionAnalyzer {
-            error_manager: ErrorManager::get_shared_instance(),
-            debug_config: DebugConfig::from_debug_mode(operational_settings.debug_mode),
-            operational_settings,
-        }
+      Self::new_with_error_manager(operational_settings,ErrorManager::get_shared_instance())
     }
 pub fn new_with_error_manager(
     operational_settings: &'a OperationalSettings,

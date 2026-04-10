@@ -17,22 +17,7 @@ pub struct DLMModuleBase {
 impl DLMModuleBase {
     /// Create new DLM module base
     pub fn new(module_name: impl Into<String>, priority: i32) -> Self {
-        let error_manager = ErrorManager::get_shared_instance();
-        let debug_mode = error_manager.get_debug_mode();
-
-        let (is_debug_enabled, is_verbose_enabled) = match debug_mode {
-            DebugMode::Off => (false, false),
-            DebugMode::Regular => (true, false),
-            DebugMode::Verbose => (true, true),
-        };
-
-        DLMModuleBase {
-            error_manager,
-            module_name: module_name.into(),
-            priority,
-            is_debug_enabled,
-            is_verbose_enabled,
-        }
+       Self::new_with_error_manager(module_name,priority,ErrorManager::get_shared_instance())
     }
     pub fn new_with_error_manager(module_name: impl Into<String>, priority: i32, error_manager: ErrorManager,
     ) -> Self {

@@ -24,13 +24,7 @@ impl<'a> ImportsSectionAnalyzer<'a> {
         operational_settings: &'a OperationalSettings,
         current_file_path:    &str,
     ) -> Self {
-        ImportsSectionAnalyzer {
-            error_manager:     ErrorManager::get_shared_instance(),
-            debug_config:      DebugConfig::from_debug_mode(operational_settings.debug_mode),
-            symbol_table,
-            operational_settings,
-            current_file_path: current_file_path.to_string(),
-        }
+       Self::new_with_error_manager(symbol_table,operational_settings,current_file_path,ErrorManager::get_shared_instance())
     }
 pub fn new_with_error_manager(
     symbol_table:         &'a SymbolTable,

@@ -1,4 +1,4 @@
-// mdix-lsp/src/features/completions.rs
+
 //! Completion provider.
 //!
 //! Triggered by: '@', '.', '<', '~'

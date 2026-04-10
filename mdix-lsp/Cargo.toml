@@ -12,7 +12,7 @@ name = "mdix-lsp"
 path = "src/main.rs"
 
 [dependencies]
-tower-lsp          = "0.20"
+tower-lsp          = { version = "0.20"}
 dixscript          = { path = "../dixscript" }
 tokio              = { version = "1", features = ["full"] }
 dashmap            = "6"

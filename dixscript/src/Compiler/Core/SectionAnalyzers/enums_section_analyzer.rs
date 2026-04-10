@@ -73,11 +73,7 @@ pub struct EnumsSectionAnalyzer<'a> {
 
 impl<'a> EnumsSectionAnalyzer<'a> {
     pub fn new(operational_settings: &'a OperationalSettings) -> Self {
-        EnumsSectionAnalyzer {
-            error_manager: ErrorManager::get_shared_instance(),
-            debug_config: DebugConfig::from_debug_mode(operational_settings.debug_mode),
-            operational_settings,
-        }
+     Self::new_with_error_manager(operational_settings,ErrorManager::get_shared_instance())
     }
 pub fn new_with_error_manager(
     operational_settings: &'a OperationalSettings,

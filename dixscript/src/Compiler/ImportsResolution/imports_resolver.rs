@@ -61,7 +61,14 @@ impl<'a> ImportsResolver<'a> {
         symbol_table: &'a mut SymbolTable,
         operational_settings: &'a OperationalSettings,
     ) -> Self {
-        let error_manager = ErrorManager::get_shared_instance();
+       Self::new_with_error_manager(symbol_table,operational_settings,ErrorManager::get_shared_instance())
+    }
+    pub fn new_with_error_manager(
+        symbol_table: &'a mut SymbolTable,
+        operational_settings: &'a OperationalSettings,
+        error_manager: ErrorManager
+    ) -> Self {
+
         let debug_config = DebugConfig::from_debug_mode(error_manager.get_debug_mode());
         let cloud_cache = CloudFileCache::new(error_manager.clone());
 
@@ -76,7 +83,6 @@ impl<'a> ImportsResolver<'a> {
             import_stack: Vec::new(),
         }
     }
-
     // ── Primary entry point ───────────────────────────────────────────────────
     //
     // Called by GeneralSemanticAnalyzer Phase 3. Reads each import declaration

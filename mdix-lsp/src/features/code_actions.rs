@@ -131,7 +131,7 @@ fn fix_weak_encryption(doc: &Document, diag: &Diagnostic) -> Option<CodeAction> 
     None
 }
 
-// ── Fix: suggest known enum values ────────────────────────────────────────────
+// ──  suggest known enum values ────────────────────────────────────────────
 
 fn fix_unknown_enum(doc: &Document, diag: &Diagnostic) -> Vec<CodeActionOrCommand> {
     let mut actions = Vec::new();

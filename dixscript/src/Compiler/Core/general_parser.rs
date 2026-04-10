@@ -402,27 +402,27 @@ impl<'a> GeneralParser<'a> {
         let t      = Instant::now();
         let result = match section.name.as_str() {
             "DLM" => {
-                let mut p = DlmSectionParser::new(&section.tokens, self.operational_settings);
+                let mut p = DlmSectionParser::new_with_error_manager(&section.tokens, self.operational_settings,self.error_manager.clone());
                 Ok(ParsedSection::DLM(p.parse_section()))
             }
             "ENUMS" => {
-                let mut p = EnumsSectionParser::new(&section.tokens, self.operational_settings);
+                let mut p = EnumsSectionParser::new_with_error_manager(&section.tokens, self.operational_settings,self.error_manager.clone());
                 Ok(ParsedSection::Enums(p.parse_section()))
             }
             "IMPORTS" => {
-                let mut p = ImportsSectionParser::new(&section.tokens, self.operational_settings);
+                let mut p = ImportsSectionParser::new_with_error_manager(&section.tokens, self.operational_settings,self.error_manager.clone());
                 Ok(ParsedSection::Imports(p.parse_section()))
             }
             "QUICKFUNCS" => {
-                let mut p = QuickFuncsSectionParser::new(&section.tokens, self.operational_settings);
+                let mut p = QuickFuncsSectionParser::new_with_error_manager(&section.tokens, self.operational_settings,self.error_manager.clone());
                 Ok(ParsedSection::QuickFuncs(p.parse_section()))
             }
             "DATA" => {
-                let mut p = DataSectionParser::new(&section.tokens, self.operational_settings);
+                let mut p = DataSectionParser::new_with_error_manager(&section.tokens, self.operational_settings,self.error_manager.clone());
                 Ok(ParsedSection::Data(p.parse_section()))
             }
             "SECURITY" => {
-                let mut p = SecuritySectionParser::new(&section.tokens, self.operational_settings);
+                let mut p = SecuritySectionParser::new_with_error_manager(&section.tokens, self.operational_settings,self.error_manager.clone());
                 Ok(ParsedSection::Security(p.parse_section()))
             }
             _ => Err(ParseException::new(format!("Unknown section: @{}", section.name))),

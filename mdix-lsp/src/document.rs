@@ -1,4 +1,4 @@
-// mdix-lsp/src/document.rs
+
 //! Per-document state. Rebuilt on every didOpen / didChange.
 
 use dixscript::Compiler::AST::DixScript;

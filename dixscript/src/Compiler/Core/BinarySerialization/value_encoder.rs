@@ -16,9 +16,7 @@ pub struct ValueEncoder {
 impl ValueEncoder {
     /// Create new value encoder
     pub fn new() -> Self {
-        ValueEncoder {
-            error_manager: ErrorManager::get_shared_instance(),
-        }
+      Self::new_with_error_manager(ErrorManager::get_shared_instance())
     }
     pub fn new_with_error_manager(_error_manager:ErrorManager) -> Self {
         ValueEncoder {

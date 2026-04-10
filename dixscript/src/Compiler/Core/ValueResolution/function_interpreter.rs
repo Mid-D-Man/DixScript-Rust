@@ -7,6 +7,7 @@
 //! absolute and dynamic limits.
 
 use std::cell::RefCell;
+use std::net::ToSocketAddrs;
 use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
@@ -206,7 +207,7 @@ impl<'a> FunctionInterpreter<'a> {
         debug_mode: DebugMode,
     ) -> Self {
         let error_manager = ErrorManager::get_shared_instance();
-       self.new_with_error_manager(symbol_table,quick_functions,data_context,debug_mode,error_manager)
+       Self::new_with_error_manager(symbol_table,quick_functions,data_context,debug_mode,error_manager)
     }
     pub fn new_with_error_manager(
         symbol_table: &'a SymbolTable,
@@ -485,7 +486,7 @@ impl<'a> FunctionInterpreter<'a> {
         let suffix = format!(".{}", name);
         let data_ctx = self.data_context.borrow();
         for (key, value) in data_ctx.iter() {
-            if key == name || key.ends_with(&suffix) {
+            if key.to_string() == name.to_string() || key.ends_with(&suffix) {
                 return Some(value.clone());
             }
         }

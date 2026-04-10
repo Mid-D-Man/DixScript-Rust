@@ -55,7 +55,7 @@ pub fn compile(path: &Path, opts: &CompileOpts) -> Result<CompileResult, CliErro
     // Clear the env var after compilation so it doesn't leak to later commands
     // in the same process invocation.
     if opts.password.is_some() {
-        std::env::remove_var("MDIX_DLM_PASSWORD");
+        unsafe{std::env::remove_var("MDIX_DLM_PASSWORD");}
     }
 
     let elapsed = t.elapsed();
@@ -137,7 +137,7 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
 
     if let Some(ref pw) = opts.password {
         load_opts.password = Some(pw.clone());
-        std::env::set_var("MDIX_DLM_PASSWORD", pw);
+      unsafe{  std::env::set_var("MDIX_DLM_PASSWORD", pw); }
     }
 
     if let Some(ref dir) = opts.output_dir {
@@ -150,7 +150,7 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
         .map_err(CliError::CompileError)?;
 
     if opts.password.is_some() {
-        std::env::remove_var("MDIX_DLM_PASSWORD");
+        unsafe{std::env::remove_var("MDIX_DLM_PASSWORD");}
     }
 
     let output_dir = opts.output_dir.as_deref().unwrap_or(".");

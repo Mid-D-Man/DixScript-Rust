@@ -16,9 +16,9 @@ pub struct ValueDecoder {
 impl ValueDecoder {
     /// Create new value decoder
     pub fn new() -> Self {
-        ValueDecoder {
-            error_manager: ErrorManager::get_shared_instance(),
-        }
+
+           Self::new_with_error_manager(ErrorManager::get_shared_instance())
+
     }
     pub fn new_with_error_manager(_error_manager:ErrorManager) -> Self {
         ValueDecoder {

@@ -259,10 +259,11 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
         let had_errors_before = self.error_manager.has_errors();
 
-        let mut imports_analyzer = ImportsSectionAnalyzer::new(
+        let mut imports_analyzer = ImportsSectionAnalyzer::new_with_error_manager(
             &self.symbol_table,
             self.operational_settings,
             current_file_path,
+            self.error_manager.clone()
         );
         imports_analyzer.analyze(Some(imports));
         drop(imports_analyzer);
@@ -356,7 +357,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         }
 
         let mut imports_resolver =
-            ImportsResolver::new(&mut self.symbol_table, self.operational_settings);
+            ImportsResolver::new_with_error_manager(&mut self.symbol_table, self.operational_settings,self.error_manager.clone());
 
         // Use the new entry point that actually reads files from disk.
         let resolve_success =
@@ -418,7 +419,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             return true;
         }
 
-        let mut analyzer = EnumsSectionAnalyzer::new(self.operational_settings);
+        let mut analyzer = EnumsSectionAnalyzer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
         let result       = analyzer.analyze(enums, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
@@ -471,7 +472,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             return true;
         }
 
-        let mut analyzer = QuickFuncsSectionAnalyzer::new(self.operational_settings);
+        let mut analyzer = QuickFuncsSectionAnalyzer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
         let result       = analyzer.analyze(quickfuncs, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
@@ -516,7 +517,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        let mut analyzer = DlmSectionAnalyzer::new(self.operational_settings);
+        let mut analyzer = DlmSectionAnalyzer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
         let result       = analyzer.analyze(dlm, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
@@ -542,7 +543,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        let mut analyzer = DataSectionAnalyzer::new(self.operational_settings);
+        let mut analyzer = DataSectionAnalyzer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
         let result       = analyzer.analyze(data, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
@@ -624,7 +625,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        let mut analyzer = SecuritySectionAnalyzer::new(self.operational_settings);
+        let mut analyzer = SecuritySectionAnalyzer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
         let result       = analyzer.analyze(security, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {

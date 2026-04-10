@@ -20,19 +20,7 @@ impl Argon2KDF {
     /// Create new Argon2KDF with configuration from SecuritySection.
     /// Used in the forward (encryption) pipeline.
     pub fn new(security_config: &SecuritySection) -> Self {
-        let error_manager = ErrorManager::get_shared_instance();
-        let (memory_size_kb, iterations, parallelism) =
-            Self::load_configuration(security_config);
-        let salt = Self::generate_salt();
-
-        if error_manager.get_debug_mode() != crate::Compiler::Core::Config::DebugMode::Off {
-            error_manager.log_debug(&format!(
-                "[Argon2KDF] Initialized: memory={}KB, iterations={}, parallelism={}",
-                memory_size_kb, iterations, parallelism
-            ));
-        }
-
-        Argon2KDF { error_manager, salt, memory_size_kb, iterations, parallelism }
+      Self::new_with_error_manager(security_config,ErrorManager::get_shared_instance())
     }
     pub fn new_with_error_manager(security_config: &SecuritySection,error_manager: ErrorManager) -> Self {
 

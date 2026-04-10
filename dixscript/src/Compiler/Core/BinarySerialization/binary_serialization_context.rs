@@ -21,17 +21,7 @@ pub struct BinarySerializationContext {
 
 impl BinarySerializationContext {
     pub fn new() -> Self {
-        let error_manager = ErrorManager::get_shared_instance();
-        let debug_mode = error_manager.get_debug_mode();
-        let debug_config = DebugConfig::from_debug_mode(debug_mode);
-
-        BinarySerializationContext {
-            error_manager,
-            debug_config,
-            scope_stack: Vec::new(),
-            current_nesting_depth: 0,
-            statistics: BinarySerializationStatistics::new(),
-        }
+       Self::new_with_error_manager(ErrorManager::get_shared_instance())
     }
     pub fn new_with_error_manager(error_manager: ErrorManager) -> Self {
 

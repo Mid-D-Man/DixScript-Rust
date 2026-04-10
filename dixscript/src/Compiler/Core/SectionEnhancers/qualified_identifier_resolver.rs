@@ -23,11 +23,8 @@ impl QualifiedIdentifierResolver {
         resolutions: HashMap<QualifiedIdentifierKey, QualifiedIdentifierResolution>,
         debug_config: DebugConfig,
     ) -> Self {
-        QualifiedIdentifierResolver {
-            resolutions: resolutions.into_iter().collect(),
-            error_manager: ErrorManager::get_shared_instance(),
-            debug_config,
-        }
+        Self::new_with_error_manager(resolutions,debug_config,ErrorManager::get_shared_instance())
+
     }
     pub fn new_with_error_manager(
         resolutions: HashMap<QualifiedIdentifierKey, QualifiedIdentifierResolution>,

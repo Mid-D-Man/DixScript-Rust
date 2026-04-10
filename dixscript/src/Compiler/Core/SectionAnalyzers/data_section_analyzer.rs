@@ -60,16 +60,20 @@ pub struct DataSectionAnalyzer<'a> {
 }
 
 impl<'a> DataSectionAnalyzer<'a> {
+
+    //Depricated left regular new in sub moduls for sake of bakwards compatability
+    //use new with error manager instead from here on out.
     pub fn new(operational_settings: &'a OperationalSettings) -> Self {
-      self.new_with_error_manager(OperationalSettings,ErrorManager::get_shared_instance())
+     Self::new_with_error_manager(operational_settings,ErrorManager::get_shared_instance())
     }
-pub fn new_with_error_manager(
+
+pub fn new_with_error_manager (
     operational_settings: &'a OperationalSettings,
-    _error_manager: ErrorManager,
+    error_manager: ErrorManager,
 ) -> Self {
     DataSectionAnalyzer {
         debug_config:  DebugConfig::from_debug_mode(operational_settings.debug_mode),
-        error_manager: _error_manager,
+        error_manager,
         operational_settings,
         declared_table_paths:     FxHashSet::default(),
         current_nesting_depth:    0,
@@ -1241,6 +1245,7 @@ pub fn new_with_error_manager(
 
         if self.debug_config.is_enabled {
             self.error_manager.log_error(&format!("  [{}] {}", error_type, message));
+
             if let Some(sugg) = suggestion {
                 self.error_manager.log_error(&format!("    Suggestion: {}", sugg));
             }
@@ -1272,3 +1277,4 @@ pub fn new_with_error_manager(
         }
     }
 }
+

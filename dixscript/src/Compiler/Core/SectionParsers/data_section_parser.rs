@@ -47,7 +47,14 @@ impl<'a> DataSectionParser<'a> {
     tokens: &'a [Token],
     operational_settings: &'a OperationalSettings,
 ) -> Self {
-    let error_manager = ErrorManager::get_shared_instance();
+   Self::new_with_error_manager(tokens,operational_settings,ErrorManager::get_shared_instance())
+}
+pub fn new_with_error_manager(
+    tokens: &'a [Token],
+    operational_settings: &'a OperationalSettings,
+    error_manager: ErrorManager,
+) -> Self {
+
     let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
 
     let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
@@ -75,28 +82,6 @@ impl<'a> DataSectionParser<'a> {
         has_seen_grouped_data: false,
         current_object_nesting_depth: 0,
         current_function_call_depth: 0,
-    }
-}
-pub fn new_with_error_manager(
-    tokens: &'a [Token],
-    operational_settings: &'a OperationalSettings,
-    error_manager: ErrorManager,
-) -> Self {
-    let debug_config   = DebugConfig::from_debug_mode(operational_settings.debug_mode);
-    let dynamic_limit  = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
-    let max_iterations = dynamic_limit.min(ABSOLUTE_MAX_ITERATIONS);
-
-    DataSectionParser {
-        tokens,
-        operational_settings,
-        error_manager,
-        debug_config,
-        position:             0,
-        last_position:        usize::MAX,
-        stuck_count:          0,
-        iteration_count:      0,
-        max_iterations,
-        has_encountered_errors: false,
     }
 }
     pub fn parse_section(&mut self) -> Option<DataSection> {

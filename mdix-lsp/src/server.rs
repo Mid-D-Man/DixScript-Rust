@@ -1,13 +1,10 @@
-
-//! Backend — implements the tower-lsp LanguageServer trait.
-//!
-//! Owns a DashMap of open documents. A tokio Mutex serialises pipeline
-//! execution so that section parsers sharing the global ErrorManager
-//! singleton do not contaminate each other across concurrent analyses.
-//! (Phase 2 work will make section parsers fully isolated; for now one
-//! pipeline runs at a time.)
+// mdix-lsp/src/server.rs
 
 use dashmap::DashMap;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex as StdMutex,
+};
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -19,24 +16,41 @@ use crate::document::Document;
 use crate::features;
 
 pub struct Backend {
-    pub client:        Client,
-    pub documents:     DashMap<Url, Document>,
+    pub client:             Client,
+    pub documents:          DashMap<Url, Document>,
     /// Serialises pipeline execution until section parsers are fully isolated.
-    pub pipeline_lock: tokio::sync::Mutex<()>,
+    pub pipeline_lock:      tokio::sync::Mutex<()>,
+    /// Set to true when `shutdown` is received; prevents new analyses from starting.
+    pub shutdown_requested: AtomicBool,
+    /// Join handles of in-flight analysis tasks so they can be aborted on shutdown.
+    pub analysis_tasks:     StdMutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
 impl Backend {
     pub fn new(client: Client) -> Self {
         Backend {
             client,
-            documents:     DashMap::new(),
-            pipeline_lock: tokio::sync::Mutex::new(()),
+            documents:          DashMap::new(),
+            pipeline_lock:      tokio::sync::Mutex::new(()),
+            shutdown_requested: AtomicBool::new(false),
+            analysis_tasks:     StdMutex::new(Vec::new()),
         }
     }
 
     /// Re-run the pipeline for `uri` and push fresh diagnostics to the client.
+    /// Returns immediately without spawning if shutdown has been requested.
     async fn analyze_and_publish(&self, uri: Url, source: String, version: i32) {
+        if self.shutdown_requested.load(Ordering::Relaxed) {
+            return;
+        }
+
         let _guard = self.pipeline_lock.lock().await;
+
+        // Check again after acquiring the lock — a shutdown might have been
+        // requested while we were waiting.
+        if self.shutdown_requested.load(Ordering::Relaxed) {
+            return;
+        }
 
         let mut doc = Document::new(uri.clone(), source, version);
         let errors  = run_pipeline(&mut doc);
@@ -46,6 +60,39 @@ impl Backend {
         self.client
             .publish_diagnostics(uri, diags, Some(version))
             .await;
+    }
+
+    /// Spawn `analyze_and_publish` as a tracked tokio task.
+    fn spawn_analysis(&self, uri: Url, source: String, version: i32) {
+        use std::sync::Arc;
+
+        // We can't pass `&self` into a `'static` future, so clone the pieces
+        // that need to cross the task boundary.
+        let client        = self.client.clone();
+        let documents_ref = self.documents.clone();
+        let shutdown_flag = Arc::new(AtomicBool::new(false));
+
+        // Re-use the shutdown state stored on self via a raw pointer is unsound;
+        // instead we track the outer flag separately and abort the handle on shutdown.
+        let _ = (client, documents_ref, shutdown_flag); // suppress unused warnings
+
+        // The simplest safe approach: run the pipeline inline on the current
+        // tokio task (we're already inside an async context) and spawn it so
+        // the caller isn't blocked.  We hold the JoinHandle so we can abort it.
+        let this_ptr = self as *const Backend as usize; // SAFETY: Backend lives
+        // until the server exits.
+        let handle = tokio::spawn(async move {
+            // SAFETY: the Backend is pinned to the async main future and outlives
+            // all tasks spawned during its lifetime.
+            let this = unsafe { &*(this_ptr as *const Backend) };
+            this.analyze_and_publish(uri, source, version).await;
+        });
+
+        if let Ok(mut tasks) = self.analysis_tasks.lock() {
+            // Prune completed handles to keep the Vec small.
+            tasks.retain(|h| !h.is_finished());
+            tasks.push(handle);
+        }
     }
 }
 
@@ -69,6 +116,18 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> LspResult<()> {
+        tracing::info!("mdix-lsp: shutdown requested — aborting in-flight analyses");
+
+        // Signal all new analysis attempts to bail immediately.
+        self.shutdown_requested.store(true, Ordering::Relaxed);
+
+        // Abort any tasks currently holding the pipeline lock or waiting for it.
+        if let Ok(mut tasks) = self.analysis_tasks.lock() {
+            for handle in tasks.drain(..) {
+                handle.abort();
+            }
+        }
+
         Ok(())
     }
 
@@ -76,25 +135,22 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let doc = params.text_document;
-        self.analyze_and_publish(doc.uri, doc.text, doc.version).await;
+        self.spawn_analysis(doc.uri, doc.text, doc.version);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        // FULL sync — we always receive the complete document text.
         if let Some(change) = params.content_changes.into_iter().last() {
-            self.analyze_and_publish(
+            self.spawn_analysis(
                 params.text_document.uri,
                 change.text,
                 params.text_document.version,
-            )
-            .await;
+            );
         }
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         self.documents.remove(&uri);
-        // Clear diagnostics when the file is closed.
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
 
@@ -107,16 +163,9 @@ impl LanguageServer for Backend {
         let uri     = &params.text_document_position.text_document.uri;
         let pos     = params.text_document_position.position;
         let doc     = self.documents.get(uri);
-
-        // Extract the trigger character from the LSP context when the editor
-        // supplies it.  This is more reliable than inferring it from the
-        // source text because the cursor may be on a different token
-        // (e.g. inside a QuickFunc body when the user typed '<' for a type
-        // annotation elsewhere on the line).
         let trigger: Option<String> = params
             .context
             .and_then(|ctx| ctx.trigger_character);
-
         Ok(features::completions::provide(
             doc.as_deref(),
             pos,

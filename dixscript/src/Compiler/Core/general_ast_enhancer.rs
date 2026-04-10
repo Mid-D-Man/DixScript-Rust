@@ -1,6 +1,17 @@
+// dixscript/src/Compiler/Core/general_ast_enhancer.rs
+
 //! Applies compile-time enhancements to a validated AST.
 //!
-//! Must run after semantic analysis: Parse -> Semantic Analysis -> AST Enhancement -> Value Resolution.
+//! Must run after semantic analysis: Parse → Semantic Analysis → AST Enhancement → Value Resolution.
+//!
+//! ## Error manager propagation
+//! `propagate_error_manager = true`  (LSP / isolated mode): every sub-enhancer
+//!   receives a clone of this instance's ErrorManager so all diagnostics land
+//!   in the same isolated document store.
+//! `propagate_error_manager = false` (CLI / shared mode): sub-enhancers call
+//!   their own `new()` which acquires the process-wide shared singleton. This
+//!   is the legacy path and produces identical runtime behaviour because the
+//!   CLI's top-level ErrorManager IS the shared singleton.
 
 use crate::Compiler::AST::DixScript;
 use crate::Compiler::Core::{
@@ -11,15 +22,23 @@ use crate::ErrorManager::{DebugConfig, ErrorManager};
 use std::time::Instant;
 
 pub struct GeneralAstEnhancer<'a> {
-    operational_settings: &'a OperationalSettings,
-    error_manager:        ErrorManager,
-    debug_config:         DebugConfig,
-    enhancement_result:   EnhancementResult,
-    stopwatch:            Instant,
+    operational_settings:    &'a OperationalSettings,
+    error_manager:           ErrorManager,
+    debug_config:            DebugConfig,
+    enhancement_result:      EnhancementResult,
+    stopwatch:               Instant,
+    /// When true, sub-enhancers receive `self.error_manager.clone()` so that
+    /// diagnostics from all sub-enhancers aggregate into the same store.
+    /// When false (CLI path), sub-enhancers call their own `new()` and use the
+    /// process-wide shared singleton independently.
+    propagate_error_manager: bool,
 }
 
 impl<'a> GeneralAstEnhancer<'a> {
-    /// Primary constructor — caller supplies the ErrorManager instance.
+    // ── Constructors ──────────────────────────────────────────────────────────
+
+    /// LSP / isolated path.
+    /// Sub-enhancers will receive `error_manager.clone()`.
     pub fn new_with_error_manager(
         operational_settings: &'a OperationalSettings,
         error_manager:        ErrorManager,
@@ -29,15 +48,26 @@ impl<'a> GeneralAstEnhancer<'a> {
             operational_settings,
             error_manager,
             debug_config,
-            enhancement_result: EnhancementResult::new(),
-            stopwatch: Instant::now(),
+            enhancement_result:      EnhancementResult::new(),
+            stopwatch:               Instant::now(),
+            propagate_error_manager: true,
         }
     }
 
-    /// Backward-compatible constructor for the CLI path.
+    /// CLI / shared path.
+    /// Sub-enhancers will call their own `new()` and use the shared singleton.
     pub fn new(operational_settings: &'a OperationalSettings) -> Self {
         Self::new_with_error_manager(operational_settings, ErrorManager::get_shared_instance())
+            .with_propagate(false)
     }
+
+    /// Builder-style helper to flip the propagation flag.
+    fn with_propagate(mut self, propagate: bool) -> Self {
+        self.propagate_error_manager = propagate;
+        self
+    }
+
+    // ── Main entry point ──────────────────────────────────────────────────────
 
     pub fn enhance(
         mut self,
@@ -62,6 +92,8 @@ impl<'a> GeneralAstEnhancer<'a> {
 
         self.finalize_result()
     }
+
+    // ── Private ───────────────────────────────────────────────────────────────
 
     fn enhance_quickfunctions(
         &mut self,
@@ -93,11 +125,17 @@ impl<'a> GeneralAstEnhancer<'a> {
             }
         }
 
-        // Phase 2: pass error_manager into QuickFunctionsAstEnhancer.
-        // For now it acquires get_shared_instance() internally.
-        let mut enhancer       = QuickFunctionsAstEnhancer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
-        let enhanced_section   = enhancer.enhance(quickfuncs_section, quickfuncs_analysis);
-        let count              = enhancer.get_enhancement_count();
+        let mut enhancer = if self.propagate_error_manager {
+            QuickFunctionsAstEnhancer::new_with_error_manager(
+                self.operational_settings,
+                self.error_manager.clone(),
+            )
+        } else {
+            QuickFunctionsAstEnhancer::new(self.operational_settings)
+        };
+
+        let enhanced_section = enhancer.enhance(quickfuncs_section, quickfuncs_analysis);
+        let count            = enhancer.get_enhancement_count();
 
         self.enhancement_result.total_enhancements += count;
         self.enhancement_result.section_enhancements.insert(

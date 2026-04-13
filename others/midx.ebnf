@@ -339,7 +339,40 @@ DataType         ::= "int" | "float" | "double" | "string" | "bool" | "array"
 (* IDENTIFIERS AND BASIC ELEMENTS *)
 (* ============================================================ *)
 
+(*
+IDENTIFIER RULES
+================
+
+DixScript supports two identifier forms:
+
+1. Snake-case (all sections):
+      Identifier_snake ::= Letter (Letter | Digit | "_")*
+
+2. Kebab-case (all sections EXCEPT @QUICKFUNCS):
+      Identifier_kebab ::= Letter (Letter | Digit | "_")* ("-" (Letter | "_") (Letter | Digit | "_")*)+
+
+The unified production covering both forms:
+
+      Identifier ::= Letter (Letter | Digit | "_" | KebabContinuation)*
+      KebabContinuation ::= "-" (Letter | "_") (Letter | Digit | "_")*
+
+IMPORTANT DISAMBIGUATION RULES:
+  • Hyphen is part of an identifier ONLY when:
+      – Not in @QUICKFUNCS section (where "-" is arithmetic minus)
+      – Immediately followed by [A-Za-z_] (not digit, ">", space, or another "-")
+  • "mid-log"  → one Identifier token   (DATA section)
+  • "mid-net"  → one Identifier token   (DATA section)
+  • "a - b"    → Identifier ArithmeticOp Identifier (spaces disambiguate)
+  • "a-5"      → Identifier then numeric literal "-5" (digit after hyphen)
+  • "a->"      → Identifier then SwitchCase "->" (> after hyphen)
+  • "a-b" in @QUICKFUNCS → Identifier ArithmeticOp Identifier
+
+This matches TOML's bare-key rule (A-Za-z0-9_-) while preserving
+unambiguous arithmetic in expression contexts.
+*)
+
 Identifier       ::= Letter (Letter | Digit | "_")*
+                    | Letter (Letter | Digit | "_" | "-")* Letter  (* kebab — non-QUICKFUNCS only *)
 
 Digit            ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
 HexDigit         ::= Digit | "a" | "b" | "c" | "d" | "e" | "f"

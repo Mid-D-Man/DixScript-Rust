@@ -915,16 +915,62 @@ impl<'src> Tokenizer<'src> {
 }
 
 impl<'src> Tokenizer<'src> {
+    /// Scan an identifier or keyword token.
+    ///
+    /// ## Kebab-case identifiers
+    ///
+    /// DixScript v1.0.0 supports hyphen (`-`) as a valid identifier character
+    /// in all sections **except `@QUICKFUNCS`**, where `-` is the arithmetic
+    /// minus operator and must remain unambiguous.
+    ///
+    /// The rule for consuming a hyphen as part of an identifier:
+    ///   1. We are NOT currently inside `@QUICKFUNCS`.
+    ///   2. The character immediately after the hyphen is `[A-Za-z_]`
+    ///      (not a digit, not `>`, not whitespace, not another operator).
+    ///
+    /// Examples that scan as a single `Identifier` token:
+    ///   - `mid-log`   (DATA section key)
+    ///   - `mid-net`   (DATA section table path segment)
+    ///   - `my-project` (CONFIG/DATA property name)
+    ///
+    /// Examples that correctly do NOT merge:
+    ///   - `a - b`     (arithmetic; spaces mean `-` is its own token)
+    ///   - `a-5`       (digit after `-` → `a` then numeric `-5`)
+    ///   - `a->`       (`>` after `-` → `a` then `->` SwitchCase)
+    ///   - `a--`       (`-` after `-` → `a` then `ArithmeticOp("--")`)
+    ///   - `a-b` inside `@QUICKFUNCS` → `a` then `ArithmeticOp("-")` then `b`
     fn scan_identifier_or_keyword(&self, state: &mut TokenizerState) -> Token {
         let start_column = state.column;
         let start_line   = state.line;
         let start_pos    = state.position;
+
         while !state.is_at_end() {
             let ch = state.peek(self.input);
-            if ch.is_alphanumeric() || ch == '_' { state.advance(self.input); } else { break; }
+
+            if ch.is_alphanumeric() || ch == '_' {
+                state.advance(self.input);
+            } else if ch == '-' {
+                // Kebab-case: allow '-' inside an identifier only when:
+                //   • not in @QUICKFUNCS (which has arithmetic expressions), AND
+                //   • the very next character is [A-Za-z_] (not digit, >, space …)
+                let next                = state.peek_next(self.input);
+                let in_expression_ctx   = matches!(self.current_section, SectionId::QuickFuncs);
+                let valid_continuation  = next.is_ascii_alphabetic() || next == '_';
+
+                if !in_expression_ctx && valid_continuation {
+                    state.advance(self.input); // consume the '-'
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
         }
+
         let identifier = state.slice(self.input, start_pos, state.position - start_pos);
 
+        // Keyword table lookup — kebab-case strings are never keywords,
+        // so this will always miss for hyphenated names. That's correct.
         if let Some(ctor) = KEYWORDS.get(identifier) {
             return Token::new(ctor(), start_line, start_column, self.current_section);
         }

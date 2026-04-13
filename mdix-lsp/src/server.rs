@@ -1,12 +1,13 @@
 // mdix-lsp/src/server.rs
 
 use dashmap::DashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex as StdMutex;
 
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer};  // LanguageServer must be in scope here
+use tower_lsp::{Client, LanguageServer};
 
 use crate::analyzer::run_pipeline;
 use crate::capabilities::server_capabilities;
@@ -18,13 +19,12 @@ use crate::features;
 
 pub struct Backend {
     pub client:             Client,
-    pub documents:          DashMap<Url, Document>,
-    /// Serialises the pipeline so two rapid saves don't interleave their
-    /// DashMap writes.  Held only for the duration of run_pipeline + insert.
+    /// Arc-wrapped so spawn_analysis can clone the pointer cheaply without
+    /// requiring Document: Clone.  DashMap is internally sharded and
+    /// thread-safe; Arc just gives us a cheap reference-counted handle.
+    pub documents:          Arc<DashMap<Url, Document>>,
     pub pipeline_lock:      tokio::sync::Mutex<()>,
-    /// Set to true on `shutdown`; prevents new analyses from starting.
     pub shutdown_requested: AtomicBool,
-    /// Tracked task handles so we can abort them on shutdown.
     pub analysis_tasks:     StdMutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
@@ -32,7 +32,7 @@ impl Backend {
     pub fn new(client: Client) -> Self {
         Backend {
             client,
-            documents:          DashMap::new(),
+            documents:          Arc::new(DashMap::new()),
             pipeline_lock:      tokio::sync::Mutex::new(()),
             shutdown_requested: AtomicBool::new(false),
             analysis_tasks:     StdMutex::new(Vec::new()),
@@ -40,23 +40,18 @@ impl Backend {
     }
 
     /// Re-runs the pipeline for one document and publishes fresh diagnostics.
-    ///
-    /// `Client` and `DashMap` are both cheaply cloneable (Arc-backed), so we
-    /// clone them before spawning instead of passing a raw `self` pointer.
     fn spawn_analysis(&self, uri: Url, source: String, version: i32) {
         if self.shutdown_requested.load(Ordering::Relaxed) {
             return;
         }
 
-        // Clone the Arc-backed handles — this is O(1) and safe to send across
-        // thread boundaries.
         let client    = self.client.clone();
-        let documents = self.documents.clone();
+        let documents = Arc::clone(&self.documents); // O(1) arc clone
 
         let handle = tokio::spawn(async move {
-            let mut doc    = Document::new(uri.clone(), source, version);
-            let errors     = run_pipeline(&mut doc);
-            let diags      = to_diagnostics(&errors);
+            let mut doc = Document::new(uri.clone(), source, version);
+            let errors  = run_pipeline(&mut doc);
+            let diags   = to_diagnostics(&errors);
             documents.insert(uri.clone(), doc);
             client.publish_diagnostics(uri, diags, Some(version)).await;
         });
@@ -132,9 +127,7 @@ impl LanguageServer for Backend {
         let uri     = &params.text_document_position.text_document.uri;
         let pos     = params.text_document_position.position;
         let doc     = self.documents.get(uri);
-        let trigger = params
-            .context
-            .and_then(|ctx| ctx.trigger_character);
+        let trigger = params.context.and_then(|ctx| ctx.trigger_character);
         Ok(features::completions::provide(
             doc.as_deref(),
             pos,
@@ -181,7 +174,9 @@ impl LanguageServer for Backend {
         &self,
         params: ColorPresentationParams,
     ) -> LspResult<Vec<ColorPresentation>> {
-        Ok(features::document_color::presentation(params.color))
+        // Pass the original source range so the presentation can include a
+        // TextEdit that actually replaces the hex literal in the document.
+        Ok(features::document_color::presentation(params.color, params.range))
     }
 
     async fn inlay_hint(

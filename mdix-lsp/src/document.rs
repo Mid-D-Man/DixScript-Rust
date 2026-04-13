@@ -1,5 +1,4 @@
 // mdix-lsp/src/document.rs
-
 //! Per-document state.  Rebuilt on every didOpen / didChange.
 
 use dixscript::Compiler::AST::DixScript;
@@ -9,31 +8,28 @@ use tower_lsp::lsp_types::Url;
 
 /// Everything the server knows about one open .mdix file.
 pub struct Document {
-    pub uri: Url,
-    pub source: String,
-    pub error_manager: ErrorManager,
-    pub tokens: Vec<dixscript::Compiler::Core::Tokenizer::Token>,
-    pub ast: Option<DixScript>,
-    pub semantic_result: Option<SemanticAnalysisResult>,
-    pub enhancement_result: Option<EnhancementResult>,
-    pub version: i32,
-
+    pub uri:               Url,
+    pub source:            String,
+    pub error_manager:     ErrorManager,
+    pub tokens:            Vec<dixscript::Compiler::Core::Tokenizer::Token>,
+    pub ast:               Option<DixScript>,
+    pub semantic_result:   Option<SemanticAnalysisResult>,
+    pub enhancement_result:Option<EnhancementResult>,
+    pub version:           i32,
     /// Lines removed from the start of `source` when @CONFIG was stripped.
-    /// Token positions are relative to the cleaned source; add this offset
-    /// when mapping back to LSP positions in the original file.
-    pub config_line_offset: usize,
+    pub config_line_offset:usize,
 }
 
 impl std::fmt::Debug for Document {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Document")
-            .field("uri",                &self.uri)
-            .field("version",            &self.version)
-            .field("source_len",         &self.source.len())
-            .field("token_count",        &self.tokens.len())
-            .field("has_ast",            &self.ast.is_some())
-            .field("has_semantic_result",&self.semantic_result.is_some())
-            .field("config_line_offset", &self.config_line_offset)
+            .field("uri",                 &self.uri)
+            .field("version",             &self.version)
+            .field("source_len",          &self.source.len())
+            .field("token_count",         &self.tokens.len())
+            .field("has_ast",             &self.ast.is_some())
+            .field("has_semantic_result", &self.semantic_result.is_some())
+            .field("config_line_offset",  &self.config_line_offset)
             .finish()
     }
 }

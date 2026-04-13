@@ -2,13 +2,17 @@
 //!
 //! Scans the token stream for HexColor tokens and returns DocumentColor entries
 //! so editors can display an inline color swatch.
-//! color_presentation converts an edited RGBA value back to a DixScript hex string.
+//!
+//! `color_presentation` now receives the source range and returns a TextEdit
+//! so the editor's color picker actually writes the new hex back to the file.
 
 use tower_lsp::lsp_types::{
-    Color, ColorInformation, ColorPresentation, Position, Range,
+    Color, ColorInformation, ColorPresentation, Position, Range, TextEdit,
 };
 use dixscript::Compiler::Core::Tokenizer::TokenType;
 use crate::document::Document;
+
+// ── Provide color information ─────────────────────────────────────────────────
 
 pub fn provide(doc: Option<&Document>) -> Vec<ColorInformation> {
     let doc = match doc {
@@ -21,10 +25,9 @@ pub fn provide(doc: Option<&Document>) -> Vec<ColorInformation> {
     for token in &doc.tokens {
         if let TokenType::HexColor(hex) = &token.token_type {
             if let Some(color) = parse_hex_color(hex) {
-                // Token position is 1-based; LSP Range is 0-based.
                 let line   = token.line.saturating_sub(1) as u32;
                 let col    = token.column.saturating_sub(1) as u32;
-                // +1 for the leading '#'
+                // +1 for the leading '#'; hex string stored without '#'
                 let length = hex.len() as u32 + 1;
 
                 result.push(ColorInformation {
@@ -41,46 +44,59 @@ pub fn provide(doc: Option<&Document>) -> Vec<ColorInformation> {
     result
 }
 
+// ── Produce color presentation ────────────────────────────────────────────────
+
 /// Called by the editor when the user picks a new color in the swatch.
-/// Converts the RGBA float color back to a DixScript hex string.
-pub fn presentation(color: Color) -> Vec<ColorPresentation> {
+/// `range` is the source range that originally contained the hex literal.
+/// We return a TextEdit so the editor replaces the old hex with the new one.
+pub fn presentation(color: Color, range: Range) -> Vec<ColorPresentation> {
     let r = (color.red   * 255.0).round() as u8;
     let g = (color.green * 255.0).round() as u8;
     let b = (color.blue  * 255.0).round() as u8;
     let a = (color.alpha * 255.0).round() as u8;
 
-    let label = if a == 255 {
-        format!("#{:02X}{:02X}{:02X}", r, g, b)
-    } else {
-        format!("#{:02X}{:02X}{:02X}{:02X}", r, g, b, a)
-    };
+    // Produce both RRGGBB and RRGGBBAA presentations so the user can choose.
+    let rgb_label  = format!("#{:02X}{:02X}{:02X}", r, g, b);
+    let rgba_label = format!("#{:02X}{:02X}{:02X}{:02X}", r, g, b, a);
 
-    vec![ColorPresentation {
-        label,
-        text_edit:               None,
-        additional_text_edits:   None,
-    }]
+    let mut presentations = vec![ColorPresentation {
+        label:               rgb_label.clone(),
+        text_edit:           Some(TextEdit {
+            range,
+            new_text: rgb_label,
+        }),
+        additional_text_edits: None,
+    }];
+
+    if a != 255 {
+        presentations.push(ColorPresentation {
+            label:               rgba_label.clone(),
+            text_edit:           Some(TextEdit {
+                range,
+                new_text: rgba_label,
+            }),
+            additional_text_edits: None,
+        });
+    }
+
+    presentations
 }
 
 // ── Hex parsing ───────────────────────────────────────────────────────────────
 
 /// Parses a DixScript HexColor string (without the leading '#') into an LSP Color.
-///
 /// Supported formats: RGB (3), RGBA (4), RRGGBB (6), RRGGBBAA (8).
-fn parse_hex_color(hex: &str) -> Option<Color> {
-    // Strip leading '#' if present (the lexer may include it in the stored string).
+pub fn parse_hex_color(hex: &str) -> Option<Color> {
     let hex = hex.trim_start_matches('#');
 
     let (r, g, b, a): (u8, u8, u8, u8) = match hex.len() {
         3 => {
-            // RGB shorthand — expand each nibble.
             let r = expand_nibble(hex.get(0..1)?)?;
             let g = expand_nibble(hex.get(1..2)?)?;
             let b = expand_nibble(hex.get(2..3)?)?;
             (r, g, b, 255)
         }
         4 => {
-            // RGBA shorthand.
             let r = expand_nibble(hex.get(0..1)?)?;
             let g = expand_nibble(hex.get(1..2)?)?;
             let b = expand_nibble(hex.get(2..3)?)?;
@@ -115,4 +131,4 @@ fn parse_hex_color(hex: &str) -> Option<Color> {
 fn expand_nibble(s: &str) -> Option<u8> {
     let nibble = u8::from_str_radix(s, 16).ok()?;
     Some(nibble << 4 | nibble)
-  }
+}

@@ -1,0 +1,45 @@
+ Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://wbwmovtewytjibxutssk.supabase.co/storage/v1/object/list/product-images. (Reason: CORS request did not succeed). Status code: (null).
+13:56:52.791 Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://wbwmovtewytjibxutssk.supabase.co/storage/v1/object/list/product-images. (Reason: CORS request did not succeed). Status code: (null).
+13:56:52.792 Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://wbwmovtewytjibxutssk.supabase.co/storage/v1/object/list/product-images. (Reason: CORS request did not succeed). Status code: (null).
+13:56:53.737 fail: SubashaVentures.Services.Supabase.SupabaseStorageService[0]
+      ListFiles failed: mens-clothing
+System.Net.Http.HttpRequestException: TypeError: NetworkError when attempting to fetch resource.
+ ---> TypeError: NetworkError when attempting to fetch resource.
+   Exception_EndOfInnerExceptionStack
+   at System.Net.Http.BrowserHttpInterop.<CancelationHelper>d__13`1[[System.Runtime.InteropServices.JavaScript.JSObject, System.Runtime.InteropServices.JavaScript, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]].MoveNext()
+   at System.Net.Http.BrowserHttpHandler.CallFetch(HttpRequestMessage , CancellationToken , Nullable`1 )
+   at System.Net.Http.BrowserHttpHandler.<SendAsync>g__Impl|55_0(HttpRequestMessage , CancellationToken , Nullable`1 )
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage , HttpCompletionOption , CancellationTokenSource , Boolean , CancellationTokenSource , CancellationToken )
+   at Supabase.Storage.Helpers.MakeRequest(HttpMethod method, String url, Object data, Dictionary`2 headers, CancellationToken cancellationToken)
+   at Supabase.Storage.Helpers.<MakeRequest>d__4`1[[System.Collections.Generic.List`1[[Supabase.Storage.FileObject, Supabase.Storage, Version=2.0.2.0, Culture=neutral, PublicKeyToken=null]], System.Private.CoreLib, Version=7.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]].MoveNext()
+   at Supabase.Storage.StorageFileApi.List(String path, SearchOptions options)
+   at SubashaVentures.Services.Supabase.SupabaseStorageService.ListFilesAsync(String folder, String bucketName) _bound_js_globalThis_console_error:7:5
+13:56:53.927 Image corrupt or truncated. IMG_4634_20260406_133809.JPG
+13:56:53.987 Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://wbwmovtewytjibxutssk.supabase.co/storage/v1/object/list/product-images. (Reason: CORS request did not succeed). Status code: (null).
+13:56:54.128 fail: SubashaVentures.Services.Supabase.SupabaseStorageService[0]
+      ListFiles failed: womens-clothing
+System.Net.Http.HttpRequestException: TypeError: NetworkError when attempting to fetch resource.
+ ---> TypeError: NetworkError when attempting to fetch resource.
+   Exception_EndOfInnerExceptionStack
+   at System.Net.Http.BrowserHttpInterop.<CancelationHelper>d__13`1[[System.Runtime.InteropServices.JavaScript.JSObject, System.Runtime.InteropServices.JavaScript, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]].MoveNext()
+   at System.Net.Http.BrowserHttpHandler.CallFetch(HttpRequestMessage , CancellationToken , Nullable`1 )
+   at System.Net.Http.BrowserHttpHandler.<SendAsync>g__Impl|55_0(HttpRequestMessage , CancellationToken , Nullable`1 )
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage , HttpCompletionOption , CancellationTokenSource , Boolean , CancellationTokenSource , CancellationToken )
+   at Supabase.Storage.Helpers.MakeRequest(HttpMethod method, String url, Object data, Dictionary`2 headers, CancellationToken cancellationToken)
+   at Supabase.Storage.Helpers.<MakeRequest>d__4`1[[System.Collections.Generic.List`1[[Supabase.Storage.FileObject, Supabase.Storage, Version=2.0.2.0, Culture=neutral, PublicKeyToken=null]], System.Private.CoreLib, Version=7.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]].MoveNext()
+   at Supabase.Storage.StorageFileApi.List(String path, SearchOptions options)
+   at SubashaVentures.Services.Supabase.SupabaseStorageService.ListFilesAsync(String folder, String bucketName) _bound_js_globalThis_console_error:7:5
+13:57:42.691 Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://wbwmovtewytjibxutssk.supabase.co/storage/v1/object/list/product-images. (Reason: CORS request did not succeed). Status code: (null). 2
+13:57:42.717 fail: SubashaVentures.Services.Supabase.SupabaseStorageService[0]
+      ListFiles failed: children-clothing
+System.Net.Http.HttpRequestException: TypeError: NetworkError when attempting to fetch resource.
+ ---> TypeError: NetworkError when attempting to fetch resource.
+   Exception_EndOfInnerExceptionStack
+   at System.Net.Http.BrowserHttpInterop.<CancelationHelper>d__13`1[[System.Runtime.InteropServices.JavaScript.JSObject, System.Runtime.InteropServices.JavaScript, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]].MoveNext()
+   at System.Net.Http.BrowserHttpHandler.CallFetch(HttpRequestMessage , CancellationToken , Nullable`1 )
+   at System.Net.Http.BrowserHttpHandler.<SendAsync>g__Impl|55_0(HttpRequestMessage , CancellationToken , Nullable`1 )
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage , HttpCompletionOption , CancellationTokenSource , Boolean , CancellationTokenSource , CancellationToken )
+   at Supabase.Storage.Helpers.MakeRequest(HttpMethod method, String url, Object data, Dictionary`2 headers, CancellationToken cancellationToken)
+   at Supabase.Storage.Helpers.<MakeRequest>d__4`1[[System.Collections.Generic.List`1[[Supabase.Storage.FileObject, Supabase.Storage, Version=2.0.2.0, Culture=neutral, PublicKeyToken=null]], System.Private.CoreLib, Version=7.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]].MoveNext()
+   at Supabase.Storage.StorageFileApi.List(String path, SearchOptions options)
+   at SubashaVentures.Services.Supabase.SupabaseStorageService.ListFilesAsync(String folder, String bucketName) _bound_js_globalThis_console_error:7:5

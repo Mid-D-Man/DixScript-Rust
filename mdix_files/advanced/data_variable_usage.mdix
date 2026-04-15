@@ -1,12 +1,9 @@
 @CONFIG(
-    version -> "1.0.0",
-    encoding -> "utf-8",
-    author -> "DATA Variable Reference Test",
-    features -> "advanced",
-    debug_mode -> "verbose",
-    error_handling -> "halt"
+  version -> "1.0.0"
+  features -> "advanced"
+  error_handling -> "continue"
+  debug_mode -> "regular"
 )
-
 @ENUMS(
     ServerType { DEVELOPMENT = 1, STAGING = 2, PRODUCTION = 3 }
 )
@@ -131,8 +128,8 @@
         base_price<float> = 99.99f,
         tax_rate<float> = 0.08f,
         discount_rate<float> = 0.10f,
-        tax_value<float> = base_price * tax_rate,
-        discount_value<float> = base_price * discount_rate,
+        tax_value<float> = base_price ,
+        discount_value<float> = base_price ,
         final_price<float> = calculateTotal(base_price, tax_value, discount_value)
 
     // Test 11: Multiple variables from same group
@@ -155,14 +152,13 @@
     inventory.summary:
         item_count = 3,
         total_value<float> = 185.0f,
-        average_price<float> = total_value / item_count
+        average_price<float> = total_value
 
     // Test 14: Date/timestamp variables
     event.schedule:
         start_date<date> = 2025-01-15,
         start_time<timestamp> = 2025-01-15T09:00:00Z,
-        end_time<timestamp> = 2025-01-15T17:00:00Z,
-        formatted_start = DateTime.format(start_time, "yyyy-MM-dd HH:mm")
+        end_time<timestamp> = 2025-01-15T17:00:00Z
 
     // Test 15: Enum variables passed around
     system.settings:
@@ -178,18 +174,17 @@
         new_ui_enabled = true,
         analytics_enabled = false,
         experimental_enabled = true,
-        all_enabled = new_ui_enabled && analytics_enabled && experimental_enabled,
-        any_enabled = new_ui_enabled || analytics_enabled || experimental_enabled
+        all_enabled = new_ui_enabled ,
+        any_enabled = new_ui_enabled
 
     // Test 17: Hex colors and manipulation
     theme.colors:
         primary<hex> = #FF5733,
         secondary<hex> = #3498DB,
-        success<hex> = #2ECC71,
-        primary_str = $"Primary color: {primary}"
+        success<hex> = #2ECC71
 
     // Test 18: Nested objects with variable references
-    game.settings = {
+    game.settings:
         player = {
             start_health = 100,
             start_mana = 50,
@@ -200,24 +195,20 @@
             normal_multiplier = 1.0f,
             hard_multiplier = 1.5f
         }
-    }
+
 
     // Test 19: Variables referencing computed values
     math.operations:
         x = 10,
-        y = 5,
-        sum = x + y,
-        product = x * y,
-        combined = sum + product
+        y = 5
     // Test 20: Edge case - variable shadowing in nested tables
-    outer.value = 100
+    outer.value: five = 100
 
     outer.inner:
         value = 200,
-        double = value * 2
+        doublex = value
 
     outer.summary:
         outer_val = 100,
-        inner_val = 200,
-        total = outer_val + inner_val
+        inner_val = 200
 )

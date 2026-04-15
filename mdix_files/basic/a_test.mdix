@@ -1,0 +1,30 @@
+@CONFIG(
+  version -> "1.0.0"
+  features -> "advanced"
+  error_handling -> "continue"
+  debug_mode -> "regular"
+)
+
+
+     @QUICKFUNCS(
+
+     ~function<string> (stringParam,boolParam){
+
+     return $"random{stringParam} : {boolParam}"
+
+     }
+     ~depFunc<string> (){
+     return "Something cool"
+     }
+
+     )
+
+     @DATA(
+
+     someRandString = "Something Cool",
+         someFuncCall = function(depFunc(),true),
+        // more = function(function(someRandString,false),true)
+
+
+
+     )

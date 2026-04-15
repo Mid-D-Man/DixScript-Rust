@@ -844,7 +844,7 @@ mod tests {
         let items  = section_snippet_completions();
         let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
         for s in &["@CONFIG","@IMPORTS","@DLM","@ENUMS","@QUICKFUNCS","@DATA","@SECURITY"] {
-            assert!(labels.iter().any(|l| l == s), "missing: {}", s);
+            assert!(labels.iter().any(|l| l.to_string() == s.to_string()), "missing: {}", s);
         }
     }
 

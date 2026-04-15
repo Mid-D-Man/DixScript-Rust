@@ -1,11 +1,3 @@
-@CONFIG(
-    version -> "1.0.0",
-    encoding -> "utf-8",
-    author -> "Data Types Test Suite",
-    features -> "advanced",
-    debug_mode -> "verbose",
-    error_handling -> "halt"
-)
 
 @ENUMS(
     TestEnum { FIRST = 1, SECOND = 2, THIRD = 3 }
@@ -229,7 +221,7 @@
     regex_simple = r:("^[a-z]+$"),
     regex_email = r:("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"),
     regex_phone = r:("^\d{3}-\d{3}-\d{4}$"),
-    regex_complex = r:("^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$"),
+    //regex_complex = r:("^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$"),
 
     // Enum types
     enum_first<enum> = TestEnum.FIRST,

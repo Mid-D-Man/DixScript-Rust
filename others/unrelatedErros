@@ -1,45 +1,56 @@
- Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://wbwmovtewytjibxutssk.supabase.co/storage/v1/object/list/product-images. (Reason: CORS request did not succeed). Status code: (null).
-13:56:52.791 Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://wbwmovtewytjibxutssk.supabase.co/storage/v1/object/list/product-images. (Reason: CORS request did not succeed). Status code: (null).
-13:56:52.792 Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://wbwmovtewytjibxutssk.supabase.co/storage/v1/object/list/product-images. (Reason: CORS request did not succeed). Status code: (null).
-13:56:53.737 fail: SubashaVentures.Services.Supabase.SupabaseStorageService[0]
-      ListFiles failed: mens-clothing
-System.Net.Http.HttpRequestException: TypeError: NetworkError when attempting to fetch resource.
- ---> TypeError: NetworkError when attempting to fetch resource.
-   Exception_EndOfInnerExceptionStack
-   at System.Net.Http.BrowserHttpInterop.<CancelationHelper>d__13`1[[System.Runtime.InteropServices.JavaScript.JSObject, System.Runtime.InteropServices.JavaScript, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]].MoveNext()
-   at System.Net.Http.BrowserHttpHandler.CallFetch(HttpRequestMessage , CancellationToken , Nullable`1 )
-   at System.Net.Http.BrowserHttpHandler.<SendAsync>g__Impl|55_0(HttpRequestMessage , CancellationToken , Nullable`1 )
-   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage , HttpCompletionOption , CancellationTokenSource , Boolean , CancellationTokenSource , CancellationToken )
-   at Supabase.Storage.Helpers.MakeRequest(HttpMethod method, String url, Object data, Dictionary`2 headers, CancellationToken cancellationToken)
-   at Supabase.Storage.Helpers.<MakeRequest>d__4`1[[System.Collections.Generic.List`1[[Supabase.Storage.FileObject, Supabase.Storage, Version=2.0.2.0, Culture=neutral, PublicKeyToken=null]], System.Private.CoreLib, Version=7.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]].MoveNext()
-   at Supabase.Storage.StorageFileApi.List(String path, SearchOptions options)
-   at SubashaVentures.Services.Supabase.SupabaseStorageService.ListFilesAsync(String folder, String bucketName) _bound_js_globalThis_console_error:7:5
-13:56:53.927 Image corrupt or truncated. IMG_4634_20260406_133809.JPG
-13:56:53.987 Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://wbwmovtewytjibxutssk.supabase.co/storage/v1/object/list/product-images. (Reason: CORS request did not succeed). Status code: (null).
-13:56:54.128 fail: SubashaVentures.Services.Supabase.SupabaseStorageService[0]
-      ListFiles failed: womens-clothing
-System.Net.Http.HttpRequestException: TypeError: NetworkError when attempting to fetch resource.
- ---> TypeError: NetworkError when attempting to fetch resource.
-   Exception_EndOfInnerExceptionStack
-   at System.Net.Http.BrowserHttpInterop.<CancelationHelper>d__13`1[[System.Runtime.InteropServices.JavaScript.JSObject, System.Runtime.InteropServices.JavaScript, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]].MoveNext()
-   at System.Net.Http.BrowserHttpHandler.CallFetch(HttpRequestMessage , CancellationToken , Nullable`1 )
-   at System.Net.Http.BrowserHttpHandler.<SendAsync>g__Impl|55_0(HttpRequestMessage , CancellationToken , Nullable`1 )
-   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage , HttpCompletionOption , CancellationTokenSource , Boolean , CancellationTokenSource , CancellationToken )
-   at Supabase.Storage.Helpers.MakeRequest(HttpMethod method, String url, Object data, Dictionary`2 headers, CancellationToken cancellationToken)
-   at Supabase.Storage.Helpers.<MakeRequest>d__4`1[[System.Collections.Generic.List`1[[Supabase.Storage.FileObject, Supabase.Storage, Version=2.0.2.0, Culture=neutral, PublicKeyToken=null]], System.Private.CoreLib, Version=7.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]].MoveNext()
-   at Supabase.Storage.StorageFileApi.List(String path, SearchOptions options)
-   at SubashaVentures.Services.Supabase.SupabaseStorageService.ListFilesAsync(String folder, String bucketName) _bound_js_globalThis_console_error:7:5
-13:57:42.691 Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://wbwmovtewytjibxutssk.supabase.co/storage/v1/object/list/product-images. (Reason: CORS request did not succeed). Status code: (null). 2
-13:57:42.717 fail: SubashaVentures.Services.Supabase.SupabaseStorageService[0]
-      ListFiles failed: children-clothing
-System.Net.Http.HttpRequestException: TypeError: NetworkError when attempting to fetch resource.
- ---> TypeError: NetworkError when attempting to fetch resource.
-   Exception_EndOfInnerExceptionStack
-   at System.Net.Http.BrowserHttpInterop.<CancelationHelper>d__13`1[[System.Runtime.InteropServices.JavaScript.JSObject, System.Runtime.InteropServices.JavaScript, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]].MoveNext()
-   at System.Net.Http.BrowserHttpHandler.CallFetch(HttpRequestMessage , CancellationToken , Nullable`1 )
-   at System.Net.Http.BrowserHttpHandler.<SendAsync>g__Impl|55_0(HttpRequestMessage , CancellationToken , Nullable`1 )
-   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage , HttpCompletionOption , CancellationTokenSource , Boolean , CancellationTokenSource , CancellationToken )
-   at Supabase.Storage.Helpers.MakeRequest(HttpMethod method, String url, Object data, Dictionary`2 headers, CancellationToken cancellationToken)
-   at Supabase.Storage.Helpers.<MakeRequest>d__4`1[[System.Collections.Generic.List`1[[Supabase.Storage.FileObject, Supabase.Storage, Version=2.0.2.0, Culture=neutral, PublicKeyToken=null]], System.Private.CoreLib, Version=7.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]].MoveNext()
-   at Supabase.Storage.StorageFileApi.List(String path, SearchOptions options)
-   at SubashaVentures.Services.Supabase.SupabaseStorageService.ListFilesAsync(String folder, String bucketName) _bound_js_globalThis_console_error:7:5
+ Ok we have quite a few issues to rectify, first in value resolution, its treating using variables, from flat properties and or table properties
+ as functions causing circular dependency failuer,[16:03:42.517] [Info] [DIAGNOSTIC] Found 13 function calls to resolve
+                                                  [16:03:42.517] [Info]   local: 13, namespaced: 0
+                                                  [16:03:42.517] [Debug]   ~buildConnectionString() → DATA.simple_connection
+                                                  [16:03:42.517] [Debug]   ~calculateTotal() → DATA.final_total
+                                                  [16:03:42.517] [Debug]   ~formatServerInfo() → DATA.server_info
+                                                  [16:03:42.517] [Debug]   ~validateServerConfig() → DATA.server.config.is_valid
+                                                  [16:03:42.517] [Debug]   ~buildDatabaseUrl() → DATA.database.primary.connection_url
+                                                  [16:03:42.517] [Debug]   ~calculatePlayerPower() → DATA.database.primary.player.power
+                                                  [16:03:42.517] [Debug]   ~arraySum() → DATA.database.primary.number_total
+                                                  [16:03:42.517] [Debug]   ~processConfig() → DATA.database.primary.config_processed
+                                                  [16:03:42.517] [Debug]   ~chainedCalculation() → DATA.database.primary.chained_calc
+                                                  [16:03:42.517] [Debug]   ~useChainedResult() → DATA.database.primary.chained_final
+                                                  [16:03:42.517] [Debug]   ~calculateTotal() → DATA.ecommerce.shop.final_price
+                                                  [16:03:42.518] [Debug]   ~formatServerInfo() → DATA.system.settings.primary_info
+                                                  [16:03:42.518] [Debug]   ~formatServerInfo() → DATA.system.settings.backup_info
+                                                  [16:03:42.518] [Debug] [Execute] Statement 1/1: Return
+                                                  [16:03:42.518] [Debug] [ExecuteStatement] Return
+                                                  [16:03:42.518] [Debug] [ExecuteReturn] Processing return statement
+                                                  [16:03:42.518] [Debug] [InterpolatedString] Template: 'Server={0};Port={1};Database={2}', expressions: 3
+                                                  [16:03:42.520] [Debug] [ResolveId] Resolving: host
+                                                  [16:03:42.520] [Debug]   Found in execution context: string
+                                                  [16:03:42.520] [Debug] [InterpolatedString] Replacing '{0}' with 'simple_host'
+                                                  [16:03:42.520] [Debug] [ResolveId] Resolving: port
+                                                  [16:03:42.520] [Debug]   Found in execution context: int
+                                                  [16:03:42.520] [Debug] [InterpolatedString] Replacing '{1}' with '800'
+                                                  [16:03:42.521] [Debug] [ResolveId] Resolving: database
+                                                  [16:03:42.521] [Debug]   Found in execution context: string
+                                                  [16:03:42.521] [Debug] [InterpolatedString] Replacing '{2}' with 'simple_db'
+                                                  [16:03:42.521] [Debug] [InterpolatedString] Result: 'Server=simple_host;Port=800;Database=simple_db'
+                                                  [16:03:42.521] [Debug] [ExecuteReturn] Evaluated to: string = "Server=simple_host;Port=800;Database=simple_db"
+                                                  [16:03:42.521] [Debug] [Execute] Explicit return: string
+                                                  [16:03:42.521] [Info] [iter 1] resolved DATA.simple_connection (3.065ms)
+                                                  [16:03:42.521] [Info] [Phase 4] done — 1/13 resolved, 2 iterations used (limit: 39)
+                                                  [16:03:42.521] [Info] [Phase 4.1] Resolution complete
+                                                  [16:03:42.521] [Info]   Resolved: 1
+                                                  [16:03:42.521] [Info]   Failed:   1
+                                                  [16:03:42.521] [Info]   Duration: 35.580ms
+                                                  ✗ Compile error: Value resolution failed: ["Circular dependency: 12 calls unresolvable"]
+
+
+
+.. second issue how do we actualy use the mdix cli globaly, and why does it require ./mdixto work,
+
+
+third issue and most important as to why lsp is failing
+the config section, is removed from handler, meaning config tokens dont exist in lexer, thei is an architectural limitation we need to deal with,
+ and rectify properly, cause configs must be handled, seprately although, yeah we could pass tokesn of config diectly to lexer, with some meta(or rather directly in config results, so the server
+  gonna have to do some magic,
+  ok another thing imports paths, and its from the lsp, not the compiler itself, yeah.... it needs to hadle local imports
+   paths, and cloud imports it simply doesnt handle it at all, if no network we gotta account for it
+
+oh yeah, also auto complet on @enums produces @enum instead of @enums, and @config produces @@config, also the auto complete can be none case sensiticive
+
+Ok one more note for the  ["Circular dependency: 1 calls unresolvable"]
+ issue using variables, its actually only variables in data section used, cause using function calls withing function calls in data section works no issue

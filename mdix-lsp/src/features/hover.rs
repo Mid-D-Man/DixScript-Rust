@@ -162,6 +162,21 @@ fn section_hover(name: &str, description: &str, example: &str, notes: &str) -> S
 // ── Keyword hover ──────────────────────────────────────────────────────────────
 
 fn hover_keyword(kw: &str) -> Option<String> {
+    let binding_int = hover_data_type("int").unwrap_or_default();
+    let binding_float = hover_data_type("float").unwrap_or_default();
+    let binding_double = hover_data_type("double").unwrap_or_default();
+    let binding_string = hover_data_type("string").unwrap_or_default();
+    let binding_bool = hover_data_type("bool").unwrap_or_default();
+    let binding_array = hover_data_type("array").unwrap_or_default();
+    let binding_tuple = hover_data_type("tuple").unwrap_or_default();
+    let binding_object = hover_data_type("object").unwrap_or_default();
+    let binding_hex = hover_data_type("hex").unwrap_or_default();
+    let binding_blob = hover_data_type("blob").unwrap_or_default();
+    let binding_regex = hover_data_type("regex").unwrap_or_default();
+    let binding_date = hover_data_type("date").unwrap_or_default();
+    let binding_timestamp = hover_data_type("timestamp").unwrap_or_default();
+    let binding_enum = hover_data_type("enum").unwrap_or_default();
+    let binding_any = hover_data_type("any").unwrap_or_default();
     let content = match kw {
         "if" | "if:" => "**`if:`** — conditional statement\n\nNote: DixScript uses `if:` (with colon).\n\n```mdix\nif: x > 0 {\n  return x\n} elif: x == 0 {\n  return 0\n} else {\n  return -1\n}\n```",
         "elif" | "elif:" => "**`elif:`** — else-if branch\n\nChained after `if:` or another `elif:`. Uses colon syntax.\n\n```mdix\nelif: difficulty == Difficulty.HARD {\n  multiplier = 2.0\n}\n```",
@@ -184,21 +199,21 @@ fn hover_keyword(kw: &str) -> Option<String> {
         "verify"=> "**`verify`** — hash verification for imports\n\nEnsures the imported file matches a known hash:\n\n```mdix\nUtils from \"utils.mdix\" verify \"sha256:abc123...\"\n```",
         "global"=> "**`global`** — scope modifier for QuickFunc scope lists\n\nMarks a QuickFunc as available globally (to all sections).",
         "then"  => "**`then`** — optional clause\n\nUsed in some extended conditional forms.",
-        "int"       => hover_data_type("int").unwrap_or_default().as_str().to_string(),
-        "float"     => hover_data_type("float").unwrap_or_default().as_str().to_string(),
-        "double"    => hover_data_type("double").unwrap_or_default().as_str().to_string(),
-        "string"    => hover_data_type("string").unwrap_or_default().as_str().to_string(),
-        "bool"      => hover_data_type("bool").unwrap_or_default().as_str().to_string(),
-        "array"     => hover_data_type("array").unwrap_or_default().as_str().to_string(),
-        "tuple"     => hover_data_type("tuple").unwrap_or_default().as_str().to_string(),
-        "object"    => hover_data_type("object").unwrap_or_default().as_str().to_string(),
-        "hex"       => hover_data_type("hex").unwrap_or_default().as_str().to_string(),
-        "blob"      => hover_data_type("blob").unwrap_or_default().as_str().to_string(),
-        "regex"     => hover_data_type("regex").unwrap_or_default().as_str().to_string(),
-        "date"      => hover_data_type("date").unwrap_or_default().as_str().to_string(),
-        "timestamp" => hover_data_type("timestamp").unwrap_or_default().as_str().to_string(),
-        "enum"      => hover_data_type("enum").unwrap_or_default().as_str().to_string(),
-        "any"       => hover_data_type("any").unwrap_or_default().as_str().to_string(),
+        "int"       =>  binding_int.as_str(),
+        "float"     => binding_float.as_str(),
+        "double"    => binding_double.as_str(),
+        "string"    => binding_string.as_str(),
+        "bool"      => binding_bool.as_str(),
+        "array"     => binding_array.as_str(),
+        "tuple"     => binding_tuple.as_str(),
+        "object"    => binding_object.as_str(),
+        "hex"       => binding_hex.as_str(),
+        "blob"      => binding_blob.as_str(),
+        "regex"     => binding_regex.as_str(),
+        "date"      => binding_date.as_str(),
+        "timestamp" => binding_timestamp.as_str(),
+        "enum"      => binding_enum.as_str(),
+        "any"       => binding_any.as_str(),
         _ => return None,
     };
     Some(content.to_string())
@@ -431,7 +446,7 @@ fn hover_static_object(name: &str) -> Option<String> {
 // ── Static method hover ────────────────────────────────────────────────────────
 
 fn hover_static_method(class: &str, method: &str) -> Option<String> {
-    let entry = STATIC_SIGS.iter().find(|(c, m, _, _)| *c == class && *m == method)?;
+    let entry = STATIC_SIGS.iter().find(|(c, m, _, _,_)| *c == class && *m == method)?;
     Some(format!(
         "**`{}.{}`** — built-in static method\n\n```\n{}\n```\n\n{}\n\n```mdix\n// Example:\n{}\n```",
         class, method, entry.2, entry.3, entry.4

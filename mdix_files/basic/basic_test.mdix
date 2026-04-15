@@ -1,3 +1,38 @@
 @ENUMS(
     TestEnum { FIRST = 1, SECOND = 2, THIRD = 3 }
+
+)
+
+@QUICKFUNCS(
+
+~function<string> (stringParam,boolParam){
+
+return $"random{stringParam} : {boolParam}"
+
+}
+~depFunc<string> (){
+return "Something cool"
+}
+
+)
+
+@DATA(
+
+    // Date types
+    date_standard<date> = 2025-01-15,
+    date_leap_year<date> = 2024-02-29,
+    date_year_end<date> = 2025-12-31,
+    date_year_start<date> = 2025-01-01,
+
+    // Timestamp types - all variations
+    timestamp_basic<timestamp> = 2025-01-15T10:30:00Z,
+    timestamp_with_millis<timestamp> = 2025-01-15T10:30:00.123Z,
+    timestamp_with_timezone<timestamp> = 2025-01-15T10:30:00+05:30,
+    timestamp_utc<timestamp> = 2025-01-15T10:30:00.999Z,
+someRandString = "Something Cool",
+    someFuncCall = function(depFunc(),true),
+    more = function(someRandString,true)
+
+
+
 )

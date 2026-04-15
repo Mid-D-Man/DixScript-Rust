@@ -32,7 +32,15 @@ pub fn provide(
                 '<' => type_annotation_completions(),
                 '~' => quickfunc_declaration_snippets(),
                 '.' => dot_completions(d, pos),
-                _   => general_completions(d, pos),
+                _   => {
+                    // Check if we're inside an @ word (e.g. user typed "@conf")
+                    let word = word_before_cursor(&d.source, pos);
+                    if word.starts_with('@') {
+                        section_snippet_completions()
+                    } else {
+                        general_completions(d, pos)
+                    }
+                }
             }
         }
     };
@@ -40,58 +48,79 @@ pub fn provide(
     if items.is_empty() { None } else { Some(CompletionResponse::Array(items)) }
 }
 
+/// Extract the word (including leading @) that the cursor is in the middle of.
+fn word_before_cursor(source: &str, pos: Position) -> String {
+    let line = source.lines().nth(pos.line as usize).unwrap_or("");
+    let up_to: String = line.chars().take(pos.character as usize).collect();
+    // Walk backward until we hit a non-word, non-@ char
+    let start = up_to
+        .rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '@')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    up_to[start..].to_string()
+}
+
 // ── Section snippets ──────────────────────────────────────────────────────────
 
 fn section_snippet_completions() -> Vec<CompletionItem> {
+    // (label, insertText WITHOUT leading @, documentation)
     let sections: &[(&str, &str, &str)] = &[
         (
             "@CONFIG",
-            "@CONFIG(\n  version -> \"1.0.0\"\n  author -> \"${1:name}\"\n  debug_mode -> \"off\"\n  error_handling -> \"halt\"\n  compatibility_mode -> \"strict\"\n  features -> \"advanced\"\n)",
+            "CONFIG(\n  version -> \"1.0.0\"\n  author -> \"${1:name}\"\n  debug_mode -> \"off\"\n  error_handling -> \"halt\"\n  compatibility_mode -> \"strict\"\n  features -> \"advanced\"\n)",
             "Compiler settings and metadata.\n\n**Keys:** `version`, `author`, `created`, `encoding`, `debug_mode` (`off`/`regular`/`verbose`), `error_handling` (`halt`/`continue`/`recover`), `compatibility_mode` (`strict`/`best_effort`/`permissive`), `features`.\n\n```mdix\n@CONFIG(\n  version -> \"1.0.0\"\n  debug_mode -> \"regular\"\n)\n```",
         ),
         (
             "@IMPORTS",
-            "@IMPORTS(\n  ${1:Alias} from \"${2:path/to/file.mdix}\"\n)",
+            "IMPORTS(\n  ${1:Alias} from \"${2:path/to/file.mdix}\"\n)",
             "Import other `.mdix` files. The alias becomes a namespace.\n\n```mdix\n@IMPORTS(\n  Utils from \"common/utils.mdix\"\n  Base  from \"../base.mdix\"\n)\n```\n\nCall imported functions: `Utils.myFunc(x)`. Access imported enums: `Utils.Status.ACTIVE`.",
         ),
         (
             "@DLM",
-            "@DLM(\n  DCompressor.${1|gzip,bzip2,lzma|}\n  DEncryptor.${2|aes256,aes128,chacha20|}\n)",
+            "DLM(\n  DCompressor.${1|gzip,bzip2,lzma|}\n  DEncryptor.${2|aes256,aes128,chacha20|}\n)",
             "Data Lifecycle Modules — compression and encryption applied at compile time.\n\n**Compressors:** `DCompressor.gzip`, `DCompressor.bzip2`, `DCompressor.lzma`\n**Encryptors:** `DEncryptor.aes256`, `DEncryptor.aes128`, `DEncryptor.chacha20`, `DEncryptor.xor`\n**Auditor:** `DAuditor.diy`, `DAuditor.enhanced`\n\n```mdix\n@DLM(DCompressor.gzip, DEncryptor.aes256)\n```",
         ),
         (
             "@ENUMS",
-            "@ENUMS(\n  ${1:EnumName} { ${2:VALUE_A} = 0, ${3:VALUE_B} = 1 }\n)",
+            "ENUMS(\n  ${1:EnumName} { ${2:VALUE_A} = 0, ${3:VALUE_B} = 1 }\n)",
             "Named integer constants. Auto-increments from 0 if values omitted.\n\n```mdix\n@ENUMS(\n  Difficulty { EASY = 0, NORMAL = 1, HARD = 2 }\n  AIType     { PASSIVE, NEUTRAL, AGGRESSIVE, BOSS }\n)\n```\n\nAccess: `Difficulty.HARD`, use type annotation `<enum>`.",
         ),
         (
             "@QUICKFUNCS",
-            "@QUICKFUNCS(\n  ~${1:funcName}<${2:object}>(${3:param1}, ${4:param2}) {\n    return {\n      ${5:key} = ${6:param1}\n    }\n  }\n)",
+            "QUICKFUNCS(\n  ~${1:funcName}<${2:object}>(${3:param1}, ${4:param2}) {\n    return {\n      ${5:key} = ${6:param1}\n    }\n  }\n)",
             "Compile-time functions. All computation happens at compile time — zero runtime overhead.\n\n```mdix\n@QUICKFUNCS(\n  ~weapon<object>(id, damage<int>) {\n    return { id = id, damage = damage, range = damage * 2 }\n  }\n)\n```\n\nCall in `@DATA`: `weapon(\"AK47\", 35)`",
         ),
         (
             "@DATA",
-            "@DATA(\n  ${1:key} = ${2:value}\n\n  ${3:table}: ${4:field} = ${5:value}\n\n  ${6:array}::\n    ${7:item1},\n    ${8:item2}\n)",
+            "DATA(\n  ${1:key} = ${2:value}\n\n  ${3:table}: ${4:field} = ${5:value}\n\n  ${6:array}::\n    ${7:item1},\n    ${8:item2}\n)",
             "Data payload. Three entry types:\n\n- **Flat:** `name = value` (primitives)\n- **Table:** `section: field = value, field2 = value2`\n- **Group array:** `items:: value1, value2`\n\nCommas between entries are optional.\n\n```mdix\n@DATA(\n  app_name = \"MyApp\"\n  server: host = \"localhost\", port = 8080\n  tags:: \"alpha\", \"beta\"\n)\n```",
         ),
         (
             "@SECURITY",
-            "@SECURITY(\n  encryption -> {\n    mode = \"${1|password,keyfile|}\",\n    algorithm = \"${2|aes256-gcm,aes128-gcm,chacha20-poly1305|}\"\n  }\n)",
+            "SECURITY(\n  encryption -> {\n    mode = \"${1|password,keyfile|}\",\n    algorithm = \"${2|aes256-gcm,aes128-gcm,chacha20-poly1305|}\"\n  }\n)",
             "Encryption configuration. Required when `@DLM` includes a `DEncryptor`.\n\n**Modes:** `\"password\"` (user-supplied), `\"keyfile\"` (generates `.key` file)\n\n```mdix\n@SECURITY(\n  encryption -> { mode = \"keyfile\", algorithm = \"aes256-gcm\" }\n)\n```\n\nCompile: `mdix compile secrets.mdix --password`",
         ),
     ];
 
-    sections.iter().map(|(label, snippet, doc)| CompletionItem {
-        label:              label.to_string(),
-        kind:               Some(CompletionItemKind::MODULE),
-        detail:             Some("DixScript section".to_string()),
-        documentation:      Some(Documentation::MarkupContent(MarkupContent {
-            kind:  MarkupKind::Markdown,
-            value: doc.to_string(),
-        })),
-        insert_text:        Some(snippet.to_string()),
-        insert_text_format: Some(InsertTextFormat::SNIPPET),
-        ..Default::default()
+    sections.iter().map(|(label, snippet, doc)| {
+        // label is "@CONFIG", strip @ for filter so matching works regardless of
+        // whether the user typed the @ already.  The insert text never includes @
+        // because @ is already the trigger character in the document.
+        let filter = label.trim_start_matches('@').to_lowercase();
+        CompletionItem {
+            label:              label.to_string(),
+            kind:               Some(CompletionItemKind::MODULE),
+            detail:             Some("DixScript section".to_string()),
+            filter_text:        Some(filter),
+            documentation:      Some(Documentation::MarkupContent(MarkupContent {
+                kind:  MarkupKind::Markdown,
+                value: doc.to_string(),
+            })),
+            insert_text:        Some(snippet.to_string()),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            sort_text:          Some(format!("0_{}", label)), // sections sort first
+            ..Default::default()
+        }
     }).collect()
 }
 

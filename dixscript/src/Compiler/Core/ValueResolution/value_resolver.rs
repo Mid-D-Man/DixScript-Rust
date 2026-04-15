@@ -1493,51 +1493,98 @@ fn execute_iterative_resolution(
     }
 
     fn expr_has_unresolved_ref(
-    expr: &Expression,
-    ctx: &FxHashMap<String, DixValue>,
-) -> bool {
-    match expr {
-        Expression::Identifier { name, .. } => !ctx.contains_key(name.as_str()),
+        expr: &Expression,
+        ctx: &FxHashMap<String, DixValue>,
+    ) -> bool {
+        match expr {
+            // An Identifier is only truly unresolved if it cannot be found anywhere
+            // in the data context — either by exact key or by path-suffix match.
+            // Previously this was just `!ctx.contains_key(name)`, which caused false
+            // positives for results stored at nested paths like "db.primary.total"
+            // when the argument was just Identifier("total").
+            Expression::Identifier { name, .. } => {
+                if ctx.contains_key(name.as_str()) {
+                    return false;
+                }
+                let suffix = format!(".{}", name);
+                !ctx.keys().any(|k| k.ends_with(&suffix))
+            }
 
-        // After Phase 1 enum pre-resolution these are already Integer literals —
-        // but keep the guard as a safety net.
-        Expression::EnumAccess { .. } => false,
+            // After Phase 1 enum pre-resolution these are already Integer literals.
+            Expression::EnumAccess { .. } => false,
 
-        // FIX: a nested call is only "unresolved" if its own arguments contain
-        // something we cannot evaluate yet. If all its args are literals/resolved,
-        // it is safe to execute — the interpreter will evaluate it inline.
-        Expression::QuickFuncCall { arguments, .. }
-        | Expression::ImportedFunctionCall { arguments, .. } => {
-            arguments.iter().any(|a| Self::expr_has_unresolved_ref(a, ctx))
-        }
+            // A nested call is only "unresolved" if its own arguments contain
+            // something we cannot evaluate yet.  The interpreter will execute it
+            // inline, so the call itself is not a dependency gate.
+            Expression::QuickFuncCall { arguments, .. }
+            | Expression::ImportedFunctionCall { arguments, .. } => {
+                arguments.iter().any(|a| Self::expr_has_unresolved_ref(a, ctx))
+            }
 
-        Expression::ArithmeticOp { left, right, .. }
-        | Expression::BitwiseOp { left, right, .. }
-        | Expression::ComparisonOp { left, right, .. }
-        | Expression::LogicalOp { left, right, .. } => {
-            Self::expr_has_unresolved_ref(left, ctx)
-                || Self::expr_has_unresolved_ref(right, ctx)
+            Expression::ArithmeticOp { left, right, .. }
+            | Expression::BitwiseOp { left, right, .. }
+            | Expression::ComparisonOp { left, right, .. }
+            | Expression::LogicalOp { left, right, .. } => {
+                Self::expr_has_unresolved_ref(left, ctx)
+                    || Self::expr_has_unresolved_ref(right, ctx)
+            }
+
+            Expression::Conditional { condition, true_value, false_value, .. } => {
+                Self::expr_has_unresolved_ref(condition, ctx)
+                    || Self::expr_has_unresolved_ref(true_value, ctx)
+                    || Self::expr_has_unresolved_ref(false_value, ctx)
+            }
+
+            Expression::Value { value, .. } => Self::value_has_unresolved_ref(value, ctx),
+
+            // For property access (e.g. `server.host`) reconstruct the full dotted
+            // path and look it up directly rather than only checking the root object.
+            Expression::PropertyAccess { object, property, .. } => {
+                if let Some(full_path) = Self::reconstruct_access_path(object, property) {
+                    if ctx.contains_key(full_path.as_str()) {
+                        return false;
+                    }
+                    let suffix = format!(".{}", full_path);
+                    !ctx.keys().any(|k| k.ends_with(&suffix))
+                } else {
+                    // Cannot reconstruct — fall back to checking the base object.
+                    Self::expr_has_unresolved_ref(object, ctx)
+                }
+            }
+
+            Expression::IndexAccess { object, index, .. } => {
+                Self::expr_has_unresolved_ref(object, ctx)
+                    || Self::expr_has_unresolved_ref(index, ctx)
+            }
+
+            // All other expression variants (literals, static calls, etc.)
+            // are either self-contained or handled by the interpreter directly.
+            _ => false,
         }
-        Expression::Conditional { condition, true_value, false_value, .. } => {
-            Self::expr_has_unresolved_ref(condition, ctx)
-                || Self::expr_has_unresolved_ref(true_value, ctx)
-                || Self::expr_has_unresolved_ref(false_value, ctx)
-        }
-        Expression::Value { value, .. } => Self::value_has_unresolved_ref(value, ctx),
-        Expression::PropertyAccess { object, .. } => {
-            Self::expr_has_unresolved_ref(object, ctx)
-        }
-        Expression::IndexAccess { object, index, .. } => {
-            Self::expr_has_unresolved_ref(object, ctx)
-                || Self::expr_has_unresolved_ref(index, ctx)
-        }
-        _ => false,
     }
-}
-
+    /// Reconstruct a fully-qualified dotted path from a chain of PropertyAccess
+    /// nodes.  Returns `None` if the chain contains a non-identifier base.
+    fn reconstruct_access_path(object: &Expression, property: &str) -> Option<String> {
+        match object {
+            Expression::Identifier { name, .. } => Some(format!("{}.{}", name, property)),
+            Expression::PropertyAccess {
+                object: inner,
+                property: inner_prop,
+                ..
+            } => Self::reconstruct_access_path(inner, inner_prop)
+                .map(|base| format!("{}.{}", base, property)),
+            _ => None,
+        }
+    }
     fn value_has_unresolved_ref(value: &Value, ctx: &FxHashMap<String, DixValue>) -> bool {
         match value {
-            Value::Identifier { value: id, .. } => !ctx.contains_key(id.as_str()),
+            Value::Identifier { value: id, .. } => {
+                if ctx.contains_key(id.as_str()) {
+                    return false;
+                }
+                let suffix = format!(".{}", id);
+                !ctx.keys().any(|k| k.ends_with(&suffix))
+            }
             Value::Expression { expr, .. } => Self::expr_has_unresolved_ref(expr, ctx),
             Value::Array { values, .. } | Value::NestedArray { values, .. } => {
                 values.iter().any(|v| Self::value_has_unresolved_ref(v, ctx))

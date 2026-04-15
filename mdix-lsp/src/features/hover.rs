@@ -306,7 +306,7 @@ fn hover_enum_access(doc: &Document, enum_name: &str, field: &str) -> Option<Str
 // ── Identifier hover ───────────────────────────────────────────────────────────
 
 fn hover_identifier(doc: &Document, name: &str) -> Option<String> {
-    // QuickFunc declaration or call
+    // QuickFunc declaration or call site
     if let Some(ast) = &doc.ast {
         if let Some(qf) = &ast.quick_functions {
             for func in &qf.functions {
@@ -330,12 +330,28 @@ fn hover_identifier(doc: &Document, name: &str) -> Option<String> {
                     .map(|s| format!("\n\n**Scope:** `=> {}`", s.join(", ")))
                     .unwrap_or_default();
 
-                return Some(format!(
-                    "**`~{}<{}>({})`** — QuickFunc\n\nCompile-time function. All calls are resolved at compile time; the binary stores only the result.{}\n\n```mdix\n// Example call in @DATA:\n{}({})\n```",
-                    name, ret, params.join(", "), scopes,
+                // Check for a doc comment on the line immediately above the
+                // function definition and show it at the top of the hover card.
+                let doc_comment_block = extract_doc_comment_for_func(
+                    &doc.tokens,
+                    func.position.line,
+                )
+                    .map(|c| format!("{}\n\n---\n\n", c))
+                    .unwrap_or_default();
+
+                let signature = format!(
+                    "**`~{}<{}>({})`** — QuickFunc",
+                    name, ret, params.join(", ")
+                );
+
+                let body = format!(
+                    "Compile-time function. All calls are resolved at compile time; the binary stores only the result.{}\n\n```mdix\n// Example call in @DATA:\n{}({})\n```",
+                    scopes,
                     name,
                     params.iter().map(|p| p.split('<').next().unwrap_or("…")).collect::<Vec<_>>().join(", ")
-                ));
+                );
+
+                return Some(format!("{}{}\n\n{}", doc_comment_block, signature, body));
             }
         }
 
@@ -626,7 +642,53 @@ fn find_adjacent_string(tokens: &[Token], start_index: usize) -> Option<String> 
     }
     None
 }
+/// Scan backward from `func_def_line` (1-based) to find a `// ...` comment
+/// on the line immediately before the function declaration.
+/// Returns the comment text if found.
+fn extract_doc_comment_for_func(tokens: &[Token], func_def_line: usize) -> Option<String> {
+    let target_line = func_def_line.saturating_sub(1);
+    if target_line == 0 {
+        return None;
+    }
+    // Scan in reverse — comments are usually close to the function
+    for token in tokens.iter().rev() {
+        if token.line == target_line {
+            if let TokenType::Comment(content) = &token.token_type {
+                return Some(format_doc_comment(content));
+            }
+        }
+        // If we've passed the target line going backward, give up
+        if token.line < target_line.saturating_sub(2) {
+            break;
+        }
+    }
+    None
+}
 
+/// Format a comment string for display in hover markdown.
+/// Handles Rust-style ` backtick ` and ``` triple-backtick ``` blocks.
+fn format_doc_comment(raw: &str) -> String {
+    let text = raw.trim();
+
+    // Strip leading `//` markers that sometimes remain in multi-line block comments
+    let cleaned: String = text
+        .lines()
+        .map(|l| l.trim_start_matches('/').trim_start())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // If it contains fenced code blocks or inline backticks, pass through as markdown
+    if cleaned.contains("```") || cleaned.contains('`') {
+        cleaned
+    } else {
+        // Plain comment — wrap in blockquote for visual separation
+        cleaned
+            .lines()
+            .map(|l| format!("> {}", l))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
 // ── Lookup table (class, method, signature, description, example) ─────────────
 
 static STATIC_SIGS: &[(&str, &str, &str, &str, &str)] = &[

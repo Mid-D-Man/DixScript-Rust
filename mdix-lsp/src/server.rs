@@ -46,14 +46,36 @@ impl Backend {
         }
 
         let client    = self.client.clone();
-        let documents = Arc::clone(&self.documents); // O(1) arc clone
+        let documents = Arc::clone(&self.documents);
 
         let handle = tokio::spawn(async move {
-            let mut doc = Document::new(uri.clone(), source, version);
-            let errors  = run_pipeline(&mut doc);
-            let diags   = to_diagnostics(&errors);
-            documents.insert(uri.clone(), doc);
-            client.publish_diagnostics(uri, diags, Some(version)).await;
+            // The DixScript compiler pipeline is fully synchronous and CPU-bound.
+            // Running it directly in tokio::spawn blocks the async executor thread,
+            // preventing the server from responding to ANY other LSP request while
+            // compilation is in progress (hover, completion, documentLink probes, etc.).
+            // This caused IntelliJ's documentLink annotator to timeout, which then
+            // cascaded into a shutdown timeout loop.
+            //
+            // spawn_blocking moves the work onto a dedicated blocking thread pool,
+            // keeping all tokio threads free to handle incoming messages.
+            let result = tokio::task::spawn_blocking(move || {
+                let mut doc = Document::new(uri.clone(), source, version);
+                let errors  = run_pipeline(&mut doc);
+                (uri, doc, errors, version)
+            })
+                .await;
+
+            match result {
+                Ok((uri, doc, errors, version)) => {
+                    let diags = to_diagnostics(&errors);
+                    documents.insert(uri.clone(), doc);
+                    client.publish_diagnostics(uri, diags, Some(version)).await;
+                }
+                Err(e) => {
+                    // Compiler panicked (bug) — log and keep server alive
+                    tracing::error!("Analysis task panicked: {:?}", e);
+                }
+            }
         });
 
         if let Ok(mut tasks) = self.analysis_tasks.lock() {
@@ -61,6 +83,7 @@ impl Backend {
             tasks.push(handle);
         }
     }
+
 }
 
 // ─── LanguageServer impl ──────────────────────────────────────────────────────

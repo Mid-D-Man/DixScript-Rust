@@ -15,6 +15,8 @@
 
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
+use dixscript::Compiler::Core::Tokenizer::token::SectionId;
+
 use crate::document::Document;
 
 pub fn provide(doc: Option<&Document>, pos: Position) -> Option<Hover> {
@@ -36,7 +38,7 @@ pub fn provide(doc: Option<&Document>, pos: Position) -> Option<Hover> {
 fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<String> {
     match &token.token_type {
 
-        // ── Section keywords ───────────────────────────────────────────────
+        // ── Section keywords (@CONFIG, @DATA, …) ─────────────────────────
         TokenType::SectionConfig     => Some(section_hover("@CONFIG",
                                                            "Compiler settings and file metadata.",
                                                            "@CONFIG(\n  version -> \"1.0.0\"\n  author -> \"name\"\n  debug_mode -> \"off\"\n  error_handling -> \"halt\"\n  compatibility_mode -> \"strict\"\n  features -> \"advanced\"\n)",
@@ -87,8 +89,15 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
             hover_enum_access(doc, enum_name, value)
         }
 
-        // ── Identifiers ────────────────────────────────────────────────────
-        TokenType::Identifier(name) => hover_identifier(doc, name),
+        // ── Identifiers — section-aware dispatch ───────────────────────────
+        TokenType::Identifier(name) => {
+            // Config section keys have dedicated documentation
+            if token.section == SectionId::Config {
+                hover_config_key(name).or_else(|| hover_identifier(doc, name))
+            } else {
+                hover_identifier(doc, name)
+            }
+        }
 
         // ── Date / Timestamp ───────────────────────────────────────────────
         TokenType::Date(d)        => hover_date(d),
@@ -123,7 +132,7 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
             s.len(), s
         )),
         TokenType::InterpolatedString(s) => Some(format!(
-            "**Interpolated string** (`<string>`)\n\nUse `{{expr}}` to embed expressions.\n\n```mdix\n$\"{}\"\n```",
+            "**Interpolated string** (`<string>`)\n\nUse `{{expr}}` to embed expressions at compile time.\n\n```mdix\n$\"{}\"\n```\n\nExpressions inside `{{}}` are evaluated when the QuickFunc runs.",
             s
         )),
 
@@ -134,8 +143,8 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
         TokenType::LogicalOp(op)          => hover_operator(op, "logical"),
         TokenType::BitwiseOp(op)          => hover_operator(op, "bitwise"),
         TokenType::DoubleColon            => Some("**`::`** — group array operator\n\nDefines a group array entry in `@DATA`.\n\n```mdix\ntags:: \"alpha\", \"beta\", \"v1\"\n```".to_string()),
-        TokenType::Arrow                  => Some("**`->`** — association operator\n\nUsed in `@CONFIG` and `@SECURITY` to map a key to a block.\n\n```mdix\nencryption -> { mode = \"password\" }\n```".to_string()),
-        TokenType::SwitchCase             => Some("**`->`** — switch case operator\n\nUsed inside `chk:` blocks.\n\n```mdix\nchk: x {\n  -> 1 { return \"one\" }\n  -> miss { return \"other\" }\n}\n```".to_string()),
+        TokenType::Arrow                  => Some("**`=>`** — association operator\n\nUsed in QuickFunc scope declarations.\n\n```mdix\n~func<int> => global(x<int>) { return x }\n```".to_string()),
+        TokenType::SwitchCase             => Some("**`->`** — association / switch-case operator\n\nIn `@CONFIG`/`@SECURITY`: maps key to value block.\nIn `chk:`: introduces a case.\n\n```mdix\nencryption -> { mode = \"password\" }\n```\n\n```mdix\nchk: x {\n  -> 1 { return \"one\" }\n  -> miss { return \"other\" }\n}\n```".to_string()),
         TokenType::FunctionPrefix         => Some("**`~`** — QuickFunc declaration prefix\n\nAll QuickFunc names start with `~`.\n\n```mdix\n~myFunc<int>(x<int>) { return x * 2 }\n```".to_string()),
 
         // ── Prefixed constructors ──────────────────────────────────────────
@@ -159,6 +168,21 @@ fn section_hover(name: &str, description: &str, example: &str, notes: &str) -> S
     )
 }
 
+/// Hover documentation for keys inside @CONFIG( ... ).
+fn hover_config_key(name: &str) -> Option<String> {
+    let content = match name.to_lowercase().as_str() {
+        "version" => "**`version`** — CONFIG key\n\nDixScript format version. Must match the compiler.\n\nExample: `version -> \"1.0.0\"`",
+        "encoding" => "**`encoding`** — CONFIG key\n\nSource file character encoding.\n\nSupported: `\"utf-8\"` *(default)*, `\"utf-16\"`, `\"utf-16le\"`, `\"utf-16be\"`, `\"ascii\"`, `\"iso-8859-1\"`",
+        "author" => "**`author`** — CONFIG key\n\nFile author. Free-form string.\n\nExample: `author -> \"Alice\"`",
+        "created" => "**`created`** — CONFIG key\n\nFile creation timestamp. Auto-filled by tooling.\n\nFormat: `YYYY-MM-DDThh:mm:ssZ`\n\nExample: `created -> \"2025-01-15T10:30:00Z\"`",
+        "features" => "**`features`** — CONFIG key\n\nEnabled section features.\n\n| Value | Sections available |\n|-------|-------------------|\n| `\"basic\"` | DATA, SECURITY only |\n| `\"advanced\"` | All sections *(default)* |\n| `\"quickfuncs,enums\"` | Explicit list |\n\nExample: `features -> \"advanced\"`",
+        "debug_mode" => "**`debug_mode`** — CONFIG key\n\nCompiler diagnostic verbosity.\n\n| Value | Effect |\n|-------|--------|\n| `\"off\"` | No debug output *(default)* |\n| `\"regular\"` | Key resolution steps |\n| `\"verbose\"` | Full execution trace |\n\nExample: `debug_mode -> \"regular\"`",
+        "error_handling" => "**`error_handling`** — CONFIG key\n\nHow the compiler responds to errors.\n\n| Value | Behaviour |\n|-------|----------|\n| `\"halt\"` | Stop on first error *(default)* |\n| `\"continue\"` | Collect all errors then report |\n| `\"recover\"` | Try to parse past errors |\n\nExample: `error_handling -> \"continue\"`",
+        "compatibility_mode" => "**`compatibility_mode`** — CONFIG key\n\nParser strictness level.\n\n| Value | Behaviour |\n|-------|----------|\n| `\"strict\"` | Reject unknown syntax *(default)* |\n| `\"best_effort\"` | Warn on unknown, continue |\n| `\"permissive\"` | Accept anything parseable |\n\nExample: `compatibility_mode -> \"strict\"`",
+        _ => return None,
+    };
+    Some(content.to_string())
+}
 // ── Keyword hover ──────────────────────────────────────────────────────────────
 
 fn hover_keyword(kw: &str) -> Option<String> {
@@ -306,15 +330,17 @@ fn hover_enum_access(doc: &Document, enum_name: &str, field: &str) -> Option<Str
 // ── Identifier hover ───────────────────────────────────────────────────────────
 
 fn hover_identifier(doc: &Document, name: &str) -> Option<String> {
-    // QuickFunc declaration or call site
+    // ── QuickFunc declaration or call site ────────────────────────────────
     if let Some(ast) = &doc.ast {
         if let Some(qf) = &ast.quick_functions {
             for func in &qf.functions {
-                if func.name != name { continue; }
+                if func.name != name {
+                    continue;
+                }
 
                 let params: Vec<String> = func.parameters.iter().map(|p| {
                     let t = p.data_type.as_ref()
-                        .map(|dt| format!("<{:?}>", dt).to_lowercase())
+                        .map(|dt| format!("<{}>", dt))
                         .unwrap_or_default();
                     let d = p.default_value.as_ref()
                         .map(|_| " = …".to_string())
@@ -323,15 +349,13 @@ fn hover_identifier(doc: &Document, name: &str) -> Option<String> {
                 }).collect();
 
                 let ret = func.return_type.as_ref()
-                    .map(|t| format!("{:?}", t).to_lowercase())
+                    .map(|t| format!("{}", t))
                     .unwrap_or_else(|| "?".to_string());
 
                 let scopes = func.scope_list.as_ref()
                     .map(|s| format!("\n\n**Scope:** `=> {}`", s.join(", ")))
                     .unwrap_or_default();
 
-                // Check for a doc comment on the line immediately above the
-                // function definition and show it at the top of the hover card.
                 let doc_comment_block = extract_doc_comment_for_func(
                     &doc.tokens,
                     func.position.line,
@@ -344,39 +368,47 @@ fn hover_identifier(doc: &Document, name: &str) -> Option<String> {
                     name, ret, params.join(", ")
                 );
 
+                let param_names: Vec<&str> = func.parameters.iter()
+                    .map(|p| p.name.as_str())
+                    .collect();
+
                 let body = format!(
                     "Compile-time function. All calls are resolved at compile time; the binary stores only the result.{}\n\n```mdix\n// Example call in @DATA:\n{}({})\n```",
                     scopes,
                     name,
-                    params.iter().map(|p| p.split('<').next().unwrap_or("…")).collect::<Vec<_>>().join(", ")
+                    param_names.join(", ")
                 );
 
                 return Some(format!("{}{}\n\n{}", doc_comment_block, signature, body));
             }
         }
 
-        // Enum type name
+        // ── Enum type name ────────────────────────────────────────────────
         if let Some(enums) = &ast.enums {
             for decl in &enums.enums {
-                if decl.name != name { continue; }
+                if decl.name != name {
+                    continue;
+                }
                 let fields: Vec<String> = decl.fields.iter().map(|f| {
                     let v = f.value.map(|n| format!(" = {}", n)).unwrap_or_default();
                     format!("`{}{}`", f.name, v)
                 }).collect();
                 return Some(format!(
-                    "**`{}`** — enum type\n\n**Fields:** {}\n\nAccess: `{}.FIELD_NAME`\n\nAnnotate variables `<enum>` to enable enum access.",
+                    "**`{}`** — enum type\n\n**Fields:** {}\n\nAccess: `{}.FIELD_NAME`\n\nAnnotate with `<enum>` to use enum values as property types.",
                     name, fields.join(", "), name
                 ));
             }
         }
     }
 
-    // DATA variable
+    // ── Semantic symbol table lookups ─────────────────────────────────────
     if let Some(sr) = &doc.semantic_result {
         if let Some(st) = &sr.symbol_table {
+
+            // ── DATA variable (flat property at root) ─────────────────────
             if let Some(var) = st.try_get_data_variable(name) {
                 let type_str = var.effective_type()
-                    .map(|t| format!("{:?}", t).to_lowercase())
+                    .map(|t| format!("{}", t))
                     .unwrap_or_else(|| "unknown".to_string());
                 let inferred = if var.is_inferred { " *(inferred)*" } else { "" };
                 return Some(format!(
@@ -385,9 +417,46 @@ fn hover_identifier(doc: &Document, name: &str) -> Option<String> {
                 ));
             }
 
-            // Static object name
+            // ── DATA variable with full path lookup (table properties) ────
+            // For `host` in `server: host = "localhost"`, the symbol is stored
+            // as DATA.server.host, not just host.  Try suffix-matching.
+            let suffix = format!(".{}", name);
+            for (path, var) in &st.data_variables {
+                if path.ends_with(&suffix) {
+                    let type_str = var.effective_type()
+                        .map(|t| format!("{}", t))
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let inferred = if var.is_inferred { " *(inferred)*" } else { "" };
+                    // Show the short name but the full access path
+                    let access_path = path.trim_start_matches("DATA.");
+                    return Some(format!(
+                        "**`{}`** — DATA property\n\nFull path: `{}`\nType: `<{}>`{}\n\nAccess at runtime:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
+                        name, access_path, type_str, inferred, type_str, access_path
+                    ));
+                }
+            }
+
+            // ── Static object name ────────────────────────────────────────
             if st.is_builtin_static_object(name) {
                 return hover_static_object(name);
+            }
+
+            // ── Imported namespace alias ──────────────────────────────────
+            if let Some(ns) = st.try_get_namespace(name) {
+                let func_names: Vec<String> =
+                    ns.functions.keys().take(6).cloned().collect();
+                let enum_names: Vec<String> =
+                    ns.enums.keys().take(4).cloned().collect();
+                return Some(format!(
+                    "**`{}`** — imported namespace\n\nSource: `{}`\n\n**Functions ({}):** {}\n\n**Enums ({}):** {}\n\nCall: `{}.funcName(…)`",
+                    name,
+                    ns.file_path,
+                    ns.functions.len(),
+                    func_names.iter().map(|f| format!("`{}`", f)).collect::<Vec<_>>().join(", "),
+                    ns.enums.len(),
+                    enum_names.iter().map(|e| format!("`{}`", e)).collect::<Vec<_>>().join(", "),
+                    name
+                ));
             }
         }
     }

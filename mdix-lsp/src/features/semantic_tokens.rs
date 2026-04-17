@@ -76,6 +76,7 @@ impl ClassifierState {
         match &token.token_type {
             // ── @ENUMS ────────────────────────────────────────────────────────
             TokenType::SectionEnums => {
+                // Reset for first enum type name in this section
                 self.seen_enum_name = false;
             }
             TokenType::Symbol('{') if token.section == SectionId::Enums => {
@@ -86,6 +87,7 @@ impl ClassifierState {
                 self.enum_brace_depth = (self.enum_brace_depth - 1).max(0);
                 if self.enum_brace_depth == 0 {
                     self.in_enum_body   = false;
+                    // Reset so the NEXT enum declaration's name gets TT_STRUCT
                     self.seen_enum_name = false;
                 }
             }
@@ -118,7 +120,6 @@ impl ClassifierState {
             TokenType::SectionImports => {
                 self.next_is_alias = true;
             }
-            // FIX: use direct equality, not .as_str() (unstable on &'static str)
             TokenType::Keyword(kw)
             if *kw == "from" || *kw == "from_cloud" || *kw == "verify" =>
                 {
@@ -127,6 +128,7 @@ impl ClassifierState {
             TokenType::String(_) | TokenType::StringSingle(_)
             if token.section == SectionId::Imports =>
                 {
+                    // After seeing the path string, next identifier is the next alias
                     self.next_is_alias = true;
                 }
 
@@ -146,17 +148,25 @@ impl ClassifierState {
     fn classify_identifier(&mut self, token: &Token) -> (u32, u32) {
         match token.section {
 
+            // ── @CONFIG keys — show as property (purple) ──────────────────────
+            SectionId::Config => (TT_PROPERTY, 0),
+
+            // ── @ENUMS ────────────────────────────────────────────────────────
             SectionId::Enums => {
                 if self.in_enum_body {
+                    // Enum field names (PASSIVE, AGGRESSIVE, PRODUCTION, …)
                     (TT_ENUM_MEMBER, MOD_DECLARATION)
                 } else if !self.seen_enum_name {
+                    // First identifier after `@ENUMS(` or after `}` — enum type name
                     self.seen_enum_name = true;
-                    (TT_STRUCT, MOD_DECLARATION)
+                    // Use TT_TYPE (teal) — more universally themed than TT_STRUCT
+                    (TT_TYPE, MOD_DECLARATION)
                 } else {
                     (TT_VARIABLE, 0)
                 }
             }
 
+            // ── @QUICKFUNCS ───────────────────────────────────────────────────
             SectionId::QuickFuncs => {
                 if self.next_is_func_name {
                     self.next_is_func_name = false;
@@ -164,10 +174,12 @@ impl ClassifierState {
                 } else if self.in_param_list && self.param_paren_depth <= 1 {
                     (TT_PARAMETER, MOD_DECLARATION)
                 } else {
+                    // Function call inside body, or local variable
                     (TT_VARIABLE, 0)
                 }
             }
 
+            // ── @IMPORTS ──────────────────────────────────────────────────────
             SectionId::Imports => {
                 if self.next_is_alias {
                     self.next_is_alias = false;
@@ -177,21 +189,27 @@ impl ClassifierState {
                 }
             }
 
+            // ── @DLM ──────────────────────────────────────────────────────────
             SectionId::Dlm => {
                 if self.next_is_dlm_subtype {
                     self.next_is_dlm_subtype = false;
                     (TT_DECORATOR, 0)
                 } else if self.next_is_dlm_module {
                     self.next_is_dlm_module  = false;
-                    self.next_is_dlm_subtype = true;
+                    self.next_is_dlm_subtype = true; // expect subtype after dot
                     (TT_MACRO, MOD_DECLARATION)
                 } else {
                     (TT_MACRO, 0)
                 }
             }
 
+            // ── @DATA ─────────────────────────────────────────────────────────
             SectionId::Data => (TT_VARIABLE, 0),
 
+            // ── @SECURITY ─────────────────────────────────────────────────────
+            SectionId::Security => (TT_PROPERTY, 0),
+
+            // ── Unknown / top-level ───────────────────────────────────────────
             _ => (TT_VARIABLE, 0),
         }
     }

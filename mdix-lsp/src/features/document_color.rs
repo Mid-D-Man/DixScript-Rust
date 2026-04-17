@@ -25,10 +25,13 @@ pub fn provide(doc: Option<&Document>) -> Vec<ColorInformation> {
     for token in &doc.tokens {
         if let TokenType::HexColor(hex) = &token.token_type {
             if let Some(color) = parse_hex_color(hex) {
-                let line   = token.line.saturating_sub(1) as u32;
-                let col    = token.column.saturating_sub(1) as u32;
-                // +1 for the leading '#'; hex string stored without '#'
-                let length = hex.len() as u32 + 1;
+                let line = token.line.saturating_sub(1) as u32;
+                let col  = token.column.saturating_sub(1) as u32;
+
+                // The tokenizer stores the '#' as the first character of the
+                // hex string (e.g. "#FF5733" = 7 chars), so the token length
+                // is exactly hex.len() — no +1 needed.
+                let length = hex.len() as u32;
 
                 result.push(ColorInformation {
                     range: Range::new(

@@ -1092,7 +1092,7 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
     fn build_initial_data_context(&mut self) {
         let data_section = match &self.ast.data {
             Some(d) => d,
-            None => return,
+            None    => return,
         };
 
         let estimated = (data_section.entries.len() * 4).max(MIN_CAPACITY);
@@ -1113,8 +1113,131 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
                 total_inserted
             ));
         }
+
+        // Multi-pass: resolve simple variable-alias assignments (a = b style).
+        // These are properties whose value is a plain Identifier referencing a
+        // sibling or previously-defined variable.  They are not function calls so
+        // Phase 4 never touches them, yet function calls may depend on them.
+        // Example: `tax_value = base_price` inside a table must be resolved so
+        // that `calculateTotal(base_price, tax_value, discount_value)` can proceed.
+        self.resolve_identifier_aliases_in_context();
     }
 
+    fn resolve_identifier_aliases_in_context(&mut self) {
+        let entries = match &self.ast.data {
+            Some(d) => d.entries.clone(),
+            None    => return,
+        };
+
+        // Up to 8 passes handles chains like a=b, b=c, c=1 that resolve in order.
+        for pass in 0..8usize {
+            let mut changed = false;
+            let mut ctx = self.data_context.borrow_mut();
+
+            for entry in &entries {
+                changed |= Self::try_resolve_identifier_aliases_in_entry(entry, &mut ctx);
+            }
+
+            drop(ctx);
+
+            if self.debug_config.is_verbose {
+                self.error_manager.log_debug(&format!(
+                    "[IdentifierAliasPass {}] changed={}",
+                    pass + 1,
+                    changed
+                ));
+            }
+
+            if !changed {
+                break;
+            }
+        }
+    }
+    fn try_resolve_identifier_aliases_in_entry(
+        entry:   &DataEntry,
+        context: &mut FxHashMap<String, DixValue>,
+    ) -> bool {
+        match entry {
+            DataEntry::SimpleProperty { name, value, .. } => {
+                let path = PathBuilder::build(&[name.as_str()]);
+                if context.contains_key(&path) {
+                    return false; // already resolved
+                }
+                if let Value::Identifier { value: id, .. } = value {
+                    if let Some(dix) = Self::lookup_by_name_or_suffix(id, context) {
+                        context.insert(path, dix);
+                        return true;
+                    }
+                }
+                false
+            }
+
+            DataEntry::TableProperty { path: tp, properties, .. } => {
+                let segments: Vec<&str> = tp.segments.iter().map(|s| s.as_str()).collect();
+                let mut changed = false;
+
+                for prop in properties {
+                    let mut segs = segments.clone();
+                    segs.push(prop.name.as_str());
+                    let full = PathBuilder::build(&segs);
+
+                    if context.contains_key(&full) {
+                        continue; // already resolved
+                    }
+
+                    if let Value::Identifier { value: id, .. } = &prop.value {
+                        if let Some(dix) = Self::lookup_by_name_or_suffix(id, context) {
+                            context.insert(full, dix);
+                            changed = true;
+                        }
+                    }
+                }
+
+                changed
+            }
+
+            DataEntry::GroupArray { path: gp, items, .. } => {
+                let segments: Vec<&str> = gp.segments.iter().map(|s| s.as_str()).collect();
+                let base = PathBuilder::build(&segments);
+                let mut changed = false;
+
+                for (i, item) in items.iter().enumerate() {
+                    let indexed = format!("{}[{}]", base, i);
+                    if context.contains_key(&indexed) {
+                        continue;
+                    }
+                    if let Value::Identifier { value: id, .. } = item {
+                        if let Some(dix) = Self::lookup_by_name_or_suffix(id, context) {
+                            context.insert(indexed, dix);
+                            changed = true;
+                        }
+                    }
+                }
+
+                changed
+            }
+
+            DataEntry::ObjectProperty { .. } => false,
+        }
+    }
+    /// Look up `name` in `context` by exact key first, then by path-suffix
+    /// (e.g. `"port"` matches `"DATA.server.config.port"`).
+    /// Returns a clone of the first match, or `None`.
+    fn lookup_by_name_or_suffix(
+        name:    &str,
+        context: &FxHashMap<String, DixValue>,
+    ) -> Option<DixValue> {
+        // Exact match (flat property at DATA root)
+        if let Some(v) = context.get(name) {
+            return Some(v.clone());
+        }
+        // Suffix match (nested property)
+        let suffix = format!(".{}", name);
+        context
+            .iter()
+            .find(|(k, _)| k.ends_with(&suffix))
+            .map(|(_, v)| v.clone())
+    }
     fn populate_context_from_entry(
         entry: &DataEntry,
         context: &mut FxHashMap<String, DixValue>,

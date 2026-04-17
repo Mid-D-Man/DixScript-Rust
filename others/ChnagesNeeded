@@ -1,0 +1,737 @@
+Fix 1: mdix-lsp/src/server.rs — spawn_analysis (critical — fixes timeout)
+fn spawn_analysis(&self, uri: Url, source: String, version: i32) {
+    if self.shutdown_requested.load(Ordering::Relaxed) {
+        return;
+    }
+
+    let client    = self.client.clone();
+    let documents = Arc::clone(&self.documents);
+
+    let handle = tokio::spawn(async move {
+        // The DixScript compiler pipeline is fully synchronous and CPU-bound.
+        // Running it directly in tokio::spawn blocks the async executor thread,
+        // preventing the server from responding to ANY other LSP request while
+        // compilation is in progress (hover, completion, documentLink probes, etc.).
+        // This caused IntelliJ's documentLink annotator to timeout, which then
+        // cascaded into a shutdown timeout loop.
+        //
+        // spawn_blocking moves the work onto a dedicated blocking thread pool,
+        // keeping all tokio threads free to handle incoming messages.
+        let result = tokio::task::spawn_blocking(move || {
+            let mut doc = Document::new(uri.clone(), source, version);
+            let errors  = run_pipeline(&mut doc);
+            (uri, doc, errors, version)
+        })
+        .await;
+
+        match result {
+            Ok((uri, doc, errors, version)) => {
+                let diags = to_diagnostics(&errors);
+                documents.insert(uri.clone(), doc);
+                client.publish_diagnostics(uri, diags, Some(version)).await;
+            }
+            Err(e) => {
+                // Compiler panicked (bug) — log and keep server alive
+                tracing::error!("Analysis task panicked: {:?}", e);
+            }
+        }
+    });
+
+    if let Ok(mut tasks) = self.analysis_tasks.lock() {
+        tasks.retain(|h| !h.is_finished());
+        tasks.push(handle);
+    }
+}
+
+Fix 2: dixscript/src/Compiler/Core/ValueResolution/value_resolver.rs — three new methods + modified build_initial_data_context
+The key insight: Value::Identifier assignments like tax_value = base_price never enter the data context because try_value_to_dix returns None for them. We need multi-pass resolution before Phase 4 runs function calls.
+
+fn build_initial_data_context(&mut self) {
+    let data_section = match &self.ast.data {
+        Some(d) => d,
+        None    => return,
+    };
+
+    let estimated = (data_section.entries.len() * 4).max(MIN_CAPACITY);
+    self.data_context.borrow_mut().reserve(estimated);
+
+    let mut context = self.data_context.borrow_mut();
+    let mut total_inserted = 0usize;
+
+    for entry in &data_section.entries {
+        total_inserted += Self::populate_context_from_entry(entry, &mut context);
+    }
+
+    drop(context);
+
+    if self.debug_config.is_enabled {
+        self.error_manager.log_info(&format!(
+            "Data context populated: {} literal entries",
+            total_inserted
+        ));
+    }
+
+    // Multi-pass: resolve simple variable-alias assignments (a = b style).
+    // These are properties whose value is a plain Identifier referencing a
+    // sibling or previously-defined variable.  They are not function calls so
+    // Phase 4 never touches them, yet function calls may depend on them.
+    // Example: `tax_value = base_price` inside a table must be resolved so
+    // that `calculateTotal(base_price, tax_value, discount_value)` can proceed.
+    self.resolve_identifier_aliases_in_context();
+}
+
+
+New resolve_identifier_aliases_in_context
+
+fn resolve_identifier_aliases_in_context(&mut self) {
+    let entries = match &self.ast.data {
+        Some(d) => d.entries.clone(),
+        None    => return,
+    };
+
+    // Up to 8 passes handles chains like a=b, b=c, c=1 that resolve in order.
+    for pass in 0..8usize {
+        let mut changed = false;
+        let mut ctx = self.data_context.borrow_mut();
+
+        for entry in &entries {
+            changed |= Self::try_resolve_identifier_aliases_in_entry(entry, &mut ctx);
+        }
+
+        drop(ctx);
+
+        if self.debug_config.is_verbose {
+            self.error_manager.log_debug(&format!(
+                "[IdentifierAliasPass {}] changed={}",
+                pass + 1,
+                changed
+            ));
+        }
+
+        if !changed {
+            break;
+        }
+    }
+}
+
+try_resolve_identifier_aliases_in_entry
+
+fn try_resolve_identifier_aliases_in_entry(
+    entry:   &DataEntry,
+    context: &mut FxHashMap<String, DixValue>,
+) -> bool {
+    match entry {
+        DataEntry::SimpleProperty { name, value, .. } => {
+            let path = PathBuilder::build(&[name.as_str()]);
+            if context.contains_key(&path) {
+                return false; // already resolved
+            }
+            if let Value::Identifier { value: id, .. } = value {
+                if let Some(dix) = Self::lookup_by_name_or_suffix(id, context) {
+                    context.insert(path, dix);
+                    return true;
+                }
+            }
+            false
+        }
+
+        DataEntry::TableProperty { path: tp, properties, .. } => {
+            let segments: Vec<&str> = tp.segments.iter().map(|s| s.as_str()).collect();
+            let mut changed = false;
+
+            for prop in properties {
+                let mut segs = segments.clone();
+                segs.push(prop.name.as_str());
+                let full = PathBuilder::build(&segs);
+
+                if context.contains_key(&full) {
+                    continue; // already resolved
+                }
+
+                if let Value::Identifier { value: id, .. } = &prop.value {
+                    if let Some(dix) = Self::lookup_by_name_or_suffix(id, context) {
+                        context.insert(full, dix);
+                        changed = true;
+                    }
+                }
+            }
+
+            changed
+        }
+
+        DataEntry::GroupArray { path: gp, items, .. } => {
+            let segments: Vec<&str> = gp.segments.iter().map(|s| s.as_str()).collect();
+            let base = PathBuilder::build(&segments);
+            let mut changed = false;
+
+            for (i, item) in items.iter().enumerate() {
+                let indexed = format!("{}[{}]", base, i);
+                if context.contains_key(&indexed) {
+                    continue;
+                }
+                if let Value::Identifier { value: id, .. } = item {
+                    if let Some(dix) = Self::lookup_by_name_or_suffix(id, context) {
+                        context.insert(indexed, dix);
+                        changed = true;
+                    }
+                }
+            }
+
+            changed
+        }
+
+        DataEntry::ObjectProperty { .. } => false,
+    }
+}
+
+New static lookup_by_name_or_suffix
+
+/// Look up `name` in `context` by exact key first, then by path-suffix
+/// (e.g. `"port"` matches `"DATA.server.config.port"`).
+/// Returns a clone of the first match, or `None`.
+fn lookup_by_name_or_suffix(
+    name:    &str,
+    context: &FxHashMap<String, DixValue>,
+) -> Option<DixValue> {
+    // Exact match (flat property at DATA root)
+    if let Some(v) = context.get(name) {
+        return Some(v.clone());
+    }
+    // Suffix match (nested property)
+    let suffix = format!(".{}", name);
+    context
+        .iter()
+        .find(|(k, _)| k.ends_with(&suffix))
+        .map(|(_, v)| v.clone())
+}
+
+Fix 4: mdix-lsp/src/features/semantic_tokens.rs — advance method + classify_identifier method
+Modified advance method
+
+fn advance(&mut self, token: &Token) {
+    match &token.token_type {
+        // ── @ENUMS ────────────────────────────────────────────────────────
+        TokenType::SectionEnums => {
+            // Reset for first enum type name in this section
+            self.seen_enum_name = false;
+        }
+        TokenType::Symbol('{') if token.section == SectionId::Enums => {
+            self.in_enum_body     = true;
+            self.enum_brace_depth += 1;
+        }
+        TokenType::Symbol('}') if token.section == SectionId::Enums => {
+            self.enum_brace_depth = (self.enum_brace_depth - 1).max(0);
+            if self.enum_brace_depth == 0 {
+                self.in_enum_body   = false;
+                // Reset so the NEXT enum declaration's name gets TT_STRUCT
+                self.seen_enum_name = false;
+            }
+        }
+
+        // ── @QUICKFUNCS ───────────────────────────────────────────────────
+        TokenType::FunctionPrefix => {
+            self.next_is_func_name = true;
+            self.in_param_list     = false;
+            self.param_paren_depth = 0;
+        }
+        TokenType::Symbol('(') if token.section == SectionId::QuickFuncs => {
+            if self.next_is_func_name {
+                self.in_param_list     = true;
+                self.param_paren_depth = 1;
+            } else if self.in_param_list {
+                self.param_paren_depth += 1;
+            }
+        }
+        TokenType::Symbol(')') if token.section == SectionId::QuickFuncs => {
+            if self.in_param_list {
+                self.param_paren_depth -= 1;
+                if self.param_paren_depth <= 0 {
+                    self.in_param_list     = false;
+                    self.param_paren_depth = 0;
+                }
+            }
+        }
+
+        // ── @IMPORTS ──────────────────────────────────────────────────────
+        TokenType::SectionImports => {
+            self.next_is_alias = true;
+        }
+        TokenType::Keyword(kw)
+            if *kw == "from" || *kw == "from_cloud" || *kw == "verify" =>
+        {
+            self.next_is_alias = false;
+        }
+        TokenType::String(_) | TokenType::StringSingle(_)
+            if token.section == SectionId::Imports =>
+        {
+            // After seeing the path string, next identifier is the next alias
+            self.next_is_alias = true;
+        }
+
+        // ── @DLM ──────────────────────────────────────────────────────────
+        TokenType::SectionDLM => {
+            self.next_is_dlm_module  = true;
+            self.next_is_dlm_subtype = false;
+        }
+        TokenType::Symbol('.') if token.section == SectionId::Dlm => {
+            self.next_is_dlm_subtype = true;
+        }
+
+        _ => {}
+    }
+}
+
+Modified classify_identifier method
+
+fn classify_identifier(&mut self, token: &Token) -> (u32, u32) {
+    match token.section {
+
+        // ── @CONFIG keys — show as property (purple) ──────────────────────
+        SectionId::Config => (TT_PROPERTY, 0),
+
+        // ── @ENUMS ────────────────────────────────────────────────────────
+        SectionId::Enums => {
+            if self.in_enum_body {
+                // Enum field names (PASSIVE, AGGRESSIVE, PRODUCTION, …)
+                (TT_ENUM_MEMBER, MOD_DECLARATION)
+            } else if !self.seen_enum_name {
+                // First identifier after `@ENUMS(` or after `}` — enum type name
+                self.seen_enum_name = true;
+                // Use TT_TYPE (teal) — more universally themed than TT_STRUCT
+                (TT_TYPE, MOD_DECLARATION)
+            } else {
+                (TT_VARIABLE, 0)
+            }
+        }
+
+        // ── @QUICKFUNCS ───────────────────────────────────────────────────
+        SectionId::QuickFuncs => {
+            if self.next_is_func_name {
+                self.next_is_func_name = false;
+                (TT_FUNCTION, MOD_DECLARATION)
+            } else if self.in_param_list && self.param_paren_depth <= 1 {
+                (TT_PARAMETER, MOD_DECLARATION)
+            } else {
+                // Function call inside body, or local variable
+                (TT_VARIABLE, 0)
+            }
+        }
+
+        // ── @IMPORTS ──────────────────────────────────────────────────────
+        SectionId::Imports => {
+            if self.next_is_alias {
+                self.next_is_alias = false;
+                (TT_NAMESPACE, MOD_DECLARATION)
+            } else {
+                (TT_VARIABLE, 0)
+            }
+        }
+
+        // ── @DLM ──────────────────────────────────────────────────────────
+        SectionId::Dlm => {
+            if self.next_is_dlm_subtype {
+                self.next_is_dlm_subtype = false;
+                (TT_DECORATOR, 0)
+            } else if self.next_is_dlm_module {
+                self.next_is_dlm_module  = false;
+                self.next_is_dlm_subtype = true; // expect subtype after dot
+                (TT_MACRO, MOD_DECLARATION)
+            } else {
+                (TT_MACRO, 0)
+            }
+        }
+
+        // ── @DATA ─────────────────────────────────────────────────────────
+        SectionId::Data => (TT_VARIABLE, 0),
+
+        // ── @SECURITY ─────────────────────────────────────────────────────
+        SectionId::Security => (TT_PROPERTY, 0),
+
+        // ── Unknown / top-level ───────────────────────────────────────────
+        _ => (TT_VARIABLE, 0),
+    }
+}
+
+Fix 5: mdix-lsp/src/features/document_color.rs — provide function + presentation (fix length)
+
+pub fn provide(doc: Option<&Document>) -> Vec<ColorInformation> {
+    let doc = match doc {
+        Some(d) => d,
+        None    => return vec![],
+    };
+
+    let mut result = Vec::new();
+
+    for token in &doc.tokens {
+        if let TokenType::HexColor(hex) = &token.token_type {
+            if let Some(color) = parse_hex_color(hex) {
+                let line = token.line.saturating_sub(1) as u32;
+                let col  = token.column.saturating_sub(1) as u32;
+
+                // The tokenizer stores the '#' as the first character of the
+                // hex string (e.g. "#FF5733" = 7 chars), so the token length
+                // is exactly hex.len() — no +1 needed.
+                let length = hex.len() as u32;
+
+                result.push(ColorInformation {
+                    range: Range::new(
+                        Position::new(line, col),
+                        Position::new(line, col + length),
+                    ),
+                    color,
+                });
+            }
+        }
+    }
+
+    result
+}
+
+Fix 6: mdix-lsp/src/features/hover.rs — hover_content_for, hover_identifier, new hover_config_key
+New hover_config_key function
+
+/// Hover documentation for keys inside @CONFIG( ... ).
+fn hover_config_key(name: &str) -> Option<String> {
+    let content = match name.to_lowercase().as_str() {
+        "version" => "**`version`** — CONFIG key\n\nDixScript format version. Must match the compiler.\n\nExample: `version -> \"1.0.0\"`",
+        "encoding" => "**`encoding`** — CONFIG key\n\nSource file character encoding.\n\nSupported: `\"utf-8\"` *(default)*, `\"utf-16\"`, `\"utf-16le\"`, `\"utf-16be\"`, `\"ascii\"`, `\"iso-8859-1\"`",
+        "author" => "**`author`** — CONFIG key\n\nFile author. Free-form string.\n\nExample: `author -> \"Alice\"`",
+        "created" => "**`created`** — CONFIG key\n\nFile creation timestamp. Auto-filled by tooling.\n\nFormat: `YYYY-MM-DDThh:mm:ssZ`\n\nExample: `created -> \"2025-01-15T10:30:00Z\"`",
+        "features" => "**`features`** — CONFIG key\n\nEnabled section features.\n\n| Value | Sections available |\n|-------|-------------------|\n| `\"basic\"` | DATA, SECURITY only |\n| `\"advanced\"` | All sections *(default)* |\n| `\"quickfuncs,enums\"` | Explicit list |\n\nExample: `features -> \"advanced\"`",
+        "debug_mode" => "**`debug_mode`** — CONFIG key\n\nCompiler diagnostic verbosity.\n\n| Value | Effect |\n|-------|--------|\n| `\"off\"` | No debug output *(default)* |\n| `\"regular\"` | Key resolution steps |\n| `\"verbose\"` | Full execution trace |\n\nExample: `debug_mode -> \"regular\"`",
+        "error_handling" => "**`error_handling`** — CONFIG key\n\nHow the compiler responds to errors.\n\n| Value | Behaviour |\n|-------|----------|\n| `\"halt\"` | Stop on first error *(default)* |\n| `\"continue\"` | Collect all errors then report |\n| `\"recover\"` | Try to parse past errors |\n\nExample: `error_handling -> \"continue\"`",
+        "compatibility_mode" => "**`compatibility_mode`** — CONFIG key\n\nParser strictness level.\n\n| Value | Behaviour |\n|-------|----------|\n| `\"strict\"` | Reject unknown syntax *(default)* |\n| `\"best_effort\"` | Warn on unknown, continue |\n| `\"permissive\"` | Accept anything parseable |\n\nExample: `compatibility_mode -> \"strict\"`",
+        _ => return None,
+    };
+    Some(content.to_string())
+}
+
+Modified hover_content_for (add Config section dispatch)
+
+fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<String> {
+    match &token.token_type {
+
+        // ── Section keywords (@CONFIG, @DATA, …) ─────────────────────────
+        TokenType::SectionConfig     => Some(section_hover("@CONFIG",
+            "Compiler settings and file metadata.",
+            "@CONFIG(\n  version -> \"1.0.0\"\n  author -> \"name\"\n  debug_mode -> \"off\"\n  error_handling -> \"halt\"\n  compatibility_mode -> \"strict\"\n  features -> \"advanced\"\n)",
+            "All entries use `key -> value` syntax (arrow, not equals).\n\n**Keys:** `version`, `author`, `created`, `encoding`, `debug_mode` (`off`/`regular`/`verbose`), `error_handling` (`halt`/`continue`/`recover`), `compatibility_mode` (`strict`/`best_effort`/`permissive`), `features` (`basic`/`advanced`/section list)."
+        )),
+        TokenType::SectionImports    => Some(section_hover("@IMPORTS",
+            "Import other `.mdix` files.",
+            "@IMPORTS(\n  Utils from \"common/utils.mdix\"\n  Base  from_cloud \"https://example.com/base.mdix\"\n)",
+            "The alias becomes a namespace. Call: `Utils.myFunc(x)`. Access enums: `Utils.Status.ACTIVE`.\n\nOptional: `verify \"hash\"` to check file integrity."
+        )),
+        TokenType::SectionDLM        => Some(section_hover("@DLM",
+            "Data Lifecycle Modules — applied at compile time.",
+            "@DLM(\n  DCompressor.gzip\n  DEncryptor.aes256\n)",
+            "**Compressors:** `DCompressor.gzip`, `.bzip2`, `.lzma`\n\n**Encryptors:** `DEncryptor.aes256`, `.aes128`, `.chacha20`, `.xor`\n\n**Auditor:** `DAuditor.diy`, `.enhanced`\n\nIf `DEncryptor` is present, `@SECURITY` is required."
+        )),
+        TokenType::SectionEnums      => Some(section_hover("@ENUMS",
+            "Named integer constants.",
+            "@ENUMS(\n  Difficulty { EASY = 0, NORMAL = 1, HARD = 2 }\n  AIType     { PASSIVE, NEUTRAL, AGGRESSIVE, BOSS }\n)",
+            "Values auto-increment from 0 if omitted. Access with `EnumName.FIELD`. Annotate variables `<enum>` to enable enum access.\n\nAt runtime, enum values are resolved to their integer and stored as `Enum { enum_name, field_name, value }`."
+        )),
+        TokenType::SectionQuickFuncs => Some(section_hover("@QUICKFUNCS",
+            "Compile-time functions — zero runtime overhead.",
+            "@QUICKFUNCS(\n  ~weapon<object>(id, damage<int>) {\n    return {\n      id     = id\n      damage = damage\n      range  = damage * 2\n    }\n  }\n)",
+            "All computation happens at compile time. The binary contains only resolved data.\n\n**Syntax:** `~name<returnType>(params) { ... return expr }` \n\n**Supported statements:** `let`, `let mut`, `const`, `if:`, `elif:`, `else`, `chk:`, `return`, `log:`\n\n**Operators:** `+`, `-`, `*`, `/`, `%`, `**`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`/`and`, `||`/`or`, `!`/`not`, ternary `? :`"
+        )),
+        TokenType::SectionData       => Some(section_hover("@DATA",
+            "Data payload — the main output of the file.",
+            "@DATA(\n  // Flat properties (single =)\n  app_name = \"MyApp\"\n  port<int> = 8080\n\n  // Table property (single :)\n  server: host = \"localhost\", port = 8080\n\n  // Group array (double ::)\n  tags:: \"alpha\", \"beta\", \"v1\"\n)",
+            "**Two-tier ordering rule:** flat properties must come before any table/group entries.\n\n**Commas between entries are optional.** Commas inside function calls and object literals are required.\n\nType annotations `<int>` are optional; the compiler infers types automatically."
+        )),
+        TokenType::SectionSecurity   => Some(section_hover("@SECURITY",
+            "Encryption configuration.",
+            "@SECURITY(\n  encryption -> {\n    mode = \"keyfile\",\n    algorithm = \"aes256-gcm\"\n  }\n)",
+            "**Modes:** `\"password\"` (user-supplied at compile time), `\"keyfile\"` (auto-generated `.key` file)\n\n**Algorithms:** `\"aes256-gcm\"`, `\"aes128-gcm\"`, `\"chacha20-poly1305\"`\n\nCompile: `mdix compile secrets.mdix --password`\nLoad: `DixLoadOptions::with_key_file(\"path.key\")`"
+        )),
+
+        // ── Language keywords ──────────────────────────────────────────────
+        TokenType::Keyword(kw) => hover_keyword(kw),
+
+        // ── Boolean / null literals ────────────────────────────────────────
+        TokenType::Bool(b) => Some(format!(
+            "**`{}`** — boolean literal\n\nType: `<bool>`. Use in conditions and as property values.",
+            if *b { "true" } else { "false" }
+        )),
+
+        // ── Enum access ────────────────────────────────────────────────────
+        TokenType::EnumAccess { enum_name, value } => {
+            hover_enum_access(doc, enum_name, value)
+        }
+
+        // ── Identifiers — section-aware dispatch ───────────────────────────
+        TokenType::Identifier(name) => {
+            // Config section keys have dedicated documentation
+            if token.section == SectionId::Config {
+                hover_config_key(name).or_else(|| hover_identifier(doc, name))
+            } else {
+                hover_identifier(doc, name)
+            }
+        }
+
+        // ── Date / Timestamp ───────────────────────────────────────────────
+        TokenType::Date(d)        => hover_date(d),
+        TokenType::Timestamp(ts)  => hover_timestamp(ts),
+
+        // ── Static method calls ────────────────────────────────────────────
+        TokenType::StaticFunction { class, method } => hover_static_method(class, method),
+
+        // ── Regex constructor ──────────────────────────────────────────────
+        TokenType::RegexConstructor(_) => Some(hover_regex(&doc.tokens, index)),
+
+        // ── Blob constructor ───────────────────────────────────────────────
+        TokenType::BlobConstructor(_) => Some(hover_blob(&doc.tokens, index)),
+
+        // ── HexColor ──────────────────────────────────────────────────────
+        TokenType::HexColor(hex) => hover_hex_color(hex),
+
+        // ── Numeric literals ───────────────────────────────────────────────
+        TokenType::Integer(i)           => Some(format!("**`{}`** — integer literal (`<int>`)", i)),
+        TokenType::Float(f)             => Some(format!("**`{}f`** — 32-bit float literal (`<float>`)", f)),
+        TokenType::Double(d)            => Some(format!("**`{}`** — 64-bit double literal (`<double>`)", d)),
+        TokenType::ScientificNotation(d)=> Some(format!("**`{:e}`** — scientific notation (`<double>`)", d)),
+        TokenType::HexLiteral(i)        => Some(format!("**`0x{:X}`** — hex integer literal (`<hex>`, value: {})", i, i)),
+
+        // ── String literals ────────────────────────────────────────────────
+        TokenType::String(s) => Some(format!(
+            "**String literal** (`<string>`)\n\nLength: {} characters\n\n```mdix\n\"{}\"\n```",
+            s.len(), s
+        )),
+        TokenType::StringSingle(s) => Some(format!(
+            "**String literal** (`<string>`, single-quoted)\n\nLength: {} characters\n\n```mdix\n'{}'\n```",
+            s.len(), s
+        )),
+        TokenType::InterpolatedString(s) => Some(format!(
+            "**Interpolated string** (`<string>`)\n\nUse `{{expr}}` to embed expressions at compile time.\n\n```mdix\n$\"{}\"\n```\n\nExpressions inside `{{}}` are evaluated when the QuickFunc runs.",
+            s
+        )),
+
+        // ── Operators ──────────────────────────────────────────────────────
+        TokenType::ArithmeticOp(op)       => hover_operator(op, "arithmetic"),
+        TokenType::ArithmeticAssignOp(op) => hover_operator(op, "arithmetic assignment"),
+        TokenType::ComparisonOp(op)       => hover_operator(op, "comparison"),
+        TokenType::LogicalOp(op)          => hover_operator(op, "logical"),
+        TokenType::BitwiseOp(op)          => hover_operator(op, "bitwise"),
+        TokenType::DoubleColon            => Some("**`::`** — group array operator\n\nDefines a group array entry in `@DATA`.\n\n```mdix\ntags:: \"alpha\", \"beta\", \"v1\"\n```".to_string()),
+        TokenType::Arrow                  => Some("**`=>`** — association operator\n\nUsed in QuickFunc scope declarations.\n\n```mdix\n~func<int> => global(x<int>) { return x }\n```".to_string()),
+        TokenType::SwitchCase             => Some("**`->`** — association / switch-case operator\n\nIn `@CONFIG`/`@SECURITY`: maps key to value block.\nIn `chk:`: introduces a case.\n\n```mdix\nencryption -> { mode = \"password\" }\n```\n\n```mdix\nchk: x {\n  -> 1 { return \"one\" }\n  -> miss { return \"other\" }\n}\n```".to_string()),
+        TokenType::FunctionPrefix         => Some("**`~`** — QuickFunc declaration prefix\n\nAll QuickFunc names start with `~`.\n\n```mdix\n~myFunc<int>(x<int>) { return x * 2 }\n```".to_string()),
+
+        // ── Prefixed constructors ──────────────────────────────────────────
+        TokenType::TupleConstructor(_) => Some(
+            "**`t:(...)`** — tuple constructor\n\nMixed-type collection, maximum 6 elements.\n\n```mdix\ncoord = t:(128.5, 0.0, -64.3)\n```\n\nAccess with `.first()`, `.second()`, `.get(index)`, `.toArray()`.".to_string()
+        ),
+
+        // ── DataType annotations ───────────────────────────────────────────
+        TokenType::DataType(dt) => hover_data_type(dt),
+
+        _ => None,
+    }
+}
+
+You'll need to add this import at the top of hover.rs:
+
+use dixscript::Compiler::Core::Tokenizer::token::SectionId;
+
+Modified hover_identifier — handles table property paths
+
+fn hover_identifier(doc: &Document, name: &str) -> Option<String> {
+    // ── QuickFunc declaration or call site ────────────────────────────────
+    if let Some(ast) = &doc.ast {
+        if let Some(qf) = &ast.quick_functions {
+            for func in &qf.functions {
+                if func.name != name {
+                    continue;
+                }
+
+                let params: Vec<String> = func.parameters.iter().map(|p| {
+                    let t = p.data_type.as_ref()
+                        .map(|dt| format!("<{}>", dt))
+                        .unwrap_or_default();
+                    let d = p.default_value.as_ref()
+                        .map(|_| " = …".to_string())
+                        .unwrap_or_default();
+                    format!("{}{}{}", p.name, t, d)
+                }).collect();
+
+                let ret = func.return_type.as_ref()
+                    .map(|t| format!("{}", t))
+                    .unwrap_or_else(|| "?".to_string());
+
+                let scopes = func.scope_list.as_ref()
+                    .map(|s| format!("\n\n**Scope:** `=> {}`", s.join(", ")))
+                    .unwrap_or_default();
+
+                let doc_comment_block = extract_doc_comment_for_func(
+                    &doc.tokens,
+                    func.position.line,
+                )
+                .map(|c| format!("{}\n\n---\n\n", c))
+                .unwrap_or_default();
+
+                let signature = format!(
+                    "**`~{}<{}>({})`** — QuickFunc",
+                    name, ret, params.join(", ")
+                );
+
+                let param_names: Vec<&str> = func.parameters.iter()
+                    .map(|p| p.name.as_str())
+                    .collect();
+
+                let body = format!(
+                    "Compile-time function. All calls are resolved at compile time; the binary stores only the result.{}\n\n```mdix\n// Example call in @DATA:\n{}({})\n```",
+                    scopes,
+                    name,
+                    param_names.join(", ")
+                );
+
+                return Some(format!("{}{}\n\n{}", doc_comment_block, signature, body));
+            }
+        }
+
+        // ── Enum type name ────────────────────────────────────────────────
+        if let Some(enums) = &ast.enums {
+            for decl in &enums.enums {
+                if decl.name != name {
+                    continue;
+                }
+                let fields: Vec<String> = decl.fields.iter().map(|f| {
+                    let v = f.value.map(|n| format!(" = {}", n)).unwrap_or_default();
+                    format!("`{}{}`", f.name, v)
+                }).collect();
+                return Some(format!(
+                    "**`{}`** — enum type\n\n**Fields:** {}\n\nAccess: `{}.FIELD_NAME`\n\nAnnotate with `<enum>` to use enum values as property types.",
+                    name, fields.join(", "), name
+                ));
+            }
+        }
+    }
+
+    // ── Semantic symbol table lookups ─────────────────────────────────────
+    if let Some(sr) = &doc.semantic_result {
+        if let Some(st) = &sr.symbol_table {
+
+            // ── DATA variable (flat property at root) ─────────────────────
+            if let Some(var) = st.try_get_data_variable(name) {
+                let type_str = var.effective_type()
+                    .map(|t| format!("{}", t))
+                    .unwrap_or_else(|| "unknown".to_string());
+                let inferred = if var.is_inferred { " *(inferred)*" } else { "" };
+                return Some(format!(
+                    "**`{}`** — DATA variable\n\nType: `<{}>`{}\n\nAccess at runtime:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
+                    name, type_str, inferred, type_str, name
+                ));
+            }
+
+            // ── DATA variable with full path lookup (table properties) ────
+            // For `host` in `server: host = "localhost"`, the symbol is stored
+            // as DATA.server.host, not just host.  Try suffix-matching.
+            let suffix = format!(".{}", name);
+            for (path, var) in &st.data_variables {
+                if path.ends_with(&suffix) {
+                    let type_str = var.effective_type()
+                        .map(|t| format!("{}", t))
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let inferred = if var.is_inferred { " *(inferred)*" } else { "" };
+                    // Show the short name but the full access path
+                    let access_path = path.trim_start_matches("DATA.");
+                    return Some(format!(
+                        "**`{}`** — DATA property\n\nFull path: `{}`\nType: `<{}>`{}\n\nAccess at runtime:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
+                        name, access_path, type_str, inferred, type_str, access_path
+                    ));
+                }
+            }
+
+            // ── Static object name ────────────────────────────────────────
+            if st.is_builtin_static_object(name) {
+                return hover_static_object(name);
+            }
+
+            // ── Imported namespace alias ──────────────────────────────────
+            if let Some(ns) = st.try_get_namespace(name) {
+                let func_names: Vec<String> =
+                    ns.functions.keys().take(6).cloned().collect();
+                let enum_names: Vec<String> =
+                    ns.enums.keys().take(4).cloned().collect();
+                return Some(format!(
+                    "**`{}`** — imported namespace\n\nSource: `{}`\n\n**Functions ({}):** {}\n\n**Enums ({}):** {}\n\nCall: `{}.funcName(…)`",
+                    name,
+                    ns.file_path,
+                    ns.functions.len(),
+                    func_names.iter().map(|f| format!("`{}`", f)).collect::<Vec<_>>().join(", "),
+                    ns.enums.len(),
+                    enum_names.iter().map(|e| format!("`{}`", e)).collect::<Vec<_>>().join(", "),
+                    name
+                ));
+            }
+        }
+    }
+
+    None
+}
+
+Fix 7: mdix-lsp/src/features/goto_definition.rs — provide function
+
+pub fn provide(doc: Option<&Document>, pos: Position) -> Option<GotoDefinitionResponse> {
+    let doc = doc?;
+    let (token, index) = token_and_index_at(&doc.tokens, pos)?;
+
+    let token_type = token.token_type.clone();
+    let token_section = token.section;
+
+    match &token_type {
+        TokenType::Identifier(name) => {
+            // 1. Enum field access: cursor on FIELD in EnumName.FIELD
+            if let Some(r) = goto_enum_from_context(doc, name, index) {
+                return Some(r);
+            }
+            // 2. QuickFunc call/reference → jump to ~name declaration
+            if let Some(r) = goto_quickfunc(doc, name) {
+                return Some(r);
+            }
+            // 3. DATA property reference → jump to definition line
+            // Skip if we're already inside @QUICKFUNCS body
+            // (local variables don't navigate)
+            if token_section != SectionId::QuickFuncs {
+                goto_data_property(doc, name, pos.line as usize + 1)
+            } else {
+                // Inside a QuickFunc body, identifiers are local params or
+                // calls — still try QuickFunc navigation
+                goto_quickfunc(doc, name)
+            }
+        }
+
+        // EnumAccess tokens from the semantic enhancer path
+        TokenType::EnumAccess { enum_name, value } => {
+            goto_enum_field(doc, enum_name, value)
+        }
+
+        // Import path string → open the target file
+        TokenType::String(path) | TokenType::StringSingle(path) => {
+            goto_import(doc, path)
+        }
+
+        // Enum type name in @ENUMS declaration → go to declaration itself
+        // (it's already at this position, but jump to the { start)
+        _ => None,
+    }
+}
+
+You also need to add this import to the file:
+
+use dixscript::Compiler::Core::Tokenizer::token::SectionId;
+
+Summary of what each fix addresses
+Fix File Addresses
+spawn_blocking server.rs LSP shutdown timeout, server unresponsive during compile
+Identifier alias pre-resolution value_resolver.rs calculateTotal(base_price, tax_value, discount_value) circular dependency false positive
+QuickFunc return type in hints inlay_hints.rs Function calls showing : auto instead of : object, : int, etc.
+Config section + enum name colors semantic_tokens.rs Config keys colorless; enum type names colorless
+HexColor length fix document_color.rs Color swatch range off by one character
+Config key hover hover.rs Hovering version, debug_mode etc. showed nothing
+Table property hover hover.rs host in server: host = "localhost" showed no type info
+Broader goto_definition goto_definition.rs Navigate to QuickFunc from within QuickFuncs body
+On your comment filter question: Comments are NOT filtered from doc.tokens — they're stored from the raw tokenizer output before the parser's CommentFilter::filter runs. So extract_doc_comment_for_func in hover.rs already has access to them. If doc comment hover isn't working for you, double check that the comment is on the line immediately above the ~ line with no blank line between them.

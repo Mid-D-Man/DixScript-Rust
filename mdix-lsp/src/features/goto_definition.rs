@@ -3,6 +3,7 @@ use tower_lsp::lsp_types::{
 };
 use dixscript::Compiler::Core::Tokenizer::TokenType;
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
+
 use crate::document::Document;
 use crate::features::hover::token_and_index_at;
 
@@ -12,34 +13,43 @@ pub fn provide(doc: Option<&Document>, pos: Position) -> Option<GotoDefinitionRe
     let doc = doc?;
     let (token, index) = token_and_index_at(&doc.tokens, pos)?;
 
-    // Clone to release the borrow on doc.tokens before we do further lookups.
     let token_type = token.token_type.clone();
+    let token_section = token.section;
 
     match &token_type {
         TokenType::Identifier(name) => {
-            // 1. Part of EnumName.FieldName? → jump to the field declaration.
+            // 1. Enum field access: cursor on FIELD in EnumName.FIELD
             if let Some(r) = goto_enum_from_context(doc, name, index) {
                 return Some(r);
             }
-            // 2. QuickFunc call site → jump to ~name declaration.
+            // 2. QuickFunc call/reference → jump to ~name declaration
             if let Some(r) = goto_quickfunc(doc, name) {
                 return Some(r);
             }
-            // 3. DATA property reference → jump to its definition.
-            goto_data_property(doc, name, pos.line as usize + 1)
+            // 3. DATA property reference → jump to definition line
+            // Skip if we're already inside @QUICKFUNCS body
+            // (local variables don't navigate)
+            if token_section != SectionId::QuickFuncs {
+                goto_data_property(doc, name, pos.line as usize + 1)
+            } else {
+                // Inside a QuickFunc body, identifiers are local params or
+                // calls — still try QuickFunc navigation
+                goto_quickfunc(doc, name)
+            }
         }
 
-        // EnumAccess tokens are produced by the semantic enhancer path;
-        // handle them if they happen to appear in doc.tokens.
+        // EnumAccess tokens from the semantic enhancer path
         TokenType::EnumAccess { enum_name, value } => {
             goto_enum_field(doc, enum_name, value)
         }
 
-        // Import path string → open the target file.
+        // Import path string → open the target file
         TokenType::String(path) | TokenType::StringSingle(path) => {
             goto_import(doc, path)
         }
 
+        // Enum type name in @ENUMS declaration → go to declaration itself
+        // (it's already at this position, but jump to the { start)
         _ => None,
     }
 }

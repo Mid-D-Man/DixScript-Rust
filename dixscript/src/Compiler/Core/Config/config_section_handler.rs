@@ -63,6 +63,7 @@ impl ConfigSectionHandler {
             self.log_info("No CONFIG section found - using cached defaults");
             result.config_section = ConfigSchema::create_minimal_config();
             result.warnings.push("No CONFIG section found - using cached defaults".to_string());
+            // Return full source so the tokeniser can see every section.
             result.cleaned_input_string = input_string.to_string();
             self.initialize_singletons(&mut result);
             return result;
@@ -81,7 +82,9 @@ impl ConfigSectionHandler {
                         Ok(parse_result) => {
                             result.config_section = parse_result.config_section;
                             result.warnings.extend(parse_result.warnings);
-                            result.cleaned_input_string = extraction_result.cleaned_input_string;
+                            // *** Option B: return the original full source unchanged.
+                            // The parser will skip @CONFIG tokens itself. ***
+                            result.cleaned_input_string = input_string.to_string();
                             if self.debug_config.is_enabled {
                                 self.log_info(&format!(
                                     "Parsed CONFIG with {} warnings",

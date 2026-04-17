@@ -1,7 +1,7 @@
 // mdix-lsp/src/features/inlay_hints.rs
 
 use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position};
-use dixscript::Compiler::AST::DataEntry;
+use dixscript::Compiler::AST::{DataEntry, DataType, Value};
 use crate::document::Document;
 
 pub fn provide(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
@@ -17,20 +17,23 @@ pub fn provide(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
     let mut hints = Vec::new();
 
     for entry in &data.entries {
-        // Use explicit `ref` bindings so we never move out of the borrowed
-        // DataEntry, which fixes E0382 ("value used after move") when match
-        // ergonomics don't kick in automatically for this enum variant.
         if let DataEntry::SimpleProperty {
             ref name,
-            data_type: None,
-            value: _,
+            ref data_type,
+            ref value,
             ref position,
         } = *entry
         {
+            // Only annotate properties that have no explicit type already.
+            if data_type.is_some() { continue; }
+
             let type_label = type_index
                 .and_then(|idx| idx.get(name.as_str()))
-                .map(|dt| format!(": {:?}", dt).to_lowercase())
-                .unwrap_or_else(|| ": ?".to_string());
+                // Use Display, which gives lowercase names ("int", "string", …)
+                .map(|dt| format!(": {}", dt))
+                // Fall back to inferring from the literal value itself.
+                .or_else(|| infer_type_label(value))
+                .unwrap_or_else(|| ": auto".to_string());
 
             let line = position.line.saturating_sub(1) as u32;
             let col  = (position.column.saturating_sub(1) + name.len()) as u32;
@@ -49,4 +52,32 @@ pub fn provide(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
     }
 
     if hints.is_empty() { None } else { Some(hints) }
+}
+
+/// Infer a display type label directly from the AST literal when the semantic
+/// type index has no entry for this property name.
+fn infer_type_label(value: &Value) -> Option<String> {
+    let dt = match value {
+        Value::Integer { .. }            => DataType::Int,
+        Value::Float { .. }              => DataType::Float,
+        Value::Double { .. }             => DataType::Double,
+        Value::ScientificNotation { .. } => DataType::Double,
+        Value::String { .. }             => DataType::String,
+        Value::InterpolatedString { .. } => DataType::String,
+        Value::Boolean { .. }            => DataType::Bool,
+        Value::Array { .. } | Value::NestedArray { .. } => DataType::Array,
+        Value::Object { .. }             => DataType::Object,
+        Value::HexColor { .. }           => DataType::Hex,
+        Value::Date { .. }               => DataType::Date,
+        Value::Timestamp { .. }          => DataType::Timestamp,
+        Value::EnumValue { .. }          => DataType::Enum,
+        Value::PrefixedConstructor { prefix, .. } => match prefix.as_str() {
+            "b" => DataType::Blob,
+            "t" => DataType::Tuple,
+            "r" => DataType::Regex,
+            _   => return None,
+        },
+        _ => return None,
+    };
+    Some(format!(": {}", dt))
 }

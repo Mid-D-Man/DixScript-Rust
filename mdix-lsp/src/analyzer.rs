@@ -25,8 +25,8 @@ use crate::document::Document;
 /// Runs every compiler stage on `doc` and populates all derived fields.
 /// Returns the flat list of errors for the caller to convert to diagnostics.
 ///
-/// Never panics — any stage that fails is logged and subsequent stages are
-/// skipped gracefully.
+/// With Option B config handling the full source is tokenised as-is;
+/// `config_line_offset` is always 0 and position compensation is not needed.
 pub fn run_pipeline(doc: &mut Document) -> Vec<DixError> {
     let em = doc.error_manager.clone();
 
@@ -35,20 +35,16 @@ pub fn run_pipeline(doc: &mut Document) -> Vec<DixError> {
         ConfigSectionHandler::new_with_error_manager(None, em.clone());
     let config_result = config_handler.process_config_section(&doc.source);
 
-    // Force Continue so all stages run and every error is collected,
-    // regardless of what the file's @CONFIG requested.
+    // Force Continue so every stage runs and every error is collected.
     em.force_strategy(ErrorHandlingStrategy::Continue);
 
+    // cleaned_input_string == the original full source (Option B).
     let cleaned_source       = &config_result.cleaned_input_string;
     let operational_settings = &config_result.operational_settings;
 
-    // Compute the line offset introduced by stripping @CONFIG.
-    // When @CONFIG is absent the offset is 0 and nothing changes.
-    // When @CONFIG spans N lines at the top of the file, all token positions
-    // are N lines too low and must be shifted up by N when reporting to the
-    // editor.  We store the offset on the document so hover / goto-definition
-    // providers can compensate without re-doing the arithmetic.
-    doc.config_line_offset = compute_config_line_offset(&doc.source, cleaned_source);
+    // Offset is always 0: the tokeniser sees the full source, so all token
+    // positions match the editor's view of the document exactly.
+    doc.config_line_offset = 0;
 
     // ── Stage 2: tokenize ─────────────────────────────────────────────────────
     let tokenizer = Tokenizer::new_with_error_manager(

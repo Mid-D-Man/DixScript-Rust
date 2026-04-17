@@ -23,7 +23,7 @@
 
      someRandString = "Something Cool",
          someFuncCall = function(depFunc(),true),
-        // more = function(function(someRandString,false),true)
+         more = function(someRandString,true)
 
 
 

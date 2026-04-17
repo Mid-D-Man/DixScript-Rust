@@ -1,58 +1,171 @@
- Ok we have quite a few issues to rectify, first in value resolution, its treating using variables, from flat properties and or table properties
- as functions causing circular dependency failuer,[16:03:42.517] [Info] [DIAGNOSTIC] Found 13 function calls to resolve
-                                                  [16:03:42.517] [Info]   local: 13, namespaced: 0
-                                                  [16:03:42.517] [Debug]   ~buildConnectionString() → DATA.simple_connection
-                                                  [16:03:42.517] [Debug]   ~calculateTotal() → DATA.final_total
-                                                  [16:03:42.517] [Debug]   ~formatServerInfo() → DATA.server_info
-                                                  [16:03:42.517] [Debug]   ~validateServerConfig() → DATA.server.config.is_valid
-                                                  [16:03:42.517] [Debug]   ~buildDatabaseUrl() → DATA.database.primary.connection_url
-                                                  [16:03:42.517] [Debug]   ~calculatePlayerPower() → DATA.database.primary.player.power
-                                                  [16:03:42.517] [Debug]   ~arraySum() → DATA.database.primary.number_total
-                                                  [16:03:42.517] [Debug]   ~processConfig() → DATA.database.primary.config_processed
-                                                  [16:03:42.517] [Debug]   ~chainedCalculation() → DATA.database.primary.chained_calc
-                                                  [16:03:42.517] [Debug]   ~useChainedResult() → DATA.database.primary.chained_final
-                                                  [16:03:42.517] [Debug]   ~calculateTotal() → DATA.ecommerce.shop.final_price
-                                                  [16:03:42.518] [Debug]   ~formatServerInfo() → DATA.system.settings.primary_info
-                                                  [16:03:42.518] [Debug]   ~formatServerInfo() → DATA.system.settings.backup_info
-                                                  [16:03:42.518] [Debug] [Execute] Statement 1/1: Return
-                                                  [16:03:42.518] [Debug] [ExecuteStatement] Return
-                                                  [16:03:42.518] [Debug] [ExecuteReturn] Processing return statement
-                                                  [16:03:42.518] [Debug] [InterpolatedString] Template: 'Server={0};Port={1};Database={2}', expressions: 3
-                                                  [16:03:42.520] [Debug] [ResolveId] Resolving: host
-                                                  [16:03:42.520] [Debug]   Found in execution context: string
-                                                  [16:03:42.520] [Debug] [InterpolatedString] Replacing '{0}' with 'simple_host'
-                                                  [16:03:42.520] [Debug] [ResolveId] Resolving: port
-                                                  [16:03:42.520] [Debug]   Found in execution context: int
-                                                  [16:03:42.520] [Debug] [InterpolatedString] Replacing '{1}' with '800'
-                                                  [16:03:42.521] [Debug] [ResolveId] Resolving: database
-                                                  [16:03:42.521] [Debug]   Found in execution context: string
-                                                  [16:03:42.521] [Debug] [InterpolatedString] Replacing '{2}' with 'simple_db'
-                                                  [16:03:42.521] [Debug] [InterpolatedString] Result: 'Server=simple_host;Port=800;Database=simple_db'
-                                                  [16:03:42.521] [Debug] [ExecuteReturn] Evaluated to: string = "Server=simple_host;Port=800;Database=simple_db"
-                                                  [16:03:42.521] [Debug] [Execute] Explicit return: string
-                                                  [16:03:42.521] [Info] [iter 1] resolved DATA.simple_connection (3.065ms)
-                                                  [16:03:42.521] [Info] [Phase 4] done — 1/13 resolved, 2 iterations used (limit: 39)
-                                                  [16:03:42.521] [Info] [Phase 4.1] Resolution complete
-                                                  [16:03:42.521] [Info]   Resolved: 1
-                                                  [16:03:42.521] [Info]   Failed:   1
-                                                  [16:03:42.521] [Info]   Duration: 35.580ms
-                                                  ✗ Compile error: Value resolution failed: ["Circular dependency: 12 calls unresolvable"]
+ Ok config syntax highliting still not working for lsp, and for valu resolution
+ , if the variable is function call or enum used in function call still get unresolved issue
+[08:26:24.755] [Info] [iter 1] resolved DATA.system.settings.primary_info (3.125ms)
+[08:26:24.755] [Debug] [ResolveId] Resolving: backup_name
+[08:26:24.755] [Debug]   Checking scope context: backup_name -> DATA.system.settings.backup_name
+[08:26:24.755] [Debug]   Found in scope context: string
+[08:26:24.755] [Debug] [ResolveId] Resolving: backup_environment
+[08:26:24.755] [Debug]   Checking scope context: backup_environment -> DATA.system.settings.backup_environment
+[08:26:24.757] [Debug]   Found in scope context: int
+[08:26:24.757] [Debug] [Execute] Statement 1/2: VariableDeclaration
+[08:26:24.757] [Debug] [ExecuteStatement] VariableDeclaration
+[08:26:24.757] [Debug] [ExecuteVariableDeclaration] typeStr
+[08:26:24.757] [Debug] [ResolveId] Resolving: type
+[08:26:24.757] [Debug]   Found in execution context: int
+[08:26:24.757] [Debug] [ResolveId] Resolving: type
+[08:26:24.757] [Debug]   Found in execution context: int
+[08:26:24.757] [Debug] [Execute] Statement 2/2: Return
+[08:26:24.757] [Debug] [ExecuteStatement] Return
+[08:26:24.757] [Debug] [ExecuteReturn] Processing return statement
+[08:26:24.757] [Debug] [InterpolatedString] Template: '{0} ({1}:{2})', expressions: 3
+[08:26:24.757] [Debug] [ResolveId] Resolving: name
+[08:26:24.757] [Debug]   Found in execution context: string
+[08:26:24.757] [Debug] [InterpolatedString] Replacing '{0}' with 'Staging System'
+[08:26:24.758] [Debug] [ResolveId] Resolving: typeStr
+[08:26:24.758] [Debug]   Found in execution context: string
+[08:26:24.758] [Debug] [InterpolatedString] Replacing '{1}' with 'STAGE'
+[08:26:24.758] [Debug] [ResolveId] Resolving: port
+[08:26:24.758] [Debug]   Found in execution context: int
+[08:26:24.758] [Debug] [InterpolatedString] Replacing '{2}' with '8080'
+[08:26:24.758] [Debug] [InterpolatedString] Result: 'Staging System (STAGE:8080)'
+[08:26:24.758] [Debug] [ExecuteReturn] Evaluated to: string = "Staging System (STAGE:8080)"
+[08:26:24.758] [Debug] [Execute] Explicit return: string
+[08:26:24.758] [Info] [iter 1] resolved DATA.system.settings.backup_info (3.331ms)
+[08:26:24.758] [Info] [Phase 4] done — 12/13 resolved, 2 iterations used (limit: 39)
+[08:26:24.758] [Info] [Phase 4.1] Resolution complete
+[08:26:24.758] [Info]   Resolved: 12
+[08:26:24.760] [Info]   Failed:   1
+[08:26:24.760] [Info]   Duration: 189.128ms
+✗ Compile error: Value resolution failed: ["Circular dependency: 1 calls unresolvable"]
+
+because of  // Test 15: Enum variables passed around
+               system.settings:
+                   environment<enum> = ServerType.PRODUCTION,
+                   backup_environment<enum> = ServerType.STAGING,
+                   primary_name = "Production System",
+                   backup_name = "Staging System",
+                   primary_info = formatServerInfo(primary_name, environment, 443),
+                   backup_info = formatServerInfo(backup_name, backup_environment, 8080)
 
 
+                   also type inferance for function calls returns auto rather than the function return type,
+                   and then the type inferance dosent show for table,group arrays, and hover dosent work for table, object properties,group array content
+                   color picker still dosent show up,and need to show blob content based on mime type siwitch or soemthing
+                   and interpolated string need special handling for its content wothing {} hover, click, show stuff
+                   also click to def only works for flat properties in data section, dosent work for quickfunctions section, and even in data section clicking enum only the value works the main enum dosent
+                   and why symbols color less, and main enum name to
 
-.. second issue how do we actualy use the mdix cli globaly, and why does it require ./mdixto work,
+                   finally the big issue we get the below, when we open a mdix file with config secton preset,
 
-
-third issue and most important as to why lsp is failing
-the config section, is removed from handler, meaning config tokens dont exist in lexer, thei is an architectural limitation we need to deal with,
- and rectify properly, cause configs must be handled, seprately although, yeah we could pass tokesn of config diectly to lexer, with some meta(or rather directly in config results, so the server
-  gonna have to do some magic,
-  ok another thing imports paths, and its from the lsp, not the compiler itself, yeah.... it needs to hadle local imports
-   paths, and cloud imports it simply doesnt handle it at all, if no network we gotta account for it
-
-oh yeah, also auto complet on @enums produces @enum instead of @enums, and @config produces @@config, also the auto complete can be none case sensiticive
-
-Ok one more note for the  ["Circular dependency: 1 calls unresolvable"]
- issue using variables, its actually only variables in data section used, cause using function calls withing function calls in data section works no issue
-
- Ok fuck we have some serious issues to rectify the most serious one is the config handling, the way we handling config section currently is very much probelmatic for lsp, so and no matter how i think about it our solutions seem to fall in the relm of not removing the config string from sause, but then wed have to tell the tokenizer to skip it and or tokenize it , but that whould mean we have to parse, analyse which is waste of resourse, second possible solution, is to get the config section token produced by the config handler, and put it in the results since its always correct,  but what about the source string  do we leave it or remove it, honestly we need to brainsfotrm this one and then we have these other issues,, above in the pasted text to deal, with ok for the config lsp stuff we should just brainstorm this  but the value resoltion issue, and the other issues we can try to rectify, provide all functions updated in full as individual copyable code blcoks not artifacts..... also, go to definition works only for quickfunctions, also for quickfunctions calls i want to add on hover we check the comment token, right above a function definition and show it on the hover if existing and if it has in the content of the comment one of those ' ` stuff like rust does it show it like rust does it u get , but  for data section properties dosent realy work, nore for enum access......  anaywa provide all functions updated in full as individual copyabe code blcoks not artifacts and where to put em, and then discuss what ahsould be our plan for this config handling cause that one needs thinking
+                   java.lang.Exception: Timeout error while shutdown the language server '7db8a7f4-943b-4dae-87de-5dd8dc4d8771'
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.shutdownLanguageServerInstance(LanguageServerWrapper.java:1635)
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.shutdownAll(LanguageServerWrapper.java:1601)
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.lambda$stop$28(LanguageServerWrapper.java:1563)
+                   	at java.base/java.util.concurrent.CompletableFuture$AsyncRun.run(CompletableFuture.java:1804)
+                   	at java.base/java.util.concurrent.CompletableFuture$AsyncRun.exec(CompletableFuture.java:1796)
+                   	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:507)
+                   	at java.base/java.util.concurrent.ForkJoinPool$WorkQueue.topLevelExec(ForkJoinPool.java:1491)
+                   	at java.base/java.util.concurrent.ForkJoinPool.scan(ForkJoinPool.java:2073)
+                   	at java.base/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:2035)
+                   	at java.base/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:187)
+                   Caused by: java.util.concurrent.TimeoutException
+                   	at java.base/java.util.concurrent.CompletableFuture.timedGet(CompletableFuture.java:1960)
+                   	at java.base/java.util.concurrent.CompletableFuture.get(CompletableFuture.java:2095)
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.shutdownLanguageServerInstance(LanguageServerWrapper.java:1629)
+                   	... 9 more
+                   java.lang.Exception: Timeout error while shutdown the language server '7db8a7f4-943b-4dae-87de-5dd8dc4d8771'
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.shutdownLanguageServerInstance(LanguageServerWrapper.java:1635)
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.shutdownAll(LanguageServerWrapper.java:1601)
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.lambda$stop$28(LanguageServerWrapper.java:1563)
+                   	at java.base/java.util.concurrent.CompletableFuture$AsyncRun.run(CompletableFuture.java:1804)
+                   	at java.base/java.util.concurrent.CompletableFuture$AsyncRun.exec(CompletableFuture.java:1796)
+                   	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:507)
+                   	at java.base/java.util.concurrent.ForkJoinPool$WorkQueue.helpAsyncBlocker(ForkJoinPool.java:1615)
+                   	at java.base/java.util.concurrent.ForkJoinPool.helpAsyncBlocker(ForkJoinPool.java:2686)
+                   	at java.base/java.util.concurrent.CompletableFuture.timedGet(CompletableFuture.java:1933)
+                   	at java.base/java.util.concurrent.CompletableFuture.get(CompletableFuture.java:2095)
+                   	at com.redhat.devtools.lsp4ij.internal.CompletableFutures.waitUntilDone(CompletableFutures.java:144)
+                   	at com.redhat.devtools.lsp4ij.internal.CompletableFutures.waitUntilDone(CompletableFutures.java:111)
+                   	at com.redhat.devtools.lsp4ij.features.documentLink.LSPDocumentLinkAnnotator.collectInformation(LSPDocumentLinkAnnotator.java:71)
+                   	at com.redhat.devtools.lsp4ij.features.documentLink.LSPDocumentLinkAnnotator.collectInformation(LSPDocumentLinkAnnotator.java:49)
+                   	at com.intellij.codeInsight.daemon.impl.ExternalToolPass.collectInformationWithProgress(ExternalToolPass.java:132)
+                   	at com.intellij.codeInsight.daemon.impl.ProgressableTextEditorHighlightingPass.doCollectInformation(ProgressableTextEditorHighlightingPass.java:86)
+                   	at com.intellij.codeHighlighting.TextEditorHighlightingPass.collectInformation(TextEditorHighlightingPass.java:67)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.lambda$doRun$2(PassExecutorService.java:431)
+                   	at com.intellij.platform.diagnostic.telemetry.helpers.TraceKt.runWithSpanIgnoreThrows(trace.kt:118)
+                   	at com.intellij.platform.diagnostic.telemetry.helpers.TraceUtil.runWithSpanThrows(TraceUtil.java:36)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.lambda$doRun$3(PassExecutorService.java:426)
+                   	at com.intellij.openapi.application.impl.AnyThreadWriteThreadingSupport.tryRunReadAction(AnyThreadWriteThreadingSupport.kt:291)
+                   	at com.intellij.openapi.application.impl.ApplicationImpl.tryRunReadAction(ApplicationImpl.java:965)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.lambda$doRun$4(PassExecutorService.java:417)
+                   	at com.intellij.openapi.progress.impl.CoreProgressManager.lambda$executeProcessUnderProgress$13(CoreProgressManager.java:660)
+                   	at com.intellij.openapi.progress.impl.CoreProgressManager.registerIndicatorAndRun(CoreProgressManager.java:735)
+                   	at com.intellij.openapi.progress.impl.CoreProgressManager.computeUnderProgress(CoreProgressManager.java:691)
+                   	at com.intellij.openapi.progress.impl.CoreProgressManager.executeProcessUnderProgress(CoreProgressManager.java:659)
+                   	at com.intellij.openapi.progress.impl.ProgressManagerImpl.executeProcessUnderProgress(ProgressManagerImpl.java:79)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.doRun(PassExecutorService.java:416)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.lambda$run$0(PassExecutorService.java:392)
+                   	at com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl.cacheFileTypesInside(FileTypeManagerImpl.java:802)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.lambda$run$1(PassExecutorService.java:392)
+                   	at com.intellij.openapi.application.impl.AnyThreadWriteThreadingSupport.executeByImpatientReader(AnyThreadWriteThreadingSupport.kt:486)
+                   	at com.intellij.openapi.application.impl.ApplicationImpl.executeByImpatientReader(ApplicationImpl.java:178)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.run(PassExecutorService.java:390)
+                   	at com.intellij.concurrency.JobLauncherImpl$VoidForkJoinTask$1.exec(JobLauncherImpl.java:259)
+                   	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:507)
+                   	at java.base/java.util.concurrent.ForkJoinPool$WorkQueue.topLevelExec(ForkJoinPool.java:1491)
+                   	at java.base/java.util.concurrent.ForkJoinPool.scan(ForkJoinPool.java:2073)
+                   	at java.base/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:2035)
+                   	at java.base/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:187)
+                   Caused by: java.util.concurrent.TimeoutException
+                   	at java.base/java.util.concurrent.CompletableFuture.timedGet(CompletableFuture.java:1960)
+                   	at java.base/java.util.concurrent.CompletableFuture.get(CompletableFuture.java:2095)
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.shutdownLanguageServerInstance(LanguageServerWrapper.java:1629)
+                   	... 41 more
+                   java.lang.Exception: Timeout error while shutdown the language server '7db8a7f4-943b-4dae-87de-5dd8dc4d8771'
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.shutdownLanguageServerInstance(LanguageServerWrapper.java:1635)
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.shutdownAll(LanguageServerWrapper.java:1601)
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.lambda$stop$28(LanguageServerWrapper.java:1563)
+                   	at java.base/java.util.concurrent.CompletableFuture$AsyncRun.run(CompletableFuture.java:1804)
+                   	at java.base/java.util.concurrent.CompletableFuture$AsyncRun.exec(CompletableFuture.java:1796)
+                   	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:507)
+                   	at java.base/java.util.concurrent.ForkJoinPool$WorkQueue.helpAsyncBlocker(ForkJoinPool.java:1615)
+                   	at java.base/java.util.concurrent.ForkJoinPool.helpAsyncBlocker(ForkJoinPool.java:2686)
+                   	at java.base/java.util.concurrent.CompletableFuture.timedGet(CompletableFuture.java:1933)
+                   	at java.base/java.util.concurrent.CompletableFuture.get(CompletableFuture.java:2095)
+                   	at com.redhat.devtools.lsp4ij.internal.CompletableFutures.waitUntilDone(CompletableFutures.java:144)
+                   	at com.redhat.devtools.lsp4ij.internal.CompletableFutures.waitUntilDone(CompletableFutures.java:111)
+                   	at com.redhat.devtools.lsp4ij.features.documentLink.LSPDocumentLinkAnnotator.collectInformation(LSPDocumentLinkAnnotator.java:71)
+                   	at com.redhat.devtools.lsp4ij.features.documentLink.LSPDocumentLinkAnnotator.collectInformation(LSPDocumentLinkAnnotator.java:49)
+                   	at com.intellij.codeInsight.daemon.impl.ExternalToolPass.collectInformationWithProgress(ExternalToolPass.java:132)
+                   	at com.intellij.codeInsight.daemon.impl.ProgressableTextEditorHighlightingPass.doCollectInformation(ProgressableTextEditorHighlightingPass.java:86)
+                   	at com.intellij.codeHighlighting.TextEditorHighlightingPass.collectInformation(TextEditorHighlightingPass.java:67)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.lambda$doRun$2(PassExecutorService.java:431)
+                   	at com.intellij.platform.diagnostic.telemetry.helpers.TraceKt.runWithSpanIgnoreThrows(trace.kt:118)
+                   	at com.intellij.platform.diagnostic.telemetry.helpers.TraceUtil.runWithSpanThrows(TraceUtil.java:36)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.lambda$doRun$3(PassExecutorService.java:426)
+                   	at com.intellij.openapi.application.impl.AnyThreadWriteThreadingSupport.tryRunReadAction(AnyThreadWriteThreadingSupport.kt:291)
+                   	at com.intellij.openapi.application.impl.ApplicationImpl.tryRunReadAction(ApplicationImpl.java:965)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.lambda$doRun$4(PassExecutorService.java:417)
+                   	at com.intellij.openapi.progress.impl.CoreProgressManager.lambda$executeProcessUnderProgress$13(CoreProgressManager.java:660)
+                   	at com.intellij.openapi.progress.impl.CoreProgressManager.registerIndicatorAndRun(CoreProgressManager.java:735)
+                   	at com.intellij.openapi.progress.impl.CoreProgressManager.computeUnderProgress(CoreProgressManager.java:691)
+                   	at com.intellij.openapi.progress.impl.CoreProgressManager.executeProcessUnderProgress(CoreProgressManager.java:659)
+                   	at com.intellij.openapi.progress.impl.ProgressManagerImpl.executeProcessUnderProgress(ProgressManagerImpl.java:79)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.doRun(PassExecutorService.java:416)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.lambda$run$0(PassExecutorService.java:392)
+                   	at com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl.cacheFileTypesInside(FileTypeManagerImpl.java:802)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.lambda$run$1(PassExecutorService.java:392)
+                   	at com.intellij.openapi.application.impl.AnyThreadWriteThreadingSupport.executeByImpatientReader(AnyThreadWriteThreadingSupport.kt:486)
+                   	at com.intellij.openapi.application.impl.ApplicationImpl.executeByImpatientReader(ApplicationImpl.java:178)
+                   	at com.intellij.codeInsight.daemon.impl.PassExecutorService$ScheduledPass.run(PassExecutorService.java:390)
+                   	at com.intellij.concurrency.JobLauncherImpl$VoidForkJoinTask$1.exec(JobLauncherImpl.java:259)
+                   	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:507)
+                   	at java.base/java.util.concurrent.ForkJoinPool$WorkQueue.topLevelExec(ForkJoinPool.java:1491)
+                   	at java.base/java.util.concurrent.ForkJoinPool.scan(ForkJoinPool.java:2073)
+                   	at java.base/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:2035)
+                   	at java.base/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:187)
+                   Caused by: java.util.concurrent.TimeoutException
+                   	at java.base/java.util.concurrent.CompletableFuture.timedGet(CompletableFuture.java:1960)
+                   	at java.base/java.util.concurrent.CompletableFuture.get(CompletableFuture.java:2095)
+                   	at com.redhat.devtools.lsp4ij.LanguageServerWrapper.shutdownLanguageServerInstance(LanguageServerWrapper.java:1629)
+                   	... 41 more meaning we nto handling it xorrectly steal

@@ -245,11 +245,50 @@ impl<'a> GeneralParser<'a> {
         while !self.is_at_end() {
             self.skip_non_meaningful_tokens();
             if self.is_at_end() { break; }
+
+            // @CONFIG is pre-processed by ConfigSectionHandler.
+            // The full source is now tokenised, so its tokens appear in the stream.
+            // Skip them here instead of trying to re-parse them.
+            if matches!(self.current().token_type, TokenType::SectionConfig) {
+                self.skip_config_section_tokens();
+                continue;
+            }
+
             let start_pos      = self.position;
             let (name, tokens) = self.extract_section()?;
             sections.push(SectionData { name, tokens, position: start_pos });
         }
         Ok(sections)
+    }
+
+    // ── new helper ────────────────────────────────────────────────────────────────
+    /// Advance past all tokens belonging to `@CONFIG(...)`.
+    /// Handles malformed files by stopping early if a known section keyword
+    /// or EOF is encountered before the closing `)`.
+    fn skip_config_section_tokens(&mut self) {
+        self.advance(); // consume the SectionConfig token itself
+
+        // Scan forward to the opening '('.
+        while !self.is_at_end() && !self.current_matches_symbol('(') {
+            // If another section starts before we find '(', bail out.
+            if self.is_section_keyword_token(self.current()) {
+                return;
+            }
+            self.advance();
+        }
+
+        if self.is_at_end() || !self.current_matches_symbol('(') {
+            return; // malformed: no body found
+        }
+
+        self.advance(); // consume '('
+        let mut depth = 1i32;
+        while !self.is_at_end() && depth > 0 {
+            if self.current_matches_symbol('(')      { depth += 1; }
+            else if self.current_matches_symbol(')') { depth -= 1; }
+            self.advance();
+        }
+        // We are now positioned at the token immediately after the closing ')'.
     }
 
     fn extract_section(&mut self) -> Result<(String, Vec<Token>), ParseException> {

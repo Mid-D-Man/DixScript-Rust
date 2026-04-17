@@ -4,105 +4,143 @@ use tower_lsp::lsp_types::{
 use dixscript::Compiler::Core::Tokenizer::TokenType;
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
 use crate::document::Document;
-use crate::features::hover::token_at;
+use crate::features::hover::token_and_index_at;
+
+// ── Entry point ───────────────────────────────────────────────────────────────
 
 pub fn provide(doc: Option<&Document>, pos: Position) -> Option<GotoDefinitionResponse> {
-    let doc   = doc?;
-    let token = token_at(&doc.tokens, pos)?;
+    let doc = doc?;
+    let (token, index) = token_and_index_at(&doc.tokens, pos)?;
 
-    match &token.token_type {
+    // Clone to release the borrow on doc.tokens before we do further lookups.
+    let token_type = token.token_type.clone();
+
+    match &token_type {
         TokenType::Identifier(name) => {
-            // 1. QuickFunc call site → jump to ~name declaration
+            // 1. Part of EnumName.FieldName? → jump to the field declaration.
+            if let Some(r) = goto_enum_from_context(doc, name, index) {
+                return Some(r);
+            }
+            // 2. QuickFunc call site → jump to ~name declaration.
             if let Some(r) = goto_quickfunc(doc, name) {
                 return Some(r);
             }
-            // 2. DATA property usage → jump to its definition line
+            // 3. DATA property reference → jump to its definition.
             goto_data_property(doc, name, pos.line as usize + 1)
         }
+
+        // EnumAccess tokens are produced by the semantic enhancer path;
+        // handle them if they happen to appear in doc.tokens.
         TokenType::EnumAccess { enum_name, value } => {
             goto_enum_field(doc, enum_name, value)
         }
+
+        // Import path string → open the target file.
         TokenType::String(path) | TokenType::StringSingle(path) => {
-            // Could be an import path
             goto_import(doc, path)
         }
+
         _ => None,
     }
 }
 
-// ── QuickFunc definition ───────────────────────────────────────────────────────
+// ── Enum access from raw identifier context ───────────────────────────────────
+//
+// The basic tokeniser emits  Identifier('AIType') Symbol('.') Identifier('BOSS').
+// When the cursor is on the second identifier we look two positions back to
+// find the enum name, then jump to its field declaration.
+
+fn goto_enum_from_context(
+    doc: &Document,
+    field_name: &str,
+    token_index: usize,
+) -> Option<GotoDefinitionResponse> {
+    if token_index < 2 { return None; }
+
+    let dot_tok = doc.tokens.get(token_index - 1)?;
+    if !matches!(dot_tok.token_type, TokenType::Symbol('.')) { return None; }
+
+    let enum_tok = doc.tokens.get(token_index - 2)?;
+    let TokenType::Identifier(enum_name) = &enum_tok.token_type else { return None };
+
+    // Verify the name is actually declared in @ENUMS.
+    let ast   = doc.ast.as_ref()?;
+    let enums = ast.enums.as_ref()?;
+    if !enums.enums.iter().any(|e| e.name == *enum_name) {
+        return None;
+    }
+
+    goto_enum_field(doc, enum_name, field_name)
+}
+
+// ── QuickFunc declaration ─────────────────────────────────────────────────────
 
 fn goto_quickfunc(doc: &Document, name: &str) -> Option<GotoDefinitionResponse> {
     let ast = doc.ast.as_ref()?;
     let qf  = ast.quick_functions.as_ref()?;
 
     for func in &qf.functions {
-        if func.name == name {
-            let line = (func.position.line.saturating_sub(1) as u32)
-                .saturating_add(doc.config_line_offset as u32);
-            let col  = func.position.column.saturating_sub(1) as u32;
-            // +1 for the leading ~
-            return Some(GotoDefinitionResponse::Scalar(Location {
-                uri:   doc.uri.clone(),
-                range: Range::new(
-                    Position::new(line, col),
-                    Position::new(line, col + 1 + name.len() as u32),
-                ),
-            }));
-        }
+        if func.name != name { continue; }
+
+        // func.position points to the '~' prefix (or just before the name).
+        // With Option B the line numbers match the original source exactly.
+        let line = func.position.line.saturating_sub(1) as u32;
+        let col  = func.position.column.saturating_sub(1) as u32;
+
+        return Some(GotoDefinitionResponse::Scalar(Location {
+            uri:   doc.uri.clone(),
+            range: Range::new(
+                Position::new(line, col),
+                // +1 for the leading ~
+                Position::new(line, col + 1 + name.len() as u32),
+            ),
+        }));
     }
     None
 }
 
-// ── DATA property definition ───────────────────────────────────────────────────
+// ── DATA property definition ──────────────────────────────────────────────────
 //
-// Finds the first token in the DATA section that looks like a property
-// *definition* (an Identifier followed by `=`, `:`, or `::`) rather than
-// a property *use* inside a function argument.
+// Scan the DATA-section tokens for an identifier followed by `=`, `:`, or `::`
+// that is NOT on the caller's line (so we don't "jump to self").
 
 fn goto_data_property(
     doc: &Document,
     name: &str,
-    caller_line: usize,     // 1-based line of the token we jumped from
+    caller_line: usize, // 1-based, matches token.line
 ) -> Option<GotoDefinitionResponse> {
     let tokens = &doc.tokens;
 
     for (i, token) in tokens.iter().enumerate() {
-        if token.section != SectionId::Data {
-            continue;
-        }
+        if token.section != SectionId::Data     { continue; }
         let TokenType::Identifier(id) = &token.token_type else { continue };
-        if id.to_string() != name.to_string() {
-            continue;
-        }
+        if id.as_str() != name                  { continue; }
+        if token.line == caller_line             { continue; } // skip self-reference
 
-        // Skip if this is the caller itself
-        if token.line == caller_line {
-            continue;
-        }
-
-        // Peek at the next meaningful token to decide if this is a definition.
-        // A definition is: Identifier followed by `=`, `:`, `::`, or `<`
-        let next_meaningful = tokens
+        // Peek past optional type annotation to find the defining operator.
+        let next_op = tokens
             .iter()
             .skip(i + 1)
-            .find(|t| !matches!(t.token_type, TokenType::Symbol('<') | TokenType::DataType(_)));
+            .find(|t| !matches!(
+                t.token_type,
+                TokenType::Symbol('<')
+                | TokenType::Symbol('>')
+                | TokenType::DataType(_)
+                | TokenType::Identifier(_) // type annotation identifier
+            ));
 
-        let is_def = match next_meaningful.map(|t| &t.token_type) {
-            Some(TokenType::Symbol('='))  => true,
-            Some(TokenType::Symbol(':'))  => true,
-            Some(TokenType::DoubleColon)  => true,
-            Some(TokenType::Symbol('<'))  => true,  // type-annotated: name<int> = ...
-            Some(TokenType::DataType(_))  => true,
-            _ => false,
-        };
+        let is_definition = matches!(
+            next_op.map(|t| &t.token_type),
+            Some(TokenType::Symbol('='))
+            | Some(TokenType::Symbol(':'))
+            | Some(TokenType::DoubleColon)
+            | Some(TokenType::DataType(_))
+        );
 
-        if !is_def {
-            continue;
-        }
+        if !is_definition { continue; }
 
-        let line = (token.line.saturating_sub(1) as u32)
-            .saturating_add(doc.config_line_offset as u32);
+        // With Option B, token.line already reflects the original source line.
+        let line = token.line.saturating_sub(1) as u32;
         let col  = token.column.saturating_sub(1) as u32;
 
         return Some(GotoDefinitionResponse::Scalar(Location {
@@ -113,11 +151,10 @@ fn goto_data_property(
             ),
         }));
     }
-
     None
 }
 
-// ── Enum field definition ──────────────────────────────────────────────────────
+// ── Enum field declaration ────────────────────────────────────────────────────
 
 fn goto_enum_field(
     doc: &Document,
@@ -128,16 +165,13 @@ fn goto_enum_field(
     let enums = ast.enums.as_ref()?;
 
     for decl in &enums.enums {
-        if !decl.name.eq_ignore_ascii_case(enum_name) {
-            continue;
-        }
+        if !decl.name.eq_ignore_ascii_case(enum_name) { continue; }
         for field in &decl.fields {
-            if !field.name.eq_ignore_ascii_case(field_name) {
-                continue;
-            }
-            let line = (field.position.line.saturating_sub(1) as u32)
-                .saturating_add(doc.config_line_offset as u32);
+            if !field.name.eq_ignore_ascii_case(field_name) { continue; }
+
+            let line = field.position.line.saturating_sub(1) as u32;
             let col  = field.position.column.saturating_sub(1) as u32;
+
             return Some(GotoDefinitionResponse::Scalar(Location {
                 uri:   doc.uri.clone(),
                 range: Range::new(
@@ -150,10 +184,10 @@ fn goto_enum_field(
     None
 }
 
-// ── Import path definition ─────────────────────────────────────────────────────
+// ── Import path → target file ─────────────────────────────────────────────────
 
 fn goto_import(doc: &Document, path: &str) -> Option<GotoDefinitionResponse> {
-    // cloud imports have no local file to jump to
+    // Cloud imports have no local file to jump to.
     if path.starts_with("http://") || path.starts_with("https://") {
         return None;
     }
@@ -161,7 +195,6 @@ fn goto_import(doc: &Document, path: &str) -> Option<GotoDefinitionResponse> {
     let base = doc.uri.to_file_path().ok()?;
     let dir  = base.parent()?;
 
-    // Try the path as-is, then with .mdix extension if missing
     let candidates = if path.ends_with(".mdix") {
         vec![dir.join(path)]
     } else {
@@ -170,14 +203,13 @@ fn goto_import(doc: &Document, path: &str) -> Option<GotoDefinitionResponse> {
 
     for candidate in candidates {
         if candidate.exists() {
-            if let Ok(target_uri) = Url::from_file_path(candidate) {
+            if let Ok(uri) = Url::from_file_path(candidate) {
                 return Some(GotoDefinitionResponse::Scalar(Location {
-                    uri:   target_uri,
+                    uri,
                     range: Range::new(Position::new(0, 0), Position::new(0, 0)),
                 }));
             }
         }
     }
-
     None
 }

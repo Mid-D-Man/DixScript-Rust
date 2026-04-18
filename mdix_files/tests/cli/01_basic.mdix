@@ -1,6 +1,7 @@
 @CONFIG(
-  version -> "1.0.0"
-  author  -> "CLI Test — Basic"
+  version -> "1.0.0",
+  author  -> "CLI Test — Basic",
+  debug_mode -> "regular"
 )
 
 @DATA(

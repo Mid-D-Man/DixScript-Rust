@@ -1,6 +1,32 @@
 //! Extracts and processes the @CONFIG section, then initialises VersionManager and ErrorManager.
 //!
 //! Grammar reference: `others/midx.ebnf`, @CONFIG section.
+//!
+//! ## Source-stripping strategy
+//!
+//! After extracting the @CONFIG block we replace it with the same number of
+//! `\n` characters that the block originally contained.  This preserves every
+//! source line number exactly so that all downstream token positions already
+//! reflect the original file — no offset arithmetic is required anywhere in
+//! the pipeline (LSP or CLI).
+//!
+//! Example — a 3-line @CONFIG block:
+//!
+//!   @CONFIG(          line 1
+//!     version -> …    line 2
+//!   )                 line 3
+//!   @DATA(            line 4
+//!
+//! becomes:
+//!
+//!   \n                (blank, line 1)
+//!   \n                (blank, line 2)
+//!   @DATA(            line 3 → still line 4 in the file  ← wait, re-check
+//!
+//! More precisely: `input[start..end]` for the block above contains 2 `\n`
+//! characters.  We replace that slice with `"\n\n"`.  The `\n` that follows
+//! the closing `)` in the original (i.e. in `input[end..]`) is left intact,
+//! so `@DATA` lands on line 4 in both the original and the stripped source.
 
 use crate::Compiler::AST::ConfigSection;
 use crate::Compiler::VersionControl::VersionManager;
@@ -63,7 +89,7 @@ impl ConfigSectionHandler {
             self.log_info("No CONFIG section found - using cached defaults");
             result.config_section = ConfigSchema::create_minimal_config();
             result.warnings.push("No CONFIG section found - using cached defaults".to_string());
-            // Return full source so the tokeniser can see every section.
+            // No @CONFIG present: return source unchanged (no offset needed).
             result.cleaned_input_string = input_string.to_string();
             self.initialize_singletons(&mut result);
             return result;
@@ -82,9 +108,10 @@ impl ConfigSectionHandler {
                         Ok(parse_result) => {
                             result.config_section = parse_result.config_section;
                             result.warnings.extend(parse_result.warnings);
-                            // *** Option B: return the original full source unchanged.
-                            // The parser will skip @CONFIG tokens itself. ***
-                            result.cleaned_input_string = input_string.to_string();
+                            // Use the blank-line-preserved source so that all
+                            // token line numbers already match the original file.
+                            result.cleaned_input_string =
+                                extraction_result.cleaned_input_string.clone();
                             if self.debug_config.is_enabled {
                                 self.log_info(&format!(
                                     "Parsed CONFIG with {} warnings",
@@ -96,7 +123,10 @@ impl ConfigSectionHandler {
                             self.log_error(&format!("Error parsing CONFIG: {}", e));
                             result.config_section = ConfigSchema::create_minimal_config();
                             result.warnings.push(format!("Parsing error: {}", e));
-                            result.cleaned_input_string = input_string.to_string();
+                            // Even on parse failure, use the stripped source so
+                            // no SectionConfig tokens reach the tokenizer.
+                            result.cleaned_input_string =
+                                extraction_result.cleaned_input_string.clone();
                         }
                     }
                 } else {
@@ -104,10 +134,16 @@ impl ConfigSectionHandler {
                     result.config_section = ConfigSchema::create_minimal_config();
                     result.warnings
                         .push("No valid CONFIG section - using cached defaults".to_string());
-                    result.cleaned_input_string = input_string.to_string();
+                    // extraction_result.found = false means we located @CONFIG
+                    // but could not parse it; use the blank-line source.
+                    result.cleaned_input_string =
+                        extraction_result.cleaned_input_string.clone();
                 }
             }
             Err(e) => {
+                // Extraction itself failed (e.g. malformed @CONFIG with no `(`).
+                // Fall back to the original source — we could not identify
+                // boundaries so we cannot safely replace anything.
                 self.log_error(&format!("CONFIG extraction error: {}", e));
                 result.config_section = ConfigSchema::create_minimal_config();
                 result.warnings.push(format!("Extraction error: {}", e));
@@ -130,6 +166,10 @@ impl ConfigSectionHandler {
             ));
         }
 
+        // VersionManager::initialize is idempotent when the version has not
+        // changed (reads first with a cheap read-lock before attempting a
+        // write).  In practice every .mdix file uses "1.0.0" so subsequent
+        // LSP document opens hit the fast path and never block.
         VersionManager::initialize(&settings.version);
 
         if self.debug_config.is_enabled {
@@ -179,8 +219,11 @@ impl ConfigSectionHandler {
         let config_end_index = self.find_config_end_optimized(input, open_paren_index);
 
         let config_string = input[config_start_index..config_end_index].to_string();
+
+        // Replace the @CONFIG block with blank lines so every token produced
+        // from the resulting source has the correct original line number.
         let cleaned_input_string =
-            self.remove_config_section_optimized(input, config_start_index, config_end_index);
+            self.replace_config_with_blank_lines(input, config_start_index, config_end_index);
 
         Ok(ConfigExtractionResult {
             found: true,
@@ -306,21 +349,25 @@ impl ConfigSectionHandler {
             || upper.starts_with("@XML")
     }
 
-    fn remove_config_section_optimized(
+    /// Replace `input[start_index..end_index]` with the same number of `\n`
+    /// characters that the slice contains, preserving all subsequent line
+    /// numbers exactly.
+    ///
+    /// The tokenizer's `skip_whitespace` advances past every `\n` without
+    /// emitting a token, so the blank lines are invisible to the parser while
+    /// every real token retains its original 1-based line number.
+    fn replace_config_with_blank_lines(
         &self,
         input: &str,
         start_index: usize,
         end_index: usize,
     ) -> String {
-        let before = input[..start_index].trim_end();
-        let after = input[end_index..].trim_start();
-        if before.is_empty() {
-            return after.to_string();
-        }
-        if after.is_empty() {
-            return before.to_string();
-        }
-        format!("{}\n{}", before, after)
+        let config_chunk = &input[start_index..end_index];
+        let newline_count = config_chunk.chars().filter(|&c| c == '\n').count();
+        // Replace the entire block with exactly the same number of newlines.
+        // The surrounding text (before start and after end) is untouched.
+        let replacement = "\n".repeat(newline_count);
+        format!("{}{}{}", &input[..start_index], replacement, &input[end_index..])
     }
 
     fn parse_config_string_optimized(
@@ -419,8 +466,6 @@ impl ConfigSectionHandler {
                     string_delimiter = '\0';
                 }
             } else if c == ',' || c == '\n' || c == '\r' {
-                // Push whatever we have between start and here.
-                // Use byte_offset so we can get a valid &str slice.
                 entries.push(&content[start..byte_offset]);
                 start = byte_offset + c.len_utf8();
             }
@@ -496,6 +541,9 @@ impl ConfigSectionHandler {
 pub struct ProcessConfigResult {
     pub config_section: ConfigSection,
     pub operational_settings: OperationalSettings,
+    /// The source with @CONFIG replaced by blank lines (or the original source
+    /// when no @CONFIG was present).  Feed this directly to the Tokenizer —
+    /// all token line numbers will already match the original file.
     pub cleaned_input_string: String,
     pub warnings: Vec<String>,
 }
@@ -516,6 +564,7 @@ pub struct ConfigExtractionResult {
     pub found: bool,
     pub start_position: usize,
     pub config_string: String,
+    /// Source with the @CONFIG block replaced by blank lines.
     pub cleaned_input_string: String,
 }
 
@@ -540,4 +589,4 @@ pub struct ConfigParseResult {
 struct ConfigEntriesParseResult {
     entries: HashMap<String, String>,
     warnings: Vec<String>,
-                            }
+}

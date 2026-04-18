@@ -136,7 +136,7 @@
     string_with_spaces<string> = "   spaces   ",
     string_with_escapes<string> = "Line1\nLine2\tTabbed",
     string_with_quotes<string> = "He said \"Hello\"",
-
+    string_with_new_lines = "string /n stuff \n or the other ",
     // Boolean types
     bool_true<bool> = true,
     bool_false<bool> = false,

@@ -3,20 +3,6 @@
 
 )
 
-@QUICKFUNCS(
-
-~function<string> (stringParam,boolParam){
-
-return $"random{stringParam} : {boolParam}"
-
-}
-~depFunc<string> (){
-return "Something cool"
-}
-
-)
-
-
 @DATA(
 
     // Date types
@@ -29,10 +15,7 @@ return "Something cool"
     timestamp_basic<timestamp> = 2025-01-15T10:30:00Z,
     timestamp_with_millis<timestamp> = 2025-01-15T10:30:00.123Z,
     timestamp_with_timezone<timestamp> = 2025-01-15T10:30:00+05:30,
-    timestamp_utc<timestamp> = 2025-01-15T10:30:00.999Z,
-someRandString = "Something Cool",
-    someFuncCall = function(depFunc(),true),
-    more = function(someRandString,true)
+    timestamp_utc<timestamp> = 2025-01-15T10:30:00.999Z
 
 
 

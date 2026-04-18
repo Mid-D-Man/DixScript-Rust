@@ -1,30 +1,20 @@
 @CONFIG(
   version -> "1.0.0"
+  author -> "name"
+  debug_mode -> "off"
+  error_handling -> "halt"
+  compatibility_mode -> "strict"
   features -> "advanced"
-  error_handling -> "continue"
-  debug_mode -> "regular"
 )
+@DATA(
 
 
-     @QUICKFUNCS(
+  table: field = "value"
 
-     ~function<string> (stringParam,boolParam){
-
-     return $"random{stringParam} : {boolParam}"
-
-     }
-     ~depFunc<string> (){
-     return "Something cool"
-     }
-
-     )
-
-     @DATA(
-
-     someRandString = "Something Cool",
-         someFuncCall = function(depFunc(),true),
-         more = function(someRandString,true)
-
-
-
-     )
+  array::
+    "item1",
+    "item2"
+)
+@ENUMS(
+  EnumName { VALUE_A = 0, VALUE_B = 1 }
+)

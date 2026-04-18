@@ -1,4 +1,3 @@
-
 //! Version Manager - Manages DixScript version features and compatibility
 //!
 //! SINGLETON PATTERN using LazyLock (thread-safe, zero-cost after first access)
@@ -44,12 +43,39 @@ impl VersionManager {
         &VERSION_MANAGER
     }
 
-    /// Initialize with specific version (call once at startup)
-    /// Note: This updates the existing singleton, does not return Result
+    /// Initialize with specific version (idempotent — safe to call repeatedly).
+    ///
+    /// Uses a double-checked read-first pattern:
+    /// 1. Acquire a cheap read-lock and return immediately if the version has
+    ///    not changed (the common case in the LSP where every document open
+    ///    calls this with "1.0.0").
+    /// 2. Only acquire the global write-lock when a version transition actually
+    ///    needs to happen.
+    ///
+    /// This eliminates the write-lock contention that previously caused the
+    /// LSP server to stall (and sometimes timeout) when multiple documents
+    /// opened simultaneously.
     pub fn initialize(version: &str) {
-        let mut manager = VERSION_MANAGER.write().unwrap();
-        manager.current_version = Self::validate_version_static(version);
-        manager.feature_map = Self::initialize_features_for_version(&manager.current_version);
+        let validated = Self::validate_version_static(version);
+
+        // Fast path — read-lock only (≈20 ns, never blocks writers).
+        // Since all .mdix files use "1.0.0" and the singleton starts at
+        // "1.0.0", this branch is taken on every call after the first.
+        if let Ok(manager) = VERSION_MANAGER.read() {
+            if manager.current_version == validated {
+                return;
+            }
+        }
+
+        // Slow path — write-lock needed (version actually changed).
+        if let Ok(mut manager) = VERSION_MANAGER.write() {
+            // Double-check: another thread may have already updated while we
+            // were waiting for the write-lock.
+            if manager.current_version != validated {
+                manager.current_version = validated.clone();
+                manager.feature_map = Self::initialize_features_for_version(&validated);
+            }
+        }
     }
 
     /// Validate version string
@@ -180,7 +206,7 @@ impl VersionManager {
     }
 
     /// Initialize feature set for v1.0.0
-    /// Called ONCE during singleton construction
+    /// Called ONCE during singleton construction (or on version change)
     fn initialize_features_for_version(version: &str) -> HashSet<String> {
         if version != VERSION_1_0 {
             return HashSet::new();
@@ -343,5 +369,16 @@ mod tests {
         assert!(manager.supports_section_type("CONFIG"));
         assert!(manager.supports_section_type("IMPORTS"));
         assert!(manager.supports_section_type("QUICKFUNCS"));
+    }
+
+    #[test]
+    fn test_initialize_idempotent() {
+        // Calling initialize multiple times with the same version must be
+        // safe and not panic (tests the double-checked locking path).
+        VersionManager::initialize("1.0.0");
+        VersionManager::initialize("1.0.0");
+        VersionManager::initialize("1.0.0");
+        let manager = VERSION_MANAGER.read().unwrap();
+        assert_eq!(manager.get_current_version(), VERSION_1_0);
     }
 }

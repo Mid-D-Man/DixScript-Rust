@@ -15,17 +15,20 @@ use crate::converters::to_diagnostics;
 use crate::document::Document;
 use crate::features;
 
-// ─── Backend ──────────────────────────────────────────────────────────────────
+/// How long a single pipeline run may take before it is abandoned.
+/// Prevents a hung analysis from blocking the shutdown sequence.
+const ANALYSIS_TIMEOUT_SECS: u64 = 15;
 
 pub struct Backend {
     pub client:             Client,
-    /// Arc-wrapped so spawn_analysis can clone the pointer cheaply without
-    /// requiring Document: Clone.  DashMap is internally sharded and
-    /// thread-safe; Arc just gives us a cheap reference-counted handle.
     pub documents:          Arc<DashMap<Url, Document>>,
+    /// Never actually locked as a gate — retained for future serialization use.
     pub pipeline_lock:      tokio::sync::Mutex<()>,
     pub shutdown_requested: AtomicBool,
     pub analysis_tasks:     StdMutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// Tracks the latest analysis version scheduled per URI.
+    /// Results from superseded analyses (stale after rapid edits) are discarded.
+    pub pending_versions:   Arc<DashMap<Url, i32>>,
 }
 
 impl Backend {
@@ -36,57 +39,82 @@ impl Backend {
             pipeline_lock:      tokio::sync::Mutex::new(()),
             shutdown_requested: AtomicBool::new(false),
             analysis_tasks:     StdMutex::new(Vec::new()),
+            pending_versions:   Arc::new(DashMap::new()),
         }
     }
 
-    /// Re-runs the pipeline for one document and publishes fresh diagnostics.
     fn spawn_analysis(&self, uri: Url, source: String, version: i32) {
         if self.shutdown_requested.load(Ordering::Relaxed) {
             return;
         }
 
+        // Mark this as the latest version for this URI.
+        self.pending_versions.insert(uri.clone(), version);
+
         let client    = self.client.clone();
         let documents = Arc::clone(&self.documents);
+        let versions  = Arc::clone(&self.pending_versions);
 
         let handle = tokio::spawn(async move {
-            // The DixScript compiler pipeline is fully synchronous and CPU-bound.
-            // Running it directly in tokio::spawn blocks the async executor thread,
-            // preventing the server from responding to ANY other LSP request while
-            // compilation is in progress (hover, completion, documentLink probes, etc.).
-            // This caused IntelliJ's documentLink annotator to timeout, which then
-            // cascaded into a shutdown timeout loop.
+            // spawn_blocking moves CPU-bound work off the tokio executor so
+            // hover / completion / semantic-token requests are never blocked
+            // while analysis is in progress.
             //
-            // spawn_blocking moves the work onto a dedicated blocking thread pool,
-            // keeping all tokio threads free to handle incoming messages.
-            let result = tokio::task::spawn_blocking(move || {
-                let mut doc = Document::new(uri.clone(), source, version);
-                let errors  = run_pipeline(&mut doc);
-                (uri, doc, errors, version)
-            })
+            // The outer timeout ensures a hung spawn_blocking call (e.g. a
+            // deadlock inside VersionManager after a poisoned lock) does not
+            // keep the server alive past the LSP client's shutdown deadline.
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(ANALYSIS_TIMEOUT_SECS),
+                tokio::task::spawn_blocking({
+                    let uri = uri.clone();
+                    move || {
+                        let mut doc = Document::new(uri.clone(), source, version);
+                        let errors  = run_pipeline(&mut doc);
+                        (uri, doc, errors, version)
+                    }
+                }),
+            )
                 .await;
 
             match result {
-                Ok((uri, doc, errors, version)) => {
-                    let diags = to_diagnostics(&errors);
-                    documents.insert(uri.clone(), doc);
-                    client.publish_diagnostics(uri, diags, Some(version)).await;
+                Err(_timeout) => {
+                    tracing::warn!(
+                        "Analysis timed out after {}s for {} — stale diagnostics preserved",
+                        ANALYSIS_TIMEOUT_SECS, uri
+                    );
+                    // Do NOT publish empty diagnostics — leave the last good
+                    // set in place so the editor still shows something useful.
                 }
-                Err(e) => {
-                    // Compiler panicked (bug) — log and keep server alive
-                    tracing::error!("Analysis task panicked: {:?}", e);
+                Ok(Err(panic_err)) => {
+                    // The catch_unwind in run_pipeline should have caught this,
+                    // but if spawn_blocking itself panicked we handle it here.
+                    tracing::error!("Analysis task panicked: {:?}", panic_err);
+                }
+                Ok(Ok((uri, doc, errors, ver))) => {
+                    // Discard results if a newer analysis was scheduled while
+                    // this one ran (e.g. user typed faster than analysis speed).
+                    let latest = versions.get(&uri).map(|v| *v).unwrap_or(ver);
+                    if ver >= latest {
+                        let diags = to_diagnostics(&errors);
+                        documents.insert(uri.clone(), doc);
+                        client.publish_diagnostics(uri, diags, Some(ver)).await;
+                    } else {
+                        tracing::debug!(
+                            "Discarding stale analysis v{} for {} (latest is v{})",
+                            ver, uri, latest
+                        );
+                    }
                 }
             }
         });
 
         if let Ok(mut tasks) = self.analysis_tasks.lock() {
+            // Prune finished handles to avoid unbounded growth.
             tasks.retain(|h| !h.is_finished());
             tasks.push(handle);
         }
     }
-
 }
-
-// ─── LanguageServer impl ──────────────────────────────────────────────────────
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
@@ -108,8 +136,11 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> LspResult<()> {
-        tracing::info!("mdix-lsp: shutdown requested — aborting in-flight analyses");
+        tracing::info!("mdix-lsp: shutdown — aborting in-flight analyses");
         self.shutdown_requested.store(true, Ordering::SeqCst);
+        // Abort the outer async wrappers.  The spawn_blocking threads inside
+        // are not directly abortable, but the ANALYSIS_TIMEOUT_SECS guard
+        // ensures they self-terminate before the LSP client's deadline.
         if let Ok(mut tasks) = self.analysis_tasks.lock() {
             for handle in tasks.drain(..) {
                 handle.abort();
@@ -117,8 +148,6 @@ impl LanguageServer for Backend {
         }
         Ok(())
     }
-
-    // ── Document sync ──────────────────────────────────────────────────────────
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let doc = params.text_document;
@@ -138,10 +167,9 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         self.documents.remove(&uri);
+        self.pending_versions.remove(&uri);
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
-
-    // ── Feature handlers ───────────────────────────────────────────────────────
 
     async fn completion(
         &self,
@@ -151,11 +179,7 @@ impl LanguageServer for Backend {
         let pos     = params.text_document_position.position;
         let doc     = self.documents.get(uri);
         let trigger = params.context.and_then(|ctx| ctx.trigger_character);
-        Ok(features::completions::provide(
-            doc.as_deref(),
-            pos,
-            trigger.as_deref(),
-        ))
+        Ok(features::completions::provide(doc.as_deref(), pos, trigger.as_deref()))
     }
 
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
@@ -197,8 +221,6 @@ impl LanguageServer for Backend {
         &self,
         params: ColorPresentationParams,
     ) -> LspResult<Vec<ColorPresentation>> {
-        // Pass the original source range so the presentation can include a
-        // TextEdit that actually replaces the hex literal in the document.
         Ok(features::document_color::presentation(params.color, params.range))
     }
 

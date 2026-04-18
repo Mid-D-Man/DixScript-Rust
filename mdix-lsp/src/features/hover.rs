@@ -91,11 +91,11 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
 
         // ── Identifiers — section-aware dispatch ───────────────────────────
         TokenType::Identifier(name) => {
-            // Config section keys have dedicated documentation
             if token.section == SectionId::Config {
-                hover_config_key(name).or_else(|| hover_identifier(doc, name))
+                hover_config_key(name)
+                    .or_else(|| hover_identifier(doc, name, token.section))
             } else {
-                hover_identifier(doc, name)
+                hover_identifier(doc, name, token.section)
             }
         }
 
@@ -329,26 +329,51 @@ fn hover_enum_access(doc: &Document, enum_name: &str, field: &str) -> Option<Str
 
 // ── Identifier hover ───────────────────────────────────────────────────────────
 
-fn hover_identifier(doc: &Document, name: &str) -> Option<String> {
-    // ── QuickFunc declaration or call site ────────────────────────────────
+
+fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<String> {
+
+    // ── 1. QuickFuncs body context: parameter hover ───────────────────────
+    // When the cursor is inside a @QUICKFUNCS function body on a parameter
+    // name, show that parameter's declared type and which function owns it.
+    if section == SectionId::QuickFuncs {
+        if let Some(ast) = &doc.ast {
+            if let Some(qf) = &ast.quick_functions {
+                for func in &qf.functions {
+                    for param in &func.parameters {
+                        if param.name != name { continue; }
+                        let type_str = param.data_type
+                            .map(|t| format!("{}", t))
+                            .unwrap_or_else(|| "any".to_string());
+                        let default_note = if param.default_value.is_some() {
+                            "\n\n*(has a default value from type annotation)*"
+                        } else {
+                            ""
+                        };
+                        return Some(format!(
+                            "**`{}`** — parameter of `~{}`\n\nType: `<{}>`{}",
+                            name, func.name, type_str, default_note
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 2. QuickFunc declaration or call site ─────────────────────────────
     if let Some(ast) = &doc.ast {
         if let Some(qf) = &ast.quick_functions {
             for func in &qf.functions {
-                if func.name != name {
-                    continue;
-                }
+                if func.name != name { continue; }
 
                 let params: Vec<String> = func.parameters.iter().map(|p| {
-                    let t = p.data_type.as_ref()
+                    let t = p.data_type
                         .map(|dt| format!("<{}>", dt))
                         .unwrap_or_default();
-                    let d = p.default_value.as_ref()
-                        .map(|_| " = …".to_string())
-                        .unwrap_or_default();
+                    let d = if p.default_value.is_some() { " = …" } else { "" };
                     format!("{}{}{}", p.name, t, d)
                 }).collect();
 
-                let ret = func.return_type.as_ref()
+                let ret = func.return_type
                     .map(|t| format!("{}", t))
                     .unwrap_or_else(|| "?".to_string());
 
@@ -373,75 +398,86 @@ fn hover_identifier(doc: &Document, name: &str) -> Option<String> {
                     .collect();
 
                 let body = format!(
-                    "Compile-time function. All calls are resolved at compile time; the binary stores only the result.{}\n\n```mdix\n// Example call in @DATA:\n{}({})\n```",
-                    scopes,
-                    name,
-                    param_names.join(", ")
+                    "Compile-time function. Resolved entirely at compile time; the binary stores only the result.{}\n\n```mdix\n// Example call in @DATA:\n{}({})\n```",
+                    scopes, name, param_names.join(", ")
                 );
 
                 return Some(format!("{}{}\n\n{}", doc_comment_block, signature, body));
             }
         }
 
-        // ── Enum type name ────────────────────────────────────────────────
+        // ── 3. Enum type name (declaration site) ──────────────────────────
         if let Some(enums) = &ast.enums {
             for decl in &enums.enums {
-                if decl.name != name {
-                    continue;
-                }
+                if decl.name != name { continue; }
                 let fields: Vec<String> = decl.fields.iter().map(|f| {
                     let v = f.value.map(|n| format!(" = {}", n)).unwrap_or_default();
                     format!("`{}{}`", f.name, v)
                 }).collect();
                 return Some(format!(
-                    "**`{}`** — enum type\n\n**Fields:** {}\n\nAccess: `{}.FIELD_NAME`\n\nAnnotate with `<enum>` to use enum values as property types.",
+                    "**`{}`** — enum type\n\n**Fields:** {}\n\nAccess: `{}.FIELD_NAME`\n\nAnnotate variables with `<enum>` to enable enum-value assignment.",
                     name, fields.join(", "), name
                 ));
             }
         }
     }
 
-    // ── Semantic symbol table lookups ─────────────────────────────────────
+    // ── 4. Semantic symbol table lookups ──────────────────────────────────
     if let Some(sr) = &doc.semantic_result {
         if let Some(st) = &sr.symbol_table {
 
-            // ── DATA variable (flat property at root) ─────────────────────
+            // Exact flat property (stored as bare name, e.g. "app_name")
             if let Some(var) = st.try_get_data_variable(name) {
                 let type_str = var.effective_type()
                     .map(|t| format!("{}", t))
                     .unwrap_or_else(|| "unknown".to_string());
                 let inferred = if var.is_inferred { " *(inferred)*" } else { "" };
                 return Some(format!(
-                    "**`{}`** — DATA variable\n\nType: `<{}>`{}\n\nAccess at runtime:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
+                    "**`{}`** — DATA variable\n\nType: `<{}>`{}\n\nRuntime access:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
                     name, type_str, inferred, type_str, name
                 ));
             }
 
-            // ── DATA variable with full path lookup (table properties) ────
-            // For `host` in `server: host = "localhost"`, the symbol is stored
-            // as DATA.server.host, not just host.  Try suffix-matching.
+            // Suffix match: table / group array properties
+            // e.g. hovering `host` in `server: host = "localhost"` → stored
+            // in symbol table as "DATA.server.host".
+            // If multiple paths end with `.name` we prefer the most specific
+            // (longest) path.
             let suffix = format!(".{}", name);
+            let mut best: Option<(usize, String, bool, Option<dixscript::Compiler::AST::DataType>)> = None;
             for (path, var) in &st.data_variables {
-                if path.ends_with(&suffix) {
-                    let type_str = var.effective_type()
-                        .map(|t| format!("{}", t))
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let inferred = if var.is_inferred { " *(inferred)*" } else { "" };
-                    // Show the short name but the full access path
-                    let access_path = path.trim_start_matches("DATA.");
-                    return Some(format!(
-                        "**`{}`** — DATA property\n\nFull path: `{}`\nType: `<{}>`{}\n\nAccess at runtime:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
-                        name, access_path, type_str, inferred, type_str, access_path
-                    ));
+                if !path.ends_with(&suffix) { continue; }
+                let specificity = path.len();
+                let effective_type = var.effective_type();
+                let is_inferred    = var.is_inferred;
+                match &best {
+                    None => {
+                        best = Some((specificity, path.clone(), is_inferred, effective_type));
+                    }
+                    Some((best_spec, _, _, _)) if specificity > *best_spec => {
+                        best = Some((specificity, path.clone(), is_inferred, effective_type));
+                    }
+                    _ => {}
                 }
             }
+            if let Some((_, path, is_inferred, effective_type)) = best {
+                let type_str = effective_type
+                    .map(|t| format!("{}", t))
+                    .unwrap_or_else(|| "unknown".to_string());
+                let inferred_note = if is_inferred { " *(inferred)*" } else { "" };
+                let access_path = path.trim_start_matches("DATA.");
+                return Some(format!(
+                    "**`{}`** — DATA property\n\nFull path: `{}`\nType: `<{}>`{}\n\nRuntime access:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
+                    name, access_path, type_str, inferred_note, type_str, access_path
+                ));
+            }
 
-            // ── Static object name ────────────────────────────────────────
+            // Built-in static object (Math, DateTime, Array, …)
             if st.is_builtin_static_object(name) {
                 return hover_static_object(name);
             }
 
-            // ── Imported namespace alias ──────────────────────────────────
+            // Imported namespace alias
             if let Some(ns) = st.try_get_namespace(name) {
                 let func_names: Vec<String> =
                     ns.functions.keys().take(6).cloned().collect();
@@ -715,23 +751,60 @@ fn find_adjacent_string(tokens: &[Token], start_index: usize) -> Option<String> 
 /// on the line immediately before the function declaration.
 /// Returns the comment text if found.
 fn extract_doc_comment_for_func(tokens: &[Token], func_def_line: usize) -> Option<String> {
-    let target_line = func_def_line.saturating_sub(1);
-    if target_line == 0 {
-        return None;
-    }
-    // Scan in reverse — comments are usually close to the function
-    for token in tokens.iter().rev() {
-        if token.line == target_line {
-            if let TokenType::Comment(content) = &token.token_type {
-                return Some(format_doc_comment(content));
+    if func_def_line == 0 { return None; }
+
+    let search_start = func_def_line.saturating_sub(60);
+
+    // Build (start_line, end_line, raw_text) for every comment token that
+    // appears before the function declaration line.
+    //
+    // For `//` comments the lexer emits one token per line; start == end.
+    // For `/* */` comments a single token is emitted at the opening line;
+    // end_line = start_line + number-of-newlines-inside-the-body.
+    let mut spans: Vec<(usize, usize, String)> = tokens
+        .iter()
+        .filter(|t| t.line >= search_start && t.line < func_def_line)
+        .filter_map(|t| {
+            if let TokenType::Comment(c) = &t.token_type {
+                let newlines = c.chars().filter(|&ch| ch == '\n').count();
+                let end_line = t.line + newlines;
+                // Only include comments whose final line is strictly before
+                // the function declaration.
+                if end_line < func_def_line {
+                    return Some((t.line, end_line, c.clone()));
+                }
             }
-        }
-        // If we've passed the target line going backward, give up
-        if token.line < target_line.saturating_sub(2) {
+            None
+        })
+        .collect();
+
+    if spans.is_empty() { return None; }
+
+    // Sort ascending so we can walk backward unambiguously.
+    spans.sort_by_key(|(s, _, _)| *s);
+
+    // Walk backward from (func_def_line - 1), collecting contiguous comment
+    // spans with no blank-line gaps between them.
+    //
+    // "Contiguous" means: this span's end_line == expected_end.
+    // As soon as we encounter a gap we stop — code or blank lines between
+    // a comment and the function mean the comment belongs to something else.
+    let mut collected: Vec<String> = Vec::new();
+    let mut expected_end            = func_def_line.saturating_sub(1);
+
+    for (start, end, content) in spans.iter().rev() {
+        if *end == expected_end {
+            collected.insert(0, content.clone());
+            // Next span must end on the line before this one starts.
+            expected_end = start.saturating_sub(1);
+        } else {
+            // Gap detected — stop collecting.
             break;
         }
     }
-    None
+
+    if collected.is_empty() { return None; }
+    Some(format_doc_comment(&collected.join("\n")))
 }
 
 /// Format a comment string for display in hover markdown.

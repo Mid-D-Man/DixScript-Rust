@@ -14,6 +14,18 @@ pub fn provide(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
         .as_ref()
         .and_then(|sr| sr.type_index.as_ref());
 
+    // Build QuickFunc name → return type lookup for function-call value inference.
+    let qf_return_types: std::collections::HashMap<String, DataType> = ast
+        .quick_functions
+        .as_ref()
+        .map(|qf| {
+            qf.functions
+                .iter()
+                .filter_map(|f| f.return_type.map(|rt| (f.name.clone(), rt)))
+                .collect()
+        })
+        .unwrap_or_default();
+
     let mut hints = Vec::new();
 
     for entry in &data.entries {
@@ -24,15 +36,15 @@ pub fn provide(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
             ref position,
         } = *entry
         {
-            // Only annotate properties that have no explicit type already.
-            if data_type.is_some() { continue; }
+            // Skip properties that already carry an explicit type annotation.
+            if data_type.is_some() {
+                continue;
+            }
 
-            let type_label = type_index
+            let type_label = type_index.as_ref()
                 .and_then(|idx| idx.get(name.as_str()))
-                // Use Display, which gives lowercase names ("int", "string", …)
                 .map(|dt| format!(": {}", dt))
-                // Fall back to inferring from the literal value itself.
-                .or_else(|| infer_type_label(value))
+                .or_else(|| infer_type_label(value, &qf_return_types))
                 .unwrap_or_else(|| ": auto".to_string());
 
             let line = position.line.saturating_sub(1) as u32;
@@ -54,23 +66,43 @@ pub fn provide(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
     if hints.is_empty() { None } else { Some(hints) }
 }
 
-/// Infer a display type label directly from the AST literal when the semantic
-/// type index has no entry for this property name.
-fn infer_type_label(value: &Value) -> Option<String> {
+/// Infer a display type label from the AST value node.
+/// `qf_return_types` is consulted when the value is a QuickFunc call expression.
+fn infer_type_label(
+    value: &Value,
+    qf_return_types: &std::collections::HashMap<String, DataType>,
+) -> Option<String> {
+    // Handle QuickFunc call expressions before the main match so we can
+    // delegate early without fighting the "let dt = match" pattern.
+    if let Value::Expression { expr, .. } = value {
+        use dixscript::Compiler::AST::Expression;
+        match expr.as_ref() {
+            Expression::QuickFuncCall { name, .. } => {
+                return qf_return_types
+                    .get(name.as_str())
+                    .map(|rt| format!(": {}", rt));
+            }
+            Expression::Value { value: inner, .. } => {
+                return infer_type_label(inner, qf_return_types);
+            }
+            _ => return None,
+        }
+    }
+
     let dt = match value {
-        Value::Integer { .. }            => DataType::Int,
-        Value::Float { .. }              => DataType::Float,
-        Value::Double { .. }             => DataType::Double,
-        Value::ScientificNotation { .. } => DataType::Double,
-        Value::String { .. }             => DataType::String,
-        Value::InterpolatedString { .. } => DataType::String,
-        Value::Boolean { .. }            => DataType::Bool,
+        Value::Integer { .. }              => DataType::Int,
+        Value::Float { .. }                => DataType::Float,
+        Value::Double { .. }               => DataType::Double,
+        Value::ScientificNotation { .. }   => DataType::Double,
+        Value::String { .. }               => DataType::String,
+        Value::InterpolatedString { .. }   => DataType::String,
+        Value::Boolean { .. }              => DataType::Bool,
         Value::Array { .. } | Value::NestedArray { .. } => DataType::Array,
-        Value::Object { .. }             => DataType::Object,
-        Value::HexColor { .. }           => DataType::Hex,
-        Value::Date { .. }               => DataType::Date,
-        Value::Timestamp { .. }          => DataType::Timestamp,
-        Value::EnumValue { .. }          => DataType::Enum,
+        Value::Object { .. }               => DataType::Object,
+        Value::HexColor { .. }             => DataType::Hex,
+        Value::Date { .. }                 => DataType::Date,
+        Value::Timestamp { .. }            => DataType::Timestamp,
+        Value::EnumValue { .. }            => DataType::Enum,
         Value::PrefixedConstructor { prefix, .. } => match prefix.as_str() {
             "b" => DataType::Blob,
             "t" => DataType::Tuple,
@@ -79,5 +111,6 @@ fn infer_type_label(value: &Value) -> Option<String> {
         },
         _ => return None,
     };
+
     Some(format!(": {}", dt))
 }

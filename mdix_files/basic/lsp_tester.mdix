@@ -62,6 +62,7 @@
     simple_host = "localhost",
     simple_port = 8080,
     simple_db = "mydb",
+    supabean = ServerType.DEVELOPMENT,
     simple_connection = buildConnectionString(simple_host, simple_port, simple_db),
 
     // Test 2: Variables with calculations

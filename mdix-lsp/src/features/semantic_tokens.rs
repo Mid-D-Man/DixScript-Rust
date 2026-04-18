@@ -1,30 +1,5 @@
 // mdix-lsp/src/features/semantic_tokens.rs
 
-//! Semantic token classifier.
-//!
-//! One linear pass through the token stream assigns (type_index, modifier_bitmask)
-//! to every token.  Indices map to TOKEN_TYPES in capabilities.rs.
-//!
-//! ## Full token → color mapping (Ferrous dark reference)
-//!
-//! TT_KEYWORD     (0)  #569CD6  blue   — @sections, control-flow, literals
-//! TT_STRING      (1)  #CE9178  orange — "strings", 'strings', $"interpolated"
-//! TT_NUMBER      (2)  #B5CEA8  green  — 42, 3.14f, 0xDEAD
-//! TT_OPERATOR    (3)  #D4D4D4  white  — =, ->, ::, ~, +, -, ==
-//! TT_VARIABLE    (4)  #9CDCFE  l-blue — plain identifiers, DATA property names
-//! TT_FUNCTION    (5)  #DCDCAA  yellow — QuickFunc call/decl, static calls
-//! TT_TYPE        (6)  #4EC9B0  teal   — <int>, <string>, <enum> …
-//! TT_ENUM_MEMBER (7)  #4FC1FF  l-blue — enum fields + enum access
-//! TT_COMMENT     (8)  #6A9955  green  — // line comments
-//! TT_NAMESPACE   (9)  #9CDCFE  l-blue — import alias names
-//! TT_PROPERTY   (10)  #C586C0  purple — table.path segments, group arrays::
-//! TT_PARAMETER  (11)  #9CDCFE  l-blue — QuickFunc parameters
-//! TT_MACRO      (12)  #C586C0  purple — DCompressor, DEncryptor, DAuditor
-//! TT_DECORATOR  (13)  #CE9178  orange — .gzip, .aes256, .chacha20 subtypes
-//! TT_STRUCT     (14)  #4EC9B0  teal   — enum TYPE names in @ENUMS declaration
-//! TT_REGEXP     (15)  #D16969  red    — r:() regex constructor token
-//! TT_EVENT      (16)  #B5CEA8  green  — date / timestamp literals
-
 use tower_lsp::lsp_types::{SemanticToken, SemanticTokens, SemanticTokensResult};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
@@ -33,7 +8,7 @@ use crate::document::Document;
 use crate::capabilities::{
     TT_KEYWORD, TT_STRING, TT_NUMBER, TT_OPERATOR, TT_VARIABLE,
     TT_FUNCTION, TT_TYPE, TT_ENUM_MEMBER, TT_COMMENT, TT_NAMESPACE,
-    TT_PROPERTY, TT_PARAMETER, TT_MACRO, TT_DECORATOR, TT_STRUCT,
+    TT_PROPERTY, TT_PARAMETER, TT_MACRO, TT_DECORATOR,
     TT_REGEXP, TT_EVENT,
     MOD_DECLARATION, MOD_READONLY,
 };
@@ -53,20 +28,13 @@ pub fn provide(doc: Option<&Document>) -> Option<SemanticTokensResult> {
 
 #[derive(Default)]
 struct ClassifierState {
-    // @ENUMS tracking
-    in_enum_body:      bool,
-    enum_brace_depth:  i32,
-    seen_enum_name:    bool,
-
-    // @QUICKFUNCS tracking
-    next_is_func_name: bool,
-    in_param_list:     bool,
-    param_paren_depth: i32,
-
-    // @IMPORTS tracking
-    next_is_alias:     bool,
-
-    // @DLM tracking
+    in_enum_body:        bool,
+    enum_brace_depth:    i32,
+    seen_enum_name:      bool,
+    next_is_func_name:   bool,
+    in_param_list:       bool,
+    param_paren_depth:   i32,
+    next_is_alias:       bool,
     next_is_dlm_module:  bool,
     next_is_dlm_subtype: bool,
 }
@@ -74,9 +42,7 @@ struct ClassifierState {
 impl ClassifierState {
     fn advance(&mut self, token: &Token) {
         match &token.token_type {
-            // ── @ENUMS ────────────────────────────────────────────────────────
             TokenType::SectionEnums => {
-                // Reset for first enum type name in this section
                 self.seen_enum_name = false;
             }
             TokenType::Symbol('{') if token.section == SectionId::Enums => {
@@ -87,12 +53,9 @@ impl ClassifierState {
                 self.enum_brace_depth = (self.enum_brace_depth - 1).max(0);
                 if self.enum_brace_depth == 0 {
                     self.in_enum_body   = false;
-                    // Reset so the NEXT enum declaration's name gets TT_STRUCT
                     self.seen_enum_name = false;
                 }
             }
-
-            // ── @QUICKFUNCS ───────────────────────────────────────────────────
             TokenType::FunctionPrefix => {
                 self.next_is_func_name = true;
                 self.in_param_list     = false;
@@ -115,8 +78,6 @@ impl ClassifierState {
                     }
                 }
             }
-
-            // ── @IMPORTS ──────────────────────────────────────────────────────
             TokenType::SectionImports => {
                 self.next_is_alias = true;
             }
@@ -128,11 +89,8 @@ impl ClassifierState {
             TokenType::String(_) | TokenType::StringSingle(_)
             if token.section == SectionId::Imports =>
                 {
-                    // After seeing the path string, next identifier is the next alias
                     self.next_is_alias = true;
                 }
-
-            // ── @DLM ──────────────────────────────────────────────────────────
             TokenType::SectionDLM => {
                 self.next_is_dlm_module  = true;
                 self.next_is_dlm_subtype = false;
@@ -140,33 +98,25 @@ impl ClassifierState {
             TokenType::Symbol('.') if token.section == SectionId::Dlm => {
                 self.next_is_dlm_subtype = true;
             }
-
             _ => {}
         }
     }
 
     fn classify_identifier(&mut self, token: &Token) -> (u32, u32) {
         match token.section {
-
-            // ── @CONFIG keys — show as property (purple) ──────────────────────
             SectionId::Config => (TT_PROPERTY, 0),
 
-            // ── @ENUMS ────────────────────────────────────────────────────────
             SectionId::Enums => {
                 if self.in_enum_body {
-                    // Enum field names (PASSIVE, AGGRESSIVE, PRODUCTION, …)
                     (TT_ENUM_MEMBER, MOD_DECLARATION)
                 } else if !self.seen_enum_name {
-                    // First identifier after `@ENUMS(` or after `}` — enum type name
                     self.seen_enum_name = true;
-                    // Use TT_TYPE (teal) — more universally themed than TT_STRUCT
                     (TT_TYPE, MOD_DECLARATION)
                 } else {
                     (TT_VARIABLE, 0)
                 }
             }
 
-            // ── @QUICKFUNCS ───────────────────────────────────────────────────
             SectionId::QuickFuncs => {
                 if self.next_is_func_name {
                     self.next_is_func_name = false;
@@ -174,12 +124,10 @@ impl ClassifierState {
                 } else if self.in_param_list && self.param_paren_depth <= 1 {
                     (TT_PARAMETER, MOD_DECLARATION)
                 } else {
-                    // Function call inside body, or local variable
                     (TT_VARIABLE, 0)
                 }
             }
 
-            // ── @IMPORTS ──────────────────────────────────────────────────────
             SectionId::Imports => {
                 if self.next_is_alias {
                     self.next_is_alias = false;
@@ -189,28 +137,22 @@ impl ClassifierState {
                 }
             }
 
-            // ── @DLM ──────────────────────────────────────────────────────────
             SectionId::Dlm => {
                 if self.next_is_dlm_subtype {
                     self.next_is_dlm_subtype = false;
                     (TT_DECORATOR, 0)
                 } else if self.next_is_dlm_module {
                     self.next_is_dlm_module  = false;
-                    self.next_is_dlm_subtype = true; // expect subtype after dot
+                    self.next_is_dlm_subtype = true;
                     (TT_MACRO, MOD_DECLARATION)
                 } else {
                     (TT_MACRO, 0)
                 }
             }
 
-            // ── @DATA ─────────────────────────────────────────────────────────
-            SectionId::Data => (TT_VARIABLE, 0),
-
-            // ── @SECURITY ─────────────────────────────────────────────────────
+            SectionId::Data     => (TT_VARIABLE, 0),
             SectionId::Security => (TT_PROPERTY, 0),
-
-            // ── Unknown / top-level ───────────────────────────────────────────
-            _ => (TT_VARIABLE, 0),
+            _                   => (TT_VARIABLE, 0),
         }
     }
 }
@@ -225,6 +167,13 @@ fn encode_tokens(tokens: &[Token]) -> Vec<SemanticToken> {
 
     for token in tokens {
         state.advance(token);
+
+        // Interpolated strings get special splitting so variables inside {}
+        // receive TT_VARIABLE colouring instead of TT_STRING.
+        if let TokenType::InterpolatedString(content) = &token.token_type {
+            emit_interpolated_tokens(token, content, &mut prev_line, &mut prev_col, &mut data);
+            continue;
+        }
 
         let (token_type, modifiers) = match classify(token, &mut state) {
             Some(t) => t,
@@ -255,12 +204,112 @@ fn encode_tokens(tokens: &[Token]) -> Vec<SemanticToken> {
     data
 }
 
+// ── Interpolated string splitter ──────────────────────────────────────────────
+//
+// For  $"Hello {name}!"  the token starts at `$`.
+// Content (stored in the token) = `Hello {name}!`  (no $" prefix, no closing ")
+// Offsets from base_col:  0=$  1="  2=H  3=e … 8={  9=n … 12=e  13=}  14=!  15="
+//
+// We emit:
+//   [0 , 8)  TT_STRING   →  $"Hello
+//   [8 , 9)  TT_OPERATOR →  {
+//   [9 , 13) TT_VARIABLE →  name
+//   [13, 14) TT_OPERATOR →  }
+//   [14, 16) TT_STRING   →  !"   (closing quote included)
+
+fn emit_interpolated_tokens(
+    token: &Token,
+    content: &str,
+    prev_line: &mut u32,
+    prev_col: &mut u32,
+    data: &mut Vec<SemanticToken>,
+) {
+    let base_line = token.line.saturating_sub(1) as u32;
+    let base_col  = token.column.saturating_sub(1) as u32;
+
+    // Multiline interpolated strings are uncommon and complex to split correctly;
+    // fall back to a single TT_STRING span for them.
+    if content.contains('\n') {
+        push_raw(data, prev_line, prev_col,
+                 base_line, base_col,
+                 (content.len() + 3) as u32,   // $" + content + "
+                 TT_STRING, 0);
+        return;
+    }
+
+    // seg_start  = offset from base_col where the current string segment begins
+    // char_offset = offset from base_col of the character currently being examined
+    // Content chars start at offset 2 (after $")
+    let mut seg_start:   u32 = 0; // begins at `$`
+    let mut char_offset: u32 = 2; // first content char
+    let mut in_brace          = false;
+    let mut brace_start: u32  = 0;
+
+    for ch in content.chars() {
+        match ch {
+            '{' if !in_brace => {
+                // Emit string segment up to (exclusive) the opening brace.
+                let seg_len = char_offset - seg_start;
+                push_raw(data, prev_line, prev_col,
+                         base_line, base_col + seg_start, seg_len, TT_STRING, 0);
+                // Emit `{` as an operator.
+                push_raw(data, prev_line, prev_col,
+                         base_line, base_col + char_offset, 1, TT_OPERATOR, 0);
+                in_brace     = true;
+                brace_start  = char_offset + 1;
+                char_offset += 1;
+            }
+            '}' if in_brace => {
+                // Emit expression content.
+                let expr_len = char_offset - brace_start;
+                push_raw(data, prev_line, prev_col,
+                         base_line, base_col + brace_start, expr_len, TT_VARIABLE, 0);
+                // Emit `}` as an operator.
+                push_raw(data, prev_line, prev_col,
+                         base_line, base_col + char_offset, 1, TT_OPERATOR, 0);
+                in_brace     = false;
+                seg_start    = char_offset + 1;
+                char_offset += 1;
+            }
+            _ => { char_offset += 1; }
+        }
+    }
+
+    // Emit the remaining string segment plus the closing `"`.
+    if !in_brace {
+        let end_offset = char_offset + 1; // +1 for the closing `"`
+        let seg_len    = end_offset - seg_start;
+        push_raw(data, prev_line, prev_col,
+                 base_line, base_col + seg_start, seg_len, TT_STRING, 0);
+    }
+}
+
+/// Push a single semantic token, computing the LSP delta from the running
+/// previous-position state.
+fn push_raw(
+    data: &mut Vec<SemanticToken>,
+    prev_line: &mut u32,
+    prev_col:  &mut u32,
+    line: u32, col: u32, len: u32, tt: u32, mods: u32,
+) {
+    if len == 0 { return; }
+    let dl = line - *prev_line;
+    let ds = if dl == 0 { col.saturating_sub(*prev_col) } else { col };
+    data.push(SemanticToken {
+        delta_line:              dl,
+        delta_start:             ds,
+        length:                  len,
+        token_type:              tt,
+        token_modifiers_bitset:  mods,
+    });
+    *prev_line = line;
+    *prev_col  = col;
+}
+
 // ── Per-token classification ──────────────────────────────────────────────────
 
 fn classify(token: &Token, state: &mut ClassifierState) -> Option<(u32, u32)> {
     match &token.token_type {
-
-        // ── Section keywords (@CONFIG, @DATA, …) ─────────────────────────────
         TokenType::SectionConfig
         | TokenType::SectionImports
         | TokenType::SectionDLM
@@ -269,37 +318,26 @@ fn classify(token: &Token, state: &mut ClassifierState) -> Option<(u32, u32)> {
         | TokenType::SectionData
         | TokenType::SectionSecurity     => Some((TT_KEYWORD, MOD_READONLY)),
 
-        // ── Language keywords (return, if, let, const, …) ────────────────────
         TokenType::Keyword(_)            => Some((TT_KEYWORD, 0)),
-
-        // ── Boolean / null literals ───────────────────────────────────────────
         TokenType::Bool(_)               => Some((TT_KEYWORD, MOD_READONLY)),
-
-        // ── Type annotations ─────────────────────────────────────────────────
         TokenType::DataType(_)           => Some((TT_TYPE, 0)),
 
-        // ── String literals ───────────────────────────────────────────────────
         TokenType::String(_)
-        | TokenType::StringSingle(_)
-        | TokenType::InterpolatedString(_) => Some((TT_STRING, 0)),
+        | TokenType::StringSingle(_)     => Some((TT_STRING, 0)),
+        // InterpolatedString is handled before classify() is reached in encode_tokens.
+        TokenType::InterpolatedString(_) => Some((TT_STRING, 0)),
 
-        // ── Date / timestamp ─────────────────────────────────────────────────
         TokenType::Date(_)
         | TokenType::Timestamp(_)        => Some((TT_EVENT, 0)),
 
-        // ── Numeric literals ─────────────────────────────────────────────────
         TokenType::Integer(_)
         | TokenType::Float(_)
         | TokenType::Double(_)
         | TokenType::ScientificNotation(_) => Some((TT_NUMBER, 0)),
 
-        // ── Hex integer literals (0xDEAD) ─────────────────────────────────────
         TokenType::HexLiteral(_)         => Some((TT_NUMBER, 0)),
-
-        // ── Hex color literals (#FF5733) ──────────────────────────────────────
         TokenType::HexColor(_)           => Some((TT_NUMBER, MOD_READONLY)),
 
-        // ── Operators ─────────────────────────────────────────────────────────
         TokenType::ArithmeticOp(_)
         | TokenType::ArithmeticAssignOp(_)
         | TokenType::ComparisonOp(_)
@@ -307,40 +345,23 @@ fn classify(token: &Token, state: &mut ClassifierState) -> Option<(u32, u32)> {
         | TokenType::BitwiseOp(_)
         | TokenType::MultiCharSymbol(_)  => Some((TT_OPERATOR, 0)),
 
-        // ── Multi-char structural operators ───────────────────────────────────
         TokenType::Arrow
         | TokenType::SwitchCase
         | TokenType::DoubleColon
-        | TokenType::ControlFlowColon   => Some((TT_OPERATOR, 0)),
+        | TokenType::ControlFlowColon    => Some((TT_OPERATOR, 0)),
 
-        // ── Function prefix (~) ───────────────────────────────────────────────
         TokenType::FunctionPrefix        => Some((TT_OPERATOR, 0)),
-
-        // ── Comments ──────────────────────────────────────────────────────────
         TokenType::Comment(_)            => Some((TT_COMMENT, 0)),
-
-        // ── Enum access (AIType.BOSS, Environment.PROD) ───────────────────────
         TokenType::EnumAccess { .. }     => Some((TT_ENUM_MEMBER, 0)),
-
-        // ── Table paths (server.primary, user.profile) ────────────────────────
-        // NEW: TablePath was previously unhandled
         TokenType::TablePath(_)          => Some((TT_PROPERTY, 0)),
-
-        // ── Static method calls (Math.sqrt, DateTime.now) ─────────────────────
         TokenType::StaticFunction { .. } => Some((TT_FUNCTION, 0)),
-
-        // ── Built-in Dix functions ────────────────────────────────────────────
         TokenType::DixFunction(_)        => Some((TT_FUNCTION, 0)),
-
-        // ── Regex constructor r:() ─────────────────────────────────────────────
         TokenType::RegexConstructor(_)   => Some((TT_REGEXP, 0)),
 
-        // ── Blob / Tuple constructors ─────────────────────────────────────────
         TokenType::BlobConstructor(_)
         | TokenType::TupleConstructor(_)
         | TokenType::PrefixedConstructor { .. } => Some((TT_KEYWORD, 0)),
 
-        // ── ObjectAccess / DLM subtype ────────────────────────────────────────
         TokenType::ObjectAccess(_) => {
             if token.section == SectionId::Dlm {
                 Some((TT_DECORATOR, 0))
@@ -349,28 +370,13 @@ fn classify(token: &Token, state: &mut ClassifierState) -> Option<(u32, u32)> {
             }
         }
 
-        // ── Context-aware identifier classification ───────────────────────────
         TokenType::Identifier(_)         => Some(state.classify_identifier(token)),
-
-        // ── Scope declarations ────────────────────────────────────────────────
         TokenType::ScopeDeclaration(_)   => Some((TT_TYPE, 0)),
-
-        // ── Config access tokens ──────────────────────────────────────────────
         TokenType::ConfigAccess(_)       => Some((TT_PROPERTY, 0)),
-
-        // ── Built-in method tokens ────────────────────────────────────────────
         TokenType::BuiltinMethod(_)      => Some((TT_FUNCTION, 0)),
-
-        // ── ParseContext — internal parser marker ─────────────────────────────
         TokenType::ParseContext(_)       => None,
-
-        // ── Raw symbols — skip (bracket-pair coloring handles these) ──────────
         TokenType::Symbol(_)             => None,
-
-        // ── End of file ───────────────────────────────────────────────────────
         TokenType::EndOfFile             => None,
-
-        // ── Lexer error tokens — already reported as diagnostics ──────────────
         TokenType::Error(_)              => None,
     }
 }
@@ -379,46 +385,30 @@ fn classify(token: &Token, state: &mut ClassifierState) -> Option<(u32, u32)> {
 
 fn token_length(token: &Token) -> usize {
     match &token.token_type {
-        TokenType::String(s)              => s.len() + 2,   // "..."
-        TokenType::StringSingle(s)        => s.len() + 2,   // '...'
-        TokenType::InterpolatedString(s)  => s.len() + 3,   // $"..."
-        TokenType::HexColor(h)            => h.len() + 1,   // #RRGGBB
-        TokenType::Comment(c)             => c.len() + 2,   // // ...
-
-        // Section keywords — exact lengths
-        TokenType::SectionConfig          =>  7, // @CONFIG
-        TokenType::SectionImports         =>  8, // @IMPORTS
-        TokenType::SectionDLM             =>  4, // @DLM
-        TokenType::SectionEnums           =>  6, // @ENUMS
-        TokenType::SectionQuickFuncs      => 11, // @QUICKFUNCS
-        TokenType::SectionData            =>  5, // @DATA
-        TokenType::SectionSecurity        =>  9, // @SECURITY
-
-        // Multi-char operators
-        TokenType::DoubleColon            => 2, // ::
-        TokenType::Arrow                  => 2, // -> or =>
-        TokenType::SwitchCase             => 2, // ->
-        TokenType::ControlFlowColon       => 1, // :  (just the colon suffix)
-        TokenType::FunctionPrefix         => 1, // ~
-
-        // Boolean literals
+        TokenType::String(s)              => s.len() + 2,
+        TokenType::StringSingle(s)        => s.len() + 2,
+        TokenType::InterpolatedString(s)  => s.len() + 3,
+        TokenType::HexColor(h)            => h.len() + 1,
+        TokenType::Comment(c)             => c.len() + 2,
+        TokenType::SectionConfig          =>  7,
+        TokenType::SectionImports         =>  8,
+        TokenType::SectionDLM             =>  4,
+        TokenType::SectionEnums           =>  6,
+        TokenType::SectionQuickFuncs      => 11,
+        TokenType::SectionData            =>  5,
+        TokenType::SectionSecurity        =>  9,
+        TokenType::DoubleColon            => 2,
+        TokenType::Arrow                  => 2,
+        TokenType::SwitchCase             => 2,
+        TokenType::ControlFlowColon       => 1,
+        TokenType::FunctionPrefix         => 1,
         TokenType::Bool(b)                => if *b { 4 } else { 5 },
-
-        // Prefix constructors: b:, r:, t:
         TokenType::BlobConstructor(_)     => 2,
         TokenType::RegexConstructor(_)    => 2,
         TokenType::TupleConstructor(_)    => 2,
-
-        // EnumAccess: "EnumName.FIELD"
         TokenType::EnumAccess { enum_name, value } => enum_name.len() + 1 + value.len(),
-
-        // TablePath: "a.b.c"
-        TokenType::TablePath(s) => s.len(),
-
-        // ObjectAccess: ".subtype" segments
-        TokenType::ObjectAccess(parts) => parts.join(".").len(),
-
-        // Everything else: use the token value length, min 1
+        TokenType::TablePath(s)           => s.len(),
+        TokenType::ObjectAccess(parts)    => parts.join(".").len(),
         _ => {
             let v = token.get_token_value();
             if v.is_empty() { 1 } else { v.len() }

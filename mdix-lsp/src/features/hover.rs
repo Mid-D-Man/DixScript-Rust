@@ -10,8 +10,8 @@
 //! - ALL built-in static objects → method catalogue
 //! - Date / Timestamp         → human-readable breakdown
 //! - HexColor                 → RGBA channel values
-//! - Regex r:(...)            → pattern validity
-//! - Blob b:(...)             → decoded size + hex preview + MIME type
+//! - Regex r:(...)            → pattern validity + regex101 link
+//! - Blob b:(...)             → decoded size + hex preview + MIME type + image preview
 
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
@@ -38,7 +38,7 @@ pub fn provide(doc: Option<&Document>, pos: Position) -> Option<Hover> {
 fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<String> {
     match &token.token_type {
 
-        // ── Section keywords (@CONFIG, @DATA, …) ─────────────────────────
+        // ── Section keywords ──────────────────────────────────────────────
         TokenType::SectionConfig     => Some(section_hover("@CONFIG",
                                                            "Compiler settings and file metadata.",
                                                            "@CONFIG(\n  version -> \"1.0.0\"\n  author -> \"name\"\n  debug_mode -> \"off\"\n  error_handling -> \"halt\"\n  compatibility_mode -> \"strict\"\n  features -> \"advanced\"\n)",
@@ -116,11 +116,11 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
         TokenType::HexColor(hex) => hover_hex_color(hex),
 
         // ── Numeric literals ───────────────────────────────────────────────
-        TokenType::Integer(i)           => Some(format!("**`{}`** — integer literal (`<int>`)", i)),
-        TokenType::Float(f)             => Some(format!("**`{}f`** — 32-bit float literal (`<float>`)", f)),
-        TokenType::Double(d)            => Some(format!("**`{}`** — 64-bit double literal (`<double>`)", d)),
-        TokenType::ScientificNotation(d)=> Some(format!("**`{:e}`** — scientific notation (`<double>`)", d)),
-        TokenType::HexLiteral(i)        => Some(format!("**`0x{:X}`** — hex integer literal (`<hex>`, value: {})", i, i)),
+        TokenType::Integer(i)            => Some(format!("**`{}`** — integer literal (`<int>`)", i)),
+        TokenType::Float(f)              => Some(format!("**`{}f`** — 32-bit float literal (`<float>`)", f)),
+        TokenType::Double(d)             => Some(format!("**`{}`** — 64-bit double literal (`<double>`)", d)),
+        TokenType::ScientificNotation(d) => Some(format!("**`{:e}`** — scientific notation (`<double>`)", d)),
+        TokenType::HexLiteral(i)         => Some(format!("**`0x{:X}`** — hex integer literal (`<hex>`, value: {})", i, i)),
 
         // ── String literals ────────────────────────────────────────────────
         TokenType::String(s) => Some(format!(
@@ -168,7 +168,8 @@ fn section_hover(name: &str, description: &str, example: &str, notes: &str) -> S
     )
 }
 
-/// Hover documentation for keys inside @CONFIG( ... ).
+// ── CONFIG key hover ───────────────────────────────────────────────────────────
+
 fn hover_config_key(name: &str) -> Option<String> {
     let content = match name.to_lowercase().as_str() {
         "version" => "**`version`** — CONFIG key\n\nDixScript format version. Must match the compiler.\n\nExample: `version -> \"1.0.0\"`",
@@ -183,24 +184,26 @@ fn hover_config_key(name: &str) -> Option<String> {
     };
     Some(content.to_string())
 }
+
 // ── Keyword hover ──────────────────────────────────────────────────────────────
 
 fn hover_keyword(kw: &str) -> Option<String> {
-    let binding_int = hover_data_type("int").unwrap_or_default();
-    let binding_float = hover_data_type("float").unwrap_or_default();
-    let binding_double = hover_data_type("double").unwrap_or_default();
-    let binding_string = hover_data_type("string").unwrap_or_default();
-    let binding_bool = hover_data_type("bool").unwrap_or_default();
-    let binding_array = hover_data_type("array").unwrap_or_default();
-    let binding_tuple = hover_data_type("tuple").unwrap_or_default();
-    let binding_object = hover_data_type("object").unwrap_or_default();
-    let binding_hex = hover_data_type("hex").unwrap_or_default();
-    let binding_blob = hover_data_type("blob").unwrap_or_default();
-    let binding_regex = hover_data_type("regex").unwrap_or_default();
-    let binding_date = hover_data_type("date").unwrap_or_default();
+    let binding_int       = hover_data_type("int").unwrap_or_default();
+    let binding_float     = hover_data_type("float").unwrap_or_default();
+    let binding_double    = hover_data_type("double").unwrap_or_default();
+    let binding_string    = hover_data_type("string").unwrap_or_default();
+    let binding_bool      = hover_data_type("bool").unwrap_or_default();
+    let binding_array     = hover_data_type("array").unwrap_or_default();
+    let binding_tuple     = hover_data_type("tuple").unwrap_or_default();
+    let binding_object    = hover_data_type("object").unwrap_or_default();
+    let binding_hex       = hover_data_type("hex").unwrap_or_default();
+    let binding_blob      = hover_data_type("blob").unwrap_or_default();
+    let binding_regex     = hover_data_type("regex").unwrap_or_default();
+    let binding_date      = hover_data_type("date").unwrap_or_default();
     let binding_timestamp = hover_data_type("timestamp").unwrap_or_default();
-    let binding_enum = hover_data_type("enum").unwrap_or_default();
-    let binding_any = hover_data_type("any").unwrap_or_default();
+    let binding_enum      = hover_data_type("enum").unwrap_or_default();
+    let binding_any       = hover_data_type("any").unwrap_or_default();
+
     let content = match kw {
         "if" | "if:" => "**`if:`** — conditional statement\n\nNote: DixScript uses `if:` (with colon).\n\n```mdix\nif: x > 0 {\n  return x\n} elif: x == 0 {\n  return 0\n} else {\n  return -1\n}\n```",
         "elif" | "elif:" => "**`elif:`** — else-if branch\n\nChained after `if:` or another `elif:`. Uses colon syntax.\n\n```mdix\nelif: difficulty == Difficulty.HARD {\n  multiplier = 2.0\n}\n```",
@@ -223,7 +226,7 @@ fn hover_keyword(kw: &str) -> Option<String> {
         "verify"=> "**`verify`** — hash verification for imports\n\nEnsures the imported file matches a known hash:\n\n```mdix\nUtils from \"utils.mdix\" verify \"sha256:abc123...\"\n```",
         "global"=> "**`global`** — scope modifier for QuickFunc scope lists\n\nMarks a QuickFunc as available globally (to all sections).",
         "then"  => "**`then`** — optional clause\n\nUsed in some extended conditional forms.",
-        "int"       =>  binding_int.as_str(),
+        "int"       => binding_int.as_str(),
         "float"     => binding_float.as_str(),
         "double"    => binding_double.as_str(),
         "string"    => binding_string.as_str(),
@@ -329,12 +332,9 @@ fn hover_enum_access(doc: &Document, enum_name: &str, field: &str) -> Option<Str
 
 // ── Identifier hover ───────────────────────────────────────────────────────────
 
-
 fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<String> {
 
-    // ── 1. QuickFuncs body context: parameter hover ───────────────────────
-    // When the cursor is inside a @QUICKFUNCS function body on a parameter
-    // name, show that parameter's declared type and which function owns it.
+    // ── 1. QuickFuncs body: parameter hover ───────────────────────────────
     if section == SectionId::QuickFuncs {
         if let Some(ast) = &doc.ast {
             if let Some(qf) = &ast.quick_functions {
@@ -346,9 +346,7 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
                             .unwrap_or_else(|| "any".to_string());
                         let default_note = if param.default_value.is_some() {
                             "\n\n*(has a default value from type annotation)*"
-                        } else {
-                            ""
-                        };
+                        } else { "" };
                         return Some(format!(
                             "**`{}`** — parameter of `~{}`\n\nType: `<{}>`{}",
                             name, func.name, type_str, default_note
@@ -406,7 +404,7 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
             }
         }
 
-        // ── 3. Enum type name (declaration site) ──────────────────────────
+        // ── 3. Enum type name ──────────────────────────────────────────────
         if let Some(enums) = &ast.enums {
             for decl in &enums.enums {
                 if decl.name != name { continue; }
@@ -422,11 +420,11 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
         }
     }
 
-    // ── 4. Semantic symbol table lookups ──────────────────────────────────
+    // ── 4. Semantic symbol table ───────────────────────────────────────────
     if let Some(sr) = &doc.semantic_result {
         if let Some(st) = &sr.symbol_table {
 
-            // Exact flat property (stored as bare name, e.g. "app_name")
+            // 4a. Exact bare-name lookup (e.g. symbol table stores "app_name")
             if let Some(var) = st.try_get_data_variable(name) {
                 let type_str = var.effective_type()
                     .map(|t| format!("{}", t))
@@ -438,16 +436,25 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
                 ));
             }
 
-            // Suffix match: table / group array properties
-            // e.g. hovering `host` in `server: host = "localhost"` → stored
-            // in symbol table as "DATA.server.host".
-            // If multiple paths end with `.name` we prefer the most specific
-            // (longest) path.
+            // 4b. Full-path lookup with DATA. prefix (e.g. "DATA.app_name")
+            if let Some(var) = st.try_get_data_variable(&format!("DATA.{}", name)) {
+                let type_str = var.effective_type()
+                    .map(|t| format!("{}", t))
+                    .unwrap_or_else(|| "unknown".to_string());
+                let inferred = if var.is_inferred { " *(inferred)*" } else { "" };
+                return Some(format!(
+                    "**`{}`** — DATA variable\n\nType: `<{}>`{}\n\nRuntime access:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
+                    name, type_str, inferred, type_str, name
+                ));
+            }
+
+            // 4c. Suffix match: table / group array properties stored as
+            //     "DATA.server.host" → suffix ".host"
             let suffix = format!(".{}", name);
             let mut best: Option<(usize, String, bool, Option<dixscript::Compiler::AST::DataType>)> = None;
             for (path, var) in &st.data_variables {
                 if !path.ends_with(&suffix) { continue; }
-                let specificity = path.len();
+                let specificity  = path.len();
                 let effective_type = var.effective_type();
                 let is_inferred    = var.is_inferred;
                 match &best {
@@ -465,19 +472,22 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
                     .map(|t| format!("{}", t))
                     .unwrap_or_else(|| "unknown".to_string());
                 let inferred_note = if is_inferred { " *(inferred)*" } else { "" };
-                let access_path = path.trim_start_matches("DATA.");
+                // Strip the leading "DATA." for the user-visible access path.
+                let access_path = path
+                    .strip_prefix("DATA.")
+                    .unwrap_or(path.as_str());
                 return Some(format!(
                     "**`{}`** — DATA property\n\nFull path: `{}`\nType: `<{}>`{}\n\nRuntime access:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
                     name, access_path, type_str, inferred_note, type_str, access_path
                 ));
             }
 
-            // Built-in static object (Math, DateTime, Array, …)
+            // 4d. Built-in static object (Math, DateTime, …)
             if st.is_builtin_static_object(name) {
                 return hover_static_object(name);
             }
 
-            // Imported namespace alias
+            // 4e. Imported namespace alias
             if let Some(ns) = st.try_get_namespace(name) {
                 let func_names: Vec<String> =
                     ns.functions.keys().take(6).cloned().collect();
@@ -500,7 +510,7 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
     None
 }
 
-// ── Static object hover (when hovering the object name itself) ─────────────────
+// ── Static object hover ────────────────────────────────────────────────────────
 
 fn hover_static_object(name: &str) -> Option<String> {
     let (desc, methods) = match name {
@@ -567,7 +577,7 @@ fn hover_static_object(name: &str) -> Option<String> {
 // ── Static method hover ────────────────────────────────────────────────────────
 
 fn hover_static_method(class: &str, method: &str) -> Option<String> {
-    let entry = STATIC_SIGS.iter().find(|(c, m, _, _,_)| *c == class && *m == method)?;
+    let entry = STATIC_SIGS.iter().find(|(c, m, _, _, _)| *c == class && *m == method)?;
     Some(format!(
         "**`{}.{}`** — built-in static method\n\n```\n{}\n```\n\n{}\n\n```mdix\n// Example:\n{}\n```",
         class, method, entry.2, entry.3, entry.4
@@ -592,8 +602,9 @@ fn hover_date(date_str: &str) -> Option<String> {
 
 fn hover_timestamp(ts: &str) -> Option<String> {
     let tz = if ts.ends_with('Z') { "UTC" }
-    else if ts.contains('+') || (ts.len() > 20 && ts.chars().nth(19) == Some('-')) { "with UTC offset" }
-    else { "local time" };
+    else if ts.contains('+') || (ts.len() > 20 && ts.chars().nth(19) == Some('-')) {
+        "with UTC offset"
+    } else { "local time" };
     Some(format!(
         "**Timestamp**: `{}`\n\n*{}*\n\nType: `<timestamp>`\n\nGet components: `DateTime.year(ts)`, `DateTime.hour(ts)`, …",
         ts, tz
@@ -605,18 +616,58 @@ fn hover_timestamp(ts: &str) -> Option<String> {
 fn hover_regex(tokens: &[Token], constructor_index: usize) -> String {
     let pattern = find_adjacent_string(tokens, constructor_index);
     match pattern {
-        None => "**`r:(...)`** — regex constructor\n\nProvide the pattern as a string.\n\n```mdix\nemail = r:(\"^[\\\\w.]+@[\\\\w.]+$\")\n```\n\nInstance methods: `.test(str)`, `.match(str)`, `.matchAll(str)`, `.replace(str,repl)`, `.split(str)`, `.isValid()`".to_string(),
+        None => concat!(
+        "**`r:(...)`** — regex constructor\n\n",
+        "Provide the pattern as a string.\n\n",
+        "```mdix\nemail = r:(\"^[\\\\w.]+@[\\\\w.]+$\")\n```\n\n",
+        "Instance methods: `.test(str)`, `.match(str)`, `.matchAll(str)`, ",
+        "`.replace(str,repl)`, `.split(str)`, `.isValid()`"
+        ).to_string(),
+
         Some(pat) => {
             match regex::Regex::new(&pat) {
                 Ok(re) => {
                     let groups = re.captures_len().saturating_sub(1);
+
+                    // Build a regex101 deep-link so the user can interactively
+                    // test the pattern in their browser.
+                    let encoded: String = pat.chars().flat_map(|c| {
+                        match c {
+                            ' '  => "%20".chars().collect::<Vec<_>>(),
+                            '+'  => "%2B".chars().collect(),
+                            '/'  => "%2F".chars().collect(),
+                            '?'  => "%3F".chars().collect(),
+                            '#'  => "%23".chars().collect(),
+                            '&'  => "%26".chars().collect(),
+                            '='  => "%3D".chars().collect(),
+                            _    => vec![c],
+                        }
+                    }).collect();
+                    let test_url = format!(
+                        "https://regex101.com/?regex={}&flavor=rust",
+                        encoded
+                    );
+
                     format!(
-                        "**`r:(...)`** — regex constructor\n\n```\n{}\n```\n\n✅ **Pattern valid** — {} capture group{}\n\nType: `<regex>`\n\nMethods: `.test(str)`, `.match(str)` → `[full, g1, g2, …]`, `.matchAll(str)`, `.replace(str,repl)`, `.split(str)`",
-                        pat, groups, if groups == 1 { "" } else { "s" }
+                        "**`r:(...)`** — regex constructor\n\n\
+````\n{}\n```\n\n\
+                         ✅ **Pattern valid** — {} capture group{}\n\n\
+                         Type: `<regex>`\n\n\
+                         Methods: `.test(str)`, `.match(str)` → `[full, g1, g2, …]`, \
+                         `.matchAll(str)`, `.replace(str,repl)`, `.split(str)`\n\n\
+                         [🔗 Test this pattern on regex101]({}) — paste your text there \
+                         to validate matches interactively.",
+                        pat,
+                        groups,
+                        if groups == 1 { "" } else { "s" },
+                        test_url
                     )
                 }
                 Err(e) => format!(
-                    "**`r:(...)`** — regex constructor\n\n```\n{}\n```\n\n❌ **Invalid pattern:** {}\n\nType: `<regex>`",
+                    "**`r:(...)`** — regex constructor\n\n\
+```\n{}\n```\n\n\
+                     ❌ **Invalid pattern:** {}\n\n\
+                     Type: `<regex>`",
                     pat,
                     e.to_string().lines().next().unwrap_or("parse error")
                 ),
@@ -630,23 +681,41 @@ fn hover_regex(tokens: &[Token], constructor_index: usize) -> String {
 fn hover_blob(tokens: &[Token], constructor_index: usize) -> String {
     let data = find_adjacent_string(tokens, constructor_index);
     match data {
-        None => "**`b:(...)`** — blob constructor\n\nBase64-encoded binary data.\n\n```mdix\navatar = b:(\"SGVsbG8gV29ybGQ=\")\n```\n\nMethods: `.size()`, `.mimeType()`, `.toHex()`, `.toBytes()`, `.isValid()`, `.slice(start,end)`".to_string(),
+        None => concat!(
+        "**`b:(...)`** — blob constructor\n\nBase64-encoded binary data.\n\n",
+        "```mdix\navatar = b:(\"SGVsbG8gV29ybGQ=\")\n```\n\n",
+        "Methods: `.size()`, `.mimeType()`, `.toHex()`, `.toBytes()`, `.isValid()`, `.slice(start,end)`"
+        ).to_string(),
+
         Some(b64) => {
             use base64::{Engine as _, engine::general_purpose};
             match general_purpose::STANDARD.decode(&b64) {
                 Ok(bytes) => {
-                    let mime = detect_mime(&bytes);
-                    let preview: Vec<String> = bytes.iter().take(12)
+                    let mime    = detect_mime(&bytes);
+                    let preview = build_blob_preview(&bytes, &b64, mime);
+                    let hex_bytes: Vec<String> = bytes.iter().take(12)
                         .map(|b| format!("{:02X}", b)).collect();
                     let ellipsis = if bytes.len() > 12 { " …" } else { "" };
+
                     format!(
-                        "**`b:(...)`** — blob\n\n📦 **{}** bytes · {} base64 chars\n\n🗂 MIME type: `{}`\n\nFirst bytes: `{}{}`\n\nType: `<blob>`\n\nMethods: `.size()`, `.mimeType()`, `.toHex()`, `.toBytes()`, `.isValid()`, `.slice(start,end)`",
-                        bytes.len(), b64.len(), mime,
-                        preview.join(" "), ellipsis,
+                        "**`b:(...)`** — blob\n\n\
+                         📦 **{}** bytes · {} base64 chars\n\n\
+                         🗂 MIME type: `{}`\n\n\
+                         First bytes: `{}{}`{}\n\n\
+                         Type: `<blob>`\n\n\
+                         Methods: `.size()`, `.mimeType()`, `.toHex()`, `.toBytes()`, `.isValid()`, `.slice(start,end)`",
+                        bytes.len(),
+                        b64.len(),
+                        mime,
+                        hex_bytes.join(" "),
+                        ellipsis,
+                        preview,
                     )
                 }
                 Err(_) => format!(
-                    "**`b:(...)`** — blob\n\n⚠️ `{}` chars — **invalid base64 encoding**\n\nType: `<blob>`",
+                    "**`b:(...)`** — blob\n\n\
+                     ⚠️ `{}` chars — **invalid base64 encoding**\n\n\
+                     Type: `<blob>`",
                     b64.len()
                 ),
             }
@@ -654,17 +723,61 @@ fn hover_blob(tokens: &[Token], constructor_index: usize) -> String {
     }
 }
 
+/// Build an inline preview section based on the blob's MIME type.
+///
+/// For images ≤ 300 KB: embed as a markdown data-URI image (VS Code renders these).
+/// For audio: display a friendly description with the MIME type.
+/// For other types: return an empty string.
+fn build_blob_preview(bytes: &[u8], b64: &str, mime: &str) -> String {
+    if mime.starts_with("image/") {
+        // VS Code's markdown renderer supports data: URIs in img tags embedded
+        // in hover markdown — cap at 300 KB to avoid freezing the editor.
+        if bytes.len() <= 300_000 {
+            return format!("\n\n![blob preview](data:{};base64,{})", mime, b64);
+        }
+        // Too large to embed; tell the user the dimensions aren't available.
+        return format!(
+            "\n\n🖼 **Image** (`{}`) — {} KB (too large to preview inline)",
+            mime,
+            bytes.len() / 1024
+        );
+    }
+
+    if mime.starts_with("audio/") {
+        return format!(
+            "\n\n🔊 **Audio** (`{}`) — {} bytes\n\n\
+             Save to disk and open with a media player to listen.",
+            mime,
+            bytes.len()
+        );
+    }
+
+    if mime == "application/pdf" {
+        return format!(
+            "\n\n📄 **PDF document** — {} bytes",
+            bytes.len()
+        );
+    }
+
+    String::new()
+}
+
 fn detect_mime(bytes: &[u8]) -> &'static str {
     if bytes.len() < 4 { return "application/octet-stream"; }
     match bytes {
-        b if b[0]==0xFF && b[1]==0xD8 && b[2]==0xFF                             => "image/jpeg",
-        b if b[0]==0x89 && b[1]==0x50 && b[2]==0x4E && b[3]==0x47              => "image/png",
-        b if b[0]==0x47 && b[1]==0x49 && b[2]==0x46                            => "image/gif",
-        b if b[0]==0x52 && b[1]==0x49 && b[2]==0x46 && b[3]==0x46              => "audio/wav",
-        b if b[0]==0x49 && b[1]==0x44 && b[2]==0x33                            => "audio/mp3",
-        b if b[0]==0x25 && b[1]==0x50 && b[2]==0x44 && b[3]==0x46              => "application/pdf",
-        b if b[0]==0x50 && b[1]==0x4B                                           => "application/zip",
-        b if b[0]==0x7F && b[1]==0x45 && b[2]==0x4C && b[3]==0x46              => "application/elf",
+        b if b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF                              => "image/jpeg",
+        b if b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47             => "image/png",
+        b if b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46                              => "image/gif",
+        b if b.len() >= 12
+            && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46
+            && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50         => "image/webp",
+        b if b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46             => "audio/wav",
+        b if b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33                              => "audio/mp3",
+        b if b[0] == 0xFF && (b[1] & 0xE0) == 0xE0                                     => "audio/mp3",
+        b if b[0] == 0x4F && b[1] == 0x67 && b[2] == 0x67 && b[3] == 0x53             => "audio/ogg",
+        b if b[0] == 0x25 && b[1] == 0x50 && b[2] == 0x44 && b[3] == 0x46             => "application/pdf",
+        b if b[0] == 0x50 && b[1] == 0x4B                                              => "application/zip",
+        b if b[0] == 0x7F && b[1] == 0x45 && b[2] == 0x4C && b[3] == 0x46             => "application/elf",
         _ => "application/octet-stream",
     }
 }
@@ -687,7 +800,15 @@ fn hover_hex_color(hex: &str) -> Option<String> {
     };
 
     Some(format!(
-        "**HexColor** `#{}`\n\n| Channel | Dec | Hex |\n|---------|-----|-----|\n| Red   | {} | `{:02X}` |\n| Green | {} | `{:02X}` |\n| Blue  | {} | `{:02X}` |\n\n{}\n\nType: `<hex>`\n\nClick the color swatch to open the color picker.",
+        "**HexColor** `#{}`\n\n\
+         | Channel | Dec | Hex |\n\
+         |---------|-----|-----|\n\
+         | Red   | {} | `{:02X}` |\n\
+         | Green | {} | `{:02X}` |\n\
+         | Blue  | {} | `{:02X}` |\n\n\
+         {}\n\n\
+         Type: `<hex>`\n\n\
+         Click the color swatch in the gutter to open the color picker.",
         stripped, r, r, g, g, b, b, alpha_line
     ))
 }
@@ -700,7 +821,9 @@ pub fn token_and_index_at(tokens: &[Token], pos: Position) -> Option<(&Token, us
     let mut best: Option<(&Token, usize)> = None;
 
     for (i, token) in tokens.iter().enumerate() {
-        if token.line != target_line { continue; }
+        if token.line < target_line { continue; }
+        if token.line > target_line { break; }
+        // Same line:
         if token.column > target_col { break; }
         let len = token_value_len(token);
         if target_col <= token.column + len {
@@ -719,7 +842,7 @@ fn token_value_len(token: &Token) -> usize {
         TokenType::String(s)             => s.len() + 2,
         TokenType::StringSingle(s)       => s.len() + 2,
         TokenType::InterpolatedString(s) => s.len() + 3,
-        TokenType::HexColor(h)           => h.len() + 1,
+        TokenType::HexColor(h)           => h.len(),    // '#' already included in stored value
         TokenType::Comment(c)            => c.len() + 2,
         TokenType::Bool(b)               => if *b { 4 } else { 5 },
         TokenType::EnumAccess { enum_name, value } => enum_name.len() + 1 + value.len(),
@@ -741,26 +864,21 @@ fn find_adjacent_string(tokens: &[Token], start_index: usize) -> Option<String> 
     for token in tokens.iter().skip(start_index + 1).take(5) {
         match &token.token_type {
             TokenType::String(s) | TokenType::StringSingle(s) => return Some(s.clone()),
-            TokenType::Identifier(_) | TokenType::SectionData | TokenType::EndOfFile => break,
+            TokenType::Identifier(_)
+            | TokenType::SectionData
+            | TokenType::EndOfFile => break,
             _ => {}
         }
     }
     None
 }
-/// Scan backward from `func_def_line` (1-based) to find a `// ...` comment
-/// on the line immediately before the function declaration.
-/// Returns the comment text if found.
+
+/// Scan backward from `func_def_line` (1-based) for a contiguous block of
+/// `// ...` comments immediately before the function declaration.
 fn extract_doc_comment_for_func(tokens: &[Token], func_def_line: usize) -> Option<String> {
     if func_def_line == 0 { return None; }
-
     let search_start = func_def_line.saturating_sub(60);
 
-    // Build (start_line, end_line, raw_text) for every comment token that
-    // appears before the function declaration line.
-    //
-    // For `//` comments the lexer emits one token per line; start == end.
-    // For `/* */` comments a single token is emitted at the opening line;
-    // end_line = start_line + number-of-newlines-inside-the-body.
     let mut spans: Vec<(usize, usize, String)> = tokens
         .iter()
         .filter(|t| t.line >= search_start && t.line < func_def_line)
@@ -768,8 +886,6 @@ fn extract_doc_comment_for_func(tokens: &[Token], func_def_line: usize) -> Optio
             if let TokenType::Comment(c) = &t.token_type {
                 let newlines = c.chars().filter(|&ch| ch == '\n').count();
                 let end_line = t.line + newlines;
-                // Only include comments whose final line is strictly before
-                // the function declaration.
                 if end_line < func_def_line {
                     return Some((t.line, end_line, c.clone()));
                 }
@@ -779,26 +895,16 @@ fn extract_doc_comment_for_func(tokens: &[Token], func_def_line: usize) -> Optio
         .collect();
 
     if spans.is_empty() { return None; }
-
-    // Sort ascending so we can walk backward unambiguously.
     spans.sort_by_key(|(s, _, _)| *s);
 
-    // Walk backward from (func_def_line - 1), collecting contiguous comment
-    // spans with no blank-line gaps between them.
-    //
-    // "Contiguous" means: this span's end_line == expected_end.
-    // As soon as we encounter a gap we stop — code or blank lines between
-    // a comment and the function mean the comment belongs to something else.
     let mut collected: Vec<String> = Vec::new();
-    let mut expected_end            = func_def_line.saturating_sub(1);
+    let mut expected_end = func_def_line.saturating_sub(1);
 
     for (start, end, content) in spans.iter().rev() {
         if *end == expected_end {
             collected.insert(0, content.clone());
-            // Next span must end on the line before this one starts.
             expected_end = start.saturating_sub(1);
         } else {
-            // Gap detected — stop collecting.
             break;
         }
     }
@@ -807,23 +913,17 @@ fn extract_doc_comment_for_func(tokens: &[Token], func_def_line: usize) -> Optio
     Some(format_doc_comment(&collected.join("\n")))
 }
 
-/// Format a comment string for display in hover markdown.
-/// Handles Rust-style ` backtick ` and ``` triple-backtick ``` blocks.
 fn format_doc_comment(raw: &str) -> String {
     let text = raw.trim();
-
-    // Strip leading `//` markers that sometimes remain in multi-line block comments
     let cleaned: String = text
         .lines()
         .map(|l| l.trim_start_matches('/').trim_start())
         .collect::<Vec<_>>()
         .join("\n");
 
-    // If it contains fenced code blocks or inline backticks, pass through as markdown
     if cleaned.contains("```") || cleaned.contains('`') {
         cleaned
     } else {
-        // Plain comment — wrap in blockquote for visual separation
         cleaned
             .lines()
             .map(|l| format!("> {}", l))
@@ -831,7 +931,8 @@ fn format_doc_comment(raw: &str) -> String {
             .join("\n")
     }
 }
-// ── Lookup table (class, method, signature, description, example) ─────────────
+
+// ── Static method signature table ─────────────────────────────────────────────
 
 static STATIC_SIGS: &[(&str, &str, &str, &str, &str)] = &[
     ("Math","abs",      "Math.abs(x: number) → double",                      "Absolute value of x.",                                     "Math.abs(-42)        // → 42.0"),
@@ -888,18 +989,27 @@ static STATIC_SIGS: &[(&str, &str, &str, &str, &str)] = &[
 
 fn month_name(m: u32) -> Option<&'static str> {
     match m {
-        1=>"January",2=>"February",3=>"March",4=>"April",5=>"May",6=>"June",
-        7=>"July",8=>"August",9=>"September",10=>"October",11=>"November",12=>"December",
-        _=>return None,
-    }.into()
+        1  => Some("January"),   2  => Some("February"), 3  => Some("March"),
+        4  => Some("April"),     5  => Some("May"),       6  => Some("June"),
+        7  => Some("July"),      8  => Some("August"),    9  => Some("September"),
+        10 => Some("October"),   11 => Some("November"),  12 => Some("December"),
+        _  => None,
+    }
 }
 
 fn ordinal_suffix(d: u32) -> &'static str {
-    match d { 11|12|13=>"th", n if n%10==1=>"st", n if n%10==2=>"nd", n if n%10==3=>"rd", _=>"th" }
+    match d {
+        11 | 12 | 13         => "th",
+        n if n % 10 == 1     => "st",
+        n if n % 10 == 2     => "nd",
+        n if n % 10 == 3     => "rd",
+        _                    => "th",
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine;
     use super::*;
     use crate::analyzer::run_pipeline;
     use crate::document::Document;
@@ -913,7 +1023,7 @@ mod tests {
 
     #[test]
     fn hover_none_doc_returns_none() {
-        assert!(provide(None, Position::new(0,0)).is_none());
+        assert!(provide(None, Position::new(0, 0)).is_none());
     }
 
     #[test]
@@ -950,5 +1060,29 @@ mod tests {
             "and","or","not","true","false","null","from","from_cloud","verify","global"] {
             assert!(hover_keyword(kw).is_some(), "missing hover for keyword: {}", kw);
         }
+    }
+
+    #[test]
+    fn hover_regex_valid_pattern() {
+        // Should contain a regex101 link
+        let result = hover_regex(&[], 0); // no tokens → no pattern
+        assert!(result.contains("r:(...)"));
+    }
+
+    #[test]
+    fn blob_preview_image_small() {
+        // PNG magic bytes
+        let png_header = vec![0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_header);
+        let preview = build_blob_preview(&png_header, &b64, "image/png");
+        assert!(preview.contains("data:image/png;base64,"), "should embed image");
+    }
+
+    #[test]
+    fn blob_preview_audio() {
+        let wav_header = vec![0x52u8, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00];
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&wav_header);
+        let preview = build_blob_preview(&wav_header, &b64, "audio/wav");
+        assert!(preview.contains("🔊"), "should show audio icon");
     }
 }

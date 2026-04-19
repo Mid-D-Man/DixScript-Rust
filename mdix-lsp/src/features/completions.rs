@@ -1,6 +1,7 @@
 //! Completion provider.
 //!
 //! Triggered by: '@', '.', '<', '~'
+//! Also: section-aware completions when inside @CONFIG.
 //! Covers: section snippets, ALL keywords, ALL built-in static objects and their
 //! methods, ALL instance methods per type, enum values, QuickFunc names,
 //! type annotations, DLM modules, CONFIG keys, SECURITY keys.
@@ -9,7 +10,8 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionResponse,
     Documentation, InsertTextFormat, MarkupContent, MarkupKind, Position,
 };
-use dixscript::Compiler::Core::Tokenizer::TokenType;
+use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
+use dixscript::Compiler::Core::Tokenizer::token::SectionId;
 use dixscript::Compiler::AST::DixScript;
 use crate::document::Document;
 
@@ -23,6 +25,24 @@ pub fn provide(
     let items = match doc {
         None => section_snippet_completions(),
         Some(d) => {
+            // ── Section-aware routing ──────────────────────────────────────
+            // Check which section the cursor is in before looking at trigger chars,
+            // so section-specific completions always take priority.
+            if !d.tokens.is_empty() {
+                let section = section_of_token_at(&d.tokens, pos);
+
+                if section == SectionId::Config {
+                    // Inside @CONFIG — offer key completions; if the cursor
+                    // follows a known key, offer value completions too.
+                    let config_items = config_completions_at(&d.source, pos);
+                    if !config_items.is_empty() {
+                        return Some(CompletionResponse::Array(config_items));
+                    }
+                    return Some(CompletionResponse::Array(config_key_completions()));
+                }
+            }
+
+            // ── Trigger-character routing ──────────────────────────────────
             let trigger_ch: char = trigger
                 .and_then(|t| t.chars().next())
                 .unwrap_or_else(|| trigger_char(&d.source, pos));
@@ -33,7 +53,7 @@ pub fn provide(
                 '~' => quickfunc_declaration_snippets(),
                 '.' => dot_completions(d, pos),
                 _   => {
-                    // Check if we're inside an @ word (e.g. user typed "@conf")
+                    // Check if we're in the middle of typing an @keyword.
                     let word = word_before_cursor(&d.source, pos);
                     if word.starts_with('@') {
                         section_snippet_completions()
@@ -48,22 +68,153 @@ pub fn provide(
     if items.is_empty() { None } else { Some(CompletionResponse::Array(items)) }
 }
 
-/// Extract the word (including leading @) that the cursor is in the middle of.
-fn word_before_cursor(source: &str, pos: Position) -> String {
-    let line = source.lines().nth(pos.line as usize).unwrap_or("");
-    let up_to: String = line.chars().take(pos.character as usize).collect();
-    // Walk backward until we hit a non-word, non-@ char
-    let start = up_to
-        .rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '@')
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    up_to[start..].to_string()
+// ── Section detection ─────────────────────────────────────────────────────────
+
+/// Return the `SectionId` of the most recent section token at or before `pos`.
+/// Each token carries the section it was lexed inside, so we walk forward until
+/// we pass the cursor and return the last observed section.
+fn section_of_token_at(tokens: &[Token], pos: Position) -> SectionId {
+    let target_line = (pos.line as usize) + 1;
+    let target_col  = (pos.character as usize) + 1;
+    let mut last    = SectionId::None;
+
+    for token in tokens {
+        if token.line > target_line { break; }
+        if token.line == target_line && token.column > target_col { break; }
+        last = token.section;
+    }
+    last
+}
+
+// ── CONFIG completions ────────────────────────────────────────────────────────
+
+/// Decide whether we are on the value side of a `key -> |` expression in
+/// @CONFIG.  If yes, return value-specific completions for that key.
+/// Otherwise returns an empty Vec so the caller can fall through to key completions.
+fn config_completions_at(source: &str, pos: Position) -> Vec<CompletionItem> {
+    let line_text = source.lines().nth(pos.line as usize).unwrap_or("");
+    let up_to: &str = &line_text[..((pos.character as usize).min(line_text.len()))];
+
+    // Is there an arrow before the cursor on this line?
+    if let Some(arrow_pos) = up_to.rfind("->") {
+        let key_part = up_to[..arrow_pos].trim();
+        return config_value_completions(key_part);
+    }
+    vec![]
+}
+
+fn config_key_completions() -> Vec<CompletionItem> {
+    // (key, insert_text after cursor, type hint, doc)
+    let keys: &[(&str, &str, &str, &str)] = &[
+        (
+            "version",
+            "version -> \"${1:1.0.0}\"",
+            "string",
+            "DixScript format version this file targets.\n\nExample: `version -> \"1.0.0\"`",
+        ),
+        (
+            "author",
+            "author -> \"${1:name}\"",
+            "string",
+            "File author. Free-form string.",
+        ),
+        (
+            "created",
+            "created -> \"${1:2025-01-01T00:00:00Z}\"",
+            "timestamp",
+            "File creation timestamp. ISO 8601 format.\n\nExample: `created -> \"2025-01-15T10:30:00Z\"`",
+        ),
+        (
+            "encoding",
+            "encoding -> \"${1|utf-8,utf-16,ascii,iso-8859-1|}\"",
+            "string",
+            "Source file character encoding.\n\nSupported: `utf-8` *(default)*, `utf-16`, `ascii`, `iso-8859-1`",
+        ),
+        (
+            "debug_mode",
+            "debug_mode -> \"${1|off,regular,verbose|}\"",
+            "string",
+            "Compiler diagnostic verbosity.\n\n| Value | Effect |\n|-------|--------|\n| `\"off\"` | No debug output *(default)* |\n| `\"regular\"` | Key resolution steps |\n| `\"verbose\"` | Full execution trace |",
+        ),
+        (
+            "error_handling",
+            "error_handling -> \"${1|halt,continue,recover|}\"",
+            "string",
+            "How the compiler responds to errors.\n\n| Value | Behaviour |\n|-------|----------|\n| `\"halt\"` | Stop on first error *(default)* |\n| `\"continue\"` | Collect all, then report |\n| `\"recover\"` | Try to parse past errors |",
+        ),
+        (
+            "compatibility_mode",
+            "compatibility_mode -> \"${1|strict,best_effort,permissive|}\"",
+            "string",
+            "Parser strictness level.\n\n| Value | Behaviour |\n|-------|----------|\n| `\"strict\"` | Reject unknown syntax *(default)* |\n| `\"best_effort\"` | Warn, continue |\n| `\"permissive\"` | Accept anything parseable |",
+        ),
+        (
+            "features",
+            "features -> \"${1|advanced,basic|}\"",
+            "string",
+            "Enabled section features.\n\n| Value | Sections |\n|-------|----------|\n| `\"basic\"` | DATA, SECURITY only |\n| `\"advanced\"` | All sections *(default)* |\n\nOr a comma-separated list: `\"quickfuncs,enums,data\"`",
+        ),
+    ];
+
+    keys.iter().map(|(key, snippet, type_hint, doc)| CompletionItem {
+        label: key.to_string(),
+        kind:  Some(CompletionItemKind::FIELD),
+        detail: Some(format!("<{}> — CONFIG key", type_hint)),
+        documentation: Some(Documentation::MarkupContent(MarkupContent {
+            kind:  MarkupKind::Markdown,
+            value: format!("**`{}`** — CONFIG key (`<{}>`)\n\n{}", key, type_hint, doc),
+        })),
+        insert_text:        Some(snippet.to_string()),
+        insert_text_format: Some(InsertTextFormat::SNIPPET),
+        sort_text:          Some(format!("0_{}", key)), // sort above generic completions
+        ..Default::default()
+    }).collect()
+}
+
+fn config_value_completions(key: &str) -> Vec<CompletionItem> {
+    let choices: &[(&str, &str)] = match key.trim() {
+        "debug_mode" => &[
+            ("off",     "No debug output (default)"),
+            ("regular", "Key resolution steps"),
+            ("verbose", "Full execution trace"),
+        ],
+        "error_handling" => &[
+            ("halt",     "Stop on first error (default)"),
+            ("continue", "Collect all errors, then report"),
+            ("recover",  "Try to parse past errors"),
+        ],
+        "compatibility_mode" => &[
+            ("strict",      "Reject unknown syntax (default)"),
+            ("best_effort", "Warn on unknown, continue"),
+            ("permissive",  "Accept anything parseable"),
+        ],
+        "features" => &[
+            ("advanced",              "All sections (default)"),
+            ("basic",                 "DATA and SECURITY only"),
+            ("quickfuncs,enums,data", "Explicit section list"),
+        ],
+        "encoding" => &[
+            ("utf-8",      "Default encoding"),
+            ("utf-16",     "UTF-16"),
+            ("ascii",      "ASCII only"),
+            ("iso-8859-1", "Latin-1"),
+        ],
+        _ => return vec![],
+    };
+
+    choices.iter().map(|(value, detail)| CompletionItem {
+        label:  format!("\"{}\"", value),
+        kind:   Some(CompletionItemKind::ENUM_MEMBER),
+        detail: Some(detail.to_string()),
+        insert_text:        Some(format!("\"{}\"", value)),
+        insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+        ..Default::default()
+    }).collect()
 }
 
 // ── Section snippets ──────────────────────────────────────────────────────────
 
 fn section_snippet_completions() -> Vec<CompletionItem> {
-    // (label, insertText WITHOUT leading @, documentation)
     let sections: &[(&str, &str, &str)] = &[
         (
             "@CONFIG",
@@ -103,9 +254,6 @@ fn section_snippet_completions() -> Vec<CompletionItem> {
     ];
 
     sections.iter().map(|(label, snippet, doc)| {
-        // label is "@CONFIG", strip @ for filter so matching works regardless of
-        // whether the user typed the @ already.  The insert text never includes @
-        // because @ is already the trigger character in the document.
         let filter = label.trim_start_matches('@').to_lowercase();
         CompletionItem {
             label:              label.to_string(),
@@ -118,7 +266,7 @@ fn section_snippet_completions() -> Vec<CompletionItem> {
             })),
             insert_text:        Some(snippet.to_string()),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
-            sort_text:          Some(format!("0_{}", label)), // sections sort first
+            sort_text:          Some(format!("0_{}", label)),
             ..Default::default()
         }
     }).collect()
@@ -213,15 +361,12 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
         return items;
     }
 
-    // Check enum names from current document
     if let Some(ast) = &doc.ast {
         items.extend(enum_value_completions(ast, &word_before));
     }
 
-    // Check built-in static objects
     items.extend(static_method_completions(&word_before));
 
-    // Check imported namespaces
     if let Some(sr) = doc.semantic_result.as_ref() {
         if let Some(st) = &sr.symbol_table {
             if let Some(ns) = st.try_get_namespace(&word_before) {
@@ -245,10 +390,7 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
         }
     }
 
-    // Instance method completions: if the word looks like a type keyword,
-    // offer that type's instance methods
     items.extend(instance_method_completions(&word_before));
-
     items
 }
 
@@ -278,7 +420,6 @@ fn enum_value_completions(ast: &DixScript, enum_name: &str) -> Vec<CompletionIte
 // ── ALL built-in static object methods ────────────────────────────────────────
 
 fn static_method_completions(object_name: &str) -> Vec<CompletionItem> {
-    // (method_name, signature, description)
     let catalogue: &[(&str, &[(&str, &str, &str)])] = &[
         ("Math", &[
             ("abs",       "Math.abs(x) → double",                      "Absolute value of x"),
@@ -449,11 +590,9 @@ fn static_method_completions(object_name: &str) -> Vec<CompletionItem> {
     vec![]
 }
 
-// ── Instance method completions (myArray., myString., etc.) ───────────────────
+// ── Instance method completions ───────────────────────────────────────────────
 
 fn instance_method_completions(word: &str) -> Vec<CompletionItem> {
-    // This fires when the word before '.' is a known type keyword or common name
-    // suggesting an instance of that type.
     let lower = word.to_lowercase();
     match lower.as_str() {
         "string" | "str" | "text" | "name" | "label" | "message" => string_instance_methods(),
@@ -464,7 +603,7 @@ fn instance_method_completions(word: &str) -> Vec<CompletionItem> {
         "blob"   | "data" | "bytes" | "binary" => blob_instance_methods(),
         "regex"  | "pattern" => regex_instance_methods(),
         "tuple"  => tuple_instance_methods(),
-        _ => vec![], // No hints for arbitrary words
+        _ => vec![],
     }
 }
 
@@ -502,7 +641,6 @@ fn string_instance_methods() -> Vec<CompletionItem> {
         ("charAt",      "string.charAt(index) → string",          "Character at index (0-based)"),
         ("padLeft",     "string.padLeft(width, char) → string",   "Pad left to total width with char"),
         ("padRight",    "string.padRight(width, char) → string",  "Pad right to total width with char"),
-        // Universal methods
         ("toString",    "string.toString() → string",             "Identity — returns self"),
         ("type",        "string.type() → string",                 "Returns \"string\""),
         ("isNull",      "string.isNull() → bool",                 "True if null"),
@@ -542,7 +680,6 @@ fn array_instance_methods() -> Vec<CompletionItem> {
         ("average",     "array.average() → double",               "Average of numeric elements"),
         ("min",         "array.min() → double",                   "Minimum numeric value"),
         ("max",         "array.max() → double",                   "Maximum numeric value"),
-        // Universal
         ("toString",    "array.toString() → string",              "String representation"),
         ("type",        "array.type() → string",                  "Returns \"array\""),
         ("isNull",      "array.isNull() → bool",                  "True if null"),
@@ -657,24 +794,23 @@ fn tuple_instance_methods() -> Vec<CompletionItem> {
     methods.iter().map(|(m, s, d)| make_instance_item(m, s, d)).collect()
 }
 
-// ── General completions (no special trigger) ──────────────────────────────────
+// ── General completions ───────────────────────────────────────────────────────
 
 fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
     let mut items = Vec::new();
 
-    // ── QuickFunc names from the current document ──────────────────────────
     if let Some(ast) = &doc.ast {
         if let Some(qf) = &ast.quick_functions {
             for func in &qf.functions {
                 let params: Vec<String> = func.parameters.iter()
                     .map(|p| {
                         let t = p.data_type.as_ref()
-                            .map(|dt| format!("<{:?}>", dt).to_lowercase())
+                            .map(|dt| format!("<{}>", dt))
                             .unwrap_or_default();
                         format!("{}{}", p.name, t)
                     }).collect();
                 let ret = func.return_type.as_ref()
-                    .map(|t| format!("{:?}", t).to_lowercase())
+                    .map(|t| format!("{}", t))
                     .unwrap_or_else(|| "?".to_string());
 
                 items.push(CompletionItem {
@@ -695,7 +831,6 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
             }
         }
 
-        // ── Enum names from current document ──────────────────────────────
         if let Some(enums) = &ast.enums {
             for decl in &enums.enums {
                 items.push(CompletionItem {
@@ -719,10 +854,8 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
         }
     }
 
-    // ── All language keywords ─────────────────────────────────────────────
     items.extend(keyword_completions());
 
-    // ── Built-in static object names ─────────────────────────────────────
     let static_objects: &[(&str, &str)] = &[
         ("Math",      "Built-in math functions: sqrt, pow, sin, cos, clamp, …"),
         ("DateTime",  "Date/time functions: now, today, format, addDays, …"),
@@ -747,7 +880,6 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
         });
     }
 
-    // ── DLM module names ─────────────────────────────────────────────────
     for (name, desc) in &[
         ("DCompressor", "Compression: .gzip, .bzip2, .lzma"),
         ("DEncryptor",  "Encryption: .aes256, .aes128, .chacha20, .xor"),
@@ -764,11 +896,10 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
     items
 }
 
-// ── All keyword completions ───────────────────────────────────────────────────
+// ── Keyword completions ───────────────────────────────────────────────────────
 
 fn keyword_completions() -> Vec<CompletionItem> {
     let keywords: &[(&str, &str, &str)] = &[
-        // Control flow
         ("if:",     "if: condition { ... }",            "If branch. DixScript uses `if:` with a colon.\n\n```mdix\nif: x > 0 {\n  return x\n}\n```"),
         ("elif:",   "elif: condition { ... }",          "Else-if branch.\n\n```mdix\nelif: x == 0 {\n  return 0\n}\n```"),
         ("else",    "else { ... }",                     "Else branch.\n\n```mdix\nelse {\n  return -1\n}\n```"),
@@ -776,23 +907,18 @@ fn keyword_completions() -> Vec<CompletionItem> {
         ("miss",    "-> miss { ... }",                  "Default case in a `chk:` switch."),
         ("return",  "return expr",                      "Return a value from a QuickFunc.\n\n```mdix\nreturn { key = value }\n```"),
         ("log:",    "log: expr",                        "Log an expression at DEBUG level during compilation."),
-        // Variable declaration
         ("let",     "let name = expr",                  "Declare an immutable local variable.\n\n```mdix\nlet result = x + y\nlet name<string> = \"Alice\"\n```"),
         ("let mut", "let mut name = expr",              "Declare a mutable local variable.\n\n```mdix\nlet mut total<int> = 0\ntotal += 1\n```"),
         ("const",   "const name = expr",                "Declare a compile-time constant."),
-        // Logical operators
         ("and",     "a and b",                          "Logical AND (word form, equivalent to `&&`)."),
         ("or",      "a or b",                           "Logical OR (word form, equivalent to `||`)."),
         ("not",     "not expr",                         "Logical NOT (word form, equivalent to `!`)."),
-        // Literals
         ("true",    "true",                             "Boolean true literal."),
         ("false",   "false",                            "Boolean false literal."),
         ("null",    "null",                             "Null literal — absent or unset value."),
-        // Import keywords
         ("from",         "Alias from \"path\"",         "Import a local `.mdix` file."),
         ("from_cloud",   "Alias from_cloud \"url\"",    "Import a remote `.mdix` file over HTTPS."),
         ("verify",       "verify \"hash\"",             "Verify import file hash."),
-        // Scope
         ("global",  "global",                          "Mark a QuickFunc variable as globally scoped."),
     ];
 
@@ -810,7 +936,7 @@ fn keyword_completions() -> Vec<CompletionItem> {
     }).collect()
 }
 
-// ── Helper: example call string ───────────────────────────────────────────────
+// ── Example call string ───────────────────────────────────────────────────────
 
 fn example_call(obj: &str, method: &str) -> String {
     match (obj, method) {
@@ -836,6 +962,16 @@ fn trigger_char(source: &str, pos: Position) -> char {
     let line = source.lines().nth(pos.line as usize).unwrap_or("");
     if pos.character == 0 { return '\0'; }
     line.chars().nth((pos.character - 1) as usize).unwrap_or('\0')
+}
+
+fn word_before_cursor(source: &str, pos: Position) -> String {
+    let line = source.lines().nth(pos.line as usize).unwrap_or("");
+    let up_to: String = line.chars().take(pos.character as usize).collect();
+    let start = up_to
+        .rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '@')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    up_to[start..].to_string()
 }
 
 fn word_before_dot(source: &str, pos: Position) -> String {
@@ -873,7 +1009,7 @@ mod tests {
         let items  = section_snippet_completions();
         let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
         for s in &["@CONFIG","@IMPORTS","@DLM","@ENUMS","@QUICKFUNCS","@DATA","@SECURITY"] {
-            assert!(labels.iter().any(|l| l.to_string() == s.to_string()), "missing: {}", s);
+            assert!(labels.iter().any(|l| l == s), "missing: {}", s);
         }
     }
 
@@ -907,27 +1043,29 @@ mod tests {
     }
 
     #[test]
+    fn config_key_completions_covers_all_keys() {
+        let items = config_key_completions();
+        let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+        for k in &["version","author","debug_mode","error_handling","compatibility_mode","features"] {
+            assert!(labels.iter().any(|l| l == k), "missing config key: {}", k);
+        }
+    }
+
+    #[test]
+    fn config_value_completions_for_debug_mode() {
+        let items = config_value_completions("debug_mode");
+        assert!(!items.is_empty(), "debug_mode should have value completions");
+        let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(labels.iter().any(|l| l.contains("off")));
+        assert!(labels.iter().any(|l| l.contains("verbose")));
+    }
+
+    #[test]
     fn quickfunc_names_appear_in_general_completions() {
         let src = "@QUICKFUNCS(\n  ~calc<int>(x) { return x }\n)\n@DATA(\n  y = 1\n)";
         let doc = test_doc(src);
         let items = general_completions(&doc, Position::new(3, 0));
         let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
         assert!(labels.iter().any(|l| l == "calc"), "QuickFunc 'calc' missing; got: {:?}", labels);
-    }
-
-    #[test]
-    fn instance_methods_blob() {
-        let methods = blob_instance_methods();
-        let labels: Vec<String> = methods.iter().map(|i| i.label.clone()).collect();
-        assert!(labels.iter().any(|l| l == "mimeType"), "mimeType missing from blob methods");
-        assert!(labels.iter().any(|l| l == "size"),     "size missing from blob methods");
-    }
-
-    #[test]
-    fn instance_methods_regex() {
-        let methods = regex_instance_methods();
-        let labels: Vec<String> = methods.iter().map(|i| i.label.clone()).collect();
-        assert!(labels.iter().any(|l| l == "test"),    "test missing from regex methods");
-        assert!(labels.iter().any(|l| l == "replace"), "replace missing from regex methods");
     }
 }

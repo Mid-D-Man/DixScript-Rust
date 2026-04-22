@@ -1,10 +1,5 @@
+// mdix-lsp/src/features/completions.rs
 //! Completion provider.
-//!
-//! Triggered by: '@', '.', '<', '~'
-//! Also: section-aware completions when inside @CONFIG.
-//! Covers: section snippets, ALL keywords, ALL built-in static objects and their
-//! methods, ALL instance methods per type, enum values, QuickFunc names,
-//! type annotations, DLM modules, CONFIG keys, SECURITY keys.
 
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionResponse,
@@ -26,14 +21,10 @@ pub fn provide(
         None => section_snippet_completions(),
         Some(d) => {
             // ── Section-aware routing ──────────────────────────────────────
-            // Check which section the cursor is in before looking at trigger chars,
-            // so section-specific completions always take priority.
             if !d.tokens.is_empty() {
                 let section = section_of_token_at(&d.tokens, pos);
 
                 if section == SectionId::Config {
-                    // Inside @CONFIG — offer key completions; if the cursor
-                    // follows a known key, offer value completions too.
                     let config_items = config_completions_at(&d.source, pos);
                     if !config_items.is_empty() {
                         return Some(CompletionResponse::Array(config_items));
@@ -52,8 +43,7 @@ pub fn provide(
                 '<' => type_annotation_completions(),
                 '~' => quickfunc_declaration_snippets(),
                 '.' => dot_completions(d, pos),
-                _   => {
-                    // Check if we're in the middle of typing an @keyword.
+                _ => {
                     let word = word_before_cursor(&d.source, pos);
                     if word.starts_with('@') {
                         section_snippet_completions()
@@ -70,9 +60,6 @@ pub fn provide(
 
 // ── Section detection ─────────────────────────────────────────────────────────
 
-/// Return the `SectionId` of the most recent section token at or before `pos`.
-/// Each token carries the section it was lexed inside, so we walk forward until
-/// we pass the cursor and return the last observed section.
 fn section_of_token_at(tokens: &[Token], pos: Position) -> SectionId {
     let target_line = (pos.line as usize) + 1;
     let target_col  = (pos.character as usize) + 1;
@@ -88,14 +75,10 @@ fn section_of_token_at(tokens: &[Token], pos: Position) -> SectionId {
 
 // ── CONFIG completions ────────────────────────────────────────────────────────
 
-/// Decide whether we are on the value side of a `key -> |` expression in
-/// @CONFIG.  If yes, return value-specific completions for that key.
-/// Otherwise returns an empty Vec so the caller can fall through to key completions.
 fn config_completions_at(source: &str, pos: Position) -> Vec<CompletionItem> {
     let line_text = source.lines().nth(pos.line as usize).unwrap_or("");
     let up_to: &str = &line_text[..((pos.character as usize).min(line_text.len()))];
 
-    // Is there an arrow before the cursor on this line?
     if let Some(arrow_pos) = up_to.rfind("->") {
         let key_part = up_to[..arrow_pos].trim();
         return config_value_completions(key_part);
@@ -104,7 +87,6 @@ fn config_completions_at(source: &str, pos: Position) -> Vec<CompletionItem> {
 }
 
 fn config_key_completions() -> Vec<CompletionItem> {
-    // (key, insert_text after cursor, type hint, doc)
     let keys: &[(&str, &str, &str, &str)] = &[
         (
             "version",
@@ -166,7 +148,8 @@ fn config_key_completions() -> Vec<CompletionItem> {
         })),
         insert_text:        Some(snippet.to_string()),
         insert_text_format: Some(InsertTextFormat::SNIPPET),
-        sort_text:          Some(format!("0_{}", key)), // sort above generic completions
+        sort_text:          Some(format!("0_{}", key)),
+        filter_text:        None, // use label for filtering
         ..Default::default()
     }).collect()
 }
@@ -208,6 +191,7 @@ fn config_value_completions(key: &str) -> Vec<CompletionItem> {
         detail: Some(detail.to_string()),
         insert_text:        Some(format!("\"{}\"", value)),
         insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+        filter_text:        None,
         ..Default::default()
     }).collect()
 }
@@ -254,12 +238,14 @@ fn section_snippet_completions() -> Vec<CompletionItem> {
     ];
 
     sections.iter().map(|(label, snippet, doc)| {
-        let filter = label.trim_start_matches('@').to_lowercase();
+        // IMPORTANT: filter_text must be None (use label) so VSCode doesn't
+        // strip completions when the user types '@'.  Previously filter_text
+        // was the bare name without '@', which caused every item to be hidden.
         CompletionItem {
             label:              label.to_string(),
             kind:               Some(CompletionItemKind::MODULE),
             detail:             Some("DixScript section".to_string()),
-            filter_text:        Some(filter),
+            filter_text:        None, // VSCode uses label "@CONFIG" etc. — matches when user types @
             documentation:      Some(Documentation::MarkupContent(MarkupContent {
                 kind:  MarkupKind::Markdown,
                 value: doc.to_string(),
@@ -303,6 +289,7 @@ fn type_annotation_completions() -> Vec<CompletionItem> {
         })),
         insert_text:        Some(name.to_string()),
         insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+        filter_text:        None,
         ..Default::default()
     }).collect()
 }
@@ -348,11 +335,12 @@ fn quickfunc_declaration_snippets() -> Vec<CompletionItem> {
         })),
         insert_text:        Some(snippet.to_string()),
         insert_text_format: Some(InsertTextFormat::SNIPPET),
+        filter_text:        None,
         ..Default::default()
     }).collect()
 }
 
-// ── Dot completions (EnumName. → values, StaticObj. → methods) ───────────────
+// ── Dot completions ───────────────────────────────────────────────────────────
 
 fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
     let mut items = Vec::new();
@@ -375,6 +363,7 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
                         label:  func_name.clone(),
                         kind:   Some(CompletionItemKind::FUNCTION),
                         detail: Some(format!("imported from {}", ns.alias)),
+                        filter_text: None,
                         ..Default::default()
                     });
                 }
@@ -383,6 +372,7 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
                         label:  enum_name.clone(),
                         kind:   Some(CompletionItemKind::ENUM),
                         detail: Some(format!("enum from {}", ns.alias)),
+                        filter_text: None,
                         ..Default::default()
                     });
                 }
@@ -409,6 +399,7 @@ fn enum_value_completions(ast: &DixScript, enum_name: &str) -> Vec<CompletionIte
                         value: format!("**{}.{}** — enum member\n\nUsage: `{}.{}`",
                                        enum_name, f.name, enum_name, f.name),
                     })),
+                    filter_text: None,
                     ..Default::default()
                 }
             }).collect();
@@ -583,6 +574,7 @@ fn static_method_completions(object_name: &str) -> Vec<CompletionItem> {
                 })),
                 insert_text:        Some(format!("{}(", method)),
                 insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+                filter_text:        None,
                 ..Default::default()
             }).collect();
         }
@@ -618,6 +610,7 @@ fn make_instance_item(method: &str, sig: &str, desc: &str) -> CompletionItem {
         })),
         insert_text:        Some(format!("{}(", method)),
         insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+        filter_text:        None,
         ..Default::default()
     }
 }
@@ -826,6 +819,7 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
                     })),
                     insert_text:        Some(format!("{}(", func.name)),
                     insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+                    filter_text:        None,
                     ..Default::default()
                 });
             }
@@ -848,6 +842,7 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
                                        }).collect::<Vec<_>>().join(", ")
                         ),
                     })),
+                    filter_text: None,
                     ..Default::default()
                 });
             }
@@ -876,6 +871,7 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
                 kind:  MarkupKind::Markdown,
                 value: format!("**`{}`** — built-in static object\n\n{}\n\nType `.` after this name to see all methods.", name, desc),
             })),
+            filter_text: None,
             ..Default::default()
         });
     }
@@ -889,6 +885,7 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
             label:  name.to_string(),
             kind:   Some(CompletionItemKind::MODULE),
             detail: Some(desc.to_string()),
+            filter_text: None,
             ..Default::default()
         });
     }
@@ -932,6 +929,7 @@ fn keyword_completions() -> Vec<CompletionItem> {
         })),
         insert_text:        Some(label.to_string()),
         insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+        filter_text:        None,
         ..Default::default()
     }).collect()
 }
@@ -1010,6 +1008,10 @@ mod tests {
         let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
         for s in &["@CONFIG","@IMPORTS","@DLM","@ENUMS","@QUICKFUNCS","@DATA","@SECURITY"] {
             assert!(labels.iter().any(|l| l == s), "missing: {}", s);
+        }
+        // Verify filter_text is None (the fix) — VSCode uses label for filtering
+        for item in &items {
+            assert!(item.filter_text.is_none(), "filter_text must be None for section snippets");
         }
     }
 

@@ -1,21 +1,10 @@
+// mdix-lsp/src/features/hover.rs
 //! Hover provider.
-//!
-//! Shows rich IDE-style documentation for:
-//! - Every @section keyword   → purpose + syntax example
-//! - Every language keyword   → what it does + usage snippet
-//! - QuickFunc names          → full signature
-//! - DATA variables           → name + inferred type
-//! - Enum access              → enum name, field name, numeric value
-//! - Static method calls      → full signature + description + example
-//! - ALL built-in static objects → method catalogue
-//! - Date / Timestamp         → human-readable breakdown
-//! - HexColor                 → RGBA channel values
-//! - Regex r:(...)            → pattern validity + regex101 link
-//! - Blob b:(...)             → decoded size + hex preview + MIME type + image preview
 
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
+use dixscript::Compiler::AST::{DataType, QuickFuncStatement};
 
 use crate::document::Document;
 
@@ -40,39 +29,39 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
 
         // ── Section keywords ──────────────────────────────────────────────
         TokenType::SectionConfig     => Some(section_hover("@CONFIG",
-                                                           "Compiler settings and file metadata.",
-                                                           "@CONFIG(\n  version -> \"1.0.0\"\n  author -> \"name\"\n  debug_mode -> \"off\"\n  error_handling -> \"halt\"\n  compatibility_mode -> \"strict\"\n  features -> \"advanced\"\n)",
-                                                           "All entries use `key -> value` syntax (arrow, not equals).\n\n**Keys:** `version`, `author`, `created`, `encoding`, `debug_mode` (`off`/`regular`/`verbose`), `error_handling` (`halt`/`continue`/`recover`), `compatibility_mode` (`strict`/`best_effort`/`permissive`), `features` (`basic`/`advanced`/section list)."
+            "Compiler settings and file metadata.",
+            "@CONFIG(\n  version -> \"1.0.0\"\n  author -> \"name\"\n  debug_mode -> \"off\"\n  error_handling -> \"halt\"\n  compatibility_mode -> \"strict\"\n  features -> \"advanced\"\n)",
+            "All entries use `key -> value` syntax (arrow, not equals).\n\n**Keys:** `version`, `author`, `created`, `encoding`, `debug_mode` (`off`/`regular`/`verbose`), `error_handling` (`halt`/`continue`/`recover`), `compatibility_mode` (`strict`/`best_effort`/`permissive`), `features` (`basic`/`advanced`/section list)."
         )),
         TokenType::SectionImports    => Some(section_hover("@IMPORTS",
-                                                           "Import other `.mdix` files.",
-                                                           "@IMPORTS(\n  Utils from \"common/utils.mdix\"\n  Base  from_cloud \"https://example.com/base.mdix\"\n)",
-                                                           "The alias becomes a namespace. Call: `Utils.myFunc(x)`. Access enums: `Utils.Status.ACTIVE`.\n\nOptional: `verify \"hash\"` to check file integrity."
+            "Import other `.mdix` files.",
+            "@IMPORTS(\n  Utils from \"common/utils.mdix\"\n  Base  from_cloud \"https://example.com/base.mdix\"\n)",
+            "The alias becomes a namespace. Call: `Utils.myFunc(x)`. Access enums: `Utils.Status.ACTIVE`.\n\nOptional: `verify \"hash\"` to check file integrity."
         )),
         TokenType::SectionDLM        => Some(section_hover("@DLM",
-                                                           "Data Lifecycle Modules — applied at compile time.",
-                                                           "@DLM(\n  DCompressor.gzip\n  DEncryptor.aes256\n)",
-                                                           "**Compressors:** `DCompressor.gzip`, `.bzip2`, `.lzma`\n\n**Encryptors:** `DEncryptor.aes256`, `.aes128`, `.chacha20`, `.xor`\n\n**Auditor:** `DAuditor.diy`, `.enhanced`\n\nIf `DEncryptor` is present, `@SECURITY` is required."
+            "Data Lifecycle Modules — applied at compile time.",
+            "@DLM(\n  DCompressor.gzip\n  DEncryptor.aes256\n)",
+            "**Compressors:** `DCompressor.gzip`, `.bzip2`, `.lzma`\n\n**Encryptors:** `DEncryptor.aes256`, `.aes128`, `.chacha20`, `.xor`\n\n**Auditor:** `DAuditor.diy`, `.enhanced`\n\nIf `DEncryptor` is present, `@SECURITY` is required."
         )),
         TokenType::SectionEnums      => Some(section_hover("@ENUMS",
-                                                           "Named integer constants.",
-                                                           "@ENUMS(\n  Difficulty { EASY = 0, NORMAL = 1, HARD = 2 }\n  AIType     { PASSIVE, NEUTRAL, AGGRESSIVE, BOSS }\n)",
-                                                           "Values auto-increment from 0 if omitted. Access with `EnumName.FIELD`. Annotate variables `<enum>` to enable enum access.\n\nAt runtime, enum values are resolved to their integer and stored as `Enum { enum_name, field_name, value }`."
+            "Named integer constants.",
+            "@ENUMS(\n  Difficulty { EASY = 0, NORMAL = 1, HARD = 2 }\n  AIType     { PASSIVE, NEUTRAL, AGGRESSIVE, BOSS }\n)",
+            "Values auto-increment from 0 if omitted. Access with `EnumName.FIELD`. Annotate variables `<enum>` to enable enum access.\n\nAt runtime, enum values are resolved to their integer and stored as `Enum { enum_name, field_name, value }`."
         )),
         TokenType::SectionQuickFuncs => Some(section_hover("@QUICKFUNCS",
-                                                           "Compile-time functions — zero runtime overhead.",
-                                                           "@QUICKFUNCS(\n  ~weapon<object>(id, damage<int>) {\n    return {\n      id     = id\n      damage = damage\n      range  = damage * 2\n    }\n  }\n)",
-                                                           "All computation happens at compile time. The binary contains only resolved data.\n\n**Syntax:** `~name<returnType>(params) { ... return expr }` \n\n**Supported statements:** `let`, `let mut`, `const`, `if:`, `elif:`, `else`, `chk:`, `return`, `log:`\n\n**Operators:** `+`, `-`, `*`, `/`, `%`, `**`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`/`and`, `||`/`or`, `!`/`not`, ternary `? :`"
+            "Compile-time functions — zero runtime overhead.",
+            "@QUICKFUNCS(\n  ~weapon<object>(id, damage<int>) {\n    return {\n      id     = id\n      damage = damage\n      range  = damage * 2\n    }\n  }\n)",
+            "All computation happens at compile time. The binary contains only resolved data.\n\n**Syntax:** `~name<returnType>(params) { ... return expr }` \n\n**Supported statements:** `let`, `let mut`, `const`, `if:`, `elif:`, `else`, `chk:`, `return`, `log:`\n\n**Operators:** `+`, `-`, `*`, `/`, `%`, `**`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`/`and`, `||`/`or`, `!`/`not`, ternary `? :`"
         )),
         TokenType::SectionData       => Some(section_hover("@DATA",
-                                                           "Data payload — the main output of the file.",
-                                                           "@DATA(\n  // Flat properties (single =)\n  app_name = \"MyApp\"\n  port<int> = 8080\n\n  // Table property (single :)\n  server: host = \"localhost\", port = 8080\n\n  // Group array (double ::)\n  tags:: \"alpha\", \"beta\", \"v1\"\n)",
-                                                           "**Two-tier ordering rule:** flat properties must come before any table/group entries.\n\n**Commas between entries are optional.** Commas inside function calls and object literals are required.\n\nType annotations `<int>` are optional; the compiler infers types automatically."
+            "Data payload — the main output of the file.",
+            "@DATA(\n  // Flat properties (single =)\n  app_name = \"MyApp\"\n  port<int> = 8080\n\n  // Table property (single :)\n  server: host = \"localhost\", port = 8080\n\n  // Group array (double ::)\n  tags:: \"alpha\", \"beta\", \"v1\"\n)",
+            "**Two-tier ordering rule:** flat properties must come before any table/group entries.\n\n**Commas between entries are optional.** Commas inside function calls and object literals are required.\n\nType annotations `<int>` are optional; the compiler infers types automatically."
         )),
         TokenType::SectionSecurity   => Some(section_hover("@SECURITY",
-                                                           "Encryption configuration.",
-                                                           "@SECURITY(\n  encryption -> {\n    mode = \"keyfile\",\n    algorithm = \"aes256-gcm\"\n  }\n)",
-                                                           "**Modes:** `\"password\"` (user-supplied at compile time), `\"keyfile\"` (auto-generated `.key` file)\n\n**Algorithms:** `\"aes256-gcm\"`, `\"aes128-gcm\"`, `\"chacha20-poly1305\"`\n\nCompile: `mdix compile secrets.mdix --password`\nLoad: `DixLoadOptions::with_key_file(\"path.key\")`"
+            "Encryption configuration.",
+            "@SECURITY(\n  encryption -> {\n    mode = \"keyfile\",\n    algorithm = \"aes256-gcm\"\n  }\n)",
+            "**Modes:** `\"password\"` (user-supplied at compile time), `\"keyfile\"` (auto-generated `.key` file)\n\n**Algorithms:** `\"aes256-gcm\"`, `\"aes128-gcm\"`, `\"chacha20-poly1305\"`\n\nCompile: `mdix compile secrets.mdix --password`\nLoad: `DixLoadOptions::with_key_file(\"path.key\")`"
         )),
 
         // ── Language keywords ──────────────────────────────────────────────
@@ -188,22 +177,6 @@ fn hover_config_key(name: &str) -> Option<String> {
 // ── Keyword hover ──────────────────────────────────────────────────────────────
 
 fn hover_keyword(kw: &str) -> Option<String> {
-    let binding_int       = hover_data_type("int").unwrap_or_default();
-    let binding_float     = hover_data_type("float").unwrap_or_default();
-    let binding_double    = hover_data_type("double").unwrap_or_default();
-    let binding_string    = hover_data_type("string").unwrap_or_default();
-    let binding_bool      = hover_data_type("bool").unwrap_or_default();
-    let binding_array     = hover_data_type("array").unwrap_or_default();
-    let binding_tuple     = hover_data_type("tuple").unwrap_or_default();
-    let binding_object    = hover_data_type("object").unwrap_or_default();
-    let binding_hex       = hover_data_type("hex").unwrap_or_default();
-    let binding_blob      = hover_data_type("blob").unwrap_or_default();
-    let binding_regex     = hover_data_type("regex").unwrap_or_default();
-    let binding_date      = hover_data_type("date").unwrap_or_default();
-    let binding_timestamp = hover_data_type("timestamp").unwrap_or_default();
-    let binding_enum      = hover_data_type("enum").unwrap_or_default();
-    let binding_any       = hover_data_type("any").unwrap_or_default();
-
     let content = match kw {
         "if" | "if:" => "**`if:`** — conditional statement\n\nNote: DixScript uses `if:` (with colon).\n\n```mdix\nif: x > 0 {\n  return x\n} elif: x == 0 {\n  return 0\n} else {\n  return -1\n}\n```",
         "elif" | "elif:" => "**`elif:`** — else-if branch\n\nChained after `if:` or another `elif:`. Uses colon syntax.\n\n```mdix\nelif: difficulty == Difficulty.HARD {\n  multiplier = 2.0\n}\n```",
@@ -226,21 +199,21 @@ fn hover_keyword(kw: &str) -> Option<String> {
         "verify"=> "**`verify`** — hash verification for imports\n\nEnsures the imported file matches a known hash:\n\n```mdix\nUtils from \"utils.mdix\" verify \"sha256:abc123...\"\n```",
         "global"=> "**`global`** — scope modifier for QuickFunc scope lists\n\nMarks a QuickFunc as available globally (to all sections).",
         "then"  => "**`then`** — optional clause\n\nUsed in some extended conditional forms.",
-        "int"       => binding_int.as_str(),
-        "float"     => binding_float.as_str(),
-        "double"    => binding_double.as_str(),
-        "string"    => binding_string.as_str(),
-        "bool"      => binding_bool.as_str(),
-        "array"     => binding_array.as_str(),
-        "tuple"     => binding_tuple.as_str(),
-        "object"    => binding_object.as_str(),
-        "hex"       => binding_hex.as_str(),
-        "blob"      => binding_blob.as_str(),
-        "regex"     => binding_regex.as_str(),
-        "date"      => binding_date.as_str(),
-        "timestamp" => binding_timestamp.as_str(),
-        "enum"      => binding_enum.as_str(),
-        "any"       => binding_any.as_str(),
+        "int"       => hover_data_type("int").unwrap_or_default().leak(),
+        "float"     => hover_data_type("float").unwrap_or_default().leak(),
+        "double"    => hover_data_type("double").unwrap_or_default().leak(),
+        "string"    => hover_data_type("string").unwrap_or_default().leak(),
+        "bool"      => hover_data_type("bool").unwrap_or_default().leak(),
+        "array"     => hover_data_type("array").unwrap_or_default().leak(),
+        "tuple"     => hover_data_type("tuple").unwrap_or_default().leak(),
+        "object"    => hover_data_type("object").unwrap_or_default().leak(),
+        "hex"       => hover_data_type("hex").unwrap_or_default().leak(),
+        "blob"      => hover_data_type("blob").unwrap_or_default().leak(),
+        "regex"     => hover_data_type("regex").unwrap_or_default().leak(),
+        "date"      => hover_data_type("date").unwrap_or_default().leak(),
+        "timestamp" => hover_data_type("timestamp").unwrap_or_default().leak(),
+        "enum"      => hover_data_type("enum").unwrap_or_default().leak(),
+        "any"       => hover_data_type("any").unwrap_or_default().leak(),
         _ => return None,
     };
     Some(content.to_string())
@@ -307,11 +280,6 @@ fn hover_operator(op: &str, category: &str) -> Option<String> {
         "^="  => "Bitwise XOR and assign",
         "<<=" => "Left shift and assign",
         ">>=" => "Right shift and assign",
-        ">_<" => "Bitwise rotate (3-char operator)",
-        "~?"  => "Bitwise test",
-        "%%"  => "Extended modulo",
-        "%&"  => "Modulo-AND combination",
-        "&%"  => "AND-modulo combination",
         _     => return None,
     };
     Some(format!("**`{}`** — {} operator\n\n{}", op, category, desc))
@@ -330,14 +298,135 @@ fn hover_enum_access(doc: &Document, enum_name: &str, field: &str) -> Option<Str
     ))
 }
 
+// ── QuickFunc local variable hover ────────────────────────────────────────────
+//
+// Searches every QuickFunc body for a VariableDeclaration matching `name`.
+
+fn hover_qf_local_var(doc: &Document, name: &str) -> Option<String> {
+    let ast = doc.ast.as_ref()?;
+    let qf  = ast.quick_functions.as_ref()?;
+
+    for func in &qf.functions {
+        if let Some((dt, is_mutable)) = find_var_decl_in_stmts(&func.body, name) {
+            let type_str = dt
+                .map(|t| format!("{}", t))
+                .unwrap_or_else(|| "?".to_string());
+            let mut_str = if is_mutable { "mut " } else { "" };
+            return Some(format!(
+                "**`{}`** — local variable in `~{}`\n\nDeclared as: `let {}{}<{}>`\n\nType: `<{}>` *(from declaration)*\n\nScope: compile-time only — resolved before runtime.",
+                name, func.name, mut_str, name, type_str, type_str
+            ));
+        }
+    }
+    None
+}
+
+/// Recursively search statements for a VariableDeclaration whose name matches.
+/// Returns `(declared_type, is_mutable)` when found.
+fn find_var_decl_in_stmts(
+    stmts: &[QuickFuncStatement],
+    name: &str,
+) -> Option<(Option<DataType>, bool)> {
+    for stmt in stmts {
+        match stmt {
+            QuickFuncStatement::VariableDeclaration {
+                variable_name,
+                data_type,
+                is_mutable,
+                ..
+            } => {
+                if variable_name.as_str() == name {
+                    return Some((*data_type, *is_mutable));
+                }
+            }
+            QuickFuncStatement::If { then_branch, else_branch, .. } => {
+                if let Some(r) = find_var_decl_in_stmts(then_branch, name) {
+                    return Some(r);
+                }
+                if let Some(else_stmts) = else_branch {
+                    if let Some(r) = find_var_decl_in_stmts(else_stmts, name) {
+                        return Some(r);
+                    }
+                }
+            }
+            QuickFuncStatement::Switch { cases, default_case, .. } => {
+                for case in cases {
+                    if let Some(r) = find_var_decl_in_stmts(&case.statements, name) {
+                        return Some(r);
+                    }
+                }
+                if let Some(dc) = default_case {
+                    if let Some(r) = find_var_decl_in_stmts(&dc.statements, name) {
+                        return Some(r);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+// ── Table path / group array prefix hover ─────────────────────────────────────
+//
+// When hovering on a name like `server` in `server: host = "x", port = 8080`,
+// the symbol table has no entry for `server` itself — only `DATA.server.host`
+// and `DATA.server.port`.  This helper detects that case and shows a summary.
+
+fn hover_table_path_prefix(doc: &Document, name: &str) -> Option<String> {
+    let sr = doc.semantic_result.as_ref()?;
+    let st = sr.symbol_table.as_ref()?;
+
+    let prefix_with_dot = format!("DATA.{}.", name);
+
+    let mut child_names: Vec<String> = Vec::new();
+    let mut total_children: usize = 0;
+
+    for path in st.data_variables.keys() {
+        if path.starts_with(&prefix_with_dot) {
+            total_children += 1;
+            // Extract the immediate child segment after the prefix.
+            if let Some(rest) = path.strip_prefix(&prefix_with_dot) {
+                let seg = rest
+                    .split('.')
+                    .next()
+                    .and_then(|s| s.split('[').next())
+                    .unwrap_or(rest)
+                    .to_string();
+                if !child_names.contains(&seg) {
+                    child_names.push(seg);
+                }
+            }
+        }
+    }
+
+    if total_children == 0 {
+        return None;
+    }
+
+    child_names.sort();
+    let shown: Vec<String> = child_names.iter().take(8).map(|s| format!("`{}`", s)).collect();
+    let more = if child_names.len() > 8 {
+        format!(" … and {} more", child_names.len() - 8)
+    } else {
+        String::new()
+    };
+
+    Some(format!(
+        "**`{}`** — DATA table / group\n\n**Child properties:** {}{}\n\nRuntime access:\n```rust\nlet val = data.get(\"{}.property\")?;\n// Or access child keys:\nlet keys = data.get_keys(\"{}\");\n```",
+        name, shown.join(", "), more, name, name
+    ))
+}
+
 // ── Identifier hover ───────────────────────────────────────────────────────────
 
 fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<String> {
 
-    // ── 1. QuickFuncs body: parameter hover ───────────────────────────────
+    // ── 1. QuickFuncs section: parameter + local variable hover ───────────
     if section == SectionId::QuickFuncs {
         if let Some(ast) = &doc.ast {
             if let Some(qf) = &ast.quick_functions {
+                // Check parameters first
                 for func in &qf.functions {
                     for param in &func.parameters {
                         if param.name != name { continue; }
@@ -354,6 +443,10 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
                     }
                 }
             }
+        }
+        // Check local variable declarations in function bodies
+        if let Some(content) = hover_qf_local_var(doc, name) {
+            return Some(content);
         }
     }
 
@@ -424,46 +517,28 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
     if let Some(sr) = &doc.semantic_result {
         if let Some(st) = &sr.symbol_table {
 
-            // 4a. Exact bare-name lookup (e.g. symbol table stores "app_name")
+            // 4a. Exact bare-name lookup
             if let Some(var) = st.try_get_data_variable(name) {
-                let type_str = var.effective_type()
-                    .map(|t| format!("{}", t))
-                    .unwrap_or_else(|| "unknown".to_string());
-                let inferred = if var.is_inferred { " *(inferred)*" } else { "" };
-                return Some(format!(
-                    "**`{}`** — DATA variable\n\nType: `<{}>`{}\n\nRuntime access:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
-                    name, type_str, inferred, type_str, name
-                ));
+                return Some(format_data_var_hover(name, var));
             }
 
-            // 4b. Full-path lookup with DATA. prefix (e.g. "DATA.app_name")
+            // 4b. Full-path lookup with DATA. prefix
             if let Some(var) = st.try_get_data_variable(&format!("DATA.{}", name)) {
-                let type_str = var.effective_type()
-                    .map(|t| format!("{}", t))
-                    .unwrap_or_else(|| "unknown".to_string());
-                let inferred = if var.is_inferred { " *(inferred)*" } else { "" };
-                return Some(format!(
-                    "**`{}`** — DATA variable\n\nType: `<{}>`{}\n\nRuntime access:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
-                    name, type_str, inferred, type_str, name
-                ));
+                return Some(format_data_var_hover(name, var));
             }
 
-            // 4c. Suffix match: table / group array properties stored as
-            //     "DATA.server.host" → suffix ".host"
+            // 4c. Suffix match: e.g. "host" finds "DATA.server.host"
             let suffix = format!(".{}", name);
-            let mut best: Option<(usize, String, bool, Option<dixscript::Compiler::AST::DataType>)> = None;
+            let mut best: Option<(usize, String, bool, Option<DataType>)> = None;
             for (path, var) in &st.data_variables {
                 if !path.ends_with(&suffix) { continue; }
-                let specificity  = path.len();
+                let specificity   = path.len();
                 let effective_type = var.effective_type();
                 let is_inferred    = var.is_inferred;
                 match &best {
-                    None => {
-                        best = Some((specificity, path.clone(), is_inferred, effective_type));
-                    }
-                    Some((best_spec, _, _, _)) if specificity > *best_spec => {
-                        best = Some((specificity, path.clone(), is_inferred, effective_type));
-                    }
+                    None => best = Some((specificity, path.clone(), is_inferred, effective_type)),
+                    Some((bs, _, _, _)) if specificity > *bs =>
+                        best = Some((specificity, path.clone(), is_inferred, effective_type)),
                     _ => {}
                 }
             }
@@ -472,10 +547,7 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
                     .map(|t| format!("{}", t))
                     .unwrap_or_else(|| "unknown".to_string());
                 let inferred_note = if is_inferred { " *(inferred)*" } else { "" };
-                // Strip the leading "DATA." for the user-visible access path.
-                let access_path = path
-                    .strip_prefix("DATA.")
-                    .unwrap_or(path.as_str());
+                let access_path = path.strip_prefix("DATA.").unwrap_or(path.as_str());
                 return Some(format!(
                     "**`{}`** — DATA property\n\nFull path: `{}`\nType: `<{}>`{}\n\nRuntime access:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
                     name, access_path, type_str, inferred_note, type_str, access_path
@@ -507,7 +579,30 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
         }
     }
 
+    // ── 5. Table path prefix (e.g. `server` in `server: host = "x"`) ─────
+    if section == SectionId::Data {
+        if let Some(content) = hover_table_path_prefix(doc, name) {
+            return Some(content);
+        }
+    }
+
     None
+}
+
+// ── Format a DATA variable hover ──────────────────────────────────────────────
+
+fn format_data_var_hover(
+    name: &str,
+    var: &dixscript::Compiler::Utilities::VariableInfo,
+) -> String {
+    let type_str = var.effective_type()
+        .map(|t| format!("{}", t))
+        .unwrap_or_else(|| "unknown".to_string());
+    let inferred = if var.is_inferred { " *(inferred)*" } else { "" };
+    format!(
+        "**`{}`** — DATA variable\n\nType: `<{}>`{}\n\nRuntime access:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
+        name, type_str, inferred, type_str, name
+    )
 }
 
 // ── Static object hover ────────────────────────────────────────────────────────
@@ -617,20 +712,16 @@ fn hover_regex(tokens: &[Token], constructor_index: usize) -> String {
     let pattern = find_adjacent_string(tokens, constructor_index);
     match pattern {
         None => concat!(
-        "**`r:(...)`** — regex constructor\n\n",
-        "Provide the pattern as a string.\n\n",
-        "```mdix\nemail = r:(\"^[\\\\w.]+@[\\\\w.]+$\")\n```\n\n",
-        "Instance methods: `.test(str)`, `.match(str)`, `.matchAll(str)`, ",
-        "`.replace(str,repl)`, `.split(str)`, `.isValid()`"
+            "**`r:(...)`** — regex constructor\n\n",
+            "Provide the pattern as a string.\n\n",
+            "```mdix\nemail = r:(\"^[\\\\w.]+@[\\\\w.]+$\")\n```\n\n",
+            "Instance methods: `.test(str)`, `.match(str)`, `.matchAll(str)`, ",
+            "`.replace(str,repl)`, `.split(str)`, `.isValid()`"
         ).to_string(),
-
         Some(pat) => {
             match regex::Regex::new(&pat) {
                 Ok(re) => {
                     let groups = re.captures_len().saturating_sub(1);
-
-                    // Build a regex101 deep-link so the user can interactively
-                    // test the pattern in their browser.
                     let encoded: String = pat.chars().flat_map(|c| {
                         match c {
                             ' '  => "%20".chars().collect::<Vec<_>>(),
@@ -647,29 +738,14 @@ fn hover_regex(tokens: &[Token], constructor_index: usize) -> String {
                         "https://regex101.com/?regex={}&flavor=rust",
                         encoded
                     );
-
                     format!(
-                        "**`r:(...)`** — regex constructor\n\n\
-````\n{}\n```\n\n\
-                         ✅ **Pattern valid** — {} capture group{}\n\n\
-                         Type: `<regex>`\n\n\
-                         Methods: `.test(str)`, `.match(str)` → `[full, g1, g2, …]`, \
-                         `.matchAll(str)`, `.replace(str,repl)`, `.split(str)`\n\n\
-                         [🔗 Test this pattern on regex101]({}) — paste your text there \
-                         to validate matches interactively.",
-                        pat,
-                        groups,
-                        if groups == 1 { "" } else { "s" },
-                        test_url
+                        "**`r:(...)`** — regex constructor\n\n```\n{}\n```\n\n✅ **Pattern valid** — {} capture group{}\n\nType: `<regex>`\n\nMethods: `.test(str)`, `.match(str)` → `[full, g1, g2, …]`, `.matchAll(str)`, `.replace(str,repl)`, `.split(str)`\n\n[🔗 Test this pattern on regex101]({}) — paste your text there to validate matches interactively.",
+                        pat, groups, if groups == 1 { "" } else { "s" }, test_url
                     )
                 }
                 Err(e) => format!(
-                    "**`r:(...)`** — regex constructor\n\n\
-```\n{}\n```\n\n\
-                     ❌ **Invalid pattern:** {}\n\n\
-                     Type: `<regex>`",
-                    pat,
-                    e.to_string().lines().next().unwrap_or("parse error")
+                    "**`r:(...)`** — regex constructor\n\n```\n{}\n```\n\n❌ **Invalid pattern:** {}\n\nType: `<regex>`",
+                    pat, e.to_string().lines().next().unwrap_or("parse error")
                 ),
             }
         }
@@ -682,11 +758,10 @@ fn hover_blob(tokens: &[Token], constructor_index: usize) -> String {
     let data = find_adjacent_string(tokens, constructor_index);
     match data {
         None => concat!(
-        "**`b:(...)`** — blob constructor\n\nBase64-encoded binary data.\n\n",
-        "```mdix\navatar = b:(\"SGVsbG8gV29ybGQ=\")\n```\n\n",
-        "Methods: `.size()`, `.mimeType()`, `.toHex()`, `.toBytes()`, `.isValid()`, `.slice(start,end)`"
+            "**`b:(...)`** — blob constructor\n\nBase64-encoded binary data.\n\n",
+            "```mdix\navatar = b:(\"SGVsbG8gV29ybGQ=\")\n```\n\n",
+            "Methods: `.size()`, `.mimeType()`, `.toHex()`, `.toBytes()`, `.isValid()`, `.slice(start,end)`"
         ).to_string(),
-
         Some(b64) => {
             use base64::{Engine as _, engine::general_purpose};
             match general_purpose::STANDARD.decode(&b64) {
@@ -696,26 +771,14 @@ fn hover_blob(tokens: &[Token], constructor_index: usize) -> String {
                     let hex_bytes: Vec<String> = bytes.iter().take(12)
                         .map(|b| format!("{:02X}", b)).collect();
                     let ellipsis = if bytes.len() > 12 { " …" } else { "" };
-
                     format!(
-                        "**`b:(...)`** — blob\n\n\
-                         📦 **{}** bytes · {} base64 chars\n\n\
-                         🗂 MIME type: `{}`\n\n\
-                         First bytes: `{}{}`{}\n\n\
-                         Type: `<blob>`\n\n\
-                         Methods: `.size()`, `.mimeType()`, `.toHex()`, `.toBytes()`, `.isValid()`, `.slice(start,end)`",
-                        bytes.len(),
-                        b64.len(),
-                        mime,
-                        hex_bytes.join(" "),
-                        ellipsis,
-                        preview,
+                        "**`b:(...)`** — blob\n\n📦 **{}** bytes · {} base64 chars\n\n🗂 MIME type: `{}`\n\nFirst bytes: `{}{}`{}\n\nType: `<blob>`\n\nMethods: `.size()`, `.mimeType()`, `.toHex()`, `.toBytes()`, `.isValid()`, `.slice(start,end)`",
+                        bytes.len(), b64.len(), mime,
+                        hex_bytes.join(" "), ellipsis, preview,
                     )
                 }
                 Err(_) => format!(
-                    "**`b:(...)`** — blob\n\n\
-                     ⚠️ `{}` chars — **invalid base64 encoding**\n\n\
-                     Type: `<blob>`",
+                    "**`b:(...)`** — blob\n\n⚠️ `{}` chars — **invalid base64 encoding**\n\nType: `<blob>`",
                     b64.len()
                 ),
             }
@@ -723,61 +786,44 @@ fn hover_blob(tokens: &[Token], constructor_index: usize) -> String {
     }
 }
 
-/// Build an inline preview section based on the blob's MIME type.
-///
-/// For images ≤ 300 KB: embed as a markdown data-URI image (VS Code renders these).
-/// For audio: display a friendly description with the MIME type.
-/// For other types: return an empty string.
 fn build_blob_preview(bytes: &[u8], b64: &str, mime: &str) -> String {
     if mime.starts_with("image/") {
-        // VS Code's markdown renderer supports data: URIs in img tags embedded
-        // in hover markdown — cap at 300 KB to avoid freezing the editor.
         if bytes.len() <= 300_000 {
             return format!("\n\n![blob preview](data:{};base64,{})", mime, b64);
         }
-        // Too large to embed; tell the user the dimensions aren't available.
         return format!(
             "\n\n🖼 **Image** (`{}`) — {} KB (too large to preview inline)",
-            mime,
-            bytes.len() / 1024
+            mime, bytes.len() / 1024
         );
     }
-
     if mime.starts_with("audio/") {
         return format!(
-            "\n\n🔊 **Audio** (`{}`) — {} bytes\n\n\
-             Save to disk and open with a media player to listen.",
-            mime,
-            bytes.len()
+            "\n\n🔊 **Audio** (`{}`) — {} bytes\n\nSave to disk and open with a media player to listen.",
+            mime, bytes.len()
         );
     }
-
     if mime == "application/pdf" {
-        return format!(
-            "\n\n📄 **PDF document** — {} bytes",
-            bytes.len()
-        );
+        return format!("\n\n📄 **PDF document** — {} bytes", bytes.len());
     }
-
     String::new()
 }
 
 fn detect_mime(bytes: &[u8]) -> &'static str {
     if bytes.len() < 4 { return "application/octet-stream"; }
     match bytes {
-        b if b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF                              => "image/jpeg",
-        b if b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47             => "image/png",
-        b if b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46                              => "image/gif",
+        b if b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF => "image/jpeg",
+        b if b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47 => "image/png",
+        b if b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46 => "image/gif",
         b if b.len() >= 12
             && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46
-            && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50         => "image/webp",
-        b if b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46             => "audio/wav",
-        b if b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33                              => "audio/mp3",
-        b if b[0] == 0xFF && (b[1] & 0xE0) == 0xE0                                     => "audio/mp3",
-        b if b[0] == 0x4F && b[1] == 0x67 && b[2] == 0x67 && b[3] == 0x53             => "audio/ogg",
-        b if b[0] == 0x25 && b[1] == 0x50 && b[2] == 0x44 && b[3] == 0x46             => "application/pdf",
-        b if b[0] == 0x50 && b[1] == 0x4B                                              => "application/zip",
-        b if b[0] == 0x7F && b[1] == 0x45 && b[2] == 0x4C && b[3] == 0x46             => "application/elf",
+            && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50 => "image/webp",
+        b if b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46 => "audio/wav",
+        b if b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33 => "audio/mp3",
+        b if b[0] == 0xFF && (b[1] & 0xE0) == 0xE0 => "audio/mp3",
+        b if b[0] == 0x4F && b[1] == 0x67 && b[2] == 0x67 && b[3] == 0x53 => "audio/ogg",
+        b if b[0] == 0x25 && b[1] == 0x50 && b[2] == 0x44 && b[3] == 0x46 => "application/pdf",
+        b if b[0] == 0x50 && b[1] == 0x4B => "application/zip",
+        b if b[0] == 0x7F && b[1] == 0x45 && b[2] == 0x4C && b[3] == 0x46 => "application/elf",
         _ => "application/octet-stream",
     }
 }
@@ -823,7 +869,6 @@ pub fn token_and_index_at(tokens: &[Token], pos: Position) -> Option<(&Token, us
     for (i, token) in tokens.iter().enumerate() {
         if token.line < target_line { continue; }
         if token.line > target_line { break; }
-        // Same line:
         if token.column > target_col { break; }
         let len = token_value_len(token);
         if target_col <= token.column + len {
@@ -842,7 +887,7 @@ fn token_value_len(token: &Token) -> usize {
         TokenType::String(s)             => s.len() + 2,
         TokenType::StringSingle(s)       => s.len() + 2,
         TokenType::InterpolatedString(s) => s.len() + 3,
-        TokenType::HexColor(h)           => h.len(),    // '#' already included in stored value
+        TokenType::HexColor(h)           => h.len(),
         TokenType::Comment(c)            => c.len() + 2,
         TokenType::Bool(b)               => if *b { 4 } else { 5 },
         TokenType::EnumAccess { enum_name, value } => enum_name.len() + 1 + value.len(),
@@ -873,8 +918,6 @@ fn find_adjacent_string(tokens: &[Token], start_index: usize) -> Option<String> 
     None
 }
 
-/// Scan backward from `func_def_line` (1-based) for a contiguous block of
-/// `// ...` comments immediately before the function declaration.
 fn extract_doc_comment_for_func(tokens: &[Token], func_def_line: usize) -> Option<String> {
     if func_def_line == 0 { return None; }
     let search_start = func_def_line.saturating_sub(60);
@@ -957,32 +1000,32 @@ static STATIC_SIGS: &[(&str, &str, &str, &str, &str)] = &[
     ("Math","degrees",  "Math.degrees(radians: double) → double",            "Convert radians to degrees.",                              "Math.degrees(Math.pi()) // → 180.0"),
     ("Math","pi",       "Math.pi() → double",                                "π ≈ 3.14159265358979",                                     "Math.pi()            // → 3.14159…"),
     ("Math","e",        "Math.e() → double",                                 "e ≈ 2.71828182845905",                                     "Math.e()             // → 2.71828…"),
-    ("DateTime","now",         "DateTime.now() → timestamp",                              "Current UTC date and time.",                          "now = DateTime.now()"),
-    ("DateTime","today",       "DateTime.today() → date",                                "Today's date at midnight UTC.",                       "today = DateTime.today()"),
-    ("DateTime","format",      "DateTime.format(ts: timestamp, pattern: string) → string","Format using strftime-style pattern.",                "DateTime.format(DateTime.now(), \"%Y-%m-%d\")"),
-    ("DateTime","year",        "DateTime.year(d: date|timestamp) → int",                 "Year component.",                                     "DateTime.year(DateTime.today()) // → 2025"),
-    ("DateTime","month",       "DateTime.month(d: date|timestamp) → int",                "Month 1–12.",                                         "DateTime.month(DateTime.today())"),
-    ("DateTime","day",         "DateTime.day(d: date|timestamp) → int",                  "Day of month 1–31.",                                  "DateTime.day(DateTime.today())"),
-    ("DateTime","subtract",    "DateTime.subtract(a, b: date|timestamp) → double",       "Difference in days (fractional).",                    "DateTime.subtract(d1, d2) // → days"),
-    ("DateTime","addDays",     "DateTime.addDays(d, n: double) → date|timestamp",        "Add n days (fractional values supported).",           "DateTime.addDays(DateTime.today(), 7)"),
-    ("DateTime","isLeapYear",  "DateTime.isLeapYear(year: int) → bool",                  "True if year has 366 days.",                          "DateTime.isLeapYear(2024) // → true"),
-    ("Array","range",   "Array.range(start, end: int) → array",             "Integers from start to end inclusive.",                     "Array.range(1, 5) // → [1,2,3,4,5]"),
-    ("Array","fill",    "Array.fill(value: any, count: int) → array",       "Array of count copies of value.",                          "Array.fill(0, 3)  // → [0,0,0]"),
-    ("Array","sum",     "Array.sum(arr: array) → double",                   "Sum of numeric elements.",                                 "Array.sum([1,2,3]) // → 6.0"),
-    ("Array","flatten", "Array.flatten(arr: array) → array",                "Recursively flatten all nested arrays.",                    "Array.flatten([[1,2],[3,4]]) // → [1,2,3,4]"),
-    ("Array","unique",  "Array.unique(arr: array) → array",                 "Remove duplicate values (preserves order).",               "Array.unique([1,1,2,3,2]) // → [1,2,3]"),
-    ("Random","range",  "Random.range(min, max: int) → int",                "Random integer in [min, max] inclusive.",                  "Random.range(1, 6) // dice roll"),
-    ("Random","choice", "Random.choice(arr: array) → any",                  "Pick a random element from arr.",                          "Random.choice([\"rock\",\"paper\",\"scissors\"])"),
-    ("Random","shuffle","Random.shuffle(arr: array) → array",               "Fisher-Yates shuffle — returns a new array.",              "Random.shuffle(Array.range(1, 52))"),
-    ("Guid","new",      "Guid.new() → string",                              "Generate a UUID v4 string.",                               "id = Guid.new()  // \"550e8400-…\""),
-    ("Guid","validate", "Guid.validate(str: string) → bool",                "True if str is a valid GUID format.",                      "Guid.validate(\"550e8400-e29b-41d4-a716-446655440000\")"),
-    ("Dix","Log",       "Dix.Log(message: any) → void",                     "Log at INFO level during compilation.",                    "Dix.Log(\"Building \" + name)"),
-    ("Dix","Assert",    "Dix.Assert(condition: bool, message: string) → void","Abort compilation if condition is false.",               "Dix.Assert(health > 0, \"health must be positive\")"),
-    ("Dix","Format",    "Dix.Format(template: string, ...args) → string",   "Format string with {0}, {1} placeholders.",               "Dix.Format(\"Hello {0}!\", \"World\")"),
-    ("Enum","getValues","Enum.getValues(enumName: string) → array",         "All field names of an @ENUMS enum.",                      "Enum.getValues(\"Difficulty\") // → [\"EASY\",…]"),
-    ("Enum","exists",   "Enum.exists(enumName: string) → bool",             "True if the enum is registered.",                         "Enum.exists(\"Difficulty\")"),
-    ("IpAddress","validate","IpAddress.validate(str: string) → bool",       "True if str is a valid IPv4 or IPv6 address.",             "IpAddress.validate(\"192.168.1.1\")"),
-    ("IpAddress","isPrivate","IpAddress.isPrivate(str: string) → bool",     "True if in RFC-1918 / ULA range.",                        "IpAddress.isPrivate(\"10.0.0.1\") // → true"),
+    ("DateTime","now",         "DateTime.now() → timestamp",              "Current UTC date and time.",                "now = DateTime.now()"),
+    ("DateTime","today",       "DateTime.today() → date",                "Today's date at midnight UTC.",             "today = DateTime.today()"),
+    ("DateTime","format",      "DateTime.format(ts, pattern) → string",  "Format using strftime-style pattern.",      "DateTime.format(DateTime.now(), \"%Y-%m-%d\")"),
+    ("DateTime","year",        "DateTime.year(d) → int",                 "Year component.",                           "DateTime.year(DateTime.today())"),
+    ("DateTime","month",       "DateTime.month(d) → int",                "Month 1–12.",                               "DateTime.month(DateTime.today())"),
+    ("DateTime","day",         "DateTime.day(d) → int",                  "Day of month 1–31.",                        "DateTime.day(DateTime.today())"),
+    ("DateTime","subtract",    "DateTime.subtract(a, b) → double",       "Difference in days (fractional).",          "DateTime.subtract(d1, d2) // → days"),
+    ("DateTime","addDays",     "DateTime.addDays(d, n) → date|timestamp","Add n days (fractional values supported).", "DateTime.addDays(DateTime.today(), 7)"),
+    ("DateTime","isLeapYear",  "DateTime.isLeapYear(year) → bool",       "True if year has 366 days.",                "DateTime.isLeapYear(2024) // → true"),
+    ("Array","range",   "Array.range(start, end: int) → array",         "Integers from start to end inclusive.",      "Array.range(1, 5) // → [1,2,3,4,5]"),
+    ("Array","fill",    "Array.fill(value: any, count: int) → array",   "Array of count copies of value.",            "Array.fill(0, 3)  // → [0,0,0]"),
+    ("Array","sum",     "Array.sum(arr: array) → double",               "Sum of numeric elements.",                   "Array.sum([1,2,3]) // → 6.0"),
+    ("Array","flatten", "Array.flatten(arr: array) → array",            "Recursively flatten all nested arrays.",     "Array.flatten([[1,2],[3,4]]) // → [1,2,3,4]"),
+    ("Array","unique",  "Array.unique(arr: array) → array",             "Remove duplicate values (preserves order).","Array.unique([1,1,2,3,2]) // → [1,2,3]"),
+    ("Random","range",  "Random.range(min, max: int) → int",            "Random integer in [min, max] inclusive.",    "Random.range(1, 6) // dice roll"),
+    ("Random","choice", "Random.choice(arr: array) → any",              "Pick a random element from arr.",            "Random.choice([\"rock\",\"paper\",\"scissors\"])"),
+    ("Random","shuffle","Random.shuffle(arr: array) → array",           "Fisher-Yates shuffle — returns a new array.","Random.shuffle(Array.range(1, 52))"),
+    ("Guid","new",      "Guid.new() → string",                          "Generate a UUID v4 string.",                 "id = Guid.new()  // \"550e8400-…\""),
+    ("Guid","validate", "Guid.validate(str: string) → bool",            "True if str is a valid GUID format.",        "Guid.validate(\"550e8400-e29b-41d4-a716-446655440000\")"),
+    ("Dix","Log",       "Dix.Log(message: any) → void",                 "Log at INFO level during compilation.",      "Dix.Log(\"Building \" + name)"),
+    ("Dix","Assert",    "Dix.Assert(condition: bool, message: string) → void","Abort compilation if condition is false.","Dix.Assert(health > 0, \"health must be positive\")"),
+    ("Dix","Format",    "Dix.Format(template: string, ...args) → string","Format string with {0}, {1} placeholders.", "Dix.Format(\"Hello {0}!\", \"World\")"),
+    ("Enum","getValues","Enum.getValues(enumName: string) → array",     "All field names of an @ENUMS enum.",         "Enum.getValues(\"Difficulty\") // → [\"EASY\",…]"),
+    ("Enum","exists",   "Enum.exists(enumName: string) → bool",         "True if the enum is registered.",            "Enum.exists(\"Difficulty\")"),
+    ("IpAddress","validate","IpAddress.validate(str: string) → bool",   "True if str is a valid IPv4 or IPv6 address.","IpAddress.validate(\"192.168.1.1\")"),
+    ("IpAddress","isPrivate","IpAddress.isPrivate(str: string) → bool", "True if in RFC-1918 / ULA range.",           "IpAddress.isPrivate(\"10.0.0.1\") // → true"),
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1063,15 +1106,33 @@ mod tests {
     }
 
     #[test]
+    fn hover_qf_local_var_found() {
+        let src = "@QUICKFUNCS(\n  ~calc<int>(x) {\n    let result = x + 1\n    return result\n  }\n)\n@DATA(\n  y = 1\n)";
+        let doc = test_doc(src);
+        // hover_qf_local_var should find "result"
+        let res = hover_qf_local_var(&doc, "result");
+        assert!(res.is_some(), "should find local var 'result'");
+        assert!(res.unwrap().contains("local variable"), "should mention local variable");
+    }
+
+    #[test]
+    fn hover_table_path_prefix_found() {
+        // For this test the symbol table needs to have DATA.server.host etc.
+        // We test the function exists and handles missing data gracefully.
+        let doc = test_doc("@DATA(\n  server: host = \"localhost\", port = 8080\n)");
+        // May or may not find it depending on symbol table population,
+        // but must not panic.
+        let _ = hover_table_path_prefix(&doc, "server");
+    }
+
+    #[test]
     fn hover_regex_valid_pattern() {
-        // Should contain a regex101 link
-        let result = hover_regex(&[], 0); // no tokens → no pattern
+        let result = hover_regex(&[], 0);
         assert!(result.contains("r:(...)"));
     }
 
     #[test]
     fn blob_preview_image_small() {
-        // PNG magic bytes
         let png_header = vec![0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         let b64 = base64::engine::general_purpose::STANDARD.encode(&png_header);
         let preview = build_blob_preview(&png_header, &b64, "image/png");

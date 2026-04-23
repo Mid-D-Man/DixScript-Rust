@@ -15,19 +15,14 @@ use crate::converters::to_diagnostics;
 use crate::document::Document;
 use crate::features;
 
-/// How long a single pipeline run may take before it is abandoned.
-/// Prevents a hung analysis from blocking the shutdown sequence.
 const ANALYSIS_TIMEOUT_SECS: u64 = 15;
 
 pub struct Backend {
     pub client:             Client,
     pub documents:          Arc<DashMap<Url, Document>>,
-    /// Never actually locked as a gate — retained for future serialization use.
     pub pipeline_lock:      tokio::sync::Mutex<()>,
     pub shutdown_requested: AtomicBool,
     pub analysis_tasks:     StdMutex<Vec<tokio::task::JoinHandle<()>>>,
-    /// Tracks the latest analysis version scheduled per URI.
-    /// Results from superseded analyses (stale after rapid edits) are discarded.
     pub pending_versions:   Arc<DashMap<Url, i32>>,
 }
 
@@ -48,7 +43,6 @@ impl Backend {
             return;
         }
 
-        // Mark this as the latest version for this URI.
         self.pending_versions.insert(uri.clone(), version);
 
         let client    = self.client.clone();
@@ -56,13 +50,6 @@ impl Backend {
         let versions  = Arc::clone(&self.pending_versions);
 
         let handle = tokio::spawn(async move {
-            // spawn_blocking moves CPU-bound work off the tokio executor so
-            // hover / completion / semantic-token requests are never blocked
-            // while analysis is in progress.
-            //
-            // The outer timeout ensures a hung spawn_blocking call (e.g. a
-            // deadlock inside VersionManager after a poisoned lock) does not
-            // keep the server alive past the LSP client's shutdown deadline.
             let result = tokio::time::timeout(
                 std::time::Duration::from_secs(ANALYSIS_TIMEOUT_SECS),
                 tokio::task::spawn_blocking({
@@ -74,7 +61,7 @@ impl Backend {
                     }
                 }),
             )
-                .await;
+            .await;
 
             match result {
                 Err(_timeout) => {
@@ -82,17 +69,11 @@ impl Backend {
                         "Analysis timed out after {}s for {} — stale diagnostics preserved",
                         ANALYSIS_TIMEOUT_SECS, uri
                     );
-                    // Do NOT publish empty diagnostics — leave the last good
-                    // set in place so the editor still shows something useful.
                 }
                 Ok(Err(panic_err)) => {
-                    // The catch_unwind in run_pipeline should have caught this,
-                    // but if spawn_blocking itself panicked we handle it here.
                     tracing::error!("Analysis task panicked: {:?}", panic_err);
                 }
                 Ok(Ok((uri, doc, errors, ver))) => {
-                    // Discard results if a newer analysis was scheduled while
-                    // this one ran (e.g. user typed faster than analysis speed).
                     let latest = versions.get(&uri).map(|v| *v).unwrap_or(ver);
                     if ver >= latest {
                         let diags = to_diagnostics(&errors);
@@ -109,7 +90,6 @@ impl Backend {
         });
 
         if let Ok(mut tasks) = self.analysis_tasks.lock() {
-            // Prune finished handles to avoid unbounded growth.
             tasks.retain(|h| !h.is_finished());
             tasks.push(handle);
         }
@@ -138,9 +118,6 @@ impl LanguageServer for Backend {
     async fn shutdown(&self) -> LspResult<()> {
         tracing::info!("mdix-lsp: shutdown — aborting in-flight analyses");
         self.shutdown_requested.store(true, Ordering::SeqCst);
-        // Abort the outer async wrappers.  The spawn_blocking threads inside
-        // are not directly abortable, but the ANALYSIS_TIMEOUT_SECS guard
-        // ensures they self-terminate before the LSP client's deadline.
         if let Ok(mut tasks) = self.analysis_tasks.lock() {
             for handle in tasks.drain(..) {
                 handle.abort();
@@ -241,5 +218,16 @@ impl LanguageServer for Backend {
         let diags = &params.context.diagnostics;
         let doc   = self.documents.get(uri);
         Ok(features::code_actions::provide(doc.as_deref(), diags))
+    }
+
+    // ── Folding ranges ────────────────────────────────────────────────────────
+    // Folds: @SECTION(...) blocks, { } brace blocks, multi-line table/group entries
+    async fn folding_range(
+        &self,
+        params: FoldingRangeParams,
+    ) -> LspResult<Option<Vec<FoldingRange>>> {
+        let uri = &params.text_document.uri;
+        let doc = self.documents.get(uri);
+        Ok(features::folding::provide(doc.as_deref()))
     }
 }

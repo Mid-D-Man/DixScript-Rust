@@ -177,18 +177,28 @@ fn hover_config_key(name: &str) -> Option<String> {
 // ── Keyword hover ──────────────────────────────────────────────────────────────
 
 fn hover_keyword(kw: &str) -> Option<String> {
-    let content = match kw {
+    // Type-annotation keywords delegate directly to hover_data_type — no leaking needed
+    match kw {
+        "int" | "float" | "double" | "string" | "bool"
+        | "array" | "tuple" | "object" | "hex" | "blob"
+        | "regex" | "date" | "timestamp" | "enum" | "any" => {
+            return hover_data_type(kw);
+        }
+        _ => {}
+    }
+
+    let content: &str = match kw {
         "if" | "if:" => "**`if:`** — conditional statement\n\nNote: DixScript uses `if:` (with colon).\n\n```mdix\nif: x > 0 {\n  return x\n} elif: x == 0 {\n  return 0\n} else {\n  return -1\n}\n```",
         "elif" | "elif:" => "**`elif:`** — else-if branch\n\nChained after `if:` or another `elif:`. Uses colon syntax.\n\n```mdix\nelif: difficulty == Difficulty.HARD {\n  multiplier = 2.0\n}\n```",
         "else"  => "**`else`** — fallback branch\n\nNo colon. Executes when all preceding `if:`/`elif:` conditions are false.",
-        "chk" | "chk:"  => "**`chk:`** — switch/match statement\n\nEach case uses `->`. The default case is `-> miss { ... }`.\n\n```mdix\nchk: aiType {\n  -> AIType.PASSIVE    { return 0 }\n  -> AIType.AGGRESSIVE { return 10 }\n  -> miss              { return 5 }\n}\n```",
+        "chk" | "chk:" => "**`chk:`** — switch/match statement\n\nEach case uses `->`. The default case is `-> miss { ... }`.\n\n```mdix\nchk: aiType {\n  -> AIType.PASSIVE    { return 0 }\n  -> AIType.AGGRESSIVE { return 10 }\n  -> miss              { return 5 }\n}\n```",
         "miss"  => "**`miss`** — default case in `chk:`\n\nMust be the last case.\n\n```mdix\n-> miss { return defaultValue }\n```",
-        "return"=> "**`return`** — return a value from a QuickFunc\n\nEvery QuickFunc must end with `return`.\n\n```mdix\nreturn {\n  id     = id\n  damage = damage\n}\n```",
+        "return" => "**`return`** — return a value from a QuickFunc\n\nEvery QuickFunc must end with `return`.\n\n```mdix\nreturn {\n  id     = id\n  damage = damage\n}\n```",
         "log" | "log:" => "**`log:`** — compile-time log statement\n\nLogs the expression value during compilation. No runtime effect.\n\n```mdix\nlog: \"Processing \" + name\nlog: someVariable\n```",
         "let"   => "**`let`** — declare an immutable local variable\n\nOptional type annotation.\n\n```mdix\nlet result = x + y\nlet name<string> = \"Alice\"\n```\n\nUse `let mut` for a mutable variable.",
         "mut"   => "**`mut`** — mutable modifier for `let`\n\n```mdix\nlet mut counter<int> = 0\ncounter += 1\n```",
         "const" => "**`const`** — compile-time constant\n\nValue cannot change. Usually all-caps by convention.\n\n```mdix\nconst MAX_HEALTH = 100\n```",
-        "and"   => "**`and`** — logical AND (word form)\n\nEquivalent to `&&`. Use whichever reads clearer.\n\n```mdix\nif: x > 0 and y > 0 { ... }\n```",
+        "and"   => "**`and`** — logical AND (word form)\n\nEquivalent to `&&`.\n\n```mdix\nif: x > 0 and y > 0 { ... }\n```",
         "or"    => "**`or`** — logical OR (word form)\n\nEquivalent to `||`.\n\n```mdix\nif: isAdmin or isModerator { ... }\n```",
         "not"   => "**`not`** — logical NOT (word form)\n\nEquivalent to `!`.\n\n```mdix\nif: not isEmpty { ... }\n```",
         "true"  => "**`true`** — boolean literal\n\nType: `<bool>`.",
@@ -196,29 +206,13 @@ fn hover_keyword(kw: &str) -> Option<String> {
         "null"  => "**`null`** — null literal\n\nRepresents an absent or unset value. Every type can be null.",
         "from"  => "**`from`** — import keyword\n\nImport a local `.mdix` file:\n\n```mdix\n@IMPORTS(\n  Utils from \"common/utils.mdix\"\n)\n```",
         "from_cloud" => "**`from_cloud`** — remote import keyword\n\nImport a `.mdix` file over HTTPS:\n\n```mdix\n@IMPORTS(\n  Base from_cloud \"https://example.com/base.mdix\"\n)\n```",
-        "verify"=> "**`verify`** — hash verification for imports\n\nEnsures the imported file matches a known hash:\n\n```mdix\nUtils from \"utils.mdix\" verify \"sha256:abc123...\"\n```",
-        "global"=> "**`global`** — scope modifier for QuickFunc scope lists\n\nMarks a QuickFunc as available globally (to all sections).",
-        "then"  => "**`then`** — optional clause\n\nUsed in some extended conditional forms.",
-        "int"       => hover_data_type("int").unwrap_or_default().leak(),
-        "float"     => hover_data_type("float").unwrap_or_default().leak(),
-        "double"    => hover_data_type("double").unwrap_or_default().leak(),
-        "string"    => hover_data_type("string").unwrap_or_default().leak(),
-        "bool"      => hover_data_type("bool").unwrap_or_default().leak(),
-        "array"     => hover_data_type("array").unwrap_or_default().leak(),
-        "tuple"     => hover_data_type("tuple").unwrap_or_default().leak(),
-        "object"    => hover_data_type("object").unwrap_or_default().leak(),
-        "hex"       => hover_data_type("hex").unwrap_or_default().leak(),
-        "blob"      => hover_data_type("blob").unwrap_or_default().leak(),
-        "regex"     => hover_data_type("regex").unwrap_or_default().leak(),
-        "date"      => hover_data_type("date").unwrap_or_default().leak(),
-        "timestamp" => hover_data_type("timestamp").unwrap_or_default().leak(),
-        "enum"      => hover_data_type("enum").unwrap_or_default().leak(),
-        "any"       => hover_data_type("any").unwrap_or_default().leak(),
+        "verify" => "**`verify`** — hash verification for imports\n\nEnsures the imported file matches a known hash:\n\n```mdix\nUtils from \"utils.mdix\" verify \"sha256:abc123...\"\n```",
+        "global" => "**`global`** — scope modifier for QuickFunc scope lists\n\nMarks a QuickFunc as available globally (to all sections).",
+        "then"  => "**`then`** — optional clause used in some extended conditional forms.",
         _ => return None,
     };
     Some(content.to_string())
 }
-
 // ── Data type annotation hover ─────────────────────────────────────────────────
 
 fn hover_data_type(dt: &str) -> Option<String> {

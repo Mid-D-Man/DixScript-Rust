@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Thu Apr 23 00:56:55 UTC 2026
+Generated: Sat Apr 25 09:04:18 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 5868f8da3e3e67bf6cfe9657854f47e95dd04cd0
+Commit: 4397010758d6ff7ee058bcb7a668327a4fe4d6bb
 Branch: master
 ==================================
 
@@ -115,6 +115,7 @@ Source Files:
   dixscript/src/Compiler/Core/SectionParsers/mod.rs
   dixscript/src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs
   dixscript/src/Compiler/Core/SectionParsers/security_section_parser.rs
+  dixscript/src/Compiler/Core/Tokenizer/char_tables.rs
   dixscript/src/Compiler/Core/Tokenizer/lexer.rs
   dixscript/src/Compiler/Core/Tokenizer/mod.rs
   dixscript/src/Compiler/Core/Tokenizer/token.rs
@@ -370,14 +371,14 @@ GitHub Workflows:
 
 Total Rust File Counts:
 =======================
-  Source files:    262
+  Source files:    263
   Test files:      10
   Benchmark files: 9
-  Total:           281
+  Total:           282
 
 Per-Member Breakdown:
 ====================
-  dixscript: src=208  tests=4  benches=9
+  dixscript: src=209  tests=4  benches=9
   mdix-cli: src=25  tests=5  benches=0
   mdix-ffi: src=4  tests=0  benches=0
   mdix-wasm: src=4  tests=0  benches=0

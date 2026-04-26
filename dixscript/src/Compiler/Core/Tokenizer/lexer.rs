@@ -27,7 +27,7 @@
 use phf::phf_map;
 use memchr::memchr;
 use super::token::{Token, TokenType, SectionId};
-use super::char_tables::{IDENT_CONT, IDENT_START, HEX_DIGIT};
+use super::char_tables::{DIGIT, HEX_DIGIT, IDENT_CONT, IDENT_START};
 use super::platform;
 use crate::ErrorManager::{ErrorManager, LexicalErrorType, DebugConfig};
 use crate::Compiler::Core::Config::OperationalSettings;

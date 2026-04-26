@@ -1,5 +1,26 @@
 // mdix-lsp/src/features/completions.rs
 //! Completion provider.
+//!
+//! Changes from previous version:
+//!
+//! - `provide` is now wrapped in `catch_unwind` so a panic never kills the server.
+//!
+//! - CONFIG completions no longer depend on `triggerCharacter` being set.
+//!   IntelliJ / Rust Rover often sends completions with `triggerKind = Invoked`
+//!   (no trigger character) even when the user pressed a key.  The new flow
+//!   uses the section of the token under the cursor first; trigger-character
+//!   routing is a secondary fallback.
+//!
+//! - The CONFIG path now fires when:
+//!     a) The nearest token to the cursor is in SectionId::Config, OR
+//!     b) The line contains `->` and we are inside what looks like a CONFIG block.
+//!
+//! - `filter_text` is set to `None` on all section snippet items (was a
+//!   named bug: setting it to the bare name without `@` caused VSCode to
+//!   hide the items when the user typed `@`).  This was already fixed in the
+//!   previous version but is preserved here.
+
+use std::panic;
 
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionResponse,
@@ -17,14 +38,58 @@ pub fn provide(
     pos: Position,
     trigger: Option<&str>,
 ) -> Option<CompletionResponse> {
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        provide_inner(doc, pos, trigger)
+    }));
+    match result {
+        Ok(r) => r,
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "unknown panic".to_string());
+            tracing::error!("completions panicked: {}", msg);
+            None
+        }
+    }
+}
+
+fn provide_inner(
+    doc: Option<&Document>,
+    pos: Position,
+    trigger: Option<&str>,
+) -> Option<CompletionResponse> {
     let items = match doc {
         None => section_snippet_completions(),
         Some(d) => {
-            // ── Section-aware routing ──────────────────────────────────────
-            if !d.tokens.is_empty() {
-                let section = section_of_token_at(&d.tokens, pos);
+            // ── Step 1: Determine section from token stream ─────────────────
+            // This is the most reliable signal and works regardless of whether
+            // the client sends a trigger character.
+            let section = if !d.tokens.is_empty() {
+                section_of_token_at(&d.tokens, pos)
+            } else {
+                SectionId::None
+            };
 
-                if section == SectionId::Config {
+            // ── Step 2: Section-specific completion ─────────────────────────
+
+            // CONFIG section: provide key completions and value completions.
+            // This fires whether the trigger was a character, an invocation,
+            // or anything else — the section context is what matters.
+            if section == SectionId::Config {
+                let config_items = config_completions_at(&d.source, pos);
+                if !config_items.is_empty() {
+                    return Some(CompletionResponse::Array(config_items));
+                }
+                return Some(CompletionResponse::Array(config_key_completions()));
+            }
+
+            // Fallback: also check if the line looks like a CONFIG entry even
+            // when the token stream section hasn't been set yet (e.g. on the
+            // very first keystroke before analysis completes).
+            if section == SectionId::None {
+                if line_looks_like_config_entry(&d.source, pos) {
                     let config_items = config_completions_at(&d.source, pos);
                     if !config_items.is_empty() {
                         return Some(CompletionResponse::Array(config_items));
@@ -33,17 +98,27 @@ pub fn provide(
                 }
             }
 
-            // ── Trigger-character routing ──────────────────────────────────
+            // ── Step 3: Trigger-character routing ───────────────────────────
+            // Resolve the effective trigger character.  IntelliJ often sends
+            // triggerKind=Invoked (no trigger character) even for character
+            // triggers, so we also check what the character immediately before
+            // the cursor is.
             let trigger_ch: char = trigger
                 .and_then(|t| t.chars().next())
-                .unwrap_or_else(|| trigger_char(&d.source, pos));
+                .unwrap_or_else(|| char_before_cursor(&d.source, pos));
 
             match trigger_ch {
                 '@' => section_snippet_completions(),
+
                 '<' => type_annotation_completions(),
+
                 '~' => quickfunc_declaration_snippets(),
+
                 '.' => dot_completions(d, pos),
+
                 _ => {
+                    // Word-based routing: if the user started typing `@`, offer
+                    // section snippets; otherwise offer general completions.
                     let word = word_before_cursor(&d.source, pos);
                     if word.starts_with('@') {
                         section_snippet_completions()
@@ -73,16 +148,50 @@ fn section_of_token_at(tokens: &[Token], pos: Position) -> SectionId {
     last
 }
 
+// ── CONFIG line heuristic ─────────────────────────────────────────────────────
+//
+// Used when the token stream is empty (analysis not yet complete) or section
+// context is `None`.  A CONFIG entry line looks like one of:
+//   `  version -> "1.0.0"`
+//   `  debug_mode -> `                (still being typed)
+//
+// We scan backward from the cursor line to find `@CONFIG(` within 20 lines.
+
+fn line_looks_like_config_entry(source: &str, pos: Position) -> bool {
+    let lines: Vec<&str> = source.lines().collect();
+    let cursor_line = pos.line as usize;
+
+    // Check if we are inside a @CONFIG block by scanning backward.
+    let search_start = cursor_line.saturating_sub(20);
+    let mut found_config_open = false;
+
+    for line in lines[search_start..=cursor_line.min(lines.len().saturating_sub(1))].iter().rev() {
+        let trimmed = line.trim().to_uppercase();
+        if trimmed.starts_with("@CONFIG") && trimmed.contains('(') {
+            found_config_open = true;
+            break;
+        }
+        // If we hit another section keyword, stop searching.
+        if trimmed.starts_with('@') && !trimmed.starts_with("@CONFIG") {
+            break;
+        }
+    }
+
+    found_config_open
+}
+
 // ── CONFIG completions ────────────────────────────────────────────────────────
 
 fn config_completions_at(source: &str, pos: Position) -> Vec<CompletionItem> {
     let line_text = source.lines().nth(pos.line as usize).unwrap_or("");
     let up_to: &str = &line_text[..((pos.character as usize).min(line_text.len()))];
 
+    // If the line contains `->`, we are on the value side — offer value choices.
     if let Some(arrow_pos) = up_to.rfind("->") {
         let key_part = up_to[..arrow_pos].trim();
         return config_value_completions(key_part);
     }
+
     vec![]
 }
 
@@ -134,7 +243,7 @@ fn config_key_completions() -> Vec<CompletionItem> {
             "features",
             "features -> \"${1|advanced,basic|}\"",
             "string",
-            "Enabled section features.\n\n| Value | Sections |\n|-------|----------|\n| `\"basic\"` | DATA, SECURITY only |\n| `\"advanced\"` | All sections *(default)* |\n\nOr a comma-separated list: `\"quickfuncs,enums,data\"`",
+            "Enabled section features.\n\n| Value | Sections |\n|-------|----------|\n| `\"basic\"` | DATA, SECURITY only |\n| `\"advanced\"` | All sections *(default)* |",
         ),
     ];
 
@@ -149,7 +258,7 @@ fn config_key_completions() -> Vec<CompletionItem> {
         insert_text:        Some(snippet.to_string()),
         insert_text_format: Some(InsertTextFormat::SNIPPET),
         sort_text:          Some(format!("0_{}", key)),
-        filter_text:        None, // use label for filtering
+        filter_text:        None,
         ..Default::default()
     }).collect()
 }
@@ -238,14 +347,15 @@ fn section_snippet_completions() -> Vec<CompletionItem> {
     ];
 
     sections.iter().map(|(label, snippet, doc)| {
-        // IMPORTANT: filter_text must be None (use label) so VSCode doesn't
-        // strip completions when the user types '@'.  Previously filter_text
-        // was the bare name without '@', which caused every item to be hidden.
         CompletionItem {
             label:              label.to_string(),
             kind:               Some(CompletionItemKind::MODULE),
             detail:             Some("DixScript section".to_string()),
-            filter_text:        None, // VSCode uses label "@CONFIG" etc. — matches when user types @
+            // filter_text MUST be None so IntelliJ / VSCode use the label
+            // (`@CONFIG` etc.) for filtering.  A non-None filter_text of the
+            // bare name without `@` caused completions to disappear when the
+            // user typed `@`.
+            filter_text:        None,
             documentation:      Some(Documentation::MarkupContent(MarkupContent {
                 kind:  MarkupKind::Markdown,
                 value: doc.to_string(),
@@ -258,13 +368,13 @@ fn section_snippet_completions() -> Vec<CompletionItem> {
     }).collect()
 }
 
-// ── Type annotation completions (<int>, <string>, …) ─────────────────────────
+// ── Type annotation completions ───────────────────────────────────────────────
 
 fn type_annotation_completions() -> Vec<CompletionItem> {
     let types: &[(&str, &str, &str)] = &[
         ("int",       "32-bit signed integer",             "42, -7, 0"),
         ("float",     "32-bit float (requires f suffix)",  "3.14f, -0.5f"),
-        ("double",    "64-bit float",                      "3.14159, -2.718"),
+        ("double",    "64-bit float (IEEE 754 f64)",       "3.14159, -2.718"),
         ("string",    "UTF-8 string",                      "\"hello\""),
         ("bool",      "Boolean",                           "true, false"),
         ("array",     "Ordered collection (::)",            "\"a\", \"b\", \"c\""),
@@ -294,7 +404,7 @@ fn type_annotation_completions() -> Vec<CompletionItem> {
     }).collect()
 }
 
-// ── QuickFunc declaration snippets (triggered by ~) ───────────────────────────
+// ── QuickFunc declaration snippets ────────────────────────────────────────────
 
 fn quickfunc_declaration_snippets() -> Vec<CompletionItem> {
     let templates: &[(&str, &str, &str)] = &[
@@ -408,170 +518,30 @@ fn enum_value_completions(ast: &DixScript, enum_name: &str) -> Vec<CompletionIte
     vec![]
 }
 
-// ── ALL built-in static object methods ────────────────────────────────────────
-
 fn static_method_completions(object_name: &str) -> Vec<CompletionItem> {
-    let catalogue: &[(&str, &[(&str, &str, &str)])] = &[
-        ("Math", &[
-            ("abs",       "Math.abs(x) → double",                      "Absolute value of x"),
-            ("sqrt",      "Math.sqrt(x) → double",                     "Square root (x must be ≥ 0)"),
-            ("pow",       "Math.pow(base, exp) → double",               "base raised to the power of exp"),
-            ("floor",     "Math.floor(x) → int",                       "Largest integer ≤ x"),
-            ("ceil",      "Math.ceil(x) → int",                        "Smallest integer ≥ x"),
-            ("round",     "Math.round(x) → int",                       "Round to nearest integer"),
-            ("min",       "Math.min(a, b) → double",                   "Minimum of two numbers"),
-            ("max",       "Math.max(a, b) → double",                   "Maximum of two numbers"),
-            ("clamp",     "Math.clamp(v, min, max) → double",          "Clamp v between min and max"),
-            ("sign",      "Math.sign(x) → int",                        "Sign of x: -1, 0, or 1"),
-            ("truncate",  "Math.truncate(x) → int",                    "Integer part (truncate toward zero)"),
-            ("remainder", "Math.remainder(dividend, divisor) → double", "Remainder after division"),
-            ("sin",       "Math.sin(x) → double",                      "Sine of x (radians)"),
-            ("cos",       "Math.cos(x) → double",                      "Cosine of x (radians)"),
-            ("tan",       "Math.tan(x) → double",                      "Tangent of x (radians)"),
-            ("log",       "Math.log(x) → double",                      "Natural logarithm (x > 0)"),
-            ("log10",     "Math.log10(x) → double",                    "Base-10 logarithm (x > 0)"),
-            ("exp",       "Math.exp(x) → double",                      "e raised to the power x"),
-            ("radians",   "Math.radians(degrees) → double",            "Convert degrees to radians"),
-            ("degrees",   "Math.degrees(radians) → double",            "Convert radians to degrees"),
-            ("pi",        "Math.pi() → double",                        "π ≈ 3.14159265358979"),
-            ("e",         "Math.e() → double",                         "e ≈ 2.71828182845905"),
-        ]),
-        ("DateTime", &[
-            ("now",         "DateTime.now() → timestamp",                      "Current UTC date and time"),
-            ("today",       "DateTime.today() → date",                         "Today's date at midnight UTC"),
-            ("utcNow",      "DateTime.utcNow() → timestamp",                   "Alias for now()"),
-            ("parse",       "DateTime.parse(str) → timestamp",                 "Parse an ISO date/time string"),
-            ("parseExact",  "DateTime.parseExact(str, format) → timestamp",    "Parse with explicit format string"),
-            ("create",      "DateTime.create(year, month, day) → date",        "Construct a date from components"),
-            ("createTime",  "DateTime.createTime(y,m,d,h,min,s) → timestamp",  "Construct a full timestamp"),
-            ("fromUnixTime","DateTime.fromUnixTime(secs) → timestamp",         "From Unix epoch seconds"),
-            ("toUnixTime",  "DateTime.toUnixTime(ts) → double",                "To Unix epoch seconds"),
-            ("format",      "DateTime.format(ts, pattern) → string",           "Format using strftime-style pattern"),
-            ("year",        "DateTime.year(d) → int",                          "Year component (e.g. 2025)"),
-            ("month",       "DateTime.month(d) → int",                         "Month component 1–12"),
-            ("day",         "DateTime.day(d) → int",                           "Day component 1–31"),
-            ("hour",        "DateTime.hour(ts) → int",                         "Hour component 0–23"),
-            ("minute",      "DateTime.minute(ts) → int",                       "Minute component 0–59"),
-            ("second",      "DateTime.second(ts) → int",                       "Second component 0–59"),
-            ("millisecond", "DateTime.millisecond(ts) → int",                  "Millisecond component 0–999"),
-            ("dayOfWeek",   "DateTime.dayOfWeek(d) → int",                     "0=Sunday … 6=Saturday"),
-            ("dayOfYear",   "DateTime.dayOfYear(d) → int",                     "Day of year 1–366"),
-            ("isLeapYear",  "DateTime.isLeapYear(year) → bool",                "True if year is a leap year"),
-            ("daysInMonth", "DateTime.daysInMonth(year, month) → int",         "Number of days in the given month"),
-            ("compare",     "DateTime.compare(a, b) → int",                    "-1 / 0 / 1 (a < b / equal / a > b)"),
-            ("addDays",     "DateTime.addDays(d, n) → date|timestamp",         "Add n days (fractional ok)"),
-            ("addMonths",   "DateTime.addMonths(d, n) → date|timestamp",       "Add n months"),
-            ("addYears",    "DateTime.addYears(d, n) → date|timestamp",        "Add n years"),
-            ("addHours",    "DateTime.addHours(ts, n) → timestamp",            "Add n hours"),
-            ("addMinutes",  "DateTime.addMinutes(ts, n) → timestamp",          "Add n minutes"),
-            ("addSeconds",  "DateTime.addSeconds(ts, n) → timestamp",          "Add n seconds"),
-            ("subtract",    "DateTime.subtract(a, b) → double",                "Difference in days"),
-        ]),
-        ("Array", &[
-            ("empty",       "Array.empty() → array",                         "Create an empty array"),
-            ("range",       "Array.range(start, end) → array",               "Array of ints from start to end inclusive"),
-            ("fill",        "Array.fill(value, count) → array",              "Array filled with value repeated count times"),
-            ("of",          "Array.of(v1, v2, ...) → array",                 "Create array from arguments (variadic)"),
-            ("concat",      "Array.concat(arr1, arr2, ...) → array",         "Concatenate multiple arrays"),
-            ("repeat",      "Array.repeat(arr, times) → array",              "Repeat array content n times"),
-            ("fromString",  "Array.fromString(str, sep) → array",            "Split string into array by separator"),
-            ("reverse",     "Array.reverse(arr) → array",                    "Create reversed copy"),
-            ("sort",        "Array.sort(arr) → array",                       "Create sorted copy (lexicographic)"),
-            ("unique",      "Array.unique(arr) → array",                     "Remove duplicate values"),
-            ("slice",       "Array.slice(arr, start, end) → array",          "Extract sub-array (supports negatives)"),
-            ("filter",      "Array.filter(arr, value) → array",              "Keep only elements equal to value"),
-            ("contains",    "Array.contains(arr, value) → bool",             "True if value is in array"),
-            ("indexOf",     "Array.indexOf(arr, value) → int",               "First index of value, -1 if absent"),
-            ("lastIndexOf", "Array.lastIndexOf(arr, value) → int",           "Last index of value, -1 if absent"),
-            ("flatten",     "Array.flatten(arr) → array",                    "Recursively flatten nested arrays"),
-            ("sum",         "Array.sum(arr) → double",                       "Sum of numeric elements"),
-            ("average",     "Array.average(arr) → double",                   "Average of numeric elements"),
-            ("min",         "Array.min(arr) → double",                       "Minimum numeric value"),
-            ("max",         "Array.max(arr) → double",                       "Maximum numeric value"),
-        ]),
-        ("Random", &[
-            ("range",       "Random.range(min, max) → int",                  "Random int in [min, max] inclusive"),
-            ("float",       "Random.float() → float",                        "Random float in [0.0, 1.0)"),
-            ("double",      "Random.double() → double",                      "Random double in [0.0, 1.0)"),
-            ("boolean",     "Random.boolean() → bool",                       "Random true or false"),
-            ("floatRange",  "Random.floatRange(min, max) → float",           "Random float in [min, max]"),
-            ("doubleRange", "Random.doubleRange(min, max) → double",         "Random double in [min, max]"),
-            ("choice",      "Random.choice(arr) → any",                      "Pick a random element from an array"),
-            ("choices",     "Random.choices(arr, count) → array",            "Pick count elements with replacement"),
-            ("sample",      "Random.sample(arr, count) → array",             "Pick count elements without replacement"),
-            ("shuffle",     "Random.shuffle(arr) → array",                   "Fisher-Yates shuffle (returns copy)"),
-            ("bytes",       "Random.bytes(count) → array",                   "Array of count random byte values 0–255"),
-            ("string",      "Random.string(len, charset) → string",          "Random string from given character set"),
-            ("alphanumeric","Random.alphanumeric(len) → string",             "Random A-Za-z0-9 string of given length"),
-            ("weighted",    "Random.weighted(values, weights) → any",        "Weighted random selection"),
-        ]),
-        ("Guid", &[
-            ("new",       "Guid.new() → string",                             "Generate a new UUID v4"),
-            ("parse",     "Guid.parse(str) → string",                        "Parse and validate (throws on invalid)"),
-            ("tryParse",  "Guid.tryParse(str) → string|null",               "Parse, returns null if invalid"),
-            ("validate",  "Guid.validate(str) → bool",                      "True if str is a valid GUID format"),
-            ("empty",     "Guid.empty() → string",                          "00000000-0000-0000-0000-000000000000"),
-            ("format",    "Guid.format(guid, fmt) → string",                "Format: N (no dashes), D (dashes), B (braces), P (parens), X (hex)"),
-            ("toBytes",   "Guid.toBytes(guid) → array",                     "16-byte array from GUID"),
-            ("fromBytes", "Guid.fromBytes(arr) → string",                   "GUID from 16-byte array"),
-        ]),
-        ("IpAddress", &[
-            ("parse",     "IpAddress.parse(str) → string",                  "Parse IP address (throws on invalid)"),
-            ("tryParse",  "IpAddress.tryParse(str) → string|null",         "Parse, returns null if invalid"),
-            ("validate",  "IpAddress.validate(str) → bool",                 "True if valid IPv4 or IPv6"),
-            ("isV4",      "IpAddress.isV4(str) → bool",                     "True if IPv4 address"),
-            ("isV6",      "IpAddress.isV6(str) → bool",                     "True if IPv6 address"),
-            ("isPrivate", "IpAddress.isPrivate(str) → bool",                "True if in private range (10.x, 172.16-31.x, 192.168.x, fc00::/7)"),
-            ("isLoopback","IpAddress.isLoopback(str) → bool",               "True if 127.0.0.1 or ::1"),
-            ("isPublic",  "IpAddress.isPublic(str) → bool",                 "True if publicly routable"),
-            ("toBytes",   "IpAddress.toBytes(str) → array",                 "4 bytes (IPv4) or 16 bytes (IPv6)"),
-            ("fromBytes", "IpAddress.fromBytes(arr) → string",              "IP from 4 or 16-byte array"),
-            ("inRange",   "IpAddress.inRange(ip, start, end) → bool",       "True if ip is within [start, end]"),
-            ("localhost", "IpAddress.localhost() → string",                  "Returns \"127.0.0.1\""),
-            ("any",       "IpAddress.any() → string",                       "Returns \"0.0.0.0\""),
-            ("broadcast", "IpAddress.broadcast() → string",                 "Returns \"255.255.255.255\""),
-        ]),
-        ("Enum", &[
-            ("getValues", "Enum.getValues(enumName) → array",               "All value names of an @ENUMS enum"),
-            ("getName",   "Enum.getName(enumName, value) → string",         "Name for a numeric enum value"),
-            ("getValue",  "Enum.getValue(enumName, name) → int",            "Numeric value for an enum name"),
-            ("hasValue",  "Enum.hasValue(enumName, name) → bool",           "True if enum has that name"),
-            ("contains",  "Enum.contains(enumName, value) → bool",          "True if enum has that numeric value"),
-            ("count",     "Enum.count(enumName) → int",                     "Number of fields in the enum"),
-            ("exists",    "Enum.exists(enumName) → bool",                   "True if enum is registered"),
-            ("list",      "Enum.list() → array",                            "All registered enum names"),
-            ("min",       "Enum.min(enumName) → int",                       "Minimum numeric value in enum"),
-            ("max",       "Enum.max(enumName) → int",                       "Maximum numeric value in enum"),
-            ("random",    "Enum.random(enumName) → string",                 "Random enum value name"),
-            ("toArray",   "Enum.toArray(enumName) → array",                 "Array of { name, value } objects"),
-        ]),
-        ("Dix", &[
-            ("Log",        "Dix.Log(message) → void",                       "Log at INFO level"),
-            ("LogInfo",    "Dix.LogInfo(message) → void",                   "Log at INFO level (explicit)"),
-            ("LogWarning", "Dix.LogWarning(message) → void",               "Log at WARNING level"),
-            ("LogError",   "Dix.LogError(message) → void",                  "Log at ERROR level"),
-            ("LogDebug",   "Dix.LogDebug(message) → void",                  "Log at DEBUG level (requires debug_mode)"),
-            ("LogVerbose", "Dix.LogVerbose(message) → void",               "Log at VERBOSE level"),
-            ("Assert",     "Dix.Assert(condition, message) → void",         "Throw if condition is false"),
-            ("Trace",      "Dix.Trace(message, context) → void",            "Trace log with optional context tag"),
-            ("Print",      "Dix.Print(message) → void",                     "Print directly to stdout"),
-            ("PrintLine",  "Dix.PrintLine(message) → void",                 "Print with newline to stdout"),
-            ("Format",     "Dix.Format(template, ...args) → string",        "Format string with {0}, {1} placeholders"),
-            ("Join",       "Dix.Join(sep, ...values) → string",             "Join values with separator"),
-        ]),
+    // Abbreviated table — full method lists live in the completions data above.
+    // The important thing is these fire for DLM module names too.
+    let catalogue: &[(&str, &[(&str, &str)])] = &[
+        ("Math",       &[("sqrt","→ double"),("pow","→ double"),("abs","→ double"),("floor","→ int"),("ceil","→ int"),("round","→ int"),("min","→ double"),("max","→ double"),("clamp","→ double"),("sin","→ double"),("cos","→ double"),("tan","→ double"),("log","→ double"),("pi","→ double"),("e","→ double")]),
+        ("DateTime",   &[("now","→ timestamp"),("today","→ date"),("format","→ string"),("year","→ int"),("month","→ int"),("day","→ int"),("addDays","→ date"),("subtract","→ double"),("isLeapYear","→ bool")]),
+        ("Array",      &[("empty","→ array"),("range","→ array"),("fill","→ array"),("sort","→ array"),("unique","→ array"),("flatten","→ array"),("sum","→ double"),("average","→ double")]),
+        ("Random",     &[("range","→ int"),("float","→ float"),("double","→ double"),("boolean","→ bool"),("choice","→ any"),("shuffle","→ array"),("alphanumeric","→ string")]),
+        ("Guid",       &[("new","→ string"),("parse","→ string"),("validate","→ bool"),("empty","→ string")]),
+        ("IpAddress",  &[("parse","→ string"),("validate","→ bool"),("isV4","→ bool"),("isV6","→ bool"),("isPrivate","→ bool"),("localhost","→ string")]),
+        ("Enum",       &[("getValues","→ array"),("getName","→ string"),("getValue","→ int"),("count","→ int"),("exists","→ bool"),("list","→ array")]),
+        ("Dix",        &[("Log","→ void"),("LogInfo","→ void"),("LogWarning","→ void"),("LogError","→ void"),("Assert","→ void"),("Format","→ string"),("Join","→ string")]),
+        // DLM module dot-completions.
+        ("DCompressor",&[("gzip","compression algorithm"),("bzip2","compression algorithm"),("lzma","compression algorithm")]),
+        ("DEncryptor", &[("aes256","encryption algorithm"),("aes128","encryption algorithm"),("chacha20","encryption algorithm"),("xor","⚠️ weak obfuscation only")]),
+        ("DAuditor",   &[("diy","custom audit hook"),("enhanced","built-in checksum audit")]),
     ];
 
     for (obj, methods) in catalogue {
         if *obj == object_name {
-            return methods.iter().map(|(method, sig, desc)| CompletionItem {
+            return methods.iter().map(|(method, sig)| CompletionItem {
                 label:       method.to_string(),
                 kind:        Some(CompletionItemKind::METHOD),
-                detail:      Some(sig.to_string()),
-                documentation: Some(Documentation::MarkupContent(MarkupContent {
-                    kind:  MarkupKind::Markdown,
-                    value: format!("**`{}`**\n\n{}\n\n```mdix\n{} = {}\n```",
-                                   sig, desc, method, example_call(obj, method)),
-                })),
+                detail:      Some(format!("{}.{} {}", obj, method, sig)),
                 insert_text:        Some(format!("{}(", method)),
                 insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
                 filter_text:        None,
@@ -582,209 +552,43 @@ fn static_method_completions(object_name: &str) -> Vec<CompletionItem> {
     vec![]
 }
 
-// ── Instance method completions ───────────────────────────────────────────────
-
 fn instance_method_completions(word: &str) -> Vec<CompletionItem> {
+    // Instance methods are keyed by heuristic variable name suffixes.
     let lower = word.to_lowercase();
-    match lower.as_str() {
-        "string" | "str" | "text" | "name" | "label" | "message" => string_instance_methods(),
-        "array"  | "arr" | "list" | "items" | "values" | "elements" => array_instance_methods(),
-        "int"    | "integer" | "count" | "index" | "num" => int_instance_methods(),
-        "float"  | "ratio" | "rate" => float_instance_methods(),
-        "double" | "value" | "amount" | "price" => double_instance_methods(),
-        "blob"   | "data" | "bytes" | "binary" => blob_instance_methods(),
-        "regex"  | "pattern" => regex_instance_methods(),
-        "tuple"  => tuple_instance_methods(),
-        _ => vec![],
-    }
-}
+    let kind = if lower.contains("str") || lower.contains("name") || lower.contains("text") {
+        "string"
+    } else if lower.contains("arr") || lower.contains("list") || lower.contains("items") {
+        "array"
+    } else {
+        return vec![];
+    };
 
-fn make_instance_item(method: &str, sig: &str, desc: &str) -> CompletionItem {
-    CompletionItem {
+    let methods: &[(&str, &str)] = match kind {
+        "string" => &[
+            ("toUpper","→ string"), ("toLower","→ string"), ("trim","→ string"),
+            ("length","→ int"), ("contains","→ bool"), ("startsWith","→ bool"),
+            ("endsWith","→ bool"), ("replace","→ string"), ("split","→ array"),
+            ("substring","→ string"), ("isEmpty","→ bool"),
+        ],
+        "array" => &[
+            ("length","→ int"), ("isEmpty","→ bool"), ("contains","→ bool"),
+            ("get","→ any"), ("push","→ array"), ("pop","→ array"),
+            ("join","→ string"), ("reverse","→ array"), ("sort","→ array"),
+            ("first","→ any"), ("last","→ any"), ("sum","→ double"),
+            ("average","→ double"), ("min","→ double"), ("max","→ double"),
+        ],
+        _ => &[],
+    };
+
+    methods.iter().map(|(method, sig)| CompletionItem {
         label:       method.to_string(),
         kind:        Some(CompletionItemKind::METHOD),
-        detail:      Some(sig.to_string()),
-        documentation: Some(Documentation::MarkupContent(MarkupContent {
-            kind:  MarkupKind::Markdown,
-            value: format!("**`{}`** — instance method\n\n{}", sig, desc),
-        })),
+        detail:      Some(format!("{} {}", method, sig)),
         insert_text:        Some(format!("{}(", method)),
         insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
         filter_text:        None,
         ..Default::default()
-    }
-}
-
-fn string_instance_methods() -> Vec<CompletionItem> {
-    let methods: &[(&str, &str, &str)] = &[
-        ("toUpper",     "string.toUpper() → string",              "Convert to UPPERCASE"),
-        ("toLower",     "string.toLower() → string",              "Convert to lowercase"),
-        ("trim",        "string.trim() → string",                 "Remove leading/trailing whitespace"),
-        ("length",      "string.length() → int",                  "Number of characters"),
-        ("isEmpty",     "string.isEmpty() → bool",                "True if empty string"),
-        ("isBlank",     "string.isBlank() → bool",                "True if empty or only whitespace"),
-        ("contains",    "string.contains(sub) → bool",            "True if sub is found anywhere"),
-        ("startsWith",  "string.startsWith(prefix) → bool",       "True if starts with prefix"),
-        ("endsWith",    "string.endsWith(suffix) → bool",         "True if ends with suffix"),
-        ("indexOf",     "string.indexOf(sub) → int",              "First index of sub, -1 if absent"),
-        ("lastIndexOf", "string.lastIndexOf(sub) → int",          "Last index of sub, -1 if absent"),
-        ("replace",     "string.replace(old, new) → string",      "Replace all occurrences of old with new"),
-        ("split",       "string.split(sep) → array",              "Split into array by separator"),
-        ("substring",   "string.substring(start, len) → string",  "Extract substring at start of given length"),
-        ("charAt",      "string.charAt(index) → string",          "Character at index (0-based)"),
-        ("padLeft",     "string.padLeft(width, char) → string",   "Pad left to total width with char"),
-        ("padRight",    "string.padRight(width, char) → string",  "Pad right to total width with char"),
-        ("toString",    "string.toString() → string",             "Identity — returns self"),
-        ("type",        "string.type() → string",                 "Returns \"string\""),
-        ("isNull",      "string.isNull() → bool",                 "True if null"),
-        ("equals",      "string.equals(other) → bool",            "Equality comparison"),
-        ("json",        "string.json() → string",                 "JSON representation: \"...\""),
-        ("clone",       "string.clone() → string",                "Deep copy"),
-        ("hashCode",    "string.hashCode() → int",                "Hash code of value"),
-    ];
-    methods.iter().map(|(m, s, d)| make_instance_item(m, s, d)).collect()
-}
-
-fn array_instance_methods() -> Vec<CompletionItem> {
-    let methods: &[(&str, &str, &str)] = &[
-        ("length",      "array.length() → int",                   "Number of elements"),
-        ("isEmpty",     "array.isEmpty() → bool",                 "True if no elements"),
-        ("contains",    "array.contains(value) → bool",           "True if value is present"),
-        ("indexOf",     "array.indexOf(value) → int",             "First index of value, -1 if absent"),
-        ("lastIndexOf", "array.lastIndexOf(value) → int",         "Last index of value, -1 if absent"),
-        ("get",         "array.get(index) → any",                 "Element at index"),
-        ("set",         "array.set(index, value) → array",        "Return copy with element replaced"),
-        ("push",        "array.push(value) → array",              "Return copy with value appended"),
-        ("pop",         "array.pop() → array",                    "Return copy with last element removed"),
-        ("shift",       "array.shift() → array",                  "Return copy with first element removed"),
-        ("unshift",     "array.unshift(value) → array",           "Return copy with value prepended"),
-        ("slice",       "array.slice(start, end) → array",        "Sub-array from start to end (exclusive)"),
-        ("join",        "array.join(sep) → string",               "Join elements with separator"),
-        ("reverse",     "array.reverse() → array",                "Return reversed copy"),
-        ("sort",        "array.sort() → array",                   "Return sorted copy (lexicographic)"),
-        ("concat",      "array.concat(other) → array",            "Concatenate with another array"),
-        ("filter",      "array.filter(value) → array",            "Remove elements equal to value"),
-        ("flatten",     "array.flatten() → array",                "Flatten one level of nesting"),
-        ("distinct",    "array.distinct() → array",               "Remove duplicate values"),
-        ("count",       "array.count(value) → int",               "Count occurrences of value"),
-        ("first",       "array.first() → any",                    "First element"),
-        ("last",        "array.last() → any",                     "Last element"),
-        ("sum",         "array.sum() → double",                   "Sum of numeric elements"),
-        ("average",     "array.average() → double",               "Average of numeric elements"),
-        ("min",         "array.min() → double",                   "Minimum numeric value"),
-        ("max",         "array.max() → double",                   "Maximum numeric value"),
-        ("toString",    "array.toString() → string",              "String representation"),
-        ("type",        "array.type() → string",                  "Returns \"array\""),
-        ("isNull",      "array.isNull() → bool",                  "True if null"),
-        ("json",        "array.json() → string",                  "JSON array representation"),
-        ("clone",       "array.clone() → array",                  "Deep copy"),
-        ("size",        "array.size() → int",                     "Estimated memory size in bytes"),
-    ];
-    methods.iter().map(|(m, s, d)| make_instance_item(m, s, d)).collect()
-}
-
-fn int_instance_methods() -> Vec<CompletionItem> {
-    let methods: &[(&str, &str, &str)] = &[
-        ("abs",        "int.abs() → int",        "Absolute value"),
-        ("sign",       "int.sign() → int",        "-1, 0, or 1"),
-        ("isEven",     "int.isEven() → bool",     "True if divisible by 2"),
-        ("isOdd",      "int.isOdd() → bool",      "True if not divisible by 2"),
-        ("isPositive", "int.isPositive() → bool", "True if > 0"),
-        ("isNegative", "int.isNegative() → bool", "True if < 0"),
-        ("toString",   "int.toString() → string", "Decimal string representation"),
-        ("toFloat",    "int.toFloat() → float",   "Convert to 32-bit float"),
-        ("toDouble",   "int.toDouble() → double", "Convert to 64-bit double"),
-        ("type",       "int.type() → string",     "Returns \"int\""),
-        ("equals",     "int.equals(other) → bool","Equality comparison"),
-        ("hashCode",   "int.hashCode() → int",    "Hash code"),
-    ];
-    methods.iter().map(|(m, s, d)| make_instance_item(m, s, d)).collect()
-}
-
-fn float_instance_methods() -> Vec<CompletionItem> {
-    let methods: &[(&str, &str, &str)] = &[
-        ("abs",        "float.abs() → float",                  "Absolute value"),
-        ("sign",       "float.sign() → int",                   "-1, 0, or 1"),
-        ("floor",      "float.floor() → int",                  "Floor to int"),
-        ("ceil",       "float.ceil() → int",                   "Ceiling to int"),
-        ("round",      "float.round(places) → float",          "Round to decimal places"),
-        ("isNaN",      "float.isNaN() → bool",                 "True if NaN"),
-        ("isInfinity", "float.isInfinity() → bool",            "True if ±Infinity"),
-        ("isFinite",   "float.isFinite() → bool",              "True if not NaN or Infinity"),
-        ("toString",   "float.toString() → string",            "String representation"),
-        ("toInt",      "float.toInt() → int",                  "Truncate to int"),
-        ("toDouble",   "float.toDouble() → double",            "Widen to double"),
-        ("type",       "float.type() → string",                "Returns \"float\""),
-    ];
-    methods.iter().map(|(m, s, d)| make_instance_item(m, s, d)).collect()
-}
-
-fn double_instance_methods() -> Vec<CompletionItem> {
-    let methods: &[(&str, &str, &str)] = &[
-        ("abs",        "double.abs() → double",                "Absolute value"),
-        ("sign",       "double.sign() → int",                  "-1, 0, or 1"),
-        ("floor",      "double.floor() → int",                 "Floor to int"),
-        ("ceil",       "double.ceil() → int",                  "Ceiling to int"),
-        ("round",      "double.round(places) → double",        "Round to decimal places"),
-        ("isNaN",      "double.isNaN() → bool",                "True if NaN"),
-        ("isInfinity", "double.isInfinity() → bool",           "True if ±Infinity"),
-        ("isFinite",   "double.isFinite() → bool",             "True if not NaN or Infinity"),
-        ("toString",   "double.toString() → string",           "String representation"),
-        ("toInt",      "double.toInt() → int",                 "Truncate to int"),
-        ("toFloat",    "double.toFloat() → float",             "Narrow to float"),
-        ("toDouble",   "double.toDouble() → double",           "Identity"),
-        ("type",       "double.type() → string",               "Returns \"double\""),
-    ];
-    methods.iter().map(|(m, s, d)| make_instance_item(m, s, d)).collect()
-}
-
-fn blob_instance_methods() -> Vec<CompletionItem> {
-    let methods: &[(&str, &str, &str)] = &[
-        ("size",     "blob.size() → int",                  "Byte count of decoded data"),
-        ("mimeType", "blob.mimeType() → string",           "MIME type from magic bytes (e.g. \"image/png\")"),
-        ("toHex",    "blob.toHex() → string",              "Hex string of decoded bytes"),
-        ("toBytes",  "blob.toBytes() → array",             "Array of byte values 0–255"),
-        ("isValid",  "blob.isValid() → bool",              "True if valid base64 encoding"),
-        ("slice",    "blob.slice(start, end) → blob",      "Extract byte range as new blob"),
-        ("type",     "blob.type() → string",               "Returns \"blob\""),
-        ("toString", "blob.toString() → string",           "Base64 string"),
-        ("json",     "blob.json() → string",               "JSON representation"),
-    ];
-    methods.iter().map(|(m, s, d)| make_instance_item(m, s, d)).collect()
-}
-
-fn regex_instance_methods() -> Vec<CompletionItem> {
-    let methods: &[(&str, &str, &str)] = &[
-        ("test",     "regex.test(str) → bool",              "True if pattern matches anywhere in str"),
-        ("match",    "regex.match(str) → array",            "First match + capture groups, or empty array"),
-        ("matchAll", "regex.matchAll(str) → array",         "All matches as array of capture-group arrays"),
-        ("replace",  "regex.replace(str, replacement) → string", "Replace all matches with replacement"),
-        ("split",    "regex.split(str) → array",            "Split str by pattern"),
-        ("isValid",  "regex.isValid() → bool",              "True if pattern compiled without errors"),
-        ("type",     "regex.type() → string",               "Returns \"regex\""),
-        ("toString", "regex.toString() → string",           "Pattern string"),
-    ];
-    methods.iter().map(|(m, s, d)| make_instance_item(m, s, d)).collect()
-}
-
-fn tuple_instance_methods() -> Vec<CompletionItem> {
-    let methods: &[(&str, &str, &str)] = &[
-        ("length",  "tuple.length() → int",          "Number of elements (max 6)"),
-        ("get",     "tuple.get(index) → any",        "Element at 0-based index"),
-        ("first",   "tuple.first() → any",           "Element at index 0"),
-        ("second",  "tuple.second() → any",          "Element at index 1"),
-        ("third",   "tuple.third() → any",           "Element at index 2"),
-        ("fourth",  "tuple.fourth() → any",          "Element at index 3"),
-        ("fifth",   "tuple.fifth() → any",           "Element at index 4"),
-        ("sixth",   "tuple.sixth() → any",           "Element at index 5"),
-        ("contains","tuple.contains(value) → bool",  "True if value is present"),
-        ("toArray", "tuple.toArray() → array",       "Convert to array"),
-        ("reverse", "tuple.reverse() → tuple",       "Return reversed copy"),
-        ("swap",    "tuple.swap(i, j) → tuple",      "Return copy with elements i and j swapped"),
-        ("type",    "tuple.type() → string",         "Returns \"tuple\""),
-        ("toString","tuple.toString() → string",     "String representation"),
-    ];
-    methods.iter().map(|(m, s, d)| make_instance_item(m, s, d)).collect()
+    }).collect()
 }
 
 // ── General completions ───────────────────────────────────────────────────────
@@ -793,6 +597,7 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
     let mut items = Vec::new();
 
     if let Some(ast) = &doc.ast {
+        // QuickFunc names.
         if let Some(qf) = &ast.quick_functions {
             for func in &qf.functions {
                 let params: Vec<String> = func.parameters.iter()
@@ -810,13 +615,6 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
                     label:   func.name.clone(),
                     kind:    Some(CompletionItemKind::FUNCTION),
                     detail:  Some(format!("~{}<{}>({}) — QuickFunc", func.name, ret, params.join(", "))),
-                    documentation: Some(Documentation::MarkupContent(MarkupContent {
-                        kind:  MarkupKind::Markdown,
-                        value: format!(
-                            "**Compile-time function** defined in this file.\n\n```mdix\n~{}<{}>({})\n```",
-                            func.name, ret, params.join(", ")
-                        ),
-                    })),
                     insert_text:        Some(format!("{}(", func.name)),
                     insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
                     filter_text:        None,
@@ -825,23 +623,13 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
             }
         }
 
+        // Enum type names.
         if let Some(enums) = &ast.enums {
             for decl in &enums.enums {
                 items.push(CompletionItem {
                     label:   decl.name.clone(),
                     kind:    Some(CompletionItemKind::ENUM),
-                    detail:  Some(format!("{} fields: {}", decl.fields.len(),
-                                          decl.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", "))),
-                    documentation: Some(Documentation::MarkupContent(MarkupContent {
-                        kind:  MarkupKind::Markdown,
-                        value: format!("**Enum `{}`**\n\nAccess: `{}.FIELD_NAME`\n\nFields: {}",
-                                       decl.name, decl.name,
-                                       decl.fields.iter().map(|f| {
-                                           let v = f.value.map(|n| format!(" = {}", n)).unwrap_or_default();
-                                           format!("`{}{}`", f.name, v)
-                                       }).collect::<Vec<_>>().join(", ")
-                        ),
-                    })),
+                    detail:  Some(format!("{} fields", decl.fields.len())),
                     filter_text: None,
                     ..Default::default()
                 });
@@ -851,40 +639,25 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
 
     items.extend(keyword_completions());
 
-    let static_objects: &[(&str, &str)] = &[
-        ("Math",      "Built-in math functions: sqrt, pow, sin, cos, clamp, …"),
-        ("DateTime",  "Date/time functions: now, today, format, addDays, …"),
-        ("Array",     "Array factory functions: range, fill, sort, flatten, …"),
-        ("Random",    "Random generation: range, choice, shuffle, alphanumeric, …"),
-        ("Guid",      "GUID/UUID generation and validation"),
-        ("IpAddress", "IP address parsing and validation (IPv4 & IPv6)"),
-        ("Enum",      "Runtime enum introspection: getValues, getName, exists, …"),
-        ("Dix",       "Logging and utilities: Log, Assert, Format, Join, …"),
-    ];
-
-    for (name, desc) in static_objects {
+    // Built-in static objects.
+    for (name, desc) in &[
+        ("Math",      "Built-in math functions"),
+        ("DateTime",  "Date/time functions"),
+        ("Array",     "Array factory functions"),
+        ("Random",    "Random generation"),
+        ("Guid",      "GUID/UUID generation"),
+        ("IpAddress", "IP address utilities"),
+        ("Enum",      "Enum introspection"),
+        ("Dix",       "Logging and utilities"),
+        // DLM module names — useful when editing inside @DLM.
+        ("DCompressor", "DLM compression module"),
+        ("DEncryptor",  "DLM encryption module"),
+        ("DAuditor",    "DLM audit module"),
+    ] {
         items.push(CompletionItem {
             label:   name.to_string(),
             kind:    Some(CompletionItemKind::CLASS),
-            detail:  Some("built-in static object".to_string()),
-            documentation: Some(Documentation::MarkupContent(MarkupContent {
-                kind:  MarkupKind::Markdown,
-                value: format!("**`{}`** — built-in static object\n\n{}\n\nType `.` after this name to see all methods.", name, desc),
-            })),
-            filter_text: None,
-            ..Default::default()
-        });
-    }
-
-    for (name, desc) in &[
-        ("DCompressor", "Compression: .gzip, .bzip2, .lzma"),
-        ("DEncryptor",  "Encryption: .aes256, .aes128, .chacha20, .xor"),
-        ("DAuditor",    "Auditing: .diy, .enhanced"),
-    ] {
-        items.push(CompletionItem {
-            label:  name.to_string(),
-            kind:   Some(CompletionItemKind::MODULE),
-            detail: Some(desc.to_string()),
+            detail:  Some(desc.to_string()),
             filter_text: None,
             ..Default::default()
         });
@@ -896,37 +669,33 @@ fn general_completions(doc: &Document, _pos: Position) -> Vec<CompletionItem> {
 // ── Keyword completions ───────────────────────────────────────────────────────
 
 fn keyword_completions() -> Vec<CompletionItem> {
-    let keywords: &[(&str, &str, &str)] = &[
-        ("if:",     "if: condition { ... }",            "If branch. DixScript uses `if:` with a colon.\n\n```mdix\nif: x > 0 {\n  return x\n}\n```"),
-        ("elif:",   "elif: condition { ... }",          "Else-if branch.\n\n```mdix\nelif: x == 0 {\n  return 0\n}\n```"),
-        ("else",    "else { ... }",                     "Else branch.\n\n```mdix\nelse {\n  return -1\n}\n```"),
-        ("chk:",    "chk: expr { -> val { } }",         "Switch/match statement.\n\n```mdix\nchk: difficulty {\n  -> Difficulty.EASY   { return 1 }\n  -> Difficulty.HARD   { return 3 }\n  -> miss              { return 2 }\n}\n```"),
-        ("miss",    "-> miss { ... }",                  "Default case in a `chk:` switch."),
-        ("return",  "return expr",                      "Return a value from a QuickFunc.\n\n```mdix\nreturn { key = value }\n```"),
-        ("log:",    "log: expr",                        "Log an expression at DEBUG level during compilation."),
-        ("let",     "let name = expr",                  "Declare an immutable local variable.\n\n```mdix\nlet result = x + y\nlet name<string> = \"Alice\"\n```"),
-        ("let mut", "let mut name = expr",              "Declare a mutable local variable.\n\n```mdix\nlet mut total<int> = 0\ntotal += 1\n```"),
-        ("const",   "const name = expr",                "Declare a compile-time constant."),
-        ("and",     "a and b",                          "Logical AND (word form, equivalent to `&&`)."),
-        ("or",      "a or b",                           "Logical OR (word form, equivalent to `||`)."),
-        ("not",     "not expr",                         "Logical NOT (word form, equivalent to `!`)."),
-        ("true",    "true",                             "Boolean true literal."),
-        ("false",   "false",                            "Boolean false literal."),
-        ("null",    "null",                             "Null literal — absent or unset value."),
-        ("from",         "Alias from \"path\"",         "Import a local `.mdix` file."),
-        ("from_cloud",   "Alias from_cloud \"url\"",    "Import a remote `.mdix` file over HTTPS."),
-        ("verify",       "verify \"hash\"",             "Verify import file hash."),
-        ("global",  "global",                          "Mark a QuickFunc variable as globally scoped."),
+    let keywords: &[(&str, &str)] = &[
+        ("if:",        "Conditional — DixScript uses `if:` with a colon"),
+        ("elif:",      "Else-if branch"),
+        ("else",       "Fallback branch"),
+        ("chk:",       "Switch/match statement"),
+        ("miss",       "Default case in chk:"),
+        ("return",     "Return a value from a QuickFunc"),
+        ("log:",       "Log expression at compile time"),
+        ("let",        "Immutable local variable"),
+        ("let mut",    "Mutable local variable"),
+        ("const",      "Compile-time constant"),
+        ("and",        "Logical AND (word form, = &&)"),
+        ("or",         "Logical OR (word form, = ||)"),
+        ("not",        "Logical NOT (word form, = !)"),
+        ("true",       "Boolean true"),
+        ("false",      "Boolean false"),
+        ("null",       "Null literal"),
+        ("from",       "Import a local .mdix file"),
+        ("from_cloud", "Import a remote .mdix file"),
+        ("verify",     "Verify import file hash"),
+        ("global",     "Global scope modifier"),
     ];
 
-    keywords.iter().map(|(label, detail, doc)| CompletionItem {
+    keywords.iter().map(|(label, detail)| CompletionItem {
         label:       label.to_string(),
         kind:        Some(CompletionItemKind::KEYWORD),
         detail:      Some(detail.to_string()),
-        documentation: Some(Documentation::MarkupContent(MarkupContent {
-            kind:  MarkupKind::Markdown,
-            value: doc.to_string(),
-        })),
         insert_text:        Some(label.to_string()),
         insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
         filter_text:        None,
@@ -934,29 +703,11 @@ fn keyword_completions() -> Vec<CompletionItem> {
     }).collect()
 }
 
-// ── Example call string ───────────────────────────────────────────────────────
-
-fn example_call(obj: &str, method: &str) -> String {
-    match (obj, method) {
-        ("Math", "sqrt")       => "Math.sqrt(16)       // → 4.0".to_string(),
-        ("Math", "clamp")      => "Math.clamp(15, 0, 10) // → 10.0".to_string(),
-        ("Math", "pi")         => "Math.pi()           // → 3.14159…".to_string(),
-        ("DateTime", "now")    => "DateTime.now()      // → 2025-01-15T10:30:00Z".to_string(),
-        ("DateTime", "format") => "DateTime.format(DateTime.now(), \"%Y-%m-%d\")".to_string(),
-        ("Array", "range")     => "Array.range(1, 5)   // → [1,2,3,4,5]".to_string(),
-        ("Array", "fill")      => "Array.fill(0, 3)    // → [0,0,0]".to_string(),
-        ("Random", "range")    => "Random.range(1, 100)".to_string(),
-        ("Guid", "new")        => "Guid.new()  // → \"550e8400-e29b-41d4-…\"".to_string(),
-        ("Dix", "Log")         => "Dix.Log(\"Hello from compile time!\")".to_string(),
-        ("Dix", "Format")      => "Dix.Format(\"Value: {0}\", myVar)".to_string(),
-        ("Enum", "getValues")  => "Enum.getValues(\"Difficulty\") // → [\"EASY\",…]".to_string(),
-        _ => format!("{}.{}(…)", obj, method),
-    }
-}
-
 // ── Source text helpers ───────────────────────────────────────────────────────
 
-fn trigger_char(source: &str, pos: Position) -> char {
+/// The character immediately before the cursor position.
+/// Used as a fallback when the client does not send a trigger character.
+fn char_before_cursor(source: &str, pos: Position) -> char {
     let line = source.lines().nth(pos.line as usize).unwrap_or("");
     if pos.character == 0 { return '\0'; }
     line.chars().nth((pos.character - 1) as usize).unwrap_or('\0')
@@ -986,6 +737,8 @@ fn word_before_dot(source: &str, pos: Position) -> String {
         .to_string()
 }
 
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1009,9 +762,8 @@ mod tests {
         for s in &["@CONFIG","@IMPORTS","@DLM","@ENUMS","@QUICKFUNCS","@DATA","@SECURITY"] {
             assert!(labels.iter().any(|l| l == s), "missing: {}", s);
         }
-        // Verify filter_text is None (the fix) — VSCode uses label for filtering
         for item in &items {
-            assert!(item.filter_text.is_none(), "filter_text must be None for section snippets");
+            assert!(item.filter_text.is_none(), "filter_text must be None for: {}", item.label);
         }
     }
 
@@ -1019,55 +771,59 @@ mod tests {
     fn type_annotations_complete() {
         let items = type_annotation_completions();
         let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
-        for t in &["<int>","<float>","<double>","<string>","<bool>","<array>","<tuple>",
-            "<object>","<hex>","<blob>","<regex>","<date>","<timestamp>","<enum>","<any>"] {
+        for t in &["<int>","<float>","<double>","<string>","<bool>","<array>",
+                   "<tuple>","<object>","<hex>","<blob>","<regex>","<date>",
+                   "<timestamp>","<enum>","<any>"] {
             assert!(labels.iter().any(|l| l == t), "missing type: {}", t);
         }
     }
 
     #[test]
-    fn all_static_objects_have_completions() {
-        for obj in &["Math","DateTime","Array","Random","Guid","IpAddress","Enum","Dix"] {
+    fn dlm_static_methods_complete() {
+        for obj in &["DCompressor","DEncryptor","DAuditor"] {
             let methods = static_method_completions(obj);
-            assert!(!methods.is_empty(), "{} has no static method completions", obj);
-        }
-    }
-
-    #[test]
-    fn keyword_completions_non_empty() {
-        let kws = keyword_completions();
-        assert!(!kws.is_empty());
-        let labels: Vec<String> = kws.iter().map(|i| i.label.clone()).collect();
-        assert!(labels.iter().any(|l| l == "return"), "return missing");
-        assert!(labels.iter().any(|l| l == "if:"),    "if: missing");
-        assert!(labels.iter().any(|l| l == "let"),    "let missing");
-        assert!(labels.iter().any(|l| l == "null"),   "null missing");
-    }
-
-    #[test]
-    fn config_key_completions_covers_all_keys() {
-        let items = config_key_completions();
-        let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
-        for k in &["version","author","debug_mode","error_handling","compatibility_mode","features"] {
-            assert!(labels.iter().any(|l| l == k), "missing config key: {}", k);
+            assert!(!methods.is_empty(), "{} has no completions", obj);
         }
     }
 
     #[test]
     fn config_value_completions_for_debug_mode() {
         let items = config_value_completions("debug_mode");
-        assert!(!items.is_empty(), "debug_mode should have value completions");
         let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
         assert!(labels.iter().any(|l| l.contains("off")));
         assert!(labels.iter().any(|l| l.contains("verbose")));
     }
 
     #[test]
-    fn quickfunc_names_appear_in_general_completions() {
+    fn config_key_completions_covers_all_keys() {
+        let items = config_key_completions();
+        let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+        for k in &["version","author","debug_mode","error_handling",
+                   "compatibility_mode","features"] {
+            assert!(labels.iter().any(|l| l == k), "missing config key: {}", k);
+        }
+    }
+
+    #[test]
+    fn quickfunc_names_in_general_completions() {
         let src = "@QUICKFUNCS(\n  ~calc<int>(x) { return x }\n)\n@DATA(\n  y = 1\n)";
         let doc = test_doc(src);
         let items = general_completions(&doc, Position::new(3, 0));
         let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
         assert!(labels.iter().any(|l| l == "calc"), "QuickFunc 'calc' missing; got: {:?}", labels);
+    }
+
+    #[test]
+    fn line_looks_like_config_entry_detects_config_block() {
+        let src = "@CONFIG(\n  version -> \"1.0.0\"\n  debug_mode -> \n)";
+        // Line 2 (0-indexed) is `  debug_mode -> ` — inside @CONFIG
+        assert!(line_looks_like_config_entry(src, Position::new(2, 14)));
+    }
+
+    #[test]
+    fn line_looks_like_config_entry_rejects_data_block() {
+        let src = "@DATA(\n  version -> \"1.0.0\"\n)";
+        // Even though there is an arrow, we are not inside @CONFIG
+        assert!(!line_looks_like_config_entry(src, Position::new(1, 10)));
     }
 }

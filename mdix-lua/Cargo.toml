@@ -11,12 +11,12 @@ repository  = "https://github.com/Mid-D-Man/DixScript-Rust"
 [lib]
 # lib name must match what Lua's require() looks for.
 # require("mdix") → mdix.so / mdix.dll / mdix.dylib
-# Cargo produces libmdix.so — see README for renaming step.
 name       = "mdix"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 dixscript   = { path = "../dixscript" }
-# Added "module" and "macros" to the features list below
-mlua        = { version = "0.10", features = ["lua54", "vendored", "module", "macros"] }
+# "module" and "vendored" are mutually exclusive. 
+# We use "module" + "macros" for a dynamic Lua library.
+mlua        = { version = "0.10", features = ["lua54", "module", "macros"] }
 serde_json  = "1.0"

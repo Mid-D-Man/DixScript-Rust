@@ -100,7 +100,8 @@ pub fn lua_to_mdix(value: &LuaValue) -> LuaResult<String> {
 
         LuaValue::String(s) => {
             let str_val = s.to_str()?;
-            Ok(format!("\"{}\"", escape_mdix(str_val)))
+            // FIX: Borrow str_val here to convert BorrowedStr to &str
+            Ok(format!("\"{}\"", escape_mdix(&str_val)))
         }
 
         LuaValue::Table(t) => {
@@ -155,4 +156,4 @@ pub fn table_is_sequence(table: &LuaTable) -> LuaResult<bool> {
         }
     }
     Ok(count == len)
-      }
+}

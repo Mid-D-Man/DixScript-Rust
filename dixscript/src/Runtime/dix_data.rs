@@ -1,4 +1,3 @@
-
 use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Utc};
 use crate::Compiler::AST::DixScript;
@@ -26,9 +25,6 @@ pub struct DixData {
 
 impl DixData {
     /// Build a `DixData` from a resolved AST.
-    ///
-    /// Enums are extracted first so their integer values can be resolved
-    /// during the data-flattening pass that follows.
     pub fn from_ast(
         ast: DixScript,
         version: String,
@@ -102,8 +98,6 @@ impl DixData {
     }
 
     /// Get the direct child segment names under `path`.
-    ///
-    /// Pass an empty string for top-level keys.
     pub fn get_keys(&self, path: &str) -> Vec<String> {
         match self.prefix_index.get(path) {
             Some(children) => children.iter().cloned().collect(),
@@ -112,9 +106,6 @@ impl DixData {
     }
 
     /// Collect all values whose dotted path matches a wildcard pattern.
-    ///
-    /// Use `*` to match any single segment.
-    /// Example: `"enemies.*.name"` matches `"enemies.0.name"`, `"enemies.1.name"`, etc.
     pub fn select_many<T>(&self, pattern: &str) -> Vec<T>
     where
         T: TryFrom<DixValue>,
@@ -128,7 +119,7 @@ impl DixData {
             .collect()
     }
 
-    /// Total entries in the flattened store, including indexed array elements.
+    /// Total entries in the flattened store.
     #[inline]
     pub fn entry_count(&self) -> usize {
         self.flattened_data.len()
@@ -165,13 +156,6 @@ impl DixData {
         index
     }
 
-    /// Walk a key's dot-segments upward, registering each segment as a child
-    /// of its parent prefix.
-    ///
-    /// `"database.primary.host"` produces:
-    ///   index\["database.primary"\] ← "host"
-    ///   index\["database"\]         ← "primary"
-    ///   index\[""\]                 ← "database"
     fn index_key(index: &mut HashMap<String, HashSet<String>>, key: &str) {
         let mut remaining = key;
         loop {
@@ -273,7 +257,8 @@ impl DixData {
             DataEntry::SimpleProperty { name, value, .. } => {
                 let key = Self::build_path(prefix, name);
                 if let Some(dix_value) = Self::ast_value_to_dix_value(value, enums) {
-                    result.insert(key, dix_value);
+                    // Recursively flatten so nested objects/arrays are accessible
+                    Self::flatten_dix_value(&key, &dix_value, result);
                 }
             }
 
@@ -282,7 +267,7 @@ impl DixData {
                 for prop in properties {
                     let key = Self::build_path(&table_path, &prop.name);
                     if let Some(dix_value) = Self::ast_value_to_dix_value(&prop.value, enums) {
-                        result.insert(key, dix_value);
+                        Self::flatten_dix_value(&key, &dix_value, result);
                     }
                 }
             }
@@ -295,10 +280,14 @@ impl DixData {
                     .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
                     .collect();
 
+                // Store the array itself
                 result.insert(array_path.clone(), DixValue::Array(array_values.clone()));
 
+                // Recursively flatten each item so sub-properties are accessible
+                // via dotted paths like `elements[0].type`, `elements[0].style.fill`, etc.
                 for (i, value) in array_values.iter().enumerate() {
-                    result.insert(format!("{}[{}]", array_path, i), value.clone());
+                    let item_path = format!("{}[{}]", array_path, i);
+                    Self::flatten_dix_value(&item_path, value, result);
                 }
             }
 
@@ -310,12 +299,45 @@ impl DixData {
                     for prop in properties {
                         if let Some(dix_value) = Self::ast_value_to_dix_value(&prop.value, enums) {
                             obj_map.insert(prop.key.clone(), dix_value.clone());
-                            result.insert(Self::build_path(&key, &prop.key), dix_value);
+                            Self::flatten_dix_value(
+                                &Self::build_path(&key, &prop.key),
+                                &dix_value,
+                                result,
+                            );
                         }
                     }
                     result.insert(key, DixValue::Object(obj_map));
                 }
             }
+        }
+    }
+
+    /// Recursively insert `value` and all its nested fields into `result`
+    /// using dotted-path keys rooted at `path`.
+    ///
+    /// - `Object` → inserts `path` and recurses into `path.field` for every field
+    /// - `Array`  → inserts `path` and recurses into `path[i]` for every element
+    /// - Scalar   → inserts `path` only
+    ///
+    /// This ensures that after loading, paths like `elements[0].type`,
+    /// `elements[0].style.fill`, and `defs[0].stops[0].color` are all
+    /// independently addressable without any secondary lookup step.
+    fn flatten_dix_value(path: &str, value: &DixValue, result: &mut HashMap<String, DixValue>) {
+        result.insert(path.to_string(), value.clone());
+        match value {
+            DixValue::Object(obj) => {
+                for (k, v) in obj {
+                    let child = format!("{}.{}", path, k);
+                    Self::flatten_dix_value(&child, v, result);
+                }
+            }
+            DixValue::Array(arr) => {
+                for (i, item) in arr.iter().enumerate() {
+                    let child = format!("{}[{}]", path, i);
+                    Self::flatten_dix_value(&child, item, result);
+                }
+            }
+            _ => {} // Scalar — already stored above
         }
     }
 
@@ -342,10 +364,6 @@ impl DixData {
         }
     }
 
-    /// Convert an AST `Value` to a `DixValue`.
-    ///
-    /// `enums` carries the resolved enum table so `EnumValue` nodes get their
-    /// integer field value looked up rather than defaulting to 0.
     fn ast_value_to_dix_value(
         value: &crate::Compiler::AST::Value,
         enums: Option<&HashMap<String, HashMap<String, i32>>>,
@@ -600,6 +618,47 @@ mod tests {
     }
 
     #[test]
+    fn test_flatten_dix_value_object() {
+        let mut result = HashMap::new();
+        let obj = DixValue::Object({
+            let mut m = HashMap::new();
+            m.insert("type".to_string(), DixValue::String("circle".to_string()));
+            m.insert("cx".to_string(),   DixValue::Int(100));
+            m
+        });
+        DixData::flatten_dix_value("elements[0]", &obj, &mut result);
+
+        assert!(result.contains_key("elements[0]"));
+        assert!(result.contains_key("elements[0].type"));
+        assert!(result.contains_key("elements[0].cx"));
+        assert_eq!(result["elements[0].type"], DixValue::String("circle".to_string()));
+        assert_eq!(result["elements[0].cx"],   DixValue::Int(100));
+    }
+
+    #[test]
+    fn test_flatten_dix_value_nested() {
+        let mut result = HashMap::new();
+        let style = DixValue::Object({
+            let mut m = HashMap::new();
+            m.insert("fill".to_string(), DixValue::HexColor("#ff0000".to_string()));
+            m
+        });
+        let obj = DixValue::Object({
+            let mut m = HashMap::new();
+            m.insert("type".to_string(),  DixValue::String("circle".to_string()));
+            m.insert("style".to_string(), style);
+            m
+        });
+        DixData::flatten_dix_value("elements[0]", &obj, &mut result);
+
+        assert!(result.contains_key("elements[0].style.fill"));
+        assert_eq!(
+            result["elements[0].style.fill"],
+            DixValue::HexColor("#ff0000".to_string())
+        );
+    }
+
+    #[test]
     fn test_enum_value_resolves_correctly() {
         let mut enum_table: HashMap<String, HashMap<String, i32>> = HashMap::new();
         let mut ai_type = HashMap::new();
@@ -643,4 +702,4 @@ mod tests {
         let data = dix_data_from_flat(HashMap::new());
         assert!(data.get_keys("nonexistent").is_empty());
     }
-}
+    }

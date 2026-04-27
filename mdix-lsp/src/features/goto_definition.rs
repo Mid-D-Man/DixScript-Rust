@@ -1,20 +1,11 @@
 // mdix-lsp/src/features/goto_definition.rs
 //
 // Changes from previous version:
-//
-//   - `goto_enum_type`: the original check required the VERY NEXT token to
-//     be a dot.  IntelliJ / Rust Rover sends cursor positions at a slightly
-//     different character offset than VSCode, so the adjacency check was
-//     failing.  The new implementation looks up to 3 tokens ahead for the
-//     dot, tolerating type-annotation tokens (`<`, `>`, DataType) between
-//     the name and the dot.  Additionally it now falls back to a NAME-based
-//     AST search when the token stream lookup fails, which is robust against
-//     any client position encoding difference.
-//
-//   - `goto_enum_from_context`: mirrors the same lookahead tolerance for the
-//     reverse direction (cursor on the field name, look back for the enum name).
-//
-//   - `provide` is wrapped in `catch_unwind` so a panic never kills the server.
+//   - `goto_quickfunc_param` added: jumps to the parameter declaration when
+//     clicking on a parameter name inside a QuickFunc body.  Called before
+//     `goto_quickfunc_local_var` so params take priority over locals.
+//   - Enum type lookahead tolerance kept from previous version.
+//   - All panic already wrapped in catch_unwind.
 
 use std::panic;
 
@@ -31,15 +22,11 @@ use crate::features::hover::token_and_index_at;
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 pub fn provide(doc: Option<&Document>, pos: Position) -> Option<GotoDefinitionResponse> {
-    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        provide_inner(doc, pos)
-    }));
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| provide_inner(doc, pos)));
     match result {
         Ok(r) => r,
         Err(payload) => {
-            let msg = payload
-                .downcast_ref::<String>()
-                .cloned()
+            let msg = payload.downcast_ref::<String>().cloned()
                 .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
                 .unwrap_or_else(|| "unknown panic".to_string());
             tracing::error!("goto_definition panicked: {}", msg);
@@ -57,8 +44,7 @@ fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<GotoDefinition
 
     match &token_type {
         TokenType::Identifier(name) => {
-            // 0. Enum TYPE name (`AIType` in `AIType.BOSS`) → @ENUMS declaration.
-            //    Try token-stream path first; fall back to AST name search.
+            // 0. Enum TYPE name (e.g. `AIType` in `AIType.BOSS`) → @ENUMS decl.
             if let Some(r) = goto_enum_type(doc, name, index) {
                 return Some(r);
             }
@@ -66,15 +52,21 @@ fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<GotoDefinition
             if let Some(r) = goto_enum_from_context(doc, name, index) {
                 return Some(r);
             }
-            // 2. QuickFunc call / reference → jump to ~name declaration.
+            // 2. QuickFunc call / reference → ~name declaration.
             if let Some(r) = goto_quickfunc(doc, name) {
                 return Some(r);
             }
-            // 3. QuickFunc local variable declaration.
+            // 3. QuickFunc parameter — must come before local var search.
+            if token_section == SectionId::QuickFuncs {
+                if let Some(r) = goto_quickfunc_param(doc, name, pos) {
+                    return Some(r);
+                }
+            }
+            // 4. QuickFunc local variable declaration.
             if let Some(r) = goto_quickfunc_local_var(doc, name) {
                 return Some(r);
             }
-            // 4. DATA property reference (outside QuickFuncs).
+            // 5. DATA property reference (outside QuickFuncs).
             if token_section != SectionId::QuickFuncs {
                 goto_data_property(doc, name)
             } else {
@@ -98,41 +90,28 @@ fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<GotoDefinition
 
 // ── Enum TYPE name → @ENUMS declaration ──────────────────────────────────────
 //
-// Strategy:
-//   1. Token-stream lookahead: scan up to 3 tokens ahead for a '.' that is
-//      followed by an identifier (the field name).  This tolerates IntelliJ
-//      sending cursor offsets that land on the identifier body rather than
-//      its first character, and also tolerates type-annotation tokens
-//      (`<enum>`) that can appear between the name and the dot.
-//   2. AST name search: if token-stream lookup finds the enum is declared,
-//      jump there directly using the AST position — independent of which
-//      token the cursor happened to land on.
+// Scans up to 3 tokens ahead for a dot to confirm this is `Name.FIELD` access.
+// Tolerates IntelliJ cursor-offset differences.
 
 fn goto_enum_type(
     doc: &Document,
     name: &str,
     token_index: usize,
 ) -> Option<GotoDefinitionResponse> {
-    // First confirm this name actually exists as an enum declaration.
     let ast   = doc.ast.as_ref()?;
     let enums = ast.enums.as_ref()?;
 
+    // Confirm the name is actually an enum declaration.
     let decl = enums.enums.iter().find(|e| e.name == name)?;
 
-    // Now confirm there is a dot somewhere nearby in the token stream,
-    // which distinguishes `AIType.BOSS` from a bare `AIType` variable.
-    // We look up to 3 tokens ahead to tolerate position-encoding differences.
+    // Confirm a dot appears within 3 tokens ahead.
     let has_dot_ahead = doc.tokens
         .iter()
         .skip(token_index + 1)
         .take(3)
         .any(|t| matches!(t.token_type, TokenType::Symbol('.')));
 
-    if !has_dot_ahead {
-        // The name exists as an enum but the cursor is not on a `Name.FIELD`
-        // access — it might be a data property with the same name.  Don't jump.
-        return None;
-    }
+    if !has_dot_ahead { return None; }
 
     let line = decl.position.line.saturating_sub(1) as u32;
     let col  = decl.position.column.saturating_sub(1) as u32;
@@ -148,16 +127,14 @@ fn goto_enum_type(
 
 // ── Enum FIELD from raw identifier context ────────────────────────────────────
 //
-// The tokenizer emits Identifier('AIType') Symbol('.') Identifier('BOSS').
-// When the cursor is on the SECOND identifier we look up to 3 positions back
-// (tolerating position-encoding differences) for the dot and then the enum name.
+// Cursor on the field name in `EnumName.FIELD` — scan up to 3 tokens back for
+// the dot and then the enum name.
 
 fn goto_enum_from_context(
     doc: &Document,
     field_name: &str,
     token_index: usize,
 ) -> Option<GotoDefinitionResponse> {
-    // Scan backwards up to 3 tokens for a dot.
     let dot_offset = (1usize..=3).find(|&offset| {
         token_index >= offset
             && matches!(
@@ -166,17 +143,13 @@ fn goto_enum_from_context(
             )
     })?;
 
-    // The token before the dot should be the enum type name.
     let enum_tok_idx = token_index.checked_sub(dot_offset + 1)?;
-    let enum_tok = doc.tokens.get(enum_tok_idx)?;
+    let enum_tok     = doc.tokens.get(enum_tok_idx)?;
     let TokenType::Identifier(enum_name) = &enum_tok.token_type else { return None };
 
-    // Confirm the enum is actually declared in @ENUMS.
     let ast   = doc.ast.as_ref()?;
     let enums = ast.enums.as_ref()?;
-    if !enums.enums.iter().any(|e| e.name == *enum_name) {
-        return None;
-    }
+    if !enums.enums.iter().any(|e| e.name == *enum_name) { return None; }
 
     goto_enum_field(doc, enum_name, field_name)
 }
@@ -197,10 +170,61 @@ fn goto_quickfunc(doc: &Document, name: &str) -> Option<GotoDefinitionResponse> 
             uri:   doc.uri.clone(),
             range: Range::new(
                 Position::new(line, col),
-                // +1 for the leading ~ prefix.
-                Position::new(line, col + 1 + name.len() as u32),
+                Position::new(line, col + 1 + name.len() as u32), // +1 for ~
             ),
         }));
+    }
+    None
+}
+
+// ── QuickFunc parameter declaration ──────────────────────────────────────────
+//
+// Searches parameter lists of all QuickFuncs.  When multiple functions share
+// a parameter name, we use the cursor line to find the enclosing function.
+
+fn goto_quickfunc_param(
+    doc:  &Document,
+    name: &str,
+    pos:  Position,
+) -> Option<GotoDefinitionResponse> {
+    let ast = doc.ast.as_ref()?;
+    let qf  = ast.quick_functions.as_ref()?;
+
+    // Convert cursor to 1-based line for comparison with AST positions.
+    let cursor_line_1based = pos.line as usize + 1;
+
+    // Strategy: find the function whose definition line is closest to (and
+    // before) the cursor.  This scopes the search to the enclosing function.
+    let enclosing_func = qf.functions.iter()
+        .filter(|f| f.position.line <= cursor_line_1based)
+        .max_by_key(|f| f.position.line);
+
+    // Search enclosing function first; fall back to all functions.
+    let search_order: Vec<&dixscript::Compiler::AST::QuickFunction> = {
+        let mut v = Vec::new();
+        if let Some(f) = enclosing_func { v.push(f); }
+        for f in &qf.functions {
+            if !v.iter().any(|x| x.name == f.name) { v.push(f); }
+        }
+        v
+    };
+
+    for func in search_order {
+        for param in &func.parameters {
+            if param.name != name { continue; }
+
+            // AST positions are 1-based → convert to 0-based for LSP.
+            let line = param.position.line.saturating_sub(1) as u32;
+            let col  = param.position.column.saturating_sub(1) as u32;
+
+            return Some(GotoDefinitionResponse::Scalar(Location {
+                uri:   doc.uri.clone(),
+                range: Range::new(
+                    Position::new(line, col),
+                    Position::new(line, col + name.len() as u32),
+                ),
+            }));
+        }
     }
     None
 }
@@ -220,15 +244,9 @@ fn goto_quickfunc_local_var(doc: &Document, name: &str) -> Option<GotoDefinition
             });
 
             let (line, col) = if let Some(tok) = var_tok {
-                (
-                    tok.line.saturating_sub(1) as u32,
-                    tok.column.saturating_sub(1) as u32,
-                )
+                (tok.line.saturating_sub(1) as u32, tok.column.saturating_sub(1) as u32)
             } else {
-                (
-                    ast_pos.line.saturating_sub(1) as u32,
-                    ast_pos.column.saturating_sub(1) as u32,
-                )
+                (ast_pos.line.saturating_sub(1) as u32, ast_pos.column.saturating_sub(1) as u32)
             };
 
             return Some(GotoDefinitionResponse::Scalar(Location {
@@ -247,30 +265,20 @@ fn find_var_in_statements(stmts: &[QuickFuncStatement], name: &str) -> Option<As
     for stmt in stmts {
         match stmt {
             QuickFuncStatement::VariableDeclaration { variable_name, position, .. } => {
-                if variable_name == name {
-                    return Some(*position);
-                }
+                if variable_name == name { return Some(*position); }
             }
             QuickFuncStatement::If { then_branch, else_branch, .. } => {
-                if let Some(p) = find_var_in_statements(then_branch, name) {
-                    return Some(p);
-                }
+                if let Some(p) = find_var_in_statements(then_branch, name) { return Some(p); }
                 if let Some(else_stmts) = else_branch {
-                    if let Some(p) = find_var_in_statements(else_stmts, name) {
-                        return Some(p);
-                    }
+                    if let Some(p) = find_var_in_statements(else_stmts, name) { return Some(p); }
                 }
             }
             QuickFuncStatement::Switch { cases, default_case, .. } => {
                 for case in cases {
-                    if let Some(p) = find_var_in_statements(&case.statements, name) {
-                        return Some(p);
-                    }
+                    if let Some(p) = find_var_in_statements(&case.statements, name) { return Some(p); }
                 }
                 if let Some(dc) = default_case {
-                    if let Some(p) = find_var_in_statements(&dc.statements, name) {
-                        return Some(p);
-                    }
+                    if let Some(p) = find_var_in_statements(&dc.statements, name) { return Some(p); }
                 }
             }
             _ => {}
@@ -282,24 +290,15 @@ fn find_var_in_statements(stmts: &[QuickFuncStatement], name: &str) -> Option<As
 // ── DATA property definition ──────────────────────────────────────────────────
 
 fn goto_data_property(doc: &Document, name: &str) -> Option<GotoDefinitionResponse> {
-    let tokens = &doc.tokens;
-
-    for (i, token) in tokens.iter().enumerate() {
+    for (i, token) in doc.tokens.iter().enumerate() {
         if token.section != SectionId::Data { continue; }
         let TokenType::Identifier(id) = &token.token_type else { continue };
         if id.as_str() != name { continue; }
 
-        // Peek past optional type annotation to find the defining operator.
-        let next_op = tokens
-            .iter()
-            .skip(i + 1)
-            .find(|t| !matches!(
-                t.token_type,
-                TokenType::Symbol('<')
-                    | TokenType::Symbol('>')
-                    | TokenType::DataType(_)
-                    | TokenType::Identifier(_)
-            ));
+        let next_op = doc.tokens.iter().skip(i + 1)
+            .find(|t| !matches!(t.token_type,
+                TokenType::Symbol('<') | TokenType::Symbol('>')
+                | TokenType::DataType(_) | TokenType::Identifier(_)));
 
         let is_definition = matches!(
             next_op.map(|t| &t.token_type),
@@ -328,9 +327,7 @@ fn goto_data_property(doc: &Document, name: &str) -> Option<GotoDefinitionRespon
 // ── Enum field declaration ────────────────────────────────────────────────────
 
 fn goto_enum_field(
-    doc: &Document,
-    enum_name: &str,
-    field_name: &str,
+    doc: &Document, enum_name: &str, field_name: &str,
 ) -> Option<GotoDefinitionResponse> {
     let ast   = doc.ast.as_ref()?;
     let enums = ast.enums.as_ref()?;
@@ -356,9 +353,7 @@ fn goto_enum_field(
 // ── Import path → target file ─────────────────────────────────────────────────
 
 fn goto_import(doc: &Document, path: &str) -> Option<GotoDefinitionResponse> {
-    if path.starts_with("http://") || path.starts_with("https://") {
-        return None;
-    }
+    if path.starts_with("http://") || path.starts_with("https://") { return None; }
 
     let base = doc.uri.to_file_path().ok()?;
     let dir  = base.parent()?;
@@ -380,4 +375,4 @@ fn goto_import(doc: &Document, path: &str) -> Option<GotoDefinitionResponse> {
         }
     }
     None
-            }
+}

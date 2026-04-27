@@ -1,7 +1,7 @@
 // mdix-lsp/src/features/semantic_tokens.rs
 //! Semantic token provider.
 //! Wrapped in catch_unwind; function-call tokens now receive TT_FUNCTION colour.
-
+ 
 use std::panic;
 
 use tower_lsp::lsp_types::{SemanticToken, SemanticTokens, SemanticTokensResult};

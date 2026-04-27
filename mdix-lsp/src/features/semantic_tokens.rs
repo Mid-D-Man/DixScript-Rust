@@ -1,4 +1,8 @@
 // mdix-lsp/src/features/semantic_tokens.rs
+//! Semantic token provider.
+//! Wrapped in catch_unwind; function-call tokens now receive TT_FUNCTION colour.
+
+use std::panic;
 
 use tower_lsp::lsp_types::{SemanticToken, SemanticTokens, SemanticTokensResult};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
@@ -13,9 +17,21 @@ use crate::capabilities::{
     MOD_DECLARATION, MOD_READONLY,
 };
 
-// ── Public entry point ────────────────────────────────────────────────────────
-
 pub fn provide(doc: Option<&Document>) -> Option<SemanticTokensResult> {
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| provide_inner(doc)));
+    match result {
+        Ok(r) => r,
+        Err(payload) => {
+            let msg = payload.downcast_ref::<String>().cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "unknown panic".to_string());
+            tracing::error!("semantic_tokens panicked: {}", msg);
+            None
+        }
+    }
+}
+
+fn provide_inner(doc: Option<&Document>) -> Option<SemanticTokensResult> {
     let doc  = doc?;
     let data = encode_tokens(&doc.tokens);
     Some(SemanticTokensResult::Tokens(SemanticTokens {
@@ -37,14 +53,27 @@ struct ClassifierState {
     next_is_alias:       bool,
     next_is_dlm_module:  bool,
     next_is_dlm_subtype: bool,
+    /// True when the previous non-whitespace meaningful token was an
+    /// identifier immediately followed by `(`.  Used to colour function
+    /// call identifiers differently from plain variable references.
+    prev_was_call_ident: bool,
 }
 
 impl ClassifierState {
-    fn advance(&mut self, token: &Token) {
+    fn advance(&mut self, token: &Token, tokens: &[Token], index: usize) {
+        // Detect whether THIS identifier is being called (followed by `(`).
+        self.prev_was_call_ident = false;
+        if let TokenType::Identifier(_) = &token.token_type {
+            // Look ahead for `(` — skip any `<type>` annotation in between.
+            let is_call = tokens.iter().skip(index + 1).take(4).any(|t| {
+                matches!(t.token_type, TokenType::Symbol('('))
+            });
+            self.prev_was_call_ident = is_call;
+        }
+
         match &token.token_type {
-            TokenType::SectionEnums => {
-                self.seen_enum_name = false;
-            }
+            TokenType::SectionEnums => { self.seen_enum_name = false; }
+
             TokenType::Symbol('{') if token.section == SectionId::Enums => {
                 self.in_enum_body     = true;
                 self.enum_brace_depth += 1;
@@ -56,6 +85,7 @@ impl ClassifierState {
                     self.seen_enum_name = false;
                 }
             }
+
             TokenType::FunctionPrefix => {
                 self.next_is_func_name = true;
                 self.in_param_list     = false;
@@ -78,19 +108,17 @@ impl ClassifierState {
                     }
                 }
             }
-            TokenType::SectionImports => {
+
+            TokenType::SectionImports    => { self.next_is_alias = true; }
+            TokenType::Keyword(kw)
+            if *kw == "from" || *kw == "from_cloud" || *kw == "verify" => {
+                self.next_is_alias = false;
+            }
+            TokenType::String(_) | TokenType::StringSingle(_)
+            if token.section == SectionId::Imports => {
                 self.next_is_alias = true;
             }
-            TokenType::Keyword(kw)
-            if *kw == "from" || *kw == "from_cloud" || *kw == "verify" =>
-                {
-                    self.next_is_alias = false;
-                }
-            TokenType::String(_) | TokenType::StringSingle(_)
-            if token.section == SectionId::Imports =>
-                {
-                    self.next_is_alias = true;
-                }
+
             TokenType::SectionDLM => {
                 self.next_is_dlm_module  = true;
                 self.next_is_dlm_subtype = false;
@@ -98,11 +126,18 @@ impl ClassifierState {
             TokenType::Symbol('.') if token.section == SectionId::Dlm => {
                 self.next_is_dlm_subtype = true;
             }
+
             _ => {}
         }
     }
 
     fn classify_identifier(&mut self, token: &Token) -> (u32, u32) {
+        // Function call identifier — fired in @DATA, @QUICKFUNCS, anywhere a
+        // name is immediately followed by `(`.
+        if self.prev_was_call_ident && !self.next_is_func_name {
+            return (TT_FUNCTION, 0);
+        }
+
         match token.section {
             SectionId::Config => (TT_PROPERTY, 0),
 
@@ -165,11 +200,10 @@ fn encode_tokens(tokens: &[Token]) -> Vec<SemanticToken> {
     let mut prev_col:  u32 = 0;
     let mut state = ClassifierState::default();
 
-    for token in tokens {
-        state.advance(token);
+    for (index, token) in tokens.iter().enumerate() {
+        // Pass the full token list and index so the state can look ahead.
+        state.advance(token, tokens, index);
 
-        // Interpolated strings get special splitting so variables inside {}
-        // receive TT_VARIABLE colouring instead of TT_STRING.
         if let TokenType::InterpolatedString(content) = &token.token_type {
             emit_interpolated_tokens(token, content, &mut prev_line, &mut prev_col, &mut data);
             continue;
@@ -205,68 +239,46 @@ fn encode_tokens(tokens: &[Token]) -> Vec<SemanticToken> {
 }
 
 // ── Interpolated string splitter ──────────────────────────────────────────────
-//
-// For  $"Hello {name}!"  the token starts at `$`.
-// Content (stored in the token) = `Hello {name}!`  (no $" prefix, no closing ")
-// Offsets from base_col:  0=$  1="  2=H  3=e … 8={  9=n … 12=e  13=}  14=!  15="
-//
-// We emit:
-//   [0 , 8)  TT_STRING   →  $"Hello
-//   [8 , 9)  TT_OPERATOR →  {
-//   [9 , 13) TT_VARIABLE →  name
-//   [13, 14) TT_OPERATOR →  }
-//   [14, 16) TT_STRING   →  !"   (closing quote included)
 
 fn emit_interpolated_tokens(
-    token: &Token,
-    content: &str,
+    token:     &Token,
+    content:   &str,
     prev_line: &mut u32,
-    prev_col: &mut u32,
-    data: &mut Vec<SemanticToken>,
+    prev_col:  &mut u32,
+    data:      &mut Vec<SemanticToken>,
 ) {
     let base_line = token.line.saturating_sub(1) as u32;
     let base_col  = token.column.saturating_sub(1) as u32;
 
-    // Multiline interpolated strings are uncommon and complex to split correctly;
-    // fall back to a single TT_STRING span for them.
     if content.contains('\n') {
-        push_raw(data, prev_line, prev_col,
-                 base_line, base_col,
-                 (content.len() + 3) as u32,   // $" + content + "
-                 TT_STRING, 0);
+        push_raw(data, prev_line, prev_col, base_line, base_col,
+            (content.len() + 3) as u32, TT_STRING, 0);
         return;
     }
 
-    // seg_start  = offset from base_col where the current string segment begins
-    // char_offset = offset from base_col of the character currently being examined
-    // Content chars start at offset 2 (after $")
-    let mut seg_start:   u32 = 0; // begins at `$`
-    let mut char_offset: u32 = 2; // first content char
+    let mut seg_start:   u32 = 0;
+    let mut char_offset: u32 = 2;
     let mut in_brace          = false;
     let mut brace_start: u32  = 0;
 
     for ch in content.chars() {
         match ch {
             '{' if !in_brace => {
-                // Emit string segment up to (exclusive) the opening brace.
                 let seg_len = char_offset - seg_start;
-                push_raw(data, prev_line, prev_col,
-                         base_line, base_col + seg_start, seg_len, TT_STRING, 0);
-                // Emit `{` as an operator.
-                push_raw(data, prev_line, prev_col,
-                         base_line, base_col + char_offset, 1, TT_OPERATOR, 0);
+                push_raw(data, prev_line, prev_col, base_line,
+                    base_col + seg_start, seg_len, TT_STRING, 0);
+                push_raw(data, prev_line, prev_col, base_line,
+                    base_col + char_offset, 1, TT_OPERATOR, 0);
                 in_brace     = true;
                 brace_start  = char_offset + 1;
                 char_offset += 1;
             }
             '}' if in_brace => {
-                // Emit expression content.
                 let expr_len = char_offset - brace_start;
-                push_raw(data, prev_line, prev_col,
-                         base_line, base_col + brace_start, expr_len, TT_VARIABLE, 0);
-                // Emit `}` as an operator.
-                push_raw(data, prev_line, prev_col,
-                         base_line, base_col + char_offset, 1, TT_OPERATOR, 0);
+                push_raw(data, prev_line, prev_col, base_line,
+                    base_col + brace_start, expr_len, TT_VARIABLE, 0);
+                push_raw(data, prev_line, prev_col, base_line,
+                    base_col + char_offset, 1, TT_OPERATOR, 0);
                 in_brace     = false;
                 seg_start    = char_offset + 1;
                 char_offset += 1;
@@ -275,19 +287,16 @@ fn emit_interpolated_tokens(
         }
     }
 
-    // Emit the remaining string segment plus the closing `"`.
     if !in_brace {
-        let end_offset = char_offset + 1; // +1 for the closing `"`
+        let end_offset = char_offset + 1;
         let seg_len    = end_offset - seg_start;
-        push_raw(data, prev_line, prev_col,
-                 base_line, base_col + seg_start, seg_len, TT_STRING, 0);
+        push_raw(data, prev_line, prev_col, base_line,
+            base_col + seg_start, seg_len, TT_STRING, 0);
     }
 }
 
-/// Push a single semantic token, computing the LSP delta from the running
-/// previous-position state.
 fn push_raw(
-    data: &mut Vec<SemanticToken>,
+    data:      &mut Vec<SemanticToken>,
     prev_line: &mut u32,
     prev_col:  &mut u32,
     line: u32, col: u32, len: u32, tt: u32, mods: u32,
@@ -296,11 +305,11 @@ fn push_raw(
     let dl = line - *prev_line;
     let ds = if dl == 0 { col.saturating_sub(*prev_col) } else { col };
     data.push(SemanticToken {
-        delta_line:              dl,
-        delta_start:             ds,
-        length:                  len,
-        token_type:              tt,
-        token_modifiers_bitset:  mods,
+        delta_line:             dl,
+        delta_start:            ds,
+        length:                 len,
+        token_type:             tt,
+        token_modifiers_bitset: mods,
     });
     *prev_line = line;
     *prev_col  = col;
@@ -324,7 +333,6 @@ fn classify(token: &Token, state: &mut ClassifierState) -> Option<(u32, u32)> {
 
         TokenType::String(_)
         | TokenType::StringSingle(_)     => Some((TT_STRING, 0)),
-        // InterpolatedString is handled before classify() is reached in encode_tokens.
         TokenType::InterpolatedString(_) => Some((TT_STRING, 0)),
 
         TokenType::Date(_)
@@ -336,6 +344,8 @@ fn classify(token: &Token, state: &mut ClassifierState) -> Option<(u32, u32)> {
         | TokenType::ScientificNotation(_) => Some((TT_NUMBER, 0)),
 
         TokenType::HexLiteral(_)         => Some((TT_NUMBER, 0)),
+        // HexColor gets a distinct readonly modifier so editors can show
+        // the colour swatch gutter icon.
         TokenType::HexColor(_)           => Some((TT_NUMBER, MOD_READONLY)),
 
         TokenType::ArithmeticOp(_)
@@ -354,8 +364,12 @@ fn classify(token: &Token, state: &mut ClassifierState) -> Option<(u32, u32)> {
         TokenType::Comment(_)            => Some((TT_COMMENT, 0)),
         TokenType::EnumAccess { .. }     => Some((TT_ENUM_MEMBER, 0)),
         TokenType::TablePath(_)          => Some((TT_PROPERTY, 0)),
+
+        // Static function calls (Math.sqrt etc.) — always TT_FUNCTION.
         TokenType::StaticFunction { .. } => Some((TT_FUNCTION, 0)),
         TokenType::DixFunction(_)        => Some((TT_FUNCTION, 0)),
+        TokenType::BuiltinMethod(_)      => Some((TT_FUNCTION, 0)),
+
         TokenType::RegexConstructor(_)   => Some((TT_REGEXP, 0)),
 
         TokenType::BlobConstructor(_)
@@ -370,18 +384,18 @@ fn classify(token: &Token, state: &mut ClassifierState) -> Option<(u32, u32)> {
             }
         }
 
-        TokenType::Identifier(_)         => Some(state.classify_identifier(token)),
-        TokenType::ScopeDeclaration(_)   => Some((TT_TYPE, 0)),
-        TokenType::ConfigAccess(_)       => Some((TT_PROPERTY, 0)),
-        TokenType::BuiltinMethod(_)      => Some((TT_FUNCTION, 0)),
-        TokenType::ParseContext(_)       => None,
-        TokenType::Symbol(_)             => None,
-        TokenType::EndOfFile             => None,
-        TokenType::Error(_)              => None,
+        TokenType::Identifier(_)       => Some(state.classify_identifier(token)),
+        TokenType::ScopeDeclaration(_) => Some((TT_TYPE, 0)),
+        TokenType::ConfigAccess(_)     => Some((TT_PROPERTY, 0)),
+
+        TokenType::ParseContext(_)
+        | TokenType::Symbol(_)
+        | TokenType::EndOfFile
+        | TokenType::Error(_)          => None,
     }
 }
 
-// ── Source-text length of a token ─────────────────────────────────────────────
+// ── Token source-text length ──────────────────────────────────────────────────
 
 fn token_length(token: &Token) -> usize {
     match &token.token_type {
@@ -397,15 +411,15 @@ fn token_length(token: &Token) -> usize {
         TokenType::SectionQuickFuncs      => 11,
         TokenType::SectionData            =>  5,
         TokenType::SectionSecurity        =>  9,
-        TokenType::DoubleColon            => 2,
-        TokenType::Arrow                  => 2,
-        TokenType::SwitchCase             => 2,
-        TokenType::ControlFlowColon       => 1,
-        TokenType::FunctionPrefix         => 1,
+        TokenType::DoubleColon            =>  2,
+        TokenType::Arrow                  =>  2,
+        TokenType::SwitchCase             =>  2,
+        TokenType::ControlFlowColon       =>  1,
+        TokenType::FunctionPrefix         =>  1,
         TokenType::Bool(b)                => if *b { 4 } else { 5 },
-        TokenType::BlobConstructor(_)     => 2,
-        TokenType::RegexConstructor(_)    => 2,
-        TokenType::TupleConstructor(_)    => 2,
+        TokenType::BlobConstructor(_)     =>  2,
+        TokenType::RegexConstructor(_)    =>  2,
+        TokenType::TupleConstructor(_)    =>  2,
         TokenType::EnumAccess { enum_name, value } => enum_name.len() + 1 + value.len(),
         TokenType::TablePath(s)           => s.len(),
         TokenType::ObjectAccess(parts)    => parts.join(".").len(),

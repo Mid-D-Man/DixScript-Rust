@@ -39,54 +39,50 @@ fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<GotoDefinition
     let doc = doc?;
     let (token, index) = token_and_index_at(&doc.tokens, pos)?;
 
-    let token_type    = token.token_type.clone();
-    let token_section = token.section;
+    let token_type = token.token_type.clone();
 
     match &token_type {
         TokenType::Identifier(name) => {
-            // 0. Enum TYPE name (e.g. `AIType` in `AIType.BOSS`) → @ENUMS decl.
+            // 1. Enum TYPE name (e.g. `AIType` in `AIType.BOSS`) → @ENUMS decl.
             if let Some(r) = goto_enum_type(doc, name, index) {
                 return Some(r);
             }
-            // 1. Enum FIELD: cursor on FIELD in EnumName.FIELD.
+            // 2. Enum FIELD: cursor on FIELD in EnumName.FIELD.
             if let Some(r) = goto_enum_from_context(doc, name, index) {
                 return Some(r);
             }
-            // 2. QuickFunc call / reference → ~name declaration.
+            // 3. QuickFunc call / reference → ~name declaration.
             if let Some(r) = goto_quickfunc(doc, name) {
                 return Some(r);
             }
-            // 3. QuickFunc parameter — must come before local var search.
-            if token_section == SectionId::QuickFuncs {
-                if let Some(r) = goto_quickfunc_param(doc, name, pos) {
-                    return Some(r);
-                }
+            // 4. QuickFunc parameter.
+            //    NOTE: No token_section gate here — param tokens inside a
+            //    function body can carry SectionId::None depending on how
+            //    early the lexer sets the section context after `{`.
+            //    goto_quickfunc_param returns None safely when the name is
+            //    not a param, so the fallthrough cost is negligible.
+            if let Some(r) = goto_quickfunc_param(doc, name, pos) {
+                return Some(r);
             }
-            // 4. QuickFunc local variable declaration.
+            // 5. QuickFunc local variable (let / const).
             if let Some(r) = goto_quickfunc_local_var(doc, name) {
                 return Some(r);
             }
-            // 5. DATA property reference (outside QuickFuncs).
-            if token_section != SectionId::QuickFuncs {
-                goto_data_property(doc, name)
-            } else {
-                None
-            }
+            // 6. DATA property definition.
+            goto_data_property(doc, name)
         }
 
-        // EnumAccess tokens produced after semantic enhancement.
         TokenType::EnumAccess { enum_name, value } => {
             goto_enum_field(doc, enum_name, value)
         }
 
-        // Import path string → open the target file.
         TokenType::String(path) | TokenType::StringSingle(path) => {
             goto_import(doc, path)
         }
 
         _ => None,
     }
-}
+            }
 
 // ── Enum TYPE name → @ENUMS declaration ──────────────────────────────────────
 //

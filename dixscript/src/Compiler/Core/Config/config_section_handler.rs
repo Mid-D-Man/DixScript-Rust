@@ -233,9 +233,37 @@ impl ConfigSectionHandler {
         })
     }
 
+    /// Safe case-insensitive search for `@CONFIG` that operates entirely on
+    /// the original bytes.  Avoids the byte-shift bug that arises when
+    /// `to_uppercase()` changes the byte length of a Unicode character that
+    /// appears before @CONFIG (e.g. ﬁ→FI, ı→I), which would cause the
+    /// returned index to be misaligned in the original string and panic when
+    /// used to slice it.
     #[inline]
     fn index_of_config(&self, input: &str) -> Option<usize> {
-        input.to_uppercase().find(CONFIG_SECTION_KEYWORD)
+        let bytes = input.as_bytes();
+        let kw    = b"@config"; // always compare lower-case
+        let n     = kw.len();
+        if bytes.len() < n { return None; }
+        // Fast path: exact match (covers 99% of files).
+        if let Some(pos) = memchr::memmem::find(bytes, b"@CONFIG") { return Some(pos); }
+        if let Some(pos) = memchr::memmem::find(bytes, b"@config") { return Some(pos); }
+        // Slow path: full ASCII case-insensitive scan.
+        // `i` is always a valid UTF-8 char boundary because `@` (0x40) is
+        // a single-byte ASCII character.
+        'outer: for i in 0..=(bytes.len() - n) {
+            for j in 0..n {
+                if bytes[i + j].to_ascii_lowercase() != kw[j] { continue 'outer; }
+            }
+            return Some(i);
+        }
+        None
+    }
+
+    #[inline]
+    fn contains_config_keyword(&self, input: &str) -> bool {
+        if input.len() < CONFIG_KEYWORD_LENGTH { return false; }
+        self.index_of_config(input).is_some()
     }
 
     #[inline]

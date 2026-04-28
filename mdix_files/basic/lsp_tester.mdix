@@ -64,7 +64,6 @@
     simple_db = "mydb",
     supabean = ServerType.DEVELOPMENT,
     simple_connection = buildConnectionString(simple_host, simple_port, simple_db),
-
     // Test 2: Variables with calculations
     base_price = 100.0f,
     tax_amount = 15.0f,

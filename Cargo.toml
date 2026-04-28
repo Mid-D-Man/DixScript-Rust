@@ -2,12 +2,13 @@
 members = [
     "dixscript",
     "mdix-cli",
-    "mdix-lsp",
+    "mdix-lsp"
+    #unlock later
   #  "mdix-ffi",
-    "mdix-wasm",
-    "mdix-python",
-    "mdix-java",
-    "mdix-lua"
+   # "mdix-wasm",
+  #  "mdix-python",
+  #  "mdix-java"
+   # "mdix-lua"
 ]
 resolver = "2"
 

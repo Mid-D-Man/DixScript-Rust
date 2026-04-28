@@ -1,15 +1,22 @@
+
 @CONFIG(
   version -> "1.0.0"
   author -> "name"
   debug_mode -> "off"
   error_handling -> "halt"
-  compatibility_mode -> "strict"
   features -> "advanced"
+ compatibility_mode -> "strict"
+
 )
+
 @DATA(
-
-
   table: field = "value"
+  defitinyion:
+  dula =12,
+  mikc = {
+  mudi = 12
+  }
+
 
   array::
     "item1",

@@ -79,6 +79,7 @@
 
     ~testTimestampOperations<string> => global(ts<timestamp>) {
         return DateTime.format(ts, "yyyy-MM-dd HH:mm:ss");
+
     }
 
     ~testEnumOperations<int> => global(e<enum>) {
@@ -170,7 +171,7 @@
     array_integers = [1, 2, 3, 4, 5],
     array_floats = [1.1f, 2.2f, 3.3f],
     array_strings = ["apple", "banana", "cherry"],
-    array_booleans = [true, false, true, true],
+    array_booleans = [true, false, true, true,],
     array_empty = [],
     array_nested = [[1, 2], [3, 4], [5, 6]],
     array_objects = [
@@ -221,7 +222,7 @@
     regex_simple = r:("^[a-z]+$"),
     regex_email = r:("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"),
     regex_phone = r:("^\d{3}-\d{3}-\d{4}$"),
-    //regex_complex = r:("^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$"),
+    regex_complex = r:("^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$"),
 
     // Enum types
     enum_first<enum> = TestEnum.FIRST,

@@ -10,7 +10,6 @@
   port     = 8080
   debug    = true
   timeout  = 5000
-
   server: host = "localhost", port = 8080, ssl = false
 
   tags:: "web", "api", "v1"

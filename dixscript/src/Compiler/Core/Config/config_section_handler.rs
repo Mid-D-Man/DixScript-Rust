@@ -195,14 +195,6 @@ impl ConfigSectionHandler {
         self.log_info("ErrorManager configured with operational settings");
     }
 
-    #[inline]
-    fn contains_config_keyword(&self, input: &str) -> bool {
-        if input.len() < CONFIG_KEYWORD_LENGTH {
-            return false;
-        }
-        input.contains(CONFIG_SECTION_KEYWORD)
-            || input.to_uppercase().contains(CONFIG_SECTION_KEYWORD)
-    }
 
     fn extract_config_section_optimized(
         &self,

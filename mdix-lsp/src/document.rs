@@ -8,16 +8,16 @@ use tower_lsp::lsp_types::Url;
 
 /// Everything the server knows about one open .mdix file.
 pub struct Document {
-    pub uri:               Url,
-    pub source:            String,
-    pub error_manager:     ErrorManager,
-    pub tokens:            Vec<dixscript::Compiler::Core::Tokenizer::Token>,
-    pub ast:               Option<DixScript>,
-    pub semantic_result:   Option<SemanticAnalysisResult>,
-    pub enhancement_result:Option<EnhancementResult>,
-    pub version:           i32,
+    pub uri:                Url,
+    pub source:             String,
+    pub error_manager:      ErrorManager,
+    pub tokens:             Vec<dixscript::Compiler::Core::Tokenizer::Token>,
+    pub ast:                Option<DixScript>,
+    pub semantic_result:    Option<SemanticAnalysisResult>,
+    pub enhancement_result: Option<EnhancementResult>,
+    pub version:            i32,
     /// Lines removed from the start of `source` when @CONFIG was stripped.
-    pub config_line_offset:usize,
+    pub config_line_offset: usize,
 }
 
 impl std::fmt::Debug for Document {
@@ -47,16 +47,5 @@ impl Document {
             version,
             config_line_offset: 0,
         }
-    }
-
-    pub fn update(&mut self, source: String, version: i32) {
-        self.source             = source;
-        self.version            = version;
-        self.error_manager      = ErrorManager::new_isolated();
-        self.tokens             = Vec::new();
-        self.ast                = None;
-        self.semantic_result    = None;
-        self.enhancement_result = None;
-        self.config_line_offset = 0;
     }
 }

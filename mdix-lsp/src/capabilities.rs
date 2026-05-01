@@ -26,7 +26,8 @@ pub const TT_PROPERTY:    u32 = 10;
 pub const TT_PARAMETER:   u32 = 11;
 pub const TT_MACRO:       u32 = 12;
 pub const TT_DECORATOR:   u32 = 13;
-pub const TT_STRUCT:      u32 = 14;
+// Index 14 reserved for STRUCT — kept in TOKEN_TYPES for legend index stability.
+// Constant intentionally omitted (no current use site).
 pub const TT_REGEXP:      u32 = 15;
 pub const TT_EVENT:       u32 = 16;
 
@@ -34,7 +35,7 @@ pub const TT_EVENT:       u32 = 16;
 
 pub const MOD_DECLARATION: u32 = 1 << 0;
 pub const MOD_READONLY:    u32 = 1 << 1;
-pub const MOD_DEPRECATED:  u32 = 1 << 2;
+// Bit 2 (DEPRECATED) reserved in legend but has no use site — constant omitted.
 
 pub const TOKEN_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::KEYWORD,
@@ -51,15 +52,15 @@ pub const TOKEN_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::PARAMETER,
     SemanticTokenType::MACRO,
     SemanticTokenType::DECORATOR,
-    SemanticTokenType::STRUCT,
-    SemanticTokenType::REGEXP,
-    SemanticTokenType::EVENT,
+    SemanticTokenType::STRUCT,   // index 14 — kept for legend stability
+    SemanticTokenType::REGEXP,   // index 15 = TT_REGEXP
+    SemanticTokenType::EVENT,    // index 16 = TT_EVENT
 ];
 
 pub const TOKEN_MODIFIERS: &[SemanticTokenModifier] = &[
-    SemanticTokenModifier::DECLARATION,
-    SemanticTokenModifier::READONLY,
-    SemanticTokenModifier::DEPRECATED,
+    SemanticTokenModifier::DECLARATION, // bit 0 = MOD_DECLARATION
+    SemanticTokenModifier::READONLY,    // bit 1 = MOD_READONLY
+    SemanticTokenModifier::DEPRECATED,  // bit 2 — reserved in legend, no current use
 ];
 
 pub fn semantic_token_legend() -> SemanticTokensLegend {
@@ -99,7 +100,6 @@ pub fn server_capabilities() -> ServerCapabilities {
         inlay_hint_provider:  Some(OneOf::Left(true)),
         code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
 
-        // Folding ranges: sections, brace blocks, multi-line table/group entries
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
 
         semantic_tokens_provider: Some(

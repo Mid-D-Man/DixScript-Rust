@@ -1,17 +1,7 @@
 // mdix-lsp/src/features/inlay_hints.rs
-//
-// Changes:
-//   - `provide` wrapped in catch_unwind.
-//   - `infer_type_label_expr` now accepts a `param_types` map so that
-//     arithmetic expressions involving parameters resolve to the param type
-//     instead of returning `:?`.  E.g. `let x = p1 + p2` where p1,p2 are
-//     `<int>` now shows `: int` correctly.
-//   - `Expression::Identifier` is handled in `infer_type_label_expr` via
-//     the param map.
-//   - Untyped parameters (no `<type>` annotation, no default value) now show
-//     an `: any` inlay hint immediately after the parameter name.
-//   - `infer_static_method_return` covers all built-in static objects so that
-//     `let x = Math.floor(y)` shows `: int`, etc.
+//! Inlay hints — type annotations shown inline.
+//!
+//! All hints use DixScript `<type>` bracket notation, not `: type`.
 
 use std::panic;
 use std::collections::HashMap;
@@ -41,7 +31,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
     let doc = doc?;
     let ast = doc.ast.as_ref()?;
 
-    // Build QuickFunc name → declared return-type lookup.
+    // QuickFunc name → declared return-type lookup.
     let qf_return_types: HashMap<String, DataType> = ast
         .quick_functions
         .as_ref()
@@ -58,7 +48,6 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
     if let Some(data) = &ast.data {
         let type_index = doc.semantic_result.as_ref()
             .and_then(|sr| sr.type_index.as_ref());
-        // Empty param map — @DATA has no parameters.
         let no_params: HashMap<String, Option<DataType>> = HashMap::new();
 
         for entry in &data.entries {
@@ -68,9 +57,9 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     let type_label = type_index
                         .as_ref()
                         .and_then(|idx| idx.get(name.as_str()))
-                        .map(|dt| format!(": {}", dt))
+                        .map(|dt| fmt_type(*dt))
                         .or_else(|| infer_type_label(value, &qf_return_types, &no_params))
-                        .unwrap_or_else(|| ": auto".to_string());
+                        .unwrap_or_else(|| "<auto>".to_string());
                     let line = position.line.saturating_sub(1) as u32;
                     let col  = (position.column.saturating_sub(1) + name.len()) as u32;
                     hints.push(make_hint(line, col, type_label));
@@ -80,7 +69,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     for prop in properties {
                         if prop.data_type.is_some() { continue; }
                         let type_label = infer_type_label(&prop.value, &qf_return_types, &no_params)
-                            .unwrap_or_else(|| ": auto".to_string());
+                            .unwrap_or_else(|| "<auto>".to_string());
                         let line = prop.position.line.saturating_sub(1) as u32;
                         let col  = (prop.position.column.saturating_sub(1) + prop.name.len()) as u32;
                         hints.push(make_hint(line, col, type_label));
@@ -91,12 +80,12 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     if items.is_empty() { continue; }
                     let elem_type = items.first()
                         .and_then(|v| infer_type_label(v, &qf_return_types, &no_params))
-                        .map(|t| t.trim_start_matches(": ").to_string())
+                        .map(|t| t.trim_start_matches('<').trim_end_matches('>').to_string())
                         .unwrap_or_else(|| "any".to_string());
                     let path_str = path.segments.join(".");
                     let line = position.line.saturating_sub(1) as u32;
                     let col  = (position.column.saturating_sub(1) + path_str.len()) as u32;
-                    hints.push(make_hint(line, col, format!(": {}[{}]", elem_type, items.len())));
+                    hints.push(make_hint(line, col, format!("<{}>[{}]", elem_type, items.len())));
                 }
 
                 DataEntry::ObjectProperty { .. } => {}
@@ -107,26 +96,18 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
     // ── @QUICKFUNCS section ──────────────────────────────────────────────────
     if let Some(qf) = &ast.quick_functions {
         for func in &qf.functions {
-            // Build param name → declared type map for this function.
-            // None means the parameter has no type annotation (treated as `any`).
             let param_types: HashMap<String, Option<DataType>> = func.parameters.iter()
                 .map(|p| (p.name.clone(), p.data_type))
                 .collect();
 
-            // ── Parameter type hints ──────────────────────────────────────────
-            // Show `: any` for parameters that have no explicit type annotation
-            // and no default value.  Annotated params already have the type in
-            // source so no hint is needed.
+            // Untyped parameter hints.
             for param in &func.parameters {
                 if param.data_type.is_some() { continue; }
-                // Even if there is a default value we show `: any` — the type
-                // still isn't constrained by source annotation.
                 let line = param.position.line.saturating_sub(1) as u32;
                 let col  = (param.position.column.saturating_sub(1) + param.name.len()) as u32;
-                hints.push(make_hint(line, col, ": any".to_string()));
+                hints.push(make_hint(line, col, "<any>".to_string()));
             }
 
-            // ── Variable declaration hints ────────────────────────────────────
             collect_qf_var_hints(
                 &func.body,
                 &doc.tokens,
@@ -157,20 +138,17 @@ fn collect_qf_var_hints(
                 if data_type.is_some() { continue; }
 
                 let type_label = infer_type_label_expr(value, qf_return_types, param_types)
-                    .unwrap_or_else(|| ": ?".to_string());
+                    .unwrap_or_else(|| "<?>".to_string());
 
-                let target_line = position.line; // 1-based
+                let target_line = position.line;
                 let hint_line   = position.line.saturating_sub(1) as u32;
 
-                // Find the Identifier token for `variable_name` on this line so
-                // the hint lands directly after the name, not after `let`/`const`.
                 let col = tokens.iter()
                     .filter(|t| t.line == target_line)
                     .find(|t| matches!(&t.token_type,
                         TokenType::Identifier(id) if id.as_str() == variable_name.as_str()))
                     .map(|tok| (tok.column.saturating_sub(1) + variable_name.len()) as u32)
                     .unwrap_or_else(|| {
-                        // Fallback: `let ` prefix is 4 chars.
                         (position.column.saturating_sub(1) + 4 + variable_name.len()) as u32
                     });
 
@@ -213,39 +191,38 @@ fn make_hint(line: u32, col: u32, label: String) -> InlayHint {
     }
 }
 
+/// Format a DataType as a DixScript `<type>` annotation string.
+fn fmt_type(dt: DataType) -> String {
+    format!("<{}>", dt)
+}
+
 // ── Type inference from a Value node ─────────────────────────────────────────
-//
-// `param_types`: name → `Some(DataType)` if annotated, `None` if untyped.
-// `qf_return_types`: QuickFunc name → declared return type.
 
 fn infer_type_label(
     value:           &Value,
     qf_return_types: &HashMap<String, DataType>,
     param_types:     &HashMap<String, Option<DataType>>,
 ) -> Option<String> {
-    // Unwrap Expression wrappers.
     if let Value::Expression { expr, .. } = value {
         return infer_type_label_expr(expr, qf_return_types, param_types);
     }
 
-    // Direct QuickFunc call result.
     if let Value::QuickFuncCall { function_name, .. } = value {
         return qf_return_types.get(function_name.as_str())
-            .map(|rt| format!(": {}", rt));
+            .map(|rt| fmt_type(*rt));
     }
 
-    // Identifier — resolve via param map.
     if let Value::Identifier { value: name, .. } = value {
         if let Some(opt_dt) = param_types.get(name.as_str()) {
             return Some(match opt_dt {
-                Some(dt) => format!(": {}", dt),
-                None     => ": any".to_string(),
+                Some(dt) => fmt_type(*dt),
+                None     => "<any>".to_string(),
             });
         }
     }
 
     if matches!(value, Value::Null { .. }) {
-        return Some(": null".to_string());
+        return Some("<null>".to_string());
     }
 
     let dt = match value {
@@ -272,7 +249,7 @@ fn infer_type_label(
         _ => return None,
     };
 
-    Some(format!(": {}", dt))
+    Some(fmt_type(dt))
 }
 
 // ── Type inference from an Expression node ────────────────────────────────────
@@ -283,14 +260,10 @@ fn infer_type_label_expr(
     param_types:     &HashMap<String, Option<DataType>>,
 ) -> Option<String> {
     match expr {
-        // ── Identifier — look up in the param map ─────────────────────────
-        // This is the critical case that was missing: `p1 + p2` where p1,p2
-        // are parameters resolves to the param type rather than falling through
-        // to `None` → `:?`.
         Expression::Identifier { name, .. } => {
             param_types.get(name.as_str()).map(|opt_dt| match opt_dt {
-                Some(dt) => format!(": {}", dt),
-                None     => ": any".to_string(),
+                Some(dt) => fmt_type(*dt),
+                None     => "<any>".to_string(),
             })
         }
 
@@ -299,50 +272,43 @@ fn infer_type_label_expr(
         }
 
         Expression::QuickFuncCall { name, .. } => {
-            qf_return_types.get(name.as_str()).map(|rt| format!(": {}", rt))
+            qf_return_types.get(name.as_str()).map(|rt| fmt_type(*rt))
         }
 
-        // ── Arithmetic — numeric promotion rules ──────────────────────────
-        // `+` with a string operand → string (concatenation).
-        // Otherwise: double > float > int.
+        // Arithmetic — numeric promotion with <type> string comparisons.
         Expression::ArithmeticOp { left, operator, right, .. } => {
             let lt = infer_type_label_expr(left,  qf_return_types, param_types);
             let rt = infer_type_label_expr(right, qf_return_types, param_types);
 
             if operator.as_str() == "+" {
-                if lt.as_deref() == Some(": string") || rt.as_deref() == Some(": string") {
-                    return Some(": string".to_string());
+                if lt.as_deref() == Some("<string>") || rt.as_deref() == Some("<string>") {
+                    return Some("<string>".to_string());
                 }
             }
 
             match (lt.as_deref(), rt.as_deref()) {
-                (Some(": double"), _) | (_, Some(": double")) => Some(": double".to_string()),
-                (Some(": float"),  _) | (_, Some(": float"))  => Some(": float".to_string()),
-                (Some(": int"),    _) | (_, Some(": int"))     => Some(": int".to_string()),
-                // Both sides same type.
+                (Some("<double>"), _) | (_, Some("<double>")) => Some("<double>".to_string()),
+                (Some("<float>"),  _) | (_, Some("<float>"))  => Some("<float>".to_string()),
+                (Some("<int>"),    _) | (_, Some("<int>"))     => Some("<int>".to_string()),
                 (Some(l), Some(r)) if l == r => Some(l.to_string()),
-                // One side known.
                 (Some(l), _) => Some(l.to_string()),
                 (_, Some(r)) => Some(r.to_string()),
                 _ => None,
             }
         }
 
-        // ── Comparison / logical → always bool ───────────────────────────
         Expression::ComparisonOp { .. } | Expression::LogicalOp { .. } => {
-            Some(": bool".to_string())
+            Some("<bool>".to_string())
         }
 
         Expression::UnaryOp { operator, operand, .. } => {
             if operator.as_str() == "!" || operator.as_str() == "not" {
-                Some(": bool".to_string())
+                Some("<bool>".to_string())
             } else {
-                // Numeric negation preserves operand type.
                 infer_type_label_expr(operand, qf_return_types, param_types)
             }
         }
 
-        // ── Ternary — use true branch; fall back to false branch ──────────
         Expression::Conditional { true_value, false_value, .. } => {
             infer_type_label_expr(true_value, qf_return_types, param_types)
                 .or_else(|| infer_type_label_expr(false_value, qf_return_types, param_types))
@@ -352,7 +318,6 @@ fn infer_type_label_expr(
             infer_type_label_expr(expression, qf_return_types, param_types)
         }
 
-        // ── Built-in static method calls ──────────────────────────────────
         Expression::StaticMethodCall { object_name, method_name, .. } => {
             infer_static_method_return(object_name, method_name)
         }
@@ -365,8 +330,7 @@ fn infer_type_label_expr(
     }
 }
 
-/// Known return types for built-in static methods.
-/// Allows `let x = Math.floor(y)` to show `: int` rather than `:?`.
+/// Known return types for built-in static methods, returned as `<type>` strings.
 fn infer_static_method_return(class: &str, method: &str) -> Option<String> {
     let dt = match (class, method) {
         // Math
@@ -423,7 +387,7 @@ fn infer_static_method_return(class: &str, method: &str) -> Option<String> {
         ("IpAddress", "toBytes")                                => DataType::Array,
         ("IpAddress", _)                                        => DataType::String,
         // Enum
-        ("Enum", "getValues") | ("Enum", "list") | ("Enum", "toArray")=> DataType::Array,
+        ("Enum", "getValues") | ("Enum", "list") | ("Enum", "toArray") => DataType::Array,
         ("Enum", "getName") | ("Enum", "random")                => DataType::String,
         ("Enum", "getValue") | ("Enum", "count")
         | ("Enum", "min") | ("Enum", "max")                    => DataType::Int,
@@ -433,5 +397,5 @@ fn infer_static_method_return(class: &str, method: &str) -> Option<String> {
         ("Dix", "Format") | ("Dix", "Join")                    => DataType::String,
         _ => return None,
     };
-    Some(format!(": {}", dt))
+    Some(fmt_type(dt))
 }

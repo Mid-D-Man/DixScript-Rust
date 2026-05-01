@@ -20,7 +20,6 @@ const ANALYSIS_TIMEOUT_SECS: u64 = 15;
 pub struct Backend {
     pub client:             Client,
     pub documents:          Arc<DashMap<Url, Document>>,
-    pub pipeline_lock:      tokio::sync::Mutex<()>,
     pub shutdown_requested: AtomicBool,
     pub analysis_tasks:     StdMutex<Vec<tokio::task::JoinHandle<()>>>,
     pub pending_versions:   Arc<DashMap<Url, i32>>,
@@ -31,7 +30,6 @@ impl Backend {
         Backend {
             client,
             documents:          Arc::new(DashMap::new()),
-            pipeline_lock:      tokio::sync::Mutex::new(()),
             shutdown_requested: AtomicBool::new(false),
             analysis_tasks:     StdMutex::new(Vec::new()),
             pending_versions:   Arc::new(DashMap::new()),
@@ -220,8 +218,6 @@ impl LanguageServer for Backend {
         Ok(features::code_actions::provide(doc.as_deref(), diags))
     }
 
-    // ── Folding ranges ────────────────────────────────────────────────────────
-    // Folds: @SECTION(...) blocks, { } brace blocks, multi-line table/group entries
     async fn folding_range(
         &self,
         params: FoldingRangeParams,

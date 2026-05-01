@@ -1,7 +1,13 @@
 //! Central semantic analysis orchestrator — runs all section analyzers in dependency order.
 //!
-//! Phases: (1) version, (2) imports semantic, (3) imports resolution,
-//! (4) enums, (5) quickfuncs, (6) dlm, (7) data, (8) security.
+//! ## Error manager propagation
+//! `propagate_error_manager = true` (LSP / `new_for_lsp` / `new_with_error_manager`):
+//!   every sub-analyzer receives `self.error_manager.clone()` so diagnostics from
+//!   all sub-analyzers aggregate in the same isolated per-document store.
+//! `propagate_error_manager = false` (CLI / `new`):
+//!   sub-analyzers use `ErrorManager::get_shared_instance()` independently.
+//!   Behaviour is functionally identical to the propagating path when the top-level
+//!   error manager IS the shared singleton.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -36,59 +42,51 @@ pub struct GeneralSemanticAnalyzer<'a> {
     has_enums_enabled:      bool,
     has_quickfuncs_enabled: bool,
     has_dlm_enabled:        bool,
+
+    /// When true, sub-analyzers receive `self.error_manager.clone()` so all
+    /// diagnostics aggregate in the same isolated store (LSP path).
+    /// When false, sub-analyzers acquire the shared process-wide singleton (CLI path).
+    propagate_error_manager: bool,
 }
 
 impl<'a> GeneralSemanticAnalyzer<'a> {
-    /// Primary constructor — caller supplies the ErrorManager instance.
+
+    // ── Constructors ──────────────────────────────────────────────────────────
+
+    /// CLI path — sub-analyzers use shared singleton.
+    pub fn new(
+        ast:                  &'a DixScript,
+        operational_settings: &'a OperationalSettings,
+    ) -> Self {
+        let mut s = Self::build(ast, operational_settings, ErrorManager::get_shared_instance());
+        s.propagate_error_manager = false;
+        s
+    }
+
+    /// Full constructor — caller supplies the ErrorManager instance.
+    /// Sub-analyzers receive `error_manager.clone()` (propagate = true).
     pub fn new_with_error_manager(
         ast:                  &'a DixScript,
         operational_settings: &'a OperationalSettings,
         error_manager:        ErrorManager,
     ) -> Self {
-        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
-
-        let is_advanced            = operational_settings.is_advanced_mode();
-        let has_imports_enabled    = is_advanced || operational_settings.is_feature_enabled("imports");
-        let has_enums_enabled      = is_advanced || operational_settings.is_feature_enabled("enums");
-        let has_quickfuncs_enabled = is_advanced || operational_settings.is_feature_enabled("quickfuncs");
-        let has_dlm_enabled        = is_advanced || operational_settings.is_feature_enabled("dlm");
-
-        GeneralSemanticAnalyzer {
-            ast,
-            operational_settings,
-            symbol_table: SymbolTable::new(),
-            error_manager,
-            debug_config,
-            analysis_result: SemanticAnalysisResult::new(),
-            stopwatch: Instant::now(),
-            skip_validation: false,
-            has_imports_enabled,
-            has_enums_enabled,
-            has_quickfuncs_enabled,
-            has_dlm_enabled,
-        }
+        let mut s = Self::build(ast, operational_settings, error_manager);
+        s.propagate_error_manager = true;
+        s
     }
 
-    /// Backward-compatible constructor for the CLI path.
-    pub fn new(
+    /// LSP path — explicit constructor for language-server use.
+    /// Identical to `new_with_error_manager` but semantically documents the call site.
+    pub fn new_for_lsp(
         ast:                  &'a DixScript,
         operational_settings: &'a OperationalSettings,
+        error_manager:        ErrorManager,
     ) -> Self {
-        Self::new_with_error_manager(ast, operational_settings, ErrorManager::get_shared_instance())
+        Self::new_with_error_manager(ast, operational_settings, error_manager)
     }
 
     /// Constructor used when analyzing an imported file that has transitive
     /// dependencies already resolved by the outer ImportsResolver.
-    ///
-    /// Seeds the internal SymbolTable with namespace entries from
-    /// `seed_namespaces` before analysis begins.  Only namespace slots are
-    /// copied — enums, functions, data variables, and all other fields start
-    /// empty so that this file's own symbols never pollute the outer table.
-    ///
-    /// `skip_imports_resolution` must be set to `true` in `operational_settings`
-    /// by the caller (imports_resolver::parse_imported_file already does this).
-    /// The seeded namespaces make phase-3 unnecessary; the cycle guard in the
-    /// outer ImportsResolver remains the single authority on import traversal.
     pub fn new_with_seed_namespaces(
         ast:                  &'a DixScript,
         operational_settings: &'a OperationalSettings,
@@ -128,17 +126,63 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             has_enums_enabled,
             has_quickfuncs_enabled,
             has_dlm_enabled,
+            propagate_error_manager: true,
         }
     }
+
+    // ── Internal builder ──────────────────────────────────────────────────────
+
+    fn build(
+        ast:                  &'a DixScript,
+        operational_settings: &'a OperationalSettings,
+        error_manager:        ErrorManager,
+    ) -> Self {
+        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
+
+        let is_advanced            = operational_settings.is_advanced_mode();
+        let has_imports_enabled    = is_advanced || operational_settings.is_feature_enabled("imports");
+        let has_enums_enabled      = is_advanced || operational_settings.is_feature_enabled("enums");
+        let has_quickfuncs_enabled = is_advanced || operational_settings.is_feature_enabled("quickfuncs");
+        let has_dlm_enabled        = is_advanced || operational_settings.is_feature_enabled("dlm");
+
+        GeneralSemanticAnalyzer {
+            ast,
+            operational_settings,
+            symbol_table: SymbolTable::new(),
+            error_manager,
+            debug_config,
+            analysis_result: SemanticAnalysisResult::new(),
+            stopwatch: Instant::now(),
+            skip_validation: false,
+            has_imports_enabled,
+            has_enums_enabled,
+            has_quickfuncs_enabled,
+            has_dlm_enabled,
+            propagate_error_manager: true, // overridden by constructors
+        }
+    }
+
+    // ── EM helper — resolves to isolated clone or shared singleton ────────────
+
+    fn make_error_manager(&self) -> ErrorManager {
+        if self.propagate_error_manager {
+            self.error_manager.clone()
+        } else {
+            ErrorManager::get_shared_instance()
+        }
+    }
+
+    // ── Main entry point ──────────────────────────────────────────────────────
 
     pub fn analyze(mut self) -> SemanticAnalysisResult {
         if self.debug_config.is_enabled {
             self.error_manager.log_info("Starting General Semantic Analysis v1.0.0");
             self.error_manager.log_debug(&format!(
-                "Error Handling: {:?} | Compat: {:?} | Advanced: {}",
+                "Error Handling: {:?} | Compat: {:?} | Advanced: {} | Propagate EM: {}",
                 self.operational_settings.error_handling_strategy,
                 self.operational_settings.compatibility_mode,
-                self.operational_settings.is_advanced_mode()
+                self.operational_settings.is_advanced_mode(),
+                self.propagate_error_manager,
             ));
         }
 
@@ -263,7 +307,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             &self.symbol_table,
             self.operational_settings,
             current_file_path,
-            self.error_manager.clone()
+            self.make_error_manager(),
         );
         imports_analyzer.analyze(Some(imports));
         drop(imports_analyzer);
@@ -339,8 +383,6 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             return true;
         }
 
-        // Derive the base directory from the source file being compiled.
-        // All relative import paths are resolved against this directory.
         let base_dir = self
             .operational_settings
             .source_file_path
@@ -351,17 +393,17 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
-                "Phase 3: base_dir='{}' for import resolution",
-                base_dir
+                "Phase 3: base_dir='{}' for import resolution", base_dir
             ));
         }
 
-        let mut imports_resolver =
-            ImportsResolver::new_with_error_manager(&mut self.symbol_table, self.operational_settings,self.error_manager.clone());
+        let mut imports_resolver = ImportsResolver::new_with_error_manager(
+            &mut self.symbol_table,
+            self.operational_settings,
+            self.make_error_manager(),
+        );
 
-        // Use the new entry point that actually reads files from disk.
-        let resolve_success =
-            imports_resolver.resolve_from_imports_section(imports, base_dir);
+        let resolve_success = imports_resolver.resolve_from_imports_section(imports, base_dir);
 
         if !resolve_success {
             self.error_manager.log_error("Import resolution failed");
@@ -419,8 +461,11 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             return true;
         }
 
-        let mut analyzer = EnumsSectionAnalyzer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
-        let result       = analyzer.analyze(enums, &mut self.symbol_table);
+        let mut analyzer = EnumsSectionAnalyzer::new_with_error_manager(
+            self.operational_settings,
+            self.make_error_manager(),
+        );
+        let result = analyzer.analyze(enums, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -472,8 +517,11 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             return true;
         }
 
-        let mut analyzer = QuickFuncsSectionAnalyzer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
-        let result       = analyzer.analyze(quickfuncs, &mut self.symbol_table);
+        let mut analyzer = QuickFuncsSectionAnalyzer::new_with_error_manager(
+            self.operational_settings,
+            self.make_error_manager(),
+        );
+        let result = analyzer.analyze(quickfuncs, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -517,8 +565,11 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        let mut analyzer = DlmSectionAnalyzer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
-        let result       = analyzer.analyze(dlm, &mut self.symbol_table);
+        let mut analyzer = DlmSectionAnalyzer::new_with_error_manager(
+            self.operational_settings,
+            self.make_error_manager(),
+        );
+        let result = analyzer.analyze(dlm, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -543,8 +594,11 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        let mut analyzer = DataSectionAnalyzer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
-        let result       = analyzer.analyze(data, &mut self.symbol_table);
+        let mut analyzer = DataSectionAnalyzer::new_with_error_manager(
+            self.operational_settings,
+            self.make_error_manager(),
+        );
+        let result = analyzer.analyze(data, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -568,7 +622,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         }
 
-        let phase_ok              = result.is_success;
+        let phase_ok = result.is_success;
         let (short_name_idx, type_idx) = analyzer.get_indexes();
 
         if !short_name_idx.is_empty() {
@@ -625,8 +679,11 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             }
         };
 
-        let mut analyzer = SecuritySectionAnalyzer::new_with_error_manager(self.operational_settings,self.error_manager.clone());
-        let result       = analyzer.analyze(security, &mut self.symbol_table);
+        let mut analyzer = SecuritySectionAnalyzer::new_with_error_manager(
+            self.operational_settings,
+            self.make_error_manager(),
+        );
+        let result = analyzer.analyze(security, &mut self.symbol_table);
 
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -715,4 +772,4 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.analysis_result.symbol_table = Some(self.symbol_table);
         self.analysis_result
     }
-}
+    }

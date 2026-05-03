@@ -1,28 +1,26 @@
+// dixscript/src/Compiler/Core/Tokenizer/lexer.rs
 //! DixScript Lexer — tokenises a `.mdix` source string into a `Vec<Token>`.
 //!
-//! ## Changes from previous version
+//! ## Key fix: section token self-stamping
 //!
-//! - `skip_whitespace` now uses the platform-specific SIMD finder
-//!   (`platform::find_whitespace_end`) to advance to the first non-whitespace
-//!   byte in one call, then makes a single `memchr_iter` pass over the
-//!   consumed slice to count `\n` characters and update `line`/`column`.
-//!   This keeps newline counting exact while giving the whitespace-skip itself
-//!   a 4–16× throughput improvement on SIMD targets.
+//! Section keyword tokens (`@ENUMS`, `@QUICKFUNCS`, `@DATA`, etc.) are now
+//! stamped with their OWN `SectionId` rather than `self.current_section` (the
+//! previous section). Before this fix, every section keyword carried the
+//! section ID of the section that preceded it:
 //!
-//! - `scan_identifier_or_keyword` and the numeric scanner use the compile-time
-//!   `char_tables` lookup tables (`IDENT_CONT`, `DIGIT`, `HEX_DIGIT`) instead
-//!   of `char::is_alphanumeric()` / `char::is_ascii_digit()`.  Each lookup is
-//!   one indexed read with no branching or Unicode overhead.
+//!   @ENUMS token → SectionId::None   (was: None, correct)
+//!   @QUICKFUNCS  → SectionId::Enums  (was wrong — now: QuickFuncs)
+//!   @DATA        → SectionId::QuickFuncs (was wrong — now: Data)
 //!
-//! - `is_hex_digit` is now a one-line table lookup rather than a method call.
+//! The fix is isolated to `try_scan_section_keyword`: instead of passing
+//! `self.current_section`, we derive the correct SectionId from the token
+//! type via `get_section_context()`.
 //!
-//! ## f64 precision guarantee
+//! ## Note on `~` (QuickFunc prefix)
 //!
-//! `Double` and `ScientificNotation` tokens carry genuine `f64` values.
-//! The lexer calls `str::parse::<f64>()` for all decimal literals without
-//! an `f`/`F` suffix, so no precision is lost at the tokenisation stage.
-//! Only literals with an explicit float suffix are narrowed to `f32` and
-//! stored as `TokenType::Float(f32)`.
+//! The tilde character is emitted as `Symbol('~')` via the generic
+//! `scan_single_character` path. There is no `FunctionPrefix` token type.
+//! Code detecting QuickFunc declarations must match `Symbol('~')`.
 
 use phf::phf_map;
 use memchr::memchr;
@@ -148,10 +146,6 @@ pub struct Tokenizer<'src> {
 }
 
 impl<'src> Tokenizer<'src> {
-    /// Primary constructor — caller supplies the ErrorManager instance.
-    ///
-    /// For the CLI this will be `ErrorManager::get_shared_instance()`.
-    /// For the LSP this will be the per-document isolated instance.
     pub fn new_with_error_manager(
         input:         &'src str,
         settings:      &'src OperationalSettings,
@@ -181,7 +175,6 @@ impl<'src> Tokenizer<'src> {
         }
     }
 
-    /// Backward-compatible constructor for the CLI path.
     pub fn new(input: &'src str, settings: &'src OperationalSettings) -> Self {
         Self::new_with_error_manager(input, settings, ErrorManager::get_shared_instance())
     }
@@ -266,56 +259,35 @@ impl<'src> Tokenizer<'src> {
         }
     }
 
-    // ── Whitespace skipping ───────────────────────────────────────────────────
-    //
-    // Strategy:
-    //  1. Call `platform::find_whitespace_end` to get the end position of the
-    //     whitespace run.  On SIMD targets this processes 16 bytes per cycle.
-    //  2. Walk the consumed slice with `memchr_iter` (also SIMD-accelerated)
-    //     to count `\n` bytes, updating `line` and `column` arithmetically.
-    //
-    // This avoids per-byte branching in the common case while keeping the
-    // line/column tracking correct for all input.
-
     #[inline]
     fn skip_whitespace(&self, state: &mut TokenizerState) {
         let bytes = self.input.as_bytes();
         let start = state.position;
 
-        // Fast path: find where whitespace ends (SIMD on supported targets).
         let end = platform::find_whitespace_end(bytes, start);
 
         if end == start {
-            return; // Nothing to skip.
+            return;
         }
 
-        // Count newlines in [start, end) to keep line/column accurate.
         let ws_slice = &bytes[start..end];
         let newline_count = memchr::memchr_iter(b'\n', ws_slice).count();
 
         if newline_count == 0 {
-            // Pure horizontal whitespace — column advances by the run length.
             state.column   += end - start;
         } else {
-            // One or more newlines.
-            // Find the position of the last `\n` so we can compute the
-            // column for the character that follows it.
             let last_nl_offset = memchr::memchr_iter(b'\n', ws_slice)
                 .last()
-                .unwrap(); // safe: newline_count > 0
+                .unwrap();
 
             state.line   += newline_count;
-            // Column after the last newline: characters between last \n and `end`.
-            state.column  = (end - (start + last_nl_offset)); // 1-based handled below
+            state.column  = (end - (start + last_nl_offset));
         }
 
         state.position = end;
 
-        // Ensure column is always >= 1 (1-based).
         if state.column == 0 { state.column = 1; }
     }
-
-    // ── Inner helpers ─────────────────────────────────────────────────────────
 
     #[inline]
     fn handle_tokenization_error(
@@ -395,7 +367,6 @@ impl<'src> Tokenizer<'src> {
             .unwrap_or(true)
     }
 
-    /// One-read table lookup — replaces the old `char::is_ascii_hexdigit()` call.
     #[inline(always)]
     fn is_hex_digit(&self, c: char) -> bool {
         (c as u32) < 256 && HEX_DIGIT[c as usize]
@@ -470,7 +441,6 @@ impl<'src> Tokenizer<'src> {
             return Ok(Some(self.scan_prefixed_constructor(state)));
         }
 
-        // Table-driven identifier start check — replaces is_alphabetic() + '_' branch.
         if (current as u32) < 256 && IDENT_START[current as usize] {
             return Ok(Some(self.scan_identifier_or_keyword(state)));
         }
@@ -568,7 +538,9 @@ impl<'src> Tokenizer<'src> {
         }
         let section_len = state.position - section_start;
         if section_len == 0 {
-            state.position = start_pos; state.line = start_line; state.column = start_column;
+            state.position = start_pos;
+            state.line     = start_line;
+            state.column   = start_column;
             return None;
         }
         let section_name = state.slice(self.input, section_start, section_len);
@@ -583,10 +555,20 @@ impl<'src> Tokenizer<'src> {
             "SECURITY"   => Some(TokenType::SectionSecurity),
             _ => None,
         };
+
         if let Some(tt) = token_type {
-            Some(Token::new(tt, start_line, start_column, self.current_section))
+            // FIX: stamp the section keyword with its OWN section ID, not
+            // self.current_section (which is still the PREVIOUS section).
+            // Before this fix: @QUICKFUNCS had SectionId::Enums stamped on it.
+            // After: @QUICKFUNCS correctly has SectionId::QuickFuncs.
+            let own_section = tt.get_section_context()
+                .map(SectionId::from_context_str)
+                .unwrap_or(SectionId::None);
+            Some(Token::new(tt, start_line, start_column, own_section))
         } else {
-            state.position = start_pos; state.line = start_line; state.column = start_column;
+            state.position = start_pos;
+            state.line     = start_line;
+            state.column   = start_column;
             None
         }
     }
@@ -726,14 +708,6 @@ impl<'src> Tokenizer<'src> {
 }
 
 // ── Numeric scanning ──────────────────────────────────────────────────────────
-//
-// Precision guarantee:
-//   - Literals without `f`/`F` suffix are parsed with `str::parse::<f64>()`.
-//     The result is stored as `TokenType::Double(f64)` or
-//     `TokenType::ScientificNotation(f64)` — full IEEE 754 double precision.
-//   - Literals WITH an `f`/`F` suffix are narrowed to `f32` only at this
-//     explicit developer-annotated point and stored as `TokenType::Float(f32)`.
-//   - No implicit widening or narrowing occurs elsewhere in the pipeline.
 
 impl<'src> Tokenizer<'src> {
     fn scan_numeric_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
@@ -757,7 +731,6 @@ impl<'src> Tokenizer<'src> {
             let b = bytes[state.position];
 
             if DIGIT[b as usize] {
-                // Table lookup — no method call overhead.
                 state.advance(self.input);
             } else if b == b'.' && !has_dot && !has_exponent && !is_date {
                 let next_pos = state.position + 1;
@@ -826,13 +799,11 @@ impl<'src> Tokenizer<'src> {
 
         let token_type = if has_exponent {
             if has_float_suffix {
-                // Exponent + f suffix → f32.
                 match number_string.parse::<f32>() {
                     Ok(v)  => TokenType::Float(v),
                     Err(_) => return self.handle_invalid_number(number_string, start_line, start_column),
                 }
             } else {
-                // Exponent, no suffix → full f64 (ScientificNotation).
                 match number_string.parse::<f64>() {
                     Ok(v)  => TokenType::ScientificNotation(v),
                     Err(_) => return self.handle_invalid_number(number_string, start_line, start_column),
@@ -840,14 +811,11 @@ impl<'src> Tokenizer<'src> {
             }
         } else if has_dot {
             if has_float_suffix {
-                // Decimal + f suffix → f32.
                 match number_string.parse::<f32>() {
                     Ok(v)  => TokenType::Float(v),
                     Err(_) => return self.handle_invalid_number(number_string, start_line, start_column),
                 }
             } else {
-                // Decimal, no suffix → full f64 (Double).
-                // This is the primary path for most decimal literals.
                 match number_string.parse::<f64>() {
                     Ok(v)  => TokenType::Double(v),
                     Err(_) => return self.handle_invalid_number(number_string, start_line, start_column),
@@ -894,7 +862,6 @@ impl<'src> Tokenizer<'src> {
         let start_pos    = state.position;
         state.advance(self.input); // consume '#'
         let bytes = self.input.as_bytes();
-        // Table-driven hex digit check — up to 8 hex digits after '#'.
         while !state.is_at_end()
             && (bytes[state.position] as u32) < 256
             && HEX_DIGIT[bytes[state.position] as usize]
@@ -1008,13 +975,6 @@ impl<'src> Tokenizer<'src> {
 // ── Identifier scanning ───────────────────────────────────────────────────────
 
 impl<'src> Tokenizer<'src> {
-    /// Scan an identifier or keyword.
-    ///
-    /// Uses `IDENT_CONT` lookup table for continuation bytes — one indexed
-    /// read per character, no branching on character class, no Unicode.
-    ///
-    /// Kebab-case (`mid-log`) is allowed outside `@QUICKFUNCS` when the
-    /// character immediately following `-` is in `ALPHA_UNDERSCORE`.
     fn scan_identifier_or_keyword(&self, state: &mut TokenizerState) -> Token {
         let start_column = state.column;
         let start_line   = state.line;
@@ -1026,11 +986,8 @@ impl<'src> Tokenizer<'src> {
             let b = bytes[state.position];
 
             if (b as u32) < 256 && IDENT_CONT[b as usize] {
-                // Normal identifier continuation — table lookup, no branch.
                 state.advance(self.input);
             } else if b == b'-' {
-                // Kebab-case: only outside QuickFuncs and only when the next
-                // byte is [A-Za-z_] (never a digit, operator, or space).
                 let next_pos = state.position + 1;
                 let in_expression_ctx  = matches!(self.current_section, SectionId::QuickFuncs);
                 let valid_continuation = next_pos < bytes.len()
@@ -1038,7 +995,7 @@ impl<'src> Tokenizer<'src> {
                     && super::char_tables::ALPHA_UNDERSCORE[bytes[next_pos] as usize];
 
                 if !in_expression_ctx && valid_continuation {
-                    state.advance(self.input); // consume '-'
+                    state.advance(self.input);
                 } else {
                     break;
                 }
@@ -1049,7 +1006,6 @@ impl<'src> Tokenizer<'src> {
 
         let identifier = state.slice(self.input, start_pos, state.position - start_pos);
 
-        // PHF keyword lookup — O(1), returns `TokenType` factory if found.
         if let Some(ctor) = KEYWORDS.get(identifier) {
             return Token::new(ctor(), start_line, start_column, self.current_section);
         }
@@ -1109,6 +1065,7 @@ impl<'src> Tokenizer<'src> {
             '^' => TokenType::BitwiseOp("^"),
             '&' => TokenType::BitwiseOp("&"),
             '|' => TokenType::BitwiseOp("|"),
+            // '~' falls through to Symbol('~') — QuickFunc prefix and bitwise NOT
             '<' | '>' | '=' | '!' => TokenType::Symbol(symbol),
             _ if !symbol.is_control() && !symbol.is_whitespace() => TokenType::Symbol(symbol),
             _ => {
@@ -1133,8 +1090,7 @@ impl<'src> Tokenizer<'src> {
         Ok(Some(Token::new(token_type, start_line, start_column, self.current_section)))
     }
 
-    // ── Debug-only analysis passes ────────────────────────────────────────────
-    // Gated on `debug_config.is_testing`; eliminated in release builds.
+    // ── Debug-only analysis ───────────────────────────────────────────────────
 
     fn analyze_token_sequences(&mut self) {
         let len = self.token_pool.len();

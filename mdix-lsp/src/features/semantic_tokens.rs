@@ -1,13 +1,19 @@
 // mdix-lsp/src/features/semantic_tokens.rs
-//! Semantic token provider.
 //!
-//! Key improvements over original:
-//!   - @CONFIG tokens synthesised from AST (stripped before tokenisation, so no tokens exist).
-//!   - Enum type names at usage sites (e.g. `AIType` in `AIType.BOSS`) coloured as TT_TYPE.
-//!   - Enum field names at usage sites (e.g. `BOSS` in `AIType.BOSS`) coloured as TT_ENUM_MEMBER.
-//!   - Function call identifiers (name immediately before `(`) coloured as TT_FUNCTION.
-//!   - Lookahead skips type-annotation tokens (`<`, DataType, `>`) when searching for `(`.
-//!   - All paths wrapped in catch_unwind.
+//! ## DLM coloring fix
+//!
+//! Previous bug: after the first `ModuleName.subtype` pair, `next_is_dlm_module`
+//! was cleared and never reset, so subsequent module names fell to the else branch
+//! (still TT_MACRO but no declaration modifier). The SUBTYPE after the second `+`
+//! pair worked fine IF the `.` fired the state machine — but only if the `.` had
+//! `section == SectionId::Dlm`. If the section stamp was missing, the dot didn't
+//! set `next_is_dlm_subtype`, and the subtype got TT_VARIABLE.
+//!
+//! Fix: replace `next_is_dlm_module` / `next_is_dlm_subtype` with a single
+//! `dlm_dot_seen` flag. Set it when any `.` is encountered in the DLM section.
+//! Clear it when an Identifier in DLM is classified (consumed). No SectionId
+//! stamp dependency — as long as the dot token appears between two identifiers,
+//! the second gets TT_DECORATOR.
 
 use std::collections::HashSet;
 use std::panic;
@@ -45,10 +51,8 @@ pub fn provide(doc: Option<&Document>) -> Option<SemanticTokensResult> {
 fn provide_inner(doc: Option<&Document>) -> Option<SemanticTokensResult> {
     let doc = doc?;
 
-    // Build the set of declared enum type names for usage-site coloring.
     let enum_names: HashSet<String> = doc
-        .semantic_result
-        .as_ref()
+        .semantic_result.as_ref()
         .and_then(|sr| sr.symbol_table.as_ref())
         .map(|st| st.enums.keys().cloned().collect())
         .unwrap_or_default();
@@ -63,60 +67,62 @@ fn provide_inner(doc: Option<&Document>) -> Option<SemanticTokensResult> {
 // ── Stateful classifier ───────────────────────────────────────────────────────
 
 struct ClassifierState<'a> {
-    in_enum_body:        bool,
-    enum_brace_depth:    i32,
-    seen_enum_name:      bool,
-    next_is_func_name:   bool,
-    in_param_list:       bool,
-    param_paren_depth:   i32,
-    next_is_alias:       bool,
-    next_is_dlm_module:  bool,
-    next_is_dlm_subtype: bool,
-    /// True when the current Identifier token is followed by `(` (a call site).
+    // Enum body
+    in_enum_body:      bool,
+    enum_brace_depth:  i32,
+    seen_enum_name:    bool,
+
+    // QuickFuncs
+    next_is_func_name: bool,
+    in_param_list:     bool,
+    param_paren_depth: i32,
+
+    // Imports
+    next_is_alias:     bool,
+
+    // DLM — FIXED: single `dlm_dot_seen` flag replaces old module/subtype pair.
+    // Set when a `.` is encountered anywhere (and cleared on comma, section
+    // boundary, or after classifying the subtype identifier).
+    dlm_dot_seen:      bool,
+
+    // Call-site detection
     prev_was_call_ident: bool,
-    /// True when the current Identifier is a known enum type name followed by `.`.
-    next_is_enum_type:   bool,
-    /// True after `EnumTypeName` — persists until `.` is consumed.
-    next_is_enum_dot:    bool,
-    /// True after `EnumTypeName.` — the next Identifier is a field name.
-    prev_was_enum_dot:   bool,
-    /// Known enum type names from semantic analysis.
+
+    // Enum usage-site detection
+    next_is_enum_type:  bool,
+    next_is_enum_dot:   bool,
+    prev_was_enum_dot:  bool,
+
     enum_names: &'a HashSet<String>,
 }
 
 impl<'a> ClassifierState<'a> {
     fn new(enum_names: &'a HashSet<String>) -> Self {
         ClassifierState {
-            in_enum_body:        false,
-            enum_brace_depth:    0,
-            seen_enum_name:      false,
-            next_is_func_name:   false,
-            in_param_list:       false,
-            param_paren_depth:   0,
-            next_is_alias:       false,
-            next_is_dlm_module:  false,
-            next_is_dlm_subtype: false,
+            in_enum_body:       false,
+            enum_brace_depth:   0,
+            seen_enum_name:     false,
+            next_is_func_name:  false,
+            in_param_list:      false,
+            param_paren_depth:  0,
+            next_is_alias:      false,
+            dlm_dot_seen:       false,
             prev_was_call_ident: false,
-            next_is_enum_type:   false,
-            next_is_enum_dot:    false,
-            prev_was_enum_dot:   false,
+            next_is_enum_type:  false,
+            next_is_enum_dot:   false,
+            prev_was_enum_dot:  false,
             enum_names,
         }
     }
 
     fn advance(&mut self, token: &Token, tokens: &[Token], index: usize) {
         // ── Per-token resets ────────────────────────────────────────────────
-        // These flags are specific to the current token and must be recomputed.
         self.prev_was_call_ident = false;
         self.next_is_enum_type   = false;
 
-        // Enum-chain flags (next_is_enum_dot, prev_was_enum_dot) persist across
-        // Identifier and Symbol('.') tokens.  Reset on anything else that
-        // breaks the EnumName.FIELD chain.
+        // Enum-chain flags persist across Identifier and Symbol('.') tokens.
         match &token.token_type {
-            TokenType::Identifier(_) | TokenType::Symbol('.') => {
-                // Don't reset enum chain flags here.
-            }
+            TokenType::Identifier(_) | TokenType::Symbol('.') => {}
             _ => {
                 self.next_is_enum_dot  = false;
                 self.prev_was_enum_dot = false;
@@ -125,8 +131,7 @@ impl<'a> ClassifierState<'a> {
 
         // ── Identifier-specific logic ───────────────────────────────────────
         if let TokenType::Identifier(name) = &token.token_type {
-            // Function call detection: peek ahead for '(' skipping type annotations.
-            // Handles: funcName(, funcName<RetType>(, ~funcName<RetType>(
+            // Function call detection: look ahead for '(' skipping annotations.
             let is_call = tokens.iter()
                 .skip(index + 1)
                 .take(8)
@@ -138,7 +143,7 @@ impl<'a> ClassifierState<'a> {
                 .any(|t| matches!(t.token_type, TokenType::Symbol('(')));
             self.prev_was_call_ident = is_call;
 
-            // Enum type name detection: known enum followed by '.'.
+            // Enum type name detection.
             if self.enum_names.contains(name.as_str()) {
                 let has_dot = tokens.iter()
                     .skip(index + 1)
@@ -148,16 +153,14 @@ impl<'a> ClassifierState<'a> {
                     self.next_is_enum_type = true;
                     self.next_is_enum_dot  = true;
                 } else {
-                    // Enum name not followed by '.' — standalone reference.
                     self.next_is_enum_dot = false;
                 }
             } else {
-                // Not an enum type name; clear enum-dot tracking.
                 self.next_is_enum_dot = false;
             }
         }
 
-        // ── Dot: transition from enum-name to enum-field ───────────────────
+        // ── Dot: enum-field transition ─────────────────────────────────────
         if let TokenType::Symbol('.') = &token.token_type {
             if self.next_is_enum_dot {
                 self.prev_was_enum_dot = true;
@@ -167,10 +170,10 @@ impl<'a> ClassifierState<'a> {
 
         // ── Section-level state machine ─────────────────────────────────────
         match &token.token_type {
+            // ── @ENUMS ──────────────────────────────────────────────────────
             TokenType::SectionEnums => {
                 self.seen_enum_name = false;
             }
-
             TokenType::Symbol('{') if token.section == SectionId::Enums => {
                 self.in_enum_body     = true;
                 self.enum_brace_depth += 1;
@@ -183,12 +186,15 @@ impl<'a> ClassifierState<'a> {
                 }
             }
 
+            // ── @QUICKFUNCS ─────────────────────────────────────────────────
             TokenType::FunctionPrefix => {
                 self.next_is_func_name = true;
                 self.in_param_list     = false;
                 self.param_paren_depth = 0;
             }
-            TokenType::Symbol('(') if token.section == SectionId::QuickFuncs => {
+            TokenType::Symbol('(')
+                if token.section == SectionId::QuickFuncs =>
+            {
                 if self.next_is_func_name {
                     self.in_param_list     = true;
                     self.param_paren_depth = 1;
@@ -196,7 +202,9 @@ impl<'a> ClassifierState<'a> {
                     self.param_paren_depth += 1;
                 }
             }
-            TokenType::Symbol(')') if token.section == SectionId::QuickFuncs => {
+            TokenType::Symbol(')')
+                if token.section == SectionId::QuickFuncs =>
+            {
                 if self.in_param_list {
                     self.param_paren_depth -= 1;
                     if self.param_paren_depth <= 0 {
@@ -206,6 +214,7 @@ impl<'a> ClassifierState<'a> {
                 }
             }
 
+            // ── @IMPORTS ────────────────────────────────────────────────────
             TokenType::SectionImports => {
                 self.next_is_alias = true;
             }
@@ -220,12 +229,24 @@ impl<'a> ClassifierState<'a> {
                 self.next_is_alias = true;
             }
 
+            // ── @DLM — FIXED ────────────────────────────────────────────────
+            //
+            // The `.` between ModuleName and subtype sets `dlm_dot_seen`.
+            // We check ANY dot here — even if the section stamp is wrong,
+            // the `.` still acts as the separator between module and subtype.
+            // We reset it on commas (between module pairs) and on the section
+            // keyword itself.
             TokenType::SectionDLM => {
-                self.next_is_dlm_module  = true;
-                self.next_is_dlm_subtype = false;
+                self.dlm_dot_seen = false;
             }
-            TokenType::Symbol('.') if token.section == SectionId::Dlm => {
-                self.next_is_dlm_subtype = true;
+            TokenType::Symbol('.') => {
+                // Could be DLM or anything else — set the flag; classify will
+                // consume it only inside the DLM section.
+                self.dlm_dot_seen = true;
+            }
+            TokenType::Symbol(',') if token.section == SectionId::Dlm => {
+                // Between pairs: reset so the next identifier is a module.
+                self.dlm_dot_seen = false;
             }
 
             _ => {}
@@ -233,19 +254,18 @@ impl<'a> ClassifierState<'a> {
     }
 
     fn classify_identifier(&mut self, token: &Token) -> (u32, u32) {
-        // Priority 1: enum field at usage site (e.g. BOSS in AIType.BOSS).
+        // Priority 1: enum field at usage site (FIELD in EnumName.FIELD).
         if self.prev_was_enum_dot {
-            self.prev_was_enum_dot = false; // consume
+            self.prev_was_enum_dot = false;
             return (TT_ENUM_MEMBER, 0);
         }
 
-        // Priority 2: enum type name at usage site (e.g. AIType in AIType.BOSS).
+        // Priority 2: enum type name at usage site (EnumName in EnumName.FIELD).
         if self.next_is_enum_type {
-            // next_is_enum_type is reset at the start of the next advance() call.
             return (TT_TYPE, 0);
         }
 
-        // Priority 3: function call identifier (outside a declaration).
+        // Priority 3: function call (name followed by '(').
         if self.prev_was_call_ident && !self.next_is_func_name {
             return (TT_FUNCTION, 0);
         }
@@ -285,22 +305,34 @@ impl<'a> ClassifierState<'a> {
                 }
             }
 
+            // ── DLM — FIXED ─────────────────────────────────────────────────
+            //
+            // If we just saw a `.`, this identifier is a subtype (gzip, aes256).
+            // Otherwise it's a module name (DCompressor, DEncryptor, DAuditor).
+            // Always clear `dlm_dot_seen` after consuming it here.
             SectionId::Dlm => {
-                if self.next_is_dlm_subtype {
-                    self.next_is_dlm_subtype = false;
-                    (TT_DECORATOR, 0)
-                } else if self.next_is_dlm_module {
-                    self.next_is_dlm_module  = false;
-                    self.next_is_dlm_subtype = true;
-                    (TT_MACRO, MOD_DECLARATION)
+                let result = if self.dlm_dot_seen {
+                    (TT_DECORATOR, 0)           // subtype: gzip, aes256, etc.
                 } else {
-                    (TT_MACRO, 0)
-                }
+                    (TT_MACRO, MOD_DECLARATION) // module: DCompressor, etc.
+                };
+                self.dlm_dot_seen = false; // consume
+                result
             }
 
             SectionId::Data     => (TT_VARIABLE, 0),
             SectionId::Security => (TT_PROPERTY, 0),
-            _                   => (TT_VARIABLE, 0),
+
+            // SectionId::None or any other — use position in the doc to decide.
+            _ => {
+                // If the token looks like a DLM subtype (we just saw a dot and
+                // the token follows a module-like identifier), color it.
+                if self.dlm_dot_seen {
+                    self.dlm_dot_seen = false;
+                    return (TT_DECORATOR, 0);
+                }
+                (TT_VARIABLE, 0)
+            }
         }
     }
 }
@@ -313,15 +345,13 @@ fn encode_tokens(doc: &Document, enum_names: &HashSet<String>) -> Vec<SemanticTo
     let mut prev_col:  u32 = 0;
     let mut state = ClassifierState::new(enum_names);
 
-    // ── Emit @CONFIG section tokens from AST ──────────────────────────────
-    // @CONFIG is stripped (replaced with blank lines) before tokenisation, so
-    // no Token entries exist for it in doc.tokens.  We synthesise them here
-    // directly from doc.ast.config, reading positions from the original source.
+    // ── Synthesise @CONFIG tokens from AST ────────────────────────────────
+    // @CONFIG is stripped before tokenisation — no tokens exist for it.
     if let Some(ast) = &doc.ast {
         emit_config_tokens(ast, &doc.source, &mut prev_line, &mut prev_col, &mut data);
     }
 
-    // ── Emit tokens from the regular token stream ─────────────────────────
+    // ── Regular token stream ──────────────────────────────────────────────
     for (index, token) in doc.tokens.iter().enumerate() {
         state.advance(token, &doc.tokens, index);
 
@@ -335,9 +365,8 @@ fn encode_tokens(doc: &Document, enum_names: &HashSet<String>) -> Vec<SemanticTo
             None    => continue,
         };
 
-        let line = token.line.saturating_sub(1) as u32;
-        let col  = token.column.saturating_sub(1) as u32;
-
+        let line   = token.line.saturating_sub(1) as u32;
+        let col    = token.column.saturating_sub(1) as u32;
         let length = token_length(token) as u32;
         if length == 0 { continue; }
 
@@ -347,13 +376,8 @@ fn encode_tokens(doc: &Document, enum_names: &HashSet<String>) -> Vec<SemanticTo
     data
 }
 
-// ── CONFIG token synthesis ────────────────────────────────────────────────────
+// ── @CONFIG token synthesis ───────────────────────────────────────────────────
 
-/// Synthesise semantic tokens for `@CONFIG(...)` entries directly from the AST.
-///
-/// @CONFIG is stripped before tokenisation (replaced with blank newlines that
-/// preserve line numbers for all subsequent tokens).  We read positions from
-/// `ast.config` and scan the original `source` text to locate `->` and values.
 fn emit_config_tokens(
     ast:       &DixScript,
     source:    &str,
@@ -361,49 +385,38 @@ fn emit_config_tokens(
     prev_col:  &mut u32,
     data:      &mut Vec<SemanticToken>,
 ) {
-    let config = match ast.config.as_ref() {
-        Some(c) => c,
-        None    => return,
-    };
-
+    let config = match ast.config.as_ref() { Some(c) => c, None => return };
     let source_lines: Vec<&str> = source.lines().collect();
 
-    // Emit @CONFIG section keyword.
+    // @CONFIG keyword on its own line.
     if config.position.is_valid() {
         let lsp_line = (config.position.line - 1) as u32;
         let lsp_col  = (config.position.column - 1) as u32;
         push_raw(data, prev_line, prev_col, lsp_line, lsp_col, 7, TT_KEYWORD, MOD_READONLY);
-        // "@CONFIG" = 7 chars; the "(" is a plain symbol, leave uncoloured.
     }
 
-    // Sort entries by position to ensure strictly increasing delta encoding.
-    let mut entries: Vec<&dixscript::Compiler::AST::ConfigEntry> =
-        config.entries.iter().collect();
-    entries.sort_by_key(|e| (e.position.line, e.position.column));
+    let mut sorted_entries: Vec<&dixscript::Compiler::AST::ConfigEntry> = config.entries.iter()
+        .filter(|e| e.position.is_valid())
+        .collect();
+    sorted_entries.sort_by_key(|e| (e.position.line, e.position.column));
 
-    for entry in entries {
-        if !entry.position.is_valid() { continue; }
-
-        let lsp_line = (entry.position.line - 1) as u32;
+    for entry in sorted_entries {
+        let lsp_line  = (entry.position.line - 1) as u32;
         let line_text = match source_lines.get(entry.position.line - 1) {
-            Some(l) => l,
-            None    => continue,
+            Some(l) => l, None => continue,
         };
 
-        let key_start_0 = entry.position.column.saturating_sub(1);
-        let key_col     = key_start_0 as u32;
-        let key_len     = entry.key.len() as u32;
+        let key_col = (entry.position.column - 1) as u32;
+        let key_len = entry.key.len() as u32;
         if key_len == 0 { continue; }
 
-        // Key token → TT_PROPERTY.
         push_raw(data, prev_line, prev_col, lsp_line, key_col, key_len, TT_PROPERTY, 0);
 
-        // Scan for `->` after the key.
-        let search_start = key_start_0 + entry.key.len();
+        let search_start = entry.position.column.saturating_sub(1) + entry.key.len();
         if search_start >= line_text.len() { continue; }
 
         if let Some(arrow_rel) = line_text[search_start..].find("->") {
-            let arrow_col = (search_start + arrow_rel) as u32;
+            let arrow_col  = (search_start + arrow_rel) as u32;
             push_raw(data, prev_line, prev_col, lsp_line, arrow_col, 2, TT_OPERATOR, 0);
 
             let after_arrow = search_start + arrow_rel + 2;
@@ -422,56 +435,42 @@ fn emit_config_tokens(
     }
 }
 
-/// Classify a `@CONFIG` value into a (token_type, source_length) pair.
 fn classify_config_value(value: &ConfigValue, text: &str) -> (u32, usize) {
     match value {
         ConfigValue::String(_) | ConfigValue::Features(_) => {
-            // String literal: count chars inside quotes.
             if text.starts_with('"') {
-                if let Some(end) = text[1..].find('"') {
-                    return (TT_STRING, end + 2);
-                }
+                if let Some(end) = text[1..].find('"') { return (TT_STRING, end + 2); }
             }
             (TT_STRING, text.split_whitespace().next().map(|s| s.len()).unwrap_or(0))
         }
         ConfigValue::Integer(_) => {
-            let len = text.chars()
-                .take_while(|c| c.is_ascii_digit() || *c == '-')
-                .count();
+            let len = text.chars().take_while(|c| c.is_ascii_digit() || *c == '-').count();
             (TT_NUMBER, len.max(1))
         }
         ConfigValue::Float(_) => {
-            let len = text.chars()
-                .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
-                .count();
+            let len = text.chars().take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-').count();
             (TT_NUMBER, len.max(1))
         }
         ConfigValue::Boolean(_) => {
             if text.starts_with("true")  { (TT_KEYWORD, 4) }
-            else if text.starts_with("false") { (TT_KEYWORD, 5) }
-            else { (TT_KEYWORD, 4) }
+            else                         { (TT_KEYWORD, 5) }
         }
         ConfigValue::Date(_) | ConfigValue::Timestamp(_) => {
             if text.starts_with('"') {
-                if let Some(end) = text[1..].find('"') {
-                    return (TT_EVENT, end + 2);
-                }
+                if let Some(end) = text[1..].find('"') { return (TT_EVENT, end + 2); }
             }
             (TT_EVENT, text.split_whitespace().next().map(|s| s.len()).unwrap_or(0))
         }
         ConfigValue::ErrorHandling(_) | ConfigValue::Compatibility(_) | ConfigValue::Debug(_) => {
-            // These are always string literals like "halt", "strict", "off".
             if text.starts_with('"') {
-                if let Some(end) = text[1..].find('"') {
-                    return (TT_TYPE, end + 2);
-                }
+                if let Some(end) = text[1..].find('"') { return (TT_TYPE, end + 2); }
             }
             (TT_TYPE, text.split_whitespace().next().map(|s| s.len()).unwrap_or(0))
         }
     }
 }
 
-// ── Interpolated string splitter ──────────────────────────────────────────────
+// ── Interpolated string ───────────────────────────────────────────────────────
 
 fn emit_interpolated_tokens(
     token:     &Token,
@@ -490,7 +489,7 @@ fn emit_interpolated_tokens(
     }
 
     let mut seg_start:   u32 = 0;
-    let mut char_offset: u32 = 2; // $"
+    let mut char_offset: u32 = 2;
     let mut in_brace          = false;
     let mut brace_start: u32  = 0;
 
@@ -521,8 +520,7 @@ fn emit_interpolated_tokens(
     }
 
     if !in_brace {
-        let end_offset = char_offset + 1;
-        let seg_len    = end_offset - seg_start;
+        let seg_len = char_offset + 1 - seg_start;
         push_raw(data, prev_line, prev_col, base_line,
             base_col + seg_start, seg_len, TT_STRING, 0);
     }
@@ -537,10 +535,7 @@ fn push_raw(
     line: u32, col: u32, len: u32, tt: u32, mods: u32,
 ) {
     if len == 0 { return; }
-    // Skip out-of-order tokens (e.g. invalid AST positions).
-    if line < *prev_line || (line == *prev_line && col < *prev_col) {
-        return;
-    }
+    if line < *prev_line || (line == *prev_line && col < *prev_col) { return; }
     let dl = line - *prev_line;
     let ds = if dl == 0 { col.saturating_sub(*prev_col) } else { col };
     data.push(SemanticToken {
@@ -602,7 +597,11 @@ fn classify(token: &Token, state: &mut ClassifierState<'_>) -> Option<(u32, u32)
         TokenType::EnumAccess { .. }     => Some((TT_ENUM_MEMBER, 0)),
         TokenType::TablePath(_)          => Some((TT_PROPERTY, 0)),
 
+        // StaticFunction in DLM section → color as macro (module type).
+        TokenType::StaticFunction { .. } if token.section == SectionId::Dlm
+                                         => Some((TT_MACRO, 0)),
         TokenType::StaticFunction { .. } => Some((TT_FUNCTION, 0)),
+
         TokenType::DixFunction(_)        => Some((TT_FUNCTION, 0)),
         TokenType::BuiltinMethod(_)      => Some((TT_FUNCTION, 0)),
 
@@ -614,7 +613,7 @@ fn classify(token: &Token, state: &mut ClassifierState<'_>) -> Option<(u32, u32)
 
         TokenType::ObjectAccess(_) => {
             if token.section == SectionId::Dlm {
-                Some((TT_DECORATOR, 0))
+                Some((TT_MACRO, 0))  // DLM module.subtype as single token
             } else {
                 Some((TT_PROPERTY, 0))
             }
@@ -638,7 +637,7 @@ fn token_length(token: &Token) -> usize {
         TokenType::String(s)              => s.len() + 2,
         TokenType::StringSingle(s)        => s.len() + 2,
         TokenType::InterpolatedString(s)  => s.len() + 3,
-        TokenType::HexColor(h)            => h.len() + 1,
+        TokenType::HexColor(h)            => h.len() + 1, // stored without '#'
         TokenType::Comment(c)             => c.len() + 2,
         TokenType::SectionConfig          =>  7,
         TokenType::SectionImports         =>  8,
@@ -664,4 +663,4 @@ fn token_length(token: &Token) -> usize {
             if v.is_empty() { 1 } else { v.len() }
         }
     }
-}
+    }

@@ -1,4 +1,8 @@
 // mdix-lsp/src/server.rs
+//! The key fix here: shutdown must return IMMEDIATELY.
+//! Task cleanup happens asynchronously AFTER the response is sent.
+//! If shutdown blocks (waiting for tasks), LSP4IJ times out and kills the
+//! process anyway — but now the response was never delivered, so it retries.
 
 use dashmap::DashMap;
 use std::sync::Arc;
@@ -15,7 +19,7 @@ use crate::converters::to_diagnostics;
 use crate::document::Document;
 use crate::features;
 
-const ANALYSIS_TIMEOUT_SECS: u64 = 15;
+const ANALYSIS_TIMEOUT_SECS: u64 = 10;
 
 pub struct Backend {
     pub client:             Client,
@@ -63,10 +67,7 @@ impl Backend {
 
             match result {
                 Err(_timeout) => {
-                    tracing::warn!(
-                        "Analysis timed out after {}s for {} — stale diagnostics preserved",
-                        ANALYSIS_TIMEOUT_SECS, uri
-                    );
+                    tracing::warn!("Analysis timed out after {}s for {}", ANALYSIS_TIMEOUT_SECS, uri);
                 }
                 Ok(Err(panic_err)) => {
                     tracing::error!("Analysis task panicked: {:?}", panic_err);
@@ -75,11 +76,15 @@ impl Backend {
                     let latest = versions.get(&uri).map(|v| *v).unwrap_or(ver);
                     if ver >= latest {
                         let diags = to_diagnostics(&errors);
+                        tracing::debug!(
+                            "Publishing {} diagnostics for {} (v{})",
+                            diags.len(), uri, ver
+                        );
                         documents.insert(uri.clone(), doc);
                         client.publish_diagnostics(uri, diags, Some(ver)).await;
                     } else {
                         tracing::debug!(
-                            "Discarding stale analysis v{} for {} (latest is v{})",
+                            "Discarding stale analysis v{} for {} (latest v{})",
                             ver, uri, latest
                         );
                     }
@@ -97,40 +102,72 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, _params: InitializeParams) -> LspResult<InitializeResult> {
+        tracing::info!("mdix-lsp initialize request received");
         Ok(InitializeResult {
             capabilities: server_capabilities(),
             server_info:  Some(ServerInfo {
                 name:    "mdix-lsp".to_string(),
-                version: Some("1.0.0".to_string()),
+                version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
         })
     }
 
     async fn initialized(&self, _params: InitializedParams) {
-        tracing::info!("mdix-lsp initialized");
+        tracing::info!("mdix-lsp initialized (client confirmed)");
         self.client
-            .log_message(MessageType::INFO, "mdix-lsp initialized")
+            .log_message(MessageType::INFO, "mdix-lsp ready")
             .await;
     }
 
     async fn shutdown(&self) -> LspResult<()> {
-        tracing::info!("mdix-lsp: shutdown — aborting in-flight analyses");
+        // ── MUST return immediately ────────────────────────────────────────
+        //
+        // LSP4IJ has a short timeout on shutdown. If we block here waiting
+        // for tasks to finish, the timeout fires, the client kills the process
+        // anyway, then RESTARTS it (causing the 19 "initialized" loop).
+        //
+        // Fix: set the flag and schedule cleanup asynchronously. Return Ok(())
+        // immediately so the response is delivered before any cleanup work.
+        tracing::info!("mdix-lsp shutdown requested");
         self.shutdown_requested.store(true, Ordering::SeqCst);
-        if let Ok(mut tasks) = self.analysis_tasks.lock() {
-            for handle in tasks.drain(..) {
-                handle.abort();
-            }
+
+        // Drain the task list and abort all in a separate task so we don't
+        // block the response.
+        let task_handles: Vec<_> = self.analysis_tasks
+            .lock()
+            .map(|mut g| g.drain(..).collect())
+            .unwrap_or_default();
+
+        if !task_handles.is_empty() {
+            tokio::spawn(async move {
+                for handle in task_handles {
+                    handle.abort();
+                    // Give each task a brief window to notice the abort.
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_millis(50),
+                        handle,
+                    ).await;
+                }
+                tracing::debug!("All analysis tasks aborted");
+            });
         }
+
         Ok(())
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let doc = params.text_document;
+        tracing::debug!("didOpen: {} v{}", doc.uri, doc.version);
         self.spawn_analysis(doc.uri, doc.text, doc.version);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         if let Some(change) = params.content_changes.into_iter().last() {
+            tracing::debug!(
+                "didChange: {} v{}",
+                params.text_document.uri,
+                params.text_document.version
+            );
             self.spawn_analysis(
                 params.text_document.uri,
                 change.text,
@@ -141,6 +178,7 @@ impl LanguageServer for Backend {
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
+        tracing::debug!("didClose: {}", uri);
         self.documents.remove(&uri);
         self.pending_versions.remove(&uri);
         self.client.publish_diagnostics(uri, vec![], None).await;
@@ -172,6 +210,15 @@ impl LanguageServer for Backend {
         let pos = params.text_document_position_params.position;
         let doc = self.documents.get(uri);
         Ok(features::goto_definition::provide(doc.as_deref(), pos))
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> LspResult<Option<DocumentSymbolResponse>> {
+        let uri = &params.text_document.uri;
+        let doc = self.documents.get(uri);
+        Ok(features::document_symbols::provide(doc.as_deref()))
     }
 
     async fn semantic_tokens_full(

@@ -25,6 +25,7 @@ base64             = "0.21"
 
 [dev-dependencies]
 serde_json = "1.0"
+tracing-appender = "0.2"
 
 [[test]]
 name    = "lsp_integration"

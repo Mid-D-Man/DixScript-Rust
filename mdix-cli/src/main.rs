@@ -8,7 +8,8 @@ use clap::{Parser, Subcommand};
 use commands::{
     compact::CompactArgs, compile::CompileArgs, config::ConfigArgs,
     convert::ConvertArgs, create::CreateArgs, debug_ast::DebugAstArgs,
-    debug_tokens::DebugTokensArgs, decrypt::DecryptArgs, format::FormatArgs,
+    debug_symbols::DebugSymbolsArgs, debug_tokens::DebugTokensArgs,
+    decrypt::DecryptArgs, format::FormatArgs,
     inspect::InspectArgs, key::KeyArgs, validate::ValidateArgs,
 };
 
@@ -54,28 +55,31 @@ pub enum Commands {
     // ── Debug commands ──────────────────────────────────────────────────────
     /// [DEBUG] Print the token stream with positions and section tags
     ///
-    /// Use this to verify @CONFIG is NOT in the token stream, that section
-    /// stamps are correct, and to diagnose hover/folding/completion bugs.
+    /// Verifies @CONFIG is NOT in the token stream, section stamps are correct,
+    /// and diagnoses hover/folding/completion bugs.
     ///
-    /// Example:
-    ///   mdix debug-tokens config.mdix --by-line
-    ///   mdix debug-tokens config.mdix --section-filter DATA --by-line
-    ///   mdix debug-tokens config.mdix -o /tmp/tokens.txt
+    ///   mdix debug-tokens config.mdix
+    ///   mdix debug-tokens config.mdix --section-filter DATA
     #[command(name = "debug-tokens")]
     DebugTokens(DebugTokensArgs),
 
     /// [DEBUG] Print the parsed (and optionally enhanced) AST
     ///
-    /// Use this to verify DATA entries are correctly classified, positions
-    /// are sane, and enum/function declarations parsed correctly.
-    ///
-    /// Example:
     ///   mdix debug-ast config.mdix
     ///   mdix debug-ast config.mdix --section DATA
-    ///   mdix debug-ast config.mdix --section ENUMS --positions false
-    ///   mdix debug-ast config.mdix -o /tmp/ast.txt
     #[command(name = "debug-ast")]
     DebugAst(DebugAstArgs),
+
+    /// [DEBUG] Print the symbol table produced by semantic analysis
+    ///
+    /// Shows all registered enums, QuickFuncs, DATA variables, namespaces,
+    /// and builtin statics. Use to verify semantic analysis output.
+    ///
+    ///   mdix debug-symbols config.mdix
+    ///   mdix debug-symbols config.mdix --section ENUMS
+    ///   mdix debug-symbols config.mdix --section DATA --verbose
+    #[command(name = "debug-symbols")]
+    DebugSymbols(DebugSymbolsArgs),
 }
 
 fn main() {
@@ -104,6 +108,7 @@ fn main() {
         Commands::Config(args)       => commands::config::run(args, &global),
         Commands::DebugTokens(args)  => commands::debug_tokens::run(args, &global),
         Commands::DebugAst(args)     => commands::debug_ast::run(args, &global),
+        Commands::DebugSymbols(args) => commands::debug_symbols::run(args, &global),
     };
 
     std::process::exit(exit_code);

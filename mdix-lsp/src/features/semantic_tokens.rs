@@ -592,7 +592,8 @@ fn classify(token: &Token, state: &mut ClassifierState<'_>) -> Option<(u32, u32)
         | TokenType::DoubleColon
         | TokenType::ControlFlowColon    => Some((TT_OPERATOR, 0)),
 
-        TokenType::FunctionPrefix        => Some((TT_OPERATOR, 0)),
+        // '~' QuickFunc prefix — emitted as Symbol('~') by lexer
+TokenType::Symbol('~')           => Some((TT_OPERATOR, 0)),
         TokenType::Comment(_)            => Some((TT_COMMENT, 0)),
         TokenType::EnumAccess { .. }     => Some((TT_ENUM_MEMBER, 0)),
         TokenType::TablePath(_)          => Some((TT_PROPERTY, 0)),

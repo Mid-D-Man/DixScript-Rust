@@ -160,8 +160,7 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
         TokenType::DoubleColon            => Some("**`::`** — group array operator\n\nDefines a group array entry in `@DATA`.\n\n```mdix\ntags:: \"alpha\", \"beta\", \"v1\"\n```".to_string()),
         TokenType::Arrow                  => Some("**`=>`** — association operator\n\nUsed in QuickFunc scope declarations.".to_string()),
         TokenType::SwitchCase             => Some("**`->`** — association / switch-case operator\n\nIn `@CONFIG`/`@SECURITY`: maps key to value block.\nIn `chk:`: introduces a case.\n\n```mdix\nencryption -> { mode = \"password\" }\n```".to_string()),
-        TokenType::FunctionPrefix         => Some("**`~`** — QuickFunc declaration prefix\n\n```mdix\n~myFunc<int>(x<int>) { return x * 2 }\n```".to_string()),
-
+        TokenType::Symbol('~') => Some("**`~`** — QuickFunc declaration prefix\n\n```mdix\n~myFunc<int>(x<int>) { return x * 2 }\n```".to_string()),
         // ── DataType annotations ───────────────────────────────────────────
         TokenType::DataType(dt) => hover_data_type(dt),
 

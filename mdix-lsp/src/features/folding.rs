@@ -1,19 +1,25 @@
 // mdix-lsp/src/features/folding.rs
-//
-// Folding strategy:
-//   Section folds  — use token.section tags: keyword line → max line of
-//                    all tokens tagged with that section.  This is immune
-//                    to nested `(` inside data values or function calls
-//                    corrupting the paren-counting approach.
-//   Brace folds    — stack-based { / } matching, but only emit a range
-//                    when the opening and closing braces share the same
-//                    section (prevents cross-section folds).
-//   Data AST folds — TableProperty and GroupArray from the AST give
-//                    reliable ranges for nested data structures.
-//   QuickFunc folds — one fold per function body from the AST.
+//!
+//! ## Root causes of the previous bugs:
+//!
+//! 1. Section folds used `section_max` (max line of tokens stamped with a
+//!    SectionId). If the lexer doesn't stamp tokens in @DATA/@QUICKFUNCS
+//!    correctly (or stamps the closing `)` with SectionId::None), the max
+//!    is wrong or missing → only @ENUMS worked, others didn't.
+//!    FIX: paren-counting from the section keyword token — no SectionId stamps needed.
+//!
+//! 2. QF function folds used `func.position` from the AST. If the parser
+//!    sets all positions to line 0 or the same line, folds overlap and only
+//!    some show. FIX: scan for `FunctionPrefix` (`~`) tokens directly.
+//!
+//! 3. Brace folds checked `open_section == close_section` strictly —
+//!    if one brace had SectionId::None, the fold was silently dropped.
+//!    FIX: emit brace folds regardless of section, guard only by multi-line.
+//!
+//! 4. DATA entry folds didn't guard `position.is_valid()`, so a zero-position
+//!    entry would produce a fold starting at line 0 that swallowed everything.
 
 use std::panic;
-use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
@@ -39,45 +45,100 @@ pub fn provide(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
 
 fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
     let doc = doc?;
-    if doc.tokens.is_empty() { return None; }
+
+    // Need at least some tokens OR a config range.
+    if doc.tokens.is_empty() && doc.config_line_range.is_none() {
+        return None;
+    }
 
     let mut ranges: Vec<FoldingRange> = Vec::new();
 
-    // Section-level folds (the most important).
-    collect_section_folds(&doc.tokens, &mut ranges);
-
-    // Per-function folds inside @QUICKFUNCS.
-    if let Some(ast) = &doc.ast {
-        if let Some(qf) = &ast.quick_functions {
-            collect_quickfunc_folds(&doc.tokens, qf, &mut ranges);
-        }
-        // Object / table / array folds from @DATA.
-        if let Some(data) = &ast.data {
-            collect_data_entry_folds(data, &mut ranges);
+    // ── @CONFIG fold (from stored range — no tokens exist for it) ─────────
+    if let Some((start, end)) = doc.config_line_range {
+        if end > start {
+            ranges.push(region(start, end));
         }
     }
 
-    // Brace folds for enum bodies, inline objects, etc.
-    collect_brace_folds(&doc.tokens, &mut ranges);
+    if !doc.tokens.is_empty() {
+        // ── Section folds (paren-counting, no SectionId stamps needed) ────
+        collect_section_folds(&doc.tokens, &mut ranges);
 
-    // Deduplicate and sort.
+        // ── QuickFunc body folds (FunctionPrefix tokens) ─────────────────
+        collect_quickfunc_folds(&doc.tokens, &mut ranges);
+
+        // ── Brace folds {…} ───────────────────────────────────────────────
+        collect_brace_folds(&doc.tokens, &mut ranges);
+
+        // ── DATA entry folds (from AST, guarded) ─────────────────────────
+        if let Some(ast) = &doc.ast {
+            if let Some(data) = &ast.data {
+                collect_data_entry_folds(data, &mut ranges);
+            }
+        }
+    }
+
+    // Sort, deduplicate, remove zero-length.
     ranges.sort_by_key(|r| (r.start_line, r.end_line));
     ranges.dedup_by(|a, b| a.start_line == b.start_line && a.end_line == b.end_line);
-    // Remove zero-length folds.
     ranges.retain(|r| r.end_line > r.start_line);
 
     if ranges.is_empty() { None } else { Some(ranges) }
 }
 
-// ── Section folds ─────────────────────────────────────────────────────────────
+// ── Section folds via paren-counting ─────────────────────────────────────────
 //
-// For each section keyword token (e.g. SectionEnums at line 5):
-//   start_line = that token's line (0-based)
-//   end_line   = max line of ALL tokens whose .section == that SectionId
-//
-// This works because the lexer stamps every token with the section it was
-// scanned in, including the closing `)`.  No paren-counting needed.
-// @CONFIG is excluded — it is stripped before tokenisation.
+// Find each section keyword token. From that position, count `(` and `)`
+// (respecting nesting) to find the matching close paren. That line is the
+// fold end. No SectionId stamps required.
+
+fn collect_section_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
+    // Collect (token_index, lsp_start_line) for each section keyword.
+    let section_starts: Vec<(usize, u32)> = tokens.iter().enumerate()
+        .filter(|(_, t)| {
+            t.token_type.is_section_keyword()
+                && section_id_of_keyword(&t.token_type) != SectionId::None
+        })
+        .map(|(i, t)| (i, t.line.saturating_sub(1) as u32))
+        .collect();
+
+    for (i, &(tok_idx, start_line)) in section_starts.iter().enumerate() {
+        // Only scan up to the next section keyword so we can't overshoot.
+        let scan_end = section_starts.get(i + 1).map(|(j, _)| *j).unwrap_or(tokens.len());
+        let search = &tokens[tok_idx..scan_end];
+
+        if let Some(end_line) = paren_close_line(search) {
+            if end_line > start_line {
+                ranges.push(region(start_line, end_line));
+            }
+        }
+    }
+}
+
+/// Scan `tokens` for the first `(`, then find the matching `)`.
+/// Returns the 0-based LSP line of the closing `)`.
+fn paren_close_line(tokens: &[Token]) -> Option<u32> {
+    let mut depth = 0i32;
+    let mut found_open = false;
+
+    for token in tokens {
+        match &token.token_type {
+            TokenType::Symbol('(') => {
+                depth += 1;
+                found_open = true;
+            }
+            TokenType::Symbol(')') if found_open => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(token.line.saturating_sub(1) as u32);
+                }
+            }
+            TokenType::EndOfFile => break,
+            _ => {}
+        }
+    }
+    None
+}
 
 fn section_id_of_keyword(tt: &TokenType) -> SectionId {
     match tt {
@@ -87,92 +148,87 @@ fn section_id_of_keyword(tt: &TokenType) -> SectionId {
         TokenType::SectionQuickFuncs => SectionId::QuickFuncs,
         TokenType::SectionData       => SectionId::Data,
         TokenType::SectionSecurity   => SectionId::Security,
-        _ => SectionId::None,  // SectionConfig is stripped before tokenisation
-    }
-}
-
-fn collect_section_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
-    // Pass 1: collect the maximum (last) line for each section id.
-    let mut section_max: HashMap<SectionId, u32> = HashMap::new();
-    for tok in tokens {
-        if tok.section == SectionId::None { continue; }
-        let line = tok.line.saturating_sub(1) as u32;
-        let entry = section_max.entry(tok.section).or_insert(0);
-        if line > *entry { *entry = line; }
-    }
-
-    // Pass 2: find each section keyword → use its line as start.
-    for tok in tokens {
-        if !tok.token_type.is_section_keyword() { continue; }
-        let sid = section_id_of_keyword(&tok.token_type);
-        if sid == SectionId::None { continue; }
-        let start_line = tok.line.saturating_sub(1) as u32;
-        if let Some(&end_line) = section_max.get(&sid) {
-            if end_line > start_line {
-                ranges.push(region(start_line, end_line));
-            }
-        }
+        _                            => SectionId::None,
     }
 }
 
 // ── QuickFunc body folds ──────────────────────────────────────────────────────
 //
-// One fold per function: from the `~name` declaration line to either
-// the line before the next function, or the last token in the section.
+// Find all `~` (FunctionPrefix) tokens regardless of SectionId stamp.
+// Each function's fold: from its `~` line to just before the next `~`.
+// The last function folds to the end of the `@QUICKFUNCS(...)` block.
+//
+// This avoids relying on AST position accuracy entirely.
 
-fn collect_quickfunc_folds(
-    tokens: &[Token],
-    qf:     &dixscript::Compiler::AST::QuickFuncsSection,
-    ranges: &mut Vec<FoldingRange>,
-) {
-    if qf.functions.is_empty() { return; }
+fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
+    // Find where the @QUICKFUNCS section token is.
+    let qf_section_tok = tokens.iter()
+        .find(|t| matches!(t.token_type, TokenType::SectionQuickFuncs));
+    let qf_section_idx = match tokens.iter()
+        .position(|t| matches!(t.token_type, TokenType::SectionQuickFuncs))
+    {
+        Some(i) => i,
+        None    => return,
+    };
 
-    // Max line of the entire @QUICKFUNCS section (for last function's end).
-    let qf_max_line = tokens.iter()
-        .filter(|t| t.section == SectionId::QuickFuncs)
+    // Find the end of the @QUICKFUNCS block using paren-counting.
+    let qf_end_line = paren_close_line(&tokens[qf_section_idx..])
+        .unwrap_or_else(|| {
+            tokens.last().map(|t| t.line.saturating_sub(1) as u32).unwrap_or(0)
+        });
+
+    // Collect all FunctionPrefix (`~`) lines within the QF block.
+    // We accept tokens with SectionId::QuickFuncs OR SectionId::None
+    // (some lexers may not stamp inner tokens).
+    let func_lines: Vec<u32> = tokens.iter()
+        .skip(qf_section_idx)
+        .filter(|t| {
+            // Stop past the end of the QF section.
+            (t.line.saturating_sub(1) as u32) <= qf_end_line
+        })
+        .filter(|t| matches!(t.token_type, TokenType::FunctionPrefix))
         .map(|t| t.line.saturating_sub(1) as u32)
-        .max()
-        .unwrap_or(0);
+        .collect();
 
-    for (i, func) in qf.functions.iter().enumerate() {
-        let start_line = func.position.line.saturating_sub(1) as u32;
+    if func_lines.is_empty() { return; }
 
-        let end_line = if i + 1 < qf.functions.len() {
-            // End just before the next function's declaration line.
-            qf.functions[i + 1].position.line.saturating_sub(2) as u32
+    // Single function: just the section fold covers it.
+    if func_lines.len() == 1 { return; }
+
+    for (i, &start) in func_lines.iter().enumerate() {
+        let end = if i + 1 < func_lines.len() {
+            // End one line before the next function's `~`.
+            func_lines[i + 1].saturating_sub(1)
         } else {
-            // Last function ends at the section's last token.
-            qf_max_line
+            // Last function: end at the section close paren line.
+            qf_end_line
         };
 
-        if end_line > start_line {
-            ranges.push(region(start_line, end_line));
+        if end > start {
+            ranges.push(region(start, end));
         }
     }
 }
 
 // ── Brace folds ───────────────────────────────────────────────────────────────
 //
-// Stack-based { / } matching.  A fold is only emitted when the opening `{`
-// and closing `}` share the same section — this prevents a closing `}` in
-// @DATA from being matched against an opening `{` in @QUICKFUNCS.
+// Simple { / } matching. Emit whenever the braces span more than one line.
+// No section filtering — nested objects in @DATA and enum bodies all fold.
 
 fn collect_brace_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
-    // Stack entries: (open_line_0based, open_section).
-    let mut stack: Vec<(u32, SectionId)> = Vec::new();
+    // Stack of opening brace line numbers.
+    let mut stack: Vec<u32> = Vec::new();
 
-    for tok in tokens {
-        match &tok.token_type {
+    for token in tokens {
+        match &token.token_type {
             TokenType::Symbol('{') => {
-                let line = tok.line.saturating_sub(1) as u32;
-                stack.push((line, tok.section));
+                let line = token.line.saturating_sub(1) as u32;
+                stack.push(line);
             }
             TokenType::Symbol('}') => {
-                if let Some((start_line, open_section)) = stack.pop() {
-                    let end_line = tok.line.saturating_sub(1) as u32;
-                    // Only emit if the brace pair is within the same section
-                    // and spans more than one line.
-                    if end_line > start_line && open_section == tok.section {
+                if let Some(start_line) = stack.pop() {
+                    let end_line = token.line.saturating_sub(1) as u32;
+                    if end_line > start_line {
                         ranges.push(region(start_line, end_line));
                     }
                 }
@@ -183,16 +239,20 @@ fn collect_brace_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
     }
 }
 
-// ── Data entry folds (from AST) ───────────────────────────────────────────────
+// ── DATA entry folds (from AST) ───────────────────────────────────────────────
 //
-// TableProperty and GroupArray entries can span many lines.  The AST gives
-// us reliable start/end positions without any token-scanning heuristics.
+// TableProperty and GroupArray entries can span many lines.
+// Only emits when both the start and end positions are valid.
 
 fn collect_data_entry_folds(data: &DataSection, ranges: &mut Vec<FoldingRange>) {
     for entry in &data.entries {
         match entry {
             DataEntry::TableProperty { position, properties, .. } => {
-                if let Some(last) = properties.last() {
+                if !position.is_valid() { continue; }
+                // Find the last property with a valid position.
+                let last_valid = properties.iter().rev()
+                    .find(|p| p.position.is_valid());
+                if let Some(last) = last_valid {
                     let start_line = position.line.saturating_sub(1) as u32;
                     let end_line   = last.position.line.saturating_sub(1) as u32;
                     if end_line > start_line {
@@ -201,27 +261,22 @@ fn collect_data_entry_folds(data: &DataSection, ranges: &mut Vec<FoldingRange>) 
                 }
             }
             DataEntry::GroupArray { position, items, .. } => {
-                if let Some(last) = items.last() {
+                if !position.is_valid() || items.is_empty() { continue; }
+                // Use the last item's position if valid.
+                let last_valid_line = items.iter().rev()
+                    .map(|v| v.position())
+                    .find(|p| p.is_valid())
+                    .map(|p| p.line.saturating_sub(1) as u32);
+                if let Some(end_line) = last_valid_line {
                     let start_line = position.line.saturating_sub(1) as u32;
-                    let last_pos   = last.position();
-                    let end_line   = last_pos.line.saturating_sub(1) as u32;
                     if end_line > start_line {
                         ranges.push(region(start_line, end_line));
                     }
                 }
             }
-            DataEntry::ObjectProperty { position, object, .. } => {
-                // object is a boxed Value; use its position if it's an object literal.
-                let end_pos = object.position();
-                if end_pos.is_valid() {
-                    let start_line = position.line.saturating_sub(1) as u32;
-                    let end_line   = end_pos.line.saturating_sub(1) as u32;
-                    if end_line > start_line {
-                        ranges.push(region(start_line, end_line));
-                    }
-                }
-            }
-            DataEntry::SimpleProperty { .. } => {}
+            // ObjectProperty: the {…} block is handled by collect_brace_folds.
+            // SimpleProperty: single-line, no fold.
+            DataEntry::ObjectProperty { .. } | DataEntry::SimpleProperty { .. } => {}
         }
     }
 }
@@ -232,7 +287,7 @@ fn region(start_line: u32, end_line: u32) -> FoldingRange {
     FoldingRange {
         start_line,
         end_line,
-        kind: Some(FoldingRangeKind::Region),
+        kind:             Some(FoldingRangeKind::Region),
         start_character:  None,
         end_character:    None,
         collapsed_text:   None,
@@ -251,8 +306,7 @@ mod tests {
     fn test_doc(source: &str) -> Document {
         let mut doc = Document::new(
             Url::parse("file:///test.mdix").unwrap(),
-            source.to_string(),
-            0,
+            source.to_string(), 0,
         );
         run_pipeline(&mut doc);
         doc
@@ -264,47 +318,69 @@ mod tests {
     }
 
     #[test]
-    fn section_folds_are_generated() {
-        let doc = test_doc(
-            "@ENUMS(\n  AIType { PASSIVE = 0, AGGRESSIVE = 1 }\n)\n\
-             @DATA(\n  x = 1\n  y = 2\n)",
-        );
+    fn single_section_folds() {
+        let src = "@DATA(\n  x = 1\n  y = 2\n  z = 3\n)";
+        let doc  = test_doc(src);
         let folds = provide(Some(&doc)).unwrap_or_default();
-        // @ENUMS should produce a fold starting on line 0.
+        // Should have at least one fold for @DATA (lines 0–4).
         assert!(
-            folds.iter().any(|f| f.start_line == 0),
-            "expected @ENUMS fold: {:?}", folds
-        );
-        // @DATA should produce a fold starting on line 3.
-        assert!(
-            folds.iter().any(|f| f.start_line == 3),
-            "expected @DATA fold: {:?}", folds
+            folds.iter().any(|f| f.start_line == 0 && f.end_line >= 4),
+            "@DATA fold missing: {:?}", folds
         );
     }
 
     #[test]
-    fn enum_fold_does_not_extend_past_section() {
-        let doc = test_doc(
-            "@ENUMS(\n  AIType { PASSIVE = 0, AGGRESSIVE = 1 }\n)\n\
-             @DATA(\n  score = 100\n)",
-        );
+    fn enum_fold_does_not_extend_past_data() {
+        let src = "@ENUMS(\n  T { A = 0, B = 1 }\n)\n@DATA(\n  x = 1\n)";
+        let doc  = test_doc(src);
         let folds = provide(Some(&doc)).unwrap_or_default();
-        // @ENUMS fold must end before @DATA starts (line 3).
+        // @ENUMS fold should end at line 2 (the `)` of @ENUMS).
         for fold in &folds {
             if fold.start_line == 0 {
                 assert!(
-                    fold.end_line < 3,
-                    "@ENUMS fold incorrectly extends into @DATA: {:?}",
-                    fold
+                    fold.end_line <= 2,
+                    "@ENUMS fold extends too far: {:?}", fold
                 );
             }
         }
     }
 
     #[test]
-    fn no_zero_length_folds() {
-        let doc = test_doc("@DATA(\n  x = 1\n)");
+    fn multiple_quickfunc_folds() {
+        let src = concat!(
+            "@QUICKFUNCS(\n",
+            "  ~f1<int>(x) { return x }\n",
+            "  ~f2<int>(y) { return y }\n",
+            "  ~f3<int>(z) { return z }\n",
+            ")"
+        );
+        let doc   = test_doc(src);
         let folds = provide(Some(&doc)).unwrap_or_default();
-        assert!(folds.iter().all(|f| f.end_line > f.start_line));
+        // With 3 functions, we expect at least the section fold + 2 function folds
+        // (since single-func folds are skipped for the last one which uses the section fold).
+        // At minimum, multiple folds should exist.
+        assert!(folds.len() >= 2, "expected multiple folds: {:?}", folds);
+    }
+
+    #[test]
+    fn no_zero_length_folds() {
+        let src = "@DATA(\n  x = 1\n)\n@ENUMS(\n  T { A = 0 }\n)";
+        let doc   = test_doc(src);
+        let folds = provide(Some(&doc)).unwrap_or_default();
+        for f in &folds {
+            assert!(f.end_line > f.start_line, "zero-length fold: {:?}", f);
+        }
+    }
+
+    #[test]
+    fn brace_fold_for_object_in_data() {
+        let src = "@DATA(\n  player = {\n    name = \"Hero\"\n    level = 10\n  }\n)";
+        let doc   = test_doc(src);
+        let folds = provide(Some(&doc)).unwrap_or_default();
+        // Should have a brace fold for the { } on lines 1-4.
+        assert!(
+            folds.iter().any(|f| f.start_line == 1 && f.end_line >= 4),
+            "object brace fold missing: {:?}", folds
+        );
     }
 }

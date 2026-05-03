@@ -1,4 +1,5 @@
-]//! Shared command types and the CliError enum.
+// mdix-cli/src/commands/mod.rs
+//! Shared command types and the CliError enum.
 
 pub mod compact;
 pub mod compile;
@@ -6,6 +7,7 @@ pub mod config;
 pub mod convert;
 pub mod create;
 pub mod debug_ast;
+pub mod debug_symbols;
 pub mod debug_tokens;
 pub mod decrypt;
 pub mod format;

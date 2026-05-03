@@ -1,16 +1,5 @@
 // mdix-lsp/src/capabilities.rs
-//! Declares which LSP capabilities this server supports.
-
-use tower_lsp::lsp_types::{
-    CodeActionProviderCapability, ColorProviderCapability, CompletionOptions,
-    FoldingRangeProviderCapability, HoverProviderCapability, OneOf, SaveOptions,
-    SemanticTokenModifier, SemanticTokenType, SemanticTokensFullOptions,
-    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensServerCapabilities,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, WorkDoneProgressOptions,
-};
-
-// ── Token type index constants ────────────────────────────────────────────────
+use tower_lsp::lsp_types::*;
 
 pub const TT_KEYWORD:     u32 = 0;
 pub const TT_STRING:      u32 = 1;
@@ -26,16 +15,12 @@ pub const TT_PROPERTY:    u32 = 10;
 pub const TT_PARAMETER:   u32 = 11;
 pub const TT_MACRO:       u32 = 12;
 pub const TT_DECORATOR:   u32 = 13;
-// Index 14 reserved for STRUCT — kept in TOKEN_TYPES for legend index stability.
-// Constant intentionally omitted (no current use site).
+// index 14 = STRUCT reserved in legend
 pub const TT_REGEXP:      u32 = 15;
 pub const TT_EVENT:       u32 = 16;
 
-// ── Modifier bitmasks ─────────────────────────────────────────────────────────
-
 pub const MOD_DECLARATION: u32 = 1 << 0;
 pub const MOD_READONLY:    u32 = 1 << 1;
-// Bit 2 (DEPRECATED) reserved in legend but has no use site — constant omitted.
 
 pub const TOKEN_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::KEYWORD,
@@ -52,15 +37,15 @@ pub const TOKEN_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::PARAMETER,
     SemanticTokenType::MACRO,
     SemanticTokenType::DECORATOR,
-    SemanticTokenType::STRUCT,   // index 14 — kept for legend stability
-    SemanticTokenType::REGEXP,   // index 15 = TT_REGEXP
-    SemanticTokenType::EVENT,    // index 16 = TT_EVENT
+    SemanticTokenType::STRUCT,   // index 14 — legend stability
+    SemanticTokenType::REGEXP,
+    SemanticTokenType::EVENT,
 ];
 
 pub const TOKEN_MODIFIERS: &[SemanticTokenModifier] = &[
-    SemanticTokenModifier::DECLARATION, // bit 0 = MOD_DECLARATION
-    SemanticTokenModifier::READONLY,    // bit 1 = MOD_READONLY
-    SemanticTokenModifier::DEPRECATED,  // bit 2 — reserved in legend, no current use
+    SemanticTokenModifier::DECLARATION,
+    SemanticTokenModifier::READONLY,
+    SemanticTokenModifier::DEPRECATED,
 ];
 
 pub fn semantic_token_legend() -> SemanticTokensLegend {
@@ -86,21 +71,21 @@ pub fn server_capabilities() -> ServerCapabilities {
         completion_provider: Some(CompletionOptions {
             resolve_provider:   Some(false),
             trigger_characters: Some(vec![
-                "@".to_string(),
-                ".".to_string(),
-                "<".to_string(),
-                "~".to_string(),
+                "@".to_string(), ".".to_string(),
+                "<".to_string(), "~".to_string(),
             ]),
             ..Default::default()
         }),
 
-        hover_provider:       Some(HoverProviderCapability::Simple(true)),
-        definition_provider:  Some(OneOf::Left(true)),
-        color_provider:       Some(ColorProviderCapability::Simple(true)),
-        inlay_hint_provider:  Some(OneOf::Left(true)),
-        code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
-
+        hover_provider:         Some(HoverProviderCapability::Simple(true)),
+        definition_provider:    Some(OneOf::Left(true)),
+        color_provider:         Some(ColorProviderCapability::Simple(true)),
+        inlay_hint_provider:    Some(OneOf::Left(true)),
+        code_action_provider:   Some(CodeActionProviderCapability::Simple(true)),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+
+        // Document symbols — powers the outline/breadcrumb panel.
+        document_symbol_provider: Some(OneOf::Left(true)),
 
         semantic_tokens_provider: Some(
             SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {

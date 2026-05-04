@@ -32,6 +32,16 @@ pub fn provide(doc: Option<&Document>, pos: Position) -> Option<Hover> {
 
 fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<Hover> {
     let doc = doc?;
+
+    // ── @CONFIG block has NO tokens ────────────────────────────────────────────
+    // The @CONFIG section is stripped before tokenization so the token stream
+    // contains nothing for those lines. Detect cursor-in-config via the stored
+    // line range and serve hover from source-text scanning instead.
+    if doc.pos_in_config(pos) {
+        return hover_config_line(doc, pos);
+    }
+
+    // ── All other sections: token-based hover ──────────────────────────────────
     let (token, index) = token_and_index_at(&doc.tokens, pos)?;
     let content = hover_content_for(token, index, doc)?;
 

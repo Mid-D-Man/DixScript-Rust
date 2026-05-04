@@ -183,7 +183,7 @@ impl TokenDebugPrinter {
             TokenType::DoubleColon => "DoubleColon(::)".to_string(),
             TokenType::Arrow => "Arrow(=>)".to_string(),
             TokenType::SwitchCase => "SwitchCase(->)".to_string(),
-            TokenType::FunctionPrefix => "FunctionPrefix(~)".to_string(),
+            
             TokenType::ControlFlowColon => "ControlFlowColon(:)".to_string(),
             TokenType::PrefixedConstructor { prefix, value } => {
                 format!("PrefixedConstructor({}:{})", prefix, value)

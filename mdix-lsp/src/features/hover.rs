@@ -891,7 +891,77 @@ fn extract_doc_comment_for_func(tokens: &[Token], func_def_line: usize) -> Optio
         .join("\n");
     Some(cleaned)
 }
+/// Hover for a line inside the @CONFIG block.
+///
+/// @CONFIG has no tokens — the block is stripped before tokenization.
+/// We detect the key (or @CONFIG keyword itself) purely from source text.
+fn hover_config_line(doc: &Document, pos: Position) -> Option<Hover> {
+    let line_text = doc.source.lines().nth(pos.line as usize)?;
+    let trimmed   = line_text.trim();
 
+    // Cursor on the @CONFIG keyword itself.
+    if trimmed.to_uppercase().starts_with("@CONFIG") {
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind:  MarkupKind::Markdown,
+                value: section_hover(
+                    "@CONFIG",
+                    "Compiler settings and file metadata.",
+                    concat!(
+                        "@CONFIG(\n",
+                        "  version            -> \"1.0.0\"\n",
+                        "  author             -> \"name\"\n",
+                        "  debug_mode         -> \"off\"\n",
+                        "  error_handling     -> \"halt\"\n",
+                        "  compatibility_mode -> \"strict\"\n",
+                        "  features           -> \"advanced\"\n",
+                        ")"
+                    ),
+                    concat!(
+                        "All entries use `key -> value` syntax.\n\n",
+                        "**Keys:** `version`, `author`, `created`, `encoding`, ",
+                        "`debug_mode` (`off`/`regular`/`verbose`), ",
+                        "`error_handling` (`halt`/`continue`/`recover`), ",
+                        "`compatibility_mode` (`strict`/`best_effort`/`permissive`), ",
+                        "`features` (`basic`/`advanced`)."
+                    ),
+                ),
+            }),
+            range: None,
+        });
+    }
+
+    // Cursor on a `key -> value` entry.
+    if let Some(arrow_byte) = line_text.find("->") {
+        let char_pos  = pos.character as usize;
+        let key_raw   = line_text[..arrow_byte].trim();
+
+        // Validate that it looks like a key (not a blank/comment line).
+        let key_valid = !key_raw.is_empty()
+            && !key_raw.starts_with('@')
+            && !key_raw.starts_with("//")
+            && key_raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ' ');
+
+        if key_valid {
+            let key = key_raw.trim();
+
+            // Hover the value? Detect the `->` value token after the arrow.
+            // Either way, the hover text is the key description — it's the
+            // most useful info regardless of cursor side.
+            let content = hover_config_key(key)?;
+
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind:  MarkupKind::Markdown,
+                    value: content,
+                }),
+                range: None,
+            });
+        }
+    }
+
+    None
+                    }
 // ── Minimal static sig table ───────────────────────────────────────────────────
 
 static STATIC_SIGS: &[(&str, &str, &str, &str, &str)] = &[

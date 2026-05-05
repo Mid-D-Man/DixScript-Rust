@@ -77,35 +77,33 @@ fn provide_inner(doc: Option<&Document>) -> Option<SemanticTokensResult> {
 // ── Stateful classifier ───────────────────────────────────────────────────────
 
 struct ClassifierState<'a> {
-    // Enum body
     in_enum_body:      bool,
     enum_brace_depth:  i32,
     seen_enum_name:    bool,
 
-    // QuickFuncs
     next_is_func_name: bool,
     in_param_list:     bool,
     param_paren_depth: i32,
 
-    // Imports
     next_is_alias:     bool,
 
-    // DLM — single flag: set on `.`, cleared after classifying the subtype.
     dlm_dot_seen:      bool,
 
-    // Call-site detection
+    // Replaced unreliable lookahead with authoritative symbol-table lookup.
+    // prev_was_call_ident is now set only when the identifier is confirmed
+    // to exist in the symbol table's function map.
     prev_was_call_ident: bool,
 
-    // Enum usage-site detection
     next_is_enum_type:  bool,
     next_is_enum_dot:   bool,
     prev_was_enum_dot:  bool,
 
     enum_names: &'a HashSet<String>,
+    func_names: &'a HashSet<String>,  // NEW
 }
 
 impl<'a> ClassifierState<'a> {
-    fn new(enum_names: &'a HashSet<String>) -> Self {
+    fn new(enum_names: &'a HashSet<String>, func_names: &'a HashSet<String>) -> Self {
         ClassifierState {
             in_enum_body:        false,
             enum_brace_depth:    0,
@@ -120,15 +118,14 @@ impl<'a> ClassifierState<'a> {
             next_is_enum_dot:    false,
             prev_was_enum_dot:   false,
             enum_names,
+            func_names,
         }
     }
 
     fn advance(&mut self, token: &Token, tokens: &[Token], index: usize) {
-        // ── Per-token resets ────────────────────────────────────────────────
         self.prev_was_call_ident = false;
         self.next_is_enum_type   = false;
 
-        // Enum-chain flags persist across Identifier and Symbol('.') only.
         match &token.token_type {
             TokenType::Identifier(_) | TokenType::Symbol('.') => {}
             _ => {
@@ -137,10 +134,14 @@ impl<'a> ClassifierState<'a> {
             }
         }
 
-        // ── Identifier-specific logic ───────────────────────────────────────
         if let TokenType::Identifier(name) = &token.token_type {
-            // Function call detection: look ahead for '(' skipping annotations.
-            let is_call = tokens.iter()
+            // FIX: use symbol table to confirm it's a function, not lookahead for `(`.
+            // This means QuickFunc calls in @DATA and @QUICKFUNCS both get
+            // TT_FUNCTION color, matching the declaration color from `~`.
+            // Lookahead is kept as a fallback for call sites that aren't in the
+            // symbol table yet (e.g. during first-pass before analysis completes).
+            let in_symbol_table = self.func_names.contains(name.as_str());
+            let lookahead_paren = !in_symbol_table && tokens.iter()
                 .skip(index + 1)
                 .take(8)
                 .filter(|t| !matches!(&t.token_type,
@@ -149,9 +150,8 @@ impl<'a> ClassifierState<'a> {
                     | TokenType::Symbol('>')))
                 .take(3)
                 .any(|t| matches!(t.token_type, TokenType::Symbol('(')));
-            self.prev_was_call_ident = is_call;
+            self.prev_was_call_ident = in_symbol_table || lookahead_paren;
 
-            // Enum type name detection.
             if self.enum_names.contains(name.as_str()) {
                 let has_dot = tokens.iter()
                     .skip(index + 1)
@@ -168,7 +168,6 @@ impl<'a> ClassifierState<'a> {
             }
         }
 
-        // ── Dot: enum-field transition ─────────────────────────────────────
         if let TokenType::Symbol('.') = &token.token_type {
             if self.next_is_enum_dot {
                 self.prev_was_enum_dot = true;
@@ -176,10 +175,7 @@ impl<'a> ClassifierState<'a> {
             }
         }
 
-        // ── Section-level state machine ─────────────────────────────────────
         match &token.token_type {
-
-            // ── @ENUMS ──────────────────────────────────────────────────────
             TokenType::SectionEnums => {
                 self.seen_enum_name = false;
             }
@@ -194,10 +190,6 @@ impl<'a> ClassifierState<'a> {
                     self.seen_enum_name = false;
                 }
             }
-
-            // ── @QUICKFUNCS ─────────────────────────────────────────────────
-            // FIX: `~` is now Symbol('~'), not FunctionPrefix.
-            // The state machine trigger is identical — just the match arm changes.
             TokenType::Symbol('~') => {
                 self.next_is_func_name = true;
                 self.in_param_list     = false;
@@ -224,8 +216,6 @@ impl<'a> ClassifierState<'a> {
                     }
                 }
             }
-
-            // ── @IMPORTS ────────────────────────────────────────────────────
             TokenType::SectionImports => {
                 self.next_is_alias = true;
             }
@@ -239,43 +229,34 @@ impl<'a> ClassifierState<'a> {
             {
                 self.next_is_alias = true;
             }
-
-            // ── @DLM ────────────────────────────────────────────────────────
             TokenType::SectionDLM => {
                 self.dlm_dot_seen = false;
             }
             TokenType::Symbol('.') => {
-                // Any dot might be a DLM module/subtype separator.
-                // `classify_identifier` will only act on it inside DLM section.
                 self.dlm_dot_seen = true;
             }
             TokenType::Symbol(',') if token.section == SectionId::Dlm => {
-                // Between module pairs: reset so next identifier is a module name.
                 self.dlm_dot_seen = false;
             }
-
             _ => {}
         }
     }
 
     fn classify_identifier(&mut self, token: &Token) -> (u32, u32) {
-        // Priority 1: enum field at usage site (FIELD in EnumName.FIELD).
         if self.prev_was_enum_dot {
             self.prev_was_enum_dot = false;
             return (TT_ENUM_MEMBER, 0);
         }
-
-        // Priority 2: enum type name at usage site (EnumName in EnumName.FIELD).
         if self.next_is_enum_type {
             return (TT_TYPE, 0);
         }
-
-        // Priority 3: function call (name followed by '(').
+        // Function call sites now use TT_FUNCTION, same as declarations.
+        // prev_was_call_ident is true when the symbol table confirms it's a
+        // function (authoritative) or lookahead found a `(` (fallback).
         if self.prev_was_call_ident && !self.next_is_func_name {
             return (TT_FUNCTION, 0);
         }
 
-        // Priority 4: section-specific classification.
         match token.section {
             SectionId::Config => (TT_PROPERTY, 0),
 
@@ -312,11 +293,11 @@ impl<'a> ClassifierState<'a> {
 
             SectionId::Dlm => {
                 let result = if self.dlm_dot_seen {
-                    (TT_DECORATOR, 0)           // subtype: gzip, aes256, etc.
+                    (TT_DECORATOR, 0)
                 } else {
-                    (TT_MACRO, MOD_DECLARATION) // module: DCompressor, etc.
+                    (TT_MACRO, MOD_DECLARATION)
                 };
-                self.dlm_dot_seen = false; // consume flag
+                self.dlm_dot_seen = false;
                 result
             }
 
@@ -324,8 +305,6 @@ impl<'a> ClassifierState<'a> {
             SectionId::Security => (TT_PROPERTY, 0),
 
             _ => {
-                // SectionId::None or unknown.
-                // If we just saw a dot and this looks like a DLM subtype, color it.
                 if self.dlm_dot_seen {
                     self.dlm_dot_seen = false;
                     return (TT_DECORATOR, 0);
@@ -335,7 +314,6 @@ impl<'a> ClassifierState<'a> {
         }
     }
 }
-
 // ── Encoder ───────────────────────────────────────────────────────────────────
 
 fn encode_tokens(doc: &Document, enum_names: &HashSet<String>) -> Vec<SemanticToken> {

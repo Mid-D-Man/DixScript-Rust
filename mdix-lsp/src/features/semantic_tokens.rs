@@ -367,71 +367,107 @@ fn encode_tokens(doc: &Document, enum_names: &HashSet<String>, func_names: &Hash
 // position fixup pass.
 
 fn emit_config_tokens(
-    ast:       &DixScript,
-    source:    &str,
-    prev_line: &mut u32,
-    prev_col:  &mut u32,
-    data:      &mut Vec<SemanticToken>,
+    ast:               &DixScript,
+    source:            &str,
+    config_line_range: Option<(u32, u32)>,
+    prev_line:         &mut u32,
+    prev_col:          &mut u32,
+    data:              &mut Vec<SemanticToken>,
 ) {
     let config = match ast.config.as_ref() { Some(c) => c, None => return };
+
+    // Key → ConfigValue lookup for correct token type (TT_TYPE vs TT_STRING etc).
+    let value_lookup: std::collections::HashMap<&str, &ConfigValue> = config.entries.iter()
+        .map(|e| (e.key.as_str(), &e.value))
+        .collect();
+
     let source_lines: Vec<&str> = source.lines().collect();
 
-    // @CONFIG section keyword — position is now set by the fixup pass.
-    if config.position.is_valid() {
-        let lsp_line = (config.position.line - 1) as u32;
-        let lsp_col  = (config.position.column - 1) as u32;
-        push_raw(data, prev_line, prev_col, lsp_line, lsp_col, 7, TT_KEYWORD, MOD_READONLY);
+    // Use config_line_range from raw source scan — always accurate.
+    // The old approach used entry.position.is_valid() which fires false for
+    // entries injected by validate_and_enhance_config (debug_mode, error_handling,
+    // features) because create_config_section uses Default::default() positions.
+    let (start_lsp, end_lsp) = match config_line_range {
+        Some(r) => r,
+        None    => return,
+    };
+
+    // @CONFIG keyword on the opening line
+    if let Some(line_text) = source_lines.get(start_lsp as usize) {
+        let at_col = line_text.find('@').unwrap_or(0) as u32;
+        push_raw(data, prev_line, prev_col, start_lsp, at_col, 7, TT_KEYWORD, MOD_READONLY);
     }
 
-    // Sort entries by position so delta encoding is monotone.
-    let mut sorted_entries: Vec<&dixscript::Compiler::AST::ConfigEntry> = config.entries.iter()
-        .filter(|e| e.position.is_valid())
-        .collect();
-    sorted_entries.sort_by_key(|e| (e.position.line, e.position.column));
+    for lsp_line in (start_lsp + 1)..=end_lsp {
+        let line_text = match source_lines.get(lsp_line as usize) {
+            Some(l) => *l,
+            None    => continue,
+        };
+        let trimmed = line_text.trim_start();
 
-    for entry in sorted_entries {
-        let lsp_line  = (entry.position.line - 1) as u32;
+        if trimmed.is_empty()
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with(')')
+            || trimmed.to_uppercase().starts_with("@CONFIG")
+        {
+            continue;
+        }
 
-        // Guard: line must be in the source.
-        let line_text = match source_lines.get(entry.position.line - 1) {
-            Some(l) => l,
+        let arrow_pos = match trimmed.find("->") {
+            Some(p) => p,
             None    => continue,
         };
 
-        // ── Key token ─────────────────────────────────────────────────────────
-        let key_col = (entry.position.column - 1) as u32;
-        let key_len = entry.key.len() as u32;
-        if key_len == 0 { continue; }
-        push_raw(data, prev_line, prev_col, lsp_line, key_col, key_len, TT_PROPERTY, 0);
+        let key = trimmed[..arrow_pos].trim();
+        if key.is_empty()
+            || !key.chars().next().map(|c| c.is_ascii_alphabetic() || c == '_').unwrap_or(false)
+            || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            continue;
+        }
 
-        // ── Arrow token ───────────────────────────────────────────────────────
-        // Search for `->` starting just after the key in this line.
-        let search_start = (entry.position.column - 1) + entry.key.len();
-        if search_start >= line_text.len() { continue; }
+        let leading = line_text.len() - line_text.trim_start().len();
 
-        if let Some(arrow_rel) = line_text[search_start..].find("->") {
-            let arrow_col = (search_start + arrow_rel) as u32;
-            push_raw(data, prev_line, prev_col, lsp_line, arrow_col, 2, TT_OPERATOR, 0);
+        // key → PROPERTY
+        push_raw(data, prev_line, prev_col, lsp_line, leading as u32, key.len() as u32, TT_PROPERTY, 0);
 
-            // ── Value token ───────────────────────────────────────────────────
-            let after_arrow = search_start + arrow_rel + 2;
-            if after_arrow >= line_text.len() { continue; }
+        // -> → OPERATOR
+        let arrow_col = (leading + arrow_pos) as u32;
+        push_raw(data, prev_line, prev_col, lsp_line, arrow_col, 2, TT_OPERATOR, 0);
 
-            let value_raw  = &line_text[after_arrow..];
-            let trim_len   = value_raw.len() - value_raw.trim_start().len();
-            let value_col  = (after_arrow + trim_len) as u32;
-            let value_text = value_raw.trim_start();
+        // value → correct type from AST, or text-based fallback
+        let after_arrow   = arrow_pos + 2;
+        let rest          = &trimmed[after_arrow..];
+        let value_text    = rest.trim_start();
+        let value_leading = rest.len() - value_text.len();
+        let value_col     = (leading + after_arrow + value_leading) as u32;
 
-            let (tt, len) = classify_config_value(&entry.value, value_text);
-            if len > 0 {
-                push_raw(
-                    data, prev_line, prev_col,
-                    lsp_line, value_col, len as u32,
-                    tt, 0,
-                );
-            }
+        let (tt, len) = match value_lookup.get(key) {
+            Some(cv) => classify_config_value(cv, value_text),
+            None     => classify_config_value_from_source_text(value_text),
+        };
+        if len > 0 {
+            push_raw(data, prev_line, prev_col, lsp_line, value_col, len as u32, tt, 0);
         }
     }
+}
+
+fn classify_config_value_from_source_text(text: &str) -> (u32, usize) {
+    if text.starts_with('"') {
+        if let Some(end) = text[1..].find('"') { return (TT_STRING, end + 2); }
+        return (TT_STRING, text.len());
+    }
+    if text.starts_with('\'') {
+        if let Some(end) = text[1..].find('\'') { return (TT_STRING, end + 2); }
+        return (TT_STRING, text.len());
+    }
+    if text == "true" || text == "false" { return (TT_KEYWORD, text.len()); }
+    let num_len = text.chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == 'e' || *c == 'E')
+        .count();
+    if num_len > 0 { return (TT_NUMBER, num_len); }
+    (TT_STRING, text.split_whitespace().next().map(|s| s.len()).unwrap_or(0))
 }
 
 fn classify_config_value(value: &ConfigValue, text: &str) -> (u32, usize) {

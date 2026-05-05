@@ -1,8 +1,4 @@
 // mdix-lsp/src/features/folding.rs
-// CHANGE: collect_quickfunc_folds now filters Symbol('~') instead of FunctionPrefix.
-// Everything else identical.
-//!
-//! Root causes of previous bugs — see inline comments.
 
 use std::panic;
 
@@ -35,7 +31,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
 
     let mut ranges: Vec<FoldingRange> = Vec::new();
 
-    // @CONFIG fold (source-text position, no tokens exist for it)
+    // @CONFIG fold — source-text derived, no tokens exist for @CONFIG.
     if let Some((start, end)) = doc.config_line_range {
         if end > start {
             ranges.push(region(start, end));
@@ -71,8 +67,10 @@ fn collect_section_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
         .collect();
 
     for (i, &(tok_idx, start_line)) in section_starts.iter().enumerate() {
+        // Only scan tokens up to the next section keyword so paren counting
+        // never crosses a section boundary.
         let scan_end = section_starts.get(i + 1).map(|(j, _)| *j).unwrap_or(tokens.len());
-        let search = &tokens[tok_idx..scan_end];
+        let search   = &tokens[tok_idx..scan_end];
 
         if let Some(end_line) = paren_close_line(search) {
             if end_line > start_line {
@@ -82,8 +80,10 @@ fn collect_section_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
     }
 }
 
+/// Find the line of the closing `)` that matches the first `(` in `tokens`.
+/// Stops at EndOfFile. Returns None if no balanced close is found.
 fn paren_close_line(tokens: &[Token]) -> Option<u32> {
-    let mut depth = 0i32;
+    let mut depth      = 0i32;
     let mut found_open = false;
 
     for token in tokens {
@@ -130,9 +130,8 @@ fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
             tokens.last().map(|t| t.line.saturating_sub(1) as u32).unwrap_or(0)
         });
 
-    // FIX: `~` is emitted as Symbol('~'), not FunctionPrefix.
-    // Collect all QuickFunc declaration lines by finding Symbol('~') tokens
-    // within the @QUICKFUNCS block.
+    // Collect 0-based line numbers of every `~` inside the @QUICKFUNCS block.
+    // `~` is emitted as Symbol('~'), not a dedicated FunctionPrefix token.
     let func_lines: Vec<u32> = tokens.iter()
         .skip(qf_section_idx)
         .filter(|t| (t.line.saturating_sub(1) as u32) <= qf_end_line)
@@ -140,12 +139,17 @@ fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
         .map(|t| t.line.saturating_sub(1) as u32)
         .collect();
 
-    if func_lines.len() < 2 { return; }
+    // FIX: previously `len() < 2` which meant a file with exactly one QuickFunc
+    // produced zero per-function folds (the early return fired before the loop).
+    // Corrected to `is_empty()` — a single function now folds correctly.
+    if func_lines.is_empty() { return; }
 
     for (i, &start) in func_lines.iter().enumerate() {
         let end = if i + 1 < func_lines.len() {
+            // Fold ends one line before the next function's `~`.
             func_lines[i + 1].saturating_sub(1)
         } else {
+            // Last (or only) function folds to the section's closing `)`.
             qf_end_line
         };
         if end > start {
@@ -160,8 +164,7 @@ fn collect_brace_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
     for token in tokens {
         match &token.token_type {
             TokenType::Symbol('{') => {
-                let line = token.line.saturating_sub(1) as u32;
-                stack.push(line);
+                stack.push(token.line.saturating_sub(1) as u32);
             }
             TokenType::Symbol('}') => {
                 if let Some(start_line) = stack.pop() {
@@ -182,9 +185,7 @@ fn collect_data_entry_folds(data: &DataSection, ranges: &mut Vec<FoldingRange>) 
         match entry {
             DataEntry::TableProperty { position, properties, .. } => {
                 if !position.is_valid() { continue; }
-                let last_valid = properties.iter().rev()
-                    .find(|p| p.position.is_valid());
-                if let Some(last) = last_valid {
+                if let Some(last) = properties.iter().rev().find(|p| p.position.is_valid()) {
                     let start_line = position.line.saturating_sub(1) as u32;
                     let end_line   = last.position.line.saturating_sub(1) as u32;
                     if end_line > start_line {
@@ -194,11 +195,11 @@ fn collect_data_entry_folds(data: &DataSection, ranges: &mut Vec<FoldingRange>) 
             }
             DataEntry::GroupArray { position, items, .. } => {
                 if !position.is_valid() || items.is_empty() { continue; }
-                let last_valid_line = items.iter().rev()
+                let last_line = items.iter().rev()
                     .map(|v| v.position())
                     .find(|p| p.is_valid())
                     .map(|p| p.line.saturating_sub(1) as u32);
-                if let Some(end_line) = last_valid_line {
+                if let Some(end_line) = last_line {
                     let start_line = position.line.saturating_sub(1) as u32;
                     if end_line > start_line {
                         ranges.push(region(start_line, end_line));
@@ -214,10 +215,10 @@ fn region(start_line: u32, end_line: u32) -> FoldingRange {
     FoldingRange {
         start_line,
         end_line,
-        kind:             Some(FoldingRangeKind::Region),
-        start_character:  None,
-        end_character:    None,
-        collapsed_text:   None,
+        kind:            Some(FoldingRangeKind::Region),
+        start_character: None,
+        end_character:   None,
+        collapsed_text:  None,
     }
 }
 
@@ -260,12 +261,28 @@ mod tests {
         let folds = provide(Some(&doc)).unwrap_or_default();
         for fold in &folds {
             if fold.start_line == 0 {
-                assert!(
-                    fold.end_line <= 2,
-                    "@ENUMS fold extends too far: {:?}", fold
-                );
+                assert!(fold.end_line <= 2, "@ENUMS fold extends too far: {:?}", fold);
             }
         }
+    }
+
+    #[test]
+    fn single_quickfunc_gets_fold() {
+        let src = concat!(
+            "@QUICKFUNCS(\n",
+            "  ~calc<int>(x) {\n",
+            "    return x\n",
+            "  }\n",
+            ")"
+        );
+        let doc   = test_doc(src);
+        let folds = provide(Some(&doc)).unwrap_or_default();
+        // Expect at least: section fold + the single function fold.
+        assert!(folds.len() >= 2, "got: {:?}", folds);
+        assert!(
+            folds.iter().any(|f| f.start_line == 1 && f.end_line >= 3),
+            "function fold missing or wrong range: {:?}", folds
+        );
     }
 
     #[test]
@@ -279,7 +296,6 @@ mod tests {
         );
         let doc   = test_doc(src);
         let folds = provide(Some(&doc)).unwrap_or_default();
-        // Section fold + at least 2 function folds (last func uses section fold as end)
         assert!(folds.len() >= 2, "expected multiple folds: {:?}", folds);
     }
 
@@ -303,4 +319,4 @@ mod tests {
             "object brace fold missing: {:?}", folds
         );
     }
-}
+            }

@@ -1,7 +1,4 @@
 // mdix-lsp/src/features/inlay_hints.rs
-//! Inlay hints — type annotations shown inline.
-//!
-//! All hints use DixScript `<type>` bracket notation, not `: type`.
 
 use std::panic;
 use std::collections::HashMap;
@@ -31,7 +28,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
     let doc = doc?;
     let ast = doc.ast.as_ref()?;
 
-    // QuickFunc name → declared return-type lookup.
+    // QuickFunc name → declared return type, for call-site inference.
     let qf_return_types: HashMap<String, DataType> = ast
         .quick_functions
         .as_ref()
@@ -68,7 +65,8 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                 DataEntry::TableProperty { ref properties, .. } => {
                     for prop in properties {
                         if prop.data_type.is_some() { continue; }
-                        let type_label = infer_type_label(&prop.value, &qf_return_types, &no_params)
+                        let type_label =
+                            infer_type_label(&prop.value, &qf_return_types, &no_params)
                             .unwrap_or_else(|| "<auto>".to_string());
                         let line = prop.position.line.saturating_sub(1) as u32;
                         let col  = (prop.position.column.saturating_sub(1) + prop.name.len()) as u32;
@@ -143,6 +141,7 @@ fn collect_qf_var_hints(
                 let target_line = position.line;
                 let hint_line   = position.line.saturating_sub(1) as u32;
 
+                // Find the exact column of the variable name token on this line.
                 let col = tokens.iter()
                     .filter(|t| t.line == target_line)
                     .find(|t| matches!(&t.token_type,
@@ -191,7 +190,6 @@ fn make_hint(line: u32, col: u32, label: String) -> InlayHint {
     }
 }
 
-/// Format a DataType as a DixScript `<type>` annotation string.
 fn fmt_type(dt: DataType) -> String {
     format!("<{}>", dt)
 }
@@ -206,12 +204,9 @@ fn infer_type_label(
     if let Value::Expression { expr, .. } = value {
         return infer_type_label_expr(expr, qf_return_types, param_types);
     }
-
     if let Value::QuickFuncCall { function_name, .. } = value {
-        return qf_return_types.get(function_name.as_str())
-            .map(|rt| fmt_type(*rt));
+        return qf_return_types.get(function_name.as_str()).map(|rt| fmt_type(*rt));
     }
-
     if let Value::Identifier { value: name, .. } = value {
         if let Some(opt_dt) = param_types.get(name.as_str()) {
             return Some(match opt_dt {
@@ -220,7 +215,6 @@ fn infer_type_label(
             });
         }
     }
-
     if matches!(value, Value::Null { .. }) {
         return Some("<null>".to_string());
     }
@@ -275,17 +269,14 @@ fn infer_type_label_expr(
             qf_return_types.get(name.as_str()).map(|rt| fmt_type(*rt))
         }
 
-        // Arithmetic — numeric promotion with <type> string comparisons.
         Expression::ArithmeticOp { left, operator, right, .. } => {
             let lt = infer_type_label_expr(left,  qf_return_types, param_types);
             let rt = infer_type_label_expr(right, qf_return_types, param_types);
-
             if operator.as_str() == "+" {
                 if lt.as_deref() == Some("<string>") || rt.as_deref() == Some("<string>") {
                     return Some("<string>".to_string());
                 }
             }
-
             match (lt.as_deref(), rt.as_deref()) {
                 (Some("<double>"), _) | (_, Some("<double>")) => Some("<double>".to_string()),
                 (Some("<float>"),  _) | (_, Some("<float>"))  => Some("<float>".to_string()),
@@ -321,80 +312,145 @@ fn infer_type_label_expr(
         Expression::StaticMethodCall { object_name, method_name, .. } => {
             infer_static_method_return(object_name, method_name)
         }
-
         Expression::StaticFunction { class_name, method, .. } => {
             infer_static_method_return(class_name, method)
+        }
+
+        // FIX: previously fell through to _ => None, giving <?> for all
+        // built-in instance methods. Now we infer the receiver type and look up.
+        Expression::InstanceMethodCall { instance, method_name, .. } => {
+            let receiver = infer_type_label_expr(instance, qf_return_types, param_types);
+            infer_instance_method_return(receiver.as_deref(), method_name)
+        }
+
+        // PropertyAccess without call parens (e.g. .length used as a property).
+        Expression::PropertyAccess { object, property, .. } => {
+            let receiver = infer_type_label_expr(object, qf_return_types, param_types);
+            infer_instance_method_return(receiver.as_deref(), property)
         }
 
         _ => None,
     }
 }
 
-/// Known return types for built-in static methods, returned as `<type>` strings.
+// ── Built-in instance method return types ─────────────────────────────────────
+
+fn infer_instance_method_return(
+    receiver_hint: Option<&str>,
+    method_name:   &str,
+) -> Option<String> {
+    match (receiver_hint, method_name) {
+        // Array methods
+        (Some("<array>"), "sum")
+        | (Some("<array>"), "average")
+        | (Some("<array>"), "min")
+        | (Some("<array>"), "max")         => Some("<double>".to_string()),
+
+        (Some("<array>"), "length")
+        | (Some("<array>"), "indexOf")
+        | (Some("<array>"), "lastIndexOf") => Some("<int>".to_string()),
+
+        (Some("<array>"), "isEmpty")
+        | (Some("<array>"), "contains")    => Some("<bool>".to_string()),
+
+        (Some("<array>"), "join")          => Some("<string>".to_string()),
+
+        (Some("<array>"), "first")
+        | (Some("<array>"), "last")
+        | (Some("<array>"), "get")         => Some("<any>".to_string()),
+
+        (Some("<array>"), "sort")
+        | (Some("<array>"), "reverse")
+        | (Some("<array>"), "push")
+        | (Some("<array>"), "pop")
+        | (Some("<array>"), "unique")
+        | (Some("<array>"), "flatten")     => Some("<array>".to_string()),
+
+        // String methods
+        (Some("<string>"), "length")       => Some("<int>".to_string()),
+
+        (Some("<string>"), "isEmpty")
+        | (Some("<string>"), "contains")
+        | (Some("<string>"), "startsWith")
+        | (Some("<string>"), "endsWith")   => Some("<bool>".to_string()),
+
+        (Some("<string>"), "toUpper")
+        | (Some("<string>"), "toLower")
+        | (Some("<string>"), "trim")
+        | (Some("<string>"), "replace")
+        | (Some("<string>"), "substring")  => Some("<string>".to_string()),
+
+        (Some("<string>"), "split")        => Some("<array>".to_string()),
+
+        _ => None,
+    }
+}
+
+// ── Static method return types ────────────────────────────────────────────────
+
 fn infer_static_method_return(class: &str, method: &str) -> Option<String> {
     let dt = match (class, method) {
-        // Math
         ("Math", "floor") | ("Math", "ceil") | ("Math", "round")
-        | ("Math", "sign") | ("Math", "truncate")               => DataType::Int,
+        | ("Math", "sign") | ("Math", "truncate")                => DataType::Int,
         ("Math", "abs") | ("Math", "sqrt") | ("Math", "pow")
         | ("Math", "min") | ("Math", "max") | ("Math", "clamp")
         | ("Math", "sin") | ("Math", "cos") | ("Math", "tan")
         | ("Math", "log") | ("Math", "log10") | ("Math", "exp")
         | ("Math", "pi") | ("Math", "e")
         | ("Math", "radians") | ("Math", "degrees")
-        | ("Math", "remainder")                                  => DataType::Double,
-        // DateTime
+        | ("Math", "remainder")                                   => DataType::Double,
+
         ("DateTime", "year") | ("DateTime", "month")
         | ("DateTime", "day") | ("DateTime", "hour")
         | ("DateTime", "minute") | ("DateTime", "second")
         | ("DateTime", "millisecond") | ("DateTime", "dayOfWeek")
         | ("DateTime", "dayOfYear") | ("DateTime", "daysInMonth")
-        | ("DateTime", "compare")                                => DataType::Int,
-        ("DateTime", "isLeapYear")                              => DataType::Bool,
-        ("DateTime", "format")                                  => DataType::String,
+        | ("DateTime", "compare")                                 => DataType::Int,
+        ("DateTime", "isLeapYear")                               => DataType::Bool,
+        ("DateTime", "format")                                   => DataType::String,
         ("DateTime", "now") | ("DateTime", "utcNow")
         | ("DateTime", "parse") | ("DateTime", "parseExact")
         | ("DateTime", "createTime") | ("DateTime", "fromUnixTime")
         | ("DateTime", "addHours") | ("DateTime", "addMinutes")
-        | ("DateTime", "addSeconds")                            => DataType::Timestamp,
+        | ("DateTime", "addSeconds")                             => DataType::Timestamp,
         ("DateTime", "today") | ("DateTime", "create")
         | ("DateTime", "addDays") | ("DateTime", "addMonths")
-        | ("DateTime", "addYears")                              => DataType::Date,
-        ("DateTime", "subtract") | ("DateTime", "toUnixTime")  => DataType::Double,
-        // Array
+        | ("DateTime", "addYears")                               => DataType::Date,
+        ("DateTime", "subtract") | ("DateTime", "toUnixTime")   => DataType::Double,
+
         ("Array", "sum") | ("Array", "average")
-        | ("Array", "min") | ("Array", "max")                  => DataType::Double,
-        ("Array", "contains")                                   => DataType::Bool,
-        ("Array", "indexOf") | ("Array", "lastIndexOf")         => DataType::Int,
-        ("Array", _)                                            => DataType::Array,
-        // Random
-        ("Random", "range")                                     => DataType::Int,
-        ("Random", "float") | ("Random", "floatRange")          => DataType::Float,
-        ("Random", "double") | ("Random", "doubleRange")        => DataType::Double,
-        ("Random", "boolean")                                   => DataType::Bool,
-        ("Random", "alphanumeric") | ("Random", "string")       => DataType::String,
-        ("Random", _)                                           => DataType::Array,
-        // Guid
-        ("Guid", "validate")                                    => DataType::Bool,
+        | ("Array", "min") | ("Array", "max")                   => DataType::Double,
+        ("Array", "contains")                                    => DataType::Bool,
+        ("Array", "indexOf") | ("Array", "lastIndexOf")          => DataType::Int,
+        ("Array", _)                                             => DataType::Array,
+
+        ("Random", "range")                                      => DataType::Int,
+        ("Random", "float") | ("Random", "floatRange")           => DataType::Float,
+        ("Random", "double") | ("Random", "doubleRange")         => DataType::Double,
+        ("Random", "boolean")                                    => DataType::Bool,
+        ("Random", "alphanumeric") | ("Random", "string")        => DataType::String,
+        ("Random", _)                                            => DataType::Array,
+
+        ("Guid", "validate")                                     => DataType::Bool,
         ("Guid", "new") | ("Guid", "parse") | ("Guid", "tryParse")
-        | ("Guid", "format") | ("Guid", "empty")               => DataType::String,
-        ("Guid", "toBytes") | ("Guid", "fromBytes")             => DataType::Array,
-        // IpAddress
+        | ("Guid", "format") | ("Guid", "empty")                => DataType::String,
+        ("Guid", "toBytes") | ("Guid", "fromBytes")              => DataType::Array,
+
         ("IpAddress", "validate") | ("IpAddress", "isV4")
         | ("IpAddress", "isV6") | ("IpAddress", "isPrivate")
         | ("IpAddress", "isLoopback") | ("IpAddress", "isPublic")
-        | ("IpAddress", "inRange")                              => DataType::Bool,
-        ("IpAddress", "toBytes")                                => DataType::Array,
-        ("IpAddress", _)                                        => DataType::String,
-        // Enum
+        | ("IpAddress", "inRange")                               => DataType::Bool,
+        ("IpAddress", "toBytes")                                 => DataType::Array,
+        ("IpAddress", _)                                         => DataType::String,
+
         ("Enum", "getValues") | ("Enum", "list") | ("Enum", "toArray") => DataType::Array,
-        ("Enum", "getName") | ("Enum", "random")                => DataType::String,
+        ("Enum", "getName") | ("Enum", "random")                 => DataType::String,
         ("Enum", "getValue") | ("Enum", "count")
-        | ("Enum", "min") | ("Enum", "max")                    => DataType::Int,
+        | ("Enum", "min") | ("Enum", "max")                     => DataType::Int,
         ("Enum", "exists") | ("Enum", "hasValue")
-        | ("Enum", "contains")                                  => DataType::Bool,
-        // Dix
-        ("Dix", "Format") | ("Dix", "Join")                    => DataType::String,
+        | ("Enum", "contains")                                   => DataType::Bool,
+
+        ("Dix", "Format") | ("Dix", "Join")                     => DataType::String,
         _ => return None,
     };
     Some(fmt_type(dt))

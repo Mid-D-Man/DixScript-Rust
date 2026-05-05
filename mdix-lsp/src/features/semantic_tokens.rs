@@ -316,18 +316,23 @@ impl<'a> ClassifierState<'a> {
 }
 // ── Encoder ───────────────────────────────────────────────────────────────────
 
-fn encode_tokens(doc: &Document, enum_names: &HashSet<String>) -> Vec<SemanticToken> {
+fn encode_tokens(doc: &Document, enum_names: &HashSet<String>, func_names: &HashSet<String>) -> Vec<SemanticToken> {
     let mut data: Vec<SemanticToken> = Vec::with_capacity(doc.tokens.len() + 32);
     let mut prev_line: u32 = 0;
     let mut prev_col:  u32 = 0;
-    let mut state = ClassifierState::new(enum_names);
+    let mut state = ClassifierState::new(enum_names, func_names);
 
-    // ── Synthesise @CONFIG tokens from AST (no real tokens exist for @CONFIG) ─
     if let Some(ast) = &doc.ast {
-        emit_config_tokens(ast, &doc.source, &mut prev_line, &mut prev_col, &mut data);
+        emit_config_tokens(
+            ast,
+            &doc.source,
+            doc.config_line_range,
+            &mut prev_line,
+            &mut prev_col,
+            &mut data,
+        );
     }
 
-    // ── Regular token stream ──────────────────────────────────────────────────
     for (index, token) in doc.tokens.iter().enumerate() {
         state.advance(token, &doc.tokens, index);
 
@@ -354,7 +359,6 @@ fn encode_tokens(doc: &Document, enum_names: &HashSet<String>) -> Vec<SemanticTo
 
     data
 }
-
 // ── @CONFIG token synthesis ───────────────────────────────────────────────────
 //
 // @CONFIG is stripped before tokenization — no tokens exist for it.

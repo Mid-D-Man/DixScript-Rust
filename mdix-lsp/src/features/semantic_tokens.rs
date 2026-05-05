@@ -58,7 +58,16 @@ fn provide_inner(doc: Option<&Document>) -> Option<SemanticTokensResult> {
         .map(|st| st.enums.keys().cloned().collect())
         .unwrap_or_default();
 
-    let data = encode_tokens(doc, &enum_names);
+    // NEW: collect confirmed function names from the symbol table.
+    // This makes function call coloring authoritative rather than
+    // guessing from lookahead for `(`.
+    let func_names: HashSet<String> = doc
+        .semantic_result.as_ref()
+        .and_then(|sr| sr.symbol_table.as_ref())
+        .map(|st| st.functions.keys().cloned().collect())
+        .unwrap_or_default();
+
+    let data = encode_tokens(doc, &enum_names, &func_names);
     Some(SemanticTokensResult::Tokens(SemanticTokens {
         result_id: None,
         data,

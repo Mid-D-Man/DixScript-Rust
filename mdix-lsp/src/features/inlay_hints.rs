@@ -209,8 +209,8 @@ fn infer_type_label(
     }
     if let Value::Identifier { value: name, .. } = value {
         if let Some(opt_dt) = param_types.get(name.as_str()) {
-            return Some(match opt_dt {
-                Some(dt) => fmt_type(*dt),
+            return Some(match *opt_dt {
+                Some(dt) => fmt_type(dt),
                 None     => "<any>".to_string(),
             });
         }
@@ -247,6 +247,11 @@ fn infer_type_label(
 }
 
 // ── Type inference from an Expression node ────────────────────────────────────
+//
+// NOTE: This operates on the PRE-ENHANCEMENT AST (doc.ast).  Before enhancement,
+// method calls like `arr.first()` and `DateTime.year(d)` are represented as
+// QualifiedIdentifier nodes, not InstanceMethodCall / StaticMethodCall.
+// The QualifiedIdentifier arm below is the primary fix for `<?>` hints.
 
 fn infer_type_label_expr(
     expr:            &Expression,
@@ -254,21 +259,47 @@ fn infer_type_label_expr(
     param_types:     &HashMap<String, Option<DataType>>,
 ) -> Option<String> {
     match expr {
+        // ── Plain identifier: check param_types ───────────────────────────
         Expression::Identifier { name, .. } => {
-            param_types.get(name.as_str()).map(|opt_dt| match opt_dt {
-                Some(dt) => fmt_type(*dt),
+            param_types.get(name.as_str()).map(|opt_dt| match *opt_dt {
+                Some(dt) => fmt_type(dt),
                 None     => "<any>".to_string(),
             })
         }
 
+        // ── Literal or collection value ───────────────────────────────────
         Expression::Value { value, .. } => {
             infer_type_label(value, qf_return_types, param_types)
         }
 
+        // ── QuickFunc call by name ─────────────────────────────────────────
         Expression::QuickFuncCall { name, .. } => {
             qf_return_types.get(name.as_str()).map(|rt| fmt_type(*rt))
         }
 
+        // ── Generic function call (parser emits this for some call forms) ──
+        Expression::FunctionCall { name, .. } => {
+            qf_return_types.get(name.as_str()).map(|rt| fmt_type(*rt))
+        }
+
+        // ── QualifiedIdentifier: the main fix
+        //
+        // Before enhancement, `arr.first()`, `numbers.sum()`, `host.length()`,
+        // and `DateTime.year(d)` all land here as:
+        //   QualifiedIdentifier { parts: ["receiver", "method"], arguments: Some([...]) }
+        //
+        // Resolution priority:
+        //   1. PascalCase first part → static method (Math, DateTime, Array, …)
+        //   2. First part in param_types → instance method on known receiver type
+        //   3. First part in qf_return_types → QuickFunc call
+        //
+        // Property access (no arguments) gets the same treatment so that
+        // `arr.length` (without parens) also resolves correctly.
+        Expression::QualifiedIdentifier { parts, arguments, .. } => {
+            infer_qualified_id(parts, arguments.as_ref(), qf_return_types, param_types)
+        }
+
+        // ── Arithmetic ────────────────────────────────────────────────────
         Expression::ArithmeticOp { left, operator, right, .. } => {
             let lt = infer_type_label_expr(left,  qf_return_types, param_types);
             let rt = infer_type_label_expr(right, qf_return_types, param_types);
@@ -288,10 +319,15 @@ fn infer_type_label_expr(
             }
         }
 
+        // ── Logical / comparison always produce bool ──────────────────────
         Expression::ComparisonOp { .. } | Expression::LogicalOp { .. } => {
             Some("<bool>".to_string())
         }
 
+        // ── Bitwise ops produce int ───────────────────────────────────────
+        Expression::BitwiseOp { .. } => Some("<int>".to_string()),
+
+        // ── Unary ─────────────────────────────────────────────────────────
         Expression::UnaryOp { operator, operand, .. } => {
             if operator.as_str() == "!" || operator.as_str() == "not" {
                 Some("<bool>".to_string())
@@ -300,30 +336,29 @@ fn infer_type_label_expr(
             }
         }
 
+        // ── Ternary ───────────────────────────────────────────────────────
         Expression::Conditional { true_value, false_value, .. } => {
             infer_type_label_expr(true_value, qf_return_types, param_types)
                 .or_else(|| infer_type_label_expr(false_value, qf_return_types, param_types))
         }
 
+        // ── Parenthesised ─────────────────────────────────────────────────
         Expression::Parenthesized { expression, .. } => {
             infer_type_label_expr(expression, qf_return_types, param_types)
         }
 
+        // ── Already-resolved post-enhancement nodes ───────────────────────
+        // These appear if inlay_hints is ever called on an enhanced AST.
         Expression::StaticMethodCall { object_name, method_name, .. } => {
             infer_static_method_return(object_name, method_name)
         }
         Expression::StaticFunction { class_name, method, .. } => {
             infer_static_method_return(class_name, method)
         }
-
-        // FIX: previously fell through to _ => None, giving <?> for all
-        // built-in instance methods. Now we infer the receiver type and look up.
         Expression::InstanceMethodCall { instance, method_name, .. } => {
             let receiver = infer_type_label_expr(instance, qf_return_types, param_types);
             infer_instance_method_return(receiver.as_deref(), method_name)
         }
-
-        // PropertyAccess without call parens (e.g. .length used as a property).
         Expression::PropertyAccess { object, property, .. } => {
             let receiver = infer_type_label_expr(object, qf_return_types, param_types);
             infer_instance_method_return(receiver.as_deref(), property)
@@ -333,6 +368,73 @@ fn infer_type_label_expr(
     }
 }
 
+// ── QualifiedIdentifier resolution ───────────────────────────────────────────
+
+/// Infer the result type of a `QualifiedIdentifier` node.
+///
+/// Handles both call forms (`arguments = Some(...)`) and property-access
+/// forms (`arguments = None`).
+fn infer_qualified_id(
+    parts:           &[String],
+    arguments:       Option<&Vec<Expression>>,
+    qf_return_types: &HashMap<String, DataType>,
+    param_types:     &HashMap<String, Option<DataType>>,
+) -> Option<String> {
+    if parts.len() < 2 { return None; }
+
+    let receiver = &parts[0];
+    let member   = &parts[1];
+    let is_call  = arguments.is_some();
+
+    // ── 1. Static call / access: PascalCase first part ────────────────────
+    // e.g. DateTime.year(d), Math.sqrt(x), Array.range(1,5)
+    if receiver.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+        if is_call {
+            return infer_static_method_return(receiver, member);
+        }
+        // Property-style static access (e.g. Math.pi without parens):
+        return infer_static_method_return(receiver, member);
+    }
+
+    // ── 2. Instance call / access: receiver is a known parameter ─────────
+    // e.g. arr.first(), numbers.sum(), host.length(), arr.length
+    if let Some(opt_dt) = param_types.get(receiver.as_str()) {
+        let receiver_hint: Option<String> = match *opt_dt {
+            Some(dt) => Some(fmt_type(dt)),
+            None     => None,
+        };
+        let result = infer_instance_method_return(receiver_hint.as_deref(), member);
+        if result.is_some() {
+            return result;
+        }
+        // Fall through: unknown method on known type — return receiver type
+        // for property-access forms (e.g. obj.someField).
+        if !is_call {
+            return receiver_hint;
+        }
+    }
+
+    // ── 3. QuickFunc call whose result is chained ─────────────────────────
+    // e.g. chainedCalculation(a, b).toString() — unlikely but defensively handled.
+    if is_call {
+        if let Some(rt) = qf_return_types.get(receiver.as_str()) {
+            let recv_hint = fmt_type(*rt);
+            return infer_instance_method_return(Some(recv_hint.as_str()), member);
+        }
+    }
+
+    // ── 4. Three-part: namespace.Enum.VALUE or ns.func() ─────────────────
+    if parts.len() == 3 {
+        let obj = &parts[0];
+        let mth = &parts[1];
+        if obj.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+            return infer_static_method_return(obj, mth);
+        }
+    }
+
+    None
+}
+
 // ── Built-in instance method return types ─────────────────────────────────────
 
 fn infer_instance_method_return(
@@ -340,7 +442,7 @@ fn infer_instance_method_return(
     method_name:   &str,
 ) -> Option<String> {
     match (receiver_hint, method_name) {
-        // Array methods
+        // ── Array ─────────────────────────────────────────────────────────
         (Some("<array>"), "sum")
         | (Some("<array>"), "average")
         | (Some("<array>"), "min")
@@ -366,7 +468,7 @@ fn infer_instance_method_return(
         | (Some("<array>"), "unique")
         | (Some("<array>"), "flatten")     => Some("<array>".to_string()),
 
-        // String methods
+        // ── String ────────────────────────────────────────────────────────
         (Some("<string>"), "length")       => Some("<int>".to_string()),
 
         (Some("<string>"), "isEmpty")
@@ -382,6 +484,23 @@ fn infer_instance_method_return(
 
         (Some("<string>"), "split")        => Some("<array>".to_string()),
 
+        // ── Object ────────────────────────────────────────────────────────
+        (Some("<object>"), "keys")
+        | (Some("<object>"), "values")     => Some("<array>".to_string()),
+        (Some("<object>"), "has")          => Some("<bool>".to_string()),
+        (Some("<object>"), "get")          => Some("<any>".to_string()),
+
+        // ── Numeric ───────────────────────────────────────────────────────
+        (Some("<int>"), "toString")
+        | (Some("<float>"), "toString")
+        | (Some("<double>"), "toString")   => Some("<string>".to_string()),
+
+        (Some("<int>"), "toFloat")         => Some("<float>".to_string()),
+        (Some("<int>"), "toDouble")        => Some("<double>".to_string()),
+        (Some("<float>"), "toDouble")      => Some("<double>".to_string()),
+        (Some("<float>"), "toInt")
+        | (Some("<double>"), "toInt")      => Some("<int>".to_string()),
+
         _ => None,
     }
 }
@@ -390,6 +509,7 @@ fn infer_instance_method_return(
 
 fn infer_static_method_return(class: &str, method: &str) -> Option<String> {
     let dt = match (class, method) {
+        // Math
         ("Math", "floor") | ("Math", "ceil") | ("Math", "round")
         | ("Math", "sign") | ("Math", "truncate")                => DataType::Int,
         ("Math", "abs") | ("Math", "sqrt") | ("Math", "pow")
@@ -400,6 +520,7 @@ fn infer_static_method_return(class: &str, method: &str) -> Option<String> {
         | ("Math", "radians") | ("Math", "degrees")
         | ("Math", "remainder")                                   => DataType::Double,
 
+        // DateTime
         ("DateTime", "year") | ("DateTime", "month")
         | ("DateTime", "day") | ("DateTime", "hour")
         | ("DateTime", "minute") | ("DateTime", "second")
@@ -418,12 +539,14 @@ fn infer_static_method_return(class: &str, method: &str) -> Option<String> {
         | ("DateTime", "addYears")                               => DataType::Date,
         ("DateTime", "subtract") | ("DateTime", "toUnixTime")   => DataType::Double,
 
+        // Array
         ("Array", "sum") | ("Array", "average")
         | ("Array", "min") | ("Array", "max")                   => DataType::Double,
         ("Array", "contains")                                    => DataType::Bool,
         ("Array", "indexOf") | ("Array", "lastIndexOf")          => DataType::Int,
         ("Array", _)                                             => DataType::Array,
 
+        // Random
         ("Random", "range")                                      => DataType::Int,
         ("Random", "float") | ("Random", "floatRange")           => DataType::Float,
         ("Random", "double") | ("Random", "doubleRange")         => DataType::Double,
@@ -431,11 +554,13 @@ fn infer_static_method_return(class: &str, method: &str) -> Option<String> {
         ("Random", "alphanumeric") | ("Random", "string")        => DataType::String,
         ("Random", _)                                            => DataType::Array,
 
+        // Guid
         ("Guid", "validate")                                     => DataType::Bool,
         ("Guid", "new") | ("Guid", "parse") | ("Guid", "tryParse")
         | ("Guid", "format") | ("Guid", "empty")                => DataType::String,
         ("Guid", "toBytes") | ("Guid", "fromBytes")              => DataType::Array,
 
+        // IpAddress
         ("IpAddress", "validate") | ("IpAddress", "isV4")
         | ("IpAddress", "isV6") | ("IpAddress", "isPrivate")
         | ("IpAddress", "isLoopback") | ("IpAddress", "isPublic")
@@ -443,6 +568,7 @@ fn infer_static_method_return(class: &str, method: &str) -> Option<String> {
         ("IpAddress", "toBytes")                                 => DataType::Array,
         ("IpAddress", _)                                         => DataType::String,
 
+        // Enum
         ("Enum", "getValues") | ("Enum", "list") | ("Enum", "toArray") => DataType::Array,
         ("Enum", "getName") | ("Enum", "random")                 => DataType::String,
         ("Enum", "getValue") | ("Enum", "count")
@@ -450,7 +576,9 @@ fn infer_static_method_return(class: &str, method: &str) -> Option<String> {
         ("Enum", "exists") | ("Enum", "hasValue")
         | ("Enum", "contains")                                   => DataType::Bool,
 
+        // Dix
         ("Dix", "Format") | ("Dix", "Join")                     => DataType::String,
+
         _ => return None,
     };
     Some(fmt_type(dt))

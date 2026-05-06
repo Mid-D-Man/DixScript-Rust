@@ -15,7 +15,7 @@ use super::format_options::DixFormatOptions;
 pub struct DixDataBuilder {
     config_builder: ConfigBuilder,
     enums_builder:  EnumsBuilder,
-    data_builder:   DataBuilder,
+   pub(crate) data_builder:   DataBuilder,
     version:        String,
     compile_time:   chrono::DateTime<Utc>,
 }

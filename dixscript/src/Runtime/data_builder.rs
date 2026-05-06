@@ -289,7 +289,11 @@ impl DataBuilder {
             deferred_errors:       Vec::new(),
         }
     }
-
+/// Called by DixDataBuilder::serialize / serialize_at to propagate errors
+/// from DixSerialize implementations without panicking.
+pub fn push_deferred_error(&mut self, error: String) {
+    self.deferred_errors.push(error);
+}
     // ── Flat properties ───────────────────────────────────────────────────────
 
     pub fn with_int(&mut self, name: impl Into<String>, value: i32) {

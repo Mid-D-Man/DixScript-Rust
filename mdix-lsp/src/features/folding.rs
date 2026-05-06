@@ -10,16 +10,13 @@ use crate::document::Document;
 
 pub fn provide(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
     let result = panic::catch_unwind(panic::AssertUnwindSafe(|| provide_inner(doc)));
-    match result {
-        Ok(r) => r,
-        Err(payload) => {
-            let msg = payload.downcast_ref::<String>().cloned()
-                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                .unwrap_or_else(|| "unknown panic".to_string());
-            tracing::error!("folding panicked: {}", msg);
-            None
-        }
-    }
+    result.unwrap_or_else(|payload| {
+        let msg = payload.downcast_ref::<String>().cloned()
+            .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_else(|| "unknown panic".to_string());
+        tracing::error!("folding panicked: {}", msg);
+        None
+    })
 }
 
 fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {

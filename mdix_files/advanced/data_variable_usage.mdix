@@ -1,9 +1,12 @@
 @CONFIG(
   version -> "1.0.0"
+  author -> "name"
+  debug_mode -> "regular"
+  error_handling -> "halt"
+  compatibility_mode -> "strict"
   features -> "advanced"
-  error_handling -> "continue"
-  debug_mode -> "verbose"
 )
+
 @ENUMS(
     ServerType { DEVELOPMENT = 1, STAGING = 2, PRODUCTION = 3 }
 )
@@ -189,7 +192,7 @@
             start_health = 100,
             start_mana = 50,
             start_level = 1
-        },
+        }
         difficulty = {
             easy_multiplier = 0.5f,
             normal_multiplier = 1.0f,
@@ -211,4 +214,6 @@
     outer.summary:
         outer_val = 100,
         inner_val = 200
+
+
 )

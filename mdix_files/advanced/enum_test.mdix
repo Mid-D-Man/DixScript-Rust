@@ -2,11 +2,14 @@
   version -> "1.0.0"
   features -> "advanced"
   error_handling -> "halt"
+  debug_mode -> "off"
+  
 )
 
 @ENUMS(
     TestEnum { FIRST = 1, SECOND = 2, THIRD = 3 }
 )
+
 @DATA(
 
  duman = 419

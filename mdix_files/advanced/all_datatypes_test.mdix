@@ -68,6 +68,7 @@
 
     ~testObjectOperations<string> => global(obj<object>) {
         return "Object received successfully";
+
     }
 
     ~testDateOperations<string> => global(d<date>) {

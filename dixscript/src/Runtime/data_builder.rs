@@ -107,7 +107,7 @@ impl DixDataBuilder {
     ) -> Result<String, String> {
         let output_path = output_path.as_ref();
         let output_path = if output_path.extension().and_then(|s| s.to_str()) != Some("dixscript") {
-            output_path.with_extension("dixscript")
+            output_path.with_extension("mdix")
         } else {
             output_path.to_path_buf()
         };

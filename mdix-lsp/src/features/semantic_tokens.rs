@@ -672,7 +672,9 @@ fn token_length(token: &Token) -> usize {
         TokenType::String(s)              => s.len() + 2,
         TokenType::StringSingle(s)        => s.len() + 2,
         TokenType::InterpolatedString(s)  => s.len() + 3,
-        TokenType::HexColor(h)            => h.len() + 1,
+        // FIX: strip '#' before measuring so the formula is correct
+        // whether the lexer stores "FF5733" or "#FF5733".
+        TokenType::HexColor(h)            => h.trim_start_matches('#').len() + 1,
         TokenType::Comment(c)             => c.len() + 2,
         TokenType::SectionConfig          =>  7,
         TokenType::SectionImports         =>  8,
@@ -697,4 +699,5 @@ fn token_length(token: &Token) -> usize {
             if v.is_empty() { 1 } else { v.len() }
         }
     }
+}
     }

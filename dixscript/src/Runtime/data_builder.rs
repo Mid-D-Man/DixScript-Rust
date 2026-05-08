@@ -1,4 +1,3 @@
-
 use chrono::Utc;
 use crate::Compiler::AST::*;
 use super::dix_data::DixData;
@@ -15,7 +14,8 @@ use super::format_options::DixFormatOptions;
 pub struct DixDataBuilder {
     config_builder: ConfigBuilder,
     enums_builder:  EnumsBuilder,
-   pub(crate) data_builder:   DataBuilder,
+    /// pub(crate) so dix_serialize.rs can call to_dix on the inner DataBuilder.
+    pub(crate) data_builder: DataBuilder,
     version:        String,
     compile_time:   chrono::DateTime<Utc>,
 }
@@ -72,7 +72,7 @@ impl DixDataBuilder {
     /// Build DixData in memory.
     ///
     /// Returns `Err` if any two-tier ordering violations were recorded inside
-    /// the `data()` closure, or if other validation failed (e.g. bad hex color).
+    /// the `data()` closure, or if other validation failed.
     /// All violations are collected so the caller sees them all at once.
     pub fn build(self) -> Result<DixData, String> {
         let config_section = self.config_builder.build();
@@ -99,14 +99,15 @@ impl DixDataBuilder {
         ))
     }
 
-    /// Build and write to a `.dixscript` file.
+    /// Build and write to a `.mdix` file.
     pub fn build_and_save(
         self,
         output_path: impl AsRef<std::path::Path>,
         options: Option<&DixFormatOptions>,
     ) -> Result<String, String> {
         let output_path = output_path.as_ref();
-        let output_path = if output_path.extension().and_then(|s| s.to_str()) != Some("dixscript") {
+        // FIX: was Some("dixscript") — .mdix is the correct extension
+        let output_path = if output_path.extension().and_then(|s| s.to_str()) != Some("mdix") {
             output_path.with_extension("mdix")
         } else {
             output_path.to_path_buf()
@@ -208,9 +209,7 @@ impl ConfigBuilder {
 }
 
 impl Default for ConfigBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 // ── EnumsBuilder ──────────────────────────────────────────────────────────────
@@ -257,9 +256,7 @@ impl EnumsBuilder {
 }
 
 impl Default for EnumsBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 // ── DataBuilder ───────────────────────────────────────────────────────────────
@@ -289,11 +286,7 @@ impl DataBuilder {
             deferred_errors:       Vec::new(),
         }
     }
-/// Called by DixDataBuilder::serialize / serialize_at to propagate errors
-/// from DixSerialize implementations without panicking.
-pub fn push_deferred_error(&mut self, error: String) {
-    self.deferred_errors.push(error);
-}
+
     // ── Flat properties ───────────────────────────────────────────────────────
 
     pub fn with_int(&mut self, name: impl Into<String>, value: i32) {
@@ -415,9 +408,6 @@ pub fn push_deferred_error(&mut self, error: String) {
 
     // ── Validation ────────────────────────────────────────────────────────────
 
-    /// Returns `true` if a flat property may be added, `false` if a two-tier
-    /// violation was detected. The error is deferred to `build()` so all
-    /// violations are reported together rather than stopping at the first one.
     fn check_flat_allowed(&mut self, name: &str) -> bool {
         if self.has_seen_grouped_data {
             self.deferred_errors.push(format!(
@@ -429,6 +419,12 @@ pub fn push_deferred_error(&mut self, error: String) {
         } else {
             true
         }
+    }
+
+    /// Record an error from an external caller (e.g. `DixSerialize`) without
+    /// panicking. All deferred errors surface together when `build()` is called.
+    pub fn push_deferred_error(&mut self, error: String) {
+        self.deferred_errors.push(error);
     }
 
     fn build(self) -> Result<Option<DataSection>, String> {
@@ -481,9 +477,7 @@ pub fn push_deferred_error(&mut self, error: String) {
 }
 
 impl Default for DataBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 // ── TablePropertiesBuilder ────────────────────────────────────────────────────
@@ -526,9 +520,7 @@ impl TablePropertiesBuilder {
 }
 
 impl Default for TablePropertiesBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 // ── GroupArrayBuilder ─────────────────────────────────────────────────────────
@@ -560,10 +552,10 @@ impl GroupArrayBuilder {
 }
 
 impl Default for GroupArrayBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -672,5 +664,17 @@ mod tests {
         assert!(data.exists("tags[0]"));
         let first: String = data.get("tags[0]").unwrap();
         assert_eq!(first, "alpha");
+    }
+
+    #[test]
+    fn test_push_deferred_error_surfaces_in_build() {
+        let result = DixDataBuilder::new()
+            .data(|d| {
+                d.push_deferred_error("injected error from DixSerialize".to_string());
+            })
+            .build();
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("injected error"));
     }
 }

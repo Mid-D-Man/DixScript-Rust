@@ -96,15 +96,15 @@ pub use key_resolver::{
 
 pub use dix_deserialize::{
     DixDeserialize,
-    /// Build a dotted path from a prefix and a field segment.
+    // Build a dotted path from a prefix and a field segment.
     dix_path,
-    /// Read a typed field at `prefix.field`, returning `Err` if absent.
+    // Read a typed field at `prefix.field`, returning `Err` if absent.
     dix_get,
-    /// Read a typed field, returning `default` if absent.
+    // Read a typed field, returning `default` if absent.
     dix_get_or,
-    /// Deserialize a nested struct at `prefix.field`.
+    // Deserialize a nested struct at `prefix.field`.
     dix_nested,
-    /// Deserialize an array of structs at `prefix.field`.
+    // Deserialize an array of structs at `prefix.field`.
     dix_array_of,
 };
 

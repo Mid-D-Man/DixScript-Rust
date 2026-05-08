@@ -208,7 +208,7 @@ pub fn dix_array_of<T: DixDeserialize>(
 }
 
 /// Read the raw [`DixValue`] at `prefix.field` without type conversion.
-pub fn dix_value(data: &DixData, prefix: &str, field: &str) -> Option<&DixValue> {
+pub fn dix_value<'a>(data: &'a DixData, prefix: &str, field: &str) -> Option<&'a DixValue> {
     data.get_value(&dix_path(prefix, field))
 }
 

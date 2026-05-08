@@ -8,7 +8,9 @@
 )
 
 @ENUMS(
-    ServerType { DEVELOPMENT = 1, STAGING = 2, PRODUCTION = 3 }
+    ServerType {DEVELOPMENT = 1,
+     STAGING = 2,
+      PRODUCTION = 3 }
 )
 
 @QUICKFUNCS(
@@ -84,6 +86,17 @@
     server_port = 443,
     server_info = formatServerInfo(server_name, server_type, server_port),
 
+        player = {
+            start_health = 100,
+            start_mana = 50,
+            start_level = 1,
+            shaka = { dum =0 }
+        },
+        difficulty = {
+            easy_multiplier = 0.5f,
+            normal_multiplier = 1.0f,
+            hard_multiplier = 1.5f
+        }
     // Test 4: Table properties with scoped function
     server.config:
         host = "prod-server.com",
@@ -192,7 +205,7 @@
             start_health = 100,
             start_mana = 50,
             start_level = 1
-        }
+        },
         difficulty = {
             easy_multiplier = 0.5f,
             normal_multiplier = 1.0f,

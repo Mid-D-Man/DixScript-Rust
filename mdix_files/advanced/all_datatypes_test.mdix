@@ -72,7 +72,7 @@
     }
 
     ~testDateOperations<string> => global(d<date>) {
-        let year<int> = DateTime.year(d);
+        let year = DateTime.year(d);
         let month<int> = DateTime.month(d);
         let day<int> = DateTime.day(d);
         return $"Date: {year}-{month}-{day}";

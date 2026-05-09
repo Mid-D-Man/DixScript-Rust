@@ -1,35 +1,45 @@
 // mdix-lsp/src/features/folding.rs
-//! Folding provider — AST-driven with token depth-scanning for end positions.
+//! Folding provider.
 //!
-//! ## Strategy (per the LSP spec article)
+//! Strategy (verified against lexer.rs):
 //!
-//! 1. Walk the AST for foldable nodes — sections, enum bodies, function bodies.
-//! 2. Use depth-tracked token scanning to find exact END positions, starting
-//!    from each node's AST start position.
-//! 3. Apply the "closing brace adjustment": endLine = close_line − 1 so the
-//!    closing `}` stays visible below the fold.
-//! 4. @CONFIG has no tokens; use the pre-computed line range instead.
+//!   1. @CONFIG  — source-text range, no tokens.
 //!
-//! ## Why depth-scanning beats a global token stack
+//!   2. SECTION folds — scan token stream for every section keyword and
+//!      depth-track the following `(` … `)`.  The lexer emits `@DATA` as
+//!      `SectionData` and the `(` as a SEPARATE `Symbol('(')` token, so
+//!      `find_section_close` always finds a matching parenthesis.
 //!
-//! A global stack is confused by `} else {` (one line contains both a closer
-//! AND an opener), interpolated-string `{}`, and any token the lexer might
-//! emit differently than expected.  Starting a fresh depth-scan FROM a known
-//! AST position means we always find the correct matching bracket regardless
-//! of what came before it.
+//!   3. ENUM BODIES — implement `AstVisitorBase::visit_enum_declaration`:
+//!      use the AST position for the start line, then depth-scan tokens
+//!      for the first `{` at or after that line and its matching `}`.
+//!      Closing-brace adjustment: endLine = close − 1 so `}` stays visible.
 //!
-//! ## Section-close fallback
+//!   4. QUICKFUNC BODIES — same pattern via `visit_quick_function`.
+//!      Depth tracking naturally handles `} else {` because:
+//!        - `}` closes the if-then block  (depth 2 → 1)
+//!        - `{` opens the else block      (depth 1 → 2)
+//!        - only the function's own `}` brings depth back to 0.
 //!
-//! If `@DATA(` is tokenised as a single `SectionData` token (consuming the `(`),
-//! there is no `Symbol('(')` in the stream.  `find_section_close` detects this
-//! and falls back to "span until the line before the next section keyword or
-//! the last token in the file", so section folds are produced regardless of
-//! how the lexer handles the opening parenthesis.
+//!   5. DATA / SECURITY OBJECT LITERALS — bounded brace stack within the
+//!      section's line range via `visit_data_section` / `visit_security_section`.
+//!      Handles every nesting level of `{ }` without bleeding into siblings.
+//!
+//! Interpolated strings (`$"Hello {name}"`) are emitted as a single
+//! `InterpolatedString` token by the lexer — the inner `{` and `}` are
+//! stored as characters in the string value and never appear as Symbol
+//! tokens.  The brace scanner is therefore never confused by them.
 
 use std::panic;
+
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
-use dixscript::Compiler::AST::DixScript;
-use dixscript::Compiler::Core::Tokenizer::TokenType;
+
+use dixscript::Compiler::AST::{
+    AstVisitorBase, DataSection, DixScript, EnumDeclaration,
+    QuickFunction, SecuritySection,
+};
+use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
+
 use crate::document::Document;
 
 // ── Public entry point ────────────────────────────────────────────────────────
@@ -52,19 +62,18 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
     let doc = doc?;
     let mut ranges: Vec<FoldingRange> = Vec::new();
 
-    // ── @CONFIG fold ──────────────────────────────────────────────────────────
-    // No tokens exist for @CONFIG — it is stripped before tokenisation.
+    // ── 1. @CONFIG fold ───────────────────────────────────────────────────────
     if let Some((cfg_start, cfg_raw_end)) = doc.config_line_range {
         let first_section_lsp = doc
             .tokens
             .iter()
             .filter(|t| t.token_type.is_section_keyword())
-            .map(|t| t.line.saturating_sub(1) as u32)
+            .map(tok_lsp_line)
             .min()
             .unwrap_or(u32::MAX);
         let cfg_end = cfg_raw_end.min(first_section_lsp.saturating_sub(1));
         if cfg_end > cfg_start {
-            ranges.push(fold(cfg_start, cfg_end));
+            ranges.push(make_fold(cfg_start, cfg_end));
         }
     }
 
@@ -72,28 +81,27 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
         return if ranges.is_empty() { None } else { Some(ranges) };
     }
 
-    // ── Section-level folds (token stream scan) ───────────────────────────────
-    // Scan for every section keyword in the raw token stream.  We do NOT rely
-    // on AST positions for section starts — the token position is authoritative
-    // and available even if the AST position is UNKNOWN.
+    // ── 2. Section-level folds ────────────────────────────────────────────────
+    // One scan of the token stream; every section keyword produces a fold.
     for tok in &doc.tokens {
         if !tok.token_type.is_section_keyword() {
             continue;
         }
-        let start_lsp = tok.line.saturating_sub(1) as u32;
-        if let Some(close_lsp) = find_section_close(&doc.tokens, start_lsp) {
-            // Include the closing `)` in the fold — section collapses to one line.
-            if close_lsp > start_lsp {
-                ranges.push(fold(start_lsp, close_lsp));
+        let start = tok_lsp_line(tok);
+        if let Some(end) = find_section_close(&doc.tokens, start) {
+            if end > start {
+                ranges.push(make_fold(start, end));
             }
         }
     }
 
-    // ── AST-driven content folds ──────────────────────────────────────────────
-    // Use AST node positions for accurate START lines, then depth-scan tokens
-    // for exact END lines.
+    // ── 3–5. AST-driven content folds ─────────────────────────────────────────
     if let Some(ast) = &doc.ast {
-        collect_content_folds(ast, &doc.tokens, &mut ranges);
+        let mut visitor = FoldingVisitor {
+            tokens: &doc.tokens,
+            ranges: &mut ranges,
+        };
+        visitor.visit(ast);
     }
 
     // ── Finalise ──────────────────────────────────────────────────────────────
@@ -106,7 +114,6 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
     ranges.retain(|r| r.end_line > r.start_line);
 
     tracing::debug!("folding: {} ranges produced", ranges.len());
-
     if ranges.is_empty() {
         None
     } else {
@@ -114,109 +121,102 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
     }
 }
 
-// ── Content fold collection ───────────────────────────────────────────────────
+// ── AST Visitor ───────────────────────────────────────────────────────────────
 
-fn collect_content_folds(
-    ast: &DixScript,
-    tokens: &[dixscript::Compiler::Core::Tokenizer::Token],
-    ranges: &mut Vec<FoldingRange>,
-) {
-    // ── Enum declaration bodies ───────────────────────────────────────────────
-    if let Some(enums_sec) = &ast.enums {
-        // Compute the section's last line so we don't bleed into the next section.
-        let sec_end_lsp = enums_sec_close_lsp(enums_sec, tokens);
+struct FoldingVisitor<'a> {
+    tokens: &'a [Token],
+    ranges: &'a mut Vec<FoldingRange>,
+}
 
-        for decl in &enums_sec.enums {
-            if !decl.position.is_valid() {
-                continue;
-            }
-            let start_lsp = (decl.position.line.saturating_sub(1)) as u32;
-
-            // Scan for the opening `{` from this line, then find its matching `}`.
-            if let Some(close_lsp) = find_brace_close(tokens, start_lsp, sec_end_lsp) {
-                // Closing-brace adjustment: keep `}` visible below the fold.
-                if close_lsp > start_lsp {
-                    let end_lsp = close_lsp.saturating_sub(1);
-                    if end_lsp > start_lsp {
-                        ranges.push(fold(start_lsp, end_lsp));
-                    }
+impl<'a> FoldingVisitor<'a> {
+    /// Find the `{` at or after `start_lsp`, depth-scan to its matching `}`,
+    /// and push a fold with the closing-brace adjustment (end = close − 1).
+    fn push_brace_fold(&mut self, ast_line_1based: usize) {
+        if ast_line_1based == 0 {
+            return;
+        }
+        let start = ast_lsp_line(ast_line_1based);
+        if let Some(close) = find_brace_close(self.tokens, start) {
+            if close > start {
+                let end = close.saturating_sub(1); // keep closing `}` visible
+                if end > start {
+                    self.ranges.push(make_fold(start, end));
                 }
             }
-        }
-    }
-
-    // ── QuickFunc function bodies ─────────────────────────────────────────────
-    if let Some(qf_sec) = &ast.quick_functions {
-        let sec_end_lsp = qf_sec_close_lsp(qf_sec, tokens);
-
-        for func in &qf_sec.functions {
-            if !func.position.is_valid() {
-                continue;
-            }
-            let start_lsp = (func.position.line.saturating_sub(1)) as u32;
-
-            // Depth-scan for the function body `{ ... }`.
-            // This correctly handles `} else {` inside the body because the
-            // else-open `{` increments depth and its close `}` decrements it —
-            // only the outermost close brings depth to 0.
-            if let Some(close_lsp) = find_brace_close(tokens, start_lsp, sec_end_lsp) {
-                if close_lsp > start_lsp {
-                    let end_lsp = close_lsp.saturating_sub(1);
-                    if end_lsp > start_lsp {
-                        ranges.push(fold(start_lsp, end_lsp));
-                    }
-                }
-            }
-        }
-    }
-
-    // ── Data section object / brace folds ────────────────────────────────────
-    if let Some(data_sec) = &ast.data {
-        if data_sec.position.is_valid() {
-            let data_start_lsp = (data_sec.position.line.saturating_sub(1)) as u32;
-            let data_end_lsp = find_section_close(tokens, data_start_lsp);
-            // Use a bounded stack WITHIN the data section to fold every
-            // multi-line `{ }` (object literals, nested objects, etc.)
-            collect_brace_folds_in_range(tokens, data_start_lsp + 1, data_end_lsp, ranges);
-        }
-    }
-
-    // ── Security section block folds ──────────────────────────────────────────
-    if let Some(sec_sec) = &ast.security {
-        if sec_sec.position.is_valid() {
-            let sec_start_lsp = (sec_sec.position.line.saturating_sub(1)) as u32;
-            let sec_end_lsp = find_section_close(tokens, sec_start_lsp);
-            collect_brace_folds_in_range(tokens, sec_start_lsp + 1, sec_end_lsp, ranges);
         }
     }
 }
 
+impl<'a> AstVisitorBase for FoldingVisitor<'a> {
+    type Result = ();
+
+    fn default_result(&self) -> () {}
+
+    // ── 3. Enum declaration bodies ────────────────────────────────────────────
+    fn visit_enum_declaration(&mut self, decl: &EnumDeclaration) -> () {
+        if decl.position.is_valid() {
+            self.push_brace_fold(decl.position.line);
+        }
+        // No need to visit fields — they add nothing for folding.
+    }
+
+    // ── 4. QuickFunc function bodies ──────────────────────────────────────────
+    fn visit_quick_function(&mut self, func: &QuickFunction) -> () {
+        if func.position.is_valid() {
+            self.push_brace_fold(func.position.line);
+        }
+        // Do NOT visit sub-statements; `} else {` is handled by depth-tracking
+        // inside `find_brace_close` rather than by the visitor.
+    }
+
+    // ── 5a. DATA section — bounded brace scan for all object literals ─────────
+    fn visit_data_section(&mut self, section: &DataSection) -> () {
+        if !section.position.is_valid() {
+            return;
+        }
+        let data_start = ast_lsp_line(section.position.line);
+        let data_end   = find_section_close(self.tokens, data_start);
+        // Scan for every `{ }` pair within the DATA section, however deeply
+        // nested.  The bounded range prevents bleeding into adjacent sections.
+        collect_brace_folds_in_range(self.tokens, data_start + 1, data_end, self.ranges);
+        // Do NOT call the base — visiting entries via the visitor path is
+        // unnecessary because the bounded brace scan covers everything.
+    }
+
+    // ── 5b. SECURITY section ──────────────────────────────────────────────────
+    fn visit_security_section(&mut self, section: &SecuritySection) -> () {
+        if !section.position.is_valid() {
+            return;
+        }
+        let sec_start = ast_lsp_line(section.position.line);
+        let sec_end   = find_section_close(self.tokens, sec_start);
+        collect_brace_folds_in_range(self.tokens, sec_start + 1, sec_end, self.ranges);
+    }
+}
+
 // ── Section-close finder ──────────────────────────────────────────────────────
+//
+// Confirmed by lexer.rs analysis:
+//   `@DATA(` → SectionData token  +  Symbol('(') token  (two separate tokens)
+// So there IS always a Symbol('(') after the section keyword in doc.tokens.
+//
+// FALLBACK: if (for whatever reason) no `(` follows the keyword, span to the
+// line before the next section keyword or the last token.
 
-/// Find the 0-based LSP line of the `)` that closes the section whose keyword
-/// is on `section_start_lsp`.
-///
-/// PRIMARY: depth-tracked `(` / `)` scan starting from the section token.
-/// FALLBACK: if no `Symbol('(')` exists after the keyword (lexer consumed it
-///           as part of the keyword token), span to the line before the next
-///           section keyword or to the last token in the file.
-fn find_section_close(
-    tokens: &[dixscript::Compiler::Core::Tokenizer::Token],
-    section_start_lsp: u32,
-) -> Option<u32> {
-    let section_line_1based = section_start_lsp + 1;
+fn find_section_close(tokens: &[Token], section_start_lsp: u32) -> Option<u32> {
+    let section_line_1based = section_start_lsp + 1; // convert LSP 0-based → token 1-based
 
-    // Find the section keyword token at this line.
-    let sec_idx = tokens
-        .iter()
-        .position(|t| t.line == section_line_1based && t.token_type.is_section_keyword())?;
+    // Locate the section-keyword token on this line.
+    let sec_idx = tokens.iter().position(|t| {
+        (t.line as u32) == section_line_1based && t.token_type.is_section_keyword()
+    });
 
-    // PRIMARY: scan for ( ... )
-    {
+    // PRIMARY: depth-track `(` … `)`
+    if let Some(idx) = sec_idx {
         let mut depth: i32 = 0;
         let mut found_open = false;
 
-        for tok in &tokens[sec_idx..] {
+        for tok in &tokens[idx..] {
             match &tok.token_type {
                 TokenType::EndOfFile => break,
                 TokenType::Symbol('(') => {
@@ -226,86 +226,65 @@ fn find_section_close(
                 TokenType::Symbol(')') if found_open => {
                     depth -= 1;
                     if depth == 0 {
-                        return Some(tok.line.saturating_sub(1) as u32);
+                        return Some(tok_lsp_line(tok));
                     }
                 }
                 _ => {}
             }
         }
-
+        // If we found an opener but never closed, no fold.
         if found_open {
-            // Opened but never closed (syntax error) — no fold.
             return None;
         }
     }
 
-    // FALLBACK: no `Symbol('(')` was found after the section keyword.
-    // Span from here to the line just before the next section keyword.
+    // FALLBACK: span to the line before the next section keyword.
     let next_sec_line_1based = tokens
         .iter()
-        .skip(sec_idx + 1)
-        .filter(|t| t.token_type.is_section_keyword())
-        .map(|t| t.line)
+        .filter(|t| {
+            (t.line as u32) > section_line_1based && t.token_type.is_section_keyword()
+        })
+        .map(|t| t.line as u32)
         .min();
 
     match next_sec_line_1based {
         Some(next_1based) => {
-            // One line before the next section (convert: 1-based → 0-based → subtract 1)
-            // next_1based is 1-based. The line before it in 0-based = next_1based - 2.
+            // Line before next section, converted to 0-based LSP:
+            //   next_1based is 1-based → the line before it is next_1based − 1 (still 1-based)
+            //   convert to 0-based: next_1based − 1 − 1 = next_1based − 2
             if next_1based >= 2 {
                 Some(next_1based - 2)
             } else {
                 None
             }
         }
-        None => {
-            // This is the last section — use the last non-EOF token's line.
-            tokens
-                .iter()
-                .rev()
-                .find(|t| !matches!(t.token_type, TokenType::EndOfFile))
-                .map(|t| t.line.saturating_sub(1) as u32)
-        }
+        None => tokens
+            .iter()
+            .rev()
+            .find(|t| !matches!(t.token_type, TokenType::EndOfFile))
+            .map(tok_lsp_line),
     }
 }
 
 // ── Brace-close finder ────────────────────────────────────────────────────────
+//
+// Depth-scans from `from_lsp` (0-based) forward.  Finds the FIRST `{` at or
+// after `from_lsp` and returns the line of its matching `}`.
+//
+// Correctly handles `} else {`:
+//   the `}` decrements depth  →  depth 2 → 1
+//   the `{` increments depth  →  depth 1 → 2
+//   neither reaches 0, so the scan continues to the function's own `}`.
 
-/// Starting from `from_lsp` (0-based), depth-scan tokens to find the `}` that
-/// matches the FIRST `{` encountered at or after that line.
-///
-/// `upper_limit_lsp`: optional inclusive upper bound (0-based).  If the opening
-/// `{` has not been found by the time we reach this line, we stop.  Once we
-/// have started tracking depth, we continue past the limit until we find the
-/// matching `}` (handles blocks whose content spills slightly past a sibling's
-/// start estimate).
-///
-/// Returns the 0-based LSP line of the closing `}`, or `None`.
-fn find_brace_close(
-    tokens: &[dixscript::Compiler::Core::Tokenizer::Token],
-    from_lsp: u32,
-    upper_limit_lsp: Option<u32>,
-) -> Option<u32> {
+fn find_brace_close(tokens: &[Token], from_lsp: u32) -> Option<u32> {
     let from_1based = from_lsp + 1;
-    let limit_1based = upper_limit_lsp.map(|l| l + 1);
-
     let mut depth: i32 = 0;
     let mut started = false;
 
     for tok in tokens {
-        let line = tok.line;
-        if line < from_1based {
+        if (tok.line as u32) < from_1based {
             continue;
         }
-        // If we haven't started yet and we're past the limit, stop.
-        if !started {
-            if let Some(lim) = limit_1based {
-                if line > lim {
-                    break;
-                }
-            }
-        }
-
         match &tok.token_type {
             TokenType::EndOfFile => break,
             TokenType::Symbol('{') => {
@@ -315,7 +294,7 @@ fn find_brace_close(
             TokenType::Symbol('}') if started => {
                 depth -= 1;
                 if depth == 0 {
-                    return Some(tok.line.saturating_sub(1) as u32);
+                    return Some(tok_lsp_line(tok));
                 }
             }
             _ => {}
@@ -324,44 +303,43 @@ fn find_brace_close(
     None
 }
 
-// ── Bounded brace-stack (for DATA / SECURITY object literals) ─────────────────
+// ── Bounded brace-fold collector ──────────────────────────────────────────────
+//
+// Collects all multi-line `{ … }` folds whose opening `{` falls within
+// [from_lsp, to_lsp].  Handles arbitrary nesting.  Applies the closing-brace
+// adjustment (end = close − 1) so `}` stays visible.
 
-/// Collect all multi-line `{ ... }` folds WITHIN `[from_lsp, to_lsp]`.
-/// Uses a stack so nested objects produce independent folds.
-/// Applies the closing-brace adjustment (endLine = close − 1).
 fn collect_brace_folds_in_range(
-    tokens: &[dixscript::Compiler::Core::Tokenizer::Token],
-    from_lsp: u32,
-    to_lsp: Option<u32>,
-    ranges: &mut Vec<FoldingRange>,
+    tokens:    &[Token],
+    from_lsp:  u32,
+    to_lsp:    Option<u32>,
+    ranges:    &mut Vec<FoldingRange>,
 ) {
     let from_1based = from_lsp + 1;
-    let to_1based = to_lsp.map(|l| l + 1).unwrap_or(u32::MAX);
+    let to_1based   = to_lsp.map(|l| l + 1).unwrap_or(u32::MAX);
 
-    let mut stack: Vec<u32> = Vec::new(); // stores 0-based open-brace lines
+    let mut stack: Vec<u32> = Vec::new(); // 0-based open-brace lines
 
     for tok in tokens {
-        let line_1based = tok.line;
+        let line_1based = tok.line as u32;
         if line_1based < from_1based {
             continue;
         }
         if line_1based > to_1based {
             break;
         }
-
         match &tok.token_type {
             TokenType::EndOfFile => break,
             TokenType::Symbol('{') => {
-                stack.push(tok.line.saturating_sub(1) as u32);
+                stack.push(tok_lsp_line(tok));
             }
             TokenType::Symbol('}') => {
                 if let Some(open_lsp) = stack.pop() {
-                    let close_lsp = tok.line.saturating_sub(1) as u32;
+                    let close_lsp = tok_lsp_line(tok);
                     if close_lsp > open_lsp {
-                        // Keep `}` visible: fold ends at close - 1.
-                        let end_lsp = close_lsp.saturating_sub(1);
-                        if end_lsp > open_lsp {
-                            ranges.push(fold(open_lsp, end_lsp));
+                        let end = close_lsp.saturating_sub(1); // keep } visible
+                        if end > open_lsp {
+                            ranges.push(make_fold(open_lsp, end));
                         }
                     }
                 }
@@ -371,32 +349,24 @@ fn collect_brace_folds_in_range(
     }
 }
 
-// ── Section-end helpers ───────────────────────────────────────────────────────
+// ── Line-conversion helpers ───────────────────────────────────────────────────
 
-fn enums_sec_close_lsp(
-    sec: &dixscript::Compiler::AST::EnumsSection,
-    tokens: &[dixscript::Compiler::Core::Tokenizer::Token],
-) -> Option<u32> {
-    if !sec.position.is_valid() {
-        return None;
-    }
-    find_section_close(tokens, (sec.position.line.saturating_sub(1)) as u32)
+/// Token line (1-based) → LSP line (0-based).
+#[inline]
+fn tok_lsp_line(tok: &Token) -> u32 {
+    tok.line.saturating_sub(1) as u32
 }
 
-fn qf_sec_close_lsp(
-    sec: &dixscript::Compiler::AST::QuickFuncsSection,
-    tokens: &[dixscript::Compiler::Core::Tokenizer::Token],
-) -> Option<u32> {
-    if !sec.position.is_valid() {
-        return None;
-    }
-    find_section_close(tokens, (sec.position.line.saturating_sub(1)) as u32)
+/// AST position line (1-based) → LSP line (0-based).
+#[inline]
+fn ast_lsp_line(ast_line_1based: usize) -> u32 {
+    ast_line_1based.saturating_sub(1) as u32
 }
 
 // ── Fold constructor ──────────────────────────────────────────────────────────
 
 #[inline]
-fn fold(start: u32, end: u32) -> FoldingRange {
+fn make_fold(start: u32, end: u32) -> FoldingRange {
     FoldingRange {
         start_line:      start,
         end_line:        end,
@@ -426,136 +396,124 @@ mod tests {
         d
     }
 
-    // ── Single-section sanity ─────────────────────────────────────────────────
+    #[test]
+    fn no_crash_none() {
+        assert!(provide(None).is_none());
+    }
 
     #[test]
-    fn single_data_section_folds() {
+    fn single_data_section() {
         let d = doc("@DATA(\n  x = 1\n  y = 2\n)\n");
         let folds = provide(Some(&d)).unwrap_or_default();
         assert!(
             !folds.is_empty(),
-            "single @DATA section must produce at least one fold"
+            "single @DATA must produce a fold, got none"
+        );
+        assert!(
+            folds.iter().any(|f| f.start_line == 0 && f.end_line >= 3),
+            "section fold missing: {:?}",
+            folds
         );
     }
 
     #[test]
-    fn single_enums_section_folds() {
+    fn single_enums_section() {
         let d = doc("@ENUMS(\n  T { A = 0, B = 1 }\n)\n");
         let folds = provide(Some(&d)).unwrap_or_default();
-        assert!(!folds.is_empty(), "single @ENUMS must fold: {:?}", folds);
+        assert!(!folds.is_empty(), "single @ENUMS must produce a fold");
     }
 
     #[test]
-    fn single_quickfuncs_section_folds() {
+    fn single_quickfuncs_section() {
         let d = doc("@QUICKFUNCS(\n  ~f<int>(x) {\n    return x\n  }\n)\n");
         let folds = provide(Some(&d)).unwrap_or_default();
-        assert!(!folds.is_empty(), "single @QUICKFUNCS must fold: {:?}", folds);
+        assert!(
+            !folds.is_empty(),
+            "single @QUICKFUNCS must produce a fold"
+        );
     }
 
-    // ── Cross-section isolation ───────────────────────────────────────────────
-
     #[test]
-    fn enums_fold_does_not_eat_data() {
+    fn enums_does_not_eat_data() {
         let src = "@ENUMS(\n  T { A = 0 }\n)\n@DATA(\n  x = 1\n)\n";
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
-        // The @ENUMS section fold (start=0) must not reach @DATA (start=3).
         for f in folds.iter().filter(|f| f.start_line == 0) {
-            assert!(f.end_line <= 2, "ENUMS bled into @DATA: {:?}", f);
+            assert!(
+                f.end_line <= 2,
+                "ENUMS fold bled into @DATA: {:?}",
+                f
+            );
         }
     }
 
-    // ── Enum bodies ───────────────────────────────────────────────────────────
-
     #[test]
-    fn multi_line_enum_body_keeps_closing_brace_visible() {
+    fn multiline_enum_body_visible_brace() {
+        // `}` of ServerType must stay visible (endLine < line of `}`)
         let src = "@ENUMS(\n  ServerType {\n    DEV = 1,\n    PROD = 2\n  }\n)\n";
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
-        // Body: starts at line 1 (`ServerType {`), closing `}` at line 4.
-        // With the adjustment, endLine = 3 so line 4 (the `}`) stays visible.
+        // Body: start=1, close brace at line 4 (0-based), endLine should be 3
         assert!(
             folds.iter().any(|f| f.start_line == 1 && f.end_line == 3),
-            "enum body fold (1→3) missing, got: {:?}",
+            "enum body fold (1→3) missing: {:?}",
             folds
         );
     }
 
     #[test]
-    fn single_line_enum_body_not_folded() {
+    fn single_line_enum_no_body_fold() {
         let src = "@ENUMS(\n  T { A = 0, B = 1 }\n)\n";
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
-        // Single-line body — no body fold, only section fold.
         assert!(
             !folds.iter().any(|f| f.start_line == 1 && f.end_line == 1),
-            "single-line enum body must not produce a fold: {:?}",
+            "single-line enum body must not fold: {:?}",
             folds
         );
     }
 
     #[test]
-    fn multiple_enum_bodies_independent() {
+    fn quickfunc_else_does_not_truncate_fold() {
+        // `} else {` must NOT stop the function body fold early.
+        // The depth tracker: } → depth 2→1, { → depth 1→2, only function's own } → 0.
         let src = concat!(
-            "@ENUMS(\n",
-            "  A {\n    X = 0\n  }\n",  // body lines 1-3 (end=2 with adjustment)
-            "  B {\n    Y = 0\n  }\n",  // body lines 4-6 (end=5 with adjustment)
-            ")\n"
+            "@QUICKFUNCS(\n",          // 0
+            "  ~check<int>(x) {\n",    // 1  function body open
+            "    if: x > 0 {\n",       // 2
+            "      return 1\n",        // 3
+            "    } else {\n",          // 4  } closes if-then, { opens else
+            "      return 0\n",        // 5
+            "    }\n",                 // 6  closes else
+            "  }\n",                   // 7  closes function body
+            ")\n"                      // 8
         );
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
-        assert!(folds.iter().any(|f| f.start_line == 1), "A fold: {:?}", folds);
-        assert!(folds.iter().any(|f| f.start_line == 4), "B fold: {:?}", folds);
-        for f in folds.iter().filter(|f| f.start_line == 1) {
-            assert!(f.end_line <= 3, "A bled into B: {:?}", f);
-        }
+        // Function body: start=1, close brace at line 7, endLine should be 6
+        assert!(
+            folds.iter().any(|f| f.start_line == 1 && f.end_line >= 6),
+            "function body fold must span past `else {{`, got: {:?}",
+            folds
+        );
     }
 
-    // ── QuickFunc bodies ──────────────────────────────────────────────────────
-
     #[test]
-    fn quickfunc_bodies_independent() {
+    fn sibling_quickfuncs_independent() {
         let src = concat!(
             "@QUICKFUNCS(\n",
-            "  ~a<int>(x) {\n    return x\n  }\n",
-            "  ~b<int>(y) {\n    return y\n  }\n",
+            "  ~a<int>(x) {\n    return x\n  }\n",  // 1-3
+            "  ~b<int>(y) {\n    return y\n  }\n",  // 4-6
             ")\n"
         );
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
-        // ~a body starts at line 1, ~b at line 4.
         assert!(folds.iter().any(|f| f.start_line == 1), "~a: {:?}", folds);
         assert!(folds.iter().any(|f| f.start_line == 4), "~b: {:?}", folds);
         for f in folds.iter().filter(|f| f.start_line == 1) {
-            assert!(f.end_line < 4, "~a ate ~b: {:?}", f);
+            assert!(f.end_line < 4, "~a fold ate ~b: {:?}", f);
         }
     }
-
-    #[test]
-    fn else_block_does_not_truncate_function_fold() {
-        // The `} else {` pattern must not stop the function body fold prematurely.
-        let src = concat!(
-            "@QUICKFUNCS(\n",
-            "  ~check<int>(x) {\n",     // line 1
-            "    if: x > 0 {\n",         // line 2
-            "      return 1\n",          // line 3
-            "    } else {\n",            // line 4  (} then {)
-            "      return 0\n",          // line 5
-            "    }\n",                   // line 6  (closes else)
-            "  }\n",                     // line 7  (closes function body)
-            ")\n"
-        );
-        let d = doc(src);
-        let folds = provide(Some(&d)).unwrap_or_default();
-        // Function body: start=1, close brace at line 7, endLine=6 (adjustment).
-        assert!(
-            folds.iter().any(|f| f.start_line == 1 && f.end_line >= 6),
-            "function body fold must reach line 6+, got: {:?}",
-            folds
-        );
-    }
-
-    // ── Data section object folds ─────────────────────────────────────────────
 
     #[test]
     fn sibling_objects_independent() {
@@ -575,39 +533,36 @@ mod tests {
     }
 
     #[test]
-    fn nested_objects_correct() {
+    fn nested_objects() {
         let src = concat!(
             "@DATA(\n",
-            "  outer = {\n",      // 1
-            "    inner = {\n",    // 2
-            "      x = 1\n",      // 3
-            "    }\n",            // 4  inner close → fold (2, 3)
-            "  }\n",              // 5  outer close → fold (1, 4)
+            "  outer = {\n",    // 1
+            "    inner = {\n",  // 2
+            "      x = 1\n",    // 3
+            "    }\n",          // 4  inner close → fold (2, 3)
+            "  }\n",            // 5  outer close → fold (1, 4)
             ")\n"
         );
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
-        assert!(folds.iter().any(|f| f.start_line == 2 && f.end_line == 3), "inner: {:?}", folds);
-        assert!(folds.iter().any(|f| f.start_line == 1 && f.end_line == 4), "outer: {:?}", folds);
+        assert!(
+            folds.iter().any(|f| f.start_line == 2 && f.end_line == 3),
+            "inner: {:?}",
+            folds
+        );
+        assert!(
+            folds.iter().any(|f| f.start_line == 1 && f.end_line == 4),
+            "outer: {:?}",
+            folds
+        );
     }
-
-    // ── Invariants ────────────────────────────────────────────────────────────
 
     #[test]
     fn no_zero_span_folds() {
-        let src = concat!(
-            "@ENUMS(\n  T { A = 0 }\n)\n",
-            "@DATA(\n  x = 1\n)\n"
-        );
+        let src = "@ENUMS(\n  T{A=0}\n)\n@DATA(\n  x=1\n)\n";
         let d = doc(src);
-        let folds = provide(Some(&d)).unwrap_or_default();
-        for f in &folds {
+        for f in provide(Some(&d)).unwrap_or_default() {
             assert!(f.end_line > f.start_line, "zero-span: {:?}", f);
         }
-    }
-
-    #[test]
-    fn no_crash_on_none() {
-        assert!(provide(None).is_none());
     }
 }

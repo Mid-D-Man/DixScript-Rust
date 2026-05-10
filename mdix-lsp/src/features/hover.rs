@@ -7,6 +7,8 @@ use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Posi
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
 use dixscript::Compiler::AST::{DataType, QuickFuncStatement};
+use dixscript::Builtins::Core::DixType;
+use dixscript::Builtins::Resolver::{instance_method_registry, static_object_registry};
 
 use crate::document::Document;
 
@@ -33,15 +35,11 @@ pub fn provide(doc: Option<&Document>, pos: Position) -> Option<Hover> {
 fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<Hover> {
     let doc = doc?;
 
-    // ── @CONFIG block has NO tokens ────────────────────────────────────────────
-    // The @CONFIG section is stripped before tokenization so the token stream
-    // contains nothing for those lines. Detect cursor-in-config via the stored
-    // line range and serve hover from source-text scanning instead.
+    // @CONFIG block has NO tokens — serve hover from source-text scanning.
     if doc.pos_in_config(pos) {
         return hover_config_line(doc, pos);
     }
 
-    // ── All other sections: token-based hover ──────────────────────────────────
     let (token, index) = token_and_index_at(&doc.tokens, pos)?;
     let content = hover_content_for(token, index, doc)?;
 
@@ -110,13 +108,13 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
             hover_enum_access(doc, enum_name, value)
         }
 
-        // ── Identifiers ────────────────────────────────────────────────────
+        // ── Identifiers — now also handles instance/static method calls ────
         TokenType::Identifier(name) => {
             if token.section == SectionId::Config {
                 hover_config_key(name)
-                    .or_else(|| hover_identifier(doc, name, token.section))
+                    .or_else(|| hover_identifier(doc, name, token.section, index))
             } else {
-                hover_identifier(doc, name, token.section)
+                hover_identifier(doc, name, token.section, index)
             }
         }
 
@@ -134,7 +132,7 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
             "**`t:(...)`** — tuple constructor\n\n",
             "Mixed-type collection, maximum 6 elements.\n\n",
             "```mdix\ncoord = t:(128.5, 0.0, -64.3)\n```\n\n",
-            "Methods: `.first()`, `.second()`, `.get(index)`, `.toArray()`."
+            "Methods: `.first()`, `.second()` … `.sixth()`, `.get(index)`, `.toArray()`, `.length()`, `.contains(val)`, `.reverse()`, `.swap(i1,i2)`."
         ).to_string()),
 
         // ── HexColor ──────────────────────────────────────────────────────
@@ -171,10 +169,179 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
         TokenType::Arrow                  => Some("**`=>`** — association operator\n\nUsed in QuickFunc scope declarations.".to_string()),
         TokenType::SwitchCase             => Some("**`->`** — association / switch-case operator\n\nIn `@CONFIG`/`@SECURITY`: maps key to value block.\nIn `chk:`: introduces a case.\n\n```mdix\nencryption -> { mode = \"password\" }\n```".to_string()),
         TokenType::Symbol('~') => Some("**`~`** — QuickFunc declaration prefix\n\n```mdix\n~myFunc<int>(x<int>) { return x * 2 }\n```".to_string()),
-        // ── DataType annotations ───────────────────────────────────────────
         TokenType::DataType(dt) => hover_data_type(dt),
 
         _ => None,
+    }
+}
+
+// ── NEW: Instance / static method hover (called when identifier follows `.`) ──
+
+/// Returns hover content when the cursor is on an identifier that immediately
+/// follows a `.`, i.e. a method call such as `arr.sum()` or `Math.sqrt(x)`.
+///
+/// Priority:
+/// 1. If the receiver is a known static object (Math, DateTime, IpAddress …)
+///    try STATIC_SIGS first (richer examples), then the live registry.
+/// 2. Otherwise infer the receiver's DixType and look up the instance method.
+fn hover_after_dot(
+    doc: &Document,
+    method_name: &str,
+    section: SectionId,
+    token_index: usize,
+) -> Option<String> {
+    if token_index < 2 { return None; }
+
+    let prev = doc.tokens.get(token_index - 1)?;
+    if !matches!(prev.token_type, TokenType::Symbol('.')) { return None; }
+
+    let receiver = doc.tokens.get(token_index - 2)?;
+
+    // ── Static object method? ──────────────────────────────────────────────
+    if let TokenType::Identifier(recv_name) = &receiver.token_type {
+        static_object_registry::initialize_static_registry();
+        if static_object_registry::has_static_object(recv_name) {
+            // 1a. Try the detailed STATIC_SIGS table first.
+            if let Some(content) = hover_static_method(recv_name, method_name) {
+                return Some(content);
+            }
+            // 1b. Fall back to the live registry for methods not in STATIC_SIGS.
+            if let Some(info) = static_object_registry::get_method_info(recv_name, method_name) {
+                let param_count = info.parameter_count.max(0) as usize;
+                let params_str = if param_count == 0 {
+                    String::new()
+                } else {
+                    (1..=param_count)
+                        .map(|i| format!("arg{}", i))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                return Some(format!(
+                    "**`{obj}.{method}({params})`** — static method\n\n{desc}\n\n**Returns:** `<{ret}>`",
+                    obj    = recv_name,
+                    method = method_name,
+                    params = params_str,
+                    desc   = info.description,
+                    ret    = info.return_type.get_type_name(),
+                ));
+            }
+            // Static object found but method not in registry — let identifier
+            // hover fall through to DLM/keyword handlers.
+            return None;
+        }
+    }
+
+    // ── Instance method? ──────────────────────────────────────────────────
+    let receiver_type = infer_receiver_dix_type(doc, receiver, section)?;
+
+    instance_method_registry::initialize();
+    let method = instance_method_registry::get_instance_method(receiver_type, method_name)?;
+
+    let type_name  = receiver_type.get_type_name();
+    let param_count = (method.parameter_count() as i32 - 1).max(0) as usize;
+    let params_str = if param_count == 0 {
+        String::new()
+    } else {
+        (1..=param_count)
+            .map(|i| format!("arg{}", i))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    Some(format!(
+        "**`{method}({params})`** — `{type}` instance method\n\n{desc}\n\n**Returns:** `<{ret}>`",
+        method = method_name,
+        params = params_str,
+        type   = type_name,
+        desc   = method.description(),
+        ret    = method.return_type().get_type_name(),
+    ))
+}
+
+/// Infer the DixType of a receiver token (the identifier/literal before `.`).
+fn infer_receiver_dix_type(doc: &Document, tok: &Token, section: SectionId) -> Option<DixType> {
+    match &tok.token_type {
+        TokenType::String(_)
+        | TokenType::StringSingle(_)
+        | TokenType::InterpolatedString(_) => Some(DixType::String),
+
+        TokenType::Integer(_) | TokenType::HexLiteral(_) => Some(DixType::Int),
+        TokenType::Float(_)                               => Some(DixType::Float),
+        TokenType::Double(_) | TokenType::ScientificNotation(_) => Some(DixType::Double),
+        TokenType::Bool(_)                                => Some(DixType::Bool),
+        TokenType::HexColor(_)                            => Some(DixType::Hex),
+        TokenType::Date(_)                                => Some(DixType::Date),
+        TokenType::Timestamp(_)                           => Some(DixType::Timestamp),
+
+        // After a closing `]` → array literal result
+        TokenType::Symbol(']') => Some(DixType::Array),
+        // After a closing `}` → object literal result
+        TokenType::Symbol('}') => Some(DixType::Object),
+
+        // Prefixed constructor tokens
+        TokenType::BlobConstructor(_)  => Some(DixType::Blob),
+        TokenType::RegexConstructor(_) => Some(DixType::Regex),
+        TokenType::TupleConstructor(_) => Some(DixType::Tuple),
+
+        // Identifier — look up in params, symbol table, type index
+        TokenType::Identifier(name) => infer_identifier_dix_type(doc, name, section),
+
+        _ => None,
+    }
+}
+
+/// Resolve an identifier's DixType for method dispatch.
+///
+/// Lookup order:
+/// 1. QuickFunc param type annotations (when in QuickFuncs section)
+/// 2. Semantic type_index (built from DATA section analysis)
+/// 3. Symbol-table data variables
+fn infer_identifier_dix_type(doc: &Document, name: &str, section: SectionId) -> Option<DixType> {
+    // 1. QuickFuncs: param type annotations take priority
+    if section == SectionId::QuickFuncs {
+        if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
+            for func in &qf.functions {
+                for param in &func.parameters {
+                    if param.name == name {
+                        return param.data_type.and_then(ast_data_type_to_dix_type);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Semantic type_index (DATA variables with inferred types)
+    if let Some(type_idx) = doc.semantic_result.as_ref()?.type_index.as_ref() {
+        if let Some(&dt) = type_idx.get(name) {
+            return ast_data_type_to_dix_type(dt);
+        }
+    }
+
+    // 3. Symbol-table data variables
+    let st = doc.semantic_result.as_ref()?.symbol_table.as_ref()?;
+    let var = st.try_get_data_variable(name)
+        .or_else(|| st.try_get_data_variable(&format!("DATA.{}", name)))?;
+    ast_data_type_to_dix_type(var.effective_type()?)
+}
+
+/// Convert the compiler's `DataType` to the builtins `DixType`.
+fn ast_data_type_to_dix_type(dt: DataType) -> Option<DixType> {
+    match dt {
+        DataType::Int       => Some(DixType::Int),
+        DataType::Float     => Some(DixType::Float),
+        DataType::Double    => Some(DixType::Double),
+        DataType::String    => Some(DixType::String),
+        DataType::Bool      => Some(DixType::Bool),
+        DataType::Array     => Some(DixType::Array),
+        DataType::Tuple     => Some(DixType::Tuple),
+        DataType::Object    => Some(DixType::Object),
+        DataType::Hex       => Some(DixType::Hex),
+        DataType::Blob      => Some(DixType::Blob),
+        DataType::Regex     => Some(DixType::Regex),
+        DataType::Date      => Some(DixType::Date),
+        DataType::Timestamp => Some(DixType::Timestamp),
+        DataType::Enum      => Some(DixType::Enum),
+        _                   => None,
     }
 }
 
@@ -258,7 +425,6 @@ fn hover_config_key(name: &str) -> Option<String> {
 // ── Keyword hover ──────────────────────────────────────────────────────────────
 
 fn hover_keyword(kw: &str) -> Option<String> {
-    // Data type keywords are handled by hover_data_type.
     match kw {
         "int" | "float" | "double" | "string" | "bool"
         | "array" | "tuple" | "object" | "hex" | "blob"
@@ -304,12 +470,12 @@ fn hover_data_type(dt: &str) -> Option<String> {
         "double"    => "**`<double>`** — 64-bit float (IEEE 754 `f64`)\n\nDefault for decimal literals without `f` suffix. Full precision.\n\n```mdix\nprecision<double> = 3.14159265358979\n```",
         "string"    => "**`<string>`** — UTF-8 text\n\n```mdix\napp_name<string> = \"DixScript\"\n```",
         "bool"      => "**`<bool>`** — boolean\n\n```mdix\nenabled<bool> = true\n```",
-        "array"     => "**`<array>`** — ordered collection\n\n```mdix\ntags:: \"alpha\", \"beta\"\n```\n\nAccess: `data.get(\"tags[0]\")`",
-        "tuple"     => "**`<tuple>`** — mixed-type collection (max 6 elements)\n\n```mdix\ncoord = t:(128.5, 0.0, -64.3)\n```",
+        "array"     => "**`<array>`** — ordered collection\n\n```mdix\ntags:: \"alpha\", \"beta\"\n```\n\nInstance methods: `.length()`, `.contains(v)`, `.get(i)`, `.push(v)`, `.pop()`, `.join(sep)`, `.sort()`, `.reverse()`, `.sum()`, `.average()`, `.min()`, `.max()`, `.first()`, `.last()`, `.slice(s,e)`, `.flatten()`, `.distinct()`, …",
+        "tuple"     => "**`<tuple>`** — mixed-type collection (max 6 elements)\n\n```mdix\ncoord = t:(128.5, 0.0, -64.3)\n```\n\nInstance methods: `.first()`, `.second()` … `.sixth()`, `.get(i)`, `.length()`, `.contains(v)`, `.toArray()`, `.reverse()`, `.swap(i1,i2)`.",
         "object"    => "**`<object>`** — key-value map\n\n```mdix\n~enemy<object>(name, health<int>) {\n  return { name = name, health = health }\n}\n```",
         "hex"       => "**`<hex>`** — hex color or integer\n\n```mdix\nprimary_color<hex> = #FF5733\nmask<hex>          = 0xFF00FF\n```",
-        "blob"      => "**`<blob>`** — base64-encoded binary\n\n```mdix\navatar<blob> = b:(\"SGVsbG8gV29ybGQ=\")\n```",
-        "regex"     => "**`<regex>`** — compiled regular expression\n\n```mdix\nemail<regex> = r:(\"^[\\\\w.]+@[\\\\w.]+$\")\n```",
+        "blob"      => "**`<blob>`** — base64-encoded binary\n\n```mdix\navatar<blob> = b:(\"SGVsbG8gV29ybGQ=\")\n```\n\nInstance methods: `.size()`, `.mimeType()`, `.toHex()`, `.toBytes()`, `.isValid()`, `.slice(start,end)`.",
+        "regex"     => "**`<regex>`** — compiled regular expression\n\n```mdix\nemail<regex> = r:(\"^[\\\\w.]+@[\\\\w.]+$\")\n```\n\nInstance methods: `.test(str)`, `.match(str)`, `.matchAll(str)`, `.replace(str,repl)`, `.split(str)`, `.isValid()`.",
         "date"      => "**`<date>`** — ISO 8601 date\n\nFormat: `YYYY-MM-DD`\n\n```mdix\nrelease_date<date> = 2025-12-31\n```",
         "timestamp" => "**`<timestamp>`** — ISO 8601 date-time\n\nFormat: `YYYY-MM-DDThh:mm:ssZ`\n\n```mdix\ncreated_at<timestamp> = 2025-01-15T10:30:00Z\n```",
         "enum"      => "**`<enum>`** — enum value from `@ENUMS`\n\n```mdix\nlevel<enum> = Difficulty.HARD\n```\n\nAt runtime stored as `{ enum_name, field_name, value: int }`.",
@@ -461,9 +627,15 @@ fn hover_table_path_prefix(doc: &Document, name: &str) -> Option<String> {
 
 // ── Identifier hover (section-aware) ──────────────────────────────────────────
 
-fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<String> {
+fn hover_identifier(doc: &Document, name: &str, section: SectionId, token_index: usize) -> Option<String> {
 
-    // ── 0. DLM module / subtype names ─────────────────────────────────────
+    // ── 0. Instance/static method call (identifier follows `.`) ───────────
+    // Must come first so `arr.sum` beats a variable named `sum`.
+    if let Some(content) = hover_after_dot(doc, name, section, token_index) {
+        return Some(content);
+    }
+
+    // ── 0.5. DLM module / subtype names ──────────────────────────────────
     if let Some(dlm) = hover_dlm_module(name)  { return Some(dlm); }
     if let Some(dlm) = hover_dlm_subtype(name) { return Some(dlm); }
 
@@ -535,7 +707,15 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
         }
     }
 
-    // ── 4. Semantic symbol table ───────────────────────────────────────────
+    // ── 4. Builtin static objects ──────────────────────────────────────────
+    // Use the static object registry directly to fix the "Ip" vs "IpAddress"
+    // naming inconsistency in the symbol table.
+    static_object_registry::initialize_static_registry();
+    if static_object_registry::has_static_object(name) {
+        return hover_static_object(name);
+    }
+
+    // ── 5. Semantic symbol table ───────────────────────────────────────────
     if let Some(st) = doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref()) {
 
         if let Some(var) = st.try_get_data_variable(name)
@@ -566,10 +746,6 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
             ));
         }
 
-        if st.is_builtin_static_object(name) {
-            return hover_static_object(name);
-        }
-
         if let Some(ns) = st.try_get_namespace(name) {
             let funcs: Vec<String> = ns.functions.keys().take(6).map(|f| format!("`{}`", f)).collect();
             let enums: Vec<String> = ns.enums.keys().take(4).map(|e| format!("`{}`", e)).collect();
@@ -583,7 +759,7 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId) -> Option<St
         }
     }
 
-    // ── 5. Table path prefix in DATA ──────────────────────────────────────
+    // ── 6. Table path prefix in DATA ──────────────────────────────────────
     if section == SectionId::Data {
         if let Some(content) = hover_table_path_prefix(doc, name) {
             return Some(content);
@@ -615,10 +791,11 @@ fn hover_static_object(name: &str) -> Option<String> {
     let (desc, methods) = match name {
         "Math"      => ("Mathematical functions.", vec!["sqrt(x)","pow(base,exp)","abs(x)","floor(x)","ceil(x)","round(x)","min(a,b)","max(a,b)","clamp(v,min,max)","sin(x)","cos(x)","tan(x)","log(x)","pi()","e()"]),
         "DateTime"  => ("Date and time utilities.", vec!["now()","today()","format(ts,pat)","year(d)","month(d)","day(d)","addDays(d,n)","subtract(a,b)","isLeapYear(y)"]),
-        "Array"     => ("Array factory functions.", vec!["empty()","range(start,end)","fill(val,count)","sort(arr)","unique(arr)","flatten(arr)","sum(arr)","average(arr)"]),
+        "Array"     => ("Array factory functions.", vec!["empty()","range(start,end)","fill(val,count)","of(…vals)","repeat(arr,n)","concat(a,b)","fromString(str,sep)","sort(arr)","reverse(arr)","unique(arr)","slice(arr,s,e)","filter(arr,v)","contains(arr,v)","indexOf(arr,v)","flatten(arr)","sum(arr)","average(arr)","min(arr)","max(arr)"]),
         "Random"    => ("Pseudo-random generation.", vec!["range(min,max)","float()","double()","boolean()","choice(arr)","shuffle(arr)","alphanumeric(len)"]),
-        "Guid"      => ("GUID / UUID v4 generation.", vec!["new()","parse(str)","validate(str)","empty()","format(guid,fmt)"]),
-        "IpAddress" => ("IPv4 and IPv6 utilities.", vec!["parse(str)","validate(str)","isV4(str)","isV6(str)","isPrivate(str)","localhost()"]),
+        "Guid"      => ("GUID / UUID v4 generation.", vec!["new()","parse(str)","tryParse(str)","validate(str)","empty()","format(guid,fmt)","toBytes(guid)","fromBytes(arr)"]),
+        "IpAddress" => ("IPv4 and IPv6 utilities.", vec!["parse(str)","tryParse(str)","validate(str)","isV4(str)","isV6(str)","isPrivate(str)","isLoopback(str)","isPublic(str)","toBytes(str)","fromBytes(arr)","inRange(ip,start,end)","localhost()","any()","broadcast()"]),
+        "IpAddr"    => ("IPv4 and IPv6 utilities (alias).", vec!["parse(str)","validate(str)","isV4(str)","isV6(str)","isPrivate(str)","localhost()"]),
         "Enum"      => ("Runtime enum introspection.", vec!["getValues(name)","getName(name,val)","getValue(name,field)","count(name)","exists(name)","list()"]),
         "Dix"       => ("Logging and string utilities.", vec!["Log(msg)","LogInfo(msg)","LogWarning(msg)","LogError(msg)","Assert(cond,msg)","Format(tmpl,...args)","Join(sep,...vals)"]),
         _ => return None,
@@ -644,8 +821,6 @@ fn hover_static_method(class: &str, method: &str) -> Option<String> {
 // ── HexColor hover ─────────────────────────────────────────────────────────────
 
 fn hover_hex_color(hex: &str) -> Option<String> {
-    // HexColor tokens are stored WITHOUT '#' by the lexer.
-    // We accept both forms here for safety.
     let digits = hex.trim_start_matches('#');
 
     let (r, g, b, a, has_alpha_channel): (u8, u8, u8, u8, bool) = match digits.len() {
@@ -672,7 +847,7 @@ fn hover_hex_color(hex: &str) -> Option<String> {
             u8::from_str_radix(&digits[2..4], 16).ok()?,
             u8::from_str_radix(&digits[4..6], 16).ok()?,
             255,
-            false,  // 6-digit hex has NO alpha channel — fully opaque by definition
+            false,
         ),
         8 => (
             u8::from_str_radix(&digits[0..2], 16).ok()?,
@@ -740,14 +915,17 @@ fn hover_regex(tokens: &[Token], constructor_index: usize) -> String {
         None => concat!(
             "**`r:(...)`** — regex constructor\n\n",
             "```mdix\nemail = r:(\"^[\\\\w.]+@[\\\\w.]+$\")\n```\n\n",
-            "Methods: `.test(str)`, `.match(str)`, `.matchAll(str)`, `.replace(str,repl)`, `.split(str)`"
+            "**Instance methods:** `.test(str)` → `<bool>`, `.match(str)` → `<string>`, ",
+            "`.matchAll(str)` → `<array>`, `.replace(str,repl)` → `<string>`, ",
+            "`.split(str)` → `<array>`, `.isValid()` → `<bool>`\n\n",
+            "Type: `<regex>`"
         ).to_string(),
         Some(pat) => {
             match regex::Regex::new(&pat) {
                 Ok(re) => {
                     let groups = re.captures_len().saturating_sub(1);
                     format!(
-                        "**`r:(...)`** — regex constructor\n\n```\n{}\n```\n\n✅ Valid — {} capture group{}\n\nType: `<regex>`",
+                        "**`r:(...)`** — regex constructor\n\n```\n{}\n```\n\n✅ Valid — {} capture group{}\n\nType: `<regex>`\n\n**Instance methods:** `.test(str)`, `.match(str)`, `.replace(str,repl)`, `.split(str)`",
                         pat, groups, if groups == 1 { "" } else { "s" }
                     )
                 }
@@ -768,7 +946,10 @@ fn hover_blob(tokens: &[Token], constructor_index: usize) -> String {
         None => concat!(
             "**`b:(...)`** — blob constructor\n\nBase64-encoded binary data.\n\n",
             "```mdix\navatar = b:(\"SGVsbG8gV29ybGQ=\")\n```\n\n",
-            "Methods: `.size()`, `.mimeType()`, `.toHex()`, `.toBytes()`, `.isValid()`, `.slice(start,end)`"
+            "**Instance methods:** `.size()` → `<int>`, `.mimeType()` → `<string>`, ",
+            "`.toHex()` → `<string>`, `.toBytes()` → `<array>`, `.isValid()` → `<bool>`, ",
+            "`.slice(start,end)` → `<blob>`\n\n",
+            "Type: `<blob>`"
         ).to_string(),
         Some(b64) => {
             use base64::{Engine as _, engine::general_purpose};
@@ -779,7 +960,7 @@ fn hover_blob(tokens: &[Token], constructor_index: usize) -> String {
                         .map(|b| format!("{:02X}", b)).collect();
                     let ellipsis = if bytes.len() > 12 { " …" } else { "" };
                     format!(
-                        "**`b:(...)`** — blob\n\n📦 **{}** bytes · {} base64 chars\n\n🗂 MIME: `{}`\n\nFirst bytes: `{}{}`\n\nType: `<blob>`",
+                        "**`b:(...)`** — blob\n\n📦 **{}** bytes · {} base64 chars\n\n🗂 MIME: `{}`\n\nFirst bytes: `{}{}`\n\nType: `<blob>`\n\n**Instance methods:** `.size()`, `.mimeType()`, `.toHex()`, `.toBytes()`, `.isValid()`, `.slice(start,end)`",
                         bytes.len(), b64.len(), mime, hex_preview.join(" "), ellipsis
                     )
                 }
@@ -810,7 +991,7 @@ fn detect_mime(bytes: &[u8]) -> &'static str {
 // ── Token-at-position lookup ───────────────────────────────────────────────────
 
 /// Find the token covering `pos` and return it with its index.
-/// Used by this module and by goto_definition.rs.
+/// Public — also used by goto_definition.rs.
 pub fn token_and_index_at(tokens: &[Token], pos: Position) -> Option<(&Token, usize)> {
     let target_line = pos.line as usize + 1;  // AST is 1-based
     let target_col  = pos.character as usize + 1;
@@ -833,7 +1014,7 @@ fn token_value_len(token: &Token) -> usize {
         TokenType::String(s)             => s.len() + 2,
         TokenType::StringSingle(s)       => s.len() + 2,
         TokenType::InterpolatedString(s) => s.len() + 3,
-        TokenType::HexColor(h)           => h.len() + 1, // stored without '#', source has '#'
+        TokenType::HexColor(h)           => h.len() + 1,
         TokenType::Comment(c)            => c.len() + 2,
         TokenType::Bool(b)               => if *b { 4 } else { 5 },
         TokenType::EnumAccess { enum_name, value } => enum_name.len() + 1 + value.len(),
@@ -901,15 +1082,12 @@ fn extract_doc_comment_for_func(tokens: &[Token], func_def_line: usize) -> Optio
         .join("\n");
     Some(cleaned)
 }
-/// Hover for a line inside the @CONFIG block.
-///
-/// @CONFIG has no tokens — the block is stripped before tokenization.
-/// We detect the key (or @CONFIG keyword itself) purely from source text.
+
+/// Hover for a line inside the @CONFIG block (no tokens exist for that section).
 fn hover_config_line(doc: &Document, pos: Position) -> Option<Hover> {
     let line_text = doc.source.lines().nth(pos.line as usize)?;
     let trimmed   = line_text.trim();
 
-    // Cursor on the @CONFIG keyword itself.
     if trimmed.to_uppercase().starts_with("@CONFIG") {
         return Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
@@ -941,12 +1119,8 @@ fn hover_config_line(doc: &Document, pos: Position) -> Option<Hover> {
         });
     }
 
-    // Cursor on a `key -> value` entry.
     if let Some(arrow_byte) = line_text.find("->") {
-        let char_pos  = pos.character as usize;
-        let key_raw   = line_text[..arrow_byte].trim();
-
-        // Validate that it looks like a key (not a blank/comment line).
+        let key_raw = line_text[..arrow_byte].trim();
         let key_valid = !key_raw.is_empty()
             && !key_raw.starts_with('@')
             && !key_raw.starts_with("//")
@@ -954,12 +1128,7 @@ fn hover_config_line(doc: &Document, pos: Position) -> Option<Hover> {
 
         if key_valid {
             let key = key_raw.trim();
-
-            // Hover the value? Detect the `->` value token after the arrow.
-            // Either way, the hover text is the key description — it's the
-            // most useful info regardless of cursor side.
             let content = hover_config_key(key)?;
-
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind:  MarkupKind::Markdown,
@@ -971,27 +1140,73 @@ fn hover_config_line(doc: &Document, pos: Position) -> Option<Hover> {
     }
 
     None
-                    }
-// ── Minimal static sig table ───────────────────────────────────────────────────
+}
+
+// ── Static signature table ─────────────────────────────────────────────────────
+// (object, method, signature, description, example)
 
 static STATIC_SIGS: &[(&str, &str, &str, &str, &str)] = &[
-    ("Math","sqrt",  "Math.sqrt(x: double) → double",       "Square root. x must be ≥ 0.",     "Math.sqrt(16)       // → 4.0"),
-    ("Math","abs",   "Math.abs(x: number) → double",         "Absolute value.",                 "Math.abs(-42)       // → 42.0"),
-    ("Math","pow",   "Math.pow(base, exp: double) → double", "base raised to exp.",             "Math.pow(2, 10)     // → 1024.0"),
-    ("Math","floor", "Math.floor(x: double) → int",          "Largest integer ≤ x.",            "Math.floor(3.9)     // → 3"),
-    ("Math","ceil",  "Math.ceil(x: double) → int",           "Smallest integer ≥ x.",           "Math.ceil(3.1)      // → 4"),
-    ("Math","round", "Math.round(x: double) → int",          "Round to nearest integer.",       "Math.round(3.5)     // → 4"),
-    ("Math","clamp", "Math.clamp(v, min, max) → double",     "Clamp v so min ≤ result ≤ max.", "Math.clamp(15,0,10) // → 10.0"),
-    ("Math","pi",    "Math.pi() → double",                   "π ≈ 3.14159265358979",            "Math.pi()           // → 3.14159…"),
-    ("DateTime","now",    "DateTime.now() → timestamp",       "Current UTC date-time.",         "now = DateTime.now()"),
-    ("DateTime","today",  "DateTime.today() → date",          "Today's date at midnight UTC.",  "today = DateTime.today()"),
-    ("DateTime","format", "DateTime.format(ts, pat) → string","Format via strftime pattern.",   "DateTime.format(DateTime.now(), \"%Y-%m-%d\")"),
-    ("Array","range",  "Array.range(start, end: int) → array","Integers from start to end.",   "Array.range(1, 5) // → [1,2,3,4,5]"),
-    ("Random","range", "Random.range(min, max: int) → int",   "Random int in [min,max].",      "Random.range(1, 6)"),
-    ("Guid","new",     "Guid.new() → string",                 "Generate a UUID v4 string.",    "id = Guid.new()"),
-    ("Dix","Log",      "Dix.Log(message: any) → void",        "Log at INFO level.",            "Dix.Log(\"Building \" + name)"),
-    ("Dix","Assert",   "Dix.Assert(cond, msg) → void",        "Abort if condition is false.",  "Dix.Assert(health > 0, \"positive\")"),
-    ("Enum","getValues","Enum.getValues(name) → array",       "All field names of an enum.",   "Enum.getValues(\"Difficulty\")"),
+    // Math
+    ("Math","sqrt",   "Math.sqrt(x: double) → double",        "Square root. x must be ≥ 0.",          "Math.sqrt(16)        // → 4.0"),
+    ("Math","abs",    "Math.abs(x: number) → double",          "Absolute value.",                       "Math.abs(-42)        // → 42.0"),
+    ("Math","pow",    "Math.pow(base, exp: double) → double",  "base raised to exp.",                   "Math.pow(2, 10)      // → 1024.0"),
+    ("Math","floor",  "Math.floor(x: double) → int",           "Largest integer ≤ x.",                  "Math.floor(3.9)      // → 3"),
+    ("Math","ceil",   "Math.ceil(x: double) → int",            "Smallest integer ≥ x.",                 "Math.ceil(3.1)       // → 4"),
+    ("Math","round",  "Math.round(x: double) → int",           "Round to nearest integer.",             "Math.round(3.5)      // → 4"),
+    ("Math","clamp",  "Math.clamp(v, min, max) → double",      "Clamp v so min ≤ result ≤ max.",       "Math.clamp(15,0,10)  // → 10.0"),
+    ("Math","pi",     "Math.pi() → double",                    "π ≈ 3.14159265358979",                  "Math.pi()            // → 3.14159…"),
+    ("Math","min",    "Math.min(a, b: number) → double",       "Smaller of two numbers.",               "Math.min(3, 7)       // → 3.0"),
+    ("Math","max",    "Math.max(a, b: number) → double",       "Larger of two numbers.",                "Math.max(3, 7)       // → 7.0"),
+    ("Math","sin",    "Math.sin(x: double) → double",          "Sine of angle in radians.",             "Math.sin(0.0)        // → 0.0"),
+    ("Math","cos",    "Math.cos(x: double) → double",          "Cosine of angle in radians.",           "Math.cos(0.0)        // → 1.0"),
+    ("Math","log",    "Math.log(x: double) → double",          "Natural logarithm.",                    "Math.log(Math.e())   // → 1.0"),
+    ("Math","e",      "Math.e() → double",                     "Euler's number e ≈ 2.71828",            "Math.e()             // → 2.71828…"),
+    // DateTime
+    ("DateTime","now",    "DateTime.now() → timestamp",        "Current UTC date-time.",                "now = DateTime.now()"),
+    ("DateTime","today",  "DateTime.today() → date",           "Today's date at midnight UTC.",         "today = DateTime.today()"),
+    ("DateTime","format", "DateTime.format(ts, pat) → string", "Format via strftime pattern.",          "DateTime.format(DateTime.now(), \"%Y-%m-%d\")"),
+    ("DateTime","year",   "DateTime.year(d) → int",            "Extract year from date/timestamp.",     "DateTime.year(2025-06-15) // → 2025"),
+    ("DateTime","month",  "DateTime.month(d) → int",           "Extract month (1–12).",                 "DateTime.month(2025-06-15) // → 6"),
+    ("DateTime","day",    "DateTime.day(d) → int",             "Extract day of month.",                 "DateTime.day(2025-06-15) // → 15"),
+    ("DateTime","addDays","DateTime.addDays(d, n: int) → date","Add n days to a date.",                 "DateTime.addDays(2025-01-01, 30)"),
+    // Array factory
+    ("Array","range",  "Array.range(start, end: int) → array", "Integers from start to end inclusive.", "Array.range(1, 5) // → [1,2,3,4,5]"),
+    ("Array","fill",   "Array.fill(val, count: int) → array",  "Repeat val count times.",               "Array.fill(0, 3) // → [0,0,0]"),
+    ("Array","empty",  "Array.empty() → array",                "Create an empty array.",                "Array.empty()    // → []"),
+    ("Array","sum",    "Array.sum(arr: array) → double",       "Sum of numeric elements.",              "Array.sum([1,2,3]) // → 6.0"),
+    ("Array","min",    "Array.min(arr: array) → double",       "Minimum numeric value.",                "Array.min([3,1,2]) // → 1.0"),
+    ("Array","max",    "Array.max(arr: array) → double",       "Maximum numeric value.",                "Array.max([3,1,2]) // → 3.0"),
+    // Random
+    ("Random","range", "Random.range(min, max: int) → int",    "Random int in [min,max].",              "Random.range(1, 6)"),
+    ("Random","float", "Random.float() → float",               "Random float in [0,1).",                "Random.float()"),
+    ("Random","choice","Random.choice(arr: array) → any",      "Random element from array.",            "Random.choice([\"a\",\"b\",\"c\"])"),
+    // Guid
+    ("Guid","new",      "Guid.new() → string",                 "Generate a UUID v4 string.",            "id = Guid.new()"),
+    ("Guid","validate", "Guid.validate(str) → bool",           "Check if string is a valid GUID.",      "Guid.validate(\"550e8400-…\") // → true"),
+    ("Guid","empty",    "Guid.empty() → string",               "All-zero GUID.",                        "Guid.empty() // → \"00000000-0000-…\""),
+    ("Guid","format",   "Guid.format(guid, fmt) → string",     "Format GUID: N(no hyphens), D, B, P, X.", "Guid.format(id, \"N\")"),
+    // IpAddress — full coverage
+    ("IpAddress","parse",      "IpAddress.parse(str) → string",              "Parse IP address; throws on invalid.",          "IpAddress.parse(\"192.168.1.1\")"),
+    ("IpAddress","tryParse",   "IpAddress.tryParse(str) → string | null",    "Parse IP address; null on invalid.",            "IpAddress.tryParse(\"not-an-ip\") // → null"),
+    ("IpAddress","validate",   "IpAddress.validate(str) → bool",             "Check if string is a valid IPv4 or IPv6.",      "IpAddress.validate(\"10.0.0.1\") // → true"),
+    ("IpAddress","isV4",       "IpAddress.isV4(str) → bool",                 "True if the address is IPv4.",                  "IpAddress.isV4(\"127.0.0.1\") // → true"),
+    ("IpAddress","isV6",       "IpAddress.isV6(str) → bool",                 "True if the address is IPv6.",                  "IpAddress.isV6(\"::1\") // → true"),
+    ("IpAddress","isPrivate",  "IpAddress.isPrivate(str) → bool",            "True for 10.x, 172.16-31.x, 192.168.x, fc00::/7.", "IpAddress.isPrivate(\"192.168.1.1\") // → true"),
+    ("IpAddress","isLoopback", "IpAddress.isLoopback(str) → bool",           "True for 127.0.0.1 or ::1.",                    "IpAddress.isLoopback(\"127.0.0.1\") // → true"),
+    ("IpAddress","isPublic",   "IpAddress.isPublic(str) → bool",             "True if not private, loopback, or link-local.", "IpAddress.isPublic(\"8.8.8.8\") // → true"),
+    ("IpAddress","toBytes",    "IpAddress.toBytes(str) → array",             "4 bytes for IPv4, 16 for IPv6.",                "IpAddress.toBytes(\"127.0.0.1\") // → [127,0,0,1]"),
+    ("IpAddress","fromBytes",  "IpAddress.fromBytes(arr: array) → string",   "Create IP from 4-byte or 16-byte array.",       "IpAddress.fromBytes([127,0,0,1]) // → \"127.0.0.1\""),
+    ("IpAddress","inRange",    "IpAddress.inRange(ip,start,end) → bool",     "True if ip is within [start, end] inclusive.",  "IpAddress.inRange(\"10.0.0.5\",\"10.0.0.1\",\"10.0.0.10\")"),
+    ("IpAddress","localhost",  "IpAddress.localhost() → string",             "Returns \"127.0.0.1\".",                        "IpAddress.localhost()"),
+    ("IpAddress","any",        "IpAddress.any() → string",                   "Returns \"0.0.0.0\".",                          "IpAddress.any()"),
+    ("IpAddress","broadcast",  "IpAddress.broadcast() → string",             "Returns \"255.255.255.255\".",                  "IpAddress.broadcast()"),
+    // Dix
+    ("Dix","Log",     "Dix.Log(message: any) → void",          "Log at INFO level.",                    "Dix.Log(\"Building \" + name)"),
+    ("Dix","Assert",  "Dix.Assert(cond, msg) → void",          "Abort if condition is false.",          "Dix.Assert(health > 0, \"positive\")"),
+    // Enum
+    ("Enum","getValues","Enum.getValues(name) → array",        "All field names of an enum.",           "Enum.getValues(\"Difficulty\")"),
+    ("Enum","getName",  "Enum.getName(name,val) → string",     "Field name for an integer value.",      "Enum.getName(\"Difficulty\", 2)"),
+    ("Enum","getValue", "Enum.getValue(name,field) → int",     "Integer value for a field name.",       "Enum.getValue(\"Difficulty\", \"HARD\")"),
 ];
 
 // ── Calendar helpers ───────────────────────────────────────────────────────────

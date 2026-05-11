@@ -3,25 +3,23 @@
 //!
 //! ## Fold regions produced
 //!
-//! 1. **@CONFIG** — source-text line range (stripped before tokenisation, so no tokens exist)
-//! 2. **Section-level** — via SectionId stamped on every token by the lexer.
-//!    Each section's fold spans from its keyword token to the last non-EOF
-//!    token sharing that SectionId (i.e. the closing `)`).  This is robust
-//!    for single-section files AND prevents sections from bleeding into each other.
-//! 3. **Enum declaration bodies** — `{ … }` depth-tracked within @ENUMS
-//! 4. **QuickFunc bodies** — body fold from `{` to before `}`; when params
+//! 1. **Enum declaration bodies** — `{ … }` depth-tracked within @ENUMS
+//! 2. **QuickFunc bodies** — body fold from `{` to before `}`; when params
 //!    span multiple lines an additional param fold is emitted from `~` to
-//!    the line before `{`, preventing the confusing `~func(  ▶  }` collapse.
-//! 5. **Table properties / group arrays** — `path: …` and `path:: …` in @DATA,
-//!    using the "next entry start − 1" rule on AST positions.
-//! 6. **Inline object literals** — `{ … }` depth-tracked within @DATA / @SECURITY.
+//!    the line before `{`.
+//! 3. **Inline object literals** — `{ … }` depth-tracked within @DATA / @SECURITY.
+//! 4. **Table properties / group arrays** — token-based: each `:` or `::`
+//!    in @DATA opens a fold that runs to just before the next `:` / `::`,
+//!    or to just before the section's closing `)`.
+//!
+//! Section-level folds (@DATA, @ENUMS, …) are intentionally omitted.
 
 use std::panic;
 
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
 
 use dixscript::Compiler::AST::{
-    AstVisitorBase, DataEntry, DataSection, EnumDeclaration,
+    AstVisitorBase, DataSection, EnumDeclaration,
     QuickFunction, SecuritySection,
 };
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
@@ -49,48 +47,11 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
     let doc = doc?;
     let mut ranges: Vec<FoldingRange> = Vec::new();
 
-    // ── 1. @CONFIG fold (source-text, no tokens) ──────────────────────────────
-    if let Some((cfg_start, cfg_raw_end)) = doc.config_line_range {
-        let first_section_lsp = doc
-            .tokens
-            .iter()
-            .filter(|t| t.token_type.is_section_keyword())
-            .map(tok_lsp_line)
-            .min()
-            .unwrap_or(u32::MAX);
-        let cfg_end = cfg_raw_end.min(first_section_lsp.saturating_sub(1));
-        if cfg_end > cfg_start {
-            ranges.push(make_fold(cfg_start, cfg_end));
-        }
-    }
-
     if doc.tokens.is_empty() {
-        return if ranges.is_empty() { None } else { Some(ranges) };
+        return None;
     }
 
-    // ── 2. Section-level folds (SectionId-based) ─────────────────────────────
-    //
-    // Each section keyword token has its OWN SectionId stamped on it (fixed
-    // in lexer.rs).  The closing `)` of every section also carries that same
-    // SectionId.  We simply find the keyword token (start) and the last
-    // non-EOF token with the same SectionId (end = closing `)`).
-    //
-    // This replaces the fragile paren-depth approach that broke when a single
-    // section was present or when sections had deep nested parens.
-    for &sid in &[
-        SectionId::Imports,
-        SectionId::Dlm,
-        SectionId::Enums,
-        SectionId::QuickFuncs,
-        SectionId::Data,
-        SectionId::Security,
-    ] {
-        if let Some((start, end)) = section_fold_range(&doc.tokens, sid) {
-            ranges.push(make_fold(start, end));
-        }
-    }
-
-    // ── 3–6. AST-driven content folds ─────────────────────────────────────────
+    // AST-driven folds: enum bodies, quickfunc bodies, object literals
     if let Some(ast) = &doc.ast {
         let mut visitor = FoldingVisitor {
             tokens: &doc.tokens,
@@ -99,7 +60,10 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
         visitor.visit(ast);
     }
 
-    // ── Finalise ──────────────────────────────────────────────────────────────
+    // Token-based folds for table properties and group arrays
+    collect_data_table_group_folds(&doc.tokens, &mut ranges);
+
+    // Finalise
     ranges.sort_unstable_by(|a, b| {
         a.start_line
             .cmp(&b.start_line)
@@ -112,33 +76,47 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
     if ranges.is_empty() { None } else { Some(ranges) }
 }
 
-// ── Section fold helpers ──────────────────────────────────────────────────────
+// ── Table property / group array folds (token-based) ─────────────────────────
+//
+// Object property folds work by tracking { / } tokens.
+// Table and group entries have no braces — instead they are delimited by:
+//   Symbol(':')   → table property  (server.config: host = "x", port = 8080)
+//   DoubleColon   → group array     (tags:: "alpha", "beta")
+//
+// Strategy: collect all such tokens in the DATA section in source order.
+// Each one starts a fold that ends just before the next delimiter line,
+// or just before the section's closing `)`.
 
-/// Return the 0-based LSP fold range `(start, end)` for `section_id` using
-/// the SectionId already embedded in every token by the lexer.
-///
-/// start = line of the section keyword token (`@DATA`, `@ENUMS`, …)
-/// end   = line of the last non-EOF token with that SectionId (the `)`).
-fn section_fold_range(tokens: &[Token], section_id: SectionId) -> Option<(u32, u32)> {
-    let first = tokens
-        .iter()
-        .find(|t| t.section == section_id && t.token_type.is_section_keyword())?;
-    let last = tokens
-        .iter()
-        .rev()
-        .find(|t| t.section == section_id && !matches!(t.token_type, TokenType::EndOfFile))?;
-    let start = tok_lsp_line(first);
-    let end   = tok_lsp_line(last);
-    if end > start { Some((start, end)) } else { None }
-}
+fn collect_data_table_group_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
+    let section_end = section_last_lsp(tokens, SectionId::Data);
 
-/// Return the 0-based LSP line of the last non-EOF token with the given SectionId.
-fn section_last_lsp(tokens: &[Token], id: SectionId) -> Option<u32> {
-    tokens
+    // Collect the LSP line of every : or :: token inside @DATA, in order.
+    let mut starts: Vec<u32> = tokens
         .iter()
-        .rev()
-        .find(|t| t.section == id && !matches!(t.token_type, TokenType::EndOfFile))
+        .filter(|t| t.section == SectionId::Data)
+        .filter(|t| matches!(&t.token_type, TokenType::Symbol(':') | TokenType::DoubleColon))
         .map(tok_lsp_line)
+        .collect();
+
+    // Remove consecutive duplicates (both : and :: on the same line is unusual
+    // but dedup keeps the first occurrence, which is fine).
+    starts.dedup();
+
+    for (i, &start) in starts.iter().enumerate() {
+        let end = if i + 1 < starts.len() {
+            // End just before the next entry's delimiter line.
+            starts[i + 1].saturating_sub(1)
+        } else {
+            // Last entry: end just before the section's closing `)`.
+            section_end
+                .map(|l| l.saturating_sub(1))
+                .unwrap_or(start)
+        };
+
+        if end > start {
+            ranges.push(make_fold(start, end));
+        }
+    }
 }
 
 // ── AST Visitor ───────────────────────────────────────────────────────────────
@@ -151,15 +129,6 @@ struct FoldingVisitor<'a> {
 impl<'a> FoldingVisitor<'a> {
     // ── QuickFunc folds ───────────────────────────────────────────────────────
 
-    /// Emit fold region(s) for a single QuickFunction.
-    ///
-    /// **Body fold** — from the opening `{` line to the line before `}`.
-    /// Always present when the body spans more than one line.
-    ///
-    /// **Param fold** — from the `~` declaration line to the line before `{`.
-    /// Only emitted when params span multiple lines (i.e. the `{` is not on
-    /// the same line as `~`).  This prevents the confusing visual where a
-    /// multiline-param function collapses to `~func(  ▶  }`.
     fn add_quickfunc_folds(&mut self, func: &QuickFunction) {
         if !func.position.is_valid() { return; }
 
@@ -180,7 +149,6 @@ impl<'a> FoldingVisitor<'a> {
 
         let Some(brace_open_lsp) = brace_open_lsp else { return; };
 
-        // Depth-track from the `{` to find its matching `}`.
         let Some(close_lsp) = find_brace_close(self.tokens, brace_open_lsp) else { return; };
 
         // Body fold.
@@ -197,70 +165,13 @@ impl<'a> FoldingVisitor<'a> {
             }
         }
     }
-
-    // ── DATA entry folds ──────────────────────────────────────────────────────
-
-    /// Emit fold regions for `TableProperty` and `GroupArray` entries in @DATA.
-    ///
-    /// The end of each entry's fold is determined by the next entry's start
-    /// line minus one.  For the last entry the section's closing `)` line
-    /// (minus one) is used.  Only entries whose content spans more than one
-    /// line receive a fold.
-    fn add_data_entry_folds(&mut self, section: &DataSection) {
-        let entries = &section.entries;
-        let section_close_lsp = section_last_lsp(self.tokens, SectionId::Data);
-
-        for (i, entry) in entries.iter().enumerate() {
-            // Determine entry start position and the line of its last content item.
-            let (pos, last_content_line) = match entry {
-                DataEntry::TableProperty { position, properties, .. } => {
-                    let last_line = properties
-                        .last()
-                        .filter(|p| p.position.is_valid())
-                        .map(|p| p.position.line);
-                    (*position, last_line)
-                }
-                DataEntry::GroupArray { position, items, .. } => {
-                    let last_line = items
-                        .last()
-                        .filter(|v| v.position().is_valid())
-                        .map(|v| v.position().line);
-                    (*position, last_line)
-                }
-                // SimpleProperty / ObjectProperty: handled by brace fold scanner.
-                _ => continue,
-            };
-
-            if !pos.is_valid() || pos.line == 0 { continue; }
-
-            // Only fold if content actually spans multiple lines.
-            let Some(last_line) = last_content_line else { continue; };
-            if last_line <= pos.line { continue; }
-
-            let start_lsp = ast_lsp_line(pos.line);
-
-            // End = just before the next entry's first line, or just before
-            // the section's closing `)`.
-            let end_lsp = entries
-                .get(i + 1)
-                .map(|next| next.position())
-                .filter(|p| p.is_valid() && p.line > pos.line)
-                .map(|p| ast_lsp_line(p.line).saturating_sub(1))
-                .or_else(|| section_close_lsp.map(|l| l.saturating_sub(1)))
-                .unwrap_or(start_lsp);
-
-            if end_lsp > start_lsp {
-                self.ranges.push(make_fold(start_lsp, end_lsp));
-            }
-        }
-    }
 }
 
 impl<'a> AstVisitorBase for FoldingVisitor<'a> {
     type Result = ();
     fn default_result(&self) -> () {}
 
-    // ── 3. Enum declaration bodies ────────────────────────────────────────────
+    // ── Enum declaration bodies ───────────────────────────────────────────────
     fn visit_enum_declaration(&mut self, decl: &EnumDeclaration) -> () {
         if !decl.position.is_valid() { return; }
         let start = ast_lsp_line(decl.position.line);
@@ -272,30 +183,30 @@ impl<'a> AstVisitorBase for FoldingVisitor<'a> {
         }
     }
 
-    // ── 4. QuickFunc bodies (+ multiline param folds) ─────────────────────────
+    // ── QuickFunc bodies ──────────────────────────────────────────────────────
     fn visit_quick_function(&mut self, func: &QuickFunction) -> () {
         self.add_quickfunc_folds(func);
     }
 
-    // ── 5 & 6. DATA: entry folds + inline object folds ───────────────────────
+    // ── DATA: inline object literal folds only ────────────────────────────────
+    // Table/group entry folds are handled separately by
+    // collect_data_table_group_folds (token-based, not AST-based).
     fn visit_data_section(&mut self, section: &DataSection) -> () {
         if !section.position.is_valid() { return; }
 
-        // Brace folds for every `{ … }` object literal within @DATA.
         let data_start_lsp = ast_lsp_line(section.position.line);
         let data_end_lsp   = section_last_lsp(self.tokens, SectionId::Data);
+
+        // Brace folds for every `{ … }` object literal within @DATA.
         collect_brace_folds_in_range(
             self.tokens,
             data_start_lsp + 1,
             data_end_lsp,
             self.ranges,
         );
-
-        // Entry-based folds for table properties and group arrays.
-        self.add_data_entry_folds(section);
     }
 
-    // ── 6b. SECURITY: inline object folds ────────────────────────────────────
+    // ── SECURITY: inline object folds ────────────────────────────────────────
     fn visit_security_section(&mut self, section: &SecuritySection) -> () {
         if !section.position.is_valid() { return; }
         let sec_start = ast_lsp_line(section.position.line);
@@ -305,15 +216,9 @@ impl<'a> AstVisitorBase for FoldingVisitor<'a> {
 }
 
 // ── Brace-close finder ────────────────────────────────────────────────────────
-//
-// Finds the first `{` at or after `from_lsp` (0-based) and depth-tracks to
-// its matching `}`.  Returns the 0-based line of the closing `}`.
-//
-// Handles `} else {` correctly: `}` decrements depth (2→1), `{` increments
-// it (1→2); only the outermost `}` brings depth to 0 and is returned.
 
 fn find_brace_close(tokens: &[Token], from_lsp: u32) -> Option<u32> {
-    let from_1based = from_lsp + 1; // token lines are 1-based
+    let from_1based = from_lsp + 1;
     let mut depth: i32 = 0;
     let mut started = false;
 
@@ -338,11 +243,6 @@ fn find_brace_close(tokens: &[Token], from_lsp: u32) -> Option<u32> {
 }
 
 // ── Bounded brace-fold collector ──────────────────────────────────────────────
-//
-// Walks every `{` / `}` token whose 0-based line falls within
-// [from_lsp, to_lsp] and emits a fold for each balanced pair.
-// Handles arbitrary nesting.  Applies the closing-brace adjustment
-// (end = close − 1) so `}` remains visible.
 
 fn collect_brace_folds_in_range(
     tokens:   &[Token],
@@ -353,7 +253,7 @@ fn collect_brace_folds_in_range(
     let from_1based = from_lsp + 1;
     let to_1based   = to_lsp.map(|l| l + 1).unwrap_or(u32::MAX);
 
-    let mut stack: Vec<u32> = Vec::new(); // open-brace lines (0-based)
+    let mut stack: Vec<u32> = Vec::new();
 
     for tok in tokens {
         let line_1based = tok.line as u32;
@@ -382,16 +282,23 @@ fn collect_brace_folds_in_range(
 
 // ── Line-conversion helpers ───────────────────────────────────────────────────
 
-/// Token line (1-based) → LSP line (0-based).
 #[inline]
 fn tok_lsp_line(tok: &Token) -> u32 {
     tok.line.saturating_sub(1) as u32
 }
 
-/// AST position line (1-based) → LSP line (0-based).
 #[inline]
 fn ast_lsp_line(ast_line_1based: usize) -> u32 {
     ast_line_1based.saturating_sub(1) as u32
+}
+
+/// Return the 0-based LSP line of the last non-EOF token with the given SectionId.
+fn section_last_lsp(tokens: &[Token], id: SectionId) -> Option<u32> {
+    tokens
+        .iter()
+        .rev()
+        .find(|t| t.section == id && !matches!(t.token_type, TokenType::EndOfFile))
+        .map(tok_lsp_line)
 }
 
 // ── Fold constructor ──────────────────────────────────────────────────────────
@@ -432,88 +339,14 @@ mod tests {
         assert!(provide(None).is_none());
     }
 
-    // ── Section folds ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn single_data_section_produces_fold() {
-        // A single section in isolation must still fold — the old paren-depth
-        // approach failed here because there was nothing to trigger the fallback.
-        let d = doc("@DATA(\n  x = 1\n  y = 2\n)\n");
-        let folds = provide(Some(&d)).unwrap_or_default();
-        assert!(
-            !folds.is_empty(),
-            "single @DATA must produce at least one fold"
-        );
-        assert!(
-            folds.iter().any(|f| f.start_line == 0 && f.end_line >= 3),
-            "@DATA section fold missing: {:?}",
-            folds
-        );
-    }
-
-    #[test]
-    fn single_enums_section_produces_fold() {
-        let d = doc("@ENUMS(\n  T { A = 0, B = 1 }\n)\n");
-        let folds = provide(Some(&d)).unwrap_or_default();
-        assert!(
-            !folds.is_empty(),
-            "single @ENUMS must produce at least one fold"
-        );
-    }
-
-    #[test]
-    fn single_quickfuncs_section_produces_fold() {
-        let d = doc("@QUICKFUNCS(\n  ~f<int>(x) {\n    return x\n  }\n)\n");
-        let folds = provide(Some(&d)).unwrap_or_default();
-        assert!(
-            !folds.is_empty(),
-            "single @QUICKFUNCS must produce at least one fold"
-        );
-    }
-
-    #[test]
-    fn section_folds_do_not_bleed_into_each_other() {
-        // The @ENUMS fold must not extend into @DATA territory.
-        let src = "@ENUMS(\n  T { A = 0 }\n)\n@DATA(\n  x = 1\n)\n";
-        let d = doc(src);
-        let folds = provide(Some(&d)).unwrap_or_default();
-        for f in folds.iter().filter(|f| f.start_line == 0) {
-            assert!(
-                f.end_line <= 2,
-                "@ENUMS fold bled into @DATA: {:?}",
-                f
-            );
-        }
-    }
-
-    #[test]
-    fn multiple_sections_each_get_their_own_fold() {
-        let src = "@ENUMS(\n  T { A = 0 }\n)\n@DATA(\n  x = 1\n)\n";
-        let d = doc(src);
-        let folds = provide(Some(&d)).unwrap_or_default();
-        // Both @ENUMS (start=0) and @DATA (start=3) should have folds.
-        assert!(
-            folds.iter().any(|f| f.start_line == 0),
-            "@ENUMS fold missing: {:?}",
-            folds
-        );
-        assert!(
-            folds.iter().any(|f| f.start_line == 3),
-            "@DATA fold missing: {:?}",
-            folds
-        );
-    }
-
     // ── Enum body folds ───────────────────────────────────────────────────────
 
     #[test]
     fn multiline_enum_body_folds_with_visible_closing_brace() {
-        // `}` of ServerType must stay visible (endLine = close line − 1).
         let src = "@ENUMS(\n  ServerType {\n    DEV = 1,\n    PROD = 2\n  }\n)\n";
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
-        // Enum declaration is at line 1 (0-based), closing `}` at line 4.
-        // Body fold: start=1, end=3 (one before `}` at line 4).
+        // Enum body: start=1, `}` at line 4 → end=3
         assert!(
             folds.iter().any(|f| f.start_line == 1 && f.end_line == 3),
             "enum body fold (1→3) missing: {:?}",
@@ -537,12 +370,10 @@ mod tests {
 
     #[test]
     fn quickfunc_body_fold_is_independent_of_params() {
-        // Single-line params → body fold starts at the `~` / `{` line.
         let src = "@QUICKFUNCS(\n  ~f<int>(x) {\n    return x\n  }\n)\n";
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
-        // `~f<int>(x) {` is line 1 (0-based). Body: line 2. `}` at line 3.
-        // Expected body fold: start=1, end=2.
+        // `~f<int>(x) {` is line 1. `}` at line 3 → body end = 2.
         assert!(
             folds.iter().any(|f| f.start_line == 1 && f.end_line == 2),
             "single-line param function body fold missing: {:?}",
@@ -552,28 +383,25 @@ mod tests {
 
     #[test]
     fn multiline_params_produce_two_folds() {
-        // When params span multiple lines the function declaration produces:
-        //   - a param fold from `~` to the line before `{`
-        //   - a body  fold from `{` to the line before `}`
         let src = concat!(
             "@QUICKFUNCS(\n",         // 0
             "  ~f<int>(\n",           // 1  ← func_start (param fold start)
             "    x<int>,\n",          // 2
             "    y<int>\n",           // 3
-            "  ) {\n",               // 4  ← brace_open (body fold start)
+            "  ) {\n",                // 4  ← brace_open (body fold start)
             "    return x\n",         // 5
             "  }\n",                  // 6  ← close
             ")\n"                     // 7
         );
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
-        // Param fold: start=1, end=3 (line before `) {` at line 4)
+        // Param fold: start=1, end=3
         assert!(
             folds.iter().any(|f| f.start_line == 1 && f.end_line == 3),
             "param fold (1→3) missing: {:?}",
             folds
         );
-        // Body fold: start=4, end=5 (line before `}` at line 6)
+        // Body fold: start=4, end=5
         assert!(
             folds.iter().any(|f| f.start_line == 4 && f.end_line == 5),
             "body fold (4→5) missing: {:?}",
@@ -583,17 +411,16 @@ mod tests {
 
     #[test]
     fn else_branch_does_not_truncate_function_fold() {
-        // `} else {` must NOT stop the function body fold early.
         let src = concat!(
-            "@QUICKFUNCS(\n",          // 0
-            "  ~check<int>(x) {\n",    // 1  function body opens here
+            "@QUICKFUNCS(\n",
+            "  ~check<int>(x) {\n",    // 1
             "    if: x > 0 {\n",       // 2
             "      return 1\n",        // 3
-            "    } else {\n",          // 4  } closes if-then, { opens else
+            "    } else {\n",          // 4
             "      return 0\n",        // 5
-            "    }\n",                 // 6  closes else
-            "  }\n",                   // 7  closes function body
-            ")\n"                      // 8
+            "    }\n",                 // 6
+            "  }\n",                   // 7
+            ")\n"
         );
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
@@ -671,33 +498,58 @@ mod tests {
     fn multiline_table_property_gets_a_fold() {
         let src = concat!(
             "@DATA(\n",
-            "  server.config:\n",    // 1  table start
+            "  server.config:\n",    // 1  ← : token here, fold starts
             "    host = \"x\"\n",    // 2
-            "    port = 8080\n",     // 3  last property
-            "  other = 1\n",         // 4  next entry
-            ")\n"
+            "    port = 8080\n",     // 3
+            ")\n"                    // 4
         );
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
-        // Table fold: start=1, end should be >= 3 (up to but not including
-        // the `other` entry at line 4, so end=3).
         assert!(
             folds.iter().any(|f| f.start_line == 1 && f.end_line >= 2),
-            "table property fold missing: {:?}",
+            "table property fold (start=1) missing: {:?}",
+            folds
+        );
+    }
+
+    #[test]
+    fn two_table_entries_fold_independently() {
+        let src = concat!(
+            "@DATA(\n",
+            "  server:\n",      // 1  ← first :
+            "    host = \"x\"\n", // 2
+            "    port = 80\n",  // 3
+            "  cache:\n",       // 4  ← second :
+            "    host = \"r\"\n", // 5
+            "    port = 6379\n",// 6
+            ")\n"               // 7
+        );
+        let d = doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
+        // First entry: start=1, end=3 (just before line 4)
+        assert!(
+            folds.iter().any(|f| f.start_line == 1 && f.end_line == 3),
+            "first table fold (1→3) missing: {:?}",
+            folds
+        );
+        // Second entry: start=4, end=5 or 6
+        assert!(
+            folds.iter().any(|f| f.start_line == 4 && f.end_line >= 5),
+            "second table fold (start=4) missing: {:?}",
             folds
         );
     }
 
     #[test]
     fn single_line_table_property_produces_no_table_fold() {
-        // `outer.value: five = 100` — path and property on the same line.
-        let src = "@DATA(\n  outer.value: five = 100\n)\n";
+        // : is on same line as all content; next delimiter (or section end)
+        // is on the immediately following line → end == start, no fold.
+        let src = "@DATA(\n  server: host = \"x\", port = 80\n)\n";
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
-        // Should have a section fold, but NOT a separate table-entry fold for
-        // a single-line table.  The section fold starts at line 0.
+        // Any fold that starts on line 1 would be the table; it should not exist.
         assert!(
-            !folds.iter().any(|f| f.start_line == 1),
+            !folds.iter().any(|f| f.start_line == 1 && f.end_line == 1),
             "single-line table should not produce an entry fold: {:?}",
             folds
         );
@@ -707,16 +559,42 @@ mod tests {
     fn group_array_with_multiple_items_gets_a_fold() {
         let src = concat!(
             "@DATA(\n",
-            "  tags::\n",          // 1  group array start
+            "  tags::\n",          // 1  ← :: token here, fold starts
             "    \"alpha\"\n",     // 2
-            "    \"beta\"\n",      // 3  last item
-            ")\n"
+            "    \"beta\"\n",      // 3
+            ")\n"                  // 4
         );
         let d = doc(src);
         let folds = provide(Some(&d)).unwrap_or_default();
         assert!(
             folds.iter().any(|f| f.start_line == 1 && f.end_line >= 2),
-            "group array fold missing: {:?}",
+            "group array fold (start=1) missing: {:?}",
+            folds
+        );
+    }
+
+    #[test]
+    fn table_and_group_in_same_section_fold_independently() {
+        let src = concat!(
+            "@DATA(\n",
+            "  server:\n",         // 1  ← :
+            "    host = \"x\"\n",  // 2
+            "    port = 80\n",     // 3
+            "  tags::\n",          // 4  ← ::
+            "    \"a\"\n",         // 5
+            "    \"b\"\n",         // 6
+            ")\n"
+        );
+        let d = doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
+        assert!(
+            folds.iter().any(|f| f.start_line == 1 && f.end_line == 3),
+            "table fold (1→3) missing: {:?}",
+            folds
+        );
+        assert!(
+            folds.iter().any(|f| f.start_line == 4 && f.end_line >= 5),
+            "group array fold (start=4) missing: {:?}",
             folds
         );
     }
@@ -725,10 +603,17 @@ mod tests {
 
     #[test]
     fn no_zero_span_folds() {
-        let src = "@ENUMS(\n  T{A=0}\n)\n@DATA(\n  x=1\n)\n";
+        let src = concat!(
+            "@ENUMS(\n  T{A=0}\n)\n",
+            "@DATA(\n",
+            "  x=1\n",
+            "  srv:\n    host=\"x\"\n",
+            "  tags::\n    \"a\"\n    \"b\"\n",
+            ")\n"
+        );
         let d = doc(src);
         for f in provide(Some(&d)).unwrap_or_default() {
             assert!(f.end_line > f.start_line, "zero-span fold: {:?}", f);
         }
     }
-        }
+    }

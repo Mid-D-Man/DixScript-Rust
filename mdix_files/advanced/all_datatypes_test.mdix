@@ -20,7 +20,9 @@
         regexVal<regex>,
         enumVal<enum>
     ) {
+
         return $"Received all {14} data types successfully";
+
     }
 
     ~testIntOperations<int> => global(a<int>, b<int>, c<int>) {
@@ -54,14 +56,14 @@
     }
 
     ~testArrayOperations<int> => global(arr<array>) {
-        let len<int> = arr.length();
+        let len = arr.length();
         let first = arr.first();
         let last = arr.last();
         return len + first + last;
     }
 
     ~testTupleOperations<int> => global(tup<tuple>) {
-        let len<int> = tup.length();
+        let len = tup.length();
         let first = tup.first();
         return len + first;
     }

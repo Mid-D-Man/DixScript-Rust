@@ -10,7 +10,7 @@
 @ENUMS(
     ServerType {DEVELOPMENT = 1,
      STAGING = 2,
-      PRODUCTION = 3 }
+      PRODUCTION = 3}
 )
 
 @QUICKFUNCS(
@@ -82,7 +82,7 @@
 
     // Test 3: Mixed types including enums
     server_name = "MainServer",
-    server_type<enum> = ServerType.PRODUCTION,
+    server_type = ServerType.PRODUCTION,
     server_port = 443,
     server_info = formatServerInfo(server_name, server_type, server_port),
 

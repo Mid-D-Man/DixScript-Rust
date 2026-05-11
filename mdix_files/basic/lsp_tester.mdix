@@ -1,3 +1,11 @@
+@CONFIG(
+  version -> "1.0.0"
+  author -> "name"
+  debug_mode -> "off"
+  error_handling -> "halt"
+  compatibility_mode -> "strict"
+  features -> "advanced"
+)
 
 @ENUMS(
     ServerType { DEVELOPMENT = 1, STAGING = 2, PRODUCTION = 3 }

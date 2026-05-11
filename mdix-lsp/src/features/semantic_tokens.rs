@@ -700,4 +700,4 @@ fn token_length(token: &Token) -> usize {
         }
     }
 }
-    }
+

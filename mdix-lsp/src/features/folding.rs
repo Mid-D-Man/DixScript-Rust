@@ -616,4 +616,4 @@ mod tests {
             assert!(f.end_line > f.start_line, "zero-span fold: {:?}", f);
         }
     }
-    }
+}

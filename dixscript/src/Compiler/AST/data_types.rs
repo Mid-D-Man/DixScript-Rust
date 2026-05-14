@@ -1,8 +1,10 @@
+// dixscript/src/Compiler/AST/data_types.rs
 
 /// All supported data types for DixScript
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DataType {
     Int,
+    Long,      // ← NEW: 64-bit integer, suffix L in source
     Float,
     Double,
     String,
@@ -18,29 +20,30 @@ pub enum DataType {
     Enum,
     Any,
     Function,
-    Range, // Not implemented (probably won't - we have array.range() built-in but im to lazy to deal with it)
+    Range,
 }
 
 impl std::fmt::Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            DataType::Int => "int",
-            DataType::Float => "float",
-            DataType::Double => "double",
-            DataType::String => "string",
-            DataType::Bool => "bool",
-            DataType::Array => "array",
-            DataType::Tuple => "tuple",
-            DataType::Hex => "hex",
-            DataType::Blob => "blob",
-            DataType::Regex => "regex",
-            DataType::Object => "object",
+            DataType::Int       => "int",
+            DataType::Long      => "long",
+            DataType::Float     => "float",
+            DataType::Double    => "double",
+            DataType::String    => "string",
+            DataType::Bool      => "bool",
+            DataType::Array     => "array",
+            DataType::Tuple     => "tuple",
+            DataType::Hex       => "hex",
+            DataType::Blob      => "blob",
+            DataType::Regex     => "regex",
+            DataType::Object    => "object",
             DataType::Timestamp => "timestamp",
-            DataType::Date => "date",
-            DataType::Enum => "enum",
-            DataType::Any => "any",
-            DataType::Function => "function",
-            DataType::Range => "range",
+            DataType::Date      => "date",
+            DataType::Enum      => "enum",
+            DataType::Any       => "any",
+            DataType::Function  => "function",
+            DataType::Range     => "range",
         };
         write!(f, "{}", s)
     }
@@ -57,9 +60,9 @@ pub enum ErrorHandlingStrategy {
 impl std::fmt::Display for ErrorHandlingStrategy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            ErrorHandlingStrategy::Halt => "halt",
+            ErrorHandlingStrategy::Halt     => "halt",
             ErrorHandlingStrategy::Continue => "continue",
-            ErrorHandlingStrategy::Recover => "recover",
+            ErrorHandlingStrategy::Recover  => "recover",
         };
         write!(f, "{}", s)
     }
@@ -76,16 +79,15 @@ pub enum CompatibilityMode {
 impl std::fmt::Display for CompatibilityMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            CompatibilityMode::Strict => "strict",
-            CompatibilityMode::BestEffort => "best_effort",
-            CompatibilityMode::Permissive => "permissive",
+            CompatibilityMode::Strict      => "strict",
+            CompatibilityMode::BestEffort  => "best_effort",
+            CompatibilityMode::Permissive  => "permissive",
         };
         write!(f, "{}", s)
     }
 }
 
 /// Debug modes for CONFIG section
-/// Ordered from least verbose to most verbose
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DebugMode {
     Off,
@@ -96,7 +98,7 @@ pub enum DebugMode {
 impl std::fmt::Display for DebugMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            DebugMode::Off => "off",
+            DebugMode::Off     => "off",
             DebugMode::Regular => "regular",
             DebugMode::Verbose => "verbose",
         };
@@ -117,9 +119,9 @@ impl std::fmt::Display for DLMModuleType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             DLMModuleType::DCompressor => "DCompressor",
-            DLMModuleType::DAuditor => "DAuditor",
-            DLMModuleType::DEncryptor => "DEncryptor",
-            DLMModuleType::ParseError => "ParseError",
+            DLMModuleType::DAuditor    => "DAuditor",
+            DLMModuleType::DEncryptor  => "DEncryptor",
+            DLMModuleType::ParseError  => "ParseError",
         };
         write!(f, "{}", s)
     }
@@ -143,15 +145,15 @@ pub enum DLMModuleSubtype {
 impl std::fmt::Display for DLMModuleSubtype {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            DLMModuleSubtype::Gzip => "gzip",
-            DLMModuleSubtype::Bzip2 => "bzip2",
-            DLMModuleSubtype::Lzma => "lzma",
-            DLMModuleSubtype::Diy => "diy",
-            DLMModuleSubtype::Enhanced => "enhanced",
-            DLMModuleSubtype::Xor => "xor",
-            DLMModuleSubtype::Aes128 => "aes128",
-            DLMModuleSubtype::Aes256 => "aes256",
-            DLMModuleSubtype::Chacha20 => "chacha20",
+            DLMModuleSubtype::Gzip       => "gzip",
+            DLMModuleSubtype::Bzip2      => "bzip2",
+            DLMModuleSubtype::Lzma       => "lzma",
+            DLMModuleSubtype::Diy        => "diy",
+            DLMModuleSubtype::Enhanced   => "enhanced",
+            DLMModuleSubtype::Xor        => "xor",
+            DLMModuleSubtype::Aes128     => "aes128",
+            DLMModuleSubtype::Aes256     => "aes256",
+            DLMModuleSubtype::Chacha20   => "chacha20",
             DLMModuleSubtype::ParseError => "ParseError",
         };
         write!(f, "{}", s)
@@ -161,16 +163,16 @@ impl std::fmt::Display for DLMModuleSubtype {
 /// Variable declaration types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeclarationType {
-    Let,   // let x = 5 (immutable by default)
-    Const, // const x = 5 (always immutable)
+    Let,
+    Const,
 }
 
 impl std::fmt::Display for DeclarationType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            DeclarationType::Let => "let",
+            DeclarationType::Let   => "let",
             DeclarationType::Const => "const",
         };
         write!(f, "{}", s)
     }
-}
+                }

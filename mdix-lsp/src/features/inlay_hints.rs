@@ -815,6 +815,7 @@ fn hint_to_dix(hint: &str) -> Option<DixType> {
 fn dix_to_hint(dt: DixType) -> Option<String> {
     match dt {
         DixType::Int       => Some("<int>".to_string()),
+        DixType::Long       => Some("<long>".to_string()),
         DixType::Float     => Some("<float>".to_string()),
         DixType::Double    => Some("<double>".to_string()),
         DixType::String    => Some("<string>".to_string()),

@@ -139,7 +139,8 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
         TokenType::HexColor(hex) => hover_hex_color(hex),
 
         // ── Numeric literals ───────────────────────────────────────────────
-        TokenType::Integer(i)            => Some(format!("**`{}`** — integer literal (`<int>`)", i)),
+        TokenType::Integer(i)            => Some(format!("**`{}`** — integer literal (32bit) (`<int>`)", i)),
+        TokenType::Long(i)            => Some(format!("**`{}`** — long literal (64 bit) (`<long>`)", i)),
         TokenType::Float(f)              => Some(format!("**`{}f`** — 32-bit float literal (`<float>`)", f)),
         TokenType::Double(d)             => Some(format!("**`{}`** — 64-bit double literal (`<double>`)\n\nStored as IEEE 754 `f64` — full precision.", d)),
         TokenType::ScientificNotation(d) => Some(format!("**`{:e}`** — scientific notation (`<double>`)\n\nStored as IEEE 754 `f64` — full precision.", d)),

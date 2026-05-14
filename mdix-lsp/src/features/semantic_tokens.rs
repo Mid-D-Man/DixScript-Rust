@@ -609,6 +609,7 @@ fn classify(token: &Token, state: &mut ClassifierState<'_>) -> Option<(u32, u32)
         | TokenType::Timestamp(_)        => Some((TT_EVENT, 0)),
 
         TokenType::Integer(_)
+        | TokenType::Long(_)
         | TokenType::Float(_)
         | TokenType::Double(_)
         | TokenType::ScientificNotation(_) => Some((TT_NUMBER, 0)),

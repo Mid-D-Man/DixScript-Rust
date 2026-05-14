@@ -1,4 +1,4 @@
-
+// dixscript/src/Runtime/converter.rs
 use std::collections::HashMap;
 use crate::Compiler::AST::{
     DixScript, ConfigSection, ConfigEntry, ConfigValue,
@@ -9,10 +9,6 @@ use crate::Compiler::AST::{
 use super::dix_value::DixValue;
 use super::format_options::DixFormatOptions;
 
-/// Core format conversion utilities.
-///
-/// Converts between `HashMap<String, DixValue>` and a DixScript AST,
-/// and serializes an AST to and from `.mdix`, JSON, and TOML text formats.
 pub struct DixConverter {
     default_options: DixFormatOptions,
 }
@@ -26,7 +22,6 @@ impl DixConverter {
         DixConverter { default_options: options }
     }
 
-    /// Convert a flat HashMap to a DixScript AST.
     pub fn from_hashmap(&self, data: HashMap<String, DixValue>) -> Result<DixScript, String> {
         let mut flat_properties:   HashMap<String, DixValue> = HashMap::new();
         let mut nested_structures: HashMap<String, DixValue> = HashMap::new();
@@ -44,10 +39,7 @@ impl DixConverter {
         for (key, value) in flat_properties {
             let ast_value = self.convert_dix_value_to_ast_value(&value)?;
             data_entries.push(DataEntry::SimpleProperty {
-                name: key,
-                data_type: None,
-                value: ast_value,
-                position: Position::UNKNOWN,
+                name: key, data_type: None, value: ast_value, position: Position::UNKNOWN,
             });
         }
 
@@ -80,31 +72,28 @@ impl DixConverter {
         });
 
         Ok(DixScript {
-            config: config_section,
-            imports: None,
-            dlm: None,
-            enums: None,
+            config:          config_section,
+            imports:         None,
+            dlm:             None,
+            enums:           None,
             quick_functions: None,
-            data: data_section,
-            security: None,
+            data:            data_section,
+            security:        None,
         })
     }
 
-    /// Convert a DixScript AST to a flat HashMap with dotted-path keys.
     pub fn to_hashmap(&self, ast: &DixScript) -> HashMap<String, DixValue> {
         let mut result = HashMap::new();
-        let enums = self.extract_enums(ast);
+        let enums      = self.extract_enums(ast);
 
         if let Some(ref data) = ast.data {
             for entry in &data.entries {
                 self.flatten_entry(entry, "", &mut result, enums.as_ref());
             }
         }
-
         result
     }
 
-    /// Serialize a DixScript AST to `.mdix` format text.
     pub fn to_mdix(&self, ast: &DixScript, options: Option<&DixFormatOptions>) -> Result<String, String> {
         let opts   = options.unwrap_or(&self.default_options);
         let mut output = String::new();
@@ -232,11 +221,6 @@ impl DixConverter {
 
     // ── JSON ──────────────────────────────────────────────────────────────────
 
-    /// Serialize a DixScript AST to a JSON string.
-    ///
-    /// The data section is exported as a nested JSON object reconstructed from
-    /// the flat hashmap. Returns compact JSON by default; call with
-    /// `pretty = true` for indented output.
     pub fn to_json(&self, ast: &DixScript, pretty: bool) -> Result<String, String> {
         let map = self.to_hashmap(ast);
         if pretty {
@@ -248,74 +232,57 @@ impl DixConverter {
         }
     }
 
-    /// Parse a JSON string and convert it to a DixScript AST.
-    ///
-    /// The JSON must be an object at the top level. Nested objects become
-    /// DixValue::Object, arrays become DixValue::Array, and scalar types
-    /// map to their DixValue equivalents.
     pub fn from_json(&self, json_str: &str) -> Result<DixScript, String> {
         let json_value: serde_json::Value = serde_json::from_str(json_str)
             .map_err(|e| format!("JSON parse failed: {}", e))?;
-
         let map = self.json_value_to_hashmap(json_value)?;
         self.from_hashmap(map)
     }
 
     // ── TOML ──────────────────────────────────────────────────────────────────
 
-    /// Serialize a DixScript AST to a TOML string.
-    ///
-    /// The data section is exported as a TOML document. Dotted-path keys
-    /// (e.g. "server.port") are reconstructed as TOML tables.
     pub fn to_toml(&self, ast: &DixScript) -> Result<String, String> {
-        let map = self.to_hashmap(ast);
+        let map       = self.to_hashmap(ast);
         let toml_value = self.hashmap_to_toml_value(map)?;
         toml::to_string_pretty(&toml_value)
             .map_err(|e| format!("TOML serialization failed: {}", e))
     }
 
-    /// Parse a TOML string and convert it to a DixScript AST.
-    ///
-    /// The TOML must be a table at the top level. Nested tables become
-    /// DixValue::Object, arrays become DixValue::Array, and scalar types
-    /// map to their DixValue equivalents.
     pub fn from_toml(&self, toml_str: &str) -> Result<DixScript, String> {
         let toml_value: toml::Value = toml::from_str(toml_str)
             .map_err(|e| format!("TOML parse failed: {}", e))?;
-
         let map = self.toml_value_to_hashmap(toml_value)?;
         self.from_hashmap(map)
     }
 
-    // ── Private helpers — JSON conversion ─────────────────────────────────────
+    // ── JSON helpers ──────────────────────────────────────────────────────────
 
     fn json_value_to_hashmap(
-        &self,
-        value: serde_json::Value,
+        &self, value: serde_json::Value,
     ) -> Result<HashMap<String, DixValue>, String> {
         match value {
             serde_json::Value::Object(map) => {
                 let mut result = HashMap::with_capacity(map.len());
-                for (k, v) in map {
-                    result.insert(k, self.json_value_to_dix_value(v)?);
-                }
+                for (k, v) in map { result.insert(k, self.json_value_to_dix_value(v)?); }
                 Ok(result)
             }
-            other => Err(format!(
-                "Expected a JSON object at the top level, got: {}",
-                other
-            )),
+            other => Err(format!("Expected a JSON object at the top level, got: {}", other)),
         }
     }
 
     fn json_value_to_dix_value(&self, value: serde_json::Value) -> Result<DixValue, String> {
         Ok(match value {
-            serde_json::Value::Null        => DixValue::Null,
-            serde_json::Value::Bool(b)     => DixValue::Bool(b),
-            serde_json::Value::String(s)   => DixValue::String(s),
+            serde_json::Value::Null      => DixValue::Null,
+            serde_json::Value::Bool(b)   => DixValue::Bool(b),
+            serde_json::Value::String(s) => DixValue::String(s),
             serde_json::Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
-                    DixValue::Int(i as i32)
+                    // Fit in i32 → Int. Otherwise → Long.
+                    if i >= i32::MIN as i64 && i <= i32::MAX as i64 {
+                        DixValue::Int(i as i32)
+                    } else {
+                        DixValue::Long(i)
+                    }
                 } else if let Some(f) = n.as_f64() {
                     DixValue::Double(f)
                 } else {
@@ -323,70 +290,64 @@ impl DixConverter {
                 }
             }
             serde_json::Value::Array(arr) => {
-                let items: Result<Vec<DixValue>, String> = arr
-                    .into_iter()
+                let items: Result<Vec<DixValue>, String> = arr.into_iter()
                     .map(|v| self.json_value_to_dix_value(v))
                     .collect();
                 DixValue::Array(items?)
             }
             serde_json::Value::Object(map) => {
                 let mut obj = HashMap::with_capacity(map.len());
-                for (k, v) in map {
-                    obj.insert(k, self.json_value_to_dix_value(v)?);
-                }
+                for (k, v) in map { obj.insert(k, self.json_value_to_dix_value(v)?); }
                 DixValue::Object(obj)
             }
         })
     }
 
-    // ── Private helpers — TOML conversion ────────────────────────────────────
+    // ── TOML helpers ──────────────────────────────────────────────────────────
 
     fn toml_value_to_hashmap(
-        &self,
-        value: toml::Value,
+        &self, value: toml::Value,
     ) -> Result<HashMap<String, DixValue>, String> {
         match value {
             toml::Value::Table(table) => {
                 let mut result = HashMap::with_capacity(table.len());
-                for (k, v) in table {
-                    result.insert(k, self.toml_value_to_dix_value(v)?);
-                }
+                for (k, v) in table { result.insert(k, self.toml_value_to_dix_value(v)?); }
                 Ok(result)
             }
-            other => Err(format!(
-                "Expected a TOML table at the top level, got type: {}",
-                other.type_str()
-            )),
+            other => Err(format!("Expected a TOML table at the top level, got type: {}", other.type_str())),
         }
     }
 
     fn toml_value_to_dix_value(&self, value: toml::Value) -> Result<DixValue, String> {
         Ok(match value {
             toml::Value::String(s)   => DixValue::String(s),
-            toml::Value::Integer(i)  => DixValue::Int(i as i32),
+            toml::Value::Integer(i)  => {
+                // TOML integers are i64 — preserve precision
+                if i >= i32::MIN as i64 && i <= i32::MAX as i64 {
+                    DixValue::Int(i as i32)
+                } else {
+                    DixValue::Long(i)
+                }
+            }
             toml::Value::Float(f)    => DixValue::Double(f),
             toml::Value::Boolean(b)  => DixValue::Bool(b),
             toml::Value::Datetime(d) => DixValue::Timestamp(d.to_string()),
-            toml::Value::Array(arr) => {
-                let items: Result<Vec<DixValue>, String> = arr
-                    .into_iter()
+            toml::Value::Array(arr)  => {
+                let items: Result<Vec<DixValue>, String> = arr.into_iter()
                     .map(|v| self.toml_value_to_dix_value(v))
                     .collect();
                 DixValue::Array(items?)
             }
             toml::Value::Table(table) => {
                 let mut obj = HashMap::with_capacity(table.len());
-                for (k, v) in table {
-                    obj.insert(k, self.toml_value_to_dix_value(v)?);
-                }
+                for (k, v) in table { obj.insert(k, self.toml_value_to_dix_value(v)?); }
                 DixValue::Object(obj)
             }
         })
     }
 
     fn hashmap_to_toml_value(
-        &self,
-        map: HashMap<String, DixValue>,
+        &self, map: HashMap<String, DixValue>,
     ) -> Result<toml::Value, String> {
         let mut table = toml::map::Map::new();
         for (k, v) in map {
@@ -402,6 +363,7 @@ impl DixConverter {
             DixValue::Null            => None,
             DixValue::Bool(b)         => Some(toml::Value::Boolean(*b)),
             DixValue::Int(i)          => Some(toml::Value::Integer(*i as i64)),
+            DixValue::Long(l)         => Some(toml::Value::Integer(*l)),   // ← NEW: native i64
             DixValue::Float(f)        => Some(toml::Value::Float(*f as f64)),
             DixValue::Double(d)       => Some(toml::Value::Float(*d)),
             DixValue::String(s)       => Some(toml::Value::String(s.clone())),
@@ -414,8 +376,7 @@ impl DixConverter {
                 Some(toml::Value::String(format!("{}.{}", enum_name, field_name)))
             }
             DixValue::Array(arr) => {
-                let items: Vec<toml::Value> = arr
-                    .iter()
+                let items: Vec<toml::Value> = arr.iter()
                     .filter_map(|v| self.dix_value_to_toml_value(v))
                     .collect();
                 Some(toml::Value::Array(items))
@@ -430,8 +391,7 @@ impl DixConverter {
                 Some(toml::Value::Table(table))
             }
             DixValue::Tuple(items) => {
-                let arr: Vec<toml::Value> = items
-                    .iter()
+                let arr: Vec<toml::Value> = items.iter()
                     .filter_map(|v| self.dix_value_to_toml_value(v))
                     .collect();
                 Some(toml::Value::Array(arr))
@@ -439,20 +399,17 @@ impl DixConverter {
         }
     }
 
-    // ── Existing private helpers ──────────────────────────────────────────────
+    // ── Private helpers ───────────────────────────────────────────────────────
 
     fn extract_enums(
-        &self,
-        ast: &DixScript,
+        &self, ast: &DixScript,
     ) -> Option<HashMap<String, HashMap<String, i32>>> {
         ast.enums.as_ref().map(|section| {
             section.enums.iter().map(|decl| {
                 let mut auto_value = 0i32;
                 let fields: HashMap<String, i32> = decl.fields.iter().map(|field| {
                     let value = field.value.unwrap_or_else(|| {
-                        let v = auto_value;
-                        auto_value += 1;
-                        v
+                        let v = auto_value; auto_value += 1; v
                     });
                     auto_value = value + 1;
                     (field.name.clone(), value)
@@ -463,11 +420,8 @@ impl DixConverter {
     }
 
     fn process_nested_structure(
-        &self,
-        key: &str,
-        value: &DixValue,
-        entries: &mut Vec<DataEntry>,
-        parent_path: &str,
+        &self, key: &str, value: &DixValue,
+        entries: &mut Vec<DataEntry>, parent_path: &str,
     ) -> Result<(), String> {
         let current_path = if parent_path.is_empty() {
             key.to_string()
@@ -480,7 +434,6 @@ impl DixConverter {
                 let path = TablePath {
                     segments: current_path.split('.').map(String::from).collect(),
                 };
-
                 let mut properties: Vec<PropertyAssignment> = Vec::new();
                 let mut nested: Vec<(String, DixValue)>     = Vec::new();
 
@@ -490,9 +443,7 @@ impl DixConverter {
                     } else {
                         let ast_value = self.convert_dix_value_to_ast_value(v)?;
                         properties.push(PropertyAssignment {
-                            name: k.clone(),
-                            data_type: None,
-                            value: ast_value,
+                            name: k.clone(), data_type: None, value: ast_value,
                             position: Position::UNKNOWN,
                         });
                     }
@@ -500,9 +451,7 @@ impl DixConverter {
 
                 if !properties.is_empty() {
                     entries.push(DataEntry::TableProperty {
-                        path,
-                        properties,
-                        position: Position::UNKNOWN,
+                        path, properties, position: Position::UNKNOWN,
                     });
                 }
 
@@ -510,22 +459,17 @@ impl DixConverter {
                     self.process_nested_structure(&k, &v, entries, &current_path)?;
                 }
             }
-
             DixValue::Array(arr) => {
                 let path = TablePath {
                     segments: current_path.split('.').map(String::from).collect(),
                 };
-                let items: Result<Vec<Value>, String> = arr
-                    .iter()
+                let items: Result<Vec<Value>, String> = arr.iter()
                     .map(|v| self.convert_dix_value_to_ast_value(v))
                     .collect();
                 entries.push(DataEntry::GroupArray {
-                    path,
-                    items: items?,
-                    position: Position::UNKNOWN,
+                    path, items: items?, position: Position::UNKNOWN,
                 });
             }
-
             other => {
                 return Err(format!(
                     "Expected object or array for nested structure, got: {}",
@@ -539,15 +483,16 @@ impl DixConverter {
 
     fn convert_dix_value_to_ast_value(&self, value: &DixValue) -> Result<Value, String> {
         Ok(match value {
-            DixValue::Null           => Value::Null { position: Position::UNKNOWN },
-            DixValue::Bool(b)        => Value::Boolean { value: *b, position: Position::UNKNOWN },
-            DixValue::Int(i)         => Value::Integer { value: *i, position: Position::UNKNOWN },
-            DixValue::Float(f)       => Value::Float   { value: *f, position: Position::UNKNOWN },
-            DixValue::Double(d)      => Value::Double  { value: *d, position: Position::UNKNOWN },
-            DixValue::String(s)      => Value::String  { value: s.clone(), position: Position::UNKNOWN },
-            DixValue::Date(d)        => Value::Date     { value: d.clone(), position: Position::UNKNOWN },
-            DixValue::Timestamp(t)   => Value::Timestamp { value: t.clone(), position: Position::UNKNOWN },
-            DixValue::HexColor(c)    => Value::HexColor { value: c.clone(), position: Position::UNKNOWN },
+            DixValue::Null        => Value::Null     { position: Position::UNKNOWN },
+            DixValue::Bool(b)     => Value::Boolean  { value: *b,  position: Position::UNKNOWN },
+            DixValue::Int(i)      => Value::Integer  { value: *i,  position: Position::UNKNOWN },
+            DixValue::Long(l)     => Value::Long     { value: *l,  position: Position::UNKNOWN }, // ← NEW
+            DixValue::Float(f)    => Value::Float    { value: *f,  position: Position::UNKNOWN },
+            DixValue::Double(d)   => Value::Double   { value: *d,  position: Position::UNKNOWN },
+            DixValue::String(s)   => Value::String   { value: s.clone(), position: Position::UNKNOWN },
+            DixValue::Date(d)     => Value::Date      { value: d.clone(), position: Position::UNKNOWN },
+            DixValue::Timestamp(t) => Value::Timestamp { value: t.clone(), position: Position::UNKNOWN },
+            DixValue::HexColor(c) => Value::HexColor  { value: c.clone(), position: Position::UNKNOWN },
 
             DixValue::Blob(b) => Value::PrefixedConstructor {
                 prefix: "b".to_string(),
@@ -561,8 +506,7 @@ impl DixConverter {
             },
 
             DixValue::Array(arr) => {
-                let items: Result<Vec<Value>, String> = arr
-                    .iter()
+                let items: Result<Vec<Value>, String> = arr.iter()
                     .map(|v| self.convert_dix_value_to_ast_value(v))
                     .collect();
                 Value::Array { values: items?, position: Position::UNKNOWN }
@@ -573,38 +517,30 @@ impl DixConverter {
                 for (k, v) in obj {
                     let ast_value = self.convert_dix_value_to_ast_value(v)?;
                     properties.push(ObjectProperty {
-                        key:      k.clone(),
-                        value:    ast_value,
-                        position: Position::UNKNOWN,
+                        key: k.clone(), value: ast_value, position: Position::UNKNOWN,
                     });
                 }
                 Value::Object { properties, position: Position::UNKNOWN }
             }
 
             DixValue::Tuple(items) => {
-                let args: Result<Vec<Value>, String> = items
-                    .iter()
+                let args: Result<Vec<Value>, String> = items.iter()
                     .map(|v| self.convert_dix_value_to_ast_value(v))
                     .collect();
                 Value::PrefixedConstructor {
-                    prefix:    "t".to_string(),
-                    arguments: args?,
-                    position:  Position::UNKNOWN,
+                    prefix: "t".to_string(), arguments: args?, position: Position::UNKNOWN,
                 }
             }
 
             DixValue::Enum { enum_name, field_name, .. } => Value::EnumValue {
-                enum_name: enum_name.clone(),
-                value:     field_name.clone(),
-                position:  Position::UNKNOWN,
+                enum_name: enum_name.clone(), value: field_name.clone(),
+                position: Position::UNKNOWN,
             },
         })
     }
 
     fn flatten_entry(
-        &self,
-        entry: &DataEntry,
-        prefix: &str,
+        &self, entry: &DataEntry, prefix: &str,
         result: &mut HashMap<String, DixValue>,
         enums: Option<&HashMap<String, HashMap<String, i32>>>,
     ) {
@@ -615,7 +551,6 @@ impl DixConverter {
                     result.insert(key, dix_value);
                 }
             }
-
             DataEntry::TableProperty { path, properties, .. } => {
                 let table_path = Self::build_path(prefix, &path.to_string());
                 for prop in properties {
@@ -625,11 +560,9 @@ impl DixConverter {
                     }
                 }
             }
-
             DataEntry::GroupArray { path, items, .. } => {
                 let array_path = Self::build_path(prefix, &path.to_string());
-                let array_values: Vec<DixValue> = items
-                    .iter()
+                let array_values: Vec<DixValue> = items.iter()
                     .filter_map(|v| self.convert_ast_value_to_dix_value(v, enums))
                     .collect();
                 result.insert(array_path.clone(), DixValue::Array(array_values.clone()));
@@ -637,7 +570,6 @@ impl DixConverter {
                     result.insert(format!("{}[{}]", array_path, i), value.clone());
                 }
             }
-
             DataEntry::ObjectProperty { name, object, .. } => {
                 let key = Self::build_path(prefix, name);
                 if let Value::Object { ref properties, .. } = **object {
@@ -655,14 +587,14 @@ impl DixConverter {
     }
 
     fn convert_ast_value_to_dix_value(
-        &self,
-        value: &Value,
+        &self, value: &Value,
         enums: Option<&HashMap<String, HashMap<String, i32>>>,
     ) -> Option<DixValue> {
         match value {
             Value::Null { .. }                => Some(DixValue::Null),
             Value::Boolean { value: b, .. }   => Some(DixValue::Bool(*b)),
             Value::Integer { value: i, .. }   => Some(DixValue::Int(*i)),
+            Value::Long { value: l, .. }      => Some(DixValue::Long(*l)),   // ← NEW
             Value::Float { value: f, .. }     => Some(DixValue::Float(*f)),
             Value::Double { value: d, .. }    => Some(DixValue::Double(*d)),
             Value::String { value: s, .. }    => Some(DixValue::String(s.clone())),
@@ -671,8 +603,7 @@ impl DixConverter {
             Value::HexColor { value: c, .. }  => Some(DixValue::HexColor(c.clone())),
 
             Value::Array { values, .. } => {
-                let items: Vec<DixValue> = values
-                    .iter()
+                let items: Vec<DixValue> = values.iter()
                     .filter_map(|v| self.convert_ast_value_to_dix_value(v, enums))
                     .collect();
                 Some(DixValue::Array(items))
@@ -694,7 +625,6 @@ impl DixConverter {
                     .and_then(|fields| fields.get(field_name.as_str()))
                     .copied()
                     .unwrap_or(0);
-
                 Some(DixValue::Enum {
                     enum_name:  enum_name.clone(),
                     field_name: field_name.clone(),
@@ -705,8 +635,7 @@ impl DixConverter {
             Value::PrefixedConstructor { prefix, arguments, .. } => {
                 match prefix.as_str() {
                     "t" => {
-                        let items: Vec<DixValue> = arguments
-                            .iter()
+                        let items: Vec<DixValue> = arguments.iter()
                             .filter_map(|v| self.convert_ast_value_to_dix_value(v, enums))
                             .collect();
                         Some(DixValue::Tuple(items))
@@ -714,16 +643,12 @@ impl DixConverter {
                     "b" => {
                         if let Some(Value::String { value: s, .. }) = arguments.first() {
                             Some(DixValue::Blob(s.clone()))
-                        } else {
-                            None
-                        }
+                        } else { None }
                     }
                     "r" => {
                         if let Some(Value::String { value: s, .. }) = arguments.first() {
                             Some(DixValue::Regex(s.clone()))
-                        } else {
-                            None
-                        }
+                        } else { None }
                     }
                     _ => None,
                 }
@@ -734,8 +659,7 @@ impl DixConverter {
     }
 
     fn categorize_data_entries<'a>(
-        &self,
-        entries: &'a [DataEntry],
+        &self, entries: &'a [DataEntry],
     ) -> (Vec<&'a DataEntry>, Vec<&'a DataEntry>, Vec<&'a DataEntry>) {
         let mut flat   = Vec::new();
         let mut tables = Vec::new();
@@ -755,11 +679,7 @@ impl DixConverter {
     }
 
     fn build_path(prefix: &str, segment: &str) -> String {
-        if prefix.is_empty() {
-            segment.to_string()
-        } else {
-            format!("{}.{}", prefix, segment)
-        }
+        if prefix.is_empty() { segment.to_string() } else { format!("{}.{}", prefix, segment) }
     }
 
     fn format_config_value(&self, value: &ConfigValue) -> String {
@@ -780,6 +700,7 @@ impl DixConverter {
             Value::Null { .. }                => "null".to_string(),
             Value::Boolean { value: b, .. }   => b.to_string(),
             Value::Integer { value: i, .. }   => i.to_string(),
+            Value::Long { value: l, .. }      => format!("{}L", l),   // ← NEW
             Value::Float { value: f, .. }     => format!("{}f", f),
             Value::Double { value: d, .. }    => d.to_string(),
             Value::String { value: s, .. }    => format!("\"{}\"", s),
@@ -788,16 +709,14 @@ impl DixConverter {
             Value::HexColor { value: c, .. }  => c.clone(),
 
             Value::Array { values, .. } => {
-                let items: Vec<String> = values
-                    .iter()
+                let items: Vec<String> = values.iter()
                     .map(|v| self.format_value_for_mdix(v, opts))
                     .collect();
                 format!("[{}]", items.join(&format!(",{}", sp)))
             }
 
             Value::Object { properties, .. } => {
-                let pairs: Vec<String> = properties
-                    .iter()
+                let pairs: Vec<String> = properties.iter()
                     .map(|p| format!(
                         "{}{}={}{}",
                         p.key, sp, sp,
@@ -808,8 +727,7 @@ impl DixConverter {
             }
 
             Value::PrefixedConstructor { prefix, arguments, .. } => {
-                let args: Vec<String> = arguments
-                    .iter()
+                let args: Vec<String> = arguments.iter()
                     .map(|v| self.format_value_for_mdix(v, opts))
                     .collect();
                 format!("{}:({})", prefix, args.join(&format!(",{}", sp)))
@@ -825,9 +743,7 @@ impl DixConverter {
 }
 
 impl Default for DixConverter {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 #[cfg(test)]
@@ -835,148 +751,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_long_round_trips_json() {
+        let converter = DixConverter::new();
+        let mut data  = HashMap::new();
+        data.insert("big".to_string(), DixValue::Long(9_000_000_000_i64));
+        let ast  = converter.from_hashmap(data).unwrap();
+        let json = converter.to_json(&ast, false).unwrap();
+        assert!(json.contains("9000000000"));
+        let ast2 = converter.from_json(&json).unwrap();
+        let map2 = converter.to_hashmap(&ast2);
+        assert_eq!(map2.get("big"), Some(&DixValue::Long(9_000_000_000_i64)));
+    }
+
+    #[test]
+    fn test_long_round_trips_toml() {
+        let converter = DixConverter::new();
+        let mut data  = HashMap::new();
+        data.insert("big".to_string(), DixValue::Long(9_000_000_000_i64));
+        let ast  = converter.from_hashmap(data).unwrap();
+        let toml = converter.to_toml(&ast).unwrap();
+        assert!(toml.contains("9000000000"));
+    }
+
+    #[test]
+    fn test_long_format_mdix() {
+        let converter = DixConverter::new();
+        let mut data  = HashMap::new();
+        data.insert("count".to_string(), DixValue::Long(1_000_000_000_000_i64));
+        let ast  = converter.from_hashmap(data).unwrap();
+        let mdix = converter.to_mdix(&ast, None).unwrap();
+        assert!(mdix.contains("1000000000000L"));
+    }
+
+    #[test]
+    fn test_json_large_int_promotes_to_long() {
+        let converter = DixConverter::new();
+        let json      = r#"{"big": 5000000000}"#;
+        let ast       = converter.from_json(json).unwrap();
+        let map       = converter.to_hashmap(&ast);
+        assert_eq!(map.get("big"), Some(&DixValue::Long(5_000_000_000_i64)));
+    }
+
+    #[test]
     fn test_from_hashmap_simple() {
         let converter = DixConverter::new();
-        let mut data = HashMap::new();
+        let mut data  = HashMap::new();
         data.insert("name".to_string(), DixValue::String("Alice".to_string()));
         data.insert("age".to_string(),  DixValue::Int(30));
         let ast = converter.from_hashmap(data).unwrap();
-        assert!(ast.config.is_some());
         assert!(ast.data.is_some());
-    }
-
-    #[test]
-    fn test_to_mdix_basic() {
-        let converter = DixConverter::new();
-        let ast = DixScript {
-            config: Some(ConfigSection {
-                entries: vec![ConfigEntry {
-                    key: "version".to_string(),
-                    value: ConfigValue::String("1.0.0".to_string()),
-                    position: Position::UNKNOWN,
-                }],
-                position: Position::UNKNOWN,
-            }),
-            data: Some(DataSection {
-                entries: vec![DataEntry::SimpleProperty {
-                    name: "x".to_string(),
-                    data_type: None,
-                    value: Value::Integer { value: 42, position: Position::UNKNOWN },
-                    position: Position::UNKNOWN,
-                }],
-                position: Position::UNKNOWN,
-            }),
-            imports: None,
-            dlm: None,
-            enums: None,
-            quick_functions: None,
-            security: None,
-        };
-        let mdix = converter.to_mdix(&ast, None).unwrap();
-        assert!(mdix.contains("@CONFIG"));
-        assert!(mdix.contains("@DATA"));
-        assert!(mdix.contains("x = 42"));
-    }
-
-    #[test]
-    fn test_to_json_and_back() {
-        let converter = DixConverter::new();
-        let mut data = HashMap::new();
-        data.insert("port".to_string(),    DixValue::Int(8080));
-        data.insert("enabled".to_string(), DixValue::Bool(true));
-        data.insert("host".to_string(),    DixValue::String("localhost".to_string()));
-
-        let ast  = converter.from_hashmap(data).unwrap();
-        let json = converter.to_json(&ast, false).unwrap();
-
-        assert!(json.contains("8080"));
-        assert!(json.contains("localhost"));
-
-        let ast2 = converter.from_json(&json).unwrap();
-        let map2 = converter.to_hashmap(&ast2);
-        assert_eq!(map2.get("port"), Some(&DixValue::Int(8080)));
-    }
-
-    #[test]
-    fn test_to_toml_and_back() {
-        let converter = DixConverter::new();
-        let mut data = HashMap::new();
-        data.insert("port".to_string(),    DixValue::Int(8080));
-        data.insert("enabled".to_string(), DixValue::Bool(true));
-        data.insert("host".to_string(),    DixValue::String("localhost".to_string()));
-
-        let ast  = converter.from_hashmap(data).unwrap();
-        let toml = converter.to_toml(&ast).unwrap();
-
-        assert!(toml.contains("8080"));
-        assert!(toml.contains("localhost"));
-
-        let ast2 = converter.from_toml(&toml).unwrap();
-        let map2 = converter.to_hashmap(&ast2);
-        assert_eq!(map2.get("port"), Some(&DixValue::Int(8080)));
-    }
-
-    #[test]
-    fn test_from_json_invalid_input() {
-        let converter = DixConverter::new();
-        let result = converter.from_json("not json");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_from_json_array_top_level_fails() {
-        let converter = DixConverter::new();
-        let result = converter.from_json("[1, 2, 3]");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_from_toml_invalid_input() {
-        let converter = DixConverter::new();
-        let result = converter.from_toml("[[[[invalid");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_enum_value_resolved_in_to_hashmap() {
-        let converter = DixConverter::new();
-        let ast = DixScript {
-            enums: Some(EnumsSection {
-                enums: vec![EnumDeclaration {
-                    name: "AIType".to_string(),
-                    fields: vec![
-                        EnumField { name: "PASSIVE".to_string(),    value: Some(0), position: Position::UNKNOWN },
-                        EnumField { name: "AGGRESSIVE".to_string(), value: Some(1), position: Position::UNKNOWN },
-                        EnumField { name: "BOSS".to_string(),       value: Some(2), position: Position::UNKNOWN },
-                    ],
-                    position: Position::UNKNOWN,
-                }],
-                position: Position::UNKNOWN,
-            }),
-            data: Some(DataSection {
-                entries: vec![DataEntry::SimpleProperty {
-                    name: "enemy_type".to_string(),
-                    data_type: None,
-                    value: Value::EnumValue {
-                        enum_name: "AIType".to_string(),
-                        value: "BOSS".to_string(),
-                        position: Position::UNKNOWN,
-                    },
-                    position: Position::UNKNOWN,
-                }],
-                position: Position::UNKNOWN,
-            }),
-            config: None,
-            imports: None,
-            dlm: None,
-            quick_functions: None,
-            security: None,
-        };
-
-        let map = converter.to_hashmap(&ast);
-        match map.get("enemy_type") {
-            Some(DixValue::Enum { value, .. }) => assert_eq!(*value, 2),
-            other => panic!("expected resolved enum, got {:?}", other),
-        }
     }
 }

@@ -369,6 +369,23 @@ impl DixValue {
         }
     }
 
+    /// Returns `(mime_type, byte_length, raw_bytes)` for a Blob value.
+    ///
+    /// Blobs in DixScript are stored as raw base64 without an embedded MIME
+    /// header, so `mime_type` is always `"application/octet-stream"`.
+    /// Call `as_blob_base64()` if you only need the encoded string.
+    pub fn get_blob_metadata(&self) -> Result<(String, usize, Vec<u8>), String> {
+        match &self.value {
+            ValueData::Blob(b) => {
+                let bytes = base64::decode(b)
+                    .map_err(|e| format!("Failed to decode blob: {}", e))?;
+                let size = bytes.len();
+                Ok(("application/octet-stream".to_string(), size, bytes))
+            }
+            _ => Err(format!("Cannot get blob metadata from {:?}", self.dix_type)),
+        }
+    }
+
     pub fn deep_clone(&self) -> DixValue { self.clone() }
 }
 
@@ -429,7 +446,6 @@ mod tests {
     #[test]
     fn test_long_as_int_truncates() {
         let v = DixValue::from_long(i64::MAX);
-        // truncation is expected behaviour — callers should check the type first
         let _ = v.as_int(); // just verify no panic
     }
 
@@ -462,5 +478,15 @@ mod tests {
     fn test_display_long() {
         let v = DixValue::from_long(42_i64);
         assert_eq!(v.to_string(), "42L");
+    }
+
+    #[test]
+    fn test_get_blob_metadata() {
+        // base64 of "hello"
+        let blob = DixValue::from_blob("aGVsbG8=".to_string()).unwrap();
+        let (mime, size, bytes) = blob.get_blob_metadata().unwrap();
+        assert_eq!(mime, "application/octet-stream");
+        assert_eq!(size, 5);
+        assert_eq!(bytes, b"hello");
     }
 }

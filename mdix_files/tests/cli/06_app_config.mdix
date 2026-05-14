@@ -26,6 +26,8 @@
 )
 
 @SECURITY(
-  encryption -> { mode = "keyfile", algorithm = "aes256-gcm" }
+  encryption -> {
+   mode = "keyfile",
+   algorithm = "aes256-gcm" }
 
 )

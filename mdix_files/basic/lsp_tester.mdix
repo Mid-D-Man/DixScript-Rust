@@ -205,11 +205,14 @@
         x = 10,
         y = 5
     // Test 20: Edge case - variable shadowing in nested tables
+
     outer.value: five = 100
+
 
     outer.inner:
         value = 200,
         doublex = value
+
 
     outer.summary:
         outer_val = 100,

@@ -66,8 +66,7 @@ impl DixDeserialize for i32 {
 
 impl DixDeserialize for i64 {
     fn from_dix(data: &DixData, prefix: &str) -> Result<Self, String> {
-        let v: i32 = data.get(prefix)?;
-        Ok(v as i64)
+     data.get(prefix)
     }
 }
 

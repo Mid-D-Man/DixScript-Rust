@@ -250,6 +250,8 @@ pub fn convert_to_dix_value(value: &ASTValue) -> Result<DixValue, String> {
     match value {
         ASTValue::Integer { value, .. } => Ok(DixValue::from_int(*value)),
 
+        ASTValue::Long { value, .. } => Ok(DixValue::from_long(*value)),
+
         ASTValue::Float { value, .. } => Ok(DixValue::from_float(*value)),
 
         ASTValue::Double { value, .. } => Ok(DixValue::from_double(*value)),

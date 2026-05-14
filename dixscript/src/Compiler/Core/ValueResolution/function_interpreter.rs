@@ -2271,6 +2271,7 @@ fn statement_variant_name(stmt: &QuickFuncStatement) -> &'static str {
 fn value_variant_name(value: &Value) -> &'static str {
     match value {
         Value::Integer { .. }            => "Integer",
+        Value::Long { .. }            => "Long",
         Value::Float { .. }              => "Float",
         Value::Double { .. }             => "Double",
         Value::ScientificNotation { .. } => "ScientificNotation",

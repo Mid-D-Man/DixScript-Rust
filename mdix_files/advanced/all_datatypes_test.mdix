@@ -19,7 +19,8 @@
         blobVal<blob>,
         regexVal<regex>,
         enumVal<enum>
-    ) {
+    )
+    {
 
         return $"Received all {14} data types successfully";
 
@@ -112,7 +113,6 @@
     int_zero<int> = 0,
     int_large<int> = 2147483647,
     int_small<int> = -2147483648,
-
     // Float types - with f suffix
     float_positive<float> = 3.14f,
     float_negative<float> = -2.5f,

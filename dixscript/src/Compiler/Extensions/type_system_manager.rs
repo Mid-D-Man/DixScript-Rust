@@ -21,6 +21,7 @@ impl TypeSystemManager {
         match data_type {
             // Primitives
             DataType::Int => Value::Integer { value: 0, position: pos },
+            DataType::Long => Value::Long { value: 0, position: pos },
             DataType::Float => Value::Float { value: 0.0, position: pos },
             DataType::Double => Value::Double { value: 0.0, position: pos },
             DataType::String => Value::String { value: String::new(), position: pos },
@@ -307,6 +308,7 @@ impl TypeSystemManager {
     pub fn dix_type_to_data_type(dix_type: DixType) -> DataType {
         match dix_type {
             DixType::Int => DataType::Int,
+            DixType::Long => DataType::Long,
             DixType::Float => DataType::Float,
             DixType::Double => DataType::Double,
             DixType::String => DataType::String,
@@ -329,6 +331,7 @@ impl TypeSystemManager {
     pub fn data_type_to_dix_type(data_type: DataType) -> DixType {
         match data_type {
             DataType::Int => DixType::Int,
+            DataType::Long => DixType::Long,
             DataType::Float => DixType::Float,
             DataType::Double => DixType::Double,
             DataType::String => DixType::String,

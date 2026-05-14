@@ -314,6 +314,7 @@ impl<'a> ASTWalker<'a> {
 
             // Terminal values — no nested function calls possible.
             Value::Integer { .. }
+            | Value::Long { .. }
             | Value::Float { .. }
             | Value::Double { .. }
             | Value::ScientificNotation { .. }
@@ -579,6 +580,7 @@ fn get_entry_path(entry: &DataEntry) -> String {
 fn value_variant_name(value: &Value) -> &'static str {
     match value {
         Value::Integer { .. } => "Integer",
+        Value::Long { .. } => "Long",
         Value::Float { .. } => "Float",
         Value::Double { .. } => "Double",
         Value::ScientificNotation { .. } => "ScientificNotation",

@@ -2027,6 +2027,7 @@ fn execute_iterative_resolution(
     fn value_position(value: &Value) -> Option<Position> {
         Some(match value {
             Value::Integer { position, .. }
+            | Value::Long { position, .. }
             | Value::Float { position, .. }
             | Value::Double { position, .. }
             | Value::ScientificNotation { position, .. }

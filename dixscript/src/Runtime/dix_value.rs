@@ -1,4 +1,5 @@
 // dixscript/src/Runtime/dix_value.rs
+// dixscript/src/Runtime/dix_value.rs
 use std::collections::HashMap;
 use serde::Serialize;
 
@@ -174,21 +175,7 @@ impl From<f32>    for DixValue { fn from(v: f32)     -> Self { DixValue::Float(v
 impl From<f64>    for DixValue { fn from(v: f64)     -> Self { DixValue::Double(v) } }
 impl From<String> for DixValue { fn from(v: String)  -> Self { DixValue::String(v) } }
 impl From<&str>   for DixValue { fn from(v: &str)    -> Self { DixValue::String(v.to_string()) } }
-impl From<Vec<DixValue>>            for DixValue { fn from(v: Vec<DixValue>)            -> Self { DixValue::Array(v) } }
+impl From<Vec<DixValue>>             for DixValue { fn from(v: Vec<DixValue>)             -> Self { DixValue::Array(v) } }
 impl From<HashMap<String, DixValue>> for DixValue { fn from(v: HashMap<String, DixValue>) -> Self { DixValue::Object(v) } }
 
-// ── TryFrom for dix_data.rs typed getters ────────────────────────────────────
-
-impl TryFrom<DixValue> for i64 {
-    type Error = String;
-    fn try_from(value: DixValue) -> Result<Self, Self::Error> {
-        match value {
-            DixValue::Long(l)            => Ok(l),
-            DixValue::Int(i)             => Ok(i as i64),
-            DixValue::Float(f)           => Ok(f as i64),
-            DixValue::Double(d)          => Ok(d as i64),
-            DixValue::Enum { value, .. } => Ok(value as i64),
-            _ => Err(format!("Cannot convert {} to i64", value.type_name())),
-        }
-    }
-}
+// NOTE: TryFrom<DixValue> for i64 lives in dix_data.rs — do NOT duplicate here.

@@ -367,6 +367,7 @@ impl<'a> FunctionCallCollector<'a> {
             
             // Primitives and simple values - no function calls
             Value::Integer { .. }
+            | Value::Long { .. }
             | Value::Float { .. }
             | Value::Double { .. }
             | Value::ScientificNotation { .. }

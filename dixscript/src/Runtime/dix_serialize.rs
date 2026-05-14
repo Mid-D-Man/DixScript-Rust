@@ -79,7 +79,7 @@ impl DixSerialize for i32 {
 
 impl DixSerialize for i64 {
     fn to_dix(&self, d: &mut DataBuilder, prefix: &str) -> Result<(), String> {
-        d.with_int(prefix, *self as i32);
+        d.with_long(prefix, *self);
         Ok(())
     }
 }
@@ -130,7 +130,10 @@ pub fn dix_set_str(d: &mut DataBuilder, prefix: &str, field: &str, value: &str) 
 pub fn dix_set_int(d: &mut DataBuilder, prefix: &str, field: &str, value: i32) {
     d.with_int(dix_path(prefix, field), value);
 }
-
+#[inline]
+pub fn dix_set_long(d: &mut DataBuilder, prefix: &str, field: &str, value: i64) {
+    d.with_long(dix_path(prefix, field), value);
+}
 /// Write a float field at `prefix.field`.
 #[inline]
 pub fn dix_set_float(d: &mut DataBuilder, prefix: &str, field: &str, value: f32) {

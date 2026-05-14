@@ -47,6 +47,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     pub fn infer_type_from_value(&self, value: &Value) -> Option<DataType> {
         match value {
             Value::Integer { .. }            => Some(DataType::Int),
+            Value::Long { .. }               => Some(DataType::Long),
             Value::Float { .. }              => Some(DataType::Float),
             Value::Double { .. }             => Some(DataType::Double),
             Value::ScientificNotation { .. } => Some(DataType::Double),
@@ -235,7 +236,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             return Some(DataType::String);
         }
 
-        // Numeric type promotion: Double > Float > Int.
+        // Numeric type promotion: Double > Float > Long > Int.
         if let (Some(lt), Some(rt)) = (left_type, right_type) {
             if Self::is_numeric_type(lt) && Self::is_numeric_type(rt) {
                 if lt == DataType::Double || rt == DataType::Double {
@@ -243,6 +244,9 @@ impl<'a> TypeInferenceVisitor<'a> {
                 }
                 if lt == DataType::Float || rt == DataType::Float {
                     return Some(DataType::Float);
+                }
+                if lt == DataType::Long || rt == DataType::Long {
+                    return Some(DataType::Long);
                 }
                 return Some(DataType::Int);
             }
@@ -257,7 +261,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn is_numeric_type(data_type: DataType) -> bool {
-        matches!(data_type, DataType::Int | DataType::Float | DataType::Double)
+        matches!(data_type, DataType::Int | DataType::Long | DataType::Float | DataType::Double)
     }
 
     fn infer_prefixed_constructor_type(&self, prefix: &str) -> Option<DataType> {
@@ -324,11 +328,12 @@ impl<'a> TypeInferenceVisitor<'a> {
         None
     }
 
-    // ── Type conversion helpers (now actively used) ───────────────────────────
+    // ── Type conversion helpers ───────────────────────────────────────────────
 
     pub fn convert_dix_type_to_data_type(dix_type: DixType) -> Option<DataType> {
         match dix_type {
             DixType::Int       => Some(DataType::Int),
+            DixType::Long      => Some(DataType::Long),
             DixType::Float     => Some(DataType::Float),
             DixType::Double    => Some(DataType::Double),
             DixType::String    => Some(DataType::String),
@@ -350,6 +355,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     pub fn convert_data_type_to_dix_type(data_type: DataType) -> Option<DixType> {
         match data_type {
             DataType::Int       => Some(DixType::Int),
+            DataType::Long      => Some(DixType::Long),
             DataType::Float     => Some(DixType::Float),
             DataType::Double    => Some(DixType::Double),
             DataType::String    => Some(DixType::String),

@@ -8,9 +8,10 @@
 )
 
 @ENUMS(
-    ServerType {DEVELOPMENT = 1,
+    ServerType { DEVELOPMENT = 1,
      STAGING = 2,
-      PRODUCTION = 3}
+      PRODUCTION = 3
+    }
 )
 
 @QUICKFUNCS(
@@ -105,6 +106,7 @@
         is_valid = validateServerConfig(host, port)
 
     // Test 5: Another scoped function in different table
+
     database.primary:
         host = "db.production.com",
         port = 5432,
@@ -159,7 +161,7 @@
         base_url = "https://api.example.com",
         version = "v2"
 
-    // Test 13: Variables in arrays within table
+
     inventory.items::
         { id = 1, name = "Sword", damage = 50, price = 100.0f },
         { id = 2, name = "Shield", defense = 30, price = 75.0f },
@@ -218,7 +220,7 @@
         x = 10,
         y = 5
     // Test 20: Edge case - variable shadowing in nested tables
-    outer.value: five = 100
+    outer.value: five = 100,mukky = 9090
 
     outer.inner:
         value = 200,

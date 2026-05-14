@@ -512,9 +512,9 @@ mod tests {
     #[test]
     fn no_zero_span_folds() {
         let src = concat!(
-            "@ENUMS(\n  T { A=0, B=1 }\n)\n",
-            "@QUICKFUNCS(\n  ~f<int>(x) {\n    return x\n  }\n)\n",
-            "@DATA(\n  x=1\n  srv:\n    host=\"x\"\n  tags::\n    \"a\"\n    \"b\"\n)\n"
+        "@ENUMS(\n  T { A=0, B=1 }\n)\n",
+        "@QUICKFUNCS(\n  ~f<int>(x) {\n    return x\n  }\n)\n",
+        "@DATA(\n  x=1\n  srv:\n    host=\"x\"\n  tags::\n    \"a\"\n    \"b\"\n)\n"
         );
         let d = make_doc(src);
         for f in provide(Some(&d)).unwrap_or_default() {
@@ -673,23 +673,23 @@ mod tests {
     #[test]
     fn single_line_params_single_fold() {
         // ~f(x) { on one line, bodyon next → one fold from ~ to }
-let src = "@QUICKFUNCS(\n  ~f<int>(x) {\n    return x\n  }\n)\n";
-//  lsp:  0             1              2         3   4
-let d = make_doc(src);
-let folds = provide(Some(&d)).unwrap_or_default();// Exactly one fold starting at ~ (lsp 1), ending at } (lsp 3)
-    let qf_folds: Vec<_> = folds.iter()
-        .filter(|f| f.start_line == 1)
-        .collect();
+        let src = "@QUICKFUNCS(\n  ~f<int>(x) {\n    return x\n  }\n)\n";
+        //  lsp:  0             1              2         3   4
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default(); // Exactly one fold starting at ~ (lsp 1), ending at } (lsp 3)
+        let qf_folds: Vec<_> = folds.iter()
+            .filter(|f| f.start_line == 1)
+            .collect();
 
-    assert!(!qf_folds.is_empty(), "no fold starting at ~ line (lsp 1): {:?}", folds);
+        assert!(!qf_folds.is_empty(), "no fold starting at ~ line (lsp 1): {:?}", folds);
 
-    let body_fold = qf_folds.iter().find(|f| f.end_line == 3);
-    assert!(body_fold.is_some(), "expected fold(1,3), got: {:?}", qf_folds);
-}
+        let body_fold = qf_folds.iter().find(|f| f.end_line == 3);
+        assert!(body_fold.is_some(), "expected fold(1,3), got: {:?}", qf_folds);
+    }
 
-#[test]
-fn multiline_params_single_fold_from_tilde_to_brace() {
-    let src = concat!(
+    #[test]
+    fn multiline_params_single_fold_from_tilde_to_brace() {
+        let src = concat!(
         "@QUICKFUNCS(\n",    // lsp 0
         "  ~f<int>(\n",      // lsp 1  ← ~ here
         "    x<int>,\n",     // lsp 2
@@ -698,24 +698,24 @@ fn multiline_params_single_fold_from_tilde_to_brace() {
         "    return x\n",    // lsp 5
         "  }\n",             // lsp 6  ← } here
         ")\n"                // lsp 7
-    );
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
+        );
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
 
-    // ONE fold: ~ (lsp 1) → } (lsp 6)
-    // No separate param fold.
-    assert!(
-        folds.iter().any(|f| f.start_line == 1 && f.end_line == 6),
-        "single fold(1,6) from ~ to } missing: {:?}", folds
-    );
-    // Must NOT have two separate folds with start_line == 1
-    let from_tilde: Vec<_> = folds.iter().filter(|f| f.start_line == 1).collect();
-    assert_eq!(from_tilde.len(), 1, "expected exactly 1 fold from ~: {:?}", from_tilde);
-}
+        // ONE fold: ~ (lsp 1) → } (lsp 6)
+        // No separate param fold.
+        assert!(
+            folds.iter().any(|f| f.start_line == 1 && f.end_line == 6),
+            "single fold(1,6) from ~ to } missing: {:?}", folds
+        );
+        // Must NOT have two separate folds with start_line == 1
+        let from_tilde: Vec<_> = folds.iter().filter(|f| f.start_line == 1).collect();
+        assert_eq!(from_tilde.len(), 1, "expected exactly 1 fold from ~: {:?}", from_tilde);
+    }
 
-#[test]
-fn many_params_single_fold() {
-    let src = concat!(
+    #[test]
+    fn many_params_single_fold() {
+        let src = concat!(
         "@QUICKFUNCS(\n",
         "  ~testAll<string> => global(\n", // lsp 1
         "    a<int>,\n",                    // lsp 2
@@ -726,22 +726,22 @@ fn many_params_single_fold() {
         "    return \"ok\"\n",              // lsp 7
         "  }\n",                            // lsp 8
         ")\n"
-    );
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
+        );
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
 
-    // ONE fold: ~ (lsp 1) → } (lsp 8)
-    assert!(
-        folds.iter().any(|f| f.start_line == 1 && f.end_line == 8),
-        "single fold(1,8) missing: {:?}", folds
-    );
-    let from_tilde: Vec<_> = folds.iter().filter(|f| f.start_line == 1).collect();
-    assert_eq!(from_tilde.len(), 1, "expected 1 fold from ~: {:?}", from_tilde);
-}
+        // ONE fold: ~ (lsp 1) → } (lsp 8)
+        assert!(
+            folds.iter().any(|f| f.start_line == 1 && f.end_line == 8),
+            "single fold(1,8) missing: {:?}", folds
+        );
+        let from_tilde: Vec<_> = folds.iter().filter(|f| f.start_line == 1).collect();
+        assert_eq!(from_tilde.len(), 1, "expected 1 fold from ~: {:?}", from_tilde);
+    }
 
-#[test]
-fn else_branch_does_not_break_fold() {
-    let src = concat!(
+    #[test]
+    fn else_branch_does_not_break_fold() {
+        let src = concat!(
         "@QUICKFUNCS(\n",
         "  ~check<int>(x) {\n",  // lsp 1
         "    if: x > 0 {\n",     // lsp 2
@@ -751,132 +751,132 @@ fn else_branch_does_not_break_fold() {
         "    }\n",               // lsp 6
         "  }\n",                 // lsp 7
         ")\n"
-    );
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
-    // ~ at lsp 1, body } at lsp 7 → fold(1, 7)
-    assert!(
-        folds.iter().any(|f| f.start_line == 1 && f.end_line == 7),
-        "body fold(1,7) missing: {:?}", folds
-    );
-}
+        );
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
+        // ~ at lsp 1, body } at lsp 7 → fold(1, 7)
+        assert!(
+            folds.iter().any(|f| f.start_line == 1 && f.end_line == 7),
+            "body fold(1,7) missing: {:?}", folds
+        );
+    }
 
-#[test]
-fn sibling_funcs_fold_independently() {
-    let src = concat!(
+    #[test]
+    fn sibling_funcs_fold_independently() {
+        let src = concat!(
         "@QUICKFUNCS(\n",
         "  ~a<int>(x) {\n    return x\n  }\n",  // lsp 1-3
         "  ~b<int>(y) {\n    return y\n  }\n",  // lsp 4-6
         ")\n"
-    );
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
-    assert!(folds.iter().any(|f| f.start_line == 1), "~a fold missing: {:?}", folds);
-    assert!(folds.iter().any(|f| f.start_line == 4), "~b fold missing: {:?}", folds);
-    for f in folds.iter().filter(|f| f.start_line == 1) {
-        assert!(f.end_line < 4, "~a fold ate ~b: {:?}", f);
+        );
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
+        assert!(folds.iter().any(|f| f.start_line == 1), "~a fold missing: {:?}", folds);
+        assert!(folds.iter().any(|f| f.start_line == 4), "~b fold missing: {:?}", folds);
+        for f in folds.iter().filter(|f| f.start_line == 1) {
+            assert!(f.end_line < 4, "~a fold ate ~b: {:?}", f);
+        }
     }
-}
 
-// ── DATA object literals ──────────────────────────────────────────────────
+    // ── DATA object literals ──────────────────────────────────────────────────
 
-#[test]
-fn data_object_with_first_member_on_brace_line_folds() {
-    // { AND first member on same line
-    let src = concat!(
+    #[test]
+    fn data_object_with_first_member_on_brace_line_folds() {
+        // { AND first member on same line
+        let src = concat!(
         "@DATA(\n",
         "  obj = { name = \"x\",\n",  // lsp 1  ← { here
         "    value = 42\n",            // lsp 2
         "  }\n",                       // lsp 3  ← } here
         ")\n"
-    );
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
-    // { at lsp 1, } at lsp 3 → fold(1, 3) — includes }
-    assert!(
-        folds.iter().any(|f| f.start_line == 1 && f.end_line == 3),
-        "object fold(1,3) missing when first member on brace line: {:?}", folds
-    );
-}
+        );
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
+        // { at lsp 1, } at lsp 3 → fold(1, 3) — includes }
+        assert!(
+            folds.iter().any(|f| f.start_line == 1 && f.end_line == 3),
+            "object fold(1,3) missing when first member on brace line: {:?}", folds
+        );
+    }
 
-#[test]
-fn sibling_data_objects_fold_independently() {
-    let src = concat!(
+    #[test]
+    fn sibling_data_objects_fold_independently() {
+        let src = concat!(
         "@DATA(\n",
         "  a = {\n    x = 1\n  }\n",  // lsp 1-3
         "  b = {\n    y = 2\n  }\n",  // lsp 4-6
         ")\n"
-    );
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
-    assert!(folds.iter().any(|f| f.start_line == 1 && f.end_line == 3),
-        "object a fold(1,3) missing: {:?}", folds);
-    assert!(folds.iter().any(|f| f.start_line == 4 && f.end_line == 6),
-        "object b fold(4,6) missing: {:?}", folds);
-}
+        );
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
+        assert!(folds.iter().any(|f| f.start_line == 1 && f.end_line == 3),
+                "object a fold(1,3) missing: {:?}", folds);
+        assert!(folds.iter().any(|f| f.start_line == 4 && f.end_line == 6),
+                "object b fold(4,6) missing: {:?}", folds);
+    }
 
-// ── DATA table / group folds ──────────────────────────────────────────────
+    // ── DATA table / group folds ──────────────────────────────────────────────
 
-#[test]
-fn single_line_table_does_not_fold() {
-    let src = "@DATA(\n  server: host = \"x\", port = 80\n)\n";
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
-    assert!(
-        !folds.iter().any(|f| f.start_line == 1),
-        "single-line table must not fold: {:?}", folds
-    );
-}
+    #[test]
+    fn single_line_table_does_not_fold() {
+        let src = "@DATA(\n  server: host = \"x\", port = 80\n)\n";
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
+        assert!(
+            !folds.iter().any(|f| f.start_line == 1),
+            "single-line table must not fold: {:?}", folds
+        );
+    }
 
-#[test]
-fn single_line_group_array_does_not_fold() {
-    let src = "@DATA(\n  tags:: \"a\", \"b\", \"c\"\n)\n";
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
-    assert!(
-        !folds.iter().any(|f| f.start_line == 1),
-        "single-line group must not fold: {:?}", folds
-    );
-}
+    #[test]
+    fn single_line_group_array_does_not_fold() {
+        let src = "@DATA(\n  tags:: \"a\", \"b\", \"c\"\n)\n";
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
+        assert!(
+            !folds.iter().any(|f| f.start_line == 1),
+            "single-line group must not fold: {:?}", folds
+        );
+    }
 
-#[test]
-fn multiline_table_folds_without_trailing_blank() {
-    let src = concat!(
+    #[test]
+    fn multiline_table_folds_without_trailing_blank() {
+        let src = concat!(
         "@DATA(\n",
         "  server:\n",         // lsp 1  ← : here
         "    host = \"x\"\n",  // lsp 2
         "    port = 80\n",     // lsp 3
         "\n",                  // lsp 4  blank — no tokens
         ")\n"
-    );
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
-    let f = folds.iter().find(|f| f.start_line == 1)
-        .expect("table fold missing");
-    assert_eq!(f.end_line, 3,
-        "fold must end at last token (lsp3), not blank (lsp4): {:?}", folds);
-}
+        );
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
+        let f = folds.iter().find(|f| f.start_line == 1)
+            .expect("table fold missing");
+        assert_eq!(f.end_line, 3,
+                   "fold must end at last token (lsp3), not blank (lsp4): {:?}", folds);
+    }
 
-#[test]
-fn multiline_group_array_folds() {
-    let src = concat!(
+    #[test]
+    fn multiline_group_array_folds() {
+        let src = concat!(
         "@DATA(\n",
         "  tags::\n",      // lsp 1
         "    \"alpha\"\n", // lsp 2
         "    \"beta\"\n",  // lsp 3
         ")\n"
-    );
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
-    assert!(
-        folds.iter().any(|f| f.start_line == 1 && f.end_line >= 2),
-        "group array fold (start=1) missing: {:?}", folds
-    );
-}
+        );
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
+        assert!(
+            folds.iter().any(|f| f.start_line == 1 && f.end_line >= 2),
+            "group array fold (start=1) missing: {:?}", folds
+        );
+    }
 
-#[test]
-fn comment_above_next_table_not_included_in_fold() {
-    let src = concat!(
+    #[test]
+    fn comment_above_next_table_not_included_in_fold() {
+        let src = concat!(
         "@DATA(\n",
         "  server:\n",          // lsp 1
         "    host = \"x\"\n",   // lsp 2
@@ -886,24 +886,24 @@ fn comment_above_next_table_not_included_in_fold() {
         "  cache:\n",           // lsp 6
         "    port = 6379\n",    // lsp 7
         ")\n"
-    );
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
+        );
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
 
-    let first = folds.iter().find(|f| f.start_line == 1)
-        .expect("first table fold missing");
-    assert_eq!(first.end_line, 3,
-        "first fold must end at lsp3 (not comment lsp5): {:?}", folds);
+        let first = folds.iter().find(|f| f.start_line == 1)
+            .expect("first table fold missing");
+        assert_eq!(first.end_line, 3,
+                   "first fold must end at lsp3 (not comment lsp5): {:?}", folds);
 
-    assert!(
-        folds.iter().any(|f| f.start_line == 6 && f.end_line >= 7),
-        "second table fold (start=6) missing: {:?}", folds
-    );
-}
+        assert!(
+            folds.iter().any(|f| f.start_line == 6 && f.end_line >= 7),
+            "second table fold (start=6) missing: {:?}", folds
+        );
+    }
 
-#[test]
-fn blank_between_tables_excluded_from_first_fold() {
-    let src = concat!(
+    #[test]
+    fn blank_between_tables_excluded_from_first_fold() {
+        let src = concat!(
         "@DATA(\n",
         "  server:\n",            // lsp 1
         "    host = \"x\"\n",     // lsp 2
@@ -912,17 +912,18 @@ fn blank_between_tables_excluded_from_first_fold() {
         "  cache:\n",             // lsp 5
         "    port = 6379\n",      // lsp 6
         ")\n"
-    );
-    let d = make_doc(src);
-    let folds = provide(Some(&d)).unwrap_or_default();
+        );
+        let d = make_doc(src);
+        let folds = provide(Some(&d)).unwrap_or_default();
 
-    let first = folds.iter().find(|f| f.start_line == 1)
-        .expect("first table fold missing");
-    assert_eq!(first.end_line, 3,
-        "first fold must end at lsp3, not blank lsp4: {:?}", folds);
+        let first = folds.iter().find(|f| f.start_line == 1)
+            .expect("first table fold missing");
+        assert_eq!(first.end_line, 3,
+                   "first fold must end at lsp3, not blank lsp4: {:?}", folds);
 
-    assert!(
-        folds.iter().any(|f| f.start_line == 5 && f.end_line >= 6),
-        "second table fold (start=5) missing: {:?}", folds
-    );
-        }
+        assert!(
+            folds.iter().any(|f| f.start_line == 5 && f.end_line >= 6),
+            "second table fold (start=5) missing: {:?}", folds
+        );
+    }
+}

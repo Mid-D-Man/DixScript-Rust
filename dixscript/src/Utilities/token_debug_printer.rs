@@ -166,6 +166,7 @@ impl TokenDebugPrinter {
             TokenType::Keyword(k) => format!("Keyword({})", k),
             TokenType::Identifier(i) => format!("Identifier({})", i),
             TokenType::Integer(i) => format!("Integer({})", i),
+            TokenType::Long(i) => format!("Long({})", i),
             TokenType::Float(f) => format!("Float({})", f),
             TokenType::Double(d) => format!("Double({})", d),
             TokenType::ScientificNotation(sn) => format!("ScientificNotation({})", sn),

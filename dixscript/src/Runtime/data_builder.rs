@@ -298,7 +298,15 @@ impl DataBuilder {
             ));
         }
     }
-
+    pub fn with_long(&mut self, name: impl Into<String>, value: i64) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
+            self.flat_properties.push((
+                name,
+                Value::Long { value, position: Position::UNKNOWN },
+            ));
+        }
+    }
     pub fn with_float(&mut self, name: impl Into<String>, value: f32) {
         let name = name.into();
         if self.check_flat_allowed(&name) {

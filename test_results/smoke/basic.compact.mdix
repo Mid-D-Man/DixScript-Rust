@@ -8,7 +8,7 @@
   version  = "1.0.0"
   port     = 8080
   debug    = true
-  timeout  = 5000
+  timeout  = 500000000
 
   server.config: host = "localhost", port = 8080, ssl = false
   tags:: "web", "api", "v1"

@@ -706,7 +706,7 @@ mod tests {
         // No separate param fold.
         assert!(
             folds.iter().any(|f| f.start_line == 1 && f.end_line == 6),
-            "single fold(1,6) from ~ to } missing: {:?}", folds
+            "single fold(1,6) from ~ to closing brace missing: {:?}", folds
         );
         // Must NOT have two separate folds with start_line == 1
         let from_tilde: Vec<_> = folds.iter().filter(|f| f.start_line == 1).collect();

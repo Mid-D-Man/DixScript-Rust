@@ -1,10 +1,6 @@
 // dixscript/src/Compiler/Core/Tokenizer/token.rs
 use std::fmt;
 
-// =============================================================================
-// SectionId
-// =============================================================================
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SectionId {
     #[default]
@@ -41,11 +37,8 @@ impl SectionId {
         }
     }
 
-    #[inline]
-    pub const fn is_some(self) -> bool { !matches!(self, SectionId::None) }
-
-    #[inline]
-    pub const fn is_none(self) -> bool { matches!(self, SectionId::None) }
+    #[inline] pub const fn is_some(self) -> bool { !matches!(self, SectionId::None) }
+    #[inline] pub const fn is_none(self) -> bool {  matches!(self, SectionId::None) }
 
     #[inline]
     pub fn from_context_str(s: &str) -> Self {
@@ -74,11 +67,14 @@ impl fmt::Display for SectionId {
 
 /// Token types for DixScript v1.0.0
 ///
+/// ## Numeric literal additions
+/// - `Long(i64)`   — 64-bit integer. Written with `L`/`l` suffix: `9_000_000_000L`,
+///                   `0xFF_FF_FF_FFL`, `0b1111_0000L`. Also auto-promoted when a
+///                   plain integer literal overflows i32.
+/// - `Integer(i32)` — now accepts `_` separators and `0b`/`0B` binary prefix.
+///
 /// ## Note on `~` (QuickFunc prefix)
-/// The `~` character is emitted by the lexer as `Symbol('~')` — there is no
-/// separate `FunctionPrefix` variant. All code that needs to detect a QuickFunc
-/// declaration prefix must match `TokenType::Symbol('~')`, optionally guarded
-/// by `token.section == SectionId::QuickFuncs`.
+/// Emitted as `Symbol('~')` — there is no `FunctionPrefix` variant.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenType {
     // ── Static-string variants ───────────────────────────────────────────────
@@ -94,6 +90,10 @@ pub enum TokenType {
     // ── Owned-string / primitive variants ───────────────────────────────────
     Identifier(String),
     Integer(i32),
+    /// 64-bit integer literal. Suffix `L`/`l`, or auto-promoted from overflowing i32.
+    /// Covers plain decimal (`9_000_000_000L`), hex (`0xDEAD_BEEFL`),
+    /// and binary (`0b1111_0000_1111_0000L`) forms.
+    Long(i64),
     Float(f32),
     Double(f64),
     ScientificNotation(f64),
@@ -119,7 +119,6 @@ pub enum TokenType {
 
     // ── Function / control-flow markers ──────────────────────────────────────
     ControlFlowColon,
-    // NOTE: `~` is emitted as Symbol('~') — there is no FunctionPrefix variant.
 
     // ── Prefixed constructors ─────────────────────────────────────────────────
     PrefixedConstructor { prefix: String, value: String },
@@ -159,7 +158,6 @@ pub enum TokenType {
 // =============================================================================
 
 impl TokenType {
-    // ── Zero-allocation unit-variant constructors ─────────────────────────────
     #[inline] pub fn double_colon()       -> Self { TokenType::DoubleColon }
     #[inline] pub fn arrow()              -> Self { TokenType::Arrow }
     #[inline] pub fn switch_case()        -> Self { TokenType::SwitchCase }
@@ -176,7 +174,6 @@ impl TokenType {
     #[inline] pub fn bool_false()         -> Self { TokenType::Bool(false) }
     #[inline] pub fn get_symbol(c: char)  -> Self { TokenType::Symbol(c) }
 
-    /// Whether this token opens a top-level section.
     pub fn is_section_keyword(&self) -> bool {
         matches!(
             self,
@@ -190,8 +187,6 @@ impl TokenType {
         )
     }
 
-    /// The section this token introduces, as a `&'static str` context tag.
-    /// Used by the lexer to update `current_section` with zero allocation.
     pub fn get_section_context(&self) -> Option<&'static str> {
         match self {
             TokenType::SectionConfig     => Some("CONFIG"),
@@ -201,10 +196,22 @@ impl TokenType {
             TokenType::SectionQuickFuncs => Some("QUICKFUNCS"),
             TokenType::SectionData       => Some("DATA"),
             TokenType::SectionSecurity   => Some("SECURITY"),
-            // Legacy: keyword with @ prefix (kept for forward compat)
             TokenType::Keyword(k) if k.starts_with('@') => Some(&k[1..]),
             _ => None,
         }
+    }
+
+    /// Returns `true` for any numeric token type.
+    pub fn is_numeric(&self) -> bool {
+        matches!(
+            self,
+            TokenType::Integer(_)
+                | TokenType::Long(_)
+                | TokenType::Float(_)
+                | TokenType::Double(_)
+                | TokenType::ScientificNotation(_)
+                | TokenType::HexLiteral(_)
+        )
     }
 }
 
@@ -215,7 +222,6 @@ impl TokenType {
 impl fmt::Display for TokenType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            // Static-str variants
             TokenType::Keyword(k)                        => write!(f, "Keyword({})", k),
             TokenType::MultiCharSymbol(ms)               => write!(f, "MultiCharSymbol({})", ms),
             TokenType::ArithmeticOp(ao)                  => write!(f, "ArithmeticOp({})", ao),
@@ -224,10 +230,9 @@ impl fmt::Display for TokenType {
             TokenType::LogicalOp(lo)                     => write!(f, "LogicalOp({})", lo),
             TokenType::BitwiseOp(bo)                     => write!(f, "BitwiseOp({})", bo),
             TokenType::DataType(dt)                      => write!(f, "DataType(<{}>)", dt),
-
-            // Owned-string / primitive variants
             TokenType::Identifier(i)                     => write!(f, "Identifier({})", i),
             TokenType::Integer(i)                        => write!(f, "Integer({})", i),
+            TokenType::Long(l)                           => write!(f, "Long({}L)", l),
             TokenType::Float(fl)                         => write!(f, "Float({})", fl),
             TokenType::Double(d)                         => write!(f, "Double({})", d),
             TokenType::ScientificNotation(sn)            => write!(f, "ScientificNotation({})", sn),
@@ -281,13 +286,11 @@ impl fmt::Display for TokenType {
 // Token
 // =============================================================================
 
-/// A single lexical token with source position and section context.
 #[derive(Debug, Clone)]
 pub struct Token {
     pub token_type: TokenType,
     pub line:       usize,
     pub column:     usize,
-    /// Which top-level section this token was scanned inside.
     pub section:    SectionId,
 }
 
@@ -299,15 +302,9 @@ impl Token {
 
     #[inline]
     pub fn eof(line: usize, column: usize) -> Self {
-        Token {
-            token_type: TokenType::EndOfFile,
-            line,
-            column,
-            section: SectionId::None,
-        }
+        Token { token_type: TokenType::EndOfFile, line, column, section: SectionId::None }
     }
 
-    /// Human-readable token value. Allocates — use only in display / error paths.
     pub fn get_token_value(&self) -> String {
         match &self.token_type {
             TokenType::Keyword(k)              => k.to_string(),
@@ -318,36 +315,36 @@ impl Token {
             TokenType::LogicalOp(lo)           => lo.to_string(),
             TokenType::BitwiseOp(bo)           => bo.to_string(),
             TokenType::DataType(dt)            => dt.to_string(),
-
-            TokenType::Identifier(i)          => i.clone(),
-            TokenType::Integer(i)             => i.to_string(),
-            TokenType::Float(f)               => f.to_string(),
-            TokenType::Double(d)              => d.to_string(),
-            TokenType::ScientificNotation(sn) => format!("{:e}", sn),
-            TokenType::String(s)              => s.clone(),
-            TokenType::StringSingle(ss)       => ss.clone(),
-            TokenType::Bool(b)               => b.to_string().to_lowercase(),
-            TokenType::Symbol(s)              => s.to_string(),
-            TokenType::HexColor(hc)           => hc.clone(),
-            TokenType::HexLiteral(hl)         => format!("0x{:X}", hl),
-            TokenType::Date(d)               => d.clone(),
-            TokenType::Timestamp(t)           => t.clone(),
+            TokenType::Identifier(i)           => i.clone(),
+            TokenType::Integer(i)              => i.to_string(),
+            TokenType::Long(l)                 => format!("{}L", l),
+            TokenType::Float(f)                => f.to_string(),
+            TokenType::Double(d)               => d.to_string(),
+            TokenType::ScientificNotation(sn)  => format!("{:e}", sn),
+            TokenType::String(s)               => s.clone(),
+            TokenType::StringSingle(ss)        => ss.clone(),
+            TokenType::Bool(b)                 => b.to_string().to_lowercase(),
+            TokenType::Symbol(s)               => s.to_string(),
+            TokenType::HexColor(hc)            => hc.clone(),
+            TokenType::HexLiteral(hl)          => format!("0x{:X}", hl),
+            TokenType::Date(d)                 => d.clone(),
+            TokenType::Timestamp(t)            => t.clone(),
             TokenType::InterpolatedString(ist) => ist.clone(),
-            TokenType::TablePath(tp)          => tp.clone(),
+            TokenType::TablePath(tp)           => tp.clone(),
             TokenType::PrefixedConstructor { prefix, value } => format!("{}:{}", prefix, value),
-            TokenType::BlobConstructor(bc)    => format!("b:{}", bc),
-            TokenType::TupleConstructor(tc)   => format!("t:{}", tc),
-            TokenType::RegexConstructor(rc)   => format!("r:{}", rc),
-            TokenType::DoubleColon            => "::".to_string(),
-            TokenType::Arrow                  => "=>".to_string(),
-            TokenType::SwitchCase             => "->".to_string(),
-            TokenType::ControlFlowColon       => ":".to_string(),
-            TokenType::ConfigAccess(ca)       => format!("config.{}", ca),
+            TokenType::BlobConstructor(bc)     => format!("b:{}", bc),
+            TokenType::TupleConstructor(tc)    => format!("t:{}", tc),
+            TokenType::RegexConstructor(rc)    => format!("r:{}", rc),
+            TokenType::DoubleColon             => "::".to_string(),
+            TokenType::Arrow                   => "=>".to_string(),
+            TokenType::SwitchCase              => "->".to_string(),
+            TokenType::ControlFlowColon        => ":".to_string(),
+            TokenType::ConfigAccess(ca)        => format!("config.{}", ca),
             TokenType::EnumAccess { enum_name, value } => format!("{}.{}", enum_name, value),
-            TokenType::Comment(c)             => c.clone(),
-            TokenType::Error(e)               => e.clone(),
-            TokenType::EndOfFile              => "EOF".to_string(),
-            _                                 => self.token_type.to_string(),
+            TokenType::Comment(c)              => c.clone(),
+            TokenType::Error(e)                => e.clone(),
+            TokenType::EndOfFile               => "EOF".to_string(),
+            _                                  => self.token_type.to_string(),
         }
     }
 }

@@ -1,26 +1,34 @@
 // dixscript/src/Compiler/Core/Tokenizer/lexer.rs
 //! DixScript Lexer — tokenises a `.mdix` source string into a `Vec<Token>`.
 //!
+//! ## Numeric literal additions (v1.0.0+)
+//!
+//! ### Underscore separators
+//! Any integer, hex, or binary literal may contain `_` between digits as a
+//! visual separator. Underscores are stripped before parsing:
+//!   `1_000_000`  → `Integer(1000000)`
+//!   `0xFF_FF`    → `Integer(65535)`
+//!   `0b1111_0000` → `Integer(240)`
+//! Underscores inside date/timestamp literals are intentionally NOT supported.
+//!
+//! ### Binary literals  (`0b` / `0B`)
+//! Prefix `0b` or `0B` followed by `0` / `1` digits (with optional `_`).
+//! Fits in i32 → `Integer`. Overflows i32 → `Long`. `L` suffix → `Long`.
+//!   `0b1010`          → `Integer(10)`
+//!   `0b1111_0000`     → `Integer(240)`
+//!   `0b1L`            → `Long(1)`
+//!
+//! ### Long (64-bit) integers  (`L` / `l` suffix)
+//! Appending `L` or `l` to any integer literal (decimal, hex, binary) emits
+//! `Long(i64)` instead of `Integer(i32)`.
+//!   `9_000_000_000L`  → `Long(9000000000)`
+//!   `0xDEAD_BEEFL`    → `Long(3735928559)`
+//!   `0b1111L`         → `Long(15)`
+//! Plain integers that overflow i32 are also auto-promoted to `Long`:
+//!   `3_000_000_000`   → `Long(3000000000)`
+//!
 //! ## Key fix: section token self-stamping
-//!
-//! Section keyword tokens (`@ENUMS`, `@QUICKFUNCS`, `@DATA`, etc.) are now
-//! stamped with their OWN `SectionId` rather than `self.current_section` (the
-//! previous section). Before this fix, every section keyword carried the
-//! section ID of the section that preceded it:
-//!
-//!   @ENUMS token → SectionId::None   (was: None, correct)
-//!   @QUICKFUNCS  → SectionId::Enums  (was wrong — now: QuickFuncs)
-//!   @DATA        → SectionId::QuickFuncs (was wrong — now: Data)
-//!
-//! The fix is isolated to `try_scan_section_keyword`: instead of passing
-//! `self.current_section`, we derive the correct SectionId from the token
-//! type via `get_section_context()`.
-//!
-//! ## Note on `~` (QuickFunc prefix)
-//!
-//! The tilde character is emitted as `Symbol('~')` via the generic
-//! `scan_single_character` path. There is no `FunctionPrefix` token type.
-//! Code detecting QuickFunc declarations must match `Symbol('~')`.
+//! Section keyword tokens carry their OWN `SectionId`. See `try_scan_section_keyword`.
 
 use phf::phf_map;
 use memchr::memchr;
@@ -63,6 +71,7 @@ static KEYWORDS: phf::Map<&'static str, fn() -> TokenType> = phf_map! {
     "regex"       => || TokenType::Keyword("regex"),
     "array"       => || TokenType::Keyword("array"),
     "const"       => || TokenType::Keyword("const"),
+    "long"        => || TokenType::Keyword("long"),
     "string"      => || TokenType::Keyword("string"),
     "double"      => || TokenType::Keyword("double"),
     "object"      => || TokenType::Keyword("object"),
@@ -84,45 +93,29 @@ struct TokenizerState {
 }
 
 impl TokenizerState {
-    #[inline]
-    fn new(input_length: usize) -> Self {
+    #[inline] fn new(input_length: usize) -> Self {
         TokenizerState { position: 0, line: 1, column: 1, input_length }
     }
-
-    #[inline]
-    fn is_at_end(&self) -> bool { self.position >= self.input_length }
-
-    #[inline]
-    fn peek(&self, input: &str) -> char {
-        if self.is_at_end() { '\0' }
-        else { input.as_bytes()[self.position] as char }
+    #[inline] fn is_at_end(&self) -> bool { self.position >= self.input_length }
+    #[inline] fn peek(&self, input: &str) -> char {
+        if self.is_at_end() { '\0' } else { input.as_bytes()[self.position] as char }
     }
-
-    #[inline]
-    fn peek_next(&self, input: &str) -> char {
+    #[inline] fn peek_next(&self, input: &str) -> char {
         if self.position + 1 >= self.input_length { '\0' }
         else { input.as_bytes()[self.position + 1] as char }
     }
-
-    #[inline]
-    fn peek_at(&self, input: &str, offset: usize) -> char {
+    #[inline] fn peek_at(&self, input: &str, offset: usize) -> char {
         let pos = self.position + offset;
-        if pos >= self.input_length { '\0' }
-        else { input.as_bytes()[pos] as char }
+        if pos >= self.input_length { '\0' } else { input.as_bytes()[pos] as char }
     }
-
-    #[inline]
-    fn advance(&mut self, input: &str) -> char {
+    #[inline] fn advance(&mut self, input: &str) -> char {
         if self.is_at_end() { return '\0'; }
         let current = input.as_bytes()[self.position] as char;
         self.position += 1;
-        if current == '\n' { self.line += 1; self.column = 1; }
-        else               { self.column += 1; }
+        if current == '\n' { self.line += 1; self.column = 1; } else { self.column += 1; }
         current
     }
-
-    #[inline]
-    fn slice<'a>(&self, input: &'a str, start: usize, length: usize) -> &'a str {
+    #[inline] fn slice<'a>(&self, input: &'a str, start: usize, length: usize) -> &'a str {
         let bytes = input.as_bytes();
         let end   = (start + length).min(bytes.len());
         std::str::from_utf8(&bytes[start..end]).unwrap_or("")
@@ -192,7 +185,6 @@ impl<'src> Tokenizer<'src> {
             match self.scan_token(&mut state) {
                 Ok(Some(token)) => {
                     recovery_attempts = 0;
-
                     if !self.version_allows_all_tokens
                         && !self.is_token_supported_slow(&token)
                     {
@@ -200,29 +192,21 @@ impl<'src> Tokenizer<'src> {
                         if self.should_terminate() { break; }
                         continue;
                     }
-
                     self.update_section_context(&token);
                     self.token_pool.push(token);
                 }
-
                 Ok(None) => {}
-
                 Err(err_msg) => {
                     self.handle_tokenization_error(
-                        &err_msg,
-                        &mut state,
-                        &mut recovery_attempts,
-                        &mut last_error_position,
+                        &err_msg, &mut state,
+                        &mut recovery_attempts, &mut last_error_position,
                     );
-
                     if self.should_terminate() { break; }
-
                     if self.supports_recovery() {
                         if recovery_attempts >= MAX_RECOVERY_ATTEMPTS {
                             self.error_manager.add_lexical_error(
                                 LexicalErrorType::InvalidCharacter,
-                                "Maximum recovery attempts exceeded — aborting tokenization"
-                                    .to_string(),
+                                "Maximum recovery attempts exceeded — aborting tokenization".to_string(),
                                 state.line, state.column, None, None,
                             );
                             break;
@@ -230,7 +214,6 @@ impl<'src> Tokenizer<'src> {
                         if !self.attempt_recovery(&mut state) { break; }
                         continue;
                     }
-
                     if self.should_continue() {
                         let error_token = Token::new(
                             TokenType::Error(err_msg.clone()),
@@ -263,39 +246,28 @@ impl<'src> Tokenizer<'src> {
     fn skip_whitespace(&self, state: &mut TokenizerState) {
         let bytes = self.input.as_bytes();
         let start = state.position;
+        let end   = platform::find_whitespace_end(bytes, start);
+        if end == start { return; }
 
-        let end = platform::find_whitespace_end(bytes, start);
-
-        if end == start {
-            return;
-        }
-
-        let ws_slice = &bytes[start..end];
+        let ws_slice      = &bytes[start..end];
         let newline_count = memchr::memchr_iter(b'\n', ws_slice).count();
 
         if newline_count == 0 {
-            state.column   += end - start;
+            state.column += end - start;
         } else {
-            let last_nl_offset = memchr::memchr_iter(b'\n', ws_slice)
-                .last()
-                .unwrap();
-
-            state.line   += newline_count;
-            state.column  = (end - (start + last_nl_offset));
+            let last_nl_offset = memchr::memchr_iter(b'\n', ws_slice).last().unwrap();
+            state.line  += newline_count;
+            state.column = end - (start + last_nl_offset);
         }
 
         state.position = end;
-
         if state.column == 0 { state.column = 1; }
     }
 
     #[inline]
     fn handle_tokenization_error(
-        &self,
-        err_msg:             &str,
-        state:               &mut TokenizerState,
-        recovery_attempts:   &mut usize,
-        last_error_position: &mut usize,
+        &self, err_msg: &str, state: &mut TokenizerState,
+        recovery_attempts: &mut usize, last_error_position: &mut usize,
     ) {
         if state.position == *last_error_position {
             *recovery_attempts += 1;
@@ -304,16 +276,14 @@ impl<'src> Tokenizer<'src> {
             *last_error_position = state.position;
         }
         self.error_manager.add_lexical_error(
-            LexicalErrorType::InvalidCharacter,
-            err_msg.to_string(),
+            LexicalErrorType::InvalidCharacter, err_msg.to_string(),
             state.line, state.column, None, None,
         );
     }
 
     fn handle_unsupported_token(&self, token: &Token) {
         let msg = if self.debug_config.is_enabled {
-            let v = VersionManager::instance()
-                .read()
+            let v = VersionManager::instance().read()
                 .map(|vm| vm.get_current_version().to_string())
                 .unwrap_or_else(|_| "unknown".to_string());
             format!("Token type not supported in version {}", v)
@@ -321,8 +291,8 @@ impl<'src> Tokenizer<'src> {
             "Token type not supported in current version".to_string()
         };
         self.error_manager.add_lexical_error(
-            LexicalErrorType::InvalidCharacter,
-            msg, token.line, token.column, None, None,
+            LexicalErrorType::InvalidCharacter, msg,
+            token.line, token.column, None, None,
         );
     }
 
@@ -334,9 +304,7 @@ impl<'src> Tokenizer<'src> {
             if matches!(current, ';' | ',' | '}' | ')' | ']') {
                 state.advance(self.input); return true;
             }
-            if current.is_alphanumeric() || matches!(current, '"' | '\'' | '@') {
-                return true;
-            }
+            if current.is_alphanumeric() || matches!(current, '"' | '\'' | '@') { return true; }
             state.advance(self.input);
         }
         !state.is_at_end()
@@ -347,9 +315,7 @@ impl<'src> Tokenizer<'src> {
             let current = state.peek(self.input);
             if current.is_whitespace() { self.skip_whitespace(state); return true; }
             if current.is_alphanumeric()
-                || matches!(current, '"' | '\'' | '@' | '{' | '[') {
-                return true;
-            }
+                || matches!(current, '"' | '\'' | '@' | '{' | '[') { return true; }
             state.advance(self.input);
         }
         false
@@ -361,8 +327,7 @@ impl<'src> Tokenizer<'src> {
 
     #[inline]
     fn is_token_supported_slow(&self, token: &Token) -> bool {
-        VersionManager::instance()
-            .read()
+        VersionManager::instance().read()
             .map(|vm| vm.is_token_valid_for_version(&token.token_type))
             .unwrap_or(true)
     }
@@ -381,10 +346,7 @@ impl<'src> Tokenizer<'src> {
 
     #[inline]
     fn is_advanced_section(&self) -> bool {
-        matches!(
-            self.current_section,
-            SectionId::QuickFuncs | SectionId::Imports | SectionId::Dlm
-        )
+        matches!(self.current_section, SectionId::QuickFuncs | SectionId::Imports | SectionId::Dlm)
     }
 }
 
@@ -396,20 +358,24 @@ impl<'src> Tokenizer<'src> {
 
         let current = state.peek(self.input);
 
+        // Comments
         if current == '/' {
             let next = state.peek_next(self.input);
             if next == '/' { return Ok(Some(self.scan_single_line_comment(state))); }
             if next == '*' { return self.scan_multi_line_comment(state); }
         }
 
+        // Section keywords
         if current == '@' {
             if let Some(t) = self.try_scan_section_keyword(state) { return Ok(Some(t)); }
         }
 
+        // String literals
         if current == '"' || current == '\'' {
             return self.scan_string_literal(state);
         }
 
+        // Interpolated strings
         if current == '$' && self.is_advanced_section() {
             let next = state.peek_next(self.input);
             if next == '"' || next == '\'' {
@@ -417,23 +383,27 @@ impl<'src> Tokenizer<'src> {
             }
         }
 
+        // Prefixed numeric literals: 0x (hex) and 0b (binary)
         if current == '0' {
             let next = state.peek_next(self.input);
-            if next == 'x' || next == 'X' {
-                return self.scan_hex_literal(state);
-            }
+            if next == 'x' || next == 'X' { return self.scan_hex_literal(state); }
+            if next == 'b' || next == 'B' { return self.scan_binary_literal(state); }
         }
 
+        // Numeric literals (decimal, float, double, date, timestamp)
         if current.is_ascii_digit()
             || (current == '-' && state.peek_next(self.input).is_ascii_digit())
         {
             return self.scan_numeric_literal(state);
         }
 
+        // Hex colors
         if current == '#' { return Ok(Some(self.scan_hex_color(state))); }
 
+        // Multi-char operators
         if let Some(t) = self.try_scan_multi_char_operator(state) { return Ok(Some(t)); }
 
+        // Prefixed constructors (b:, t:, r:)
         if current.is_ascii_alphabetic()
             && state.peek_next(self.input) == ':'
             && self.is_valid_prefixed_constructor(state)
@@ -441,6 +411,7 @@ impl<'src> Tokenizer<'src> {
             return Ok(Some(self.scan_prefixed_constructor(state)));
         }
 
+        // Identifiers / keywords
         if (current as u32) < 256 && IDENT_START[current as usize] {
             return Ok(Some(self.scan_identifier_or_keyword(state)));
         }
@@ -458,16 +429,11 @@ impl<'src> Tokenizer<'src> {
         if let Some(offset) = memchr(b'\n', &bytes[state.position..]) {
             let content = state.slice(self.input, comment_start, offset).to_string();
             state.position += offset + 1;
-            state.line    += 1;
-            state.column   = 1;
-            return Token::new(
-                TokenType::Comment(content),
-                start_line, start_column, self.current_section,
-            );
+            state.line += 1;
+            state.column = 1;
+            return Token::new(TokenType::Comment(content), start_line, start_column, self.current_section);
         }
-        let content = state
-            .slice(self.input, comment_start, bytes.len() - comment_start)
-            .to_string();
+        let content = state.slice(self.input, comment_start, bytes.len() - comment_start).to_string();
         state.position = bytes.len();
         Token::new(TokenType::Comment(content), start_line, start_column, self.current_section)
     }
@@ -481,16 +447,14 @@ impl<'src> Tokenizer<'src> {
         let bytes = self.input.as_bytes();
 
         if let Some(offset) = memchr::memmem::find(&bytes[state.position..], b"*/") {
-            let end_abs = state.position + offset;
+            let end_abs       = state.position + offset;
             let comment_bytes = &bytes[comment_start..end_abs];
             let newline_count = memchr::memchr_iter(b'\n', comment_bytes).count();
-            let content = std::str::from_utf8(comment_bytes).unwrap_or("").to_string();
+            let content       = std::str::from_utf8(comment_bytes).unwrap_or("").to_string();
 
             if newline_count > 0 {
                 state.line += newline_count;
-                let last_nl = memchr::memchr_iter(b'\n', comment_bytes)
-                    .last()
-                    .unwrap_or(0);
+                let last_nl = memchr::memchr_iter(b'\n', comment_bytes).last().unwrap_or(0);
                 state.column = (end_abs - (comment_start + last_nl)) + 2;
             } else {
                 state.column += (end_abs - comment_start) + 2;
@@ -498,8 +462,7 @@ impl<'src> Tokenizer<'src> {
             state.position = end_abs + 2;
 
             return Ok(Some(Token::new(
-                TokenType::Comment(content),
-                start_line, start_column, self.current_section,
+                TokenType::Comment(content), start_line, start_column, self.current_section,
             )));
         }
 
@@ -509,18 +472,10 @@ impl<'src> Tokenizer<'src> {
             start_line, start_column, None, None,
         );
         if self.should_terminate() {
-            return Err(format!(
-                "Unterminated multi-line comment at line {}, col {}",
-                start_line, start_column
-            ));
+            return Err(format!("Unterminated multi-line comment at line {}, col {}", start_line, start_column));
         }
-        let content = state
-            .slice(self.input, comment_start, bytes.len() - comment_start)
-            .to_string();
-        Ok(Some(Token::new(
-            TokenType::Comment(content),
-            start_line, start_column, self.current_section,
-        )))
+        let content = state.slice(self.input, comment_start, bytes.len() - comment_start).to_string();
+        Ok(Some(Token::new(TokenType::Comment(content), start_line, start_column, self.current_section)))
     }
 
     fn try_scan_section_keyword(&self, state: &mut TokenizerState) -> Option<Token> {
@@ -538,9 +493,7 @@ impl<'src> Tokenizer<'src> {
         }
         let section_len = state.position - section_start;
         if section_len == 0 {
-            state.position = start_pos;
-            state.line     = start_line;
-            state.column   = start_column;
+            state.position = start_pos; state.line = start_line; state.column = start_column;
             return None;
         }
         let section_name = state.slice(self.input, section_start, section_len);
@@ -557,18 +510,12 @@ impl<'src> Tokenizer<'src> {
         };
 
         if let Some(tt) = token_type {
-            // FIX: stamp the section keyword with its OWN section ID, not
-            // self.current_section (which is still the PREVIOUS section).
-            // Before this fix: @QUICKFUNCS had SectionId::Enums stamped on it.
-            // After: @QUICKFUNCS correctly has SectionId::QuickFuncs.
             let own_section = tt.get_section_context()
                 .map(SectionId::from_context_str)
                 .unwrap_or(SectionId::None);
             Some(Token::new(tt, start_line, start_column, own_section))
         } else {
-            state.position = start_pos;
-            state.line     = start_line;
-            state.column   = start_column;
+            state.position = start_pos; state.line = start_line; state.column = start_column;
             None
         }
     }
@@ -593,9 +540,7 @@ impl<'src> Tokenizer<'src> {
 
                 if found_char == quote {
                     if !has_escapes {
-                        content = state
-                            .slice(self.input, search_start, found_pos - search_start)
-                            .to_string();
+                        content = state.slice(self.input, search_start, found_pos - search_start).to_string();
                     } else {
                         content.push_str(state.slice(self.input, pos, found_pos - pos));
                     }
@@ -607,9 +552,7 @@ impl<'src> Tokenizer<'src> {
                     } else {
                         TokenType::String(content)
                     };
-                    return Ok(Some(Token::new(
-                        token_type, start_line, start_column, self.current_section,
-                    )));
+                    return Ok(Some(Token::new(token_type, start_line, start_column, self.current_section)));
 
                 } else if found_char == b'\\' {
                     has_escapes = true;
@@ -637,15 +580,9 @@ impl<'src> Tokenizer<'src> {
         if self.should_terminate() {
             return Err(format!("Unterminated string at line {}, col {}", start_line, start_column));
         }
-        let partial = state
-            .slice(self.input, search_start, bytes.len() - search_start)
-            .to_string();
+        let partial    = state.slice(self.input, search_start, bytes.len() - search_start).to_string();
         state.position = bytes.len();
-        let token_type = if quote == b'\'' {
-            TokenType::StringSingle(partial)
-        } else {
-            TokenType::String(partial)
-        };
+        let token_type = if quote == b'\'' { TokenType::StringSingle(partial) } else { TokenType::String(partial) };
         Ok(Some(Token::new(token_type, start_line, start_column, self.current_section)))
     }
 
@@ -653,18 +590,16 @@ impl<'src> Tokenizer<'src> {
         let start_line   = state.line;
         let start_column = state.column;
         state.advance(self.input);
-        let quote = state.advance(self.input);
+        let quote       = state.advance(self.input);
         let mut content     = String::new();
         let mut brace_depth = 0i32;
 
         while !state.is_at_end() {
             let current = state.peek(self.input);
             if current == quote && brace_depth == 0 {
-                state.advance(self.input);
-                break;
+                state.advance(self.input); break;
             } else if current == '{' {
-                brace_depth += 1;
-                content.push(state.advance(self.input));
+                brace_depth += 1; content.push(state.advance(self.input));
             } else if current == '}' {
                 if brace_depth > 0 { brace_depth -= 1; }
                 content.push(state.advance(self.input));
@@ -685,14 +620,11 @@ impl<'src> Tokenizer<'src> {
                 start_line, start_column, None, None,
             );
             if self.should_terminate() {
-                return Err(format!(
-                    "Unmatched braces at line {}, col {}", start_line, start_column
-                ));
+                return Err(format!("Unmatched braces at line {}, col {}", start_line, start_column));
             }
         }
         Ok(Some(Token::new(
-            TokenType::InterpolatedString(content),
-            start_line, start_column, self.current_section,
+            TokenType::InterpolatedString(content), start_line, start_column, self.current_section,
         )))
     }
 
@@ -710,6 +642,9 @@ impl<'src> Tokenizer<'src> {
 // ── Numeric scanning ──────────────────────────────────────────────────────────
 
 impl<'src> Tokenizer<'src> {
+
+    // ── Decimal / float / date / timestamp ───────────────────────────────────
+
     fn scan_numeric_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
         let start_line   = state.line;
@@ -724,6 +659,7 @@ impl<'src> Tokenizer<'src> {
         let mut is_date            = false;
         let mut is_timestamp       = false;
         let mut in_timezone_offset = false;
+        let mut has_underscore     = false; // track whether we need to strip
 
         if state.peek(self.input) == '-' { state.advance(self.input); is_negative = true; }
 
@@ -732,54 +668,71 @@ impl<'src> Tokenizer<'src> {
 
             if DIGIT[b as usize] {
                 state.advance(self.input);
-            } else if b == b'.' && !has_dot && !has_exponent && !is_date {
+            }
+            // ── Underscore separator — only in pure numeric (not date/timestamp)
+            else if b == b'_' && !is_date && !is_timestamp {
+                has_underscore = true;
+                state.advance(self.input);
+            }
+            else if b == b'.' && !has_dot && !has_exponent && !is_date {
                 let next_pos = state.position + 1;
                 if next_pos < bytes.len() && DIGIT[bytes[next_pos] as usize] {
                     has_dot = true; state.advance(self.input);
                 } else { break; }
-            } else if (b == b'e' || b == b'E') && !has_exponent && !is_date {
+            }
+            else if (b == b'e' || b == b'E') && !has_exponent && !is_date {
                 has_exponent = true;
                 state.advance(self.input);
                 if !state.is_at_end() {
                     let nb = bytes[state.position];
                     if nb == b'+' || nb == b'-' { state.advance(self.input); }
                 }
-            } else if b == b'-' && dash_count < 2 && !is_negative {
+            }
+            else if b == b'-' && dash_count < 2 && !is_negative {
                 dash_count += 1; is_date = true; state.advance(self.input);
-            } else if b == b'T' && is_date {
+            }
+            else if b == b'T' && is_date {
                 is_timestamp = true; state.advance(self.input);
-            } else if b == b':' && is_timestamp {
+            }
+            else if b == b':' && is_timestamp {
                 if in_timezone_offset && colon_count >= 2 { state.advance(self.input); }
                 else if colon_count < 2 { colon_count += 1; state.advance(self.input); }
                 else { break; }
-            } else if b == b'.' && is_timestamp {
+            }
+            else if b == b'.' && is_timestamp {
                 state.advance(self.input);
-            } else if b == b'Z' && is_timestamp {
+            }
+            else if b == b'Z' && is_timestamp {
                 state.advance(self.input); break;
-            } else if (b == b'+' || b == b'-') && is_timestamp {
+            }
+            else if (b == b'+' || b == b'-') && is_timestamp {
                 let scanned = state.slice(self.input, start_pos, state.position - start_pos);
                 if scanned.contains('T') {
                     in_timezone_offset = true; state.advance(self.input);
                 } else { break; }
-            } else { break; }
+            }
+            else { break; }
         }
 
-        let number_string = state
-            .slice(self.input, start_pos, state.position - start_pos)
-            .to_string();
+        // Extract raw slice, then strip underscores if any were present
+        let raw = state.slice(self.input, start_pos, state.position - start_pos);
+        let number_string: String = if has_underscore {
+            raw.chars().filter(|&c| c != '_').collect()
+        } else {
+            raw.to_string()
+        };
 
         if is_timestamp {
             return Ok(Some(Token::new(
-                TokenType::Timestamp(number_string),
-                start_line, start_column, self.current_section,
+                TokenType::Timestamp(number_string), start_line, start_column, self.current_section,
             )));
         }
         if is_date {
             return Ok(Some(Token::new(
-                TokenType::Date(number_string),
-                start_line, start_column, self.current_section,
+                TokenType::Date(number_string), start_line, start_column, self.current_section,
             )));
         }
+
         self.create_numeric_token(&number_string, has_dot, has_exponent, state, start_line, start_column)
     }
 
@@ -792,11 +745,41 @@ impl<'src> Tokenizer<'src> {
         start_line:    usize,
         start_column:  usize,
     ) -> Result<Option<Token>, String> {
-        let has_float_suffix = if !state.is_at_end() {
-            let nb = self.input.as_bytes()[state.position];
-            if nb == b'f' || nb == b'F' { state.advance(self.input); true } else { false }
-        } else { false };
+        // ── Type suffix — check before consuming anything irreversibly ─────────
+        // L / l  → Long (only valid on integer literals, not float/double)
+        // f / F  → Float
+        // Mutually exclusive; L on a float literal is a lex error.
+        let mut has_float_suffix = false;
+        let mut has_long_suffix  = false;
 
+        if !state.is_at_end() {
+            let nb = self.input.as_bytes()[state.position];
+            match nb {
+                b'L' | b'l' if !has_dot && !has_exponent => {
+                    state.advance(self.input);
+                    has_long_suffix = true;
+                }
+                b'f' | b'F' => {
+                    state.advance(self.input);
+                    has_float_suffix = true;
+                }
+                _ => {}
+            }
+        }
+
+        // ── Long suffix → parse as i64 ────────────────────────────────────────
+        if has_long_suffix {
+            return match number_string.parse::<i64>() {
+                Ok(v)  => Ok(Some(Token::new(
+                    TokenType::Long(v), start_line, start_column, self.current_section,
+                ))),
+                Err(_) => self.handle_invalid_number(
+                    &format!("{}L", number_string), start_line, start_column,
+                ),
+            };
+        }
+
+        // ── Float / Double / Scientific / Integer ─────────────────────────────
         let token_type = if has_exponent {
             if has_float_suffix {
                 match number_string.parse::<f32>() {
@@ -827,9 +810,13 @@ impl<'src> Tokenizer<'src> {
                 Err(_) => return self.handle_invalid_number(number_string, start_line, start_column),
             }
         } else {
+            // Plain integer — try i32 first; auto-promote to i64 on overflow
             match number_string.parse::<i32>() {
-                Ok(v)  => TokenType::Integer(v),
-                Err(_) => return self.handle_invalid_number(number_string, start_line, start_column),
+                Ok(v) => TokenType::Integer(v),
+                Err(_) => match number_string.parse::<i64>() {
+                    Ok(v)  => TokenType::Long(v),
+                    Err(_) => return self.handle_invalid_number(number_string, start_line, start_column),
+                },
             }
         };
 
@@ -837,10 +824,7 @@ impl<'src> Tokenizer<'src> {
     }
 
     fn handle_invalid_number(
-        &self,
-        number_string: &str,
-        start_line:    usize,
-        start_column:  usize,
+        &self, number_string: &str, start_line: usize, start_column: usize,
     ) -> Result<Option<Token>, String> {
         self.error_manager.add_lexical_error(
             LexicalErrorType::InvalidNumericFormat,
@@ -856,11 +840,218 @@ impl<'src> Tokenizer<'src> {
         )))
     }
 
+    // ── Hex literals: 0x … ───────────────────────────────────────────────────
+    // Accepts underscore separators: 0xFF_FF_FF_FF
+    // Accepts L suffix: 0xDEAD_BEEFL → Long
+
+    fn scan_hex_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
+        let start_column = state.column;
+        let start_line   = state.line;
+        state.advance(self.input); // '0'
+        state.advance(self.input); // 'x' / 'X'
+
+        let hex_start = state.position;
+        let bytes     = self.input.as_bytes();
+        let mut has_underscore = false;
+
+        while !state.is_at_end() {
+            let b = bytes[state.position];
+            if (b as u32) < 256 && HEX_DIGIT[b as usize] {
+                state.advance(self.input);
+            } else if b == b'_' {
+                has_underscore = true;
+                state.advance(self.input);
+            } else {
+                break;
+            }
+        }
+
+        // Check L / l suffix
+        let has_long_suffix = !state.is_at_end() && {
+            let nb = bytes[state.position];
+            if nb == b'L' || nb == b'l' { state.advance(self.input); true } else { false }
+        };
+
+        let raw = state.slice(self.input, hex_start, state.position - hex_start
+            - if has_long_suffix { 1 } else { 0 }
+        );
+        // Strip underscores (and any trailing L already consumed)
+        let hex_part: String = if has_underscore {
+            raw.chars().filter(|&c| c != '_' && c != 'L' && c != 'l').collect()
+        } else {
+            raw.chars().filter(|&c| c != 'L' && c != 'l').collect()
+        };
+
+        if hex_part.is_empty() {
+            self.error_manager.add_lexical_error(
+                LexicalErrorType::InvalidNumericFormat,
+                "Hex literal '0x' has no digits".to_string(),
+                start_line, start_column, None, None,
+            );
+            if self.should_terminate() {
+                return Err(format!("Empty hex literal at line {}, col {}", start_line, start_column));
+            }
+            return Ok(Some(Token::new(
+                TokenType::Error("Empty hex literal".to_string()),
+                start_line, start_column, self.current_section,
+            )));
+        }
+
+        if has_long_suffix {
+            return match i64::from_str_radix(&hex_part, 16) {
+                Ok(v) => Ok(Some(Token::new(
+                    TokenType::Long(v), start_line, start_column, self.current_section,
+                ))),
+                Err(_) => {
+                    self.error_manager.add_lexical_error(
+                        LexicalErrorType::InvalidNumericFormat,
+                        format!("Invalid hex literal: 0x{}", hex_part),
+                        start_line, start_column, None, None,
+                    );
+                    if self.should_terminate() {
+                        return Err(format!("Invalid hex literal: 0x{}", hex_part));
+                    }
+                    Ok(Some(Token::new(
+                        TokenType::Error(format!("Invalid hex: 0x{}", hex_part)),
+                        start_line, start_column, self.current_section,
+                    )))
+                }
+            };
+        }
+
+        // Try i32 first, auto-promote to i64
+        if let Ok(v) = i32::from_str_radix(&hex_part, 16) {
+            return Ok(Some(Token::new(
+                TokenType::Integer(v), start_line, start_column, self.current_section,
+            )));
+        }
+        if let Ok(v) = i64::from_str_radix(&hex_part, 16) {
+            return Ok(Some(Token::new(
+                TokenType::Long(v), start_line, start_column, self.current_section,
+            )));
+        }
+
+        self.error_manager.add_lexical_error(
+            LexicalErrorType::InvalidNumericFormat,
+            format!("Invalid hex literal: 0x{}", hex_part),
+            start_line, start_column, None, None,
+        );
+        if self.should_terminate() {
+            return Err(format!("Invalid hex literal: 0x{}", hex_part));
+        }
+        Ok(Some(Token::new(
+            TokenType::Error(format!("Invalid hex: 0x{}", hex_part)),
+            start_line, start_column, self.current_section,
+        )))
+    }
+
+    // ── Binary literals: 0b … ────────────────────────────────────────────────
+    // Digits: 0 and 1 only. Accepts underscore separators. Accepts L suffix.
+    // Fits i32 → Integer. Overflows i32 → Long. L suffix → Long.
+    //   0b1010           → Integer(10)
+    //   0b1111_0000      → Integer(240)
+    //   0b1_0000_0000L   → Long(256)
+    //   0B101            → Integer(5)
+
+    fn scan_binary_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
+        let start_column = state.column;
+        let start_line   = state.line;
+        state.advance(self.input); // '0'
+        state.advance(self.input); // 'b' / 'B'
+
+        let bin_start      = state.position;
+        let bytes          = self.input.as_bytes();
+        let mut has_digits = false;
+
+        while !state.is_at_end() {
+            let b = bytes[state.position];
+            match b {
+                b'0' | b'1' => { has_digits = true; state.advance(self.input); }
+                b'_'        => { state.advance(self.input); } // separator — skip
+                _           => break,
+            }
+        }
+
+        if !has_digits {
+            self.error_manager.add_lexical_error(
+                LexicalErrorType::InvalidNumericFormat,
+                "Binary literal '0b' has no digits".to_string(),
+                start_line, start_column, None, None,
+            );
+            if self.should_terminate() {
+                return Err(format!("Empty binary literal at line {}, col {}", start_line, start_column));
+            }
+            return Ok(Some(Token::new(
+                TokenType::Error("Empty binary literal".to_string()),
+                start_line, start_column, self.current_section,
+            )));
+        }
+
+        // Check L / l suffix
+        let has_long_suffix = !state.is_at_end() && {
+            let nb = bytes[state.position];
+            if nb == b'L' || nb == b'l' { state.advance(self.input); true } else { false }
+        };
+
+        // Extract raw and strip underscores
+        let raw      = state.slice(self.input, bin_start, state.position - bin_start
+            - if has_long_suffix { 1 } else { 0 });
+        let clean: String = raw.chars().filter(|&c| c != '_' && c != 'L' && c != 'l').collect();
+
+        if has_long_suffix {
+            return match i64::from_str_radix(&clean, 2) {
+                Ok(v) => Ok(Some(Token::new(
+                    TokenType::Long(v), start_line, start_column, self.current_section,
+                ))),
+                Err(_) => {
+                    self.error_manager.add_lexical_error(
+                        LexicalErrorType::InvalidNumericFormat,
+                        format!("Invalid binary literal: 0b{}", clean),
+                        start_line, start_column, None, None,
+                    );
+                    if self.should_terminate() {
+                        return Err(format!("Invalid binary literal: 0b{}", clean));
+                    }
+                    Ok(Some(Token::new(
+                        TokenType::Error(format!("Invalid binary: 0b{}", clean)),
+                        start_line, start_column, self.current_section,
+                    )))
+                }
+            };
+        }
+
+        // No suffix — try i32, auto-promote to i64 on overflow
+        match i64::from_str_radix(&clean, 2) {
+            Ok(v) if v <= i32::MAX as i64 && v >= i32::MIN as i64 => Ok(Some(Token::new(
+                TokenType::Integer(v as i32), start_line, start_column, self.current_section,
+            ))),
+            Ok(v) => Ok(Some(Token::new(
+                TokenType::Long(v), start_line, start_column, self.current_section,
+            ))),
+            Err(_) => {
+                self.error_manager.add_lexical_error(
+                    LexicalErrorType::InvalidNumericFormat,
+                    format!("Invalid binary literal: 0b{}", clean),
+                    start_line, start_column, None, None,
+                );
+                if self.should_terminate() {
+                    return Err(format!("Invalid binary literal: 0b{}", clean));
+                }
+                Ok(Some(Token::new(
+                    TokenType::Error(format!("Invalid binary: 0b{}", clean)),
+                    start_line, start_column, self.current_section,
+                )))
+            }
+        }
+    }
+
+    // ── Hex color ─────────────────────────────────────────────────────────────
+
     fn scan_hex_color(&self, state: &mut TokenizerState) -> Token {
         let start_column = state.column;
         let start_line   = state.line;
         let start_pos    = state.position;
-        state.advance(self.input); // consume '#'
+        state.advance(self.input); // '#'
         let bytes = self.input.as_bytes();
         while !state.is_at_end()
             && (bytes[state.position] as u32) < 256
@@ -873,42 +1064,7 @@ impl<'src> Tokenizer<'src> {
         Token::new(TokenType::HexColor(hex_value), start_line, start_column, self.current_section)
     }
 
-    fn scan_hex_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
-        let start_column = state.column;
-        let start_line   = state.line;
-        let start_pos    = state.position;
-        state.advance(self.input); // '0'
-        state.advance(self.input); // 'x' / 'X'
-        let bytes = self.input.as_bytes();
-        while !state.is_at_end()
-            && (bytes[state.position] as u32) < 256
-            && HEX_DIGIT[bytes[state.position] as usize]
-        {
-            state.advance(self.input);
-        }
-        let hex_part = state.slice(self.input, start_pos + 2, state.position - start_pos - 2);
-        let value = if let Ok(v) = i32::from_str_radix(hex_part, 16) {
-            v
-        } else if let Ok(v) = i64::from_str_radix(hex_part, 16) {
-            v as i32
-        } else {
-            self.error_manager.add_lexical_error(
-                LexicalErrorType::InvalidNumericFormat,
-                format!("Invalid hex literal: 0x{}", hex_part),
-                start_line, start_column, None, None,
-            );
-            if self.should_terminate() {
-                return Err(format!("Invalid hex literal: 0x{}", hex_part));
-            }
-            return Ok(Some(Token::new(
-                TokenType::Error(format!("Invalid hex: 0x{}", hex_part)),
-                start_line, start_column, self.current_section,
-            )));
-        };
-        Ok(Some(Token::new(
-            TokenType::Integer(value), start_line, start_column, self.current_section,
-        )))
-    }
+    // ── Multi-char operators ──────────────────────────────────────────────────
 
     fn try_scan_multi_char_operator(&self, state: &mut TokenizerState) -> Option<Token> {
         if state.is_at_end() { return None; }
@@ -927,9 +1083,7 @@ impl<'src> Tokenizer<'src> {
                 _ => None,
             };
             if let Some(tt) = three_char {
-                state.advance(self.input);
-                state.advance(self.input);
-                state.advance(self.input);
+                state.advance(self.input); state.advance(self.input); state.advance(self.input);
                 return Some(Token::new(tt, start_line, start_column, self.current_section));
             }
         }
@@ -964,8 +1118,7 @@ impl<'src> Tokenizer<'src> {
             _ => None,
         };
         if let Some(tt) = two_char {
-            state.advance(self.input);
-            state.advance(self.input);
+            state.advance(self.input); state.advance(self.input);
             return Some(Token::new(tt, start_line, start_column, self.current_section));
         }
         None
@@ -988,17 +1141,14 @@ impl<'src> Tokenizer<'src> {
             if (b as u32) < 256 && IDENT_CONT[b as usize] {
                 state.advance(self.input);
             } else if b == b'-' {
-                let next_pos = state.position + 1;
+                let next_pos           = state.position + 1;
                 let in_expression_ctx  = matches!(self.current_section, SectionId::QuickFuncs);
                 let valid_continuation = next_pos < bytes.len()
                     && (bytes[next_pos] as u32) < 256
                     && super::char_tables::ALPHA_UNDERSCORE[bytes[next_pos] as usize];
 
-                if !in_expression_ctx && valid_continuation {
-                    state.advance(self.input);
-                } else {
-                    break;
-                }
+                if !in_expression_ctx && valid_continuation { state.advance(self.input); }
+                else { break; }
             } else {
                 break;
             }
@@ -1025,7 +1175,7 @@ impl<'src> Tokenizer<'src> {
         let start_column = state.column;
         let start_line   = state.line;
         let prefix       = state.advance(self.input);
-        state.advance(self.input); // consume ':'
+        state.advance(self.input); // ':'
 
         let constructor_type = match prefix {
             'b' => "BLOB_CONSTRUCTOR",
@@ -1065,7 +1215,6 @@ impl<'src> Tokenizer<'src> {
             '^' => TokenType::BitwiseOp("^"),
             '&' => TokenType::BitwiseOp("&"),
             '|' => TokenType::BitwiseOp("|"),
-            // '~' falls through to Symbol('~') — QuickFunc prefix and bitwise NOT
             '<' | '>' | '=' | '!' => TokenType::Symbol(symbol),
             _ if !symbol.is_control() && !symbol.is_whitespace() => TokenType::Symbol(symbol),
             _ => {
@@ -1075,14 +1224,11 @@ impl<'src> Tokenizer<'src> {
                     "Unexpected character".to_string()
                 };
                 self.error_manager.add_lexical_error(
-                    LexicalErrorType::InvalidCharacter,
-                    msg.clone(), start_line, start_column, None, None,
+                    LexicalErrorType::InvalidCharacter, msg.clone(),
+                    start_line, start_column, None, None,
                 );
                 if self.should_terminate() {
-                    return Err(format!(
-                        "Invalid character at line {}, col {}: '{}'",
-                        start_line, start_column, symbol
-                    ));
+                    return Err(format!("Invalid character at line {}, col {}: '{}'", start_line, start_column, symbol));
                 }
                 TokenType::Error(format!("Invalid character: '{}'", symbol))
             }
@@ -1090,7 +1236,7 @@ impl<'src> Tokenizer<'src> {
         Ok(Some(Token::new(token_type, start_line, start_column, self.current_section)))
     }
 
-    // ── Debug-only analysis ───────────────────────────────────────────────────
+    // ── Debug analysis ────────────────────────────────────────────────────────
 
     fn analyze_token_sequences(&mut self) {
         let len = self.token_pool.len();
@@ -1102,24 +1248,17 @@ impl<'src> Tokenizer<'src> {
                 } else { false };
                 (t1.section, is_candidate)
             };
-
             if !t1_type_is_upper_ident { continue; }
-
             let is_dot = matches!(self.token_pool[i + 1].token_type, TokenType::Symbol('.'));
             if !is_dot { continue; }
-
             if let TokenType::Identifier(method_name) = &self.token_pool[i + 2].token_type {
                 let object_name = if let TokenType::Identifier(n) = &self.token_pool[i].token_type {
                     n.clone()
                 } else { continue };
-
                 self.static_calls_found.push(StaticCallInfo {
-                    object_name,
-                    method_name: method_name.clone(),
-                    line:        self.token_pool[i].line,
-                    column:      self.token_pool[i].column,
-                    section:     t1_section,
-                    token_index: i,
+                    object_name, method_name: method_name.clone(),
+                    line: self.token_pool[i].line, column: self.token_pool[i].column,
+                    section: t1_section, token_index: i,
                 });
             }
         }
@@ -1134,7 +1273,6 @@ impl<'src> Tokenizer<'src> {
 
     fn create_metadata(&self) -> TokenizationMetadata {
         let sections_detected = self.get_sections_from_tokens();
-
         let potential_builtin_calls = if self.debug_config.is_testing {
             self.analyze_potential_builtin_calls()
         } else { 0 };
@@ -1146,14 +1284,11 @@ impl<'src> Tokenizer<'src> {
             sections_detected,
             prefixed_constructors_found: self.prefixed_constructors_found.len(),
             blob_constructors:           self.prefixed_constructors_found.iter()
-                                             .filter(|p| p.constructor_type == "BLOB_CONSTRUCTOR")
-                                             .count(),
+                                             .filter(|p| p.constructor_type == "BLOB_CONSTRUCTOR").count(),
             tuple_constructors:          self.prefixed_constructors_found.iter()
-                                             .filter(|p| p.constructor_type == "TUPLE_CONSTRUCTOR")
-                                             .count(),
+                                             .filter(|p| p.constructor_type == "TUPLE_CONSTRUCTOR").count(),
             regex_constructors:          self.prefixed_constructors_found.iter()
-                                             .filter(|p| p.constructor_type == "REGEX_CONSTRUCTOR")
-                                             .count(),
+                                             .filter(|p| p.constructor_type == "REGEX_CONSTRUCTOR").count(),
             static_calls_found:          self.static_calls_found.len(),
             potential_builtin_calls,
         }

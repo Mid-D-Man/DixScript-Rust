@@ -1,18 +1,20 @@
-
+// dixscript/src/Runtime/dix_value.rs
 use std::collections::HashMap;
 use serde::Serialize;
 
 /// Runtime value type for loaded DixScript data.
 ///
-/// Flat enum — consumers and the FFI layer pattern-match directly on variants.
-/// Separate from `Builtins::Core::DixValue`, which is the compiler-side
-/// interpreter value used during QuickFuncs evaluation.
+/// `Long(i64)` is the 64-bit integer variant. It surfaces when the source
+/// uses an explicit `L` suffix (`9_000_000_000L`), a binary/hex literal that
+/// overflows i32, or when a plain integer literal overflows i32 at lex time.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum DixValue {
     Null,
     Bool(bool),
     Int(i32),
+    /// 64-bit integer. Produced by `L`-suffixed literals or auto-promotion.
+    Long(i64),
     Float(f32),
     Double(f64),
     String(String),
@@ -28,55 +30,39 @@ pub enum DixValue {
 }
 
 impl DixValue {
-    #[inline]
-    pub fn bool(value: bool) -> Self {
-        DixValue::Bool(value)
-    }
+    #[inline] pub fn bool(value: bool)   -> Self { DixValue::Bool(value) }
+    #[inline] pub fn int(value: i32)     -> Self { DixValue::Int(value) }
+    #[inline] pub fn long(value: i64)    -> Self { DixValue::Long(value) }
+    #[inline] pub fn float(value: f32)   -> Self { DixValue::Float(value) }
+    #[inline] pub fn double(value: f64)  -> Self { DixValue::Double(value) }
+    pub fn string(value: impl Into<String>) -> Self { DixValue::String(value.into()) }
+    pub fn array(values: Vec<DixValue>)     -> Self { DixValue::Array(values) }
+    pub fn object(properties: HashMap<String, DixValue>) -> Self { DixValue::Object(properties) }
 
     #[inline]
-    pub fn int(value: i32) -> Self {
-        DixValue::Int(value)
-    }
-
-    #[inline]
-    pub fn float(value: f32) -> Self {
-        DixValue::Float(value)
-    }
-
-    #[inline]
-    pub fn double(value: f64) -> Self {
-        DixValue::Double(value)
-    }
-
-    pub fn string(value: impl Into<String>) -> Self {
-        DixValue::String(value.into())
-    }
-
-    pub fn array(values: Vec<DixValue>) -> Self {
-        DixValue::Array(values)
-    }
-
-    pub fn object(properties: HashMap<String, DixValue>) -> Self {
-        DixValue::Object(properties)
-    }
-
-    #[inline]
-    pub fn is_null(&self) -> bool {
-        matches!(self, DixValue::Null)
-    }
+    pub fn is_null(&self) -> bool { matches!(self, DixValue::Null) }
 
     pub fn as_bool(&self) -> Option<bool> {
-        match self {
-            DixValue::Bool(b) => Some(*b),
-            _ => None,
-        }
+        match self { DixValue::Bool(b) => Some(*b), _ => None }
     }
 
     pub fn as_int(&self) -> Option<i32> {
         match self {
             DixValue::Int(i)    => Some(*i),
+            DixValue::Long(l)   => Some(*l as i32),
             DixValue::Float(f)  => Some(*f as i32),
             DixValue::Double(d) => Some(*d as i32),
+            _ => None,
+        }
+    }
+
+    /// Returns the numeric value as i64, lossless for both Int and Long.
+    pub fn as_long(&self) -> Option<i64> {
+        match self {
+            DixValue::Long(l)   => Some(*l),
+            DixValue::Int(i)    => Some(*i as i64),
+            DixValue::Float(f)  => Some(*f as i64),
+            DixValue::Double(d) => Some(*d as i64),
             _ => None,
         }
     }
@@ -84,6 +70,7 @@ impl DixValue {
     pub fn as_float(&self) -> Option<f64> {
         match self {
             DixValue::Int(i)    => Some(*i as f64),
+            DixValue::Long(l)   => Some(*l as f64),
             DixValue::Float(f)  => Some(*f as f64),
             DixValue::Double(d) => Some(*d),
             _ => None,
@@ -103,17 +90,11 @@ impl DixValue {
     }
 
     pub fn as_array(&self) -> Option<&[DixValue]> {
-        match self {
-            DixValue::Array(arr) => Some(arr.as_slice()),
-            _ => None,
-        }
+        match self { DixValue::Array(arr) => Some(arr.as_slice()), _ => None }
     }
 
     pub fn as_object(&self) -> Option<&HashMap<String, DixValue>> {
-        match self {
-            DixValue::Object(obj) => Some(obj),
-            _ => None,
-        }
+        match self { DixValue::Object(obj) => Some(obj), _ => None }
     }
 
     pub fn type_name(&self) -> &'static str {
@@ -121,6 +102,7 @@ impl DixValue {
             DixValue::Null         => "null",
             DixValue::Bool(_)      => "bool",
             DixValue::Int(_)       => "int",
+            DixValue::Long(_)      => "long",
             DixValue::Float(_)     => "float",
             DixValue::Double(_)    => "double",
             DixValue::String(_)    => "string",
@@ -143,6 +125,7 @@ impl std::fmt::Display for DixValue {
             DixValue::Null                                   => write!(f, "null"),
             DixValue::Bool(b)                                => write!(f, "{}", b),
             DixValue::Int(i)                                 => write!(f, "{}", i),
+            DixValue::Long(l)                                => write!(f, "{}L", l),
             DixValue::Float(fl)                              => write!(f, "{}f", fl),
             DixValue::Double(d)                              => write!(f, "{}", d),
             DixValue::String(s)                              => write!(f, "\"{}\"", s),
@@ -182,11 +165,30 @@ impl std::fmt::Display for DixValue {
     }
 }
 
-impl From<bool>                    for DixValue { fn from(v: bool)                    -> Self { DixValue::Bool(v) } }
-impl From<i32>                     for DixValue { fn from(v: i32)                     -> Self { DixValue::Int(v) } }
-impl From<f32>                     for DixValue { fn from(v: f32)                     -> Self { DixValue::Float(v) } }
-impl From<f64>                     for DixValue { fn from(v: f64)                     -> Self { DixValue::Double(v) } }
-impl From<String>                  for DixValue { fn from(v: String)                  -> Self { DixValue::String(v) } }
-impl From<&str>                    for DixValue { fn from(v: &str)                    -> Self { DixValue::String(v.to_string()) } }
-impl From<Vec<DixValue>>           for DixValue { fn from(v: Vec<DixValue>)           -> Self { DixValue::Array(v) } }
+// ── From impls ────────────────────────────────────────────────────────────────
+
+impl From<bool>   for DixValue { fn from(v: bool)   -> Self { DixValue::Bool(v) } }
+impl From<i32>    for DixValue { fn from(v: i32)     -> Self { DixValue::Int(v) } }
+impl From<i64>    for DixValue { fn from(v: i64)     -> Self { DixValue::Long(v) } }
+impl From<f32>    for DixValue { fn from(v: f32)     -> Self { DixValue::Float(v) } }
+impl From<f64>    for DixValue { fn from(v: f64)     -> Self { DixValue::Double(v) } }
+impl From<String> for DixValue { fn from(v: String)  -> Self { DixValue::String(v) } }
+impl From<&str>   for DixValue { fn from(v: &str)    -> Self { DixValue::String(v.to_string()) } }
+impl From<Vec<DixValue>>            for DixValue { fn from(v: Vec<DixValue>)            -> Self { DixValue::Array(v) } }
 impl From<HashMap<String, DixValue>> for DixValue { fn from(v: HashMap<String, DixValue>) -> Self { DixValue::Object(v) } }
+
+// ── TryFrom for dix_data.rs typed getters ────────────────────────────────────
+
+impl TryFrom<DixValue> for i64 {
+    type Error = String;
+    fn try_from(value: DixValue) -> Result<Self, Self::Error> {
+        match value {
+            DixValue::Long(l)            => Ok(l),
+            DixValue::Int(i)             => Ok(i as i64),
+            DixValue::Float(f)           => Ok(f as i64),
+            DixValue::Double(d)          => Ok(d as i64),
+            DixValue::Enum { value, .. } => Ok(value as i64),
+            _ => Err(format!("Cannot convert {} to i64", value.type_name())),
+        }
+    }
+}

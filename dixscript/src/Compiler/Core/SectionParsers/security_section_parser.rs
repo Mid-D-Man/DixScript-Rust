@@ -380,6 +380,10 @@ impl<'a> SecuritySectionParser<'a> {
                 value: *i,
                 position: pos,
             }),
+            TokenType::Long(i) => Some(Value::Long {
+                value: *i,
+                position: pos,
+            }),
             TokenType::Float(fl) => Some(Value::Float {
                 value: *fl,
                 position: pos,

@@ -19,8 +19,7 @@
         blobVal<blob>,
         regexVal<regex>,
         enumVal<enum>
-    )
-    {
+    ){
 
         return $"Received all {14} data types successfully";
 

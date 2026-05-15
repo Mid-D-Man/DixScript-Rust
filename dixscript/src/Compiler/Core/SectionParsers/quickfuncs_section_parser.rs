@@ -1573,6 +1573,14 @@ impl<'a> QuickFuncsSectionParser<'a> {
                     position: tok_pos,
                 }
             }
+            TokenType::Long(l) => {
+                let val = *l;
+                self.advance();
+                Expression::Value {
+                    value: Value::Long { value: val, position: tok_pos },
+                    position: tok_pos,
+                }
+            }
             TokenType::Float(f) => {
                 let val = *f;
                 self.advance();
@@ -1618,7 +1626,6 @@ impl<'a> QuickFuncsSectionParser<'a> {
                     position: tok_pos,
                 }
             }
-            // null keyword — Keyword is &&'static str, compare directly
             TokenType::Keyword(kw) if *kw == "null" => {
                 self.advance();
                 Expression::Value {
@@ -1703,6 +1710,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
         match &token.token_type {
             TokenType::Integer(i)  => { let v = *i; self.advance(); Value::Integer { value: v, position: val_pos } }
+            TokenType::Long(i)  => { let v = *i; self.advance(); Value::Long { value: v, position: val_pos } }
             TokenType::Float(f)    => { let v = *f; self.advance(); Value::Float   { value: v, position: val_pos } }
             TokenType::Double(d)   => { let v = *d; self.advance(); Value::Double  { value: v, position: val_pos } }
             TokenType::String(s)   => { let v = s.clone(); self.advance(); Value::String  { value: v, position: val_pos } }
@@ -1993,7 +2001,12 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 position,
             };
         }
-
+        if let Ok(v) = trimmed.parse::<i64>() {
+            return Expression::Value {
+                value: Value::Long { value: v, position },
+                position,
+            };
+        }
         if trimmed.ends_with('f') || trimmed.ends_with('F') {
             if let Ok(v) = trimmed[..trimmed.len() - 1].parse::<f32>() {
                 return Expression::Value {
@@ -2328,6 +2341,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
     fn str_to_data_type(s: &str) -> Option<DataType> {
         match s {
             "int"       => Some(DataType::Int),
+            "long"       => Some(DataType::Long),
             "float"     => Some(DataType::Float),
             "double"    => Some(DataType::Double),
             "string"    => Some(DataType::String),

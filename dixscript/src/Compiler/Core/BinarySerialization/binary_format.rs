@@ -80,48 +80,48 @@ impl SectionId {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueTypeTag {
-    Int32 = 0x01,
+    Int32   = 0x01,
     Float32 = 0x02,
     Float64 = 0x03,
-    String = 0x04,
-    Bool = 0x05,
-    Null = 0x06,
-    Array = 0x07,
-    Object = 0x08,
-    Date = 0x09,
+    String  = 0x04,
+    Bool    = 0x05,
+    Null    = 0x06,
+    Array   = 0x07,
+    Object  = 0x08,
+    Date    = 0x09,
     Timestamp = 0x0A,
-    Hex = 0x0B,
-    Tuple = 0x0C,
-    Blob = 0x0D,
-    Regex = 0x0E,
+    Hex     = 0x0B,
+    Tuple   = 0x0C,
+    Blob    = 0x0D,
+    Regex   = 0x0E,
+    Int64   = 0x10,   // Long (i64)
     Reserved15 = 0x0F,
     Invalid = 0xFF,
 }
 
 impl ValueTypeTag {
-    /// Get type tag name for debugging
     pub fn name(&self) -> &'static str {
         match self {
-            ValueTypeTag::Int32 => "int",
-            ValueTypeTag::Float32 => "float",
-            ValueTypeTag::Float64 => "double",
-            ValueTypeTag::String => "string",
-            ValueTypeTag::Bool => "bool",
-            ValueTypeTag::Null => "null",
-            ValueTypeTag::Array => "array",
-            ValueTypeTag::Object => "object",
-            ValueTypeTag::Tuple => "tuple",
-            ValueTypeTag::Date => "date",
-            ValueTypeTag::Timestamp => "timestamp",
-            ValueTypeTag::Hex => "hex",
-            ValueTypeTag::Blob => "blob",
-            ValueTypeTag::Regex => "regex",
+            ValueTypeTag::Int32      => "int",
+            ValueTypeTag::Int64      => "long",
+            ValueTypeTag::Float32    => "float",
+            ValueTypeTag::Float64    => "double",
+            ValueTypeTag::String     => "string",
+            ValueTypeTag::Bool       => "bool",
+            ValueTypeTag::Null       => "null",
+            ValueTypeTag::Array      => "array",
+            ValueTypeTag::Object     => "object",
+            ValueTypeTag::Tuple      => "tuple",
+            ValueTypeTag::Date       => "date",
+            ValueTypeTag::Timestamp  => "timestamp",
+            ValueTypeTag::Hex        => "hex",
+            ValueTypeTag::Blob       => "blob",
+            ValueTypeTag::Regex      => "regex",
             ValueTypeTag::Reserved15 => "reserved",
-            ValueTypeTag::Invalid => "invalid",
+            ValueTypeTag::Invalid    => "invalid",
         }
     }
 
-    /// Try to convert u8 to ValueTypeTag
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             0x01 => Some(ValueTypeTag::Int32),
@@ -139,32 +139,32 @@ impl ValueTypeTag {
             0x0D => Some(ValueTypeTag::Blob),
             0x0E => Some(ValueTypeTag::Regex),
             0x0F => Some(ValueTypeTag::Reserved15),
+            0x10 => Some(ValueTypeTag::Int64),
             0xFF => Some(ValueTypeTag::Invalid),
-            _ => None,
+            _    => None,
         }
     }
 
-    /// Map AST DataType to binary ValueTypeTag
     pub fn from_data_type(data_type: DataType) -> Self {
         match data_type {
-            DataType::Int => ValueTypeTag::Int32,
-            DataType::Float => ValueTypeTag::Float32,
-            DataType::Double => ValueTypeTag::Float64,
-            DataType::String => ValueTypeTag::String,
-            DataType::Bool => ValueTypeTag::Bool,
-            DataType::Array => ValueTypeTag::Array,
-            DataType::Tuple => ValueTypeTag::Tuple,
-            DataType::Object => ValueTypeTag::Object,
-            DataType::Date => ValueTypeTag::Date,
+            DataType::Int       => ValueTypeTag::Int32,
+            DataType::Long      => ValueTypeTag::Int64,
+            DataType::Float     => ValueTypeTag::Float32,
+            DataType::Double    => ValueTypeTag::Float64,
+            DataType::String    => ValueTypeTag::String,
+            DataType::Bool      => ValueTypeTag::Bool,
+            DataType::Array     => ValueTypeTag::Array,
+            DataType::Tuple     => ValueTypeTag::Tuple,
+            DataType::Object    => ValueTypeTag::Object,
+            DataType::Date      => ValueTypeTag::Date,
             DataType::Timestamp => ValueTypeTag::Timestamp,
-            DataType::Hex => ValueTypeTag::Hex,
-            DataType::Blob => ValueTypeTag::Blob,
-            DataType::Regex => ValueTypeTag::Regex,
-            _ => ValueTypeTag::Invalid,
+            DataType::Hex       => ValueTypeTag::Hex,
+            DataType::Blob      => ValueTypeTag::Blob,
+            DataType::Regex     => ValueTypeTag::Regex,
+            _                   => ValueTypeTag::Invalid,
         }
     }
 }
-
 // ==================== VALIDATION CONSTANTS ====================
 
 pub const MAX_STRING_LENGTH: usize = 1024 * 1024; // 1 MB

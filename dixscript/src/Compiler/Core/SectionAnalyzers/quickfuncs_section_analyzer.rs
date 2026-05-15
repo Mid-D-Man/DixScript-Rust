@@ -74,6 +74,7 @@ fn is_valid_data_type(data_type: DataType) -> bool {
     matches!(
         data_type,
         DataType::Int
+        | DataType::Long
             | DataType::Float
             | DataType::Double
             | DataType::String
@@ -96,7 +97,7 @@ fn is_valid_data_type(data_type: DataType) -> bool {
 /// `true` for numeric types eligible for arithmetic promotion.
 #[inline]
 fn is_numeric_type(dt: DataType) -> bool {
-    matches!(dt, DataType::Int | DataType::Float | DataType::Double)
+    matches!(dt, DataType::Int | DataType::Long | DataType::Float | DataType::Double)
 }
 
 // ==================== ANALYZER ====================
@@ -2385,10 +2386,13 @@ pub fn new_with_error_manager(
             || source == DataType::Any
             || target == DataType::Any
             || (is_numeric_type(source) && is_numeric_type(target))
+            // Long can hold Int (widening)
+            || (source == DataType::Int && target == DataType::Long)
+            || (source == DataType::Long && target == DataType::Int)
             || matches!(
-                (source, target),
-                (DataType::Date, DataType::Timestamp) | (DataType::Timestamp, DataType::Date)
-            )
+            (source, target),
+            (DataType::Date, DataType::Timestamp) | (DataType::Timestamp, DataType::Date)
+        )
     }
 
     #[inline]

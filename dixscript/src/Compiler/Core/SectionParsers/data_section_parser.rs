@@ -727,6 +727,7 @@ pub fn new_with_error_manager(
                 if matches!(
                     next_token.token_type,
                     TokenType::Integer(_)
+                    | TokenType::Long(_)
                         | TokenType::Float(_)
                         | TokenType::Double(_)
                         | TokenType::String(_)
@@ -877,6 +878,11 @@ pub fn new_with_error_manager(
                 let val = *i;
                 self.advance();
                 Some(Value::Integer { value: val, position: value_pos })
+            }
+            TokenType::Long(l) => {
+                let val = *l;
+                self.advance();
+                Some(Value::Long { value: val, position: value_pos })
             }
             TokenType::Float(f) => {
                 let val = *f;
@@ -1426,7 +1432,14 @@ pub fn new_with_error_manager(
                 position: expr_pos,
             });
         }
-
+        if let TokenType::Long(i) = current_token.token_type {
+            let val = i;
+            self.advance();
+            return Some(Expression::Value {
+                value: Value::Long { value: val, position: expr_pos },
+                position: expr_pos,
+            });
+        }
         if let TokenType::Float(f) = current_token.token_type {
             let val = f;
             self.advance();
@@ -2529,10 +2542,10 @@ pub fn new_with_error_manager(
     }
 
     fn parse_data_type(&mut self) -> Option<DataType> {
-        // kw is &&'static str; *kw gives &'static str, which matches string literals directly.
         if let TokenType::Keyword(kw) = &self.current().token_type {
             let data_type = match *kw {
                 "int"       => Some(DataType::Int),
+                "long"      => Some(DataType::Long),
                 "float"     => Some(DataType::Float),
                 "double"    => Some(DataType::Double),
                 "string"    => Some(DataType::String),

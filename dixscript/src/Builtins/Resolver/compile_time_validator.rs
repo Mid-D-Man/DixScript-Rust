@@ -1,4 +1,4 @@
-// src/Builtins/Resolver/compile_time_validator.rs
+
 //! Compile-time validator for built-in function and method calls
 //! Provides early error detection and type checking
 
@@ -400,21 +400,22 @@ use std::collections::HashMap;
 /// Create dummy value of specified type for validation
 fn create_dummy_value(dix_type: DixType) -> Result<DixValue, String> {
     Ok(match dix_type {
-        DixType::String => DixValue::from_string(String::new()),
-        DixType::Int => DixValue::from_int(0),
-        DixType::Float => DixValue::from_float(0.0),
-        DixType::Double => DixValue::from_double(0.0),
-        DixType::Bool => DixValue::from_bool(false),
-        DixType::Array => DixValue::from_array(Vec::new()),
-        DixType::Object => DixValue::from_object(HashMap::new()),
-        DixType::Date => DixValue::from_date(chrono::Utc::now()),
+        DixType::String    => DixValue::from_string(String::new()),
+        DixType::Int       => DixValue::from_int(0),
+        DixType::Long      => DixValue::from_long(0),
+        DixType::Float     => DixValue::from_float(0.0),
+        DixType::Double    => DixValue::from_double(0.0),
+        DixType::Bool      => DixValue::from_bool(false),
+        DixType::Array     => DixValue::from_array(Vec::new()),
+        DixType::Object    => DixValue::from_object(HashMap::new()),
+        DixType::Date      => DixValue::from_date(chrono::Utc::now()),
         DixType::Timestamp => DixValue::from_timestamp(chrono::Utc::now()),
-        DixType::Null => DixValue::null(),
-        DixType::Tuple => DixValue::from_tuple(Vec::new()),
-        DixType::Blob => DixValue::from_blob(String::new()).map_err(|e| e.to_string())?,
-        DixType::Regex => DixValue::from_regex(".*".to_string()).map_err(|e| e.to_string())?,
-        DixType::Hex => DixValue::from_hex("#000000".to_string()),
-        _ => DixValue::null(),
+        DixType::Null      => DixValue::null(),
+        DixType::Tuple     => DixValue::from_tuple(Vec::new()),
+        DixType::Blob      => DixValue::from_blob(String::new()).map_err(|e| e.to_string())?,
+        DixType::Regex     => DixValue::from_regex(".*".to_string()).map_err(|e| e.to_string())?,
+        DixType::Hex       => DixValue::from_hex("#000000".to_string()),
+        _                  => DixValue::null(),
     })
 }
 

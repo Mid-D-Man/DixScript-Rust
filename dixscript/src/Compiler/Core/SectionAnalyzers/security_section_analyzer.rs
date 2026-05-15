@@ -161,7 +161,12 @@ impl<'a> ParsedEncryptionConfig<'a> {
             _ => None,
         })
     }
-
+    #[inline] fn get_long_field(&self, key: &str) -> Option<i64> {
+        self.get_field(key).and_then(|f| match &f.value {
+            Value::Long { value, .. } => Some(*value),
+            _ => None,
+        })
+    }
     #[inline] fn get_bool_field(&self, key: &str) -> Option<bool> {
         self.get_field(key).and_then(|f| match &f.value {
             Value::Boolean { value, .. } => Some(*value),

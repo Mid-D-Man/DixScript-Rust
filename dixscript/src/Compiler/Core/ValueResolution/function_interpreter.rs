@@ -725,6 +725,9 @@ impl<'a> FunctionInterpreter<'a> {
         let operand_value =
             self.evaluate_expression(value, context, scope_context, namespace)?;
 
+        let use_long = current_value.get_type() == DixType::Long
+            || operand_value.get_type() == DixType::Long;
+
         let result = match operator {
             "+=" => current_value.add(&operand_value).map_err(|e| {
                 InterpreterError::InvalidOperation { message: e, position }
@@ -742,29 +745,65 @@ impl<'a> FunctionInterpreter<'a> {
                     InterpreterError::InvalidOperation { message: e, position }
                 }
             })?,
-            "%=" => DixValue::from_double(
-                current_value.as_double() % operand_value.as_double(),
-            ),
+            // Modulo: preserve Long when both operands are integer types
+            "%=" => {
+                if use_long && current_value.get_type() != DixType::Float
+                    && current_value.get_type() != DixType::Double
+                    && operand_value.get_type() != DixType::Float
+                    && operand_value.get_type() != DixType::Double
+                {
+                    let rv = operand_value.as_long();
+                    if rv == 0 {
+                        return Err(InterpreterError::DivisionByZero { position });
+                    }
+                    DixValue::from_long(current_value.as_long() % rv)
+                } else {
+                    DixValue::from_double(
+                        current_value.as_double() % operand_value.as_double(),
+                    )
+                }
+            }
             "**=" => DixValue::from_double(
                 current_value
                     .as_double()
                     .powf(operand_value.as_double()),
             ),
+            // Bitwise assign ops — use Long path if either operand is Long
             "&=" => {
-                DixValue::from_int(current_value.as_int() & operand_value.as_int())
+                if use_long {
+                    DixValue::from_long(current_value.as_long() & operand_value.as_long())
+                } else {
+                    DixValue::from_int(current_value.as_int() & operand_value.as_int())
+                }
             }
             "|=" => {
-                DixValue::from_int(current_value.as_int() | operand_value.as_int())
+                if use_long {
+                    DixValue::from_long(current_value.as_long() | operand_value.as_long())
+                } else {
+                    DixValue::from_int(current_value.as_int() | operand_value.as_int())
+                }
             }
             "^=" => {
-                DixValue::from_int(current_value.as_int() ^ operand_value.as_int())
+                if use_long {
+                    DixValue::from_long(current_value.as_long() ^ operand_value.as_long())
+                } else {
+                    DixValue::from_int(current_value.as_int() ^ operand_value.as_int())
+                }
             }
-            "<<=" => DixValue::from_int(
-                current_value.as_int() << operand_value.as_int(),
-            ),
-            ">>=" => DixValue::from_int(
-                current_value.as_int() >> operand_value.as_int(),
-            ),
+            "<<=" => {
+                if use_long {
+                    DixValue::from_long(current_value.as_long() << operand_value.as_long())
+                } else {
+                    DixValue::from_int(current_value.as_int() << operand_value.as_int())
+                }
+            }
+            ">>=" => {
+                if use_long {
+                    DixValue::from_long(current_value.as_long() >> operand_value.as_long())
+                } else {
+                    DixValue::from_int(current_value.as_int() >> operand_value.as_int())
+                }
+            }
             _ => {
                 return Err(InterpreterError::UnsupportedStatement {
                     variant: format!("Arithmetic assignment operator: {}", operator),
@@ -1140,11 +1179,55 @@ fn evaluate_expression(
             _ => {}
         }
 
-        let left_val =
-            self.evaluate_expression(left, context, scope_context, namespace)?;
-        let right_val =
-            self.evaluate_expression(right, context, scope_context, namespace)?;
+        let left_val  = self.evaluate_expression(left,  context, scope_context, namespace)?;
+        let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
 
+        let left_type  = left_val.get_type();
+        let right_type = right_val.get_type();
+
+        // Long-integer arithmetic path: preserves i64 precision when neither
+        // operand is Float or Double, and at least one is Long.
+        let use_long = matches!((left_type, right_type),
+        (DixType::Long, DixType::Long)
+        | (DixType::Long, DixType::Int)
+        | (DixType::Int,  DixType::Long)
+    );
+
+        if use_long {
+            let lv = left_val.as_long();
+            let rv = right_val.as_long();
+            let result: Result<DixValue, String> = match operator {
+                "+" => Ok(DixValue::from_long(lv.wrapping_add(rv))),
+                "-" => Ok(DixValue::from_long(lv.wrapping_sub(rv))),
+                "*" => Ok(DixValue::from_long(lv.wrapping_mul(rv))),
+                "/" => {
+                    if rv == 0 {
+                        Err("division by zero".to_string())
+                    } else {
+                        Ok(DixValue::from_long(lv / rv))
+                    }
+                }
+                "%" => {
+                    if rv == 0 {
+                        Err("division by zero".to_string())
+                    } else {
+                        Ok(DixValue::from_long(lv % rv))
+                    }
+                }
+                // Power always returns Double for Long (same as standard numeric semantics)
+                "**" => Ok(DixValue::from_double((lv as f64).powf(rv as f64))),
+                _ => Err(format!("Unknown arithmetic operator: {}", operator)),
+            };
+            return result.map_err(|e| {
+                if e.contains("zero") {
+                    InterpreterError::DivisionByZero { position }
+                } else {
+                    InterpreterError::InvalidOperation { message: e, position }
+                }
+            });
+        }
+
+        // Standard float/double/int path.
         match operator {
             "+" => left_val.add(&right_val),
             "-" => left_val.subtract(&right_val),
@@ -1158,13 +1241,13 @@ fn evaluate_expression(
             )),
             _ => Err(format!("Unknown arithmetic operator: {}", operator)),
         }
-        .map_err(|e| {
-            if e.contains("zero") {
-                InterpreterError::DivisionByZero { position }
-            } else {
-                InterpreterError::InvalidOperation { message: e, position }
-            }
-        })
+            .map_err(|e| {
+                if e.contains("zero") {
+                    InterpreterError::DivisionByZero { position }
+                } else {
+                    InterpreterError::InvalidOperation { message: e, position }
+                }
+            })
     }
 
     fn evaluate_bitwise_op(
@@ -1177,10 +1260,8 @@ fn evaluate_expression(
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        let left_val =
-            self.evaluate_expression(left, context, scope_context, namespace)?;
-        let right_val =
-            self.evaluate_expression(right, context, scope_context, namespace)?;
+        let left_val  = self.evaluate_expression(left,  context, scope_context, namespace)?;
+        let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
 
         if !left_val.is_numeric() || !right_val.is_numeric() {
             return Err(InterpreterError::InvalidOperation {
@@ -1194,24 +1275,45 @@ fn evaluate_expression(
             });
         }
 
-        let left_int = left_val.as_int();
-        let right_int = right_val.as_int();
+        // If either operand is Long use 64-bit arithmetic; otherwise stay at 32-bit.
+        let use_long = left_val.get_type() == DixType::Long
+            || right_val.get_type() == DixType::Long;
 
-        let result = match operator {
-            "<<" => left_int << right_int,
-            ">>" => left_int >> right_int,
-            "&"  => left_int & right_int,
-            "|"  => left_int | right_int,
-            "^"  => left_int ^ right_int,
-            _ => {
-                return Err(InterpreterError::InvalidOperation {
-                    message: format!("Unknown bitwise operator: {}", operator),
-                    position,
-                })
-            }
-        };
-
-        Ok(DixValue::from_int(result))
+        if use_long {
+            let lv = left_val.as_long();
+            let rv = right_val.as_long();
+            let result = match operator {
+                "<<" => lv << rv,
+                ">>" => lv >> rv,
+                "&"  => lv & rv,
+                "|"  => lv | rv,
+                "^"  => lv ^ rv,
+                _ => {
+                    return Err(InterpreterError::InvalidOperation {
+                        message: format!("Unknown bitwise operator: {}", operator),
+                        position,
+                    })
+                }
+            };
+            Ok(DixValue::from_long(result))
+        } else {
+            let lv = left_val.as_int();
+            let rv = right_val.as_int();
+            let result = match operator {
+                "<<" => lv << rv,
+                ">>" => lv >> rv,
+                "&"  => lv & rv,
+                "|"  => lv | rv,
+                "^"  => lv ^ rv,
+                _ => {
+                    return Err(InterpreterError::InvalidOperation {
+                        message: format!("Unknown bitwise operator: {}", operator),
+                        position,
+                    })
+                }
+            };
+            Ok(DixValue::from_int(result))
+        }
     }
 
     fn evaluate_circular_modulo(
@@ -1223,10 +1325,8 @@ fn evaluate_expression(
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        let left_val =
-            self.evaluate_expression(left, context, scope_context, namespace)?;
-        let right_val =
-            self.evaluate_expression(right, context, scope_context, namespace)?;
+        let left_val  = self.evaluate_expression(left,  context, scope_context, namespace)?;
+        let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
 
         if !left_val.is_numeric() || !right_val.is_numeric() {
             return Err(InterpreterError::InvalidOperation {
@@ -1235,21 +1335,36 @@ fn evaluate_expression(
             });
         }
 
+        let lt = left_val.get_type();
+        let rt = right_val.get_type();
+
+        // Integer-only path: preserves Long precision
+        let is_integer_only = matches!(lt, DixType::Int | DixType::Long)
+            && matches!(rt, DixType::Int | DixType::Long);
+
+        if is_integer_only {
+            let a  = left_val.as_long();
+            let b  = right_val.as_long();
+            if b == 0 {
+                return Err(InterpreterError::DivisionByZero { position });
+            }
+            let result = ((a % b) + b) % b;
+            return Ok(if lt == DixType::Long || rt == DixType::Long {
+                DixValue::from_long(result)
+            } else {
+                DixValue::from_int(result as i32)
+            });
+        }
+
         let a = left_val.as_double();
         let b = right_val.as_double();
         let result = ((a % b) + b) % b;
 
-        Ok(
-            if left_val.get_type() == DixType::Int && right_val.get_type() == DixType::Int {
-                DixValue::from_int(result as i32)
-            } else if left_val.get_type() == DixType::Float
-                || right_val.get_type() == DixType::Float
-            {
-                DixValue::from_float(result as f32)
-            } else {
-                DixValue::from_double(result)
-            },
-        )
+        Ok(if lt == DixType::Float || rt == DixType::Float {
+            DixValue::from_float(result as f32)
+        } else {
+            DixValue::from_double(result)
+        })
     }
 
     fn evaluate_percentage(
@@ -1299,10 +1414,8 @@ fn evaluate_expression(
         scope_context: &FxHashMap<String, String>,
         namespace: Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        let left_val =
-            self.evaluate_expression(left, context, scope_context, namespace)?;
-        let right_val =
-            self.evaluate_expression(right, context, scope_context, namespace)?;
+        let left_val  = self.evaluate_expression(left,  context, scope_context, namespace)?;
+        let right_val = self.evaluate_expression(right, context, scope_context, namespace)?;
 
         if !left_val.is_numeric() || !right_val.is_numeric() {
             return Err(InterpreterError::InvalidOperation {
@@ -1311,7 +1424,28 @@ fn evaluate_expression(
             });
         }
 
-        Ok(DixValue::from_int(left_val.as_int() & (right_val.as_int() - 1)))
+        let use_long = left_val.get_type() == DixType::Long
+            || right_val.get_type() == DixType::Long;
+
+        if use_long {
+            let rv = right_val.as_long();
+            if rv <= 0 {
+                return Err(InterpreterError::InvalidOperation {
+                    message: "Bitwise modulo (&%) requires a positive right operand".to_string(),
+                    position,
+                });
+            }
+            Ok(DixValue::from_long(left_val.as_long() & (rv - 1)))
+        } else {
+            let rv = right_val.as_int();
+            if rv <= 0 {
+                return Err(InterpreterError::InvalidOperation {
+                    message: "Bitwise modulo (&%) requires a positive right operand".to_string(),
+                    position,
+                });
+            }
+            Ok(DixValue::from_int(left_val.as_int() & (rv - 1)))
+        }
     }
 
     fn evaluate_comparison_op(
@@ -1418,7 +1552,13 @@ fn evaluate_expression(
                         position,
                     });
                 }
-                Ok(DixValue::from_double(-operand_val.as_double()))
+                // Preserve integer types when negating; only fall to double for floats
+                Ok(match operand_val.get_type() {
+                    DixType::Long   => DixValue::from_long(-operand_val.as_long()),
+                    DixType::Int    => DixValue::from_int(-operand_val.as_int()),
+                    DixType::Float  => DixValue::from_float(-operand_val.as_float()),
+                    _               => DixValue::from_double(-operand_val.as_double()),
+                })
             }
             "!" | "not" => Ok(DixValue::from_bool(!operand_val.as_bool())),
             "++" => {
@@ -1428,7 +1568,12 @@ fn evaluate_expression(
                         position,
                     });
                 }
-                Ok(DixValue::from_double(operand_val.as_double() + 1.0))
+                Ok(match operand_val.get_type() {
+                    DixType::Long  => DixValue::from_long(operand_val.as_long().wrapping_add(1)),
+                    DixType::Int   => DixValue::from_int(operand_val.as_int().wrapping_add(1)),
+                    DixType::Float => DixValue::from_float(operand_val.as_float() + 1.0),
+                    _              => DixValue::from_double(operand_val.as_double() + 1.0),
+                })
             }
             "--" => {
                 if !operand_val.is_numeric() {
@@ -1437,16 +1582,25 @@ fn evaluate_expression(
                         position,
                     });
                 }
-                Ok(DixValue::from_double(operand_val.as_double() - 1.0))
+                Ok(match operand_val.get_type() {
+                    DixType::Long  => DixValue::from_long(operand_val.as_long().wrapping_sub(1)),
+                    DixType::Int   => DixValue::from_int(operand_val.as_int().wrapping_sub(1)),
+                    DixType::Float => DixValue::from_float(operand_val.as_float() - 1.0),
+                    _              => DixValue::from_double(operand_val.as_double() - 1.0),
+                })
             }
             "~?" => {
+                // Bitwise NOT — use Long when operand is Long to avoid truncation
                 if !operand_val.is_numeric() {
                     return Err(InterpreterError::InvalidOperation {
                         message: "Bitwise NOT requires numeric operand".to_string(),
                         position,
                     });
                 }
-                Ok(DixValue::from_int(!operand_val.as_int()))
+                Ok(match operand_val.get_type() {
+                    DixType::Long => DixValue::from_long(!operand_val.as_long()),
+                    _             => DixValue::from_int(!operand_val.as_int()),
+                })
             }
             _ => Err(InterpreterError::InvalidOperation {
                 message: format!("Unknown unary operator: {}", operator),
@@ -1908,6 +2062,7 @@ fn evaluate_enum_access(
     fn dix_value_to_ast_value(&self, dix: &DixValue, position: Position) -> Value {
         match dix.get_type() {
             DixType::Int       => Value::Integer { value: dix.as_int(), position },
+            DixType::Long      => Value::Long    { value: dix.as_long(), position },
             DixType::Float     => Value::Float   { value: dix.as_float(), position },
             DixType::Double    => Value::Double  { value: dix.as_double(), position },
             DixType::String    => Value::String  { value: dix.as_string(), position },
@@ -2021,14 +2176,15 @@ fn evaluate_enum_access(
             Value::Expression { expr, .. } => {
                 self.evaluate_expression(expr, context, scope_context, namespace)
             }
-            Value::Integer { value, .. }           => Ok(DixValue::from_int(*value)),
-            Value::Float { value, .. }             => Ok(DixValue::from_float(*value)),
-            Value::Double { value, .. }            => Ok(DixValue::from_double(*value)),
-            Value::ScientificNotation { value, .. }=> Ok(DixValue::from_double(*value)),
-            Value::String { value, .. }            => Ok(DixValue::from_string(value.clone())),
-            Value::Boolean { value, .. }           => Ok(DixValue::from_bool(*value)),
-            Value::Null { .. }                     => Ok(DixValue::null()),
-            Value::HexColor { value, .. }          => Ok(DixValue::from_hex(value.clone())),
+            Value::Integer { value, .. }            => Ok(DixValue::from_int(*value)),
+            Value::Long { value, .. }               => Ok(DixValue::from_long(*value)),
+            Value::Float { value, .. }              => Ok(DixValue::from_float(*value)),
+            Value::Double { value, .. }             => Ok(DixValue::from_double(*value)),
+            Value::ScientificNotation { value, .. } => Ok(DixValue::from_double(*value)),
+            Value::String { value, .. }             => Ok(DixValue::from_string(value.clone())),
+            Value::Boolean { value, .. }            => Ok(DixValue::from_bool(*value)),
+            Value::Null { .. }                      => Ok(DixValue::null()),
+            Value::HexColor { value, .. }           => Ok(DixValue::from_hex(value.clone())),
 
             Value::Array { values, position }
             | Value::NestedArray { values, position, .. } => {

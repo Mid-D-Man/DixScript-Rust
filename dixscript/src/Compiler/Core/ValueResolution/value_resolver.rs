@@ -1861,12 +1861,13 @@ fn execute_iterative_resolution(
         call_pos: Position,
     ) -> Result<DixValue, ResolverError> {
         match value {
-            Value::Integer { value, .. } => Ok(DixValue::from_int(*value)),
-            Value::Float { value, .. } => Ok(DixValue::from_float(*value)),
-            Value::Double { value, .. } => Ok(DixValue::from_double(*value)),
-            Value::String { value, .. } => Ok(DixValue::from_string(value.clone())),
-            Value::Boolean { value, .. } => Ok(DixValue::from_bool(*value)),
-            Value::Null { .. } => Ok(DixValue::null()),
+            Value::Integer { value, .. }  => Ok(DixValue::from_int(*value)),
+            Value::Long { value, .. }     => Ok(DixValue::from_long(*value)),
+            Value::Float { value, .. }    => Ok(DixValue::from_float(*value)),
+            Value::Double { value, .. }   => Ok(DixValue::from_double(*value)),
+            Value::String { value, .. }   => Ok(DixValue::from_string(value.clone())),
+            Value::Boolean { value, .. }  => Ok(DixValue::from_bool(*value)),
+            Value::Null { .. }            => Ok(DixValue::null()),
             Value::HexColor { value, .. } => Ok(DixValue::from_hex(value.clone())),
             Value::Identifier { value: id, .. } => {
                 ctx.get(id.as_str()).cloned().ok_or_else(|| ResolverError::Fatal {
@@ -1899,11 +1900,7 @@ fn execute_iterative_resolution(
                         let data = arguments
                             .first()
                             .and_then(|a| {
-                                if let Value::String { value, .. } = a {
-                                    Some(value.clone())
-                                } else {
-                                    None
-                                }
+                                if let Value::String { value, .. } = a { Some(value.clone()) } else { None }
                             })
                             .unwrap_or_default();
                         DixValue::from_blob(data).map_err(|e| ResolverError::Fatal { message: e })
@@ -1912,11 +1909,7 @@ fn execute_iterative_resolution(
                         let pattern = arguments
                             .first()
                             .and_then(|a| {
-                                if let Value::String { value, .. } = a {
-                                    Some(value.clone())
-                                } else {
-                                    None
-                                }
+                                if let Value::String { value, .. } = a { Some(value.clone()) } else { None }
                             })
                             .unwrap_or_else(|| ".*".to_string());
                         DixValue::from_regex(pattern)
@@ -2392,13 +2385,14 @@ fn execute_iterative_resolution(
 
     fn try_value_to_dix(value: &Value) -> Option<DixValue> {
         match value {
-            Value::Integer { value, .. } => Some(DixValue::from_int(*value)),
-            Value::Float { value, .. } => Some(DixValue::from_float(*value)),
-            Value::Double { value, .. } => Some(DixValue::from_double(*value)),
-            Value::String { value, .. } => Some(DixValue::from_string(value.clone())),
-            Value::Boolean { value, .. } => Some(DixValue::from_bool(*value)),
-            Value::Null { .. } => Some(DixValue::null()),
-            Value::HexColor { value, .. } => Some(DixValue::from_hex(value.clone())),
+            Value::Integer { value, .. }            => Some(DixValue::from_int(*value)),
+            Value::Long { value, .. }               => Some(DixValue::from_long(*value)),
+            Value::Float { value, .. }              => Some(DixValue::from_float(*value)),
+            Value::Double { value, .. }             => Some(DixValue::from_double(*value)),
+            Value::String { value, .. }             => Some(DixValue::from_string(value.clone())),
+            Value::Boolean { value, .. }            => Some(DixValue::from_bool(*value)),
+            Value::Null { .. }                      => Some(DixValue::null()),
+            Value::HexColor { value, .. }           => Some(DixValue::from_hex(value.clone())),
 
             Value::PrefixedConstructor { prefix, arguments, .. } => {
                 match prefix.to_lowercase().as_str() {
@@ -2406,11 +2400,7 @@ fn execute_iterative_resolution(
                         let data = arguments
                             .first()
                             .and_then(|a| {
-                                if let Value::String { value, .. } = a {
-                                    Some(value.clone())
-                                } else {
-                                    None
-                                }
+                                if let Value::String { value, .. } = a { Some(value.clone()) } else { None }
                             })
                             .unwrap_or_default();
                         DixValue::from_blob(data).ok()
@@ -2419,11 +2409,7 @@ fn execute_iterative_resolution(
                         let pattern = arguments
                             .first()
                             .and_then(|a| {
-                                if let Value::String { value, .. } = a {
-                                    Some(value.clone())
-                                } else {
-                                    None
-                                }
+                                if let Value::String { value, .. } = a { Some(value.clone()) } else { None }
                             })
                             .unwrap_or_else(|| ".*".to_string());
                         DixValue::from_regex(pattern).ok()
@@ -2461,13 +2447,14 @@ fn execute_iterative_resolution(
 
     pub fn convert_dix_value_to_value(dix: &DixValue, position: Position) -> Value {
         match dix.get_type() {
-            DixType::Int => Value::Integer { value: dix.as_int(), position },
-            DixType::Float => Value::Float { value: dix.as_float(), position },
+            DixType::Int   => Value::Integer { value: dix.as_int(),   position },
+            DixType::Long  => Value::Long    { value: dix.as_long(),  position },
+            DixType::Float => Value::Float   { value: dix.as_float(), position },
             DixType::Double => Value::Double { value: dix.as_double(), position },
             DixType::String => Value::String { value: dix.as_string(), position },
-            DixType::Bool => Value::Boolean { value: dix.as_bool(), position },
-            DixType::Null => Value::Null { position },
-            DixType::Hex => Value::HexColor { value: dix.as_string(), position },
+            DixType::Bool   => Value::Boolean { value: dix.as_bool(), position },
+            DixType::Null   => Value::Null { position },
+            DixType::Hex    => Value::HexColor { value: dix.as_string(), position },
 
             DixType::Blob => Value::PrefixedConstructor {
                 prefix: "b".to_string(),
@@ -2509,13 +2496,10 @@ fn execute_iterative_resolution(
                 Value::Object { properties, position }
             }
 
-            DixType::Date => Value::Date { value: dix.as_string(), position },
+            DixType::Date      => Value::Date      { value: dix.as_string(), position },
             DixType::Timestamp => Value::Timestamp { value: dix.as_string(), position },
 
-            _ => Value::String {
-                value: dix.as_string(),
-                position,
-            },
+            _ => Value::String { value: dix.as_string(), position },
         }
     }
 

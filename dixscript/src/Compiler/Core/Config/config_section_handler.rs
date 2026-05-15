@@ -1,4 +1,4 @@
-// dixscript/src/Compiler/Core/Config/config_section_handler.rs
+
 //! Extracts and processes the @CONFIG section, then initialises VersionManager and ErrorManager.
 //!
 //! ## Position fixup

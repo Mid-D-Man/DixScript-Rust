@@ -325,9 +325,13 @@ pub fn new_with_error_manager (
         }
 
         if let (Some(decl), Some(mut inf)) = (declared_type, inferred_type) {
-            if decl == DataType::Float && matches!(inf, DataType::Int | DataType::Double) {
+            if decl == DataType::Float && matches!(inf, DataType::Int | DataType::Long | DataType::Double) {
                 inf = DataType::Float;
                 self.path_to_type.insert(full_path.clone(), DataType::Float);
+            }
+            if decl == DataType::Long && inf == DataType::Int {
+                inf = DataType::Long;
+                self.path_to_type.insert(full_path.clone(), DataType::Long);
             }
             if !Self::is_type_compatible(decl, inf) {
                 self.add_error(
@@ -387,8 +391,11 @@ pub fn new_with_error_manager (
             };
 
             if let (Some(decl), Some(mut inf)) = (assignment.data_type, inferred_type) {
-                if decl == DataType::Float && matches!(inf, DataType::Int | DataType::Double) {
+                if decl == DataType::Float && matches!(inf, DataType::Int | DataType::Long | DataType::Double) {
                     inf = DataType::Float;
+                }
+                if decl == DataType::Long && inf == DataType::Int {
+                    inf = DataType::Long;
                 }
                 if !Self::is_type_compatible(decl, inf) {
                     self.add_error(
@@ -1187,10 +1194,17 @@ pub fn new_with_error_manager (
             return true;
         }
         if expected == DataType::Hex {
-            return matches!(actual, DataType::Int | DataType::Hex);
+            return matches!(actual, DataType::Int | DataType::Long | DataType::Hex);
+        }
+        // Long is wider than Int; widening is safe
+        if expected == DataType::Long {
+            return matches!(actual, DataType::Int | DataType::Long);
         }
         if matches!(expected, DataType::Double | DataType::Float) {
-            return matches!(actual, DataType::Int | DataType::Float | DataType::Double);
+            return matches!(
+            actual,
+            DataType::Int | DataType::Long | DataType::Float | DataType::Double
+        );
         }
         if expected == DataType::String {
             return true;

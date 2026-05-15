@@ -260,8 +260,8 @@ impl<'a> TypeInferenceVisitor<'a> {
         left_type.or(right_type)
     }
 
-    fn is_numeric_type(data_type: DataType) -> bool {
-        matches!(data_type, DataType::Int | DataType::Long | DataType::Float | DataType::Double)
+    fn is_numeric_type(dt: DataType) -> bool {
+        matches!(dt, DataType::Int | DataType::Long | DataType::Float | DataType::Double)
     }
 
     fn infer_prefixed_constructor_type(&self, prefix: &str) -> Option<DataType> {

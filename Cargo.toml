@@ -22,7 +22,6 @@ debug         = false
 [profile.dev]
 opt-level = 0
 debug     = true
-
 [profile.release.package.mdix-wasm]
 opt-level = "s"
 # resolver 2 is required for proper feature unification across workspace members.

@@ -1,25 +1,21 @@
 // mdix-lsp/src/features/semantic_tokens.rs
 //!
-//! ## Changes in this version
+//! ## Function call coloring
+//! Any Identifier immediately followed by `(` (optionally with a `<type>`
+//! annotation between them) is classified as TT_FUNCTION regardless of section.
+//! This includes QuickFunc call sites in @DATA, method-style calls in
+//! @QUICKFUNCS bodies, and imported-namespace calls.
+//! Symbol-table registered functions are always TT_FUNCTION even without lookahead.
 //!
-//! - `FunctionPrefix` token type removed from the lexer/token.rs.
-//!   The `~` character is now always emitted as `Symbol('~')`.
-//!   All references updated:
-//!   * ClassifierState::advance() — state machine now triggers on Symbol('~')
-//!   * classify() — Symbol('~') handled before the catch-all Symbol(_) => None
-//!   * token_length() — FunctionPrefix entry removed; Symbol('~') falls through
-//!     to the wildcard which returns get_token_value().len() == 1. Correct.
+//! ## Long token
+//! `TokenType::Long(_)` → TT_NUMBER (same as Integer).
 //!
 //! ## DLM coloring
-//!
-//! Uses a single `dlm_dot_seen` flag. Set when any `.` is encountered anywhere.
-//! Cleared when an Identifier inside DLM is classified. No SectionId stamp
-//! dependency needed for the DLM module/subtype distinction.
+//! Single `dlm_dot_seen` flag distinguishes module name (TT_MACRO) from
+//! subtype (TT_DECORATOR).
 //!
 //! ## CONFIG value coloring
-//!
-//! ErrorHandling / Compatibility / Debug config values now emit TT_STRING
-//! (was TT_TYPE which is unstyled in RustRover's default theme).
+//! ErrorHandling / Compatibility / Debug emit TT_STRING.
 
 use std::collections::HashSet;
 use std::panic;
@@ -63,6 +59,8 @@ fn provide_inner(doc: Option<&Document>) -> Option<SemanticTokensResult> {
         .map(|st| st.enums.keys().cloned().collect())
         .unwrap_or_default();
 
+    // All registered function names from the symbol table — QuickFuncs
+    // registered during semantic analysis land here.
     let func_names: HashSet<String> = doc
         .semantic_result.as_ref()
         .and_then(|sr| sr.symbol_table.as_ref())
@@ -91,7 +89,10 @@ struct ClassifierState<'a> {
 
     dlm_dot_seen:      bool,
 
-    prev_was_call_ident: bool,
+    /// True when the current Identifier token is a function/method call site
+    /// (followed by `(` possibly after a `<type>` annotation, or registered
+    /// in the symbol table).
+    is_call_site:      bool,
 
     next_is_enum_type:  bool,
     next_is_enum_dot:   bool,
@@ -112,7 +113,7 @@ impl<'a> ClassifierState<'a> {
             param_paren_depth:   0,
             next_is_alias:       false,
             dlm_dot_seen:        false,
-            prev_was_call_ident: false,
+            is_call_site:        false,
             next_is_enum_type:   false,
             next_is_enum_dot:    false,
             prev_was_enum_dot:   false,
@@ -122,9 +123,11 @@ impl<'a> ClassifierState<'a> {
     }
 
     fn advance(&mut self, token: &Token, tokens: &[Token], index: usize) {
-        self.prev_was_call_ident = false;
-        self.next_is_enum_type   = false;
+        // Reset per-token flags
+        self.is_call_site    = false;
+        self.next_is_enum_type = false;
 
+        // Reset enum-dot state unless we're on `.` or an identifier
         match &token.token_type {
             TokenType::Identifier(_) | TokenType::Symbol('.') => {}
             _ => {
@@ -133,19 +136,26 @@ impl<'a> ClassifierState<'a> {
             }
         }
 
+        // ── Identifier-specific logic ─────────────────────────────────────────
         if let TokenType::Identifier(name) = &token.token_type {
-            let in_symbol_table = self.func_names.contains(name.as_str());
-            let lookahead_paren = !in_symbol_table && tokens.iter()
-                .skip(index + 1)
-                .take(8)
-                .filter(|t| !matches!(&t.token_type,
-                    TokenType::DataType(_)
-                    | TokenType::Symbol('<')
-                    | TokenType::Symbol('>')))
-                .take(3)
-                .any(|t| matches!(t.token_type, TokenType::Symbol('(')));
-            self.prev_was_call_ident = in_symbol_table || lookahead_paren;
 
+            // ── Function / call site detection ────────────────────────────────
+            // An identifier is a call site if:
+            // (a) it is registered in the symbol table, OR
+            // (b) scanning forward (skipping type-annotation tokens) finds `(`
+            let in_symbol_table = self.func_names.contains(name.as_str());
+
+            let lookahead_paren = if in_symbol_table {
+                true
+            } else {
+                is_followed_by_paren(tokens, index + 1)
+            };
+
+            // A function declaration name (after `~`) should NOT be marked as
+            // a call site — it gets TT_FUNCTION | MOD_DECLARATION separately.
+            self.is_call_site = lookahead_paren && !self.next_is_func_name;
+
+            // ── Enum type detection ───────────────────────────────────────────
             if self.enum_names.contains(name.as_str()) {
                 let has_dot = tokens.iter()
                     .skip(index + 1)
@@ -162,6 +172,7 @@ impl<'a> ClassifierState<'a> {
             }
         }
 
+        // ── Dot tracking for enum member access ───────────────────────────────
         if let TokenType::Symbol('.') = &token.token_type {
             if self.next_is_enum_dot {
                 self.prev_was_enum_dot = true;
@@ -169,6 +180,7 @@ impl<'a> ClassifierState<'a> {
             }
         }
 
+        // ── Section / structural state machine ────────────────────────────────
         match &token.token_type {
             TokenType::SectionEnums => {
                 self.seen_enum_name = false;
@@ -237,17 +249,29 @@ impl<'a> ClassifierState<'a> {
     }
 
     fn classify_identifier(&mut self, token: &Token) -> (u32, u32) {
+        // ── Enum member (after EnumName.) ─────────────────────────────────────
         if self.prev_was_enum_dot {
             self.prev_was_enum_dot = false;
             return (TT_ENUM_MEMBER, 0);
         }
+
+        // ── Enum type name ────────────────────────────────────────────────────
         if self.next_is_enum_type {
             return (TT_TYPE, 0);
         }
-        if self.prev_was_call_ident && !self.next_is_func_name {
+
+        // ── Function / method call site ───────────────────────────────────────
+        // Any identifier followed by `(` (or registered in symbol table) is a
+        // call site. Declaration names in @QUICKFUNCS are handled below.
+        if self.is_call_site {
+            // next_is_func_name guards: declaration name after `~` uses
+            // MOD_DECLARATION path, not the generic call-site path.
+            // But is_call_site already excludes next_is_func_name==true
+            // (set in advance()), so this is always a true call site.
             return (TT_FUNCTION, 0);
         }
 
+        // ── Section-specific fallbacks ────────────────────────────────────────
         match token.section {
             SectionId::Config => (TT_PROPERTY, 0),
 
@@ -304,6 +328,62 @@ impl<'a> ClassifierState<'a> {
             }
         }
     }
+}
+
+// ── Call-site lookahead helper ────────────────────────────────────────────────
+//
+// Scans forward from `start_index` skipping type-annotation tokens
+// (`<`, keyword/DataType, `>`) and returns true if the first
+// non-annotation token is `(`.
+//
+// Handles all forms:
+//   funcName(          → immediate `(`
+//   funcName<int>(     → skip `<`, `int`, `>` then find `(`
+//   funcName<object>(  → same
+//   Namespace.func(    → `.` stops the scan; `func` gets its own lookahead
+
+fn is_followed_by_paren(tokens: &[Token], start: usize) -> bool {
+    let mut i = start;
+    let mut angle_depth: i32 = 0;
+
+    while i < tokens.len() {
+        match &tokens[i].token_type {
+            // Inside < ... > angle bracket type annotation
+            TokenType::Symbol('<') => {
+                angle_depth += 1;
+                i += 1;
+            }
+            TokenType::Symbol('>') => {
+                angle_depth -= 1;
+                i += 1;
+            }
+            // While inside angle brackets, skip anything
+            _ if angle_depth > 0 => {
+                i += 1;
+            }
+            // Found the opening paren — this IS a call site
+            TokenType::Symbol('(') => return true,
+            // Scope list `=> ScopeName` between name and `(` — skip
+            TokenType::Arrow => {
+                i += 1;
+                // skip identifier(s) until we hit `(`
+                while i < tokens.len() {
+                    match &tokens[i].token_type {
+                        TokenType::Symbol('(') => return true,
+                        TokenType::Identifier(_) | TokenType::Symbol(',') => { i += 1; }
+                        _ => break,
+                    }
+                }
+                break;
+            }
+            // Any other token terminates the scan — not a call
+            _ => break,
+        }
+
+        // Safety: don't scan forever
+        if i > start + 16 { break; }
+    }
+    false
 }
 
 // ── Encoder ───────────────────────────────────────────────────────────────────
@@ -419,7 +499,7 @@ fn emit_config_tokens(
         let arrow_col = (leading + arrow_pos) as u32;
         push_raw(data, prev_line, prev_col, lsp_line, arrow_col, 2, TT_OPERATOR, 0);
 
-        // value → correct token type from AST
+        // value
         let after_arrow   = arrow_pos + 2;
         let rest          = &trimmed[after_arrow..];
         let value_text    = rest.trim_start();
@@ -486,9 +566,6 @@ fn classify_config_value(value: &ConfigValue, text: &str) -> (u32, usize) {
             }
             (TT_EVENT, text.split_whitespace().next().map(|s| s.len()).unwrap_or(0))
         }
-        // FIX: was TT_TYPE (unstyled in RustRover's default theme).
-        // These are keyword-mode values that appear as quoted strings in source —
-        // TT_STRING matches the visual style of every other quoted CONFIG value.
         ConfigValue::ErrorHandling(_)
         | ConfigValue::Compatibility(_)
         | ConfigValue::Debug(_) => {
@@ -609,12 +686,12 @@ fn classify(token: &Token, state: &mut ClassifierState<'_>) -> Option<(u32, u32)
         | TokenType::Timestamp(_)        => Some((TT_EVENT, 0)),
 
         TokenType::Integer(_)
-        | TokenType::Long(_)
+        | TokenType::Long(_)             // ← Long gets same color as Integer
         | TokenType::Float(_)
         | TokenType::Double(_)
         | TokenType::ScientificNotation(_) => Some((TT_NUMBER, 0)),
         TokenType::HexLiteral(_)          => Some((TT_NUMBER, 0)),
-        TokenType::HexColor(_)           => Some((TT_NUMBER, MOD_READONLY)),
+        TokenType::HexColor(_)            => Some((TT_NUMBER, MOD_READONLY)),
 
         TokenType::ArithmeticOp(_)
         | TokenType::ArithmeticAssignOp(_)
@@ -673,10 +750,9 @@ fn token_length(token: &Token) -> usize {
         TokenType::String(s)              => s.len() + 2,
         TokenType::StringSingle(s)        => s.len() + 2,
         TokenType::InterpolatedString(s)  => s.len() + 3,
-        // FIX: strip '#' before measuring so the formula is correct
-        // whether the lexer stores "FF5733" or "#FF5733".
         TokenType::HexColor(h)            => h.trim_start_matches('#').len() + 1,
         TokenType::Comment(c)             => c.len() + 2,
+        TokenType::Long(l)                => format!("{}L", l).len(),   // ← NEW
         TokenType::SectionConfig          =>  7,
         TokenType::SectionImports         =>  8,
         TokenType::SectionDLM             =>  4,
@@ -700,5 +776,4 @@ fn token_length(token: &Token) -> usize {
             if v.is_empty() { 1 } else { v.len() }
         }
     }
-}
-
+            }

@@ -1,11 +1,16 @@
 // mdix-lsp/src/features/semantic_tokens.rs
 //!
+//! ## Approach B — real @CONFIG tokens
+//! @CONFIG tokens are now in the full token stream with SectionId::Config and
+//! accurate positions. No synthetic token emission needed. The classifier
+//! already handles SectionId::Config identifiers as TT_PROPERTY, SectionConfig
+//! as TT_KEYWORD, SwitchCase as TT_OPERATOR, and all value types naturally.
+//!
 //! ## Function call coloring
 //! Any Identifier immediately followed by `(` (optionally with a `<type>`
 //! annotation between them) is classified as TT_FUNCTION regardless of section.
-//! This includes QuickFunc call sites in @DATA, method-style calls in
-//! @QUICKFUNCS bodies, and imported-namespace calls.
-//! Symbol-table registered functions are always TT_FUNCTION even without lookahead.
+//! Symbol-table registered functions are always TT_FUNCTION even without
+//! lookahead.
 //!
 //! ## Long token
 //! `TokenType::Long(_)` → TT_NUMBER (same as Integer).
@@ -13,15 +18,11 @@
 //! ## DLM coloring
 //! Single `dlm_dot_seen` flag distinguishes module name (TT_MACRO) from
 //! subtype (TT_DECORATOR).
-//!
-//! ## CONFIG value coloring
-//! ErrorHandling / Compatibility / Debug emit TT_STRING.
 
 use std::collections::HashSet;
 use std::panic;
 
 use tower_lsp::lsp_types::{SemanticToken, SemanticTokens, SemanticTokensResult};
-use dixscript::Compiler::AST::{ConfigValue, DixScript};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
 use crate::document::Document;
@@ -59,8 +60,6 @@ fn provide_inner(doc: Option<&Document>) -> Option<SemanticTokensResult> {
         .map(|st| st.enums.keys().cloned().collect())
         .unwrap_or_default();
 
-    // All registered function names from the symbol table — QuickFuncs
-    // registered during semantic analysis land here.
     let func_names: HashSet<String> = doc
         .semantic_result.as_ref()
         .and_then(|sr| sr.symbol_table.as_ref())
@@ -89,9 +88,6 @@ struct ClassifierState<'a> {
 
     dlm_dot_seen:      bool,
 
-    /// True when the current Identifier token is a function/method call site
-    /// (followed by `(` possibly after a `<type>` annotation, or registered
-    /// in the symbol table).
     is_call_site:      bool,
 
     next_is_enum_type:  bool,
@@ -123,11 +119,9 @@ impl<'a> ClassifierState<'a> {
     }
 
     fn advance(&mut self, token: &Token, tokens: &[Token], index: usize) {
-        // Reset per-token flags
-        self.is_call_site    = false;
+        self.is_call_site      = false;
         self.next_is_enum_type = false;
 
-        // Reset enum-dot state unless we're on `.` or an identifier
         match &token.token_type {
             TokenType::Identifier(_) | TokenType::Symbol('.') => {}
             _ => {
@@ -136,13 +130,7 @@ impl<'a> ClassifierState<'a> {
             }
         }
 
-        // ── Identifier-specific logic ─────────────────────────────────────────
         if let TokenType::Identifier(name) = &token.token_type {
-
-            // ── Function / call site detection ────────────────────────────────
-            // An identifier is a call site if:
-            // (a) it is registered in the symbol table, OR
-            // (b) scanning forward (skipping type-annotation tokens) finds `(`
             let in_symbol_table = self.func_names.contains(name.as_str());
 
             let lookahead_paren = if in_symbol_table {
@@ -151,11 +139,8 @@ impl<'a> ClassifierState<'a> {
                 is_followed_by_paren(tokens, index + 1)
             };
 
-            // A function declaration name (after `~`) should NOT be marked as
-            // a call site — it gets TT_FUNCTION | MOD_DECLARATION separately.
             self.is_call_site = lookahead_paren && !self.next_is_func_name;
 
-            // ── Enum type detection ───────────────────────────────────────────
             if self.enum_names.contains(name.as_str()) {
                 let has_dot = tokens.iter()
                     .skip(index + 1)
@@ -172,7 +157,6 @@ impl<'a> ClassifierState<'a> {
             }
         }
 
-        // ── Dot tracking for enum member access ───────────────────────────────
         if let TokenType::Symbol('.') = &token.token_type {
             if self.next_is_enum_dot {
                 self.prev_was_enum_dot = true;
@@ -180,7 +164,6 @@ impl<'a> ClassifierState<'a> {
             }
         }
 
-        // ── Section / structural state machine ────────────────────────────────
         match &token.token_type {
             TokenType::SectionEnums => {
                 self.seen_enum_name = false;
@@ -249,30 +232,21 @@ impl<'a> ClassifierState<'a> {
     }
 
     fn classify_identifier(&mut self, token: &Token) -> (u32, u32) {
-        // ── Enum member (after EnumName.) ─────────────────────────────────────
         if self.prev_was_enum_dot {
             self.prev_was_enum_dot = false;
             return (TT_ENUM_MEMBER, 0);
         }
 
-        // ── Enum type name ────────────────────────────────────────────────────
         if self.next_is_enum_type {
             return (TT_TYPE, 0);
         }
 
-        // ── Function / method call site ───────────────────────────────────────
-        // Any identifier followed by `(` (or registered in symbol table) is a
-        // call site. Declaration names in @QUICKFUNCS are handled below.
         if self.is_call_site {
-            // next_is_func_name guards: declaration name after `~` uses
-            // MOD_DECLARATION path, not the generic call-site path.
-            // But is_call_site already excludes next_is_func_name==true
-            // (set in advance()), so this is always a true call site.
             return (TT_FUNCTION, 0);
         }
 
-        // ── Section-specific fallbacks ────────────────────────────────────────
         match token.section {
+            // @CONFIG keys — real tokens now, classified as properties.
             SectionId::Config => (TT_PROPERTY, 0),
 
             SectionId::Enums => {
@@ -330,17 +304,7 @@ impl<'a> ClassifierState<'a> {
     }
 }
 
-// ── Call-site lookahead helper ────────────────────────────────────────────────
-//
-// Scans forward from `start_index` skipping type-annotation tokens
-// (`<`, keyword/DataType, `>`) and returns true if the first
-// non-annotation token is `(`.
-//
-// Handles all forms:
-//   funcName(          → immediate `(`
-//   funcName<int>(     → skip `<`, `int`, `>` then find `(`
-//   funcName<object>(  → same
-//   Namespace.func(    → `.` stops the scan; `func` gets its own lookahead
+// ── Call-site lookahead ───────────────────────────────────────────────────────
 
 fn is_followed_by_paren(tokens: &[Token], start: usize) -> bool {
     let mut i = start;
@@ -348,25 +312,12 @@ fn is_followed_by_paren(tokens: &[Token], start: usize) -> bool {
 
     while i < tokens.len() {
         match &tokens[i].token_type {
-            // Inside < ... > angle bracket type annotation
-            TokenType::Symbol('<') => {
-                angle_depth += 1;
-                i += 1;
-            }
-            TokenType::Symbol('>') => {
-                angle_depth -= 1;
-                i += 1;
-            }
-            // While inside angle brackets, skip anything
-            _ if angle_depth > 0 => {
-                i += 1;
-            }
-            // Found the opening paren — this IS a call site
+            TokenType::Symbol('<') => { angle_depth += 1; i += 1; }
+            TokenType::Symbol('>') => { angle_depth -= 1; i += 1; }
+            _ if angle_depth > 0  => { i += 1; }
             TokenType::Symbol('(') => return true,
-            // Scope list `=> ScopeName` between name and `(` — skip
             TokenType::Arrow => {
                 i += 1;
-                // skip identifier(s) until we hit `(`
                 while i < tokens.len() {
                     match &tokens[i].token_type {
                         TokenType::Symbol('(') => return true,
@@ -376,11 +327,8 @@ fn is_followed_by_paren(tokens: &[Token], start: usize) -> bool {
                 }
                 break;
             }
-            // Any other token terminates the scan — not a call
             _ => break,
         }
-
-        // Safety: don't scan forever
         if i > start + 16 { break; }
     }
     false
@@ -388,23 +336,18 @@ fn is_followed_by_paren(tokens: &[Token], start: usize) -> bool {
 
 // ── Encoder ───────────────────────────────────────────────────────────────────
 
-fn encode_tokens(doc: &Document, enum_names: &HashSet<String>, func_names: &HashSet<String>) -> Vec<SemanticToken> {
-    let mut data: Vec<SemanticToken> = Vec::with_capacity(doc.tokens.len() + 32);
+fn encode_tokens(
+    doc:        &Document,
+    enum_names: &HashSet<String>,
+    func_names: &HashSet<String>,
+) -> Vec<SemanticToken> {
+    let mut data: Vec<SemanticToken> = Vec::with_capacity(doc.tokens.len());
     let mut prev_line: u32 = 0;
     let mut prev_col:  u32 = 0;
     let mut state = ClassifierState::new(enum_names, func_names);
 
-    if let Some(ast) = &doc.ast {
-        emit_config_tokens(
-            ast,
-            &doc.source,
-            doc.config_line_range,
-            &mut prev_line,
-            &mut prev_col,
-            &mut data,
-        );
-    }
-
+    // doc.tokens is the full stream including @CONFIG tokens with real positions.
+    // No synthetic emission needed — the loop below handles everything.
     for (index, token) in doc.tokens.iter().enumerate() {
         state.advance(token, &doc.tokens, index);
 
@@ -430,153 +373,6 @@ fn encode_tokens(doc: &Document, enum_names: &HashSet<String>, func_names: &Hash
     }
 
     data
-}
-
-// ── @CONFIG token synthesis ───────────────────────────────────────────────────
-
-fn emit_config_tokens(
-    ast:               &DixScript,
-    source:            &str,
-    config_line_range: Option<(u32, u32)>,
-    prev_line:         &mut u32,
-    prev_col:          &mut u32,
-    data:              &mut Vec<SemanticToken>,
-) {
-    let config = match ast.config.as_ref() { Some(c) => c, None => return };
-
-    let value_lookup: std::collections::HashMap<&str, &ConfigValue> = config.entries.iter()
-        .map(|e| (e.key.as_str(), &e.value))
-        .collect();
-
-    let source_lines: Vec<&str> = source.lines().collect();
-
-    let (start_lsp, end_lsp) = match config_line_range {
-        Some(r) => r,
-        None    => return,
-    };
-
-    // @CONFIG keyword on the opening line
-    if let Some(line_text) = source_lines.get(start_lsp as usize) {
-        let at_col = line_text.find('@').unwrap_or(0) as u32;
-        push_raw(data, prev_line, prev_col, start_lsp, at_col, 7, TT_KEYWORD, MOD_READONLY);
-    }
-
-    for lsp_line in (start_lsp + 1)..=end_lsp {
-        let line_text = match source_lines.get(lsp_line as usize) {
-            Some(l) => *l,
-            None    => continue,
-        };
-        let trimmed = line_text.trim_start();
-
-        if trimmed.is_empty()
-            || trimmed.starts_with("//")
-            || trimmed.starts_with("/*")
-            || trimmed.starts_with(')')
-            || trimmed.to_uppercase().starts_with("@CONFIG")
-        {
-            continue;
-        }
-
-        let arrow_pos = match trimmed.find("->") {
-            Some(p) => p,
-            None    => continue,
-        };
-
-        let key = trimmed[..arrow_pos].trim();
-        if key.is_empty()
-            || !key.chars().next().map(|c| c.is_ascii_alphabetic() || c == '_').unwrap_or(false)
-            || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            continue;
-        }
-
-        let leading = line_text.len() - line_text.trim_start().len();
-
-        // key → PROPERTY
-        push_raw(data, prev_line, prev_col, lsp_line, leading as u32, key.len() as u32, TT_PROPERTY, 0);
-
-        // -> → OPERATOR
-        let arrow_col = (leading + arrow_pos) as u32;
-        push_raw(data, prev_line, prev_col, lsp_line, arrow_col, 2, TT_OPERATOR, 0);
-
-        // value
-        let after_arrow   = arrow_pos + 2;
-        let rest          = &trimmed[after_arrow..];
-        let value_text    = rest.trim_start();
-        let value_leading = rest.len() - value_text.len();
-        let value_col     = (leading + after_arrow + value_leading) as u32;
-
-        let (tt, len) = match value_lookup.get(key) {
-            Some(cv) => classify_config_value(cv, value_text),
-            None     => classify_config_value_from_source_text(value_text),
-        };
-        if len > 0 {
-            push_raw(data, prev_line, prev_col, lsp_line, value_col, len as u32, tt, 0);
-        }
-    }
-}
-
-fn classify_config_value_from_source_text(text: &str) -> (u32, usize) {
-    if text.starts_with('"') {
-        if let Some(end) = text[1..].find('"') { return (TT_STRING, end + 2); }
-        return (TT_STRING, text.len());
-    }
-    if text.starts_with('\'') {
-        if let Some(end) = text[1..].find('\'') { return (TT_STRING, end + 2); }
-        return (TT_STRING, text.len());
-    }
-    if text == "true" || text == "false" { return (TT_KEYWORD, text.len()); }
-    let num_len = text.chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == 'e' || *c == 'E')
-        .count();
-    if num_len > 0 { return (TT_NUMBER, num_len); }
-    (TT_STRING, text.split_whitespace().next().map(|s| s.len()).unwrap_or(0))
-}
-
-fn classify_config_value(value: &ConfigValue, text: &str) -> (u32, usize) {
-    match value {
-        ConfigValue::String(_) | ConfigValue::Features(_) => {
-            if text.starts_with('"') {
-                if let Some(end) = text[1..].find('"') {
-                    return (TT_STRING, end + 2);
-                }
-            }
-            (TT_STRING, text.split_whitespace().next().map(|s| s.len()).unwrap_or(0))
-        }
-        ConfigValue::Integer(_) => {
-            let len = text.chars()
-                .take_while(|c| c.is_ascii_digit() || *c == '-')
-                .count();
-            (TT_NUMBER, len.max(1))
-        }
-        ConfigValue::Float(_) => {
-            let len = text.chars()
-                .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
-                .count();
-            (TT_NUMBER, len.max(1))
-        }
-        ConfigValue::Boolean(_) => {
-            if text.starts_with("true") { (TT_KEYWORD, 4) } else { (TT_KEYWORD, 5) }
-        }
-        ConfigValue::Date(_) | ConfigValue::Timestamp(_) => {
-            if text.starts_with('"') {
-                if let Some(end) = text[1..].find('"') {
-                    return (TT_EVENT, end + 2);
-                }
-            }
-            (TT_EVENT, text.split_whitespace().next().map(|s| s.len()).unwrap_or(0))
-        }
-        ConfigValue::ErrorHandling(_)
-        | ConfigValue::Compatibility(_)
-        | ConfigValue::Debug(_) => {
-            if text.starts_with('"') {
-                if let Some(end) = text[1..].find('"') {
-                    return (TT_STRING, end + 2);
-                }
-            }
-            (TT_STRING, text.split_whitespace().next().map(|s| s.len()).unwrap_or(0))
-        }
-    }
 }
 
 // ── Interpolated string ───────────────────────────────────────────────────────
@@ -686,12 +482,12 @@ fn classify(token: &Token, state: &mut ClassifierState<'_>) -> Option<(u32, u32)
         | TokenType::Timestamp(_)        => Some((TT_EVENT, 0)),
 
         TokenType::Integer(_)
-        | TokenType::Long(_)             // ← Long gets same color as Integer
+        | TokenType::Long(_)
         | TokenType::Float(_)
         | TokenType::Double(_)
         | TokenType::ScientificNotation(_) => Some((TT_NUMBER, 0)),
-        TokenType::HexLiteral(_)          => Some((TT_NUMBER, 0)),
-        TokenType::HexColor(_)            => Some((TT_NUMBER, MOD_READONLY)),
+        TokenType::HexLiteral(_)           => Some((TT_NUMBER, 0)),
+        TokenType::HexColor(_)             => Some((TT_NUMBER, MOD_READONLY)),
 
         TokenType::ArithmeticOp(_)
         | TokenType::ArithmeticAssignOp(_)
@@ -752,7 +548,7 @@ fn token_length(token: &Token) -> usize {
         TokenType::InterpolatedString(s)  => s.len() + 3,
         TokenType::HexColor(h)            => h.trim_start_matches('#').len() + 1,
         TokenType::Comment(c)             => c.len() + 2,
-        TokenType::Long(l)                => format!("{}L", l).len(),   // ← NEW
+        TokenType::Long(l)                => format!("{}L", l).len(),
         TokenType::SectionConfig          =>  7,
         TokenType::SectionImports         =>  8,
         TokenType::SectionDLM             =>  4,
@@ -776,4 +572,4 @@ fn token_length(token: &Token) -> usize {
             if v.is_empty() { 1 } else { v.len() }
         }
     }
-            }
+}

@@ -1,24 +1,28 @@
-
-//! Extracts and processes the @CONFIG section, then initialises VersionManager and ErrorManager.
+// dixscript/src/Compiler/Core/Config/config_section_handler.rs
+//! Extracts and processes the @CONFIG section, then initialises VersionManager
+//! and ErrorManager.
 //!
-//! ## Position fixup
+//! ## Two entry points
 //!
-//! After parse_config_string_optimized produces a ConfigSection (with all
-//! positions set to UNKNOWN via Default::default()), we do a second pass over
-//! the original source text to locate the 1-based line/column of every key.
-//! This lets semantic token emission, hover, and inlay hints work correctly for
-//! @CONFIG entries, which otherwise have no tokens in the stream (the block is
-//! stripped before tokenization).
+//! ### Token-based (Approach B — recommended, used by loader and LSP)
+//! `process_config_tokens(&[Token])` — called after the tokenizer has run on
+//! the full source.  `@CONFIG` tokens arrive with accurate 1-based positions
+//! already set; no source scanning or position fixup is required.
 //!
-//! ## Source-stripping strategy
+//! ### Text-based (legacy, kept for benches and any callers with raw source)
+//! `process_config_section(&str)` — strips the `@CONFIG` block, parses it,
+//! and returns the cleaned source for a second tokenizer pass.
+//!
+//! ## Source-stripping strategy (text path only)
 //!
 //! After extracting the @CONFIG block we replace it with the same number of
 //! `\n` characters that the block originally contained. This preserves every
 //! source line number exactly so that all downstream token positions already
 //! reflect the original file — no offset arithmetic is required anywhere in
-//! the pipeline (LSP or CLI).
+//! the pipeline.
 
 use crate::Compiler::AST::{ConfigSection, Position};
+use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::Compiler::VersionControl::VersionManager;
 use crate::ErrorManager::{ErrorManager, DebugConfig};
 use crate::Utilities::MID_Logger;
@@ -61,8 +65,88 @@ impl ConfigSectionHandler {
         self.error_manager.clone()
     }
 
+    // =========================================================================
+    // TOKEN-BASED ENTRY POINT (Approach B)
+    // =========================================================================
+
+    /// Process `@CONFIG` from a slice of tokens.
+    ///
+    /// Called after the tokenizer has run on the full source.  Positions on
+    /// every `ConfigEntry` are read directly from the tokens — no source
+    /// scanning required.
+    ///
+    /// `config_tokens` is the output of `split_config_tokens().config_tokens`:
+    /// it runs from the `SectionConfig` token through the section's closing `)`.
+    /// When the source has no `@CONFIG` section, pass an empty slice.
+    ///
+    /// `cleaned_input_string` in the returned `ProcessConfigResult` is always
+    /// empty string; in the token path the caller already has the full token
+    /// stream and does not re-run the tokenizer.
+    pub fn process_config_tokens(
+        &mut self,
+        config_tokens: &[Token],
+    ) -> ProcessConfigResult {
+        self.log_info("Starting CONFIG token-based extraction");
+
+        let mut result = ProcessConfigResult::default();
+
+        if config_tokens.is_empty() {
+            self.log_info("No CONFIG tokens — using cached minimal config");
+            result.config_section = ConfigSchema::create_minimal_config();
+            result.warnings.push(
+                "No CONFIG tokens provided — using cached defaults".to_string(),
+            );
+            self.initialize_singletons(&mut result);
+            return result;
+        }
+
+        // Position of the @CONFIG keyword itself (used as ConfigSection.position).
+        let section_position = config_tokens
+            .iter()
+            .find(|t| matches!(t.token_type, TokenType::SectionConfig))
+            .map(|t| Position::new(t.line, t.column))
+            .unwrap_or(Position::UNKNOWN);
+
+        // Parse key→value pairs from the token stream.
+        let entries_result = self.parse_config_entries_from_tokens(config_tokens);
+        result.warnings.extend(entries_result.warnings.clone());
+
+        match ConfigSchema::validate_and_enhance_config(entries_result.entries) {
+            Ok(validated) => {
+                let mut config_section = ConfigSchema::create_config_section(validated);
+                // Token positions are already 1-based and absolute — no source
+                // scan needed.
+                self.apply_positions_to_config_section(
+                    &mut config_section,
+                    &entries_result.positions,
+                    section_position,
+                );
+                result.config_section = config_section;
+            }
+            Err(e) => {
+                self.log_warning(&format!(
+                    "Config token validation failed: {} — using defaults",
+                    e
+                ));
+                result.config_section = ConfigSchema::create_minimal_config();
+                result.warnings.push(format!("Config validation error: {}", e));
+            }
+        }
+
+        // Not used in the token path: the caller already has the full token
+        // stream.  Set to empty so any stale reader gets a safe no-op.
+        result.cleaned_input_string = String::new();
+
+        self.initialize_singletons(&mut result);
+        result
+    }
+
+    // =========================================================================
+    // TEXT-BASED ENTRY POINT (legacy)
+    // =========================================================================
+
     pub fn process_config_section(&mut self, input_string: &str) -> ProcessConfigResult {
-        self.log_info("Starting CONFIG section extraction");
+        self.log_info("Starting CONFIG section extraction (text path)");
 
         let mut result = ProcessConfigResult::default();
 
@@ -100,13 +184,6 @@ impl ConfigSectionHandler {
                             result.cleaned_input_string =
                                 extraction_result.cleaned_input_string.clone();
 
-                            // ── Position fixup ────────────────────────────────────
-                            // All ConfigEntry positions come out as UNKNOWN because
-                            // ConfigSchema::create_config_section uses Default::default().
-                            // Scan the original source to recover the 1-based positions
-                            // so that semantic tokens, hover, and inlay hints work for
-                            // @CONFIG lines. This is the authoritative position source
-                            // since no tokens exist for the stripped @CONFIG block.
                             let config_end = extraction_result.start_position
                                 + extraction_result.config_string.len();
                             let key_positions = self.scan_key_positions_in_source(
@@ -144,8 +221,9 @@ impl ConfigSectionHandler {
                 } else {
                     self.log_info("No valid CONFIG section - using cached defaults");
                     result.config_section = ConfigSchema::create_minimal_config();
-                    result.warnings
-                        .push("No valid CONFIG section - using cached defaults".to_string());
+                    result.warnings.push(
+                        "No valid CONFIG section - using cached defaults".to_string(),
+                    );
                     result.cleaned_input_string =
                         extraction_result.cleaned_input_string.clone();
                 }
@@ -161,6 +239,10 @@ impl ConfigSectionHandler {
         self.initialize_singletons(&mut result);
         result
     }
+
+    // =========================================================================
+    // SHARED SINGLETON INITIALISATION
+    // =========================================================================
 
     fn initialize_singletons(&mut self, result: &mut ProcessConfigResult) {
         let settings = ConfigSchema::extract_operational_settings(&result.config_section);
@@ -198,35 +280,133 @@ impl ConfigSectionHandler {
         self.log_info("ErrorManager configured with operational settings");
     }
 
-    // ── Position helpers ──────────────────────────────────────────────────────
+    // =========================================================================
+    // TOKEN-PATH PRIVATE HELPERS
+    // =========================================================================
 
-    /// Convert a byte offset in `source` to a 1-based `Position`.
+    /// Parse `key -> value` entries from a `@CONFIG` token slice.
     ///
-    /// Column is measured in bytes (matches lexer behaviour for ASCII source).
-    /// For the `@CONFIG` keyword, `offset` is the position of the `@` character.
+    /// Handles optional commas and comments between entries.
+    fn parse_config_entries_from_tokens(
+        &self,
+        tokens: &[Token],
+    ) -> TokenConfigEntriesResult {
+        let mut entries:   HashMap<String, String>   = HashMap::new();
+        let mut positions: HashMap<String, Position> = HashMap::new();
+        let mut warnings:  Vec<String>               = Vec::new();
+
+        let mut i = 0usize;
+
+        // Skip the section keyword and opening paren.
+        while i < tokens.len() {
+            match &tokens[i].token_type {
+                TokenType::SectionConfig
+                | TokenType::Symbol('(')
+                | TokenType::Comment(_) => { i += 1; }
+                _ => break,
+            }
+        }
+
+        // Parse entries: Identifier SwitchCase value [,]
+        while i < tokens.len() {
+            // Skip entry separators and structural tokens.
+            match &tokens[i].token_type {
+                TokenType::Symbol(',')
+                | TokenType::Symbol(')')
+                | TokenType::Comment(_) => { i += 1; continue; }
+                TokenType::EndOfFile => break,
+                _ => {}
+            }
+
+            // ── Key ───────────────────────────────────────────────────────
+            let (key, key_pos) = match &tokens[i].token_type {
+                TokenType::Identifier(k) => {
+                    (k.clone(), Position::new(tokens[i].line, tokens[i].column))
+                }
+                other => {
+                    warnings.push(format!(
+                        "Unexpected token in @CONFIG at {}:{} — {:?}",
+                        tokens[i].line, tokens[i].column, other
+                    ));
+                    i += 1;
+                    continue;
+                }
+            };
+            i += 1;
+
+            // ── Arrow (->) ────────────────────────────────────────────────
+            if i >= tokens.len() { break; }
+            match &tokens[i].token_type {
+                TokenType::SwitchCase => { i += 1; }
+                _ => {
+                    warnings.push(format!(
+                        "Expected '->' after config key '{}' at {}:{}",
+                        key, tokens[i].line, tokens[i].column
+                    ));
+                    // Attempt recovery: keep consuming until next Identifier or EOF.
+                    while i < tokens.len() {
+                        match &tokens[i].token_type {
+                            TokenType::Identifier(_) | TokenType::EndOfFile => break,
+                            _ => { i += 1; }
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            // Skip any comments between arrow and value.
+            while i < tokens.len()
+                && matches!(tokens[i].token_type, TokenType::Comment(_))
+            {
+                i += 1;
+            }
+
+            // ── Value ─────────────────────────────────────────────────────
+            if i >= tokens.len() { break; }
+            let value_str = match &tokens[i].token_type {
+                TokenType::String(s) | TokenType::StringSingle(s) => s.clone(),
+                TokenType::Integer(n)              => n.to_string(),
+                TokenType::Float(f)                => f.to_string(),
+                TokenType::Double(d)               => d.to_string(),
+                TokenType::ScientificNotation(d)   => d.to_string(),
+                TokenType::Bool(b)                 => b.to_string(),
+                TokenType::Date(d)                 => d.clone(),
+                TokenType::Timestamp(t)            => t.clone(),
+                TokenType::Identifier(s)           => s.clone(),
+                TokenType::Keyword(k)              => k.to_string(),
+                other => {
+                    warnings.push(format!(
+                        "Unexpected value token for config key '{}' at {}:{} — {:?}",
+                        key, tokens[i].line, tokens[i].column, other
+                    ));
+                    i += 1;
+                    continue;
+                }
+            };
+            i += 1;
+
+            entries.insert(key.clone(), value_str);
+            positions.insert(key, key_pos);
+        }
+
+        TokenConfigEntriesResult { entries, positions, warnings }
+    }
+
+    // =========================================================================
+    // TEXT-PATH PRIVATE HELPERS (position fixup, extraction, parsing)
+    // =========================================================================
+
     fn byte_offset_to_position(source: &str, offset: usize) -> Position {
         let clamped = offset.min(source.len());
         let before  = &source[..clamped];
-
-        let line = before.chars().filter(|&c| c == '\n').count() + 1; // 1-based
-
+        let line = before.chars().filter(|&c| c == '\n').count() + 1;
         let col = match before.rfind('\n') {
-            // Number of bytes after the last newline, plus 1 for 1-based indexing.
             Some(nl_pos) => clamped - nl_pos,
-            // No newline: column is byte-offset + 1 (1-based).
             None         => clamped + 1,
         };
-
         Position::new(line, col)
     }
 
-    /// Scan the @CONFIG block in `source` and return a map of key → absolute Position.
-    ///
-    /// * `start_offset` — byte offset of the `@` in `@CONFIG` within `source`.
-    /// * `end_offset`   — byte offset just past the closing `)`.
-    ///
-    /// All returned positions are 1-based (line, column) and absolute within
-    /// the full source file, matching the convention used by the lexer.
     fn scan_key_positions_in_source(
         &self,
         source:       &str,
@@ -237,17 +417,15 @@ impl ConfigSectionHandler {
         let end   = end_offset.min(source.len());
         let block = &source[start_offset..end];
 
-        // 1-based line number of the first character of the @CONFIG block.
         let base_line = source[..start_offset]
             .chars()
             .filter(|&c| c == '\n')
             .count() + 1;
 
         for (rel_idx, line) in block.lines().enumerate() {
-            let abs_line = base_line + rel_idx; // 1-based absolute line number
+            let abs_line = base_line + rel_idx;
             let trimmed  = line.trim_start();
 
-            // Skip blank lines, the @CONFIG( opener, closing ), and comments.
             if trimmed.is_empty()
                 || trimmed.starts_with("//")
                 || trimmed.starts_with("/*")
@@ -257,12 +435,9 @@ impl ConfigSectionHandler {
                 continue;
             }
 
-            // Parse `key -> value` pattern.
             if let Some(arrow_pos) = trimmed.find("->") {
                 let key_raw = trimmed[..arrow_pos].trim();
 
-                // Validate: non-empty, starts with letter/underscore,
-                // contains only [a-zA-Z0-9_].
                 let valid = !key_raw.is_empty()
                     && key_raw.chars().next()
                         .map(|c| c.is_ascii_alphabetic() || c == '_')
@@ -270,7 +445,6 @@ impl ConfigSectionHandler {
                     && key_raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
 
                 if valid {
-                    // Column: count bytes of leading whitespace, then add 1 (1-based).
                     let leading_bytes = line.len() - line.trim_start().len();
                     let col = leading_bytes + 1;
                     positions.insert(key_raw.to_string(), Position::new(abs_line, col));
@@ -281,11 +455,6 @@ impl ConfigSectionHandler {
         positions
     }
 
-    /// Apply the scanned positions to an already-parsed `ConfigSection` in place.
-    ///
-    /// `section_position` is the 1-based position of `@` in `@CONFIG`.
-    /// Entry positions are set from `positions`; entries not found in the map
-    /// (e.g. defaults injected by ConfigSchema) retain `Position::UNKNOWN`.
     fn apply_positions_to_config_section(
         &self,
         section:          &mut ConfigSection,
@@ -297,13 +466,8 @@ impl ConfigSectionHandler {
             if let Some(&pos) = positions.get(&entry.key) {
                 entry.position = pos;
             }
-            // Entries not in `positions` keep Default::default() (UNKNOWN).
-            // These are injected defaults (e.g. `created`, `encoding`) that
-            // the user did not write explicitly — they should not produce tokens.
         }
     }
-
-    // ── Extraction ─────────────────────────────────────────────────────────────
 
     fn extract_config_section_optimized(
         &self,
@@ -332,17 +496,14 @@ impl ConfigSectionHandler {
         })
     }
 
-    /// Safe case-insensitive search for `@CONFIG`.
     #[inline]
     fn index_of_config(&self, input: &str) -> Option<usize> {
         let bytes = input.as_bytes();
         let kw    = b"@config";
         let n     = kw.len();
         if bytes.len() < n { return None; }
-        // Fast path: exact case match (covers ≥99% of files).
         if let Some(pos) = memchr::memmem::find(bytes, b"@CONFIG") { return Some(pos); }
         if let Some(pos) = memchr::memmem::find(bytes, b"@config") { return Some(pos); }
-        // Slow path: full ASCII case-insensitive scan.
         'outer: for i in 0..=(bytes.len() - n) {
             for j in 0..n {
                 if bytes[i + j].to_ascii_lowercase() != kw[j] { continue 'outer; }
@@ -361,15 +522,9 @@ impl ConfigSectionHandler {
     #[inline]
     fn find_opening_paren_optimized(&self, input: &str, start_from: usize) -> Option<usize> {
         for (i, c) in input[start_from..].char_indices() {
-            if c.is_whitespace() {
-                continue;
-            }
-            if c == '(' {
-                return Some(start_from + i);
-            }
-            if c != '/' && c != '*' {
-                return None;
-            }
+            if c.is_whitespace() { continue; }
+            if c == '(' { return Some(start_from + i); }
+            if c != '/' && c != '*' { return None; }
         }
         None
     }
@@ -465,8 +620,6 @@ impl ConfigSectionHandler {
             || upper.starts_with("@XML")
     }
 
-    /// Replace `input[start_index..end_index]` with the same number of `\n`
-    /// characters, preserving all subsequent line numbers exactly.
     fn replace_config_with_blank_lines(
         &self,
         input:       &str,
@@ -478,8 +631,6 @@ impl ConfigSectionHandler {
         let replacement    = "\n".repeat(newline_count);
         format!("{}{}{}", &input[..start_index], replacement, &input[end_index..])
     }
-
-    // ── Parsing ────────────────────────────────────────────────────────────────
 
     fn parse_config_string_optimized(
         &self,
@@ -544,8 +695,6 @@ impl ConfigSectionHandler {
         result
     }
 
-    /// Split config content on commas OR newlines (both are valid entry separators).
-    /// Does not split inside string literals.
     fn split_config_entries<'a>(&self, content: &'a str) -> Vec<&'a str> {
         let mut entries: Vec<&'a str> = Vec::new();
         let mut start = 0usize;
@@ -603,7 +752,9 @@ impl ConfigSectionHandler {
         value.to_string()
     }
 
-    // ── Logging ────────────────────────────────────────────────────────────────
+    // =========================================================================
+    // LOGGING
+    // =========================================================================
 
     fn log_info(&self, message: &str) {
         if let Some(ref logger) = self.logger {
@@ -624,14 +775,16 @@ impl ConfigSectionHandler {
     }
 }
 
-// ── Result types ───────────────────────────────────────────────────────────────
+// =============================================================================
+// PUBLIC RESULT TYPES
+// =============================================================================
 
 #[derive(Debug, Clone)]
 pub struct ProcessConfigResult {
     pub config_section:       ConfigSection,
     pub operational_settings: OperationalSettings,
-    /// Source with @CONFIG replaced by blank lines. All token line numbers
-    /// already match the original file — feed directly to the Tokenizer.
+    /// Populated by the text path only.  In the token path this is always
+    /// an empty string — the caller retains the full token stream.
     pub cleaned_input_string: String,
     pub warnings:             Vec<String>,
 }
@@ -652,7 +805,6 @@ pub struct ConfigExtractionResult {
     pub found:                bool,
     pub start_position:       usize,
     pub config_string:        String,
-    /// Source with the @CONFIG block replaced by blank lines.
     pub cleaned_input_string: String,
 }
 
@@ -673,8 +825,21 @@ pub struct ConfigParseResult {
     pub warnings:       Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+// =============================================================================
+// PRIVATE HELPER TYPES
+// =============================================================================
+
+#[derive(Debug)]
 struct ConfigEntriesParseResult {
     entries:  HashMap<String, String>,
     warnings: Vec<String>,
-    }
+}
+
+/// Return type of `parse_config_entries_from_tokens`.
+struct TokenConfigEntriesResult {
+    /// Raw key→value strings ready for `ConfigSchema::validate_and_enhance_config`.
+    entries:   HashMap<String, String>,
+    /// Per-key source positions (1-based) read directly from the token stream.
+    positions: HashMap<String, Position>,
+    warnings:  Vec<String>,
+}

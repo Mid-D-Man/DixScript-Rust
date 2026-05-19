@@ -1,3 +1,4 @@
+// dixscript/src/Compiler/Core/Tokenizer/mod.rs
 //! Tokenizer - Lexical analysis
 
 pub mod lexer;
@@ -12,6 +13,11 @@ pub mod char_tables;
 /// `Tokenizer::tokenize`, never through the platform internals directly.
 pub(crate) mod platform;
 
+/// Token-stream splitter for the Approach-B (tokeniser-first) pipeline.
+/// Separates `@CONFIG` tokens from the rest so `ConfigSectionHandler` can
+/// process config with accurate source positions without stripping the source.
+pub mod config_token_splitter;
+
 pub use lexer::{
     Tokenizer,
     TokenizationResult,
@@ -20,3 +26,4 @@ pub use lexer::{
     StaticCallInfo,
 };
 pub use token::{Token, TokenType, TokenExtensions};
+pub use config_token_splitter::{split_config_tokens, TokenSplitResult};

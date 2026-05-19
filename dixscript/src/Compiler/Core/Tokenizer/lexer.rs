@@ -27,6 +27,12 @@
 //! Plain integers that overflow i32 are also auto-promoted to `Long`:
 //!   `3_000_000_000`   → `Long(3000000000)`
 //!
+//! ### Long suffix lookahead guard
+//! `L`/`l` is only consumed as a Long suffix when the character immediately
+//! after it is NOT an identifier continuation character. This prevents
+//! `789Level` from being tokenised as `Long(789)` + `Identifier("evel")`;
+//! instead it correctly produces `Integer(789)` + `Identifier("Level")`.
+//!
 //! ## Key fix: section token self-stamping
 //! Section keyword tokens carry their OWN `SectionId`. See `try_scan_section_keyword`.
 
@@ -348,6 +354,15 @@ impl<'src> Tokenizer<'src> {
     fn is_advanced_section(&self) -> bool {
         matches!(self.current_section, SectionId::QuickFuncs | SectionId::Imports | SectionId::Dlm)
     }
+
+    /// Returns true if `bytes[pos]` is an identifier continuation character.
+    /// Used by suffix checks to avoid consuming a letter that starts a following identifier.
+    #[inline]
+    fn is_ident_cont_at(&self, pos: usize) -> bool {
+        if pos >= self.input.len() { return false; }
+        let b = self.input.as_bytes()[pos];
+        (b as u32) < 256 && IDENT_CONT[b as usize]
+    }
 }
 
 // ── Token scanning ────────────────────────────────────────────────────────────
@@ -659,7 +674,7 @@ impl<'src> Tokenizer<'src> {
         let mut is_date            = false;
         let mut is_timestamp       = false;
         let mut in_timezone_offset = false;
-        let mut has_underscore     = false; // track whether we need to strip
+        let mut has_underscore     = false;
 
         if state.peek(self.input) == '-' { state.advance(self.input); is_negative = true; }
 
@@ -749,6 +764,12 @@ impl<'src> Tokenizer<'src> {
         // L / l  → Long (only valid on integer literals, not float/double)
         // f / F  → Float
         // Mutually exclusive; L on a float literal is a lex error.
+        //
+        // LOOKAHEAD GUARD: only treat L/l as Long suffix when the character
+        // immediately after it is NOT an identifier continuation character.
+        // This prevents e.g. `789Level` being tokenised as Long(789) +
+        // Identifier("evel"). If L/l is followed by [A-Za-z0-9_], the L is
+        // the start of a following identifier and we leave it alone.
         let mut has_float_suffix = false;
         let mut has_long_suffix  = false;
 
@@ -756,8 +777,11 @@ impl<'src> Tokenizer<'src> {
             let nb = self.input.as_bytes()[state.position];
             match nb {
                 b'L' | b'l' if !has_dot && !has_exponent => {
-                    state.advance(self.input);
-                    has_long_suffix = true;
+                    // Only consume as Long suffix if not followed by ident continuation
+                    if !self.is_ident_cont_at(state.position + 1) {
+                        state.advance(self.input);
+                        has_long_suffix = true;
+                    }
                 }
                 b'f' | b'F' => {
                     state.advance(self.input);
@@ -842,7 +866,11 @@ impl<'src> Tokenizer<'src> {
 
     // ── Hex literals: 0x … ───────────────────────────────────────────────────
     // Accepts underscore separators: 0xFF_FF_FF_FF
-    // Accepts L suffix: 0xDEAD_BEEFL → Long
+    // Accepts L suffix (with lookahead guard): 0xDEAD_BEEFL → Long
+    // Produces Integer for i32-range values, Long for overflow or explicit L.
+    // Note: TokenType::HexLiteral exists in the enum but is intentionally not
+    // emitted here — hex integer notation is semantically an integer value.
+    // Use #RRGGBB notation for hex color values (produces TokenType::HexColor).
 
     fn scan_hex_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
         let start_column = state.column;
@@ -866,16 +894,24 @@ impl<'src> Tokenizer<'src> {
             }
         }
 
-        // Check L / l suffix
+        // Check L / l suffix with lookahead guard: only consume if not
+        // followed by an identifier continuation character.
         let has_long_suffix = !state.is_at_end() && {
             let nb = bytes[state.position];
-            if nb == b'L' || nb == b'l' { state.advance(self.input); true } else { false }
+            if (nb == b'L' || nb == b'l') && !self.is_ident_cont_at(state.position + 1) {
+                state.advance(self.input);
+                true
+            } else {
+                false
+            }
         };
 
-        let raw = state.slice(self.input, hex_start, state.position - hex_start
-            - if has_long_suffix { 1 } else { 0 }
-        );
-        // Strip underscores (and any trailing L already consumed)
+        // Length of the hex digit run (L already consumed and excluded).
+        let hex_digit_len = state.position - hex_start - if has_long_suffix { 1 } else { 0 };
+        let raw = state.slice(self.input, hex_start, hex_digit_len);
+
+        // Strip underscores (L/l were already excluded by the length calculation,
+        // but we filter them defensively in case of any edge case).
         let hex_part: String = if has_underscore {
             raw.chars().filter(|&c| c != '_' && c != 'L' && c != 'l').collect()
         } else {
@@ -919,7 +955,7 @@ impl<'src> Tokenizer<'src> {
             };
         }
 
-        // Try i32 first, auto-promote to i64
+        // Try i32 first, auto-promote to i64 on overflow
         if let Ok(v) = i32::from_str_radix(&hex_part, 16) {
             return Ok(Some(Token::new(
                 TokenType::Integer(v), start_line, start_column, self.current_section,
@@ -946,8 +982,8 @@ impl<'src> Tokenizer<'src> {
     }
 
     // ── Binary literals: 0b … ────────────────────────────────────────────────
-    // Digits: 0 and 1 only. Accepts underscore separators. Accepts L suffix.
-    // Fits i32 → Integer. Overflows i32 → Long. L suffix → Long.
+    // Digits: 0 and 1 only. Accepts underscore separators. Accepts L suffix
+    // with lookahead guard. Fits i32 → Integer. Overflows i32 → Long.
     //   0b1010           → Integer(10)
     //   0b1111_0000      → Integer(240)
     //   0b1_0000_0000L   → Long(256)
@@ -987,15 +1023,20 @@ impl<'src> Tokenizer<'src> {
             )));
         }
 
-        // Check L / l suffix
+        // Check L / l suffix with lookahead guard
         let has_long_suffix = !state.is_at_end() && {
             let nb = bytes[state.position];
-            if nb == b'L' || nb == b'l' { state.advance(self.input); true } else { false }
+            if (nb == b'L' || nb == b'l') && !self.is_ident_cont_at(state.position + 1) {
+                state.advance(self.input);
+                true
+            } else {
+                false
+            }
         };
 
         // Extract raw and strip underscores
-        let raw      = state.slice(self.input, bin_start, state.position - bin_start
-            - if has_long_suffix { 1 } else { 0 });
+        let bin_digit_len = state.position - bin_start - if has_long_suffix { 1 } else { 0 };
+        let raw      = state.slice(self.input, bin_start, bin_digit_len);
         let clean: String = raw.chars().filter(|&c| c != '_' && c != 'L' && c != 'l').collect();
 
         if has_long_suffix {
@@ -1364,4 +1405,4 @@ pub struct StaticCallInfo {
     pub column:       usize,
     pub section:      SectionId,
     pub token_index:  usize,
-}
+    }

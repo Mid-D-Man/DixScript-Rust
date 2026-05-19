@@ -1,14 +1,16 @@
 // mdix-lsp/src/features/document_symbols.rs
 //! Document symbol provider — powers the outline panel / breadcrumb bar.
 //!
-//! Returns a flat list of SymbolInformation (simpler than nested
-//! DocumentSymbol; compatible with all LSP clients).
+//! Approach B: @CONFIG section position is read from the SectionConfig token
+//! in doc.tokens. No config_line_range field needed.
 
 use std::panic;
 use tower_lsp::lsp_types::{
     DocumentSymbolResponse, Location, Position, Range, SymbolInformation, SymbolKind, Url,
 };
 use dixscript::Compiler::AST::{DataEntry, DixScript};
+use dixscript::Compiler::Core::Tokenizer::TokenType;
+use dixscript::Compiler::Core::Tokenizer::token::SectionId;
 use crate::document::Document;
 
 pub fn provide(doc: Option<&Document>) -> Option<DocumentSymbolResponse> {
@@ -32,16 +34,18 @@ fn provide_inner(doc: Option<&Document>) -> Option<DocumentSymbolResponse> {
 
     let mut symbols: Vec<SymbolInformation> = Vec::new();
 
-    // ── @CONFIG ─────────────────────────────────────────────────────────────
-    if let Some((start, end)) = doc.config_line_range {
+    // ── @CONFIG ───────────────────────────────────────────────────────────────
+    // Read position from the real SectionConfig token — no stored line range.
+    if let Some(config_range) = config_section_range(&doc.tokens) {
         symbols.push(make_symbol(
             "@CONFIG".to_string(),
             SymbolKind::MODULE,
             uri,
-            start, 0,
-            end, 0,
+            config_range.0, 0,
+            config_range.1, 0,
         ));
-        // Individual config keys.
+        // Individual config keys — positions from ConfigSection AST entries
+        // which were populated by process_config_tokens with real token positions.
         if let Some(ref config) = ast.config {
             for entry in &config.entries {
                 if entry.position.is_valid() {
@@ -58,7 +62,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<DocumentSymbolResponse> {
         }
     }
 
-    // ── @IMPORTS ─────────────────────────────────────────────────────────────
+    // ── @IMPORTS ──────────────────────────────────────────────────────────────
     if let Some(ref imports) = ast.imports {
         if imports.position.is_valid() {
             let line = imports.position.line.saturating_sub(1) as u32;
@@ -80,7 +84,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<DocumentSymbolResponse> {
         }
     }
 
-    // ── @DLM ─────────────────────────────────────────────────────────────────
+    // ── @DLM ──────────────────────────────────────────────────────────────────
     if let Some(ref dlm) = ast.dlm {
         if dlm.position.is_valid() {
             let line = dlm.position.line.saturating_sub(1) as u32;
@@ -91,7 +95,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<DocumentSymbolResponse> {
         }
     }
 
-    // ── @ENUMS ───────────────────────────────────────────────────────────────
+    // ── @ENUMS ────────────────────────────────────────────────────────────────
     if let Some(ref enums) = ast.enums {
         if enums.position.is_valid() {
             let line = enums.position.line.saturating_sub(1) as u32;
@@ -109,7 +113,6 @@ fn provide_inner(doc: Option<&Document>) -> Option<DocumentSymbolResponse> {
                     SymbolKind::ENUM,
                     uri, line, col, line, col + decl.name.len() as u32,
                 ));
-                // Enum fields.
                 for field in &decl.fields {
                     if field.position.is_valid() {
                         let fline = field.position.line.saturating_sub(1) as u32;
@@ -128,7 +131,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<DocumentSymbolResponse> {
         }
     }
 
-    // ── @QUICKFUNCS ──────────────────────────────────────────────────────────
+    // ── @QUICKFUNCS ───────────────────────────────────────────────────────────
     if let Some(ref qf) = ast.quick_functions {
         if qf.position.is_valid() {
             let line = qf.position.line.saturating_sub(1) as u32;
@@ -159,7 +162,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<DocumentSymbolResponse> {
         }
     }
 
-    // ── @DATA ────────────────────────────────────────────────────────────────
+    // ── @DATA ─────────────────────────────────────────────────────────────────
     if let Some(ref data) = ast.data {
         if data.position.is_valid() {
             let line = data.position.line.saturating_sub(1) as u32;
@@ -220,7 +223,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<DocumentSymbolResponse> {
         }
     }
 
-    // ── @SECURITY ────────────────────────────────────────────────────────────
+    // ── @SECURITY ─────────────────────────────────────────────────────────────
     if let Some(ref sec) = ast.security {
         if sec.position.is_valid() {
             let line = sec.position.line.saturating_sub(1) as u32;
@@ -238,6 +241,40 @@ fn provide_inner(doc: Option<&Document>) -> Option<DocumentSymbolResponse> {
         Some(DocumentSymbolResponse::Flat(symbols))
     }
 }
+
+// ── @CONFIG section line range from token stream ──────────────────────────────
+//
+// Returns (start_lsp_line, end_lsp_line) where both are 0-based LSP lines.
+// start = line of @CONFIG keyword token
+// end   = line of the last token with SectionId::Config
+//
+// Falls back to None if the file has no @CONFIG section.
+
+fn config_section_range(
+    tokens: &[dixscript::Compiler::Core::Tokenizer::Token],
+) -> Option<(u32, u32)> {
+    // Find the SectionConfig token for the start line.
+    let start_tok = tokens
+        .iter()
+        .find(|t| matches!(t.token_type, TokenType::SectionConfig))?;
+
+    let start_lsp = start_tok.line.saturating_sub(1) as u32;
+
+    // End = last token (excluding EOF) that carries SectionId::Config.
+    let end_lsp = tokens
+        .iter()
+        .rev()
+        .find(|t| {
+            t.section == SectionId::Config
+                && !matches!(t.token_type, TokenType::EndOfFile)
+        })
+        .map(|t| t.line.saturating_sub(1) as u32)
+        .unwrap_or(start_lsp);
+
+    Some((start_lsp, end_lsp))
+}
+
+// ── Symbol constructor ────────────────────────────────────────────────────────
 
 #[allow(deprecated)]
 fn make_symbol(
@@ -259,8 +296,8 @@ fn make_symbol(
                 Position::new(end_line,   end_col),
             ),
         },
-        tags:            None,
-        deprecated:      None,
-        container_name:  None,
+        tags:           None,
+        deprecated:     None,
+        container_name: None,
     }
 }

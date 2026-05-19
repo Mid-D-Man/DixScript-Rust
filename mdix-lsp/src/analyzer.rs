@@ -1,27 +1,31 @@
 // mdix-lsp/src/analyzer.rs
-//! Pipeline runner.
+//! Pipeline runner — Approach B (tokenizer-first).
 //!
-//! KEY INVARIANT: The file's @CONFIG `debug_mode` is for the CLI compiler, NOT
-//! for the LSP. Running verbose mode inside spawn_blocking floods stderr,
-//! causes pipe backpressure, blocks tokio, and prevents shutdown responses —
-//! which is why LSP4IJ keeps timing out and restarting the server.
+//! Full source goes to the tokenizer first. Config tokens are split off and
+//! routed to ConfigSectionHandler::process_config_tokens, which produces the
+//! ConfigSection AST and real OperationalSettings with accurate positions
+//! directly from the token stream — no source stripping, no position fixup,
+//! no synthetic token generation in the LSP features.
 //!
-//! We always force `DebugMode::Off` in LSP mode. LSP debug goes to RUST_LOG.
+//! doc.tokens stores the FULL token stream (including @CONFIG tokens) so that
+//! all LSP features (hover, completions, semantic tokens, folding, etc.) see
+//! the complete file with correct positions.
+//!
+//! KEY INVARIANT: debug_mode from @CONFIG is for the CLI compiler, not the LSP.
+//! We always override to DebugMode::Off after processing config. LSP debug
+//! output goes via RUST_LOG / tracing.
 
 use std::panic;
-use std::sync::Mutex;
 
 use dixscript::Compiler::AST::data_types::DebugMode;
 use dixscript::Compiler::Core::{
     ConfigSectionHandler, ErrorHandlingStrategy, GeneralAstEnhancer,
-    GeneralParser, GeneralSemanticAnalyzer,
+    GeneralParser, GeneralSemanticAnalyzer, OperationalSettings,
 };
-use dixscript::Compiler::Core::Tokenizer::Tokenizer;
+use dixscript::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
 use dixscript::ErrorManager::DixError;
 
 use crate::document::Document;
-
-static CONFIG_INIT_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn run_pipeline(doc: &mut Document) -> Vec<DixError> {
     let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -44,61 +48,70 @@ pub fn run_pipeline(doc: &mut Document) -> Vec<DixError> {
 fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     let em = doc.error_manager.clone();
 
-    // ── Stage 1: extract @CONFIG ──────────────────────────────────────────
-    let config_result = {
-        let _guard = CONFIG_INIT_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let mut handler = ConfigSectionHandler::new_with_error_manager(None, em.clone());
-        handler.process_config_section(&doc.source)
-    };
-
-    // Force Continue so all stages run and collect all diagnostics.
+    // Force Continue so all stages run and collect all diagnostics regardless
+    // of what the file's @CONFIG specifies for error_handling.
     em.force_strategy(ErrorHandlingStrategy::Continue);
 
-    // ── CRITICAL: Override debug_mode for LSP ─────────────────────────────
-    //
-    // The user's @CONFIG `debug_mode -> "verbose"` is for the CLI compiler.
-    // In LSP mode, verbose logging goes to stderr from inside spawn_blocking
-    // threads. When stderr pipe fills up, writes block → tokio stalls →
-    // shutdown request never gets a response → LSP4IJ timeout → server killed
-    // → server restarted → cycle repeats (the 19 "initialized" messages).
-    //
-    // Solution: always silence the pipeline. LSP debug goes via RUST_LOG.
-    let mut operational_settings = config_result.operational_settings.clone();
-    operational_settings.debug_mode = DebugMode::Off;
+    // ── Stage 1: tokenize the FULL source ────────────────────────────────────
+    // Use a safe default OpSettings for the tokenizer pass: Continue + Off.
+    // Real OpSettings come from config processing in Stage 2.
+    let tokenizer_settings = OperationalSettings {
+        error_handling_strategy: ErrorHandlingStrategy::Continue,
+        debug_mode:              DebugMode::Off,
+        ..OperationalSettings::default()
+    };
 
-    let cleaned_source = &config_result.cleaned_input_string;
-
-    // Detect and store the @CONFIG line range so hover/completions work
-    // even though @CONFIG tokens don't exist in the token stream.
-    doc.config_line_range = detect_config_line_range(&doc.source);
-    doc.config_line_offset = 0;
-
-    tracing::debug!(
-        "Config range: {:?}, settings: {:?}",
-        doc.config_line_range,
-        operational_settings.error_handling_strategy
-    );
-
-    // ── Stage 2: tokenize ─────────────────────────────────────────────────
     let tokenizer = Tokenizer::new_with_error_manager(
-        cleaned_source,
-        &operational_settings,
+        &doc.source,
+        &tokenizer_settings,
         em.clone(),
     );
     let token_result = tokenizer.tokenize();
-    doc.tokens = token_result.tokens.clone();
 
-    tracing::debug!("Tokenized: {} tokens", doc.tokens.len());
+    // Keep the full stream for doc.tokens — LSP features need all tokens
+    // including @CONFIG tokens, with their real positions.
+    let all_tokens = token_result.tokens;
 
-    if token_result.tokens.is_empty() {
+    tracing::debug!("Tokenized: {} tokens", all_tokens.len());
+
+    if all_tokens.len() <= 1 {
+        // Only EOF — nothing to do.
+        doc.tokens = all_tokens;
         return em.get_all_errors_flat();
     }
 
-    // ── Stage 3: parse ────────────────────────────────────────────────────
+    // ── Stage 2: split @CONFIG and process it ────────────────────────────────
+    // split_config_tokens consumes the vec — clone so doc.tokens keeps the full
+    // stream. A typical .mdix file has a few hundred tokens; this is cheap.
+    let split = split_config_tokens(all_tokens.clone());
+
+    let config_result = {
+        let mut handler =
+            ConfigSectionHandler::new_with_error_manager(None, em.clone());
+        handler.process_config_tokens(&split.config_tokens)
+    };
+
+    // ── CRITICAL: override debug_mode for LSP ────────────────────────────────
+    // The user's @CONFIG `debug_mode -> "verbose"` is for the CLI compiler.
+    // Verbose logging inside spawn_blocking fills stderr, blocks tokio, and
+    // causes shutdown timeouts. Always silence the pipeline in LSP mode.
+    let mut operational_settings = config_result.operational_settings.clone();
+    operational_settings.debug_mode = DebugMode::Off;
+
+    tracing::debug!(
+        "Config processed: strategy={:?} version={}",
+        operational_settings.error_handling_strategy,
+        operational_settings.version,
+    );
+
+    // Store the full token stream before we move rest_tokens into the parser.
+    doc.tokens = all_tokens;
+
+    // ── Stage 3: parse ────────────────────────────────────────────────────────
+    // rest_tokens is everything except the @CONFIG block — exactly what
+    // GeneralParser expects (it receives the ConfigSection separately).
     let parser = match GeneralParser::new_for_lsp(
-        token_result.tokens,
+        split.rest_tokens,
         &config_result.config_section,
         &operational_settings,
         em.clone(),
@@ -120,7 +133,7 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
 
     tracing::debug!("Parse complete");
 
-    // ── Stage 4: semantic analysis ────────────────────────────────────────
+    // ── Stage 4: semantic analysis ────────────────────────────────────────────
     let analyzer = GeneralSemanticAnalyzer::new_for_lsp(
         &ast,
         &operational_settings,
@@ -134,7 +147,7 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         semantic_result.errors.len()
     );
 
-    // ── Stage 5: AST enhancement ──────────────────────────────────────────
+    // ── Stage 5: AST enhancement ──────────────────────────────────────────────
     let enhancer = GeneralAstEnhancer::new_with_error_manager(
         &operational_settings,
         em.clone(),
@@ -153,72 +166,4 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     let errors = em.get_all_errors_flat();
     tracing::debug!("Pipeline complete: {} errors/warnings", errors.len());
     errors
-}
-
-/// Detect the 0-based LSP line range of the @CONFIG section by scanning
-/// the original source. Returns (start_line, end_line) inclusive.
-///
-/// This is necessary because @CONFIG is replaced with blank lines before
-/// tokenisation, so NO tokens carry SectionId::Config. Position-based
-/// detection is the only reliable way to answer hover/completion requests
-/// for lines inside the @CONFIG block.
-pub fn detect_config_line_range(source: &str) -> Option<(u32, u32)> {
-    let mut start_line: Option<u32> = None;
-    let mut paren_depth: i32 = 0;
-    let mut in_string = false;
-    let mut string_char = '\0';
-    let mut in_line_comment = false;
-
-    for (line_idx, line) in source.lines().enumerate() {
-        let line_upper = line.trim().to_uppercase();
-
-        // Detect @CONFIG start.
-        if start_line.is_none()
-            && (line_upper.starts_with("@CONFIG") || line_upper.starts_with("@ CONFIG"))
-        {
-            start_line = Some(line_idx as u32);
-        }
-
-        if start_line.is_none() {
-            continue;
-        }
-
-        // Count parentheses, respecting strings and comments.
-        in_line_comment = false;
-        let chars: Vec<char> = line.chars().collect();
-        let mut i = 0;
-        while i < chars.len() {
-            let c = chars[i];
-            let next = chars.get(i + 1).copied().unwrap_or('\0');
-
-            if in_line_comment { break; }
-
-            if !in_string && c == '/' && next == '/' {
-                in_line_comment = true;
-                break;
-            }
-
-            if !in_string && (c == '"' || c == '\'') {
-                in_string = true;
-                string_char = c;
-            } else if in_string && c == '\\' {
-                i += 1; // skip escaped char
-            } else if in_string && c == string_char {
-                in_string = false;
-                string_char = '\0';
-            } else if !in_string {
-                if c == '(' { paren_depth += 1; }
-                else if c == ')' {
-                    paren_depth -= 1;
-                    if paren_depth == 0 {
-                        return Some((start_line.unwrap(), line_idx as u32));
-                    }
-                }
-            }
-            i += 1;
-        }
-    }
-
-    // If we started but never closed (malformed), return what we have.
-    start_line.map(|s| (s, s))
 }

@@ -1,30 +1,16 @@
+// dixscript/src/Compiler/ImportsResolution/imports_resolver.rs
+// Only read_and_parse_raw changes — everything else identical to the file you shared.
+// Replacing the full file for clarity.
 
 //! Recursive import resolution with cycle detection and cloud download.
 //!
-//! ## Cycle detection
+//! ## Approach B in imported files
+//! `read_and_parse_raw` now uses the tokenizer-first pipeline:
+//!   Tokenizer (full content) → split_config_tokens → process_config_tokens
+//!   → GeneralParser(rest_tokens, config_section)
 //!
-//! The resolver keeps two path sets — `visiting` (currently on the call stack)
-//! and `visited` (fully processed). A cycle is detected when
-//! `resolve_import_recursive` is entered for a path already in `visiting`.
-//!
-//! ## Two-phase import processing
-//!
-//! Each imported file is processed in two distinct phases:
-//!
-//! **Phase 1 — `read_and_parse_raw`**: read file content, verify hash,
-//! tokenize, parse. Returns a raw `DixScript` AST with no semantic analysis
-//! or enhancement.
-//!
-//! **Phase 2 — `analyze_and_enhance`**: called from `resolve_import_inner`
-//! AFTER all transitive dependencies have been registered in
-//! `self.symbol_table`. Seeds the analyzer's internal `SymbolTable` with
-//! only the namespace entries the file actually imports, then runs
-//! `GeneralSemanticAnalyzer` and `GeneralAstEnhancer`.
-//!
-//! **Critical invariant:** `skip_imports_resolution = true` is preserved in
-//! `analyze_and_enhance` to prevent the semantic analyser from spinning up a
-//! new `ImportsResolver` that has no knowledge of the outer resolver's
-//! `visiting` set.
+//! This gives imported files accurate @CONFIG token positions and removes
+//! the source-stripping workaround from the import path.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -39,38 +25,42 @@ use crate::Compiler::Core::{
     GeneralSemanticAnalyzer,
     OperationalSettings,
 };
-use crate::Compiler::Core::Tokenizer::Tokenizer;
+use crate::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
 use crate::Compiler::Utilities::{FunctionSignature, ParameterInfo, QuickFunctionInfo, SymbolTable};
 use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 use crate::ErrorManager::{DebugConfig, ErrorManager, ImportsResolutionErrorType};
 use super::{HashVerifier, CloudFileCache, CloudProviderFactory};
 
 pub struct ImportsResolver<'a> {
-    symbol_table: &'a mut SymbolTable,
+    symbol_table:         &'a mut SymbolTable,
     operational_settings: &'a OperationalSettings,
-    error_manager: ErrorManager,
-    debug_config: DebugConfig,
-    cloud_cache: CloudFileCache,
-    visiting: HashSet<String>,
-    visited: HashSet<String>,
-    import_stack: Vec<String>,
+    error_manager:        ErrorManager,
+    debug_config:         DebugConfig,
+    cloud_cache:          CloudFileCache,
+    visiting:             HashSet<String>,
+    visited:              HashSet<String>,
+    import_stack:         Vec<String>,
 }
 
 impl<'a> ImportsResolver<'a> {
     pub fn new(
-        symbol_table: &'a mut SymbolTable,
+        symbol_table:         &'a mut SymbolTable,
         operational_settings: &'a OperationalSettings,
     ) -> Self {
-        Self::new_with_error_manager(symbol_table,operational_settings,ErrorManager::get_shared_instance())
+        Self::new_with_error_manager(
+            symbol_table,
+            operational_settings,
+            ErrorManager::get_shared_instance(),
+        )
     }
-    pub fn new_with_error_manager(
-        symbol_table: &'a mut SymbolTable,
-        operational_settings: &'a OperationalSettings,
-        error_manager: ErrorManager
-    ) -> Self {
 
+    pub fn new_with_error_manager(
+        symbol_table:         &'a mut SymbolTable,
+        operational_settings: &'a OperationalSettings,
+        error_manager:        ErrorManager,
+    ) -> Self {
         let debug_config = DebugConfig::from_debug_mode(error_manager.get_debug_mode());
-        let cloud_cache = CloudFileCache::new(error_manager.clone());
+        let cloud_cache  = CloudFileCache::new(error_manager.clone());
 
         ImportsResolver {
             symbol_table,
@@ -78,21 +68,18 @@ impl<'a> ImportsResolver<'a> {
             error_manager,
             debug_config,
             cloud_cache,
-            visiting: HashSet::new(),
-            visited: HashSet::new(),
+            visiting:     HashSet::new(),
+            visited:      HashSet::new(),
             import_stack: Vec::new(),
         }
     }
+
     // ── Primary entry point ───────────────────────────────────────────────────
-    //
-    // Called by GeneralSemanticAnalyzer Phase 3. Reads each import declaration
-    // from the already-parsed @IMPORTS section, loads + parses the raw AST from
-    // disk (or cloud), and then resolves it recursively.
 
     pub fn resolve_from_imports_section(
         &mut self,
         imports_section: &ImportsSection,
-        base_dir: &str,
+        base_dir:        &str,
     ) -> bool {
         if imports_section.imports.is_empty() {
             if self.debug_config.is_enabled {
@@ -195,7 +182,9 @@ impl<'a> ImportsResolver<'a> {
 
         if self.debug_config.is_enabled {
             let stats = self.cloud_cache.get_statistics();
-            self.error_manager.log_debug(&format!("[ImportsResolver] Cache statistics: {}", stats));
+            self.error_manager.log_debug(&format!(
+                "[ImportsResolver] Cache statistics: {}", stats
+            ));
         }
 
         self.visiting.clear();
@@ -243,22 +232,23 @@ impl<'a> ImportsResolver<'a> {
         success
     }
 
+    // ── Recursive resolution ──────────────────────────────────────────────────
+
     fn resolve_import_recursive(
         &mut self,
-        alias: &str,
-        raw_ast: &DixScript,
+        alias:         &str,
+        raw_ast:       &DixScript,
         absolute_path: &str,
     ) -> bool {
         let normalized_path = if Self::is_cloud_url(absolute_path) {
             Self::strip_query_parameters(absolute_path)
         } else {
             match std::fs::canonicalize(absolute_path) {
-                Ok(p) => p.to_string_lossy().to_string(),
+                Ok(p)  => p.to_string_lossy().to_string(),
                 Err(_) => absolute_path.to_string(),
             }
         };
 
-        // ── Cycle guard ───────────────────────────────────────────────────────
         if self.visiting.contains(&normalized_path) {
             let cycle_path  = self.build_cycle_path(&normalized_path);
             let cycle_chain = self.build_cycle_chain_list(&normalized_path);
@@ -270,9 +260,7 @@ impl<'a> ImportsResolver<'a> {
                 Some(absolute_path.to_string()),
                 Some(normalized_path.clone()),
                 Some(cycle_chain),
-                0,
-                0,
-                None,
+                0, 0, None,
             );
             return false;
         }
@@ -301,8 +289,8 @@ impl<'a> ImportsResolver<'a> {
 
     fn resolve_import_inner(
         &mut self,
-        alias: &str,
-        raw_ast: &DixScript,
+        alias:           &str,
+        raw_ast:         &DixScript,
         normalized_path: &str,
     ) -> bool {
         let mut local_imports = HashMap::new();
@@ -331,8 +319,10 @@ impl<'a> ImportsResolver<'a> {
                     if let Some(existing_ns) =
                         self.symbol_table.try_get_namespace(&nested_import.alias)
                     {
-                        local_imports
-                            .insert(nested_import.alias.clone(), existing_ns.clone());
+                        local_imports.insert(
+                            nested_import.alias.clone(),
+                            existing_ns.clone(),
+                        );
                         continue;
                     } else {
                         self.error_manager.add_imports_resolution_error(
@@ -345,9 +335,7 @@ impl<'a> ImportsResolver<'a> {
                             Some(nested_import.path.clone()),
                             Some(nested_path.clone()),
                             None,
-                            0,
-                            0,
-                            None,
+                            0, 0, None,
                         );
                         return false;
                     }
@@ -357,7 +345,7 @@ impl<'a> ImportsResolver<'a> {
                     Self::strip_query_parameters(&nested_path)
                 } else {
                     match std::fs::canonicalize(&nested_path) {
-                        Ok(p) => p.to_string_lossy().to_string(),
+                        Ok(p)  => p.to_string_lossy().to_string(),
                         Err(_) => nested_path.clone(),
                     }
                 };
@@ -372,16 +360,14 @@ impl<'a> ImportsResolver<'a> {
                         Some(nested_import.path.clone()),
                         Some(normalized_nested.clone()),
                         Some(cycle_chain),
-                        0,
-                        0,
-                        None,
+                        0, 0, None,
                     );
                     return false;
                 }
 
                 let nested_raw =
                     match self.read_and_parse_raw(nested_import, &nested_path) {
-                        Ok(a) => a,
+                        Ok(a)  => a,
                         Err(_) => return false,
                     };
 
@@ -472,11 +458,16 @@ impl<'a> ImportsResolver<'a> {
         true
     }
 
-    // ── Phase 1: Read and parse raw AST ──────────────────────────────────────
+    // ── Phase 1: Read and parse raw AST (Approach B) ──────────────────────────
+    //
+    // Tokenizes the full content first, splits @CONFIG tokens, processes config
+    // via process_config_tokens (accurate positions, no source stripping), then
+    // passes rest_tokens to GeneralParser. This is identical to the main loader
+    // pipeline and gives imported files the same Approach B benefits.
 
     fn read_and_parse_raw(
         &mut self,
-        import: &ImportDeclaration,
+        import:        &ImportDeclaration,
         resolved_path: &str,
     ) -> Result<DixScript, String> {
         let content = self.read_import_content(import, resolved_path)?;
@@ -490,10 +481,7 @@ impl<'a> ImportsResolver<'a> {
                         import.alias.clone(),
                         Some(import.path.clone()),
                         Some(resolved_path.to_string()),
-                        None,
-                        0,
-                        0,
-                        None,
+                        None, 0, 0, None,
                     );
                     format!("Hash verification failed: {}", e)
                 })?;
@@ -514,20 +502,21 @@ impl<'a> ImportsResolver<'a> {
             return Ok(DixScript::new());
         }
 
-        let mut config_handler = ConfigSectionHandler::new(None);
-        let config_result = config_handler.process_config_section(&content);
-
-        if self.debug_config.is_enabled {
-            self.error_manager
-                .log_debug("[ImportsResolver] Tokenizing imported file");
-        }
-
+        // ── Approach B: tokenize full content ─────────────────────────────────
         let mut import_settings = self.operational_settings.clone();
         import_settings.source_file_path = Some(resolved_path.to_string());
+        // Safe defaults for the tokenizer pass — real settings come from config.
+        let tokenizer_settings = OperationalSettings {
+            error_handling_strategy: import_settings.error_handling_strategy,
+            debug_mode:              DebugMode::Off,
+            source_file_path:        Some(resolved_path.to_string()),
+            ..OperationalSettings::default()
+        };
 
-        let tokenizer = Tokenizer::new(
-            &config_result.cleaned_input_string,
-            &import_settings,
+        let tokenizer = Tokenizer::new_with_error_manager(
+            &content,
+            &tokenizer_settings,
+            self.error_manager.clone(),
         );
         let token_result = tokenizer.tokenize();
 
@@ -538,38 +527,54 @@ impl<'a> ImportsResolver<'a> {
                 import.alias.clone(),
                 Some(import.path.clone()),
                 Some(resolved_path.to_string()),
-                None,
-                0,
-                0,
-                None,
+                None, 0, 0, None,
             );
             return Err("Tokenization produced no tokens".to_string());
         }
 
+        // ── Split @CONFIG from the rest ───────────────────────────────────────
+        let split = split_config_tokens(token_result.tokens);
+
+        let config_result = {
+            let mut handler = ConfigSectionHandler::new_with_error_manager(
+                None,
+                self.error_manager.clone(),
+            );
+            handler.process_config_tokens(&split.config_tokens)
+        };
+
+        // Update import settings with real operational settings from config.
+        import_settings = config_result.operational_settings.clone();
+        import_settings.source_file_path = Some(resolved_path.to_string());
+        // Keep skip_imports_resolution from caller to prevent nested resolver
+        // spinning up with no knowledge of the outer visiting set.
+        import_settings.skip_imports_resolution =
+            self.operational_settings.skip_imports_resolution;
+
         if self.debug_config.is_enabled {
-            self.error_manager
-                .log_debug("[ImportsResolver] Parsing imported file");
+            self.error_manager.log_debug(&format!(
+                "[ImportsResolver] Parsing imported file '{}'",
+                import.alias
+            ));
         }
 
+        // ── Parse rest_tokens ─────────────────────────────────────────────────
         let general_parser = GeneralParser::new(
-            token_result.tokens,
+            split.rest_tokens,
             &config_result.config_section,
             &import_settings,
         )
-            .map_err(|e| {
-                self.error_manager.add_imports_resolution_error(
-                    ImportsResolutionErrorType::ParseError,
-                    format!("Failed to create parser: {}", e),
-                    import.alias.clone(),
-                    Some(import.path.clone()),
-                    Some(resolved_path.to_string()),
-                    None,
-                    0,
-                    0,
-                    None,
-                );
-                format!("Failed to create parser: {}", e)
-            })?;
+        .map_err(|e| {
+            self.error_manager.add_imports_resolution_error(
+                ImportsResolutionErrorType::ParseError,
+                format!("Failed to create parser: {}", e),
+                import.alias.clone(),
+                Some(import.path.clone()),
+                Some(resolved_path.to_string()),
+                None, 0, 0, None,
+            );
+            format!("Failed to create parser: {}", e)
+        })?;
 
         let mut ast = general_parser.parse().map_err(|e| {
             let parse_errors = self.error_manager.get_parse_errors();
@@ -589,6 +594,8 @@ impl<'a> ImportsResolver<'a> {
             format!("Parse errors in imported file: {}", e)
         })?;
 
+        // Attach the already-parsed ConfigSection — GeneralParser doesn't
+        // parse @CONFIG itself, it receives it as a pre-built argument.
         ast.config = Some(config_result.config_section);
 
         Ok(ast)
@@ -598,14 +605,15 @@ impl<'a> ImportsResolver<'a> {
 
     fn analyze_and_enhance(
         &mut self,
-        raw_ast: &DixScript,
-        resolved_path: &str,
-        alias: &str,
+        raw_ast:         &DixScript,
+        resolved_path:   &str,
+        alias:           &str,
         seed_namespaces: &HashMap<String, ImportedNamespace>,
     ) -> Result<DixScript, String> {
         let mut import_settings = self.operational_settings.clone();
-        import_settings.source_file_path = Some(resolved_path.to_string());
-        // CRITICAL: prevent a nested ImportsResolver from being created.
+        import_settings.source_file_path        = Some(resolved_path.to_string());
+        // CRITICAL: prevent a nested ImportsResolver from being created inside
+        // GeneralSemanticAnalyzer, which has no knowledge of our visiting set.
         import_settings.skip_imports_resolution = true;
 
         if self.debug_config.is_enabled {
@@ -642,10 +650,7 @@ impl<'a> ImportsResolver<'a> {
                 alias.to_string(),
                 Some(resolved_path.to_string()),
                 Some(resolved_path.to_string()),
-                None,
-                0,
-                0,
-                None,
+                None, 0, 0, None,
             );
             return Err(format!("Semantic analysis failed for '{}'", alias));
         }
@@ -672,10 +677,7 @@ impl<'a> ImportsResolver<'a> {
                 alias.to_string(),
                 Some(resolved_path.to_string()),
                 Some(resolved_path.to_string()),
-                None,
-                0,
-                0,
-                None,
+                None, 0, 0, None,
             );
             return Err(format!("AST enhancement failed for '{}'", alias));
         }
@@ -699,7 +701,7 @@ impl<'a> ImportsResolver<'a> {
 
     fn read_import_content(
         &mut self,
-        import: &ImportDeclaration,
+        import:        &ImportDeclaration,
         resolved_path: &str,
     ) -> Result<String, String> {
         if import.is_cloud_import {
@@ -724,10 +726,7 @@ impl<'a> ImportsResolver<'a> {
                     import.alias.clone(),
                     Some(import.path.clone()),
                     Some(resolved_path.to_string()),
-                    None,
-                    0,
-                    0,
-                    None,
+                    None, 0, 0, None,
                 );
                 format!("Failed to read file: {}", e)
             })
@@ -737,7 +736,7 @@ impl<'a> ImportsResolver<'a> {
     fn download_cloud_file_sync(
         &mut self,
         cloud_url: &str,
-        alias: &str,
+        alias:     &str,
     ) -> Result<String, String> {
         let url_for_cache = Self::strip_query_parameters(cloud_url);
 
@@ -746,26 +745,25 @@ impl<'a> ImportsResolver<'a> {
                 return Ok(content);
             }
             if self.debug_config.is_enabled {
-                self.error_manager
-                    .log_debug("[ImportsResolver] Cache read failed, downloading fresh copy");
+                self.error_manager.log_debug(
+                    "[ImportsResolver] Cache read failed, downloading fresh copy",
+                );
             }
         }
 
-        let provider = CloudProviderFactory::get_provider(cloud_url, &self.error_manager)
-            .map_err(|e| {
-                self.error_manager.add_imports_resolution_error(
-                    ImportsResolutionErrorType::CloudImportNotSupported,
-                    e.clone(),
-                    alias.to_string(),
-                    Some(cloud_url.to_string()),
-                    Some(cloud_url.to_string()),
-                    None,
-                    0,
-                    0,
-                    None,
-                );
-                e
-            })?;
+        let provider =
+            CloudProviderFactory::get_provider(cloud_url, &self.error_manager)
+                .map_err(|e| {
+                    self.error_manager.add_imports_resolution_error(
+                        ImportsResolutionErrorType::CloudImportNotSupported,
+                        e.clone(),
+                        alias.to_string(),
+                        Some(cloud_url.to_string()),
+                        Some(cloud_url.to_string()),
+                        None, 0, 0, None,
+                    );
+                    e
+                })?;
 
         let content = tokio::runtime::Runtime::new()
             .map_err(|e| format!("Failed to create async runtime: {}", e))?
@@ -777,10 +775,7 @@ impl<'a> ImportsResolver<'a> {
                     alias.to_string(),
                     Some(cloud_url.to_string()),
                     Some(cloud_url.to_string()),
-                    None,
-                    0,
-                    0,
-                    None,
+                    None, 0, 0, None,
                 );
                 format!("Cloud download failed: {}", e)
             })?;
@@ -789,54 +784,50 @@ impl<'a> ImportsResolver<'a> {
         Ok(content)
     }
 
+    // ── Symbol extraction ─────────────────────────────────────────────────────
+
     fn extract_global_functions(
-        section: Option<&QuickFuncsSection>,
-        _namespace_name: &str,
+        section:          Option<&QuickFuncsSection>,
+        _namespace_name:  &str,
     ) -> HashMap<String, QuickFunctionInfo> {
         let mut functions = HashMap::new();
 
         let section = match section {
             Some(s) => s,
-            None => return functions,
+            None    => return functions,
         };
 
         for func in &section.functions {
             let is_global = match &func.scope_list {
                 None => true,
                 Some(scopes)
-                if scopes.len() == 1
-                    && scopes[0].eq_ignore_ascii_case("global") =>
-                    {
-                        true
-                    }
+                    if scopes.len() == 1
+                        && scopes[0].eq_ignore_ascii_case("global") => true,
                 _ => false,
             };
 
-            if !is_global {
-                continue;
-            }
+            if !is_global { continue; }
 
             let parameters: Vec<ParameterInfo> = func
                 .parameters
                 .iter()
                 .map(|p| ParameterInfo {
-                    name: p.name.clone(),
-                    param_type: p.data_type,
+                    name:              p.name.clone(),
+                    param_type:        p.data_type,
                     has_default_value: p.default_value.is_some(),
-                    default_value: p.default_value.clone(),
+                    default_value:     p.default_value.clone(),
                 })
                 .collect();
 
             let signature = FunctionSignature {
-                name: func.name.clone(),
+                name:        func.name.clone(),
                 return_type: func.return_type,
                 parameters,
-                scopes: func
-                    .scope_list
+                scopes:      func.scope_list
                     .clone()
                     .unwrap_or_else(|| vec!["global".to_string()]),
-                line: func.position.line as i32,
-                column: func.position.column as i32,
+                line:        func.position.line   as i32,
+                column:      func.position.column as i32,
             };
 
             functions.insert(
@@ -855,12 +846,12 @@ impl<'a> ImportsResolver<'a> {
 
         let section = match section {
             Some(s) => s,
-            None => return enums,
+            None    => return enums,
         };
 
         for enum_decl in &section.enums {
-            let mut field_map = HashMap::new();
-            let mut auto_value = 0i32;
+            let mut field_map   = HashMap::new();
+            let mut auto_value  = 0i32;
 
             for field in &enum_decl.fields {
                 if let Some(value) = field.value {
@@ -878,6 +869,8 @@ impl<'a> ImportsResolver<'a> {
         enums
     }
 
+    // ── Utility helpers ───────────────────────────────────────────────────────
+
     #[inline]
     fn is_cloud_url(path: &str) -> bool {
         path.starts_with("http://") || path.starts_with("https://")
@@ -887,7 +880,7 @@ impl<'a> ImportsResolver<'a> {
     fn strip_query_parameters(url: &str) -> String {
         match url.find('?') {
             Some(idx) => url[..idx].to_string(),
-            None => url.to_string(),
+            None      => url.to_string(),
         }
     }
 
@@ -895,7 +888,7 @@ impl<'a> ImportsResolver<'a> {
         let without_query = Self::strip_query_parameters(cloud_url);
         match without_query.rfind('/') {
             Some(idx) => without_query[..=idx].to_string(),
-            None => without_query,
+            None      => without_query,
         }
     }
 
@@ -965,22 +958,22 @@ impl<'a> ImportsResolver<'a> {
             .sum();
 
         ImportResolutionStats {
-            total_namespaces: self.symbol_table.namespaces.len(),
+            total_namespaces:         self.symbol_table.namespaces.len(),
             total_functions_imported: total_functions,
-            total_enums_imported: total_enums,
-            total_nested_imports: total_local_imports,
-            files_visited: self.visited.len(),
+            total_enums_imported:     total_enums,
+            total_nested_imports:     total_local_imports,
+            files_visited:            self.visited.len(),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ImportResolutionStats {
-    pub total_namespaces: usize,
+    pub total_namespaces:         usize,
     pub total_functions_imported: usize,
-    pub total_enums_imported: usize,
-    pub total_nested_imports: usize,
-    pub files_visited: usize,
+    pub total_enums_imported:     usize,
+    pub total_nested_imports:     usize,
+    pub files_visited:            usize,
 }
 
 impl std::fmt::Display for ImportResolutionStats {

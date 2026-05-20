@@ -1,23 +1,21 @@
 // mdix-cli/src/commands/debug_ast.rs
 //! `mdix debug-ast <file>` — print the parsed AST structure.
 //!
-//! Runs the full pipeline (config → tokenise → parse → semantic → enhance)
-//! and prints the resulting AST in a human-readable debug format.
+//! Uses Approach B (tokenizer-first): tokenize full source → split @CONFIG
+//! → process config tokens → parse rest tokens → semantic analysis → enhance.
 //!
 //! Use this to diagnose:
 //!   - Whether enum declarations are parsed correctly.
 //!   - Whether QuickFunc scope lists are attached.
-//!   - Whether @DATA entries are classified as SimpleProperty / TableProperty /
-//!     GroupArray / ObjectProperty correctly.
-//!   - Whether the AST position info is sane (for hover/folding debugging).
+//!   - Whether @DATA entries are classified correctly.
+//!   - Whether AST position info is sane (for hover/folding debugging).
 
 use std::path::PathBuf;
 use clap::Args;
-use dixscript::Compiler::Core::Config::ConfigSectionHandler;
-use dixscript::Compiler::Core::Tokenizer::Tokenizer;
+use dixscript::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
+use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
 use dixscript::Compiler::Core::{GeneralParser, GeneralSemanticAnalyzer, GeneralAstEnhancer};
-use dixscript::ErrorManager::ErrorManager;
-use crate::commands::{CliError, GlobalOpts};
+use crate::commands::GlobalOpts;
 use crate::services::file_io;
 
 #[derive(Args)]
@@ -44,35 +42,53 @@ pub struct DebugAstArgs {
 
 pub fn run(args: DebugAstArgs, _global: &GlobalOpts) -> i32 {
     let source = match file_io::read_file(&args.file) {
-        Ok(s)  => s,
-        Err(e) => { eprintln!("Error: {}", e); return 2; }
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            return 2;
+        }
     };
 
-    let error_manager = ErrorManager::get_shared_instance();
-    error_manager.clear_errors();
+    // ── Approach B pipeline ───────────────────────────────────────────────
 
+    // Stage 1: tokenize full source with default settings.
+    let initial_settings = OperationalSettings {
+        source_file_path: Some(args.file.to_string_lossy().to_string()),
+        ..OperationalSettings::default()
+    };
+    let tokenizer = Tokenizer::new(&source, &initial_settings);
+    let tok_result = tokenizer.tokenize();
+
+    // Stage 2: split @CONFIG and process it.
+    let split = split_config_tokens(tok_result.tokens);
     let mut config_handler = ConfigSectionHandler::new(None);
-    let config_result = config_handler.process_config_section(&source);
+    let config_result = config_handler.process_config_tokens(&split.config_tokens);
+
     let mut settings = config_result.operational_settings.clone();
     settings.source_file_path = Some(args.file.to_string_lossy().to_string());
 
-    let tokenizer = Tokenizer::new(&config_result.cleaned_input_string, &settings);
-    let tok_result = tokenizer.tokenize();
-
+    // Stage 3: parse the rest of the token stream.
     let parser = match GeneralParser::new(
-        tok_result.tokens,
+        split.rest_tokens,
         &config_result.config_section,
         &settings,
     ) {
-        Ok(p)  => p,
-        Err(e) => { eprintln!("Parser error: {}", e); return 1; }
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Parser error: {}", e);
+            return 1;
+        }
     };
 
     let raw_ast = match parser.parse() {
-        Ok(a)  => a,
-        Err(e) => { eprintln!("Parse error: {}", e); return 1; }
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            return 1;
+        }
     };
 
+    // Stages 4 & 5: optional semantic analysis and enhancement.
     let ast = if args.enhanced {
         let analyzer = GeneralSemanticAnalyzer::new(&raw_ast, &settings);
         let sem = analyzer.analyze();
@@ -89,29 +105,60 @@ pub fn run(args: DebugAstArgs, _global: &GlobalOpts) -> i32 {
         raw_ast
     };
 
-    let section_upper = args.section.to_uppercase();
+    // ── Build output ──────────────────────────────────────────────────────
 
+    let section_upper = args.section.to_uppercase();
     let mut out = String::new();
 
-    out.push_str(&format!("=== DixScript AST: {} ===\n", args.file.display()));
-    out.push_str(&format!("Enhanced: {}\n\n", args.enhanced));
+    out.push_str(&format!(
+        "=== DixScript AST: {} ===\nEnhanced: {}\n\n",
+        args.file.display(),
+        args.enhanced
+    ));
 
     let show_all = section_upper == "ALL";
 
-    if (show_all || section_upper == "CONFIG") {
+    if show_all || section_upper == "CONFIG" {
         if let Some(ref config) = ast.config {
-            out.push_str("@CONFIG\n");
+            out.push_str(&format!("@CONFIG ({} entries)\n", config.entries.len()));
             for entry in &config.entries {
-                let pos = if args.positions && entry.position.is_valid() {
-                    format!(" @L{}:C{}", entry.position.line, entry.position.column)
-                } else { String::new() };
-                out.push_str(&format!("  {} -> {:?}{}\n", entry.key, entry.value, pos));
+                let pos = fmt_pos(args.positions, entry.position);
+                out.push_str(&format!(
+                    "  {} -> {:?}{}\n",
+                    entry.key, entry.value, pos
+                ));
             }
             out.push('\n');
         }
     }
 
-    if (show_all || section_upper == "ENUMS") {
+    if show_all || section_upper == "IMPORTS" {
+        if let Some(ref imports) = ast.imports {
+            out.push_str(&format!("@IMPORTS ({} declarations)\n", imports.imports.len()));
+            for import in &imports.imports {
+                let pos = fmt_pos(args.positions, import.position);
+                let cloud = if import.is_cloud_import { " [cloud]" } else { "" };
+                out.push_str(&format!(
+                    "  {} from \"{}\"{}{}\n",
+                    import.alias, import.path, cloud, pos
+                ));
+            }
+            out.push('\n');
+        }
+    }
+
+    if show_all || section_upper == "DLM" {
+        if let Some(ref dlm) = ast.dlm {
+            out.push_str(&format!("@DLM ({} modules)\n", dlm.modules.len()));
+            for m in &dlm.modules {
+                let sub = m.subtype.map(|s| format!(".{}", s)).unwrap_or_default();
+                out.push_str(&format!("  {}{}\n", m.module_type, sub));
+            }
+            out.push('\n');
+        }
+    }
+
+    if show_all || section_upper == "ENUMS" {
         if let Some(ref enums) = ast.enums {
             out.push_str(&format!("@ENUMS ({} declarations)\n", enums.enums.len()));
             for decl in &enums.enums {
@@ -119,7 +166,7 @@ pub fn run(args: DebugAstArgs, _global: &GlobalOpts) -> i32 {
                 out.push_str(&format!("  enum {}{} {{\n", decl.name, pos));
                 for field in &decl.fields {
                     let fpos = fmt_pos(args.positions, field.position);
-                    let val  = field.value.map(|v| format!(" = {}", v)).unwrap_or_default();
+                    let val = field.value.map(|v| format!(" = {}", v)).unwrap_or_default();
                     out.push_str(&format!("    {}{}{}\n", field.name, val, fpos));
                 }
                 out.push_str("  }\n");
@@ -128,12 +175,12 @@ pub fn run(args: DebugAstArgs, _global: &GlobalOpts) -> i32 {
         }
     }
 
-    if (show_all || section_upper == "QUICKFUNCS") {
+    if show_all || section_upper == "QUICKFUNCS" {
         if let Some(ref qf) = ast.quick_functions {
             out.push_str(&format!("@QUICKFUNCS ({} functions)\n", qf.functions.len()));
             for func in &qf.functions {
-                let pos    = fmt_pos(args.positions, func.position);
-                let ret    = func.return_type.map(|t| format!("<{}>", t)).unwrap_or_default();
+                let pos = fmt_pos(args.positions, func.position);
+                let ret = func.return_type.map(|t| format!("<{}>", t)).unwrap_or_default();
                 let scopes = func.scope_list.as_ref()
                     .map(|s| format!(" => {}", s.join(",")))
                     .unwrap_or_default();
@@ -144,22 +191,26 @@ pub fn run(args: DebugAstArgs, _global: &GlobalOpts) -> i32 {
                 }).collect();
                 out.push_str(&format!(
                     "  ~{}{}{}({}) body:{} stmts{}\n",
-                    func.name, ret, scopes, params.join(", "),
-                    func.body.len(), pos
+                    func.name, ret, scopes,
+                    params.join(", "),
+                    func.body.len(),
+                    pos
                 ));
             }
             out.push('\n');
         }
     }
 
-    if (show_all || section_upper == "DATA") {
+    if show_all || section_upper == "DATA" {
         if let Some(ref data) = ast.data {
             out.push_str(&format!("@DATA ({} entries)\n", data.entries.len()));
             for entry in &data.entries {
                 match entry {
-                    dixscript::Compiler::AST::DataEntry::SimpleProperty { name, data_type, value, position } => {
+                    dixscript::Compiler::AST::DataEntry::SimpleProperty {
+                        name, data_type, value, position,
+                    } => {
                         let pos = fmt_pos(args.positions, *position);
-                        let dt  = data_type.map(|t| format!("<{}>", t)).unwrap_or_default();
+                        let dt = data_type.map(|t| format!("<{}>", t)).unwrap_or_default();
                         out.push_str(&format!(
                             "  SimpleProperty: {}{} = {}{}\n",
                             name, dt,
@@ -167,15 +218,19 @@ pub fn run(args: DebugAstArgs, _global: &GlobalOpts) -> i32 {
                             pos
                         ));
                     }
-                    dixscript::Compiler::AST::DataEntry::TableProperty { path, properties, position } => {
+                    dixscript::Compiler::AST::DataEntry::TableProperty {
+                        path, properties, position,
+                    } => {
                         let pos = fmt_pos(args.positions, *position);
                         out.push_str(&format!(
                             "  TableProperty: {}:{} props{}\n",
-                            path.segments.join("."), properties.len(), pos
+                            path.segments.join("."),
+                            properties.len(),
+                            pos
                         ));
                         for prop in properties {
                             let ppos = fmt_pos(args.positions, prop.position);
-                            let dt   = prop.data_type.map(|t| format!("<{}>", t)).unwrap_or_default();
+                            let dt = prop.data_type.map(|t| format!("<{}>", t)).unwrap_or_default();
                             out.push_str(&format!(
                                 "    .{}{} = {}{}\n",
                                 prop.name, dt,
@@ -184,15 +239,20 @@ pub fn run(args: DebugAstArgs, _global: &GlobalOpts) -> i32 {
                             ));
                         }
                     }
-                    dixscript::Compiler::AST::DataEntry::GroupArray { path, items, position } => {
+                    dixscript::Compiler::AST::DataEntry::GroupArray {
+                        path, items, position,
+                    } => {
                         let pos = fmt_pos(args.positions, *position);
                         out.push_str(&format!(
                             "  GroupArray: {}:: [{} items]{}\n",
-                            path.segments.join("."), items.len(), pos
+                            path.segments.join("."),
+                            items.len(),
+                            pos
                         ));
                         for (i, item) in items.iter().enumerate().take(5) {
                             out.push_str(&format!(
-                                "    [{}] {}\n", i,
+                                "    [{}] {}\n",
+                                i,
                                 truncate(&format!("{}", item), 60)
                             ));
                         }
@@ -200,9 +260,11 @@ pub fn run(args: DebugAstArgs, _global: &GlobalOpts) -> i32 {
                             out.push_str(&format!("    ... ({} more)\n", items.len() - 5));
                         }
                     }
-                    dixscript::Compiler::AST::DataEntry::ObjectProperty { name, data_type, object, position } => {
+                    dixscript::Compiler::AST::DataEntry::ObjectProperty {
+                        name, data_type, object, position,
+                    } => {
                         let pos = fmt_pos(args.positions, *position);
-                        let dt  = data_type.map(|t| format!("<{}>", t)).unwrap_or_default();
+                        let dt = data_type.map(|t| format!("<{}>", t)).unwrap_or_default();
                         out.push_str(&format!(
                             "  ObjectProperty: {}{} = {}{}\n",
                             name, dt,
@@ -216,36 +278,32 @@ pub fn run(args: DebugAstArgs, _global: &GlobalOpts) -> i32 {
         }
     }
 
-    if (show_all || section_upper == "DLM") {
-        if let Some(ref dlm) = ast.dlm {
-            out.push_str(&format!("@DLM ({} modules)\n", dlm.modules.len()));
-            for m in &dlm.modules {
-                let sub = m.subtype.map(|s| format!(".{}", s)).unwrap_or_default();
-                out.push_str(&format!("  {}{}\n", m.module_type, sub));
-            }
-            out.push('\n');
-        }
-    }
-
-    if (show_all || section_upper == "SECURITY") {
+    if show_all || section_upper == "SECURITY" {
         if let Some(ref sec) = ast.security {
             out.push_str(&format!("@SECURITY ({} entries)\n", sec.entries.len()));
             for entry in &sec.entries {
-                out.push_str(&format!("  {} -> {{ {} fields }}\n",
-                    entry.block_key, entry.fields.len()));
+                out.push_str(&format!(
+                    "  {} -> {{ {} fields }}\n",
+                    entry.block_key,
+                    entry.fields.len()
+                ));
             }
             out.push('\n');
         }
     }
 
-    // Error summary.
-    let errors = error_manager.get_all_errors_flat();
-    if !errors.is_empty() {
-        out.push_str(&format!("=== Errors ({}) ===\n", errors.len()));
-        for err in errors.iter().take(20) {
-            out.push_str(&format!("  {:?}\n", err));
-        }
-    }
+    // Summary.
+    out.push_str("=== Section Summary ===\n");
+    out.push_str(&format!(
+        "  CONFIG:     {}\n  IMPORTS:    {}\n  DLM:        {}\n  ENUMS:      {}\n  QUICKFUNCS: {}\n  DATA:       {}\n  SECURITY:   {}\n",
+        if ast.config.is_some() { "present" } else { "absent" },
+        if ast.imports.is_some() { "present" } else { "absent" },
+        if ast.dlm.is_some() { "present" } else { "absent" },
+        ast.enums.as_ref().map(|e| format!("{} enums", e.enums.len())).unwrap_or_else(|| "absent".to_string()),
+        ast.quick_functions.as_ref().map(|q| format!("{} funcs", q.functions.len())).unwrap_or_else(|| "absent".to_string()),
+        ast.data.as_ref().map(|d| format!("{} entries", d.entries.len())).unwrap_or_else(|| "absent".to_string()),
+        if ast.security.is_some() { "present" } else { "absent" },
+    ));
 
     match args.output {
         Some(ref path) => {
@@ -270,6 +328,9 @@ fn fmt_pos(show: bool, pos: dixscript::Compiler::AST::Position) -> String {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max { s.to_string() }
-    else { format!("{}…", &s[..max]) }
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max])
+    }
 }

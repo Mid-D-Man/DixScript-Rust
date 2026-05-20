@@ -1,16 +1,17 @@
 // mdix-lsp/src/features/folding.rs
 //!
 //! Fold regions:
-//! 1. @CONFIG section         — paren-depth tracking on Config tokens
-//! 2. Enum bodies             — collect_brace_folds_in_range on @ENUMS tokens
-//! 3. QuickFunc bodies        — ~ → params → { → }
-//! 4. QuickFunc params        — when ~ line != { line
-//! 5. DATA object literals    — collect_brace_folds_in_range
-//! 6. Table / group arrays    — last non-comment DATA token before next entry
-//! 7. SECURITY objects        — collect_brace_folds_in_range
+//! 1. Outer section fold for every @SECTION(...) — paren-depth tracking
+//! 2. Enum bodies            — collect_brace_folds_in_range on @ENUMS tokens
+//! 3. QuickFunc bodies       — ~ → params → { → }
+//! 4. QuickFunc params       — when ~ line != { line
+//! 5. DATA object literals   — collect_brace_folds_in_range
+//! 6. Table / group arrays   — last non-comment DATA token before next entry
+//! 7. SECURITY objects       — collect_brace_folds_in_range
 //!
-//! Approach B: @CONFIG tokens are real tokens with SectionId::Config and
-//! accurate positions. No source-scanning or stored line ranges needed.
+//! Approach B: all section tokens (including @CONFIG) are real tokens in
+//! doc.tokens with their own SectionId stamps and accurate positions.
+//! No source-scanning or stored line ranges needed anywhere.
 
 use std::panic;
 
@@ -49,12 +50,23 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
         return None;
     }
 
-    // ── @CONFIG fold (Approach B) ─────────────────────────────────────────────
-    // @CONFIG tokens are now real tokens. Find the section keyword and track
-    // paren depth to find the matching close paren.
-    collect_config_fold(&doc.tokens, &mut ranges);
+    // ── Outer section folds ────────────────────────────────────────────────
+    // Each @SECTION(...) gets a fold from its keyword line to just before ')'.
+    // Paren-depth tracking within each section's own token stream handles
+    // nested parens (QuickFunc param lists, DATA function calls, etc.) correctly.
+    for &section_id in &[
+        SectionId::Config,
+        SectionId::Imports,
+        SectionId::Dlm,
+        SectionId::Enums,
+        SectionId::QuickFuncs,
+        SectionId::Data,
+        SectionId::Security,
+    ] {
+        collect_outer_paren_fold(&doc.tokens, section_id, &mut ranges);
+    }
 
-    // ── Content folds via AST visitor ─────────────────────────────────────────
+    // ── Inner content folds via AST visitor ────────────────────────────────
     if let Some(ast) = &doc.ast {
         let mut visitor = FoldingVisitor {
             tokens: &doc.tokens,
@@ -75,80 +87,110 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<FoldingRange>> {
     if ranges.is_empty() { None } else { Some(ranges) }
 }
 
-// ── @CONFIG fold ──────────────────────────────────────────────────────────────
+// ── Generic outer section fold ────────────────────────────────────────────────
 //
-// Finds the SectionConfig token and the matching closing ')' by paren-depth
-// tracking. Emits one fold: @CONFIG( line → line before ).
+// Algorithm:
+//   1. Find the section keyword token (it stamps itself with its own SectionId).
+//   2. Find the opening '(' within that same section.
+//   3. Depth-track '(' and ')' tokens that belong to this section to find
+//      the matching closing ')'.  Inner parens (QuickFunc params, function
+//      calls in @DATA) are correctly balanced because they also carry the same
+//      SectionId.
+//   4. Emit a fold from the keyword line to the line *before* ')'.
 //
-// The fold end is the line BEFORE the ')' so the closing paren stays visible.
+// Example for @QUICKFUNCS:
+//   @QUICKFUNCS(          depth → 1
+//     ~f(x) { return x }  '(' → 2, ')' → 1
+//   )                     ')' → 0  ← close_lsp
 
-fn collect_config_fold(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
-    // Find @CONFIG keyword token.
-    let config_tok = match tokens
+fn collect_outer_paren_fold(
+    tokens: &[Token],
+    section_id: SectionId,
+    ranges: &mut Vec<FoldingRange>,
+) {
+    // Step 1 — find the section keyword token.
+    let kw_idx = match tokens
         .iter()
-        .find(|t| matches!(t.token_type, TokenType::SectionConfig))
+        .position(|t| t.section == section_id && is_section_keyword(&t.token_type))
     {
-        Some(t) => t,
-        None    => return,
+        Some(i) => i,
+        None => return,
     };
 
-    let open_lsp = tok_lsp_line(config_tok);
+    let open_lsp = tok_lsp_line(&tokens[kw_idx]);
 
-    // Find the opening '(' after @CONFIG.
+    // Step 2 — find the first '(' within this section (at or after keyword).
     let open_paren_idx = match tokens
         .iter()
         .enumerate()
+        .skip(kw_idx)
         .find(|(_, t)| {
-            t.section == SectionId::Config
-                && matches!(t.token_type, TokenType::Symbol('('))
+            t.section == section_id && matches!(t.token_type, TokenType::Symbol('('))
         }) {
         Some((i, _)) => i,
         None => return,
     };
 
-    // Track paren depth to find the matching ')'.
+    // Step 3 — depth-track '(' / ')' within this section only.
     let mut depth: i32 = 0;
     let mut close_lsp: Option<u32> = None;
 
     for tok in tokens.iter().skip(open_paren_idx) {
+        if matches!(tok.token_type, TokenType::EndOfFile) {
+            break;
+        }
+        // Skip tokens from other sections; they don't affect depth here.
+        if tok.section != section_id {
+            continue;
+        }
         match &tok.token_type {
-            TokenType::Symbol('(') if tok.section == SectionId::Config => {
-                depth += 1;
-            }
-            TokenType::Symbol(')') if tok.section == SectionId::Config => {
+            TokenType::Symbol('(') => depth += 1,
+            TokenType::Symbol(')') => {
                 depth -= 1;
                 if depth == 0 {
                     close_lsp = Some(tok_lsp_line(tok));
                     break;
                 }
             }
-            TokenType::EndOfFile => break,
             _ => {}
         }
     }
 
-    let close_lsp = match close_lsp {
-        Some(l) => l,
-        // Fallback: use last Config token if we never found the close paren.
-        None => tokens
+    // Fallback: use the last non-EOF token of the section.
+    let close_lsp = close_lsp.unwrap_or_else(|| {
+        tokens
             .iter()
             .rev()
             .find(|t| {
-                t.section == SectionId::Config
+                t.section == section_id
                     && !matches!(t.token_type, TokenType::EndOfFile)
             })
             .map(tok_lsp_line)
-            .unwrap_or(open_lsp),
-    };
+            .unwrap_or(open_lsp)
+    });
 
-    // Fold from the @CONFIG( line to the line before the closing ).
+    // Step 4 — emit fold from keyword line to line before ')'.
     let fold_end = close_lsp.saturating_sub(1);
     if fold_end > open_lsp {
         ranges.push(make_fold(open_lsp, fold_end));
     }
 }
 
-// ── AST Visitor ───────────────────────────────────────────────────────────────
+#[inline]
+fn is_section_keyword(tt: &TokenType) -> bool {
+    matches!(
+        tt,
+        TokenType::SectionConfig
+            | TokenType::SectionImports
+            | TokenType::SectionDLM
+            | TokenType::SectionEnums
+            | TokenType::SectionQuickFuncs
+            | TokenType::SectionData
+            | TokenType::SectionSecurity
+    )
+}
+
+// ── AST Visitor (inner content folds) ────────────────────────────────────────
 
 struct FoldingVisitor<'a> {
     tokens: &'a [Token],
@@ -159,7 +201,7 @@ impl<'a> AstVisitorBase for FoldingVisitor<'a> {
     type Result = ();
     fn default_result(&self) -> () {}
 
-    // ── @ENUMS ────────────────────────────────────────────────────────────────
+    // ── @ENUMS: individual enum body { } folds ────────────────────────────
     fn visit_enums_section(&mut self, section: &EnumsSection) -> () {
         let from_lsp = self
             .tokens
@@ -180,18 +222,20 @@ impl<'a> AstVisitorBase for FoldingVisitor<'a> {
         };
 
         let end_lsp = section_last_token_lsp(self.tokens, SectionId::Enums);
-        // from_lsp + 1: skip the @ENUMS( line itself.
+        // from_lsp + 1: skip the @ENUMS( line — only fold individual enum bodies.
         collect_brace_folds_in_range(self.tokens, from_lsp + 1, end_lsp, self.ranges);
     }
 
-    // ── @QUICKFUNCS ───────────────────────────────────────────────────────────
+    // ── @QUICKFUNCS: function body { } and multiline param folds ─────────
     fn visit_quickfuncs_section(&mut self, _section: &QuickFuncsSection) -> () {
         collect_quickfunc_folds(self.tokens, self.ranges);
     }
 
-    // ── @DATA ─────────────────────────────────────────────────────────────────
+    // ── @DATA: object { } folds and table/group-array entry folds ─────────
     fn visit_data_section(&mut self, section: &DataSection) -> () {
-        if !section.position.is_valid() { return; }
+        if !section.position.is_valid() {
+            return;
+        }
 
         let data_start_lsp = self
             .tokens
@@ -202,7 +246,7 @@ impl<'a> AstVisitorBase for FoldingVisitor<'a> {
 
         let data_end_lsp = section_last_token_lsp(self.tokens, SectionId::Data);
 
-        // Object literal { } folds
+        // Object literal { } folds within @DATA.
         collect_brace_folds_in_range(
             self.tokens,
             data_start_lsp + 1,
@@ -210,13 +254,15 @@ impl<'a> AstVisitorBase for FoldingVisitor<'a> {
             self.ranges,
         );
 
-        // Table property and group array folds
+        // Table property and group array span folds.
         collect_data_entry_folds(self.tokens, section, self.ranges);
     }
 
-    // ── @SECURITY ─────────────────────────────────────────────────────────────
+    // ── @SECURITY: encryption block { } folds ─────────────────────────────
     fn visit_security_section(&mut self, section: &SecuritySection) -> () {
-        if !section.position.is_valid() { return; }
+        if !section.position.is_valid() {
+            return;
+        }
 
         let sec_start = self
             .tokens
@@ -230,18 +276,17 @@ impl<'a> AstVisitorBase for FoldingVisitor<'a> {
     }
 }
 
-// ── QuickFunc fold collection ─────────────────────────────────────────────────
+// ── QuickFunc body and parameter folds ───────────────────────────────────────
 //
-// For each `~` token in @QUICKFUNCS:
-//   1. Find the first `(` after `~`    → param list open
-//   2. Depth-track ( / ) to close      → param list close index
-//   3. Find first `{` after close      → body open (no section filter —
-//      the `{` in `) {` can have a different section tag due to lexer ordering)
-//   4. Depth-track { / } to close      → body close
+// For each `~` in @QUICKFUNCS:
+//   1. Find the first `(` after `~`             → param list open
+//   2. Depth-track ( / ) to close               → param list close index
+//   3. Find first `{` after param close         → body open
+//   4. Depth-track { / } to close               → body close
 //
 // Emits:
-//   • Body fold:  { line → line before }   (always, when body spans > 1 line)
-//   • Param fold: ~ line → line before {   (when ~ and { are on different lines)
+//   Body fold:  { line → line before }   (always, when body spans > 1 line)
+//   Param fold: ~ line → line before {   (when ~ and { are on different lines)
 
 fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
     let tilde_positions: Vec<(usize, u32)> = tokens
@@ -255,7 +300,7 @@ fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
         .collect();
 
     for (tilde_idx, tilde_lsp) in tilde_positions {
-        // ── Step 1: first `(` after `~` ──────────────────────────────────────
+        // Step 1: first `(` after `~`.
         let paren_open = tokens
             .iter()
             .enumerate()
@@ -267,7 +312,7 @@ fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
             None => continue,
         };
 
-        // ── Step 2: depth-track ( / ) ─────────────────────────────────────────
+        // Step 2: depth-track ( / ) to find param list close.
         let paren_close_idx = {
             let mut depth = 0i32;
             let mut found = None;
@@ -276,7 +321,10 @@ fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
                     TokenType::Symbol('(') => depth += 1,
                     TokenType::Symbol(')') => {
                         depth -= 1;
-                        if depth == 0 { found = Some(idx); break; }
+                        if depth == 0 {
+                            found = Some(idx);
+                            break;
+                        }
                     }
                     TokenType::EndOfFile => break,
                     _ => {}
@@ -290,7 +338,7 @@ fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
             None => continue,
         };
 
-        // ── Step 3: first `{` after param close ───────────────────────────────
+        // Step 3: first `{` after param close.
         let body_open = tokens
             .iter()
             .enumerate()
@@ -303,7 +351,7 @@ fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
         };
         let open_lsp = tok_lsp_line(body_open_tok);
 
-        // ── Step 4: depth-track { / } ─────────────────────────────────────────
+        // Step 4: depth-track { / } to find body close.
         let close_lsp = {
             let mut depth = 0i32;
             let mut found = None;
@@ -312,7 +360,10 @@ fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
                     TokenType::Symbol('{') => depth += 1,
                     TokenType::Symbol('}') => {
                         depth -= 1;
-                        if depth == 0 { found = Some(tok_lsp_line(tok)); break; }
+                        if depth == 0 {
+                            found = Some(tok_lsp_line(tok));
+                            break;
+                        }
                     }
                     TokenType::EndOfFile => break,
                     _ => {}
@@ -326,13 +377,13 @@ fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
             None => continue,
         };
 
-        // ── Body fold ─────────────────────────────────────────────────────────
+        // Body fold.
         let body_end = close_lsp.saturating_sub(1);
         if body_end > open_lsp {
             ranges.push(make_fold(open_lsp, body_end));
         }
 
-        // ── Param fold (only when multiline) ──────────────────────────────────
+        // Param fold (only when multiline).
         if tilde_lsp < open_lsp {
             let param_end = open_lsp.saturating_sub(1);
             if param_end > tilde_lsp {
@@ -342,24 +393,26 @@ fn collect_quickfunc_folds(tokens: &[Token], ranges: &mut Vec<FoldingRange>) {
     }
 }
 
-// ── Table property / group array folds ───────────────────────────────────────
+// ── Table property / group array entry folds ─────────────────────────────────
 
 fn collect_data_entry_folds(
-    tokens:  &[Token],
+    tokens: &[Token],
     section: &DataSection,
-    ranges:  &mut Vec<FoldingRange>,
+    ranges: &mut Vec<FoldingRange>,
 ) {
-    let entries   = &section.entries;
+    let entries = &section.entries;
     let sec_close = section_last_token_lsp(tokens, SectionId::Data);
 
     for (i, entry) in entries.iter().enumerate() {
         let entry_pos = match entry {
             DataEntry::TableProperty { position, .. }
-            | DataEntry::GroupArray   { position, .. } => *position,
+            | DataEntry::GroupArray { position, .. } => *position,
             _ => continue,
         };
 
-        if !entry_pos.is_valid() || entry_pos.line == 0 { continue; }
+        if !entry_pos.is_valid() || entry_pos.line == 0 {
+            continue;
+        }
 
         let entry_line_1based = entry_pos.line;
 
@@ -367,7 +420,10 @@ fn collect_data_entry_folds(
             t.section == SectionId::Data
                 && t.line >= entry_line_1based
                 && t.line <= entry_line_1based + 1
-                && matches!(t.token_type, TokenType::Symbol(':') | TokenType::DoubleColon)
+                && matches!(
+                    t.token_type,
+                    TokenType::Symbol(':') | TokenType::DoubleColon
+                )
         });
 
         let delim_lsp = match delim_tok {
@@ -392,7 +448,7 @@ fn collect_data_entry_folds(
                     && tok_lsp_line(t) > delim_lsp
                     && match bound_1based {
                         Some(b) => t.line < b,
-                        None    => sec_close
+                        None => sec_close
                             .map(|sc| tok_lsp_line(t) < sc)
                             .unwrap_or(true),
                     }
@@ -408,22 +464,26 @@ fn collect_data_entry_folds(
     }
 }
 
-// ── Brace { } fold collector ──────────────────────────────────────────────────
+// ── { } brace fold collector ──────────────────────────────────────────────────
 
 fn collect_brace_folds_in_range(
-    tokens:   &[Token],
+    tokens: &[Token],
     from_lsp: u32,
-    to_lsp:   Option<u32>,
-    ranges:   &mut Vec<FoldingRange>,
+    to_lsp: Option<u32>,
+    ranges: &mut Vec<FoldingRange>,
 ) {
     let from_1based = from_lsp + 1;
-    let to_1based   = to_lsp.map(|l| l + 1).unwrap_or(u32::MAX);
+    let to_1based = to_lsp.map(|l| l + 1).unwrap_or(u32::MAX);
     let mut stack: Vec<u32> = Vec::new();
 
     for tok in tokens {
         let tl = tok.line as u32;
-        if tl < from_1based { continue; }
-        if tl > to_1based   { break;    }
+        if tl < from_1based {
+            continue;
+        }
+        if tl > to_1based {
+            break;
+        }
         match &tok.token_type {
             TokenType::EndOfFile => break,
             TokenType::Symbol('{') => stack.push(tok_lsp_line(tok)),
@@ -463,11 +523,11 @@ fn section_last_token_lsp(tokens: &[Token], id: SectionId) -> Option<u32> {
 #[inline]
 fn make_fold(start: u32, end: u32) -> FoldingRange {
     FoldingRange {
-        start_line:      start,
-        end_line:        end,
-        kind:            Some(FoldingRangeKind::Region),
+        start_line: start,
+        end_line: end,
+        kind: Some(FoldingRangeKind::Region),
         start_character: None,
-        end_character:   None,
-        collapsed_text:  None,
+        end_character: None,
+        collapsed_text: None,
     }
-}
+    }

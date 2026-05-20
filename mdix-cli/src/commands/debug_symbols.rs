@@ -1,24 +1,23 @@
 // mdix-cli/src/commands/debug_symbols.rs
 //! `mdix debug-symbols <file>` — dump the symbol table produced by semantic analysis.
 //!
-//! Runs config → tokenize → parse → semantic analysis and prints every
-//! category in the resulting SymbolTable.
+//! Uses Approach B (tokenizer-first): tokenize full source → split @CONFIG
+//! → process config tokens → parse rest tokens → semantic analysis.
 //!
 //! Use this to verify:
-//!   - Enum definitions are correctly registered with field values
-//!   - QuickFunc signatures, return types, and scope bindings are correct
-//!   - DATA variables are indexed with correct paths and types
-//!   - Imported namespaces are resolved
-//!   - Builtin statics are registered
+//!   - Enum definitions are correctly registered with field values.
+//!   - QuickFunc signatures, return types, and scope bindings are correct.
+//!   - DATA variables are indexed with correct paths and types.
+//!   - Imported namespaces are resolved.
+//!   - Builtin statics are registered.
 
 use std::path::PathBuf;
 use clap::Args;
-use dixscript::Compiler::Core::Config::ConfigSectionHandler;
-use dixscript::Compiler::Core::Tokenizer::Tokenizer;
+use dixscript::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
+use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
 use dixscript::Compiler::Core::{GeneralParser, GeneralSemanticAnalyzer};
 use dixscript::Compiler::Utilities::SymbolTable;
-use dixscript::ErrorManager::ErrorManager;
-use crate::commands::{GlobalOpts};
+use crate::commands::GlobalOpts;
 use crate::services::file_io;
 
 #[derive(Args)]
@@ -41,39 +40,53 @@ pub struct DebugSymbolsArgs {
 
 pub fn run(args: DebugSymbolsArgs, _global: &GlobalOpts) -> i32 {
     let source = match file_io::read_file(&args.file) {
-        Ok(s)  => s,
-        Err(e) => { eprintln!("Error: {}", e); return 2; }
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            return 2;
+        }
     };
 
-    let error_manager = ErrorManager::get_shared_instance();
-    error_manager.clear_errors();
+    // ── Approach B pipeline ───────────────────────────────────────────────
 
-    // ── Stage 1: Config ──────────────────────────────────────────────────────
+    // Stage 1: tokenize full source with default settings.
+    let initial_settings = OperationalSettings {
+        source_file_path: Some(args.file.to_string_lossy().to_string()),
+        ..OperationalSettings::default()
+    };
+    let tokenizer = Tokenizer::new(&source, &initial_settings);
+    let tok_result = tokenizer.tokenize();
+
+    // Stage 2: split @CONFIG and process it.
+    let split = split_config_tokens(tok_result.tokens);
     let mut config_handler = ConfigSectionHandler::new(None);
-    let config_result = config_handler.process_config_section(&source);
+    let config_result = config_handler.process_config_tokens(&split.config_tokens);
+
     let mut settings = config_result.operational_settings.clone();
     settings.source_file_path = Some(args.file.to_string_lossy().to_string());
 
-    // ── Stage 2: Tokenize ────────────────────────────────────────────────────
-    let tokenizer = Tokenizer::new(&config_result.cleaned_input_string, &settings);
-    let tok_result = tokenizer.tokenize();
-
-    // ── Stage 3: Parse ───────────────────────────────────────────────────────
+    // Stage 3: parse the rest of the token stream.
     let parser = match GeneralParser::new(
-        tok_result.tokens,
+        split.rest_tokens,
         &config_result.config_section,
         &settings,
     ) {
-        Ok(p)  => p,
-        Err(e) => { eprintln!("Parser error: {}", e); return 1; }
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Parser error: {}", e);
+            return 1;
+        }
     };
 
     let ast = match parser.parse() {
-        Ok(a)  => a,
-        Err(e) => { eprintln!("Parse error: {}", e); return 1; }
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            return 1;
+        }
     };
 
-    // ── Stage 4: Semantic Analysis ───────────────────────────────────────────
+    // Stage 4: semantic analysis.
     let analyzer = GeneralSemanticAnalyzer::new(&ast, &settings);
     let sem = analyzer.analyze();
 
@@ -119,9 +132,9 @@ pub fn run(args: DebugSymbolsArgs, _global: &GlobalOpts) -> i32 {
 
 fn format_symbol_table(st: &SymbolTable, args: &DebugSymbolsArgs) -> String {
     let mut out = String::new();
-    let section  = args.section.to_uppercase();
+    let section = args.section.to_uppercase();
     let show_all = section == "ALL";
-    let verbose  = args.verbose;
+    let verbose = args.verbose;
 
     out.push_str(&format!(
         "=== DixScript Symbol Table ===\nTotal symbols: {}\n\n",
@@ -151,7 +164,11 @@ fn format_symbol_table(st: &SymbolTable, args: &DebugSymbolsArgs) -> String {
 
     // ── QUICKFUNCS / FUNCTIONS ────────────────────────────────────────────────
     if show_all || section == "FUNCTIONS" {
-        out.push_str(&format!("── QUICKFUNCS ({}) {}\n", st.functions.len(), "─".repeat(45)));
+        out.push_str(&format!(
+            "── QUICKFUNCS ({}) {}\n",
+            st.functions.len(),
+            "─".repeat(45)
+        ));
         if st.functions.is_empty() {
             out.push_str("  (none)\n");
         } else {
@@ -174,21 +191,20 @@ fn format_symbol_table(st: &SymbolTable, args: &DebugSymbolsArgs) -> String {
                 };
                 out.push_str(&format!(
                     "  ~{}<{}> => {}({})\n",
-                    name, ret, scope, params.join(", ")
+                    name, ret, scope,
+                    params.join(", ")
                 ));
                 if verbose && sig.line > 0 {
-                    out.push_str(&format!(
-                        "    @L{}:C{}\n", sig.line, sig.column
-                    ));
+                    out.push_str(&format!("    @L{}:C{}\n", sig.line, sig.column));
                 }
             }
         }
         out.push('\n');
 
-        // Dix functions (sub-section under FUNCTIONS)
         if !st.dix_functions.is_empty() {
             out.push_str(&format!(
-                "  ── DIX FUNCTIONS ({}) ──\n", st.dix_functions.len()
+                "  ── DIX FUNCTIONS ({}) ──\n",
+                st.dix_functions.len()
             ));
             let mut dix_names: Vec<&String> = st.dix_functions.keys().collect();
             dix_names.sort();
@@ -196,7 +212,9 @@ fn format_symbol_table(st: &SymbolTable, args: &DebugSymbolsArgs) -> String {
                 let sig = &st.dix_functions[name];
                 out.push_str(&format!(
                     "  Dix.{}({}) → {}\n",
-                    sig.name, sig.parameter_types.join(", "), sig.return_type
+                    sig.name,
+                    sig.parameter_types.join(", "),
+                    sig.return_type
                 ));
             }
             out.push('\n');
@@ -207,7 +225,8 @@ fn format_symbol_table(st: &SymbolTable, args: &DebugSymbolsArgs) -> String {
     if show_all || section == "DATA" {
         out.push_str(&format!(
             "── DATA VARIABLES ({}) {}\n",
-            st.data_variables.len(), "─".repeat(40)
+            st.data_variables.len(),
+            "─".repeat(40)
         ));
         if st.data_variables.is_empty() {
             out.push_str("  (none)\n");
@@ -247,7 +266,9 @@ fn format_symbol_table(st: &SymbolTable, args: &DebugSymbolsArgs) -> String {
     // ── NAMESPACES ────────────────────────────────────────────────────────────
     if show_all || section == "NAMESPACES" {
         out.push_str(&format!(
-            "── NAMESPACES ({}) {}\n", st.namespaces.len(), "─".repeat(45)
+            "── NAMESPACES ({}) {}\n",
+            st.namespaces.len(),
+            "─".repeat(45)
         ));
         if st.namespaces.is_empty() {
             out.push_str("  (none)\n");
@@ -258,8 +279,11 @@ fn format_symbol_table(st: &SymbolTable, args: &DebugSymbolsArgs) -> String {
                 let ns = &st.namespaces[name];
                 out.push_str(&format!(
                     "  {} → {}\n    functions: {}  enums: {}  local_imports: {}\n",
-                    name, ns.file_path,
-                    ns.functions.len(), ns.enums.len(), ns.local_imports.len()
+                    name,
+                    ns.file_path,
+                    ns.functions.len(),
+                    ns.enums.len(),
+                    ns.local_imports.len()
                 ));
                 if verbose {
                     if !ns.functions.is_empty() {
@@ -288,11 +312,12 @@ fn format_symbol_table(st: &SymbolTable, args: &DebugSymbolsArgs) -> String {
     if show_all || section == "BUILTINS" {
         out.push_str(&format!(
             "── BUILTIN STATICS ({}) {}\n",
-            st.builtin_static_objects.len(), "─".repeat(39)
+            st.builtin_static_objects.len(),
+            "─".repeat(39)
         ));
         if st.builtin_static_objects.is_empty() {
             out.push_str(
-                "  (none — populate_builtin_objects() may not have been called)\n"
+                "  (none — populate_builtin_objects() may not have been called)\n",
             );
         } else {
             let mut names = st.builtin_static_objects.clone();
@@ -305,7 +330,9 @@ fn format_symbol_table(st: &SymbolTable, args: &DebugSymbolsArgs) -> String {
     // ── CONFIG ENTRIES ────────────────────────────────────────────────────────
     if (show_all || section == "CONFIG") && !st.configs.is_empty() {
         out.push_str(&format!(
-            "── CONFIG ENTRIES ({}) {}\n", st.configs.len(), "─".repeat(40)
+            "── CONFIG ENTRIES ({}) {}\n",
+            st.configs.len(),
+            "─".repeat(40)
         ));
         let mut keys: Vec<&String> = st.configs.keys().collect();
         keys.sort();

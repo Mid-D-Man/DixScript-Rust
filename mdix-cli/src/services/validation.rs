@@ -1,12 +1,12 @@
-
 //! Wraps the dixscript compilation pipeline up to semantic analysis.
+//! Uses Approach B (tokenizer-first): tokenize full source → split @CONFIG
+//! → process config tokens → parse rest tokens → semantic analysis.
 
 use std::path::Path;
 use std::time::Instant;
-use dixscript::Compiler::Core::Tokenizer::Tokenizer;
-use dixscript::Compiler::Core::Config::ConfigSectionHandler;
+use dixscript::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
+use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
 use dixscript::Compiler::Core::{GeneralParser, GeneralSemanticAnalyzer};
-use dixscript::ErrorManager::ErrorManager;
 use crate::commands::CliError;
 
 /// Result returned to command handlers after validation.
@@ -29,38 +29,38 @@ pub fn validate_file(path: &Path, strict: bool) -> Result<ValidationResult, CliE
     }
 
     let source = std::fs::read_to_string(path).map_err(CliError::IoError)?;
-
-    let error_manager = ErrorManager::get_shared_instance();
-    error_manager.clear_errors();
-
     let t = Instant::now();
 
-    // Config
-    let mut config_handler = ConfigSectionHandler::new(None);
-    let config_result = config_handler.process_config_section(&source);
-    let mut settings = config_result.operational_settings;
-    settings.source_file_path = Some(path.to_string_lossy().to_string());
-    error_manager.update_settings(settings.clone());
+    // ── Stage 1: tokenize the full source ─────────────────────────────────
+    let initial_settings = OperationalSettings {
+        source_file_path: Some(path.to_string_lossy().to_string()),
+        ..OperationalSettings::default()
+    };
 
-    // Tokenize
-    let tokenizer = Tokenizer::new(&config_result.cleaned_input_string, &settings);
+    let tokenizer = Tokenizer::new(&source, &initial_settings);
     let tok_result = tokenizer.tokenize();
+    // Capture total token count before the move into split_config_tokens.
     let token_count = tok_result.tokens.len();
 
-    if error_manager.has_fatal_errors() {
-        let report = error_manager.generate_error_report();
-        return Err(CliError::ParseError(report));
-    }
+    // ── Stage 2: split @CONFIG and process it ─────────────────────────────
+    let split = split_config_tokens(tok_result.tokens);
 
-    // Parse
-    let parser = GeneralParser::new(tok_result.tokens, &config_result.config_section, &settings)
-        .map_err(|e| CliError::ParseError(e.message().to_string()))?;
+    let mut config_handler = ConfigSectionHandler::new(None);
+    let config_result = config_handler.process_config_tokens(&split.config_tokens);
+
+    let mut settings = config_result.operational_settings;
+    settings.source_file_path = Some(path.to_string_lossy().to_string());
+
+    // ── Stage 3: parse the rest of the token stream ───────────────────────
+    let parser =
+        GeneralParser::new(split.rest_tokens, &config_result.config_section, &settings)
+            .map_err(|e| CliError::ParseError(e.message().to_string()))?;
 
     let ast = parser
         .parse()
         .map_err(|e| CliError::ParseError(e.message().to_string()))?;
 
-    // Semantic analysis
+    // ── Stage 4: semantic analysis ────────────────────────────────────────
     let analyzer = GeneralSemanticAnalyzer::new(&ast, &settings);
     let result = analyzer.analyze();
 
@@ -88,4 +88,4 @@ pub fn validate_file(path: &Path, strict: bool) -> Result<ValidationResult, CliE
         warnings,
         elapsed,
     })
-  }
+}

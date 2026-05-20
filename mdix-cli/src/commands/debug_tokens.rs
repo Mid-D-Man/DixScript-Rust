@@ -1,17 +1,20 @@
 // mdix-cli/src/commands/debug_tokens.rs
-//! `mdix debug-tokens <file>` — print the token stream with positions,
+//! `mdix debug-tokens <file>` — print the full token stream with positions,
 //! section tags, and optional grouping by line.
 //!
+//! Uses Approach B (tokenizer-first): the full source is tokenized once,
+//! producing ALL tokens including @CONFIG tokens with real positions. The
+//! @CONFIG split is used only to extract operational settings for display.
+//!
 //! Use this to verify:
-//!   - That @CONFIG tokens are NOT in the stream (they should be blank lines).
-//!   - That every section's tokens carry the correct SectionId stamp.
-//!   - That folding/completion/hover problems are tokeniser bugs vs parser bugs.
+//!   - @CONFIG tokens ARE in the stream with SectionId::Config.
+//!   - Every section's tokens carry the correct SectionId stamp.
+//!   - Hover/folding/completion problems are tokeniser bugs vs parser bugs.
 
 use std::path::PathBuf;
 use clap::Args;
-use dixscript::Compiler::Core::Config::ConfigSectionHandler;
-use dixscript::Compiler::Core::Tokenizer::Tokenizer;
-use dixscript::Utilities::TokenDebugPrinter;
+use dixscript::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens, TokenType};
+use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
 use crate::commands::{CliError, GlobalOpts};
 use crate::services::file_io;
 
@@ -36,7 +39,7 @@ pub struct DebugTokensArgs {
     #[arg(long, default_value = "true")]
     pub positions: bool,
 
-    /// Filter to only show tokens from this section (e.g. DATA, QUICKFUNCS)
+    /// Filter to only show tokens from this section (e.g. DATA, QUICKFUNCS, CONFIG)
     #[arg(long)]
     pub section_filter: Option<String>,
 
@@ -47,53 +50,64 @@ pub struct DebugTokensArgs {
 
 pub fn run(args: DebugTokensArgs, _global: &GlobalOpts) -> i32 {
     let source = match file_io::read_file(&args.file) {
-        Ok(s)  => s,
+        Ok(s) => s,
         Err(e) => {
             eprintln!("Error: {}", e);
             return 2;
         }
     };
 
-    // Strip @CONFIG (same as the real pipeline).
+    // ── Approach B: tokenize the FULL source ──────────────────────────────
+    let initial_settings = OperationalSettings {
+        source_file_path: Some(args.file.to_string_lossy().to_string()),
+        ..OperationalSettings::default()
+    };
+
+    let tokenizer = Tokenizer::new(&source, &initial_settings);
+    let tok_result = tokenizer.tokenize();
+    let total_tokens = tok_result.tokens.len();
+
+    // Split and process @CONFIG to extract settings for display only.
+    let split = split_config_tokens(tok_result.tokens.clone());
     let mut config_handler = ConfigSectionHandler::new(None);
-    let config_result = config_handler.process_config_section(&source);
+    let config_result = config_handler.process_config_tokens(&split.config_tokens);
     let settings = &config_result.operational_settings;
 
-    // Show what @CONFIG was detected as.
-    eprintln!("─── @CONFIG detection ───────────────────────────────────────");
+    // Print config info to stderr so it doesn't mix with token output.
+    eprintln!("─── @CONFIG settings ────────────────────────────────────────");
     eprintln!("Features:         {:?}", settings.enabled_features);
     eprintln!("Error handling:   {:?}", settings.error_handling_strategy);
     eprintln!("Debug mode:       {:?}", settings.debug_mode);
+    eprintln!("Version:          {}", settings.version);
     eprintln!("");
-    eprintln!("─── Cleaned source preview (first 20 lines) ─────────────────");
-    for (i, line) in config_result.cleaned_input_string.lines().take(20).enumerate() {
+    eprintln!("─── Source preview (first 20 lines) ─────────────────────────");
+    for (i, line) in source.lines().take(20).enumerate() {
         eprintln!("{:3}: {}", i + 1, line);
     }
     eprintln!("─────────────────────────────────────────────────────────────");
     eprintln!("");
+    eprintln!("Total tokens (including @CONFIG): {}", total_tokens);
+    eprintln!("");
 
-    // Tokenize.
-    let tokenizer = Tokenizer::new(&config_result.cleaned_input_string, settings);
-    let mut tok_result = tokenizer.tokenize();
+    // ── Build the token output ─────────────────────────────────────────────
+    // Use the full token stream (tok_result.tokens was cloned above for split;
+    // we re-tokenize with real settings so classification is accurate).
+    let full_tokenizer = Tokenizer::new(&source, settings);
+    let mut full_result = full_tokenizer.tokenize();
 
     // Apply filters.
     if let Some(ref section_name) = args.section_filter {
         let upper = section_name.to_uppercase();
-        tok_result.tokens.retain(|t| {
-            t.section.as_str().contains(&upper)
-        });
+        full_result.tokens.retain(|t| t.section.as_str().contains(&upper));
     }
     if let Some(ref type_name) = args.type_filter {
         let lower = type_name.to_lowercase();
-        tok_result.tokens.retain(|t| {
+        full_result.tokens.retain(|t| {
             format!("{:?}", t.token_type).to_lowercase().contains(&lower)
         });
     }
 
-    // Print.
-    let mut printer = TokenDebugPrinter::new(args.positions, args.sections, args.by_line);
-
-    let output_content = printer.print(&tok_result);
+    let output_content = format_tokens(&full_result.tokens, &args);
 
     match args.output {
         Some(ref path) => {
@@ -109,4 +123,58 @@ pub fn run(args: DebugTokensArgs, _global: &GlobalOpts) -> i32 {
     }
 
     0
+}
+
+// ── Token formatter ───────────────────────────────────────────────────────────
+
+fn format_tokens(
+    tokens: &[dixscript::Compiler::Core::Tokenizer::Token],
+    args: &DebugTokensArgs,
+) -> String {
+    use dixscript::Compiler::Core::Tokenizer::TokenType;
+
+    let mut out = String::new();
+    let mut current_line: Option<usize> = None;
+
+    for token in tokens {
+        if matches!(token.token_type, TokenType::EndOfFile) {
+            if args.by_line {
+                out.push_str(&format!(
+                    "L{:4}  [{}] EOF\n",
+                    token.line,
+                    token.section.as_str().to_lowercase()
+                ));
+            } else {
+                out.push_str("EOF\n");
+            }
+            break;
+        }
+
+        if args.by_line && Some(token.line) != current_line {
+            if current_line.is_some() {
+                out.push('\n');
+            }
+            out.push_str(&format!("── Line {:4} ", token.line));
+            out.push_str(&"─".repeat(60));
+            out.push('\n');
+            current_line = Some(token.line);
+        }
+
+        let type_str = format!("{}", token.token_type);
+        let section_str = if args.sections {
+            let s = token.section.as_str();
+            if s.is_empty() { "       ".to_string() } else { format!("[{:<10}]", s.to_lowercase()) }
+        } else {
+            String::new()
+        };
+        let pos_str = if args.positions {
+            format!("L{:4}:C{:<4} ", token.line, token.column)
+        } else {
+            String::new()
+        };
+
+        out.push_str(&format!("  {}{} {}\n", pos_str, section_str, type_str));
+    }
+
+    out
 }

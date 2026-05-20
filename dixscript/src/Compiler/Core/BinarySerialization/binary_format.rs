@@ -1,5 +1,10 @@
+// dixscript/src/Compiler/Core/BinarySerialization/binary_format.rs
 //! Binary format constants and type definitions for DixScript v1.0.0
-//! Defines the structure and type tags for .dixscript.enc files
+//! Defines the structure and type tags for .mdix.enc files
+//!
+//! NOTE: ValueTypeTag discriminants define the on-disk format.
+//! Changing them is a breaking change — existing .mdix.enc files
+//! must be recompiled after any reorder.
 
 use crate::Compiler::AST::{DataType, Position};
 
@@ -15,8 +20,8 @@ pub const VERSION_PATCH: u8 = 0;
 
 // ==================== HEADER SIZES ====================
 
-pub const HEADER_SIZE: usize = 16;
-pub const FOOTER_SIZE: usize = 32; // SHA-256 checksum
+pub const HEADER_SIZE:       usize = 16;
+pub const FOOTER_SIZE:       usize = 32; // SHA-256 checksum
 pub const OFFSET_ENTRY_SIZE: usize = 12;
 
 // ==================== SECTION FLAGS (1 byte) ====================
@@ -25,12 +30,12 @@ bitflags::bitflags! {
     /// Section presence flags
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SectionFlags: u8 {
-        const NONE     = 0x00;
-        const CONFIG   = 0x01;  // Bit 0
-        const ENUMS    = 0x02;  // Bit 1
-        const DATA     = 0x04;  // Bit 2
-        const SECURITY = 0x08;  // Bit 3
-        const IMPORTS  = 0x10;  // Bit 4
+        const NONE       = 0x00;
+        const CONFIG     = 0x01;  // Bit 0
+        const ENUMS      = 0x02;  // Bit 1
+        const DATA       = 0x04;  // Bit 2
+        const SECURITY   = 0x08;  // Bit 3
+        const IMPORTS    = 0x10;  // Bit 4
         const RESERVED_6 = 0x40;
         const RESERVED_7 = 0x80;
     }
@@ -42,26 +47,24 @@ bitflags::bitflags! {
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SectionId {
-    Config = 0x00000001,
-    Enums = 0x00000002,
-    Data = 0x00000003,
+    Config   = 0x00000001,
+    Enums    = 0x00000002,
+    Data     = 0x00000003,
     Security = 0x00000004,
-    Imports = 0x00000005,
+    Imports  = 0x00000005,
 }
 
 impl SectionId {
-    /// Get section name for debugging
     pub fn name(&self) -> &'static str {
         match self {
-            SectionId::Config => "@CONFIG",
-            SectionId::Enums => "@ENUMS",
-            SectionId::Data => "@DATA",
+            SectionId::Config   => "@CONFIG",
+            SectionId::Enums    => "@ENUMS",
+            SectionId::Data     => "@DATA",
             SectionId::Security => "@SECURITY",
-            SectionId::Imports => "@IMPORTS",
+            SectionId::Imports  => "@IMPORTS",
         }
     }
 
-    /// Try to convert u32 to SectionId
     pub fn from_u32(value: u32) -> Option<Self> {
         match value {
             0x00000001 => Some(SectionId::Config),
@@ -69,77 +72,92 @@ impl SectionId {
             0x00000003 => Some(SectionId::Data),
             0x00000004 => Some(SectionId::Security),
             0x00000005 => Some(SectionId::Imports),
-            _ => None,
+            _          => None,
         }
     }
 }
 
 // ==================== VALUE TYPE TAGS ====================
 
-/// Binary type tags for values
+/// Binary type tags for values.
+///
+/// Layout (v1.0.0):
+///   0x01  Int32      — i32
+///   0x02  Int64      — i64 (Long), directly after Int32
+///   0x03  Float32    — f32
+///   0x04  Float64    — f64 (Double)
+///   0x05  String     — length-prefixed UTF-8
+///   0x06  Bool       — 0x00 / 0x01
+///   0x07  Null       — no payload
+///   0x08  Array      — count + element-type + elements
+///   0x09  Object     — count + key-value pairs
+///   0x0A  Date       — 8-byte ticks
+///   0x0B  Timestamp  — 8-byte ticks
+///   0x0C  Hex        — 4-byte RGBA
+///   0x0D  Tuple      — 1-byte count (1-6) + elements
+///   0x0E  Blob       — encoding byte + length + data
+///   0x0F  Regex      — length-prefixed UTF-8 pattern
+///   0xFF  Invalid
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueTypeTag {
-    Int32   = 0x01,
-    Float32 = 0x02,
-    Float64 = 0x03,
-    String  = 0x04,
-    Bool    = 0x05,
-    Null    = 0x06,
-    Array   = 0x07,
-    Object  = 0x08,
-    Date    = 0x09,
-    Timestamp = 0x0A,
-    Hex     = 0x0B,
-    Tuple   = 0x0C,
-    Blob    = 0x0D,
-    Regex   = 0x0E,
-    Int64   = 0x10,   // Long (i64)
-    Reserved15 = 0x0F,
-    Invalid = 0xFF,
+    Int32     = 0x01,
+    Int64     = 0x02,  // Long — directly after Int32
+    Float32   = 0x03,
+    Float64   = 0x04,
+    String    = 0x05,
+    Bool      = 0x06,
+    Null      = 0x07,
+    Array     = 0x08,
+    Object    = 0x09,
+    Date      = 0x0A,
+    Timestamp = 0x0B,
+    Hex       = 0x0C,
+    Tuple     = 0x0D,
+    Blob      = 0x0E,
+    Regex     = 0x0F,
+    Invalid   = 0xFF,
 }
 
 impl ValueTypeTag {
     pub fn name(&self) -> &'static str {
         match self {
-            ValueTypeTag::Int32      => "int",
-            ValueTypeTag::Int64      => "long",
-            ValueTypeTag::Float32    => "float",
-            ValueTypeTag::Float64    => "double",
-            ValueTypeTag::String     => "string",
-            ValueTypeTag::Bool       => "bool",
-            ValueTypeTag::Null       => "null",
-            ValueTypeTag::Array      => "array",
-            ValueTypeTag::Object     => "object",
-            ValueTypeTag::Tuple      => "tuple",
-            ValueTypeTag::Date       => "date",
-            ValueTypeTag::Timestamp  => "timestamp",
-            ValueTypeTag::Hex        => "hex",
-            ValueTypeTag::Blob       => "blob",
-            ValueTypeTag::Regex      => "regex",
-            ValueTypeTag::Reserved15 => "reserved",
-            ValueTypeTag::Invalid    => "invalid",
+            ValueTypeTag::Int32     => "int",
+            ValueTypeTag::Int64     => "long",
+            ValueTypeTag::Float32   => "float",
+            ValueTypeTag::Float64   => "double",
+            ValueTypeTag::String    => "string",
+            ValueTypeTag::Bool      => "bool",
+            ValueTypeTag::Null      => "null",
+            ValueTypeTag::Array     => "array",
+            ValueTypeTag::Object    => "object",
+            ValueTypeTag::Tuple     => "tuple",
+            ValueTypeTag::Date      => "date",
+            ValueTypeTag::Timestamp => "timestamp",
+            ValueTypeTag::Hex       => "hex",
+            ValueTypeTag::Blob      => "blob",
+            ValueTypeTag::Regex     => "regex",
+            ValueTypeTag::Invalid   => "invalid",
         }
     }
 
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             0x01 => Some(ValueTypeTag::Int32),
-            0x02 => Some(ValueTypeTag::Float32),
-            0x03 => Some(ValueTypeTag::Float64),
-            0x04 => Some(ValueTypeTag::String),
-            0x05 => Some(ValueTypeTag::Bool),
-            0x06 => Some(ValueTypeTag::Null),
-            0x07 => Some(ValueTypeTag::Array),
-            0x08 => Some(ValueTypeTag::Object),
-            0x09 => Some(ValueTypeTag::Date),
-            0x0A => Some(ValueTypeTag::Timestamp),
-            0x0B => Some(ValueTypeTag::Hex),
-            0x0C => Some(ValueTypeTag::Tuple),
-            0x0D => Some(ValueTypeTag::Blob),
-            0x0E => Some(ValueTypeTag::Regex),
-            0x0F => Some(ValueTypeTag::Reserved15),
-            0x10 => Some(ValueTypeTag::Int64),
+            0x02 => Some(ValueTypeTag::Int64),
+            0x03 => Some(ValueTypeTag::Float32),
+            0x04 => Some(ValueTypeTag::Float64),
+            0x05 => Some(ValueTypeTag::String),
+            0x06 => Some(ValueTypeTag::Bool),
+            0x07 => Some(ValueTypeTag::Null),
+            0x08 => Some(ValueTypeTag::Array),
+            0x09 => Some(ValueTypeTag::Object),
+            0x0A => Some(ValueTypeTag::Date),
+            0x0B => Some(ValueTypeTag::Timestamp),
+            0x0C => Some(ValueTypeTag::Hex),
+            0x0D => Some(ValueTypeTag::Tuple),
+            0x0E => Some(ValueTypeTag::Blob),
+            0x0F => Some(ValueTypeTag::Regex),
             0xFF => Some(ValueTypeTag::Invalid),
             _    => None,
         }
@@ -165,12 +183,13 @@ impl ValueTypeTag {
         }
     }
 }
+
 // ==================== VALIDATION CONSTANTS ====================
 
-pub const MAX_STRING_LENGTH: usize = 1024 * 1024; // 1 MB
-pub const MAX_ARRAY_LENGTH: usize = 1024 * 1024; // 1M elements
-pub const MAX_OBJECT_PROPERTIES: usize = 100_000; // 100K properties
-pub const MAX_NESTING_DEPTH: usize = 5; // Match DixScript limit
+pub const MAX_STRING_LENGTH:     usize = 1024 * 1024; // 1 MB
+pub const MAX_ARRAY_LENGTH:      usize = 1024 * 1024; // 1M elements
+pub const MAX_OBJECT_PROPERTIES: usize = 100_000;     // 100K properties
+pub const MAX_NESTING_DEPTH:     usize = 5;            // Match DixScript limit
 
 // ==================== BLOB ENCODING ====================
 
@@ -180,31 +199,22 @@ pub const MAX_NESTING_DEPTH: usize = 5; // Match DixScript limit
 pub enum BlobEncoding {
     Base64 = 0x01,
     Base32 = 0x02,
-    Hex = 0x03,
-    Raw = 0x04,
-    Auto = 0xFF,
+    Hex    = 0x03,
+    Raw    = 0x04,
+    Auto   = 0xFF,
 }
 
 impl BlobEncoding {
-    /// Detect blob encoding from string content
     pub fn detect(data: &str) -> Self {
-        // Hex detection (only 0-9, A-F, a-f)
         if data.chars().all(|c| c.is_ascii_hexdigit()) {
             return BlobEncoding::Hex;
         }
-
-        // Base32 detection (A-Z, 2-7, padding =)
-        if data.chars().all(|c| {
-            matches!(c, 'A'..='Z' | '2'..='7' | '=')
-        }) {
+        if data.chars().all(|c| matches!(c, 'A'..='Z' | '2'..='7' | '=')) {
             return BlobEncoding::Base32;
         }
-
-        // Base64 default
         BlobEncoding::Base64
     }
 
-    /// Validate blob data for this encoding
     pub fn validate(&self, data: &str) -> bool {
         match self {
             BlobEncoding::Base64 => {
@@ -217,7 +227,7 @@ impl BlobEncoding {
             BlobEncoding::Base32 => {
                 data.chars().all(|c| matches!(c, 'A'..='Z' | '2'..='7' | '='))
             }
-            BlobEncoding::Raw => true,
+            BlobEncoding::Raw  => true,
             BlobEncoding::Auto => false,
         }
     }
@@ -225,12 +235,10 @@ impl BlobEncoding {
 
 // ==================== HELPER FUNCTIONS ====================
 
-/// Validate magic number
 pub fn is_valid_magic_number(magic: u32) -> bool {
     magic == MAGIC_NUMBER
 }
 
-/// Validate format version
 pub fn is_valid_version(major: u8, minor: u8, patch: u8) -> bool {
     major == VERSION_MAJOR && minor == VERSION_MINOR && patch == VERSION_PATCH
 }

@@ -290,84 +290,121 @@ pub fn new_with_error_manager(
     }
 
     fn validate_simple_property(
-        &mut self,
-        name: &str,
-        declared_type: Option<DataType>,
-        value: &Value,
-        position: Position,
-        symbol_table: &mut SymbolTable,
-        result: &mut SectionAnalysisResult,
-    ) {
-        if Keywords::is_reserved_in_context(name, "DATA") {
+    &mut self,
+    name: &str,
+    declared_type: Option<DataType>,
+    value: &Value,
+    position: Position,
+    symbol_table: &mut SymbolTable,
+    result: &mut SectionAnalysisResult,
+) {
+    if Keywords::is_reserved_in_context(name, "DATA") {
+        self.add_error(
+            result,
+            ERROR_RESERVED_KEYWORD,
+            &Keywords::get_keyword_usage_error(name, "DATA"),
+            position,
+            Some(&format!("Choose a different name for property '{}'", name)),
+        );
+        return;
+    }
+
+    // Duplicate flat-tier property check.
+    // Only flat properties (SimpleProperty / ObjectProperty) are tracked here;
+    // table paths and group arrays are checked separately.
+    if !self.declared_flat_names.insert(name.to_string()) {
+        self.add_error(
+            result,
+            ERROR_DUPLICATE_FLAT_PROPERTY,
+            &format!(
+                "Flat property '{}' is defined more than once in @DATA. \
+                 Each flat property name must be unique.",
+                name
+            ),
+            position,
+            Some(&format!(
+                "Remove or rename the duplicate '{}' property. \
+                 Note: table properties (path:) and group arrays (path::) \
+                 may share this name.",
+                name
+            )),
+        );
+        return;
+    }
+
+    let context = format!("property '{}'", name);
+    let inferred_type = {
+        let visitor = TypeInferenceVisitor::new(symbol_table, None);
+        self.validate_value(value, &context, symbol_table, &visitor, result)
+    };
+
+    let full_path = PathBuilder::build(&[name]);
+
+    self.short_name_to_full_paths
+        .entry(name.to_string())
+        .or_insert_with(Vec::new)
+        .push(full_path.clone());
+
+    if let Some(inf) = inferred_type {
+        self.path_to_type.insert(full_path.clone(), inf);
+    } else if let Some(decl) = declared_type {
+        self.path_to_type.insert(full_path.clone(), decl);
+    }
+
+    if self.debug_config.is_verbose {
+        self.error_manager.log_debug(&format!(
+            "  Indexed: {} -> {} ({:?})", name, full_path, inferred_type.or(declared_type)
+        ));
+    }
+
+    if let (Some(decl), Some(mut inf)) = (declared_type, inferred_type) {
+        // Widening coercions: allow numeric promotion in the declared direction.
+        if decl == DataType::Float
+            && matches!(inf, DataType::Int | DataType::Long | DataType::Double)
+        {
+            inf = DataType::Float;
+            self.path_to_type.insert(full_path.clone(), DataType::Float);
+        }
+        if decl == DataType::Long && inf == DataType::Int {
+            inf = DataType::Long;
+            self.path_to_type.insert(full_path.clone(), DataType::Long);
+        }
+        if decl == DataType::Double
+            && matches!(inf, DataType::Int | DataType::Long | DataType::Float)
+        {
+            inf = DataType::Double;
+            self.path_to_type.insert(full_path.clone(), DataType::Double);
+        }
+
+        if !Self::is_type_compatible(decl, inf) {
             self.add_error(
                 result,
-                ERROR_RESERVED_KEYWORD,
-                &Keywords::get_keyword_usage_error(name, "DATA"),
+                ERROR_TYPE_MISMATCH,
+                &format!(
+                    "Property '{}' is declared as <{}> but the value is <{}>. \
+                     These types are not compatible.",
+                    name, decl, inf
+                ),
                 position,
-                Some(&format!("Choose a different name for property '{}'", name)),
+                Some(&format!(
+                    "Either change the type annotation to <{}> or \
+                     provide a value of type <{}>.",
+                    inf, decl
+                )),
             );
-            return;
         }
-
-        let context = format!("property '{}'", name);
-        let inferred_type = {
-            let visitor = TypeInferenceVisitor::new(symbol_table, None);
-            self.validate_value(value, &context, symbol_table, &visitor, result)
-        };
-
-        let full_path = PathBuilder::build(&[name]);
-
-        self.short_name_to_full_paths
-            .entry(name.to_string())
-            .or_insert_with(Vec::new)
-            .push(full_path.clone());
-
-        if let Some(inf) = inferred_type {
-            self.path_to_type.insert(full_path.clone(), inf);
-        } else if let Some(decl) = declared_type {
-            self.path_to_type.insert(full_path.clone(), decl);
-        }
-
-        if self.debug_config.is_verbose {
-            self.error_manager.log_debug(&format!(
-                "  Indexed: {} -> {} ({:?})", name, full_path, inferred_type.or(declared_type)
-            ));
-        }
-
-        if let (Some(decl), Some(mut inf)) = (declared_type, inferred_type) {
-            if decl == DataType::Float && matches!(inf, DataType::Int | DataType::Long | DataType::Double) {
-                inf = DataType::Float;
-                self.path_to_type.insert(full_path.clone(), DataType::Float);
-            }
-            if decl == DataType::Long && inf == DataType::Int {
-                inf = DataType::Long;
-                self.path_to_type.insert(full_path.clone(), DataType::Long);
-            }
-            if !Self::is_type_compatible(decl, inf) {
-                self.add_error(
-                    result,
-                    ERROR_TYPE_MISMATCH,
-                    &format!(
-                        "Property '{}' declared as <{:?}> but value is {:?}", name, decl, inf
-                    ),
-                    position,
-                    Some(&format!(
-                        "Change type annotation to <{:?}> or provide a compatible value", inf
-                    )),
-                );
-            }
-        }
-
-        symbol_table.add_data_variable(name.to_string(), VariableInfo {
-            name: name.to_string(),
-            declared_type,
-            inferred_type,
-            is_inferred: declared_type.is_none(),
-            scope: "global".to_string(),
-            line: position.line as i32,
-            column: position.column as i32,
-        });
     }
+
+    symbol_table.add_data_variable(name.to_string(), VariableInfo {
+        name: name.to_string(),
+        declared_type,
+        inferred_type,
+        is_inferred: declared_type.is_none(),
+        scope: "global".to_string(),
+        line: position.line as i32,
+        column: position.column as i32,
+    });
+}
 
     fn validate_table_property(
         &mut self,
@@ -526,47 +563,66 @@ pub fn new_with_error_manager(
     }
 
     fn validate_object_property(
-        &mut self,
-        name: &str,
-        declared_type: Option<DataType>,
-        object: &Value,
-        position: Position,
-        symbol_table: &mut SymbolTable,
-        result: &mut SectionAnalysisResult,
-    ) {
-        self.current_nesting_depth = 0;
-        let context = format!("object property '{}'", name);
-
-        {
-            let visitor = TypeInferenceVisitor::new(symbol_table, None);
-            self.validate_object_literal(object, &context, symbol_table, &visitor, result);
-        }
-
-        let full_path = PathBuilder::build(&[name]);
-        self.short_name_to_full_paths
-            .entry(name.to_string())
-            .or_insert_with(Vec::new)
-            .push(full_path.clone());
-
-        let object_type = declared_type.unwrap_or(DataType::Object);
-        self.path_to_type.insert(full_path.clone(), object_type);
-
-        if self.debug_config.is_verbose {
-            self.error_manager.log_debug(&format!(
-                "  Indexed object: {} -> {} ({:?})", name, full_path, object_type
-            ));
-        }
-
-        symbol_table.add_data_variable(name.to_string(), VariableInfo {
-            name: name.to_string(),
-            declared_type: Some(declared_type.unwrap_or(DataType::Object)),
-            inferred_type: Some(DataType::Object),
-            is_inferred: declared_type.is_none(),
-            scope: "global".to_string(),
-            line: position.line as i32,
-            column: position.column as i32,
-        });
+    &mut self,
+    name: &str,
+    declared_type: Option<DataType>,
+    object: &Value,
+    position: Position,
+    symbol_table: &mut SymbolTable,
+    result: &mut SectionAnalysisResult,
+) {
+    // ObjectProperty is also in the flat tier — check for duplicates.
+    if !self.declared_flat_names.insert(name.to_string()) {
+        self.add_error(
+            result,
+            ERROR_DUPLICATE_FLAT_PROPERTY,
+            &format!(
+                "Flat property '{}' is defined more than once in @DATA. \
+                 Each flat property name must be unique.",
+                name
+            ),
+            position,
+            Some(&format!(
+                "Remove or rename the duplicate '{}' property.",
+                name
+            )),
+        );
+        return;
     }
+
+    self.current_nesting_depth = 0;
+    let context = format!("object property '{}'", name);
+
+    {
+        let visitor = TypeInferenceVisitor::new(symbol_table, None);
+        self.validate_object_literal(object, &context, symbol_table, &visitor, result);
+    }
+
+    let full_path = PathBuilder::build(&[name]);
+    self.short_name_to_full_paths
+        .entry(name.to_string())
+        .or_insert_with(Vec::new)
+        .push(full_path.clone());
+
+    let object_type = declared_type.unwrap_or(DataType::Object);
+    self.path_to_type.insert(full_path.clone(), object_type);
+
+    if self.debug_config.is_verbose {
+        self.error_manager.log_debug(&format!(
+            "  Indexed object: {} -> {} ({:?})", name, full_path, object_type
+        ));
+    }
+
+    symbol_table.add_data_variable(name.to_string(), VariableInfo {
+        name: name.to_string(),
+        declared_type: Some(declared_type.unwrap_or(DataType::Object)),
+        inferred_type: Some(DataType::Object),
+        is_inferred: declared_type.is_none(),
+        scope: "global".to_string(),
+        line: position.line as i32,
+        column: position.column as i32,
+    });
+}
 
     #[inline]
     fn join_path(segments: &[String]) -> String {

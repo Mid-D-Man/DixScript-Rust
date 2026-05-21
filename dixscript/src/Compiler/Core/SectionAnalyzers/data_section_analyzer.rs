@@ -1251,32 +1251,56 @@ pub fn new_with_error_manager(
 
     // ==================== TYPE SYSTEM ====================
 
-    #[inline]
-    fn is_type_compatible(expected: DataType, actual: DataType) -> bool {
-        if expected == actual {
-            return true;
-        }
-        if expected == DataType::Any || actual == DataType::Any {
-            return true;
-        }
-        if expected == DataType::Hex {
-            return matches!(actual, DataType::Int | DataType::Long | DataType::Hex);
-        }
-        // Long is wider than Int; widening is safe
-        if expected == DataType::Long {
-            return matches!(actual, DataType::Int | DataType::Long);
-        }
-        if matches!(expected, DataType::Double | DataType::Float) {
-            return matches!(
+#[inline]
+fn is_type_compatible(expected: DataType, actual: DataType) -> bool {
+    if expected == actual {
+        return true;
+    }
+    if expected == DataType::Any || actual == DataType::Any {
+        return true;
+    }
+
+    match expected {
+        // Hex accepts integer hex literals (0xFF) and plain integers.
+        DataType::Hex => matches!(actual, DataType::Int | DataType::Long | DataType::Hex),
+
+        // Long is wider than Int; widening is safe.
+        DataType::Long => matches!(actual, DataType::Int | DataType::Long),
+
+        // Float and Double accept all numeric types (widening).
+        DataType::Float | DataType::Double => matches!(
             actual,
             DataType::Int | DataType::Long | DataType::Float | DataType::Double
-        );
-        }
-        if expected == DataType::String {
-            return true;
-        }
-        false
+        ),
+
+        // String only accepts String (InterpolatedString infers as String).
+        // DO NOT fall through to true here — this was a bug.
+        DataType::String => actual == DataType::String,
+
+        // Bool only accepts Bool.
+        DataType::Bool => actual == DataType::Bool,
+
+        // Int does NOT accept Float/Double (narrowing).
+        DataType::Int => matches!(actual, DataType::Int),
+
+        // Object accepts Object only.
+        DataType::Object => actual == DataType::Object,
+
+        // Strict single-type matches for everything else.
+        DataType::Array     => actual == DataType::Array,
+        DataType::Tuple     => actual == DataType::Tuple,
+        DataType::Blob      => actual == DataType::Blob,
+        DataType::Regex     => actual == DataType::Regex,
+        DataType::Date      => actual == DataType::Date,
+        DataType::Timestamp => actual == DataType::Timestamp,
+        DataType::Enum      => actual == DataType::Enum,
+        DataType::Function  => actual == DataType::Function,
+        DataType::Range     => actual == DataType::Range,
+
+        // Any was handled above; this arm is unreachable.
+        DataType::Any => true,
     }
+}
 
     fn extract_table_path_from_context(context: &str) -> String {
         let Some(captures) = CONTEXT_QUOTE_RE.captures(context) else {

@@ -4,16 +4,22 @@
 //! Full source goes to the tokenizer first. Config tokens are split off and
 //! routed to ConfigSectionHandler::process_config_tokens, which produces the
 //! ConfigSection AST and real OperationalSettings with accurate positions
-//! directly from the token stream — no source stripping, no position fixup,
-//! no synthetic token generation in the LSP features.
+//! directly from the token stream.
 //!
 //! doc.tokens stores the FULL token stream (including @CONFIG tokens) so that
-//! all LSP features (hover, completions, semantic tokens, folding, etc.) see
-//! the complete file with correct positions.
+//! all LSP features see the complete file with correct positions.
 //!
 //! KEY INVARIANT: debug_mode from @CONFIG is for the CLI compiler, not the LSP.
-//! We always override to DebugMode::Off after processing config. LSP debug
-//! output goes via RUST_LOG / tracing.
+//! We always override to DebugMode::Off after processing config.
+//!
+//! FIX (semantic errors/warnings): SemanticErrorInfo / SemanticWarningInfo objects
+//! produced by the section analyzers live in SemanticAnalysisResult.errors/warnings
+//! but are never forwarded to the ErrorManager as DixError objects.  They are
+//! collected here and appended to the final diagnostic list so they appear in the
+//! editor as proper squiggles.
+//!
+//! FIX (imports): operational_settings.source_file_path must be set from the
+//! document URI so that ImportsResolver can locate relative .mdix files.
 
 use std::panic;
 
@@ -23,9 +29,11 @@ use dixscript::Compiler::Core::{
     GeneralParser, GeneralSemanticAnalyzer, OperationalSettings,
 };
 use dixscript::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
-use dixscript::ErrorManager::DixError;
+use dixscript::ErrorManager::{DixError, ErrorSeverity};
 
 use crate::document::Document;
+
+// ── Public entry point ────────────────────────────────────────────────────────
 
 pub fn run_pipeline(doc: &mut Document) -> Vec<DixError> {
     let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -45,16 +53,15 @@ pub fn run_pipeline(doc: &mut Document) -> Vec<DixError> {
     }
 }
 
+// ── Inner pipeline ────────────────────────────────────────────────────────────
+
 fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     let em = doc.error_manager.clone();
 
-    // Force Continue so all stages run and collect all diagnostics regardless
-    // of what the file's @CONFIG specifies for error_handling.
+    // Force Continue so all stages run and every diagnostic is collected.
     em.force_strategy(ErrorHandlingStrategy::Continue);
 
-    // ── Stage 1: tokenize the FULL source ────────────────────────────────────
-    // Use a safe default OpSettings for the tokenizer pass: Continue + Off.
-    // Real OpSettings come from config processing in Stage 2.
+    // ── Stage 1: tokenize the FULL source ─────────────────────────────────────
     let tokenizer_settings = OperationalSettings {
         error_handling_strategy: ErrorHandlingStrategy::Continue,
         debug_mode:              DebugMode::Off,
@@ -68,21 +75,17 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     );
     let token_result = tokenizer.tokenize();
 
-    // Keep the full stream for doc.tokens — LSP features need all tokens
-    // including @CONFIG tokens, with their real positions.
+    // Keep the full stream — LSP features need all tokens including @CONFIG.
     let all_tokens = token_result.tokens;
 
     tracing::debug!("Tokenized: {} tokens", all_tokens.len());
 
     if all_tokens.len() <= 1 {
-        // Only EOF — nothing to do.
         doc.tokens = all_tokens;
         return em.get_all_errors_flat();
     }
 
     // ── Stage 2: split @CONFIG and process it ────────────────────────────────
-    // split_config_tokens consumes the vec — clone so doc.tokens keeps the full
-    // stream. A typical .mdix file has a few hundred tokens; this is cheap.
     let split = split_config_tokens(all_tokens.clone());
 
     let config_result = {
@@ -91,12 +94,26 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         handler.process_config_tokens(&split.config_tokens)
     };
 
-    // ── CRITICAL: override debug_mode for LSP ────────────────────────────────
-    // The user's @CONFIG `debug_mode -> "verbose"` is for the CLI compiler.
-    // Verbose logging inside spawn_blocking fills stderr, blocks tokio, and
-    // causes shutdown timeouts. Always silence the pipeline in LSP mode.
+    // Override debug_mode for LSP — verbose logging blocks tokio.
     let mut operational_settings = config_result.operational_settings.clone();
     operational_settings.debug_mode = DebugMode::Off;
+
+    // ── FIX: set source file path so ImportsResolver can find relative files ──
+    // Without this, every @IMPORTS entry fails with "file not found" because
+    // the resolver has no base directory to resolve relative paths against.
+    if let Ok(file_path) = doc.uri.to_file_path() {
+        let path_str = file_path.to_string_lossy().into_owned();
+        operational_settings.source_file_path = Some(path_str);
+        tracing::debug!(
+            "Source file path set: {:?}",
+            operational_settings.source_file_path
+        );
+    } else {
+        tracing::debug!(
+            "URI is not a file:// URI; import resolution may not work: {}",
+            doc.uri
+        );
+    }
 
     tracing::debug!(
         "Config processed: strategy={:?} version={}",
@@ -108,8 +125,6 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     doc.tokens = all_tokens;
 
     // ── Stage 3: parse ────────────────────────────────────────────────────────
-    // rest_tokens is everything except the @CONFIG block — exactly what
-    // GeneralParser expects (it receives the ConfigSection separately).
     let parser = match GeneralParser::new_for_lsp(
         split.rest_tokens,
         &config_result.config_section,
@@ -142,9 +157,10 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     let semantic_result = analyzer.analyze();
 
     tracing::debug!(
-        "Semantic analysis: success={}, errors={}",
+        "Semantic analysis: success={}, errors={}, warnings={}",
         semantic_result.is_success,
-        semantic_result.errors.len()
+        semantic_result.errors.len(),
+        semantic_result.warnings.len(),
     );
 
     // ── Stage 5: AST enhancement ──────────────────────────────────────────────
@@ -159,11 +175,110 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         enhancement_result.total_enhancements
     );
 
+    // ── Assemble final diagnostic list ────────────────────────────────────────
+    //
+    // The error manager holds lexical, parse, and imports-resolution errors.
+    // Semantic errors/warnings are tracked separately in SemanticAnalysisResult
+    // and are NEVER forwarded to the ErrorManager by the section analyzers —
+    // they call error_manager.log_error() (stderr-only) rather than
+    // add_semantic_error().  We convert them here so they appear as editor
+    // squiggles.
+    //
+    // We do this BEFORE moving semantic_result into doc so we can borrow it.
+
+    let mut all_errors = em.get_all_errors_flat();
+
+    // ── Convert SemanticErrorInfo → DixError (Error severity) ─────────────────
+    for err in &semantic_result.errors {
+        let (line, col) = err
+            .position
+            .map(|p| (p.line as i32, p.column as i32))
+            .unwrap_or((0, 0));
+
+        all_errors.push(semantic_info_to_dix_error(
+            err.error_id.clone(),
+            err.message.clone(),
+            if err.suggestion.is_empty() {
+                None
+            } else {
+                Some(err.suggestion.clone())
+            },
+            ErrorSeverity::Error,
+            line,
+            col,
+        ));
+    }
+
+    // ── Convert SemanticWarningInfo → DixError (Warning severity) ─────────────
+    //
+    // This covers ALL warnings:
+    //   • SecuritySectionAnalyzer:  xor is weak, missing KDF fields, manual mode, etc.
+    //   • DataSectionAnalyzer:      empty group arrays
+    //   • DlmSectionAnalyzer:       module ordering issues
+    //   • QuickFuncsSectionAnalyzer: unused parameters, etc.
+    //   • Phase 8 (missing @SECURITY when DEncryptor is present) — this is an
+    //     *error*, already covered in semantic_result.errors above.
+    for warn in &semantic_result.warnings {
+        let (line, col) = warn
+            .position
+            .map(|p| (p.line as i32, p.column as i32))
+            .unwrap_or((0, 0));
+
+        all_errors.push(semantic_info_to_dix_error(
+            warn.warning_id.clone(),
+            warn.message.clone(),
+            None,
+            ErrorSeverity::Warning,
+            line,
+            col,
+        ));
+    }
+
+    // Store pipeline results.
     doc.ast                = Some(ast);
     doc.semantic_result    = Some(semantic_result);
     doc.enhancement_result = Some(enhancement_result);
 
-    let errors = em.get_all_errors_flat();
-    tracing::debug!("Pipeline complete: {} errors/warnings", errors.len());
-    errors
+    tracing::debug!(
+        "Pipeline complete: {} total diagnostics ({} from em, {} semantic)",
+        all_errors.len(),
+        em.get_all_errors_flat().len(),
+        all_errors.len().saturating_sub(em.get_all_errors_flat().len()),
+    );
+
+    all_errors
 }
+
+// ── Semantic → DixError conversion ───────────────────────────────────────────
+//
+// SemanticErrorInfo / SemanticWarningInfo are compiler-internal structs.
+// DixError::Semantic wraps the ErrorManager's own SemanticError struct.
+//
+// ASSUMPTION: dixscript::ErrorManager exports `SemanticError` with at least the
+// fields accessed by converters.rs: error_id, message, suggestion, severity,
+// line, column.  These are all public because converters.rs (in this crate)
+// accesses them directly.
+//
+// If this function fails to compile, inspect dixscript/src/ErrorManager/ for
+// the exact struct name and field list, then update the construction below.
+// As a fallback you can replace the body with a DixError::General variant,
+// which always renders at position 0:0 but at least surfaces the message.
+fn semantic_info_to_dix_error(
+    error_id:   String,
+    message:    String,
+    suggestion: Option<String>,
+    severity:   ErrorSeverity,
+    line:       i32,
+    column:     i32,
+) -> DixError {
+    use dixscript::ErrorManager::SemanticError;
+
+    DixError::Semantic(SemanticError {
+        error_id,
+        message,
+        suggestion,
+        severity,
+        line,
+        column,
+    })
+        }

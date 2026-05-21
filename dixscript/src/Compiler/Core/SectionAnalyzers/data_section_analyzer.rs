@@ -31,7 +31,7 @@ const ERROR_FUNCTION_NOT_FOUND:         &str = "FUNCTION_NOT_FOUND";
 const ERROR_INVALID_EXPRESSION:         &str = "INVALID_EXPRESSION";
 const ERROR_INVALID_BLOB_CONTENT:       &str = "INVALID_BLOB_CONTENT";
 const ERROR_INVALID_REGEX_PATTERN:      &str = "INVALID_REGEX_PATTERN";
-
+const ERROR_DUPLICATE_FLAT_PROPERTY:    &str = "DUPLICATE_FLAT_PROPERTY";
 const MAX_NESTING_DEPTH:  usize = 5;
 const MAX_TUPLE_ELEMENTS: usize = 6;
 
@@ -53,6 +53,10 @@ pub struct DataSectionAnalyzer<'a> {
     debug_config:            DebugConfig,
 
     declared_table_paths:    FxHashSet<String>,
+    /// Tracks flat-tier property names (SimpleProperty + ObjectProperty) to
+    /// detect duplicates within the same @DATA section.  Table paths and group
+    /// array paths are tracked separately by validate_table_path_uniqueness.
+    declared_flat_names:     FxHashSet<String>,
     current_nesting_depth:   usize,
 
     short_name_to_full_paths: FxHashMap<String, Vec<String>>,
@@ -61,13 +65,14 @@ pub struct DataSectionAnalyzer<'a> {
 
 impl<'a> DataSectionAnalyzer<'a> {
 
+    
     //Depricated left regular new in sub moduls for sake of bakwards compatability
-    //use new with error manager instead from here on out.
-    pub fn new(operational_settings: &'a OperationalSettings) -> Self {
-     Self::new_with_error_manager(operational_settings,ErrorManager::get_shared_instance())
-    }
+//use new with error manager instead from here on out.
+pub fn new(operational_settings: &'a OperationalSettings) -> Self {
+    Self::new_with_error_manager(operational_settings, ErrorManager::get_shared_instance())
+}
 
-pub fn new_with_error_manager (
+pub fn new_with_error_manager(
     operational_settings: &'a OperationalSettings,
     error_manager: ErrorManager,
 ) -> Self {
@@ -76,67 +81,72 @@ pub fn new_with_error_manager (
         error_manager,
         operational_settings,
         declared_table_paths:     FxHashSet::default(),
+        declared_flat_names:      FxHashSet::default(),
         current_nesting_depth:    0,
         short_name_to_full_paths: FxHashMap::default(),
         path_to_type:             FxHashMap::default(),
     }
 }
     pub fn analyze(
-        &mut self,
-        section: &DataSection,
-        symbol_table: &mut SymbolTable,
-    ) -> SectionAnalysisResult {
-        let mut result = SectionAnalysisResult::new("DATA");
-        let entry_count = section.entries.len();
+    &mut self,
+    section: &DataSection,
+    symbol_table: &mut SymbolTable,
+) -> SectionAnalysisResult {
+    let mut result = SectionAnalysisResult::new("DATA");
+    let entry_count = section.entries.len();
 
-        self.declared_table_paths = FxHashSet::with_capacity_and_hasher(
-            entry_count / 2,
-            Default::default(),
-        );
-        self.current_nesting_depth = 0;
+    self.declared_table_paths = FxHashSet::with_capacity_and_hasher(
+        entry_count / 2,
+        Default::default(),
+    );
+    self.declared_flat_names = FxHashSet::with_capacity_and_hasher(
+        entry_count,
+        Default::default(),
+    );
+    self.current_nesting_depth = 0;
 
-        if self.debug_config.is_enabled {
-            self.error_manager.log_info(&format!(
-                "Analyzing DATA section with {} entries", entry_count
-            ));
-        }
-
-        if self.debug_config.is_verbose {
-            self.error_manager.log_debug("Phase 1: Validating two-tier ordering");
-        }
-        self.validate_two_tier_ordering(section, &mut result);
-
-        if self.debug_config.is_verbose {
-            self.error_manager.log_debug("Phase 2: Validating table path uniqueness");
-        }
-        self.validate_table_path_uniqueness(section, &mut result);
-
-        if self.debug_config.is_verbose {
-            self.error_manager.log_debug("Phase 3: Validating entries and building indexes");
-        }
-        for entry in &section.entries {
-            self.validate_data_entry(entry, symbol_table, &mut result);
-            if self.error_manager.should_terminate_parsing() {
-                break;
-            }
-        }
-
-        result.is_success = result.errors.is_empty();
-
-        if self.debug_config.is_enabled {
-            self.error_manager.log_info(&format!(
-                "DATA analysis {}: {} entries, {} short names, {} types, {} errors, {} warnings",
-                if result.is_success { "SUCCESS" } else { "FAILED" },
-                entry_count,
-                self.short_name_to_full_paths.len(),
-                self.path_to_type.len(),
-                result.errors.len(),
-                result.warnings.len(),
-            ));
-        }
-
-        result
+    if self.debug_config.is_enabled {
+        self.error_manager.log_info(&format!(
+            "Analyzing DATA section with {} entries", entry_count
+        ));
     }
+
+    if self.debug_config.is_verbose {
+        self.error_manager.log_debug("Phase 1: Validating two-tier ordering");
+    }
+    self.validate_two_tier_ordering(section, &mut result);
+
+    if self.debug_config.is_verbose {
+        self.error_manager.log_debug("Phase 2: Validating table path uniqueness");
+    }
+    self.validate_table_path_uniqueness(section, &mut result);
+
+    if self.debug_config.is_verbose {
+        self.error_manager.log_debug("Phase 3: Validating entries and building indexes");
+    }
+    for entry in &section.entries {
+        self.validate_data_entry(entry, symbol_table, &mut result);
+        if self.error_manager.should_terminate_parsing() {
+            break;
+        }
+    }
+
+    result.is_success = result.errors.is_empty();
+
+    if self.debug_config.is_enabled {
+        self.error_manager.log_info(&format!(
+            "DATA analysis {}: {} entries, {} short names, {} types, {} errors, {} warnings",
+            if result.is_success { "SUCCESS" } else { "FAILED" },
+            entry_count,
+            self.short_name_to_full_paths.len(),
+            self.path_to_type.len(),
+            result.errors.len(),
+            result.warnings.len(),
+        ));
+    }
+
+    result
+}
 
     #[inline]
     pub fn get_indexes(

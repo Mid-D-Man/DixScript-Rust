@@ -2340,26 +2340,26 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
     /// Convert a type-keyword string to the corresponding DataType variant.
     fn str_to_data_type(s: &str) -> Option<DataType> {
-        match s {
-            "int"       => Some(DataType::Int),
-            "long"       => Some(DataType::Long),
-            "float"     => Some(DataType::Float),
-            "double"    => Some(DataType::Double),
-            "string"    => Some(DataType::String),
-            "bool"      => Some(DataType::Bool),
-            "array"     => Some(DataType::Array),
-            "object"    => Some(DataType::Object),
-            "tuple"     => Some(DataType::Tuple),
-            "hex"       => Some(DataType::Hex),
-            "blob"      => Some(DataType::Blob),
-            "regex"     => Some(DataType::Regex),
-            "date"      => Some(DataType::Date),
-            "timestamp" => Some(DataType::Timestamp),
-            "enum"      => Some(DataType::Enum),
-            "any"       => Some(DataType::Any),
-            _           => None,
-        }
+    match s {
+        "int"       => Some(DataType::Int),
+        "long"      => Some(DataType::Long),
+        "float"     => Some(DataType::Float),
+        "double"    => Some(DataType::Double),
+        "string"    => Some(DataType::String),
+        "bool"      => Some(DataType::Bool),
+        "array"     => Some(DataType::Array),
+        "object"    => Some(DataType::Object),
+        "tuple"     => Some(DataType::Tuple),
+        "hex"       => Some(DataType::Hex),
+        "blob"      => Some(DataType::Blob),
+        "regex"     => Some(DataType::Regex),
+        "date"      => Some(DataType::Date),
+        "timestamp" => Some(DataType::Timestamp),
+        "enum"      => Some(DataType::Enum),
+        "any"       => Some(DataType::Any),   // ← was missing
+        _           => None,
     }
+}
 
     fn parse_type_annotation(&mut self) -> Option<DataType> {
     if !self.check_symbol('<') { return None; }
@@ -2551,6 +2551,73 @@ fn parse_typed_collection_qf(&mut self, base_kw: &str) -> Option<DataType> {
 
         Some(path)
     }
+
+    /// Parse a single element-type keyword and advance.
+fn parse_elem_type_keyword_qf(&mut self) -> Option<ElemType> {
+    let token = self.current().clone();
+    let lower: Option<String> = match &token.token_type {
+        TokenType::Keyword(kw)    => Some(kw.to_lowercase()),
+        TokenType::Identifier(id) => Some(id.to_lowercase()),
+        _ => None,
+    };
+
+    match lower {
+        Some(ref s) => {
+            let elem = ElemType::from_keyword(s.as_str());
+            if elem.is_some() {
+                self.advance();
+            } else {
+                self.error_manager.add_parse_error(
+                    ParseErrorType::InvalidType,
+                    format!("Unknown element type '{}' in typed collection annotation", s),
+                    token.line, token.column, None,
+                    self.get_source_line(&token),
+                );
+                self.advance(); // skip invalid, attempt continuation
+            }
+            elem
+        }
+        None => {
+            self.error_manager.add_parse_error(
+                ParseErrorType::InvalidType,
+                "Expected element type keyword (int, string, bool, …) in typed collection".to_string(),
+                token.line, token.column, None,
+                self.get_source_line(&token),
+            );
+            None
+        }
+    }
+}
+
+                /// True when current token is `>` or the first `>` of a `>>` token.
+#[inline]
+fn is_closing_angle(&self) -> bool {
+    match &self.current().token_type {
+        TokenType::Symbol('>') => true,
+        TokenType::BitwiseOp(op) if *op == ">>" => true,
+        _ => false,
+    }
+}
+
+/// Consume one closing `>`, handling the `>>` split case.
+fn match_and_consume_closing_angle(&mut self) -> bool {
+    if self.pending_angle {
+        self.pending_angle = false;
+        return true;
+    }
+    if self.check_symbol('>') {
+        self.advance();
+        return true;
+    }
+    if let TokenType::BitwiseOp(op) = &self.current().token_type {
+        if *op == ">>" {
+            self.advance();
+            self.pending_angle = true;
+            return true;
+        }
+    }
+    false
+            }
 
     /// Consume a `->`  switch-case arrow (distinct from `=>` scope arrow).
     fn match_arrow(&mut self) -> bool {

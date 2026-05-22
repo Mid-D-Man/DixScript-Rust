@@ -1,2 +1,1193 @@
- Ok commrents work, em interpolated strings to, but all other issues remain,
- please start by fixing config handling
+~/Desktop/DixScript-Rust/mdix-lsp git:[master]
+cargo build --release
+warning: profile package spec `mdix-wasm` in profile `release` did not match any packages
+
+help: a package with a similar name exists: `mdix-lsp`
+   Compiling dixscript v1.0.0 (/Users/midman/Desktop/DixScript-Rust/dixscript)
+warning: type `MID_Logger` should have an upper camel case name
+  --> dixscript/src/Utilities/mid_logger.rs:17:12
+   |
+17 | pub struct MID_Logger {
+   |            ^^^^^^^^^^ help: convert the identifier to upper camel case: `MidLogger`
+   |
+   = note: `#[warn(non_camel_case_types)]` on by default
+
+warning: unexpected `cfg` condition value: `debug_logging`
+   --> dixscript/src/Utilities/mid_logger.rs:293:15
+    |
+293 |         #[cfg(feature = "debug_logging")]
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: `default`
+    = help: consider adding `debug_logging` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition value: `debug_logging`
+   --> dixscript/src/Utilities/mid_logger.rs:297:19
+    |
+297 |         #[cfg(not(feature = "debug_logging"))]
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: `default`
+    = help: consider adding `debug_logging` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `verbose_logging`
+   --> dixscript/src/Utilities/mid_logger.rs:305:15
+    |
+305 |         #[cfg(feature = "verbose_logging")]
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: `default`
+    = help: consider adding `verbose_logging` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `verbose_logging`
+   --> dixscript/src/Utilities/mid_logger.rs:309:19
+    |
+309 |         #[cfg(not(feature = "verbose_logging"))]
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: `default`
+    = help: consider adding `verbose_logging` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unused import: `std::collections::HashSet`
+ --> dixscript/src/Utilities/mid_helper_functions.rs:2:5
+  |
+2 | use std::collections::HashSet;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `std::fmt::Write`
+ --> dixscript/src/Utilities/mid_helper_functions.rs:3:5
+  |
+3 | use std::fmt::Write;
+  |     ^^^^^^^^^^^^^^^
+
+warning: type `MID_HelperFunctions` should have an upper camel case name
+ --> dixscript/src/Utilities/mid_helper_functions.rs:7:12
+  |
+7 | pub struct MID_HelperFunctions;
+  |            ^^^^^^^^^^^^^^^^^^^ help: convert the identifier to upper camel case: `MidHelperFunctions`
+
+warning: unused import: `std::fmt::Write`
+ --> dixscript/src/Utilities/ast_debug_printer.rs:3:5
+  |
+3 | use std::fmt::Write;
+  |     ^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::ErrorManager::Helpers::*`
+  --> dixscript/src/ErrorManager/error_manager.rs:13:5
+   |
+13 | use crate::ErrorManager::Helpers::*;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::path::Path`
+ --> dixscript/src/ErrorManager/diagnostic_dumper.rs:2:5
+  |
+2 | use std::path::Path;
+  |     ^^^^^^^^^^^^^^^
+
+warning: unused import: `BuiltinMethodException`
+ --> dixscript/src/Builtins/Instance/string_methods.rs:7:5
+  |
+7 |     BuiltinMethodException, validation_helpers,
+  |     ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `validation_helpers`
+ --> dixscript/src/Builtins/Instance/regex_methods.rs:6:55
+  |
+6 |     DixType, DixValue, IBuiltinMethod, BuiltinMethod, validation_helpers,
+  |                                                       ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::position::Position`
+ --> dixscript/src/Compiler/AST/root.rs:1:5
+  |
+1 | use super::position::Position;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Position`
+ --> dixscript/src/Compiler/Core/mod.rs:6:28
+  |
+6 | use crate::Compiler::AST::{Position, DataType, DixScript};
+  |                            ^^^^^^^^
+
+warning: unused import: `crate::Compiler::Core::Config::operational_settings::ErrorHandlingStrategy`
+  --> dixscript/src/Compiler/Core/Tokenizer/lexer.rs:46:5
+   |
+46 | use crate::Compiler::Core::Config::operational_settings::ErrorHandlingStrategy;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `SemanticErrorType`
+ --> dixscript/src/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs:7:41
+  |
+7 | use crate::ErrorManager::{ErrorManager, SemanticErrorType, DebugConfig};
+  |                                         ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::net::ToSocketAddrs`
+  --> dixscript/src/Compiler/Core/ValueResolution/function_interpreter.rs:10:5
+   |
+10 | use std::net::ToSocketAddrs;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::supporting_classes::ExecutionError`
+  --> dixscript/src/Compiler/Core/ValueResolution/function_interpreter.rs:27:5
+   |
+27 | use super::supporting_classes::ExecutionError;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Position`
+ --> dixscript/src/Compiler/Core/BinarySerialization/binary_format.rs:9:38
+  |
+9 | use crate::Compiler::AST::{DataType, Position};
+  |                                      ^^^^^^^^
+
+warning: unused import: `crate::ErrorManager::ErrorTypes::BinarySerializationErrorType`
+ --> dixscript/src/Compiler/Core/BinarySerialization/binary_packer.rs:6:5
+  |
+6 | use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::ErrorManager::ErrorTypes::BinarySerializationErrorType`
+ --> dixscript/src/Compiler/Core/BinarySerialization/binary_unpacker.rs:6:5
+  |
+6 | use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `DataType`
+ --> dixscript/src/Compiler/Core/BinarySerialization/value_encoder.rs:5:35
+  |
+5 | use crate::Compiler::AST::{Value, DataType};
+  |                                   ^^^^^^^^
+
+warning: unused import: `MAX_STRING_LENGTH`
+ --> dixscript/src/Compiler/Core/BinarySerialization/value_encoder.rs:7:56
+  |
+7 | use super::binary_format::{ValueTypeTag, BlobEncoding, MAX_STRING_LENGTH};
+  |                                                        ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::ErrorManager::ErrorTypes::BinarySerializationErrorType`
+ --> dixscript/src/Compiler/Core/BinarySerialization/SectionReaders/enums_section_reader.rs:5:5
+  |
+5 | use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::ErrorManager::ErrorTypes::BinarySerializationErrorType`
+ --> dixscript/src/Compiler/Core/BinarySerialization/SectionReaders/security_section_reader.rs:5:5
+  |
+5 | use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::ErrorManager::ErrorTypes::BinarySerializationErrorType`
+ --> dixscript/src/Compiler/Core/BinarySerialization/SectionWriters/config_section_writer.rs:6:5
+  |
+6 | use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::ErrorManager::ErrorTypes::BinarySerializationErrorType`
+ --> dixscript/src/Compiler/Core/BinarySerialization/SectionWriters/enums_section_writer.rs:5:5
+  |
+5 | use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::ErrorManager::ErrorTypes::BinarySerializationErrorType`
+ --> dixscript/src/Compiler/Core/BinarySerialization/SectionWriters/data_section_writer.rs:5:5
+  |
+5 | use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::ErrorManager::ErrorTypes::BinarySerializationErrorType`
+ --> dixscript/src/Compiler/Core/BinarySerialization/SectionWriters/security_section_writer.rs:5:5
+  |
+5 | use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::ErrorManager::ErrorTypes::BinarySerializationErrorType`
+ --> dixscript/src/Compiler/Core/BinarySerialization/checksum_validator.rs:4:5
+  |
+4 | use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Position`
+ --> dixscript/src/Compiler/DLM/Auditor/auditor_trait.rs:3:39
+  |
+3 | use crate::Compiler::AST::{DixScript, Position};
+  |                                       ^^^^^^^^
+
+warning: unused import: `std::collections::HashMap`
+ --> dixscript/src/Compiler/DLM/KeyManagement/key_file_data.rs:4:5
+  |
+4 | use std::collections::HashMap;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::collections::HashMap`
+ --> dixscript/src/Compiler/DLM/dlm_module_base.rs:5:5
+  |
+5 | use std::collections::HashMap;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `ObjectProperty`
+ --> dixscript/src/Compiler/Extensions/type_system_manager.rs:7:65
+  |
+7 |     DataType, QuickFunction, QuickFuncParam, Expression, Value, ObjectProperty, Position
+  |                                                                 ^^^^^^^^^^^^^^
+
+warning: unused import: `GeneralErrorType`
+  --> dixscript/src/Compiler/Utilities/security_utilities.rs:11:41
+   |
+11 | use crate::ErrorManager::{ErrorManager, GeneralErrorType};
+   |                                         ^^^^^^^^^^^^^^^^
+
+warning: unused import: `Position`
+  --> dixscript/src/Compiler/Utilities/symbol_table.rs:12:38
+   |
+12 | use crate::Compiler::AST::{DataType, Position, QuickFunction};
+   |                                      ^^^^^^^^
+
+warning: unused import: `super::compatibility_result::CompatibilityResult`
+ --> dixscript/src/Compiler/VersionControl/forward_compatibility_manager.rs:6:5
+  |
+6 | use super::compatibility_result::CompatibilityResult;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CompatibilityResult`
+ --> dixscript/src/Compiler/VersionControl/version_constraints.rs:7:84
+  |
+7 | use crate::Compiler::VersionControl::{VersionManager, ForwardCompatibilityManager, CompatibilityResult};
+  |                                                                                    ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Path`
+ --> dixscript/src/Compiler/ImportsResolution/cloud_file_cache.rs:8:17
+  |
+8 | use std::path::{Path, PathBuf};
+  |                 ^^^^
+
+warning: unused imports: `EnumDeclaration`, `EnumField`, and `EnumsSection`
+ --> dixscript/src/Runtime/converter.rs:6:32
+  |
+6 |     TablePath, ObjectProperty, EnumDeclaration, EnumField,
+  |                                ^^^^^^^^^^^^^^^  ^^^^^^^^^
+7 |     EnumsSection, Position,
+  |     ^^^^^^^^^^^^
+
+warning: unused import: `PathBuf`
+ --> dixscript/src/Runtime/loader.rs:3:23
+  |
+3 | use std::path::{Path, PathBuf};
+  |                       ^^^^^^^
+
+warning: unused import: `ErrorSeverity`
+  --> dixscript/src/Runtime/loader.rs:15:59
+   |
+15 | use crate::ErrorManager::{ErrorManager, RuntimeErrorType, ErrorSeverity};
+   |                                                           ^^^^^^^^^^^^^
+
+warning: use of deprecated function `base64::decode`: Use Engine::decode
+  --> dixscript/src/Builtins/Core/dix_value.rs:90:17
+   |
+90 |         base64::decode(&base64_data).map_err(|e| format!("Invalid base64 blob data: {}", e))?;
+   |                 ^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated function `base64::decode`: Use Engine::decode
+   --> dixscript/src/Builtins/Core/dix_value.rs:367:43
+    |
+367 |             ValueData::Blob(b) => base64::decode(b).map_err(|e| format!("Failed to decode blob: {}", e)),
+    |                                           ^^^^^^
+
+warning: use of deprecated function `base64::decode`: Use Engine::decode
+   --> dixscript/src/Builtins/Core/dix_value.rs:380:37
+    |
+380 |                 let bytes = base64::decode(b)
+    |                                     ^^^^^^
+
+warning: use of deprecated function `base64::encode`: Use Engine::encode
+   --> dixscript/src/Builtins/Instance/blob_methods.rs:136:38
+    |
+136 |                 let base64 = base64::encode(sliced);
+    |                                      ^^^^^^
+
+warning: use of deprecated method `chrono::NaiveDateTime::timestamp`: use `.and_utc().timestamp()` instead
+   --> dixscript/src/Compiler/Core/BinarySerialization/value_encoder.rs:302:56
+    |
+302 |         let ticks = date.and_hms_opt(0, 0, 0).unwrap().timestamp() * 10_000_000;
+    |                                                        ^^^^^^^^^
+
+warning: use of deprecated associated function `chrono::NaiveDateTime::from_timestamp_opt`: use `DateTime::from_timestamp` instead
+   --> dixscript/src/Compiler/Core/BinarySerialization/value_decoder.rs:274:36
+    |
+274 |         let naive = NaiveDateTime::from_timestamp_opt(seconds, 0)
+    |                                    ^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated associated function `chrono::NaiveDateTime::from_timestamp_opt`: use `DateTime::from_timestamp` instead
+   --> dixscript/src/Compiler/Core/BinarySerialization/value_decoder.rs:293:36
+    |
+293 |         let naive = NaiveDateTime::from_timestamp_opt(seconds, 0)
+    |                                    ^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `src`
+  --> dixscript/src/ErrorManager/ErrorTypes/lexical_error.rs:41:47
+   |
+41 |         let error_indicator = if let Some(ref src) = source_line {
+   |                                               ^^^ help: if this is intentional, prefix it with an underscore: `_src`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `src`
+  --> dixscript/src/ErrorManager/ErrorTypes/parse_error.rs:54:47
+   |
+54 |         let error_indicator = if let Some(ref src) = source_line {
+   |                                               ^^^ help: if this is intentional, prefix it with an underscore: `_src`
+
+warning: variable does not need to be mutable
+   --> dixscript/src/Builtins/Instance/array_methods.rs:275:9
+    |
+275 |     let mut end   = args[2].as_int().min(len);
+    |         ----^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` on by default
+
+warning: variable does not need to be mutable
+   --> dixscript/src/Builtins/Static/array_object.rs:189:21
+    |
+189 |                 let mut reversed: Vec<DixValue> = array.iter().rev().cloned().collect();
+    |                     ----^^^^^^^^
+    |                     |
+    |                     help: remove this `mut`
+
+warning: unused variable: `value`
+   --> dixscript/src/Compiler/AST/Visitors/ast_visitor_base.rs:187:55
+    |
+187 |             QuickFuncStatement::VariableDeclaration { value, .. } => {
+    |                                                       ^^^^^-
+    |                                                       |
+    |                                                       help: try removing the field
+
+warning: unused variable: `function_name`
+    --> dixscript/src/Compiler/Core/SectionAnalyzers/quickfuncs_section_analyzer.rs:2312:9
+     |
+2312 |         function_name: &str,
+     |         ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_function_name`
+
+warning: unreachable pattern
+   --> dixscript/src/Compiler/Core/ValueResolution/ast_walker.rs:637:9
+    |
+624 |         Expression::BitwiseOp { .. } => "BitwiseOp",
+    |         ---------------------------- matches all the relevant values
+...
+637 |         Expression::BitwiseOp { .. } => "BitwiseOp",
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no value can reach this
+    |
+    = note: `#[warn(unreachable_patterns)]` on by default
+
+warning: variable `any_changed` is assigned to, but never used
+   --> dixscript/src/Compiler/Core/ValueResolution/value_resolver.rs:667:17
+    |
+667 |         let mut any_changed = false;
+    |                 ^^^^^^^^^^^
+    |
+    = note: consider using `_any_changed` instead
+
+warning: value assigned to `any_changed` is never read
+   --> dixscript/src/Compiler/Core/ValueResolution/value_resolver.rs:681:17
+    |
+681 |                 any_changed = true;
+    |                 ^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+    = note: `#[warn(unused_assignments)]` on by default
+
+warning: unused variable: `position`
+    --> dixscript/src/Compiler/Core/ValueResolution/function_interpreter.rs:2039:5
+     |
+2039 |     position: Position,
+     |     ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_position`
+
+warning: unused variable: `id`
+   --> dixscript/src/Compiler/Core/BinarySerialization/binary_unpacker.rs:328:14
+    |
+328 |         for (id, result) in results {
+    |              ^^ help: if this is intentional, prefix it with an underscore: `_id`
+
+warning: value assigned to `depth` is never read
+   --> dixscript/src/Compiler/Core/general_parser.rs:287:17
+    |
+287 |         let mut depth  = 0i32;
+    |                 ^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: unused variable: `caps`
+   --> dixscript/src/Compiler/DLM/Auditor/enhanced_auditor.rs:104:21
+    |
+104 |         if let Some(caps) = RE_CHECKSUM.captures(&content) {
+    |                     ^^^^ help: if this is intentional, prefix it with an underscore: `_caps`
+
+warning: unused variable: `data_type`
+   --> dixscript/src/Compiler/Extensions/type_system_manager.rs:269:27
+    |
+269 |     fn is_valid_data_type(data_type: DataType) -> bool {
+    |                           ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_data_type`
+
+warning: unused variable: `options`
+  --> dixscript/src/Runtime/loader.rs:89:9
+   |
+89 |         options: &DixLoadOptions,
+   |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_options`
+
+warning: type `ValueData` is more private than the item `Builtins::Core::dix_value::DixValue::new`
+  --> dixscript/src/Builtins/Core/dix_value.rs:35:5
+   |
+35 |     pub fn new(value: ValueData, dix_type: DixType) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ associated function `Builtins::Core::dix_value::DixValue::new` is reachable at visibility `pub`
+   |
+note: but type `ValueData` is only usable at visibility `pub(crate)`
+  --> dixscript/src/Builtins/Core/dix_value.rs:14:1
+   |
+14 | pub(crate) enum ValueData {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: `#[warn(private_interfaces)]` on by default
+
+warning: associated items `MAX_DEPTH`, `MAX_COLLECTION_ITEMS`, `get_indentation`, and `get_arrow_indentation` are never used
+  --> dixscript/src/Utilities/mid_helper_functions.rs:14:11
+   |
+9  | impl MID_HelperFunctions {
+   | ------------------------ associated items in this implementation
+...
+14 |     const MAX_DEPTH: usize = 10;
+   |           ^^^^^^^^^
+15 |     const MAX_COLLECTION_ITEMS: usize = 100;
+   |           ^^^^^^^^^^^^^^^^^^^^
+...
+83 |     fn get_indentation(depth: usize) -> String {
+   |        ^^^^^^^^^^^^^^^
+...
+88 |     fn get_arrow_indentation(depth: usize) -> &'static str {
+   |        ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: field `show_types` is never read
+  --> dixscript/src/Utilities/ast_debug_printer.rs:11:5
+   |
+7  | pub struct AstDebugPrinter {
+   |            --------------- field in this struct
+...
+11 |     show_types: bool,
+   |     ^^^^^^^^^^
+
+warning: method `format_node_type` is never used
+  --> dixscript/src/Utilities/ast_debug_printer.rs:99:8
+   |
+16 | impl AstDebugPrinter {
+   | -------------------- method in this implementation
+...
+99 |     fn format_node_type(&self, node_type: &str) -> String {
+   |        ^^^^^^^^^^^^^^^^
+
+warning: field `settings` is never read
+   --> dixscript/src/Compiler/Core/Tokenizer/lexer.rs:135:5
+    |
+133 | pub struct Tokenizer<'src> {
+    |            --------- field in this struct
+134 |     input:    &'src str,
+135 |     settings: &'src OperationalSettings,
+    |     ^^^^^^^^
+
+warning: method `is_hex_digit` is never used
+   --> dixscript/src/Compiler/Core/Tokenizer/lexer.rs:342:8
+    |
+147 | impl<'src> Tokenizer<'src> {
+    | -------------------------- method in this implementation
+...
+342 |     fn is_hex_digit(&self, c: char) -> bool {
+    |        ^^^^^^^^^^^^
+
+warning: function `is_whitespace_byte` is never used
+  --> dixscript/src/Compiler/Core/Tokenizer/platform/scalar.rs:25:8
+   |
+25 | pub fn is_whitespace_byte(b: u8) -> bool {
+   |        ^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_STUCK_COUNT` is never used
+  --> dixscript/src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs:32:7
+   |
+32 | const MAX_STUCK_COUNT: usize = 3;
+   |       ^^^^^^^^^^^^^^^
+
+warning: fields `last_position` and `stuck_count` are never read
+  --> dixscript/src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs:81:5
+   |
+75 | pub struct QuickFuncsSectionParser<'a> {
+   |            ----------------------- fields in this struct
+...
+81 |     last_position: usize,
+   |     ^^^^^^^^^^^^^
+82 |     stuck_count: usize,
+   |     ^^^^^^^^^^^
+
+warning: methods `get_long_field` and `get_bool_field` are never used
+   --> dixscript/src/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs:164:18
+    |
+131 | impl<'a> ParsedEncryptionConfig<'a> {
+    | ----------------------------------- methods in this implementation
+...
+164 |     #[inline] fn get_long_field(&self, key: &str) -> Option<i64> {
+    |                  ^^^^^^^^^^^^^^
+...
+170 |     #[inline] fn get_bool_field(&self, key: &str) -> Option<bool> {
+    |                  ^^^^^^^^^^^^^^
+
+warning: field `operational_settings` is never read
+  --> dixscript/src/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:52:5
+   |
+51 | pub struct DataSectionAnalyzer<'a> {
+   |            ------------------- field in this struct
+52 |     operational_settings:    &'a OperationalSettings,
+   |     ^^^^^^^^^^^^^^^^^^^^
+
+warning: method `get_element_type` is never used
+    --> dixscript/src/Compiler/Core/SectionAnalyzers/quickfuncs_section_analyzer.rs:2894:8
+     |
+2817 | impl LocalScopeTracker {
+     | ---------------------- method in this implementation
+...
+2894 |     fn get_element_type(&self, name: &str) -> Option<DataType> {
+     |        ^^^^^^^^^^^^^^^^
+
+warning: fields `operational_settings` and `current_file_path` are never read
+  --> dixscript/src/Compiler/Core/SectionAnalyzers/imports_section_analyzer.rs:15:5
+   |
+13 | pub struct ImportsSectionAnalyzer<'a> {
+   |            ---------------------- fields in this struct
+14 |     symbol_table:         &'a SymbolTable,
+15 |     operational_settings: &'a OperationalSettings,
+   |     ^^^^^^^^^^^^^^^^^^^^
+16 |     current_file_path:    String,
+   |     ^^^^^^^^^^^^^^^^^
+
+warning: field `operational_settings` is never read
+  --> dixscript/src/Compiler/Core/SectionEnhancers/quickfuncs_ast_enhancer.rs:17:5
+   |
+16 | pub struct QuickFunctionsAstEnhancer<'a> {
+   |            ------------------------- field in this struct
+17 |     operational_settings: &'a OperationalSettings,
+   |     ^^^^^^^^^^^^^^^^^^^^
+
+warning: associated items `resolve_call_arguments`, `resolve_expr_to_dix`, and `resolve_value_to_dix` are never used
+    --> dixscript/src/Compiler/Core/ValueResolution/value_resolver.rs:1759:8
+     |
+136  | impl<'a> ValueResolver<'a> {
+     | -------------------------- associated items in this implementation
+...
+1759 |     fn resolve_call_arguments(
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+1776 |     fn resolve_expr_to_dix(
+     |        ^^^^^^^^^^^^^^^^^^^
+...
+1858 |     fn resolve_value_to_dix(
+     |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: field `error_manager` is never read
+  --> dixscript/src/Compiler/Core/BinarySerialization/value_decoder.rs:14:5
+   |
+13 | pub struct ValueDecoder {
+   |            ------------ field in this struct
+14 |     error_manager: ErrorManager,
+   |     ^^^^^^^^^^^^^
+
+warning: field `position` is never read
+  --> dixscript/src/Compiler/Core/general_parser.rs:38:5
+   |
+35 | struct SectionData {
+   |        ----------- field in this struct
+...
+38 |     position: usize,
+   |     ^^^^^^^^
+
+warning: struct `ParseTimings` is never constructed
+  --> dixscript/src/Compiler/Core/general_parser.rs:42:12
+   |
+42 | pub struct ParseTimings {
+   |            ^^^^^^^^^^^^
+
+warning: field `is_advanced_mode` is never read
+  --> dixscript/src/Compiler/Core/general_parser.rs:70:5
+   |
+58 | pub struct GeneralParser<'a> {
+   |            ------------- field in this struct
+...
+70 |     is_advanced_mode:       bool,
+   |     ^^^^^^^^^^^^^^^^
+
+warning: field `has_dlm_enabled` is never read
+  --> dixscript/src/Compiler/Core/general_semantics_analyzer.rs:33:5
+   |
+21 | pub struct GeneralSemanticAnalyzer<'a> {
+   |            ----------------------- field in this struct
+...
+33 |     has_dlm_enabled:        bool,
+   |     ^^^^^^^^^^^^^^^
+
+warning: field `error_manager` is never read
+  --> dixscript/src/Runtime/key_resolver.rs:27:5
+   |
+26 | pub struct KeyFileResolver {
+   |            --------------- field in this struct
+27 |     error_manager: ErrorManager,
+   |     ^^^^^^^^^^^^^
+
+warning: module `Utilities` should have a snake case name
+ --> dixscript/src/lib.rs:7:9
+  |
+7 | pub mod Utilities;
+  |         ^^^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `utilities`
+  |
+  = note: `#[warn(non_snake_case)]` on by default
+
+warning: module `ErrorManager` should have a snake case name
+ --> dixscript/src/lib.rs:8:9
+  |
+8 | pub mod ErrorManager;
+  |         ^^^^^^^^^^^^ help: convert the identifier to snake case: `error_manager`
+
+warning: module `Builtins` should have a snake case name
+ --> dixscript/src/lib.rs:9:9
+  |
+9 | pub mod Builtins;
+  |         ^^^^^^^^ help: convert the identifier to snake case: `builtins`
+
+warning: module `Compiler` should have a snake case name
+  --> dixscript/src/lib.rs:10:9
+   |
+10 | pub mod Compiler;
+   |         ^^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `compiler`
+
+warning: module `Runtime` should have a snake case name
+  --> dixscript/src/lib.rs:11:9
+   |
+11 | pub mod Runtime;
+   |         ^^^^^^^ help: convert the identifier to snake case: `runtime`
+
+warning: method `GetSharedInstance` should have a snake case name
+  --> dixscript/src/Utilities/mid_logger.rs:40:12
+   |
+40 |     pub fn GetSharedInstance(level: Option<LogLevel>, enabled: Option<bool>) -> Arc<Mutex<Self>> {
+   |            ^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `get_shared_instance`
+
+warning: method `HasSharedInstance` should have a snake case name
+  --> dixscript/src/Utilities/mid_logger.rs:63:12
+   |
+63 |     pub fn HasSharedInstance() -> bool {
+   |            ^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `has_shared_instance`
+
+warning: method `IncreaseIndent` should have a snake case name
+  --> dixscript/src/Utilities/mid_logger.rs:71:12
+   |
+71 |     pub fn IncreaseIndent(&mut self) {
+   |            ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `increase_indent`
+
+warning: method `DecreaseIndent` should have a snake case name
+  --> dixscript/src/Utilities/mid_logger.rs:75:12
+   |
+75 |     pub fn DecreaseIndent(&mut self) {
+   |            ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `decrease_indent`
+
+warning: method `ResetIndent` should have a snake case name
+  --> dixscript/src/Utilities/mid_logger.rs:81:12
+   |
+81 |     pub fn ResetIndent(&mut self) {
+   |            ^^^^^^^^^^^ help: convert the identifier to snake case: `reset_indent`
+
+warning: method `Error` should have a snake case name
+  --> dixscript/src/Utilities/mid_logger.rs:87:12
+   |
+87 |     pub fn Error(&mut self, message: &str) {
+   |            ^^^^^ help: convert the identifier to snake case: `error`
+
+warning: method `Warning` should have a snake case name
+  --> dixscript/src/Utilities/mid_logger.rs:94:12
+   |
+94 |     pub fn Warning(&mut self, message: &str) {
+   |            ^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `warning`
+
+warning: method `Info` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:101:12
+    |
+101 |     pub fn Info(&mut self, message: &str) {
+    |            ^^^^ help: convert the identifier to snake case (notice the capitalization): `info`
+
+warning: method `Debug` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:113:12
+    |
+113 |     pub fn Debug<F>(&mut self, message_builder: F)
+    |            ^^^^^ help: convert the identifier to snake case: `debug`
+
+warning: method `DebugStr` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:129:12
+    |
+129 |     pub fn DebugStr(&mut self, message: &str) {
+    |            ^^^^^^^^ help: convert the identifier to snake case: `debug_str`
+
+warning: method `Verbose` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:141:12
+    |
+141 |     pub fn Verbose<F>(&mut self, message_builder: F)
+    |            ^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `verbose`
+
+warning: method `VerboseStr` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:157:12
+    |
+157 |     pub fn VerboseStr(&mut self, message: &str) {
+    |            ^^^^^^^^^^ help: convert the identifier to snake case: `verbose_str`
+
+warning: method `CreateScope` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:197:12
+    |
+197 |     pub fn CreateScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a> {
+    |            ^^^^^^^^^^^ help: convert the identifier to snake case: `create_scope`
+
+warning: method `CreateDebugScope` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:217:12
+    |
+217 |     pub fn CreateDebugScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a> {
+    |            ^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `create_debug_scope`
+
+warning: method `CreateVerboseScope` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:237:12
+    |
+237 |     pub fn CreateVerboseScope<'a>(&'a mut self, scope_name: &str) -> LoggerScope<'a> {
+    |            ^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `create_verbose_scope`
+
+warning: method `SetLogLevel` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:275:12
+    |
+275 |     pub fn SetLogLevel(&mut self, level: LogLevel) {
+    |            ^^^^^^^^^^^ help: convert the identifier to snake case: `set_log_level`
+
+warning: method `SetEnabled` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:279:12
+    |
+279 |     pub fn SetEnabled(&mut self, enabled: bool) {
+    |            ^^^^^^^^^^ help: convert the identifier to snake case: `set_enabled`
+
+warning: method `GetCurrentLevel` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:283:12
+    |
+283 |     pub fn GetCurrentLevel(&self) -> LogLevel {
+    |            ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `get_current_level`
+
+warning: method `IsEnabled` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:287:12
+    |
+287 |     pub fn IsEnabled(&self) -> bool {
+    |            ^^^^^^^^^ help: convert the identifier to snake case: `is_enabled`
+
+warning: method `IsDebugEnabled` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:292:12
+    |
+292 |     pub fn IsDebugEnabled(&self) -> bool {
+    |            ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `is_debug_enabled`
+
+warning: method `IsVerboseEnabled` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:304:12
+    |
+304 |     pub fn IsVerboseEnabled(&self) -> bool {
+    |            ^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `is_verbose_enabled`
+
+warning: method `WouldLog` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:315:12
+    |
+315 |     pub fn WouldLog(&self, level: LogLevel) -> bool {
+    |            ^^^^^^^^ help: convert the identifier to snake case: `would_log`
+
+warning: method `GetLogContents` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:321:12
+    |
+321 |     pub fn GetLogContents(&self) -> &str {
+    |            ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `get_log_contents`
+
+warning: method `ClearLogBuffer` should have a snake case name
+   --> dixscript/src/Utilities/mid_logger.rs:325:12
+    |
+325 |     pub fn ClearLogBuffer(&mut self) {
+    |            ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `clear_log_buffer`
+
+warning: method `IsValidString` should have a snake case name
+  --> dixscript/src/Utilities/mid_helper_functions.rs:20:12
+   |
+20 |     pub fn IsValidString(input: Option<&str>) -> bool {
+   |            ^^^^^^^^^^^^^ help: convert the identifier to snake case: `is_valid_string`
+
+warning: method `GetEnvironment` should have a snake case name
+  --> dixscript/src/Utilities/mid_helper_functions.rs:37:12
+   |
+37 |     pub fn GetEnvironment() -> &'static str {
+   |            ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `get_environment`
+
+warning: method `GenerateRandomString` should have a snake case name
+  --> dixscript/src/Utilities/mid_helper_functions.rs:49:12
+   |
+49 |     pub fn GenerateRandomString(length: usize, use_special_characters: bool) -> String {
+   |            ^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `generate_random_string`
+
+warning: method `GetStructOrClassMemberValues` should have a snake case name
+  --> dixscript/src/Utilities/mid_helper_functions.rs:78:12
+   |
+78 |     pub fn GetStructOrClassMemberValues<T: std::fmt::Debug>(instance: &T) -> String {
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `get_struct_or_class_member_values`
+
+warning: trait method `IsNullOrEmpty` should have a snake case name
+ --> dixscript/src/Utilities/utilities.rs:3:8
+  |
+3 |     fn IsNullOrEmpty(&self) -> bool;
+  |        ^^^^^^^^^^^^^ help: convert the identifier to snake case: `is_null_or_empty`
+
+warning: trait method `IsNullOrWhiteSpace` should have a snake case name
+ --> dixscript/src/Utilities/utilities.rs:4:8
+  |
+4 |     fn IsNullOrWhiteSpace(&self) -> bool;
+  |        ^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `is_null_or_white_space`
+
+warning: trait method `ToUpperInvariant` should have a snake case name
+ --> dixscript/src/Utilities/utilities.rs:5:8
+  |
+5 |     fn ToUpperInvariant(&self) -> String;
+  |        ^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `to_upper_invariant`
+
+warning: trait method `ToLowerInvariant` should have a snake case name
+ --> dixscript/src/Utilities/utilities.rs:6:8
+  |
+6 |     fn ToLowerInvariant(&self) -> String;
+  |        ^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `to_lower_invariant`
+
+warning: trait method `Contains` should have a snake case name
+ --> dixscript/src/Utilities/utilities.rs:7:8
+  |
+7 |     fn Contains(&self, value: &str) -> bool;
+  |        ^^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `contains`
+
+warning: trait method `StartsWith` should have a snake case name
+ --> dixscript/src/Utilities/utilities.rs:8:8
+  |
+8 |     fn StartsWith(&self, value: &str) -> bool;
+  |        ^^^^^^^^^^ help: convert the identifier to snake case: `starts_with`
+
+warning: trait method `EndsWith` should have a snake case name
+ --> dixscript/src/Utilities/utilities.rs:9:8
+  |
+9 |     fn EndsWith(&self, value: &str) -> bool;
+  |        ^^^^^^^^ help: convert the identifier to snake case: `ends_with`
+
+warning: trait method `Trim` should have a snake case name
+  --> dixscript/src/Utilities/utilities.rs:10:8
+   |
+10 |     fn Trim(&self) -> String;
+   |        ^^^^ help: convert the identifier to snake case: `trim`
+
+warning: trait method `TrimStart` should have a snake case name
+  --> dixscript/src/Utilities/utilities.rs:11:8
+   |
+11 |     fn TrimStart(&self) -> String;
+   |        ^^^^^^^^^ help: convert the identifier to snake case: `trim_start`
+
+warning: trait method `TrimEnd` should have a snake case name
+  --> dixscript/src/Utilities/utilities.rs:12:8
+   |
+12 |     fn TrimEnd(&self) -> String;
+   |        ^^^^^^^ help: convert the identifier to snake case: `trim_end`
+
+warning: trait method `Replace` should have a snake case name
+  --> dixscript/src/Utilities/utilities.rs:13:8
+   |
+13 |     fn Replace(&self, old: &str, new: &str) -> String;
+   |        ^^^^^^^ help: convert the identifier to snake case: `replace`
+
+warning: trait method `Split` should have a snake case name
+  --> dixscript/src/Utilities/utilities.rs:14:8
+   |
+14 |     fn Split(&self, separator: char) -> Vec<String>;
+   |        ^^^^^ help: convert the identifier to snake case (notice the capitalization): `split`
+
+warning: trait method `Join` should have a snake case name
+  --> dixscript/src/Utilities/utilities.rs:15:8
+   |
+15 |     fn Join(separator: &str, values: &[String]) -> String;
+   |        ^^^^ help: convert the identifier to snake case: `join`
+
+warning: trait method `Substring` should have a snake case name
+  --> dixscript/src/Utilities/utilities.rs:16:8
+   |
+16 |     fn Substring(&self, start: usize, length: Option<usize>) -> String;
+   |        ^^^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `substring`
+
+warning: trait method `IndexOf` should have a snake case name
+  --> dixscript/src/Utilities/utilities.rs:17:8
+   |
+17 |     fn IndexOf(&self, value: &str) -> Option<usize>;
+   |        ^^^^^^^ help: convert the identifier to snake case: `index_of`
+
+warning: trait method `LastIndexOf` should have a snake case name
+  --> dixscript/src/Utilities/utilities.rs:18:8
+   |
+18 |     fn LastIndexOf(&self, value: &str) -> Option<usize>;
+   |        ^^^^^^^^^^^ help: convert the identifier to snake case: `last_index_of`
+
+warning: trait method `ToString` should have a snake case name
+   --> dixscript/src/Utilities/utilities.rs:162:8
+    |
+162 |     fn ToString(&self) -> String;
+    |        ^^^^^^^^ help: convert the identifier to snake case: `to_string`
+
+warning: trait method `GetHashCode` should have a snake case name
+   --> dixscript/src/Utilities/utilities.rs:163:8
+    |
+163 |     fn GetHashCode(&self) -> u64;
+    |        ^^^^^^^^^^^ help: convert the identifier to snake case: `get_hash_code`
+
+warning: module `ErrorTypes` should have a snake case name
+ --> dixscript/src/ErrorManager/mod.rs:3:9
+  |
+3 | pub mod ErrorTypes;
+  |         ^^^^^^^^^^ help: convert the identifier to snake case: `error_types`
+
+warning: module `Helpers` should have a snake case name
+ --> dixscript/src/ErrorManager/mod.rs:4:9
+  |
+4 | pub mod Helpers;
+  |         ^^^^^^^ help: convert the identifier to snake case: `helpers`
+
+warning: module `Core` should have a snake case name
+ --> dixscript/src/Builtins/mod.rs:4:9
+  |
+4 | pub mod Core;
+  |         ^^^^ help: convert the identifier to snake case (notice the capitalization): `core`
+
+warning: module `Instance` should have a snake case name
+ --> dixscript/src/Builtins/mod.rs:5:9
+  |
+5 | pub mod Instance;
+  |         ^^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `instance`
+
+warning: module `Static` should have a snake case name
+ --> dixscript/src/Builtins/mod.rs:6:9
+  |
+6 | pub mod Static;
+  |         ^^^^^^
+  |
+help: rename the identifier or convert it to a snake case raw identifier
+  |
+6 - pub mod Static;
+6 + pub mod r#static;
+  |
+
+warning: module `Resolver` should have a snake case name
+ --> dixscript/src/Builtins/mod.rs:7:9
+  |
+7 | pub mod Resolver;
+  |         ^^^^^^^^ help: convert the identifier to snake case: `resolver`
+
+warning: module `AST` should have a snake case name
+ --> dixscript/src/Compiler/mod.rs:4:9
+  |
+4 | pub mod AST;
+  |         ^^^ help: convert the identifier to snake case: `ast`
+
+warning: module `Core` should have a snake case name
+ --> dixscript/src/Compiler/mod.rs:5:9
+  |
+5 | pub mod Core;
+  |         ^^^^ help: convert the identifier to snake case (notice the capitalization): `core`
+
+warning: module `DLM` should have a snake case name
+ --> dixscript/src/Compiler/mod.rs:6:9
+  |
+6 | pub mod DLM;
+  |         ^^^ help: convert the identifier to snake case: `dlm`
+
+warning: module `Extensions` should have a snake case name
+ --> dixscript/src/Compiler/mod.rs:7:9
+  |
+7 | pub mod Extensions;
+  |         ^^^^^^^^^^ help: convert the identifier to snake case: `extensions`
+
+warning: module `Utilities` should have a snake case name
+ --> dixscript/src/Compiler/mod.rs:8:9
+  |
+8 | pub mod Utilities;
+  |         ^^^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `utilities`
+
+warning: module `VersionControl` should have a snake case name
+ --> dixscript/src/Compiler/mod.rs:9:9
+  |
+9 | pub mod VersionControl;
+  |         ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `version_control`
+
+warning: module `ImportsResolution` should have a snake case name
+  --> dixscript/src/Compiler/mod.rs:10:9
+   |
+10 | pub mod ImportsResolution;
+   |         ^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `imports_resolution`
+
+warning: module `Visitors` should have a snake case name
+  --> dixscript/src/Compiler/AST/mod.rs:36:9
+   |
+36 | pub mod Visitors;
+   |         ^^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `visitors`
+
+warning: module `Tokenizer` should have a snake case name
+ --> dixscript/src/Compiler/Core/mod.rs:9:9
+  |
+9 | pub mod Tokenizer;
+  |         ^^^^^^^^^ help: convert the identifier to snake case: `tokenizer`
+
+warning: module `SectionParsers` should have a snake case name
+  --> dixscript/src/Compiler/Core/mod.rs:10:9
+   |
+10 | pub mod SectionParsers;
+   |         ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `section_parsers`
+
+warning: module `SectionAnalyzers` should have a snake case name
+  --> dixscript/src/Compiler/Core/mod.rs:11:9
+   |
+11 | pub mod SectionAnalyzers;
+   |         ^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `section_analyzers`
+
+warning: module `SectionEnhancers` should have a snake case name
+  --> dixscript/src/Compiler/Core/mod.rs:12:9
+   |
+12 | pub mod SectionEnhancers;
+   |         ^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `section_enhancers`
+
+warning: module `ValueResolution` should have a snake case name
+  --> dixscript/src/Compiler/Core/mod.rs:13:9
+   |
+13 | pub mod ValueResolution;
+   |         ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `value_resolution`
+
+warning: module `BinarySerialization` should have a snake case name
+  --> dixscript/src/Compiler/Core/mod.rs:14:9
+   |
+14 | pub mod BinarySerialization;
+   |         ^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `binary_serialization`
+
+warning: module `Config` should have a snake case name
+  --> dixscript/src/Compiler/Core/mod.rs:15:9
+   |
+15 | pub mod Config;
+   |         ^^^^^^ help: convert the identifier to snake case (notice the capitalization): `config`
+
+warning: module `Functions` should have a snake case name
+  --> dixscript/src/Compiler/Core/mod.rs:16:9
+   |
+16 | pub mod Functions;
+   |         ^^^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `functions`
+
+warning: module `SectionReaders` should have a snake case name
+  --> dixscript/src/Compiler/Core/BinarySerialization/mod.rs:21:9
+   |
+21 | pub mod SectionReaders;
+   |         ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `section_readers`
+
+warning: module `SectionWriters` should have a snake case name
+  --> dixscript/src/Compiler/Core/BinarySerialization/mod.rs:22:9
+   |
+22 | pub mod SectionWriters;
+   |         ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `section_writers`
+
+warning: module `Auditor` should have a snake case name
+ --> dixscript/src/Compiler/DLM/mod.rs:3:9
+  |
+3 | pub mod Auditor;
+  |         ^^^^^^^ help: convert the identifier to snake case: `auditor`
+
+warning: module `Compressor` should have a snake case name
+ --> dixscript/src/Compiler/DLM/mod.rs:4:9
+  |
+4 | pub mod Compressor;
+  |         ^^^^^^^^^^ help: convert the identifier to snake case (notice the capitalization): `compressor`
+
+warning: module `Encryptor` should have a snake case name
+ --> dixscript/src/Compiler/DLM/mod.rs:5:9
+  |
+5 | pub mod Encryptor;
+  |         ^^^^^^^^^ help: convert the identifier to snake case: `encryptor`
+
+warning: module `KeyManagement` should have a snake case name
+ --> dixscript/src/Compiler/DLM/mod.rs:6:9
+  |
+6 | pub mod KeyManagement;
+  |         ^^^^^^^^^^^^^ help: convert the identifier to snake case: `key_management`
+
+warning: `dixscript` (lib) generated 165 warnings (run `cargo fix --lib -p dixscript` to apply 40 suggestions)
+   Compiling mdix-lsp v1.0.0 (/Users/midman/Desktop/DixScript-Rust/mdix-lsp)
+warning: unused import: `fmt`
+  --> mdix-lsp/src/main.rs:14:26
+   |
+14 | use tracing_subscriber::{fmt, EnvFilter};
+   |                          ^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `ErrorManager`
+  --> mdix-lsp/src/analyzer.rs:25:15
+   |
+25 |     DixError, ErrorManager, ErrorSeverity,
+   |               ^^^^^^^^^^^^
+
+warning: unused import: `crate::features::formatting::format_source`
+  --> mdix-lsp/src/features/commands.rs:24:5
+   |
+24 | use crate::features::formatting::format_source;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `DixScript`
+  --> mdix-lsp/src/features/document_symbols.rs:11:43
+   |
+11 | use dixscript::Compiler::AST::{DataEntry, DixScript};
+   |                                           ^^^^^^^^^
+
+warning: unused import: `dixscript::Compiler::AST::DixScript`
+  --> mdix-lsp/src/features/goto_definition.rs:14:5
+   |
+14 | use dixscript::Compiler::AST::DixScript;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0560]: struct `tower_lsp::lsp_types::CodeLensOptions` has no field named `work_done_progress_options`
+   --> mdix-lsp/src/capabilities.rs:115:13
+    |
+115 |             work_done_progress_options: WorkDoneProgressOptions {
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^ `tower_lsp::lsp_types::CodeLensOptions` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `which`
+   --> mdix-lsp/src/features/commands.rs:206:23
+    |
+206 |     if let Ok(path) = which::which("mdix") {
+    |                       ^^^^^ use of unresolved module or unlinked crate `which`
+    |
+    = help: if you wanted to use a crate named `which`, use `cargo add which` to add it to your `Cargo.toml`
+
+warning: unreachable pattern
+   --> mdix-lsp/src/features/hover.rs:191:9
+    |
+184 | ...   TokenType::DoubleColon            => Some("**`::`** — group array operator\n\nDefines a group array entry in `@DATA`.\n\n```...
+    |       ---------------------- matches all the relevant values
+...
+191 | ...   TokenType::DoubleColon => Some("**`::`** — group array separator\n\nUsed in `@DATA` to declare a group array.\n\n```mdix\nta...
+    |       ^^^^^^^^^^^^^^^^^^^^^^ no value can reach this
+    |
+    = note: `#[warn(unreachable_patterns)]` on by default
+
+Some errors have detailed explanations: E0433, E0560.
+For more information about an error, try `rustc --explain E0433`.
+warning: `mdix-lsp` (bin "mdix-lsp") generated 6 warnings
+error: could not compile `mdix-lsp` (bin "mdix-lsp") due to 2 previous errors; 6 warnings emitted

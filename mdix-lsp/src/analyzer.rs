@@ -1,13 +1,14 @@
 // mdix-lsp/src/analyzer.rs
 //! Pipeline runner — Approach B (tokenizer-first).
 //!
-//! FIXES:
-//!   1. source_file_path set from URI → local imports resolve correctly
-//!   2. Cloud imports detected → skip_imports_resolution=true to avoid tokio
-//!      runtime-inside-async panic
-//!   3. SemanticErrorInfo / SemanticWarningInfo converted to DixError::Semantic
-//!      via direct struct construction (preserves original error_id)
-//!   4. All ErrorHandlingStrategy forced to Continue in LSP mode
+//! SECURITY DIAGNOSTIC FIX:
+//!   When @DLM contains DEncryptor and @SECURITY is absent, the diagnostic
+//!   is emitted with the position of the @DLM token (not 0:0) so the squiggly
+//!   appears on the correct line and the light-bulb fires reliably.
+//!
+//! DAuditor:
+//!   DAuditor is informational — no error is emitted when it is present without
+//!   a security section. An info-level note is logged only.
 
 use std::collections::HashMap;
 use std::panic;
@@ -18,6 +19,8 @@ use dixscript::Compiler::Core::{
     GeneralParser, GeneralSemanticAnalyzer, OperationalSettings,
 };
 use dixscript::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
+use dixscript::Compiler::Core::Tokenizer::TokenType;
+use dixscript::Compiler::AST::data_types::{DLMModuleType, DLMModuleSubtype};
 use dixscript::ErrorManager::{
     DixError, ErrorManager, ErrorSeverity,
     SemanticError, SemanticErrorType,
@@ -25,7 +28,7 @@ use dixscript::ErrorManager::{
 
 use crate::document::Document;
 
-// ── Public entry point ────────────────────────────────────────────────────────
+// ── Entry point ───────────────────────────────────────────────────────────────
 
 pub fn run_pipeline(doc: &mut Document) -> Vec<DixError> {
     let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -50,10 +53,9 @@ pub fn run_pipeline(doc: &mut Document) -> Vec<DixError> {
 fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     let em = doc.error_manager.clone();
 
-    // Collect all diagnostics regardless of what @CONFIG says.
     em.force_strategy(ErrorHandlingStrategy::Continue);
 
-    // ── Stage 1: tokenize the FULL source ─────────────────────────────────────
+    // ── Stage 1: tokenize ─────────────────────────────────────────────────────
     let tokenizer_settings = OperationalSettings {
         error_handling_strategy: ErrorHandlingStrategy::Continue,
         debug_mode: DebugMode::Off,
@@ -75,26 +77,18 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         return em.get_all_errors_flat();
     }
 
-    // ── Stage 2: split @CONFIG and process it ────────────────────────────────
+    // ── Stage 2: split @CONFIG ────────────────────────────────────────────────
     let split = split_config_tokens(all_tokens.clone());
 
     let config_result = {
-        let mut handler =
-            ConfigSectionHandler::new_with_error_manager(None, em.clone());
+        let mut handler = ConfigSectionHandler::new_with_error_manager(None, em.clone());
         handler.process_config_tokens(&split.config_tokens)
     };
 
-    // Override debug_mode — verbose logging blocks tokio in LSP.
     let mut operational_settings = config_result.operational_settings.clone();
     operational_settings.debug_mode = DebugMode::Off;
-    // Always continue so every diagnostic is surfaced.
     operational_settings.error_handling_strategy = ErrorHandlingStrategy::Continue;
 
-    // ── FIX: set source_file_path so ImportsResolver finds relative files ─────
-    //
-    // Without this the resolver has no base directory and every local import
-    // fails with "file not found".  Non-file:// URIs (e.g. untitled:) cannot be
-    // resolved, so we skip import resolution for them entirely.
     match doc.uri.to_file_path() {
         Ok(file_path) => {
             let path_str = file_path.to_string_lossy().into_owned();
@@ -110,7 +104,6 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         }
     }
 
-    // Store full token stream — all LSP features use this (including @CONFIG).
     doc.tokens = all_tokens;
 
     // ── Stage 3: parse ────────────────────────────────────────────────────────
@@ -138,12 +131,6 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     tracing::debug!("Parse complete");
 
     // ── FIX: skip cloud imports to prevent tokio-inside-async panic ───────────
-    //
-    // `ImportsResolver::download_cloud_file_sync` calls
-    // `tokio::runtime::Runtime::new().block_on(...)`.  Inside a tokio worker
-    // (spawn_blocking) this panics with "Cannot start a runtime from within a
-    // runtime."  We detect cloud imports here and disable resolution for them.
-    // Local imports are still resolved when source_file_path is set above.
     let has_cloud_imports = ast
         .imports
         .as_ref()
@@ -151,9 +138,7 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         .unwrap_or(false);
 
     if has_cloud_imports {
-        tracing::debug!(
-            "Cloud imports present — disabling import resolution to prevent tokio panic"
-        );
+        tracing::debug!("Cloud imports present — disabling import resolution");
         operational_settings.skip_imports_resolution = true;
     }
 
@@ -184,56 +169,107 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         enhancement_result.total_enhancements
     );
 
-    // ── Assemble diagnostics ──────────────────────────────────────────────────
+    // ── Stage 6: DLM security validation (LSP-side, with correct positions) ───
     //
-    // em holds: lexical, parse, imports-resolution errors added via add_*_error().
-    // semantic_result holds: SemanticErrorInfo / SemanticWarningInfo produced by
-    // section analyzers — these are NEVER forwarded to the ErrorManager by the
-    // analyzers themselves (they call em.log_error / log_warning, which is
-    // stderr-only, not add_semantic_error).  Convert them here.
-
+    // The core semantic analyzer may emit the "missing @SECURITY" error at 0:0
+    // because it does not have access to the token stream for position lookup.
+    // We re-emit it here with the exact @DLM line so the squiggly lands correctly.
     let mut all_errors = em.get_all_errors_flat();
 
-    // Convert SemanticErrorInfo → DixError::Semantic (Error severity).
-    // Direct struct construction preserves the analyzer's original error_id
-    // (e.g. "DATA2C1" from DataSectionAnalyzer) rather than overwriting it.
+    // Remove any 0:0 "security missing" errors emitted by the core analyzer —
+    // we will replace them with correctly-positioned ones below.
+    all_errors.retain(|e| {
+        let msg = e.message().to_lowercase();
+        let is_security_missing = msg.contains("security") && msg.contains("missing")
+            || msg.contains("@security section is required")
+            || msg.contains("encryptor requires");
+        if is_security_missing {
+            if let DixError::Semantic(se) = e {
+                // Only remove the zero-position ones; keep any that already have
+                // a real position (line > 0).
+                return se.line > 0;
+            }
+        }
+        true
+    });
+
+    // Now emit a correctly-positioned diagnostic for each encryptor without security.
+    let dlm_encryptors = collect_encryptors(&ast);
+    if !dlm_encryptors.is_empty() && ast.security.is_none() {
+        for (enc_line, enc_col, algorithm) in dlm_encryptors {
+            // Find the actual @DLM token line for a better position.
+            let (diag_line, diag_col) = find_dlm_token_pos(&doc.tokens)
+                .unwrap_or((enc_line, enc_col));
+
+            all_errors.push(DixError::Semantic(SemanticError {
+                error_id:    "SEC001".to_string(),
+                error_type:  SemanticErrorType::InvalidConfiguration,
+                message:     format!(
+                    "@SECURITY section is required when DEncryptor.{} is present in @DLM.",
+                    algorithm
+                ),
+                line:        diag_line as i32,
+                column:      diag_col as i32,
+                section_name: Some("DLM".to_string()),
+                suggestion:  Some(
+                    "Add an @SECURITY section with encryption -> { mode = \"keyfile\" or \"password\", algorithm = \"...\" }".to_string()
+                ),
+                severity:    ErrorSeverity::Error,
+                quick_fixes: Vec::new(),
+                metadata:    HashMap::new(),
+            }));
+        }
+    }
+
+    // DAuditor: emit an informational note (not an error) so the user knows
+    // auditing is active. Only logged at debug level — no squiggly.
+    if let Some(dlm) = &ast.dlm {
+        for m in &dlm.modules {
+            if matches!(m.module_type, DLMModuleType::DAuditor) {
+                let subtype = m.subtype.map(|s| format!("{}", s)).unwrap_or_else(|| "?".to_string());
+                tracing::debug!("DAuditor module active: {}", subtype);
+            }
+        }
+    }
+
+    // ── Convert semantic_result errors/warnings ───────────────────────────────
     for err in &semantic_result.errors {
         let (line, col) = err
             .position
             .map(|p| (p.line as i32, p.column as i32))
             .unwrap_or((0, 0));
 
+        // Skip zero-position security errors — already handled above.
+        let msg_lower = err.message.to_lowercase();
+        if line == 0
+            && (msg_lower.contains("security") && msg_lower.contains("missing")
+                || msg_lower.contains("@security section is required"))
+        {
+            continue;
+        }
+
         all_errors.push(DixError::Semantic(SemanticError {
-            error_id: err.error_id.clone(),
-            error_type: SemanticErrorType::InvalidConfiguration,
-            message: err.message.clone(),
+            error_id:    err.error_id.clone(),
+            error_type:  SemanticErrorType::InvalidConfiguration,
+            message:     err.message.clone(),
             line,
-            column,
+            column:      col,
             section_name: if err.section_name.is_empty() {
                 None
             } else {
                 Some(err.section_name.clone())
             },
-            suggestion: if err.suggestion.is_empty() {
+            suggestion:  if err.suggestion.is_empty() {
                 None
             } else {
                 Some(err.suggestion.clone())
             },
-            severity: ErrorSeverity::Error,
+            severity:    ErrorSeverity::Error,
             quick_fixes: Vec::new(),
-            metadata: HashMap::new(),
+            metadata:    HashMap::new(),
         }));
     }
 
-    // Convert SemanticWarningInfo → DixError::Semantic (Warning severity).
-    //
-    // This is where ALL section-level warnings land:
-    //   • SecuritySectionAnalyzer: xor weak, missing KDF, manual mode, etc.
-    //   • DataSectionAnalyzer:     empty group arrays
-    //   • DlmSectionAnalyzer:      ordering issues
-    //   • QuickFuncsSectionAnalyzer: unused parameters, etc.
-    //   • Missing @SECURITY when DEncryptor present (emitted as an *error* in
-    //     semantic_result.errors above, not as a warning).
     for warn in &semantic_result.warnings {
         let (line, col) = warn
             .position
@@ -241,20 +277,20 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
             .unwrap_or((0, 0));
 
         all_errors.push(DixError::Semantic(SemanticError {
-            error_id: warn.warning_id.clone(),
-            error_type: SemanticErrorType::InvalidConfiguration,
-            message: warn.message.clone(),
+            error_id:    warn.warning_id.clone(),
+            error_type:  SemanticErrorType::InvalidConfiguration,
+            message:     warn.message.clone(),
             line,
-            column,
+            column:      col,
             section_name: if warn.section_name.is_empty() {
                 None
             } else {
                 Some(warn.section_name.clone())
             },
-            suggestion: None,
-            severity: ErrorSeverity::Warning,
+            suggestion:  None,
+            severity:    ErrorSeverity::Warning,
             quick_fixes: Vec::new(),
-            metadata: HashMap::new(),
+            metadata:    HashMap::new(),
         }));
     }
 
@@ -264,4 +300,35 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
 
     tracing::debug!("Pipeline complete: {} total diagnostics", all_errors.len());
     all_errors
-    }
+}
+
+// ── DLM helpers ───────────────────────────────────────────────────────────────
+
+/// Returns (line_1based, col_1based, algorithm_name) for every DEncryptor module.
+fn collect_encryptors(ast: &dixscript::Compiler::AST::DixScript) -> Vec<(usize, usize, String)> {
+    let dlm = match &ast.dlm { Some(d) => d, None => return vec![] };
+    dlm.modules
+        .iter()
+        .filter(|m| matches!(m.module_type, DLMModuleType::DEncryptor))
+        .map(|m| {
+            let algo = match m.subtype {
+                Some(DLMModuleSubtype::Aes128)   => "aes128",
+                Some(DLMModuleSubtype::Aes256)   => "aes256",
+                Some(DLMModuleSubtype::Chacha20)  => "chacha20",
+                Some(DLMModuleSubtype::Xor)       => "xor",
+                _                                 => "aes256",
+            };
+            let line = if m.position.is_valid() { m.position.line } else { 0 };
+            let col  = if m.position.is_valid() { m.position.column } else { 0 };
+            (line, col, algo.to_string())
+        })
+        .collect()
+}
+
+/// Find the 1-based (line, col) of the @DLM section keyword token.
+fn find_dlm_token_pos(tokens: &[dixscript::Compiler::Core::Tokenizer::Token]) -> Option<(usize, usize)> {
+    tokens
+        .iter()
+        .find(|t| matches!(t.token_type, TokenType::SectionDLM))
+        .map(|t| (t.line, t.column))
+}

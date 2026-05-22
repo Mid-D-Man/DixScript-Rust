@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Fri May 22 10:52:53 UTC 2026
+Generated: Fri May 22 10:54:08 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 9469f62452b50c49d960d9708f6bdf56d76f0ccd
+Commit: ca1d4e4bd2b65d92c195ca020cd4143bfadd9c28
 Branch: master
 ==================================
 
@@ -288,6 +288,7 @@ Source Files:
   mdix-lsp/src/features/document_highlights.rs
   mdix-lsp/src/features/document_symbols.rs
   mdix-lsp/src/features/folding.rs
+  mdix-lsp/src/features/formatting.rs
   mdix-lsp/src/features/goto_definition.rs
   mdix-lsp/src/features/hover.rs
   mdix-lsp/src/features/inlay_hints.rs
@@ -398,10 +399,10 @@ GitHub Workflows:
 
 Total Rust File Counts:
 =======================
-  Source files:    280
+  Source files:    281
   Test files:      15
   Benchmark files: 9
-  Total:           304
+  Total:           305
 
 Per-Member Breakdown:
 ====================
@@ -411,5 +412,5 @@ Per-Member Breakdown:
   mdix-wasm: src=4  tests=0  benches=0
   mdix-python: src=5  tests=0  benches=0
   mdix-java: src=1  tests=0  benches=0
-  mdix-lsp: src=20  tests=1  benches=0
+  mdix-lsp: src=21  tests=1  benches=0
   mdix-c: src=0  tests=0  benches=0

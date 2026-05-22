@@ -742,60 +742,67 @@ pub fn new_with_error_manager(
     }
 
     fn validate_return_statement(
-        &self,
-        value: &Expression,
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
-    ) {
-        let max_depth = Self::calculate_max_depth(100);
-        self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
+    &self,
+    value:       &Expression,
+    func:        &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope: &LocalScopeTracker,
+    result:      &mut SectionAnalysisResult,
+) {
+    let max_depth = Self::calculate_max_depth(100);
+    self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
 
-        let local_variable_types = local_scope.get_all_variable_types();
-        let visitor = TypeInferenceVisitor::new(symbol_table, Some(local_variable_types));
-        let return_value_type = visitor.infer_type_from_expression(value);
-        let expected = func.return_type.unwrap();
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
+    let return_value_type = visitor.infer_type_from_expression(value);
+    let expected = func.return_type.unwrap();
 
-        match return_value_type {
-            Some(actual) if !Self::are_types_compatible_strict(actual, expected) => {
-                self.add_error(
-                    result,
-                    "QFUNC015",
-                    "RETURN_TYPE_MISMATCH",
-                    &format!(
-                        "Function '{}' returns {:?} but declared return type is {:?}",
-                        func.name, actual, expected
-                    ),
-                    &format!(
-                        "Change the return value to match {:?} or update the function return type",
-                        expected
-                    ),
-                    value.position(),
-                );
-            }
-            Some(actual) => {
-                if self.debug_config.is_verbose {
-                    self.error_manager.log_debug(&format!(
-                        "Return type {:?} matches expected {:?}",
-                        actual, expected
-                    ));
-                }
-            }
-            None => {
-                self.add_warning(
-                    result,
-                    "QFUNC_WARN004",
-                    &format!(
-                        "Cannot infer return type in function '{}'. Expected: {:?}",
-                        func.name, expected
-                    ),
-                    "QUICKFUNCS",
-                    value.position(),
-                );
+    match return_value_type {
+        // Any is compatible with all declared return types — no error
+        Some(actual) if actual == DataType::Any => {}
+
+        Some(actual) if !Self::are_types_compatible_strict(actual, expected) => {
+            self.add_error(
+                result,
+                "QFUNC015",
+                "RETURN_TYPE_MISMATCH",
+                &format!(
+                    "Function '{}' returns {:?} but declared return type is {:?}",
+                    func.name, actual, expected
+                ),
+                &format!(
+                    "Change the return value to match {:?} or update the function return type",
+                    expected
+                ),
+                value.position(),
+            );
+        }
+        Some(actual) => {
+            if self.debug_config.is_verbose {
+                self.error_manager.log_debug(&format!(
+                    "Return type {:?} matches expected {:?}", actual, expected
+                ));
             }
         }
+        None => {
+            self.add_warning(
+                result,
+                "QFUNC_WARN004",
+                &format!(
+                    "Cannot infer return type in function '{}'. Expected: {:?}",
+                    func.name, expected
+                ),
+                "QUICKFUNCS",
+                value.position(),
+            );
+        }
     }
+}
 
     fn validate_variable_declaration_statement(
         &self,

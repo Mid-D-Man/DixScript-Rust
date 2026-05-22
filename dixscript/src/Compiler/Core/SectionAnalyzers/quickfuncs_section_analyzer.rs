@@ -69,12 +69,14 @@ fn is_valid_arithmetic_assign_op(op: &str) -> bool {
     )
 }
 
+// ── Operator validator (free function) ─────────────────────────────────────
+
 #[inline]
 fn is_valid_data_type(data_type: DataType) -> bool {
     matches!(
         data_type,
         DataType::Int
-        | DataType::Long
+            | DataType::Long
             | DataType::Float
             | DataType::Double
             | DataType::String
@@ -91,6 +93,8 @@ fn is_valid_data_type(data_type: DataType) -> bool {
             | DataType::Any
             | DataType::Function
             | DataType::Range
+            | DataType::TypedArray(_)   // typed collection — valid annotation
+            | DataType::TypedTuple(_)
     )
 }
 

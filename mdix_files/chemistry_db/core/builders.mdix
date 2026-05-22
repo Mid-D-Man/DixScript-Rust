@@ -1,0 +1,261 @@
+@CONFIG(
+  version -> "1.0.0",
+  author -> "Chemistry System - Object Builders",
+  created -> 2025-01-09T00:00:00Z,
+  encoding -> "UTF-8",
+  features -> "advanced"
+)
+
+@IMPORTS(
+  enums from "enums.mdix"
+)
+
+@QUICKFUNCS(
+  ~createIdentity<object>(name<string>, symbol<string>, atomic_num<int>, atomic_weight<float>, group<enum>, period<int>, block<enum>, category<enum>, state<enum>) {
+    return {
+      name = name,
+      symbol = symbol,
+      atomic_number = atomic_num,
+      atomic_weight = atomic_weight,
+      group = group,
+      period = period,
+      block = block,
+      category = category,
+      standard_state = state
+    }
+  }
+
+  ~createNuclearCore<object>(protons<int>, neutrons_stable<int>, spin<float>, magnetic_moment<float>, quadrupole_moment<float>) {
+    return {
+      protons = protons,
+      neutrons_stable = neutrons_stable,
+      nuclear_spin = spin,
+      magnetic_moment_nuclear_magnetons = magnetic_moment,
+      quadrupole_moment_barns = quadrupole_moment
+    }
+  }
+
+  ~createIsotope<object>(mass_num<int>, abundance_percent<float>, half_life_seconds<float>, decay_mode<enum>, decay_energy_mev<float>, neutron_xs_barns<float>) {
+    is_stable = decay_mode == enums.DecayMode.STABLE
+    
+    return {
+      mass_number = mass_num,
+      natural_abundance_percent = abundance_percent,
+      half_life_seconds = half_life_seconds,
+      is_stable = is_stable,
+      decay_mode = decay_mode,
+      decay_energy_mev = decay_energy_mev,
+      neutron_cross_section_barns = neutron_xs_barns
+    }
+  }
+
+  ~createElectronicConfig<object>(config<string>, valence<int>, electron_affinity<float>, binding_energy<float>, work_function<float>) {
+    return {
+      ground_state_configuration = config,
+      valence_electrons = valence,
+      electron_affinity_kj_mol = electron_affinity,
+      binding_energy_ev = binding_energy,
+      work_function_ev = work_function
+    }
+  }
+
+  ~createQuantumNumbers<object>(n<int>, l<int>, ml<int>, ms<float>) {
+    return {
+      principal_n = n,
+      azimuthal_l = l,
+      magnetic_ml = ml,
+      spin_ms = ms
+    }
+  }
+
+  ~createElectronegativity<object>(pauling<float>, mulliken<float>, allred<float>, sanderson<float>, allen<float>) {
+    avg = (pauling + mulliken + allred + sanderson + allen) / 5.0
+    
+    return {
+      pauling = pauling,
+      mulliken = mulliken,
+      allred_rochow = allred,
+      sanderson = sanderson,
+      allen = allen,
+      average = avg
+    }
+  }
+
+  ~createRadii<object>(atomic<float>, covalent<float>, vdw<float>) {
+    return {
+      atomic_pm = atomic,
+      covalent_pm = covalent,
+      van_der_waals_pm = vdw
+    }
+  }
+
+  ~createIonicRadius<object>(charge<int>, radius_pm<float>, coordination<int>) {
+    return {
+      oxidation_state = charge,
+      radius_pm = radius_pm,
+      coordination_number = coordination
+    }
+  }
+
+  ~createCrystalLattice<object>(system<enum>, a_angstrom<float>, b_angstrom<float>, c_angstrom<float>, alpha_deg<float>, beta_deg<float>, gamma_deg<float>) {
+    abc_tuple = t:(a_angstrom, b_angstrom, c_angstrom)
+    angles_tuple = t:(alpha_deg, beta_deg, gamma_deg)
+    
+    return {
+      lattice_system = system,
+      constants_abc_angstrom = abc_tuple,
+      angles_degrees = angles_tuple
+    }
+  }
+
+  ~createMatrix3x3<tuple>(r1c1<float>, r1c2<float>, r1c3<float>, r2c1<float>, r2c2<float>, r2c3<float>, r3c1<float>, r3c2<float>, r3c3<float>) {
+    row1 = t:(r1c1, r1c2, r1c3)
+    row2 = t:(r2c1, r2c2, r2c3)
+    row3 = t:(r3c1, r3c2, r3c3)
+    
+    return t:(row1, row2, row3)
+  }
+
+  ~createPhasePoints<object>(melting_k<float>, boiling_k<float>, triple_temp_k<float>, triple_press_pa<float>, critical_temp_k<float>, critical_press_pa<float>) {
+    melting_c = melting_k - 273.15
+    boiling_c = boiling_k - 273.15
+    triple_point = t:(triple_temp_k, triple_press_pa)
+    critical_point = t:(critical_temp_k, critical_press_pa)
+    
+    return {
+      melting_point_k = melting_k,
+      melting_point_c = melting_c,
+      boiling_point_k = boiling_k,
+      boiling_point_c = boiling_c,
+      triple_point = triple_point,
+      critical_point = critical_point
+    }
+  }
+
+  ~createThermalProps<object>(heat_fusion<float>, heat_vap<float>, specific_heat<float>, thermal_cond<float>, thermal_exp<float>, debye_temp<float>) {
+    return {
+      heat_of_fusion_kj_mol = heat_fusion,
+      heat_of_vaporization_kj_mol = heat_vap,
+      specific_heat_j_kg_k = specific_heat,
+      thermal_conductivity_w_m_k = thermal_cond,
+      thermal_expansion_k_minus1 = thermal_exp,
+      debye_temperature_k = debye_temp
+    }
+  }
+
+  ~createMechanicalProps<object>(density<float>, youngs<float>, shear<float>, bulk<float>, poisson<float>, mohs<float>, sound_speed<float>) {
+    bulk_moduli = t:(youngs, shear, bulk)
+    
+    return {
+      density_g_cm3 = density,
+      bulk_moduli_gpa = bulk_moduli,
+      poisson_ratio = poisson,
+      mohs_hardness = mohs,
+      speed_of_sound_m_s = sound_speed
+    }
+  }
+
+  ~createElectricalProps<object>(conductivity<float>, resistivity<float>, band_gap<float>) {
+    return {
+      electrical_conductivity_s_m = conductivity,
+      electrical_resistivity_ohm_m = resistivity,
+      band_gap_ev = band_gap
+    }
+  }
+
+  ~createMagneticProps<object>(ordering<enum>, susceptibility<float>, curie_temp<float>) {
+    return {
+      magnetic_ordering = ordering,
+      magnetic_susceptibility_volume = susceptibility,
+      curie_temperature_k = curie_temp
+    }
+  }
+
+  ~createLennardJones<object>(epsilon<float>, sigma<float>) {
+    potential_params = t:(epsilon, sigma)
+    
+    return {
+      epsilon_well_depth_k = epsilon,
+      sigma_collision_diameter_angstrom = sigma,
+      lj_parameters = potential_params
+    }
+  }
+
+  ~createPolarizabilityTensor<tuple>(xx<float>, xy<float>, xz<float>, yx<float>, yy<float>, yz<float>, zx<float>, zy<float>, zz<float>) {
+    row1 = t:(xx, xy, xz)
+    row2 = t:(yx, yy, yz)
+    row3 = t:(zx, zy, zz)
+    
+    return t:(row1, row2, row3)
+  }
+
+  ~createSurfaceProps<object>(surface_energy<float>, adsorption_energy<float>, work_function<float>) {
+    return {
+      surface_energy_j_m2 = surface_energy,
+      adsorption_energy_ev = adsorption_energy,
+      work_function_ev = work_function
+    }
+  }
+
+  ~createSpectralLine<object>(wavelength_nm<float>, intensity<float>, series<enum>, transition_desc<string>) {
+    frequency_hz = 299792458.0 / (wavelength_nm * 1.0e-9)
+    energy_ev = 1239.84193 / wavelength_nm
+    
+    return {
+      wavelength_nm = wavelength_nm,
+      frequency_hz = frequency_hz,
+      energy_ev = energy_ev,
+      intensity_relative = intensity,
+      spectral_series = series,
+      transition = transition_desc
+    }
+  }
+
+  ~createEinsteinCoeffs<object>(a21<float>, b12<float>, b21<float>) {
+    coefficients = t:(a21, b12, b21)
+    
+    return {
+      spontaneous_emission_a21 = a21,
+      absorption_b12 = b12,
+      stimulated_emission_b21 = b21,
+      einstein_abc = coefficients
+    }
+  }
+
+  ~createPhotonCrossSections<object>(photoelectric<float>, compton<float>, pair_production<float>) {
+    total = photoelectric + compton + pair_production
+    
+    return {
+      photoelectric_barns = photoelectric,
+      compton_scattering_barns = compton,
+      pair_production_barns = pair_production,
+      total_barns = total
+    }
+  }
+
+  ~createHyperfine<object>(splitting_mhz<float>, g_factor<float>, quadrupole_coupling<float>) {
+    return {
+      hyperfine_splitting_mhz = splitting_mhz,
+      g_factor = g_factor,
+      quadrupole_coupling_constant_mhz = quadrupole_coupling
+    }
+  }
+
+  ~createAbundance<object>(crust_ppm<float>, universe_ppm<float>, ocean_ppm<float>, human_ppm<float>) {
+    return {
+      earths_crust_ppm = crust_ppm,
+      universe_ppm = universe_ppm,
+      ocean_ppm = ocean_ppm,
+      human_body_ppm = human_ppm
+    }
+  }
+
+  ~createDiscovery<object>(year<int>, discoverer<string>, country<string>, etymology<string>) {
+    return {
+      discovery_year = year,
+      discovered_by = discoverer,
+      country_of_discovery = country,
+      name_etymology = etymology
+    }
+  }
+)

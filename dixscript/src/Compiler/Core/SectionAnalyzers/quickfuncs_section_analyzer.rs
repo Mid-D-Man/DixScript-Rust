@@ -2086,46 +2086,64 @@ fn validate_unary_op_expression(
     }
 }
 
-    fn validate_conditional_expression(
-        &self,
-        condition: &Expression,
-        true_value: &Expression,
-        false_value: &Expression,
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
-        max_depth: usize,
-    ) {
-        self.validate_expression(condition, func, symbol_table, local_scope, result, max_depth - 1);
+fn validate_conditional_expression(
+    &self,
+    condition:    &Expression,
+    true_value:   &Expression,
+    false_value:  &Expression,
+    func:         &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope:  &LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
+    max_depth:    usize,
+) {
+    self.validate_expression(condition, func, symbol_table, local_scope, result, max_depth - 1);
 
-        let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        if let Some(ct) = visitor.infer_type_from_expression(condition) {
-            if ct != DataType::Bool {
-                self.add_error(
-                    result, "QFUNC041", "NON_BOOL_TERNARY_CONDITION",
-                    &format!("Ternary condition must be bool, got {:?} in '{}'", ct, func.name),
-                    "Use comparison operators to create a boolean condition.", condition.position(),
-                );
-            }
-        }
+    // Build visitor with full element-hint context
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
 
-        self.validate_expression(true_value, func, symbol_table, local_scope, result, max_depth - 1);
-        self.validate_expression(false_value, func, symbol_table, local_scope, result, max_depth - 1);
-
-        let tt = visitor.infer_type_from_expression(true_value);
-        let ft = visitor.infer_type_from_expression(false_value);
-
-        if let (Some(t), Some(f)) = (tt, ft) {
-            if !Self::are_types_comparable(t, f) {
-                self.add_warning(
-                    result, "QFUNC_WARN003",
-                    &format!("Ternary branches have incompatible types {:?} and {:?} in '{}'", t, f, func.name),
-                    "QUICKFUNCS", condition.position(),
-                );
-            }
+    if let Some(ct) = visitor.infer_type_from_expression(condition) {
+        // Any and Bool are both acceptable condition types
+        if ct != DataType::Bool && ct != DataType::Any {
+            self.add_error(
+                result,
+                "QFUNC041",
+                "NON_BOOL_TERNARY_CONDITION",
+                &format!("Ternary condition must be bool, got {:?} in '{}'", ct, func.name),
+                "Use comparison operators to create a boolean condition.",
+                condition.position(),
+            );
         }
     }
+
+    self.validate_expression(true_value,  func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(false_value, func, symbol_table, local_scope, result, max_depth - 1);
+
+    let tt = visitor.infer_type_from_expression(true_value);
+    let ft = visitor.infer_type_from_expression(false_value);
+
+    if let (Some(t), Some(f)) = (tt, ft) {
+        // Only warn if both sides have known concrete types that mismatch
+        if t != DataType::Any && f != DataType::Any && !Self::are_types_comparable(t, f) {
+            self.add_warning(
+                result,
+                "QFUNC_WARN003",
+                &format!(
+                    "Ternary branches have incompatible types {:?} and {:?} in '{}'",
+                    t, f, func.name
+                ),
+                "QUICKFUNCS",
+                condition.position(),
+            );
+        }
+    }
+}
 
     // ==================== CALL VALIDATORS ====================
 

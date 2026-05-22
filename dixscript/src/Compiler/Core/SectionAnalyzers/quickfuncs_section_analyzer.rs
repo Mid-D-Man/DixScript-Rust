@@ -808,7 +808,7 @@ pub fn new_with_error_manager(
     }
 }
 
-    fn validate_variable_declaration_statement(
+fn validate_variable_declaration_statement(
     &self,
     statement:    &QuickFuncStatement,
     func:         &QuickFunction,
@@ -831,9 +831,7 @@ pub fn new_with_error_manager(
 
     if !Self::is_valid_identifier(variable_name) {
         self.add_error(
-            result,
-            "QFUNC067",
-            "INVALID_VARIABLE_NAME",
+            result, "QFUNC067", "INVALID_VARIABLE_NAME",
             &format!("Invalid variable name '{}' in function '{}'", variable_name, func.name),
             "Variable names must start with a letter and contain only alphanumeric characters and underscores.",
             *position,
@@ -849,24 +847,19 @@ pub fn new_with_error_manager(
             variable_name
         );
         self.add_error(
-            result,
-            "QFUNC067B",
-            "DATA_TYPE_KEYWORD_AS_VARIABLE",
+            result, "QFUNC067B", "DATA_TYPE_KEYWORD_AS_VARIABLE",
             &format!(
                 "Variable '{}' in function '{}' cannot use a data type keyword as name",
                 variable_name, func.name
             ),
-            &suggestion,
-            *position,
+            &suggestion, *position,
         );
         return;
     }
 
     if Keywords::is_reserved_in_context(variable_name, "QUICKFUNCS") {
         self.add_error(
-            result,
-            "QFUNC068",
-            "RESERVED_KEYWORD_AS_VARIABLE",
+            result, "QFUNC068", "RESERVED_KEYWORD_AS_VARIABLE",
             &Keywords::get_keyword_usage_error(variable_name, "QUICKFUNCS"),
             &format!("Choose a different name for variable '{}'", variable_name),
             *position,
@@ -876,13 +869,8 @@ pub fn new_with_error_manager(
 
     if local_scope.has_variable(variable_name) {
         self.add_error(
-            result,
-            "QFUNC069",
-            "VARIABLE_REDECLARATION",
-            &format!(
-                "Variable '{}' already declared in function '{}'",
-                variable_name, func.name
-            ),
+            result, "QFUNC069", "VARIABLE_REDECLARATION",
+            &format!("Variable '{}' already declared in function '{}'", variable_name, func.name),
             "Each variable must be declared only once. Use assignment to change its value.",
             *position,
         );
@@ -892,7 +880,6 @@ pub fn new_with_error_manager(
     let max_depth = Self::calculate_max_depth(100);
     self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
 
-    // Build TypeInferenceVisitor with full local scope context including element hints
     let local_variable_types = local_scope.get_all_variable_types();
     let element_type_hints   = local_scope.get_all_element_type_hints();
     let visitor = TypeInferenceVisitor::new_with_element_hints(
@@ -906,17 +893,12 @@ pub fn new_with_error_manager(
     if let (Some(&declared), Some(inferred)) = (data_type.as_ref(), inferred_type) {
         if inferred != DataType::Any && !Self::are_types_compatible_strict(inferred, declared) {
             self.add_error(
-                result,
-                "QFUNC071",
-                "VARIABLE_TYPE_MISMATCH",
+                result, "QFUNC071", "VARIABLE_TYPE_MISMATCH",
                 &format!(
                     "Variable '{}' declared as {:?} but assigned value of type {:?}",
                     variable_name, declared, inferred
                 ),
-                &format!(
-                    "Change the value to match {:?} or remove the type annotation",
-                    declared
-                ),
+                &format!("Change the value to match {:?} or remove the type annotation", declared),
                 *position,
             );
         }
@@ -925,10 +907,20 @@ pub fn new_with_error_manager(
     let is_const     = matches!(declaration_type, DeclarationType::Const) || !is_mutable;
     let effective_type = data_type.or(inferred_type);
 
-    // Infer element type for arrays and tuples so downstream method calls can
-    // resolve .first(), .last(), .get(i), etc. to the actual element type.
-    let element_type = match effective_type {
+    // Infer element type for scope tracking.
+    // TypedArray/TypedTuple declarations are authoritative — use the annotation directly
+    // rather than trying to infer from the value (which would only give untyped Array/Tuple).
+    let element_type: Option<DataType> = match effective_type {
+        Some(DataType::TypedArray(elem)) => {
+            // Declared annotation is ground truth
+            Some(elem.to_data_type())
+        }
+        Some(DataType::TypedTuple(arr)) => {
+            // First defined slot as representative element type
+            arr[0].map(|e| e.to_data_type())
+        }
         Some(DataType::Array) | Some(DataType::Tuple) => {
+            // Untyped collection: infer from the assigned value
             visitor.infer_element_type_from_expression(value)
         }
         _ => None,
@@ -950,7 +942,7 @@ pub fn new_with_error_manager(
             element_type,
         ));
     }
-}
+            }
 
     // ==================== CONTROL FLOW VALIDATION ====================
 

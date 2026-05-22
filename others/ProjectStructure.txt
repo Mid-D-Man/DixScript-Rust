@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Fri May 22 10:36:55 UTC 2026
+Generated: Fri May 22 10:37:31 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 63ce67a3e12fc2b431dcaf4d520c8d4603a4e5b1
+Commit: d6b6753913e353c619dd80fa249a5b0d70422d30
 Branch: master
 ==================================
 
@@ -335,6 +335,7 @@ DixScript Sample Files (.mdix):
   mdix_files/basic/lsp_tester.mdix
   mdix_files/chemistry_db/core/builders.mdix
   mdix_files/chemistry_db/core/enums.mdix
+  mdix_files/chemistry_db/core/physics.mdix
   mdix_files/chemistry_db/elements_database.mdix
   mdix_files/tests/cli/01_basic.mdix
   mdix_files/tests/cli/02_enums.mdix

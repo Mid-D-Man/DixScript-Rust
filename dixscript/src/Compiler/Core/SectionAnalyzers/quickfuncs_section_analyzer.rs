@@ -1866,53 +1866,82 @@ fn validate_arithmetic_op_expression(
     }
 }
 
-    fn validate_comparison_op_expression(
-        &self,
-        left: &Expression,
-        right: &Expression,
-        operator: &str,
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
-        max_depth: usize,
-    ) {
-        if !is_valid_comparison_operator(operator) {
-            self.add_error(
-                result, "QFUNC032", "INVALID_COMPARISON_OPERATOR",
-                &format!("Invalid comparison operator '{}' in function '{}'", operator, func.name),
-                "Valid operators: ==, !=, >, <, >=, <=", left.position(),
-            );
+    // ── Operator expression validators ─────────────────────────────────────────
+
+fn validate_comparison_op_expression(
+    &self,
+    left:         &Expression,
+    right:        &Expression,
+    operator:     &str,
+    func:         &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope:  &LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
+    max_depth:    usize,
+) {
+    if !is_valid_comparison_operator(operator) {
+        self.add_error(
+            result,
+            "QFUNC032",
+            "INVALID_COMPARISON_OPERATOR",
+            &format!("Invalid comparison operator '{}' in function '{}'", operator, func.name),
+            "Valid operators: ==, !=, >, <, >=, <=",
+            left.position(),
+        );
+        return;
+    }
+
+    self.validate_expression(left,  func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
+
+    // Use full element-hint context so element-returning methods resolve correctly
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
+
+    let lt = visitor.infer_type_from_expression(left);
+    let rt = visitor.infer_type_from_expression(right);
+
+    if let (Some(l), Some(r)) = (lt, rt) {
+        // Any on either side — permissive, skip further checks
+        if l == DataType::Any || r == DataType::Any { return; }
+
+        if operator == "==" || operator == "!=" {
+            if !Self::are_types_comparable(l, r) {
+                self.add_warning(
+                    result,
+                    "QFUNC_WARN002",
+                    &format!(
+                        "Comparing incompatible types {:?} and {:?} in function '{}'",
+                        l, r, func.name
+                    ),
+                    "QUICKFUNCS",
+                    left.position(),
+                );
+            }
             return;
         }
 
-        self.validate_expression(left, func, symbol_table, local_scope, result, max_depth - 1);
-        self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
-
-        let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        let lt = visitor.infer_type_from_expression(left);
-        let rt = visitor.infer_type_from_expression(right);
-
-        if let (Some(l), Some(r)) = (lt, rt) {
-            if operator == "==" || operator == "!=" {
-                if !Self::are_types_comparable(l, r) {
-                    self.add_warning(
-                        result, "QFUNC_WARN002",
-                        &format!("Comparing incompatible types {:?} and {:?} in function '{}'", l, r, func.name),
-                        "QUICKFUNCS", left.position(),
-                    );
-                }
-                return;
-            }
-            if !is_numeric_type(l) || !is_numeric_type(r) {
-                self.add_error(
-                    result, "QFUNC033", "NON_NUMERIC_COMPARISON",
-                    &format!("Operator '{}' requires numeric types, got {:?} and {:?} in '{}'", operator, l, r, func.name),
-                    "Use numeric types (int, float, double) for relational comparisons.", left.position(),
-                );
-            }
+        // Relational operators require numeric operands
+        if !is_numeric_type(l) || !is_numeric_type(r) {
+            self.add_error(
+                result,
+                "QFUNC033",
+                "NON_NUMERIC_COMPARISON",
+                &format!(
+                    "Operator '{}' requires numeric types, got {:?} and {:?} in '{}'",
+                    operator, l, r, func.name
+                ),
+                "Use numeric types (int, float, double) for relational comparisons.",
+                left.position(),
+            );
         }
     }
+}
 
     fn validate_logical_op_expression(
     &self,

@@ -1,7 +1,4 @@
 // mdix-lsp/src/server.rs
-//! The key fix here: shutdown must return IMMEDIATELY.
-//! Task cleanup happens asynchronously AFTER the response is sent.
-
 use dashmap::DashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -65,7 +62,10 @@ impl Backend {
 
             match result {
                 Err(_timeout) => {
-                    tracing::warn!("Analysis timed out after {}s for {}", ANALYSIS_TIMEOUT_SECS, uri);
+                    tracing::warn!(
+                        "Analysis timed out after {}s for {}",
+                        ANALYSIS_TIMEOUT_SECS, uri
+                    );
                 }
                 Ok(Err(panic_err)) => {
                     tracing::error!("Analysis task panicked: {:?}", panic_err);
@@ -100,7 +100,7 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, _params: InitializeParams) -> LspResult<InitializeResult> {
-        tracing::info!("mdix-lsp initialize request received");
+        tracing::info!("mdix-lsp initialize");
         Ok(InitializeResult {
             capabilities: server_capabilities(),
             server_info:  Some(ServerInfo {
@@ -111,14 +111,12 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _params: InitializedParams) {
-        tracing::info!("mdix-lsp initialized (client confirmed)");
-        self.client
-            .log_message(MessageType::INFO, "mdix-lsp ready")
-            .await;
+        tracing::info!("mdix-lsp initialized");
+        self.client.log_message(MessageType::INFO, "mdix-lsp ready").await;
     }
 
     async fn shutdown(&self) -> LspResult<()> {
-        tracing::info!("mdix-lsp shutdown requested");
+        tracing::info!("mdix-lsp shutdown");
         self.shutdown_requested.store(true, Ordering::SeqCst);
 
         let task_handles: Vec<_> = self.analysis_tasks
@@ -141,6 +139,8 @@ impl LanguageServer for Backend {
 
         Ok(())
     }
+
+    // ── Document lifecycle ────────────────────────────────────────────────────
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let doc = params.text_document;
@@ -171,6 +171,8 @@ impl LanguageServer for Backend {
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
 
+    // ── Completion ────────────────────────────────────────────────────────────
+
     async fn completion(
         &self,
         params: CompletionParams,
@@ -182,12 +184,29 @@ impl LanguageServer for Backend {
         Ok(features::completions::provide(doc.as_deref(), pos, trigger.as_deref()))
     }
 
+    // ── Signature help ────────────────────────────────────────────────────────
+
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> LspResult<Option<SignatureHelp>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let ctx = params.context;
+        let doc = self.documents.get(uri);
+        Ok(features::signature_help::provide(doc.as_deref(), pos, ctx))
+    }
+
+    // ── Hover ─────────────────────────────────────────────────────────────────
+
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
         let doc = self.documents.get(uri);
         Ok(features::hover::provide(doc.as_deref(), pos))
     }
+
+    // ── Go-to definition ──────────────────────────────────────────────────────
 
     async fn goto_definition(
         &self,
@@ -199,6 +218,56 @@ impl LanguageServer for Backend {
         Ok(features::goto_definition::provide(doc.as_deref(), pos))
     }
 
+    // ── Document highlight ────────────────────────────────────────────────────
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> LspResult<Option<Vec<DocumentHighlight>>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let doc = self.documents.get(uri);
+        Ok(features::document_highlight::provide(doc.as_deref(), pos))
+    }
+
+    // ── References ────────────────────────────────────────────────────────────
+
+    async fn references(
+        &self,
+        params: ReferenceParams,
+    ) -> LspResult<Option<Vec<Location>>> {
+        let uri  = &params.text_document_position.text_document.uri;
+        let pos  = params.text_document_position.position;
+        let doc  = self.documents.get(uri);
+        let incl = params.context.include_declaration;
+        Ok(features::references::provide(doc.as_deref(), uri, pos, incl))
+    }
+
+    // ── Rename ────────────────────────────────────────────────────────────────
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> LspResult<Option<PrepareRenameResponse>> {
+        let uri = &params.text_document.uri;
+        let pos = params.position;
+        let doc = self.documents.get(uri);
+        Ok(features::rename::prepare(doc.as_deref(), pos))
+    }
+
+    async fn rename(
+        &self,
+        params: RenameParams,
+    ) -> LspResult<Option<WorkspaceEdit>> {
+        let uri      = &params.text_document_position.text_document.uri;
+        let pos      = params.text_document_position.position;
+        let new_name = &params.new_name;
+        let doc      = self.documents.get(uri);
+        Ok(features::rename::provide(doc.as_deref(), uri, pos, new_name))
+    }
+
+    // ── Document symbols ──────────────────────────────────────────────────────
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -208,6 +277,8 @@ impl LanguageServer for Backend {
         Ok(features::document_symbols::provide(doc.as_deref()))
     }
 
+    // ── Semantic tokens ───────────────────────────────────────────────────────
+
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
@@ -216,6 +287,8 @@ impl LanguageServer for Backend {
         let doc = self.documents.get(uri);
         Ok(features::semantic_tokens::provide(doc.as_deref()))
     }
+
+    // ── Colors ────────────────────────────────────────────────────────────────
 
     async fn document_color(
         &self,
@@ -233,6 +306,8 @@ impl LanguageServer for Backend {
         Ok(features::document_color::presentation(params.color, params.range))
     }
 
+    // ── Inlay hints ───────────────────────────────────────────────────────────
+
     async fn inlay_hint(
         &self,
         params: InlayHintParams,
@@ -241,6 +316,8 @@ impl LanguageServer for Backend {
         let doc = self.documents.get(uri);
         Ok(features::inlay_hints::provide(doc.as_deref()))
     }
+
+    // ── Code actions ──────────────────────────────────────────────────────────
 
     async fn code_action(
         &self,
@@ -252,6 +329,8 @@ impl LanguageServer for Backend {
         Ok(features::code_actions::provide(doc.as_deref(), diags))
     }
 
+    // ── Folding ───────────────────────────────────────────────────────────────
+
     async fn folding_range(
         &self,
         params: FoldingRangeParams,
@@ -259,63 +338,5 @@ impl LanguageServer for Backend {
         let uri = &params.text_document.uri;
         let doc = self.documents.get(uri);
         Ok(features::folding::provide(doc.as_deref()))
-    }
-
-    // ── NEW: Document highlights ───────────────────────────────────────────────
-    async fn document_highlight(
-        &self,
-        params: DocumentHighlightParams,
-    ) -> LspResult<Option<Vec<DocumentHighlight>>> {
-        let uri = &params.text_document_position_params.text_document.uri;
-        let pos = params.text_document_position_params.position;
-        let doc = self.documents.get(uri);
-        Ok(features::document_highlights::provide(doc.as_deref(), pos))
-    }
-
-    // ── NEW: References ────────────────────────────────────────────────────────
-    async fn references(
-        &self,
-        params: ReferenceParams,
-    ) -> LspResult<Option<Vec<Location>>> {
-        let uri  = &params.text_document_position.text_document.uri;
-        let pos  = params.text_document_position.position;
-        let doc  = self.documents.get(uri);
-        let incl = params.context.include_declaration;
-        Ok(features::references::provide(doc.as_deref(), uri, pos, incl))
-    }
-
-    // ── NEW: Prepare rename ────────────────────────────────────────────────────
-    async fn prepare_rename(
-        &self,
-        params: TextDocumentPositionParams,
-    ) -> LspResult<Option<PrepareRenameResponse>> {
-        let uri = &params.text_document.uri;
-        let pos = params.position;
-        let doc = self.documents.get(uri);
-        Ok(features::rename::prepare(doc.as_deref(), pos))
-    }
-
-    // ── NEW: Rename ────────────────────────────────────────────────────────────
-    async fn rename(
-        &self,
-        params: RenameParams,
-    ) -> LspResult<Option<WorkspaceEdit>> {
-        let uri      = &params.text_document_position.text_document.uri;
-        let pos      = params.text_document_position.position;
-        let new_name = &params.new_name;
-        let doc      = self.documents.get(uri);
-        Ok(features::rename::provide(doc.as_deref(), uri, pos, new_name))
-    }
-
-    // ── NEW: Signature help ────────────────────────────────────────────────────
-    async fn signature_help(
-        &self,
-        params: SignatureHelpParams,
-    ) -> LspResult<Option<SignatureHelp>> {
-        let uri = &params.text_document_position_params.text_document.uri;
-        let pos = params.text_document_position_params.position;
-        let ctx = params.context;
-        let doc = self.documents.get(uri);
-        Ok(features::signature_help::provide(doc.as_deref(), pos, ctx))
     }
 }

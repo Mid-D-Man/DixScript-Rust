@@ -1,5 +1,6 @@
 // mdix-lsp/src/capabilities.rs
 use tower_lsp::lsp_types::*;
+use crate::features::code_lens::ALL_COMMANDS;
 
 pub const TT_KEYWORD:     u32 = 0;
 pub const TT_STRING:      u32 = 1;
@@ -57,6 +58,7 @@ pub fn semantic_token_legend() -> SemanticTokensLegend {
 
 pub fn server_capabilities() -> ServerCapabilities {
     ServerCapabilities {
+        // ── Document sync ─────────────────────────────────────────────────────
         text_document_sync: Some(TextDocumentSyncCapability::Options(
             TextDocumentSyncOptions {
                 open_close: Some(true),
@@ -90,13 +92,11 @@ pub fn server_capabilities() -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
 
         // ── Symbol navigation ─────────────────────────────────────────────────
-        references_provider: Some(OneOf::Left(true)),
+        references_provider:          Some(OneOf::Left(true)),
+        document_highlight_provider:  Some(OneOf::Left(true)),
+        document_symbol_provider:     Some(OneOf::Left(true)),
 
-        document_highlight_provider: Some(OneOf::Left(true)),
-
-        document_symbol_provider: Some(OneOf::Left(true)),
-
-        // ── Editing assistance ────────────────────────────────────────────────
+        // ── Editing ───────────────────────────────────────────────────────────
         rename_provider: Some(OneOf::Right(RenameOptions {
             prepare_provider: Some(true),
             work_done_progress_options: WorkDoneProgressOptions {
@@ -105,6 +105,24 @@ pub fn server_capabilities() -> ServerCapabilities {
         })),
 
         code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+
+        // ── Formatting ────────────────────────────────────────────────────────
+        document_formatting_provider: Some(OneOf::Left(true)),
+
+        // ── Play button / commands ────────────────────────────────────────────
+        code_lens_provider: Some(CodeLensOptions {
+            resolve_provider: Some(false),
+            work_done_progress_options: WorkDoneProgressOptions {
+                work_done_progress: None,
+            },
+        }),
+
+        execute_command_provider: Some(ExecuteCommandOptions {
+            commands: ALL_COMMANDS.iter().map(|s| s.to_string()).collect(),
+            work_done_progress_options: WorkDoneProgressOptions {
+                work_done_progress: None,
+            },
+        }),
 
         // ── Visual enrichment ─────────────────────────────────────────────────
         semantic_tokens_provider: Some(

@@ -2575,6 +2575,110 @@ fn reset_parse_state(&mut self) {
     base
                     }
 
+    /// Parse the inner `<elemType>` or `<e1,e2,...>` after the base keyword is consumed.
+/// Handles the inner `<` and inner `>` (including `>>` split for `<array<int>>`).
+fn parse_typed_collection(&mut self, base_kw: &str) -> Option<DataType> {
+    self.advance(); // consume inner '<'
+
+    if base_kw == "array" {
+        let elem = self.parse_elem_type_keyword();
+
+        if !self.match_and_consume_closing_angle() {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected '>' to close array element type annotation (e.g. <array<int>>)",
+                &current,
+            );
+            if self.should_halt_section() { return None; }
+        }
+
+        return Some(match elem {
+            Some(e) => DataType::TypedArray(e),
+            None    => DataType::Array, // fallback to untyped on parse error
+        });
+    }
+
+    // tuple: parse up to 6 comma-separated element types
+    let mut elems: [Option<ElemType>; 6] = [None; 6];
+    let mut count = 0usize;
+
+    loop {
+        if count >= 6 {
+            // Skip the rest; semantic analysis will report TUPLE_TOO_LARGE
+            while !self.is_at_end() && !self.is_closing_angle() {
+                self.advance();
+            }
+            break;
+        }
+
+        let elem = self.parse_elem_type_keyword();
+        elems[count] = elem;
+        count += 1;
+
+        if self.is_current_symbol(',') {
+            self.advance();
+        } else {
+            break;
+        }
+    }
+
+    if !self.match_and_consume_closing_angle() {
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::MissingToken,
+            "Expected '>' to close tuple element types annotation (e.g. <tuple<int,bool>>)",
+            &current,
+        );
+        if self.should_halt_section() { return None; }
+    }
+
+    Some(if count == 0 {
+        DataType::Tuple // empty inner list — treat as untyped
+    } else {
+        DataType::TypedTuple(elems)
+    })
+    }
+
+    /// Parse a single element-type keyword and advance past it.
+/// Returns `None` on unknown/missing keyword (error is emitted).
+fn parse_elem_type_keyword(&mut self) -> Option<ElemType> {
+    let lower: Option<String> = match &self.current().token_type {
+        TokenType::Keyword(kw)    => Some(kw.to_lowercase()),
+        TokenType::Identifier(id) => Some(id.to_lowercase()),
+        _ => None,
+    };
+
+    match lower {
+        Some(ref s) => {
+            let elem = ElemType::from_keyword(s.as_str());
+            if elem.is_some() {
+                self.advance();
+            } else {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::UnexpectedToken,
+                    &format!("Unknown element type '{}' in typed collection annotation", s),
+                    &current,
+                );
+                if !self.should_halt_section() {
+                    self.advance(); // skip invalid token, continue
+                }
+            }
+            elem
+        }
+        None => {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::UnexpectedToken,
+                "Expected element type keyword (int, string, bool, …) in typed collection annotation",
+                &current,
+            );
+            None
+        }
+    }
+}
+
     fn parse_table_path(&mut self) -> Option<TablePath> {
         let mut segments = Vec::new();
         let first_segment = self.parse_property_name()?;

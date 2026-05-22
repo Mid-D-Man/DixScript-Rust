@@ -2447,63 +2447,82 @@ fn validate_unary_op_expression(
     }
 
     fn validate_array_homogeneity(
-        &self,
-        values: &[Value],
-        function_name: &str,
-        local_scope: &LocalScopeTracker,
-        symbol_table: &SymbolTable,
-        result: &mut SectionAnalysisResult,
-        position: Position,
-    ) {
-        if values.len() < 2 {
-            return;
-        }
+    &self,
+    values:          &[Value],
+    function_name:   &str,
+    local_scope:     &LocalScopeTracker,
+    symbol_table:    &SymbolTable,
+    result:          &mut SectionAnalysisResult,
+    position:        Position,
+) {
+    if values.len() < 2 {
+        return;
+    }
 
-        let local_types = local_scope.get_all_variable_types();
-        let visitor = TypeInferenceVisitor::new(symbol_table, Some(local_types));
+    let local_types       = local_scope.get_all_variable_types();
+    let element_type_hints = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_types),
+        Some(element_type_hints),
+    );
 
-        let first_type = match visitor.infer_type_from_value(&values[0]) {
-            Some(t) => t,
-            None => return,
-        };
+    let first_type = match visitor.infer_type_from_value(&values[0]) {
+        Some(t) => t,
+        None    => return, // Can't determine first type — skip homogeneity check
+    };
 
-        for (i, element) in values.iter().enumerate().skip(1) {
-            match visitor.infer_type_from_value(element) {
-                Some(et) if !Self::are_types_compatible_strict(et, first_type) => {
-                    self.add_error(
-                        result, "QFUNC077", "ARRAY_HETEROGENEOUS",
-                        &format!(
-                            "Array element {} has type {:?} but array expects {:?} (from first element)",
-                            i + 1, et, first_type
-                        ),
-                        &format!(
-                            "All array elements must be the same type. Convert element to {:?} or use separate arrays.",
-                            first_type
-                        ),
-                        position,
-                    );
-                }
-                None => {
-                    self.add_warning(
-                        result, "QFUNC_WARN008",
-                        &format!(
-                            "Cannot infer type of array element {} in function '{}'",
-                            i + 1, function_name
-                        ),
-                        "QUICKFUNCS", position,
-                    );
-                }
-                _ => {}
+    // Any-typed first element — can't make a useful assertion
+    if first_type == DataType::Any {
+        return;
+    }
+
+    for (i, element) in values.iter().enumerate().skip(1) {
+        match visitor.infer_type_from_value(element) {
+            Some(et) if et == DataType::Any => {
+                // Element type is Any (deferred) — treat as compatible, skip
             }
-        }
-
-        if self.debug_config.is_verbose {
-            self.error_manager.log_debug(&format!(
-                "Array homogeneity validated: all {} elements are {:?}",
-                values.len(), first_type
-            ));
+            Some(et) if !Self::are_types_compatible_strict(et, first_type) => {
+                self.add_error(
+                    result,
+                    "QFUNC077",
+                    "ARRAY_HETEROGENEOUS",
+                    &format!(
+                        "Array element {} has type {:?} but array expects {:?} \
+                         (from first element) in function '{}'",
+                        i + 1, et, first_type, function_name
+                    ),
+                    &format!(
+                        "All array elements must be the same type. \
+                         Convert element to {:?} or use separate arrays.",
+                        first_type
+                    ),
+                    position,
+                );
+            }
+            None => {
+                self.add_warning(
+                    result,
+                    "QFUNC_WARN008",
+                    &format!(
+                        "Cannot infer type of array element {} in function '{}'",
+                        i + 1, function_name
+                    ),
+                    "QUICKFUNCS",
+                    position,
+                );
+            }
+            _ => {} // same type — OK
         }
     }
+
+    if self.debug_config.is_verbose {
+        self.error_manager.log_debug(&format!(
+            "Array homogeneity validated: all {} elements are {:?}",
+            values.len(), first_type
+        ));
+    }
+}
 
     fn validate_object_literal_keys(
         &self,

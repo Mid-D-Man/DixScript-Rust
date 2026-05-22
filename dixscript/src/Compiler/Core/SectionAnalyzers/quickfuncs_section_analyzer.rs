@@ -1166,67 +1166,78 @@ pub fn new_with_error_manager(
 }
 
     fn validate_arithmetic_assignment_statement(
-        &self,
-        variable: &str,
-        operator: &str,
-        value: &Expression,
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
+    &self,
+    variable:     &str,
+    operator:     &str,
+    value:        &Expression,
+    func:         &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope:  &LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
+) {
+    if !local_scope.has_variable(variable) {
+        self.add_error(
+            result,
+            "QFUNC020",
+            "UNDEFINED_VARIABLE",
+            &format!(
+                "Variable '{}' used before assignment in function '{}'",
+                variable, func.name
+            ),
+            "Declare the variable before using arithmetic assignment.",
+            value.position(),
+        );
+        return;
+    }
+
+    if local_scope.is_const(variable) {
+        self.add_error(
+            result,
+            "QFUNC021",
+            "CONST_REASSIGNMENT",
+            &format!("Cannot modify const variable '{}' with '{}'", variable, operator),
+            "Remove 'const' to make the variable mutable.",
+            value.position(),
+        );
+        return;
+    }
+
+    if !is_valid_arithmetic_assign_op(operator) {
+        self.add_error(
+            result,
+            "QFUNC022",
+            "INVALID_ARITHMETIC_ASSIGN_OP",
+            &format!("Invalid arithmetic assignment operator '{}'", operator),
+            "Valid operators: +=, -=, *=, /=, %=, **=, &=, |=, ^=, <<=, >>=",
+            value.position(),
+        );
+        return;
+    }
+
+    let max_depth = Self::calculate_max_depth(100);
+    self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
+
+    // Use element hints so element-returning method results resolve correctly
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
+
+    if let (Some(var_t), Some(val_t)) = (
+        local_scope.get_variable_type(variable),
+        visitor.infer_type_from_expression(value),
     ) {
-        if !local_scope.has_variable(variable) {
-            self.add_error(
-                result,
-                "QFUNC020",
-                "UNDEFINED_VARIABLE",
-                &format!(
-                    "Variable '{}' used before assignment in function '{}'",
-                    variable, func.name
-                ),
-                "Declare the variable before using arithmetic assignment.",
-                value.position(),
-            );
-            return;
-        }
-
-        if local_scope.is_const(variable) {
-            self.add_error(
-                result,
-                "QFUNC021",
-                "CONST_REASSIGNMENT",
-                &format!("Cannot modify const variable '{}' with '{}'", variable, operator),
-                "Remove 'const' to make the variable mutable.",
-                value.position(),
-            );
-            return;
-        }
-
-        if !is_valid_arithmetic_assign_op(operator) {
-            self.add_error(
-                result,
-                "QFUNC022",
-                "INVALID_ARITHMETIC_ASSIGN_OP",
-                &format!("Invalid arithmetic assignment operator '{}'", operator),
-                "Valid operators: +=, -=, *=, /=, %=, **=, &=, |=, ^=, <<=, >>=",
-                value.position(),
-            );
-            return;
-        }
-
-        let max_depth = Self::calculate_max_depth(100);
-        self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
-
-        let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        if let (Some(var_t), Some(val_t)) = (
-            local_scope.get_variable_type(variable),
-            visitor.infer_type_from_expression(value),
-        ) {
+        // Skip operand checks when either side is Any (type deferred / unknown)
+        if var_t != DataType::Any && val_t != DataType::Any {
             self.validate_arithmetic_operation(
                 operator, var_t, val_t, &func.name, result, value.position(),
             );
         }
     }
+}
 
     fn validate_object_creation_statement(
         &self,

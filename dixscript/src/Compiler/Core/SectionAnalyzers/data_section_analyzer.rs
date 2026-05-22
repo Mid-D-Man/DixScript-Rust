@@ -1288,15 +1288,11 @@ pub fn new_with_error_manager(
 
 #[inline]
 fn is_type_compatible(expected: DataType, actual: DataType) -> bool {
-    if expected == actual {
-        return true;
-    }
-    if expected == DataType::Any || actual == DataType::Any {
-        return true;
-    }
+    if expected == actual { return true; }
+    if expected == DataType::Any || actual == DataType::Any { return true; }
 
     match expected {
-        // Hex accepts integer hex literals (0xFF) and plain integers.
+        // Hex accepts integer hex literals and plain integers.
         DataType::Hex => matches!(actual, DataType::Int | DataType::Long | DataType::Hex),
 
         // Long is wider than Int; widening is safe.
@@ -1308,22 +1304,34 @@ fn is_type_compatible(expected: DataType, actual: DataType) -> bool {
             DataType::Int | DataType::Long | DataType::Float | DataType::Double
         ),
 
-        // String only accepts String (InterpolatedString infers as String).
-        // DO NOT fall through to true here — this was a bug.
         DataType::String => actual == DataType::String,
-
-        // Bool only accepts Bool.
-        DataType::Bool => actual == DataType::Bool,
-
-        // Int does NOT accept Float/Double (narrowing).
-        DataType::Int => matches!(actual, DataType::Int),
-
-        // Object accepts Object only.
+        DataType::Bool   => actual == DataType::Bool,
+        DataType::Int    => matches!(actual, DataType::Int),
         DataType::Object => actual == DataType::Object,
 
-        // Strict single-type matches for everything else.
-        DataType::Array     => actual == DataType::Array,
-        DataType::Tuple     => actual == DataType::Tuple,
+        // Untyped array accepts typed array and vice-versa (type check deferred)
+        DataType::Array => matches!(actual, DataType::Array | DataType::TypedArray(_)),
+
+        // Untyped tuple accepts typed tuple and vice-versa
+        DataType::Tuple => matches!(actual, DataType::Tuple | DataType::TypedTuple(_)),
+
+        // TypedArray: untyped actual is OK; typed actual must match element type
+        DataType::TypedArray(exp_elem) => match actual {
+            DataType::Array => true,
+            DataType::TypedArray(act_elem) => {
+                act_elem == exp_elem
+                    || act_elem == ElemType::Any
+                    || exp_elem == ElemType::Any
+            }
+            _ => false,
+        },
+
+        // TypedTuple: untyped actual is OK; typed ↔ typed is loosely compatible
+        // (per-element structural checking is a runtime concern for this iteration)
+        DataType::TypedTuple(_) => {
+            matches!(actual, DataType::Tuple | DataType::TypedTuple(_))
+        }
+
         DataType::Blob      => actual == DataType::Blob,
         DataType::Regex     => actual == DataType::Regex,
         DataType::Date      => actual == DataType::Date,
@@ -1332,7 +1340,7 @@ fn is_type_compatible(expected: DataType, actual: DataType) -> bool {
         DataType::Function  => actual == DataType::Function,
         DataType::Range     => actual == DataType::Range,
 
-        // Any was handled above; this arm is unreachable.
+        // Any was handled above — unreachable
         DataType::Any => true,
     }
 }

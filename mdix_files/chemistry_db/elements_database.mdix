@@ -1,0 +1,413 @@
+@CONFIG(
+  version -> "1.0.0",
+  author -> "Chemistry System - Elements Database",
+  created -> 2025-01-09T00:00:00Z,
+  encoding -> "UTF-8",
+  features -> "advanced",
+  debug_mode -> "regular",
+  error_handling -> "halt"
+)
+
+@IMPORTS(
+  enums from "core/enums.mdix",
+  builders from "core/builders.mdix",
+  physics from "core/physics.mdix",
+  units from "core/units.mdix"
+)
+
+@DATA(
+  database_name = "Periodic Table Database - First 5 Elements",
+  database_version = "1.0.0",
+  last_updated = 2025-01-09T00:00:00Z,
+  format_type = "DixScript Physics Simulation Ready",
+  total_elements = 5,
+  properties_per_element = 126,
+  simulation_ready = true,
+  speed_of_light_m_s = 299792458.0,
+  planck_constant_j_s = 6.62607015e-34,
+  boltzmann_constant_j_k = 1.380649e-23,
+  avogadro_number = 6.02214076e23,
+  elementary_charge_c = 1.602176634e-19,
+  electron_mass_kg = 9.1093837015e-31,
+  proton_mass_kg = 1.67262192369e-27,
+  neutron_mass_kg = 1.67492749804e-27,
+  atomic_mass_unit_kg = 1.66053906660e-27,
+  gas_constant_j_mol_k = 8.314462618,
+  vacuum_permittivity = 8.8541878128e-12,
+  vacuum_permeability = 1.25663706212e-6,
+  bohr_radius_m = 5.29177210903e-11,
+  rydberg_constant = 10973731.568160
+  
+  
+  // ============================================================
+  // ELEMENT: Hydrogen (H, Z=1)
+  // ============================================================
+  
+  elements.hydrogen.identity:
+    core = builders.createIdentity("Hydrogen", "H", 1, 1.008, enums.ElementGroup.NONMETAL, 1, enums.Block.S_BLOCK, enums.ElementGroup.NONMETAL, enums.Phase.GAS),
+    cas_registry = "1333-74-0"
+  
+  elements.hydrogen.nuclear:
+    properties = builders.createNuclearCore(1, 0, 0.5, 2.79285, 0.0)
+  
+  elements.hydrogen.isotopes::
+    builders.createIsotope(1, 99.9885, 0.0, enums.DecayMode.STABLE, 0.0, 0.3326),
+    builders.createIsotope(2, 0.0115, 0.0, enums.DecayMode.STABLE, 0.0, 0.000519),
+    builders.createIsotope(3, 0.0, 388800000.0, enums.DecayMode.BETA_MINUS, 0.0186, 0.0)
+  
+  elements.hydrogen.electronic:
+    configuration = builders.createElectronicConfig("1s1", 1, 72.8, 13.598, 4.5),
+    quantum = builders.createQuantumNumbers(1, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(2.20, 2.20, 2.20, 2.31, 2.30)
+  
+  elements.hydrogen.ionization_energies_kj_mol:: 1312.0
+  
+  elements.hydrogen.oxidation_states:: -1, 0, 1
+  
+  elements.hydrogen.geometry:
+    radii = builders.createRadii(53.0, 31.0, 120.0),
+    molar_volume_cm3 = 11.42,
+    atomic_radius_with_unit = units.createValueWithUnit(53.0, enums.LengthUnit.PICOMETER),
+    covalent_radius_angstrom = units.convertLength(units.createValueWithUnit(31.0, enums.LengthUnit.PICOMETER), enums.LengthUnit.ANGSTROM)
+  
+  elements.hydrogen.ionic_radii::
+    builders.createIonicRadius(-1, 208.0, 6),
+    builders.createIonicRadius(1, 0.0, 1)
+  
+  elements.hydrogen.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HEXAGONAL, 3.75, 3.75, 6.12, 90.0, 90.0, 120.0),
+    space_group = "P63/mmc",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+  
+  elements.hydrogen.thermodynamics:
+    phases = builders.createPhasePoints(14.01, 20.28, 13.8033, 7041.0, 32.97, 1293000.0),
+    thermal = builders.createThermalProps(0.117, 0.904, 14304.0, 0.1805, 0.0, 110.0),
+    melting_point = units.createValueWithUnit(14.01, enums.TemperatureUnit.KELVIN),
+    melting_point_celsius = units.convertTemperature(units.createValueWithUnit(14.01, enums.TemperatureUnit.KELVIN), enums.TemperatureUnit.CELSIUS),
+    boiling_point = units.createValueWithUnit(20.28, enums.TemperatureUnit.KELVIN),
+    triple_point_temp = units.createValueWithUnit(13.8033, enums.TemperatureUnit.KELVIN),
+    triple_point_pressure = units.createValueWithUnit(7041.0, enums.PressureUnit.PASCAL),
+    triple_point_pressure_atm = units.convertPressure(units.createValueWithUnit(7041.0, enums.PressureUnit.PASCAL), enums.PressureUnit.ATMOSPHERE)
+  
+  elements.hydrogen.mechanical:
+    bulk = builders.createMechanicalProps(0.00008988, 0.0, 0.0, 0.0, 0.0, 0.0, 1310.0)
+  
+  elements.hydrogen.electrical:
+    props = builders.createElectricalProps(0.0, 1.0e10, 13.6),
+    type = "insulator",
+    band_gap = units.createValueWithUnit(13.6, enums.EnergyUnit.ELECTRONVOLT),
+    band_gap_joules = units.convertEnergy(units.createValueWithUnit(13.6, enums.EnergyUnit.ELECTRONVOLT), enums.EnergyUnit.JOULE)
+  
+  elements.hydrogen.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -2.2e-9, 0.0)
+  
+  elements.hydrogen.optical:
+    refractive_index = 1.000132,
+    color = "colorless"
+  
+  elements.hydrogen.spectral_lines::
+    builders.createSpectralLine(656.3, 100.0, enums.SpectralSeries.BALMER, "H-alpha"),
+    builders.createSpectralLine(486.1, 50.0, enums.SpectralSeries.BALMER, "H-beta"),
+    builders.createSpectralLine(121.6, 100.0, enums.SpectralSeries.LYMAN, "Lyman-alpha")
+  
+  elements.hydrogen.quantum:
+    hyperfine = builders.createHyperfine(1420.405751768, 5.585694702, 0.0),
+    hyperfine_splitting = units.createValueWithUnitAndUncertainty(1420.405751768, enums.EnergyUnit.MEGA_EV, 0.0001),
+    ionization_energy = units.createValueWithUnit(13.598, enums.EnergyUnit.ELECTRONVOLT),
+    ionization_energy_kj_mol = units.convertEnergy(units.createValueWithUnit(13.598, enums.EnergyUnit.ELECTRONVOLT), enums.EnergyUnit.KILOJOULE)
+  
+  elements.hydrogen.interaction:
+    lennard_jones = builders.createLennardJones(37.0, 2.928),
+    polarizability_angstrom3 = 0.667,
+    polarizability_tensor = builders.createPolarizabilityTensor(0.667, 0.0, 0.0, 0.0, 0.667, 0.0, 0.0, 0.0, 0.667),
+    surface = builders.createSurfaceProps(0.0723, 0.45, 4.5),
+    lj_sigma = units.createValueWithUnit(2.928, enums.LengthUnit.ANGSTROM),
+    lj_epsilon = units.createValueWithUnit(37.0, enums.TemperatureUnit.KELVIN)
+  
+  elements.hydrogen.photon_interactions:
+    cross_sections = builders.createPhotonCrossSections(0.0, 0.209, 0.0)
+  
+  elements.hydrogen.abundance:
+    distribution = builders.createAbundance(1400.0, 739000.0, 108000.0, 100000.0)
+  
+  elements.hydrogen.discovery:
+    info = builders.createDiscovery(1766, "Henry Cavendish", "England", "Greek hydro + genes")
+  
+  elements.hydrogen.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(1312.0, 72.8, 2.20),
+    lj_force_at_2a = physics.simulateLJForce(2.0, 37.0, 2.928)
+  
+  
+  // ============================================================
+  // ELEMENT: Helium (He, Z=2)
+  // ============================================================
+  
+  elements.helium.identity:
+    core = builders.createIdentity("Helium", "He", 2, 4.0026, enums.ElementGroup.NOBLE_GAS, 1, enums.Block.S_BLOCK, enums.ElementGroup.NOBLE_GAS, enums.Phase.GAS),
+    cas_registry = "7440-59-7"
+  
+  elements.helium.nuclear:
+    properties = builders.createNuclearCore(2, 2, 0.0, 0.0, 0.0)
+  
+  elements.helium.isotopes::
+    builders.createIsotope(3, 0.000137, 0.0, enums.DecayMode.STABLE, 0.0, 0.0),
+    builders.createIsotope(4, 99.999863, 0.0, enums.DecayMode.STABLE, 0.0, 0.0)
+  
+  elements.helium.electronic:
+    configuration = builders.createElectronicConfig("1s2", 2, 0.0, 24.587, 0.0),
+    quantum = builders.createQuantumNumbers(1, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(0.0, 0.0, 0.0, 0.0, 0.0)
+  
+  elements.helium.ionization_energies_kj_mol:: 2372.3, 5250.5
+  
+  elements.helium.oxidation_states:: 0
+  
+  elements.helium.geometry:
+    radii = builders.createRadii(31.0, 28.0, 140.0),
+    molar_volume_cm3 = 27.2
+  
+  elements.helium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 3.57, 3.57, 5.83, 90.0, 90.0, 120.0),
+    space_group = "P63/mmc",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+  
+  elements.helium.thermodynamics:
+    phases = builders.createPhasePoints(0.95, 4.22, 2.177, 5043.0, 5.19, 227600.0),
+    thermal = builders.createThermalProps(0.0138, 0.0829, 5193.0, 0.1513, 0.0, 0.0),
+    boiling_point_kelvin = units.createValueWithUnit(4.22, enums.TemperatureUnit.KELVIN),
+    boiling_point_celsius = units.convertTemperature(units.createValueWithUnit(4.22, enums.TemperatureUnit.KELVIN), enums.TemperatureUnit.CELSIUS)
+  
+  elements.helium.mechanical:
+    bulk = builders.createMechanicalProps(0.0001785, 0.0, 0.0, 0.0, 0.0, 0.0, 970.0)
+  
+  elements.helium.electrical:
+    props = builders.createElectricalProps(0.0, 1.0e15, 24.6),
+    type = "insulator"
+  
+  elements.helium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -1.05e-8, 0.0)
+  
+  elements.helium.optical:
+    refractive_index = 1.000035,
+    color = "colorless"
+  
+  elements.helium.interaction:
+    lennard_jones = builders.createLennardJones(10.22, 2.551),
+    polarizability_angstrom3 = 0.205,
+    polarizability_tensor = builders.createPolarizabilityTensor(0.205, 0.0, 0.0, 0.0, 0.205, 0.0, 0.0, 0.0, 0.205),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0)
+  
+  elements.helium.abundance:
+    distribution = builders.createAbundance(0.008, 23000.0, 0.0072, 0.0)
+  
+  elements.helium.discovery:
+    info = builders.createDiscovery(1868, "Pierre Janssen", "France", "Greek helios (sun)")
+  
+  
+  // ============================================================
+  // ELEMENT: Lithium (Li, Z=3)
+  // ============================================================
+  
+  elements.lithium.identity:
+    core = builders.createIdentity("Lithium", "Li", 3, 6.94, enums.ElementGroup.ALKALI_METAL, 1, enums.Block.S_BLOCK, enums.ElementGroup.ALKALI_METAL, enums.Phase.SOLID),
+    cas_registry = "7439-93-2"
+  
+  elements.lithium.nuclear:
+    properties = builders.createNuclearCore(3, 4, 1.5, 3.2564, -0.0008)
+  
+  elements.lithium.isotopes::
+    builders.createIsotope(6, 7.59, 0.0, enums.DecayMode.STABLE, 0.0, 0.94),
+    builders.createIsotope(7, 92.41, 0.0, enums.DecayMode.STABLE, 0.0, 0.045)
+  
+  elements.lithium.electronic:
+    configuration = builders.createElectronicConfig("[He] 2s1", 1, 59.6, 5.392, 2.9),
+    quantum = builders.createQuantumNumbers(2, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(0.98, 1.28, 0.97, 0.89, 0.91)
+  
+  elements.lithium.ionization_energies_kj_mol:: 520.2, 7298.1, 11815.0
+  
+  elements.lithium.oxidation_states:: 1
+  
+  elements.lithium.geometry:
+    radii = builders.createRadii(167.0, 128.0, 182.0),
+    molar_volume_cm3 = 13.02
+  
+  elements.lithium.ionic_radii::
+    builders.createIonicRadius(1, 76.0, 6)
+  
+  elements.lithium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.BCC, 3.51, 3.51, 3.51, 90.0, 90.0, 90.0),
+    space_group = "Im-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+  
+  elements.lithium.thermodynamics:
+    phases = builders.createPhasePoints(453.65, 1603.0, 0.0, 0.0, 3220.0, 67000000.0),
+    thermal = builders.createThermalProps(3.0, 136.0, 24860.0, 84.8, 4.6e-5, 344.0),
+    melting_point = units.createValueWithUnit(453.65, enums.TemperatureUnit.KELVIN),
+    melting_point_celsius = units.convertTemperature(units.createValueWithUnit(453.65, enums.TemperatureUnit.KELVIN), enums.TemperatureUnit.CELSIUS)
+  
+  elements.lithium.mechanical:
+    bulk = builders.createMechanicalProps(0.534, 4.9, 4.2, 11.0, 0.36, 0.6, 6000.0)
+  
+  elements.lithium.electrical:
+    props = builders.createElectricalProps(10.8e6, 9.28e-8, 0.0),
+    type = "conductor"
+  
+  elements.lithium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 1.4e-8, 0.0)
+  
+  elements.lithium.optical:
+    refractive_index = 0.0,
+    color = "silvery-white"
+  
+  elements.lithium.interaction:
+    lennard_jones = builders.createLennardJones(183.0, 2.451),
+    polarizability_angstrom3 = 24.3,
+    polarizability_tensor = builders.createPolarizabilityTensor(24.3, 0.0, 0.0, 0.0, 24.3, 0.0, 0.0, 0.0, 24.3),
+    surface = builders.createSurfaceProps(0.398, 1.67, 2.9)
+  
+  elements.lithium.abundance:
+    distribution = builders.createAbundance(20.0, 6.0, 0.18, 0.00003)
+  
+  elements.lithium.discovery:
+    info = builders.createDiscovery(1817, "Johan Arfwedson", "Sweden", "Greek lithos (stone)")
+  
+  elements.lithium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(520.2, 59.6, 0.98)
+  
+  
+  // ============================================================
+  // ELEMENT: Beryllium (Be, Z=4)
+  // ============================================================
+  
+  elements.beryllium.identity:
+    core = builders.createIdentity("Beryllium", "Be", 4, 9.0122, enums.ElementGroup.ALKALINE_EARTH, 2, enums.Block.S_BLOCK, enums.ElementGroup.ALKALINE_EARTH, enums.Phase.SOLID),
+    cas_registry = "7440-41-7"
+  
+  elements.beryllium.nuclear:
+    properties = builders.createNuclearCore(4, 5, 1.5, -1.1776, 0.0529)
+  
+  elements.beryllium.isotopes::
+    builders.createIsotope(9, 100.0, 0.0, enums.DecayMode.STABLE, 0.0, 0.0076)
+  
+  elements.beryllium.electronic:
+    configuration = builders.createElectronicConfig("[He] 2s2", 2, 0.0, 9.323, 4.98),
+    quantum = builders.createQuantumNumbers(2, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(1.57, 1.99, 1.47, 1.81, 1.99)
+  
+  elements.beryllium.ionization_energies_kj_mol:: 899.5, 1757.1, 14848.7, 21006.6
+  
+  elements.beryllium.oxidation_states:: 2
+  
+  elements.beryllium.geometry:
+    radii = builders.createRadii(112.0, 96.0, 153.0),
+    molar_volume_cm3 = 4.85
+  
+  elements.beryllium.ionic_radii::
+    builders.createIonicRadius(2, 45.0, 6)
+  
+  elements.beryllium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 2.29, 2.29, 3.58, 90.0, 90.0, 120.0),
+    space_group = "P63/mmc",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+  
+  elements.beryllium.thermodynamics:
+    phases = builders.createPhasePoints(1560.0, 2742.0, 0.0, 0.0, 5205.0, 0.0),
+    thermal = builders.createThermalProps(7.95, 297.0, 16443.0, 200.0, 1.13e-5, 1440.0)
+  
+  elements.beryllium.mechanical:
+    bulk = builders.createMechanicalProps(1.85, 287.0, 132.0, 130.0, 0.032, 5.5, 13000.0)
+  
+  elements.beryllium.electrical:
+    props = builders.createElectricalProps(25.0e6, 4.0e-8, 0.0),
+    type = "conductor"
+  
+  elements.beryllium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -1.0e-8, 0.0)
+  
+  elements.beryllium.optical:
+    refractive_index = 0.0,
+    color = "steel-gray"
+  
+  elements.beryllium.interaction:
+    lennard_jones = builders.createLennardJones(0.0, 0.0),
+    polarizability_angstrom3 = 5.6,
+    polarizability_tensor = builders.createPolarizabilityTensor(5.6, 0.0, 0.0, 0.0, 5.6, 0.0, 0.0, 0.0, 5.6),
+    surface = builders.createSurfaceProps(1.0, 0.0, 4.98)
+  
+  elements.beryllium.abundance:
+    distribution = builders.createAbundance(2.8, 0.73, 0.0006, 0.00004)
+  
+  elements.beryllium.discovery:
+    info = builders.createDiscovery(1798, "Louis Vauquelin", "France", "Greek beryllos (beryl)")
+  
+  
+  // ============================================================
+  // ELEMENT: Boron (B, Z=5)
+  // ============================================================
+  
+  elements.boron.identity:
+    core = builders.createIdentity("Boron", "B", 5, 10.81, enums.ElementGroup.METALLOID, 2, enums.Block.P_BLOCK, enums.ElementGroup.METALLOID, enums.Phase.SOLID),
+    cas_registry = "7440-42-8"
+  
+  elements.boron.nuclear:
+    properties = builders.createNuclearCore(5, 6, 1.5, 2.6886, 0.0407)
+  
+  elements.boron.isotopes::
+    builders.createIsotope(10, 19.9, 0.0, enums.DecayMode.STABLE, 0.0, 0.5),
+    builders.createIsotope(11, 80.1, 0.0, enums.DecayMode.STABLE, 0.0, 0.0055)
+  
+  elements.boron.electronic:
+    configuration = builders.createElectronicConfig("[He] 2s2 2p1", 3, 26.7, 8.298, 4.45),
+    quantum = builders.createQuantumNumbers(2, 1, 0, 0.5),
+    electronegativity = builders.createElectronegativity(2.04, 2.28, 2.01, 2.27, 2.05)
+  
+  elements.boron.ionization_energies_kj_mol:: 800.6, 2427.1, 3659.7, 25026.0, 32826.0
+  
+  elements.boron.oxidation_states:: 1, 2, 3
+  
+  elements.boron.geometry:
+    radii = builders.createRadii(87.0, 84.0, 192.0),
+    molar_volume_cm3 = 4.39
+  
+  elements.boron.ionic_radii::
+    builders.createIonicRadius(3, 27.0, 6)
+  
+  elements.boron.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.RHOMBOHEDRAL, 5.06, 5.06, 5.06, 58.06, 58.06, 58.06),
+    space_group = "R-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+  
+  elements.boron.thermodynamics:
+    phases = builders.createPhasePoints(2349.0, 4200.0, 0.0, 0.0, 0.0, 0.0),
+    thermal = builders.createThermalProps(50.2, 508.0, 11087.0, 27.0, 8.3e-6, 1250.0)
+  
+  elements.boron.mechanical:
+    bulk = builders.createMechanicalProps(2.37, 0.0, 0.0, 320.0, 0.0, 9.3, 16200.0)
+  
+  elements.boron.electrical:
+    props = builders.createElectricalProps(1.0e-4, 1.0e4, 1.56),
+    type = "semiconductor"
+  
+  elements.boron.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -6.7e-9, 0.0)
+  
+  elements.boron.optical:
+    refractive_index = 0.0,
+    color = "black-brown"
+  
+  elements.boron.interaction:
+    lennard_jones = builders.createLennardJones(0.0, 0.0),
+    polarizability_angstrom3 = 3.03,
+    polarizability_tensor = builders.createPolarizabilityTensor(3.03, 0.0, 0.0, 0.0, 3.03, 0.0, 0.0, 0.0, 3.03),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.45)
+  
+  elements.boron.abundance:
+    distribution = builders.createAbundance(10.0, 0.001, 4.4, 0.00069)
+  
+  elements.boron.discovery:
+    info = builders.createDiscovery(1808, "Joseph Gay-Lussac", "France", "Arabic buraq (borax)")
+  
+  elements.boron.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(800.6, 26.7, 2.04)
+)

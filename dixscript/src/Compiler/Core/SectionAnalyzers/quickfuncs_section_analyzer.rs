@@ -2638,18 +2638,19 @@ pub fn new_with_error_manager(
 // ==================== LOCAL SCOPE TRACKER ====================
 
 struct LocalScopeTracker {
-    variables: FxHashMap<String, VariableScopeInfo>,
+    variables:  FxHashMap<String, VariableScopeInfo>,
     parameters: FxHashSet<String>,
 }
 
 impl LocalScopeTracker {
     fn with_capacity(capacity: usize) -> Self {
         LocalScopeTracker {
-            variables: FxHashMap::with_capacity_and_hasher(capacity, Default::default()),
+            variables:  FxHashMap::with_capacity_and_hasher(capacity, Default::default()),
             parameters: FxHashSet::with_capacity_and_hasher(capacity, Default::default()),
         }
     }
 
+    /// Reset scope and pre-populate from function parameters.
     fn reset_with_params(&mut self, func_parameters: &[QuickFuncParam]) {
         self.variables.clear();
         self.parameters.clear();
@@ -2662,15 +2663,39 @@ impl LocalScopeTracker {
                     var_type:     param.data_type,
                     is_const:     true,
                     is_parameter: true,
+                    element_type: None, // populated later if param is array/tuple
                 },
             );
         }
     }
 
+    // ── Variable registration ─────────────────────────────────────────────────
+
+    /// Add a variable without an element type (scalars, objects, etc.).
     #[inline]
     fn add_variable(&mut self, name: String, var_type: Option<DataType>, is_const: bool) {
-        self.variables.insert(name, VariableScopeInfo { var_type, is_const, is_parameter: false });
+        self.variables.insert(
+            name,
+            VariableScopeInfo { var_type, is_const, is_parameter: false, element_type: None },
+        );
     }
+
+    /// Add an array or tuple variable and record its element type.
+    #[inline]
+    fn add_variable_with_element_type(
+        &mut self,
+        name:         String,
+        var_type:     Option<DataType>,
+        is_const:     bool,
+        element_type: Option<DataType>,
+    ) {
+        self.variables.insert(
+            name,
+            VariableScopeInfo { var_type, is_const, is_parameter: false, element_type },
+        );
+    }
+
+    // ── Queries ───────────────────────────────────────────────────────────────
 
     #[inline]
     fn has_variable(&self, name: &str) -> bool {
@@ -2692,6 +2717,15 @@ impl LocalScopeTracker {
         self.variables.get(name).and_then(|v| v.var_type)
     }
 
+    /// Returns the element type of an array/tuple variable, or None.
+    #[inline]
+    fn get_element_type(&self, name: &str) -> Option<DataType> {
+        self.variables.get(name).and_then(|v| v.element_type)
+    }
+
+    // ── Updates ───────────────────────────────────────────────────────────────
+
+    /// Update the inferred type of a variable (used during assignment).
     fn update_variable_type(&mut self, name: &str, var_type: DataType) {
         if let Some(info) = self.variables.get_mut(name) {
             if info.var_type.is_none() {
@@ -2700,18 +2734,39 @@ impl LocalScopeTracker {
         }
     }
 
-    fn get_declared_variable_names(&self) -> impl Iterator<Item = &String> {
-        self.variables
-            .iter()
-            .filter(|(_, v)| !v.is_parameter)
-            .map(|(k, _)| k)
+    /// Update the element type of an array/tuple variable (used during assignment).
+    fn update_variable_element_type(&mut self, name: &str, element_type: Option<DataType>) {
+        if let Some(info) = self.variables.get_mut(name) {
+            info.element_type = element_type;
+        }
     }
 
+    // ── Bulk accessors for TypeInferenceVisitor construction ─────────────────
+
+    /// All variable types: name → Option<DataType>.  Includes parameters.
     fn get_all_variable_types(&self) -> HashMap<String, Option<DataType>> {
         self.variables
             .iter()
             .map(|(k, v)| (k.clone(), v.var_type))
             .collect()
+    }
+
+    /// Element type hints for array/tuple variables: name → DataType.
+    /// Passed to `TypeInferenceVisitor::new_with_element_hints` so element-
+    /// returning methods (`.first()`, `.last()`, etc.) resolve to the actual type.
+    fn get_all_element_type_hints(&self) -> HashMap<String, DataType> {
+        self.variables
+            .iter()
+            .filter_map(|(k, v)| v.element_type.map(|et| (k.clone(), et)))
+            .collect()
+    }
+
+    /// Iterator over non-parameter variable names (for unused-variable detection).
+    fn get_declared_variable_names(&self) -> impl Iterator<Item = &String> {
+        self.variables
+            .iter()
+            .filter(|(_, v)| !v.is_parameter)
+            .map(|(k, _)| k)
     }
 }
 
@@ -2719,8 +2774,10 @@ struct VariableScopeInfo {
     var_type:     Option<DataType>,
     is_const:     bool,
     is_parameter: bool,
-}
-
+    /// For arrays and tuples: the element type if the collection is uniform.
+    /// None for non-collection types or heterogeneous collections.
+    element_type: Option<DataType>,
+        }
 // ==================== RETURN PATH ANALYZER ====================
 
 struct ReturnPathAnalyzer {

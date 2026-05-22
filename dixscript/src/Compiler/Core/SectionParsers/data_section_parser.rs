@@ -2931,6 +2931,38 @@ fn parse_elem_type_keyword(&mut self) -> Option<ElemType> {
             false
         }
     }
+    /// True if the current token is `>` or the first `>` of `>>`.
+#[inline]
+fn is_closing_angle(&self) -> bool {
+    match &self.current().token_type {
+        TokenType::Symbol('>') => true,
+        TokenType::BitwiseOp(op) if *op == ">>" => true,
+        _ => false,
+    }
+}
+
+/// Consume one closing `>`.
+/// For plain `>`: advance normally.
+/// For `>>` (emitted as `BitwiseOp(">>")`): advance and set `pending_angle = true`
+/// so the next call returns `true` without advancing (acts as the second `>`).
+fn match_and_consume_closing_angle(&mut self) -> bool {
+    if self.pending_angle {
+        self.pending_angle = false;
+        return true;
+    }
+    if self.is_current_symbol('>') {
+        self.advance();
+        return true;
+    }
+    if let TokenType::BitwiseOp(op) = &self.current().token_type {
+        if *op == ">>" {
+            self.advance();
+            self.pending_angle = true;
+            return true;
+        }
+    }
+    false
+}
 
     fn handle_parse_error(&mut self, error_type: ParseErrorType, message: &str, token: &Token) {
         let source_line = self.get_source_line(token);

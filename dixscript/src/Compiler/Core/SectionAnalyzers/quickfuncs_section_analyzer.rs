@@ -2675,26 +2675,33 @@ fn are_types_comparable(a: DataType, b: DataType) -> bool {
         }
     }
 
-    #[inline]
-    fn convert_data_type_to_dix_type(data_type: DataType) -> Option<DixType> {
-        match data_type {
-            DataType::Int       => Some(DixType::Int),
-            DataType::Float     => Some(DixType::Float),
-            DataType::Double    => Some(DixType::Double),
-            DataType::String    => Some(DixType::String),
-            DataType::Bool      => Some(DixType::Bool),
-            DataType::Array     => Some(DixType::Array),
-            DataType::Tuple     => Some(DixType::Tuple),
-            DataType::Object    => Some(DixType::Object),
-            DataType::Hex       => Some(DixType::Hex),
-            DataType::Blob      => Some(DixType::Blob),
-            DataType::Regex     => Some(DixType::Regex),
-            DataType::Date      => Some(DixType::Date),
-            DataType::Timestamp => Some(DixType::Timestamp),
-            DataType::Enum      => Some(DixType::Enum),
-            _ => None,
-        }
+    /// Maps DataType → DixType for instance-method registry lookups.
+/// `Long` is included (was missing in previous version — bug fix).
+/// TypedArray/TypedTuple map to their untyped DixType equivalents.
+#[inline]
+fn convert_data_type_to_dix_type(data_type: DataType) -> Option<DixType> {
+    match data_type {
+        DataType::Int               => Some(DixType::Int),
+        DataType::Long              => Some(DixType::Long),   // ← was missing before
+        DataType::Float             => Some(DixType::Float),
+        DataType::Double            => Some(DixType::Double),
+        DataType::String            => Some(DixType::String),
+        DataType::Bool              => Some(DixType::Bool),
+        DataType::Array             => Some(DixType::Array),
+        DataType::Tuple             => Some(DixType::Tuple),
+        DataType::Object            => Some(DixType::Object),
+        DataType::Hex               => Some(DixType::Hex),
+        DataType::Blob              => Some(DixType::Blob),
+        DataType::Regex             => Some(DixType::Regex),
+        DataType::Date              => Some(DixType::Date),
+        DataType::Timestamp         => Some(DixType::Timestamp),
+        DataType::Enum              => Some(DixType::Enum),
+        DataType::TypedArray(_)     => Some(DixType::Array),
+        DataType::TypedTuple(_)     => Some(DixType::Tuple),
+        // Function / Range / Any have no direct DixType mapping
+        _ => None,
     }
+}
 
     fn count_method_chain_depth(expr: &Expression) -> usize {
         let mut depth = 0;

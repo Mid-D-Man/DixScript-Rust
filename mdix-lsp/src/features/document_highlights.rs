@@ -1,22 +1,15 @@
-// mdix-lsp/src/features/document_highlights.rs
-//! Document highlight provider.
+// mdix-lsp/src/features/document_highlight.rs
+//! Document-highlight provider — highlights all occurrences of the symbol
+//! under the cursor within the current file.
 //!
-//! When the cursor rests on an identifier, all matching occurrences in the
-//! document are highlighted. Writes (declarations) use WRITE kind; reads use READ.
-//!
-//! Scoping rules:
-//!   - QuickFunc parameters → only within @QUICKFUNCS tokens
-//!   - QuickFunc names      → declaration + all call sites (any section)
-//!   - Enum type names      → declaration + all EnumAccess tokens with that name
-//!   - Enum field access    → all EnumAccess tokens for that exact enum.field
-//!   - Import aliases       → declaration + all identifier uses in any section
-//!   - Data variables       → all matching identifiers in @DATA
+//! - Identifiers: all tokens with the same name
+//! - EnumAccess: all usages of the same enum name
+//! Write kind = declaration site; Read kind = usage site.
 
 use std::panic;
 
 use tower_lsp::lsp_types::{DocumentHighlight, DocumentHighlightKind, Position, Range};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
-use dixscript::Compiler::Core::Tokenizer::token::SectionId;
 
 use crate::document::Document;
 use crate::features::hover::token_and_index_at;
@@ -24,8 +17,7 @@ use crate::features::hover::token_and_index_at;
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 pub fn provide(doc: Option<&Document>, pos: Position) -> Option<Vec<DocumentHighlight>> {
-    let result =
-        panic::catch_unwind(panic::AssertUnwindSafe(|| provide_inner(doc, pos)));
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| provide_inner(doc, pos)));
     match result {
         Ok(r) => r,
         Err(payload) => {
@@ -34,7 +26,7 @@ pub fn provide(doc: Option<&Document>, pos: Position) -> Option<Vec<DocumentHigh
                 .cloned()
                 .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
                 .unwrap_or_else(|| "unknown panic".to_string());
-            tracing::error!("document_highlights panicked: {}", msg);
+            tracing::error!("document_highlight panicked: {}", msg);
             None
         }
     }
@@ -44,194 +36,144 @@ fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<Vec<DocumentHi
     let doc = doc?;
     let (token, _index) = token_and_index_at(&doc.tokens, pos)?;
 
-    let highlights = match &token.token_type {
-        // Exact enum.field access — highlight all identical enum accesses.
-        TokenType::EnumAccess { enum_name, value } => {
-            let en = enum_name.clone();
-            let v  = value.clone();
-            highlights_for_enum_access(&doc.tokens, &en, &v)
-        }
-
-        // Plain identifier — resolve what kind of symbol it is then highlight all.
-        TokenType::Identifier(name) => {
-            let name = name.clone();
-            highlights_for_identifier(doc, &name, token.section)
-        }
-
+    let target_name: String = match &token.token_type {
+        TokenType::Identifier(n)            => n.clone(),
+        TokenType::EnumAccess { enum_name, .. } => enum_name.clone(),
         _ => return None,
     };
+
+    if target_name.is_empty() {
+        return None;
+    }
+
+    let highlights: Vec<DocumentHighlight> = doc
+        .tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let matches = match &t.token_type {
+                TokenType::Identifier(n) => n.as_str() == target_name.as_str(),
+                TokenType::EnumAccess { enum_name, .. } => {
+                    enum_name.as_str() == target_name.as_str()
+                }
+                _ => false,
+            };
+
+            if !matches {
+                return None;
+            }
+
+            let line = t.line.saturating_sub(1) as u32;
+            let col  = t.column.saturating_sub(1) as u32;
+            let len  = target_name.len() as u32;
+
+            let kind = if is_declaration_site(&doc.tokens, i) {
+                DocumentHighlightKind::WRITE
+            } else {
+                DocumentHighlightKind::READ
+            };
+
+            Some(DocumentHighlight {
+                range: Range::new(
+                    Position::new(line, col),
+                    Position::new(line, col + len),
+                ),
+                kind: Some(kind),
+            })
+        })
+        .collect();
 
     if highlights.is_empty() { None } else { Some(highlights) }
 }
 
-// ── EnumAccess highlights ─────────────────────────────────────────────────────
+// ── Declaration-site heuristic ────────────────────────────────────────────────
 
-fn highlights_for_enum_access(
-    tokens:    &[Token],
-    enum_name: &str,
-    value:     &str,
-) -> Vec<DocumentHighlight> {
-    tokens
-        .iter()
-        .filter_map(|t| {
-            if let TokenType::EnumAccess { enum_name: en, value: v } = &t.token_type {
-                if en.as_str() == enum_name && v.as_str() == value {
-                    let len = en.len() + 1 + v.len();
-                    return Some(make_highlight(t, len, DocumentHighlightKind::READ));
-                }
-            }
-            None
-        })
-        .collect()
-}
-
-// ── Identifier highlights ─────────────────────────────────────────────────────
-
-fn highlights_for_identifier(
-    doc:    &Document,
-    name:   &str,
-    origin: SectionId,
-) -> Vec<DocumentHighlight> {
-    let ctx = IdentifierContext::resolve(doc, name, origin);
-    let mut out = Vec::new();
-
-    for (idx, token) in doc.tokens.iter().enumerate() {
-        match &token.token_type {
-            TokenType::Identifier(tok_name) if tok_name.as_str() == name => {
-                // Parameters are scoped to @QUICKFUNCS only.
-                if ctx.is_param && token.section != SectionId::QuickFuncs {
-                    continue;
-                }
-
-                let kind = declaration_or_read(token, idx, &ctx, &doc.tokens);
-                out.push(make_highlight(token, name.len(), kind));
-            }
-
-            // When the cursor is on an enum TYPE name, also highlight all EnumAccess
-            // tokens whose enum_name matches — so "AIType" lights up "AIType.BOSS" etc.
-            TokenType::EnumAccess { enum_name, .. } if ctx.is_enum && enum_name.as_str() == name => {
-                // Highlight just the enum_name portion of the access token.
-                out.push(make_highlight(token, name.len(), DocumentHighlightKind::READ));
-            }
-
+/// Returns true when the token at `idx` is an identifier being declared:
+///   - preceded by `~`                     → QuickFunc name
+///   - preceded by `let`, `const`, `mut`   → variable
+///   - followed by `from` / `from_cloud`   → import alias
+///   - followed by `{` in @ENUMS           → enum type name
+fn is_declaration_site(tokens: &[Token], idx: usize) -> bool {
+    // Check previous token
+    if let Some(prev) = idx.checked_sub(1).and_then(|i| tokens.get(i)) {
+        match &prev.token_type {
+            TokenType::Symbol('~') => return true,
+            TokenType::Keyword(kw) if matches!(*kw, "let" | "const" | "mut") => return true,
             _ => {}
         }
     }
 
-    out
+    // Check next token
+    if let Some(next) = tokens.get(idx + 1) {
+        match &next.token_type {
+            TokenType::Keyword(kw) if matches!(*kw, "from" | "from_cloud") => return true,
+            TokenType::Symbol('{') => return true,
+            _ => {}
+        }
+    }
+
+    false
 }
 
-// ── Symbol context ────────────────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
-struct IdentifierContext {
-    is_quickfunc: bool,
-    is_enum:      bool,
-    is_import:    bool,
-    is_param:     bool,
-    // param belonging to which function (for tighter scoping if needed later)
-    #[allow(dead_code)]
-    param_func:   Option<String>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyzer::run_pipeline;
+    use crate::document::Document;
+    use tower_lsp::lsp_types::{Position, Url};
 
-impl IdentifierContext {
-    fn resolve(doc: &Document, name: &str, origin: SectionId) -> Self {
-        let ast = doc.ast.as_ref();
+    fn test_doc(source: &str) -> Document {
+        let mut doc = Document::new(
+            Url::parse("file:///test.mdix").unwrap(),
+            source.to_string(),
+            0,
+        );
+        run_pipeline(&mut doc);
+        doc
+    }
 
-        let is_quickfunc = ast
-            .and_then(|a| a.quick_functions.as_ref())
-            .map(|qf| qf.functions.iter().any(|f| f.name == name))
-            .unwrap_or(false);
+    #[test]
+    fn highlights_all_occurrences() {
+        let src = concat!(
+            "@QUICKFUNCS(\n",
+            "  ~calc<int>(x<int>) { return x }\n",
+            ")\n",
+            "@DATA(\n",
+            "  result = calc(5)\n",
+            ")"
+        );
+        let doc    = test_doc(src);
+        let pos    = Position::new(1, 4);
+        let result = provide(Some(&doc), pos);
+        assert!(result.is_some());
+        assert!(result.unwrap().len() >= 2);
+    }
 
-        let is_enum = ast
-            .and_then(|a| a.enums.as_ref())
-            .map(|e| e.enums.iter().any(|d| d.name == name))
-            .unwrap_or(false);
+    #[test]
+    fn no_highlights_for_non_identifier() {
+        let src = "@DATA(\n  x = 42\n)";
+        let doc  = test_doc(src);
+        assert!(provide(Some(&doc), Position::new(1, 6)).is_none());
+    }
 
-        let is_import = ast
-            .and_then(|a| a.imports.as_ref())
-            .map(|i| i.imports.iter().any(|imp| imp.alias == name))
-            .unwrap_or(false);
-
-        let mut is_param   = false;
-        let mut param_func = None;
-
-        if origin == SectionId::QuickFuncs {
-            if let Some(qf) = ast.and_then(|a| a.quick_functions.as_ref()) {
-                for func in &qf.functions {
-                    if func.parameters.iter().any(|p| p.name == name) {
-                        is_param   = true;
-                        param_func = Some(func.name.clone());
-                        break;
-                    }
-                }
-            }
-        }
-
-        IdentifierContext { is_quickfunc, is_enum, is_import, is_param, param_func }
+    #[test]
+    fn declaration_site_is_write() {
+        let src = concat!(
+            "@QUICKFUNCS(\n",
+            "  ~build<object>(name) { return { n = name } }\n",
+            ")\n",
+            "@DATA(\n",
+            "  x = build(\"hi\")\n",
+            ")"
+        );
+        let doc     = test_doc(src);
+        let pos     = Position::new(1, 4); // `build` declaration
+        let result  = provide(Some(&doc), pos).unwrap_or_default();
+        let has_write = result
+            .iter()
+            .any(|h| h.kind == Some(DocumentHighlightKind::WRITE));
+        assert!(has_write, "Expected at least one WRITE highlight for the declaration");
     }
 }
-
-/// Decide whether a token occurrence is a WRITE (declaration) or READ (use).
-fn declaration_or_read(
-    token:  &Token,
-    index:  usize,
-    ctx:    &IdentifierContext,
-    tokens: &[Token],
-) -> DocumentHighlightKind {
-    // QuickFunc declaration: `~` immediately precedes the identifier.
-    if ctx.is_quickfunc && token.section == SectionId::QuickFuncs {
-        if index > 0 {
-            if let TokenType::Symbol('~') = &tokens[index - 1].token_type {
-                return DocumentHighlightKind::WRITE;
-            }
-        }
-    }
-
-    // Enum type declaration: identifier is followed by `{` in @ENUMS.
-    if ctx.is_enum && token.section == SectionId::Enums {
-        if let Some(next) = tokens.get(index + 1) {
-            if matches!(next.token_type, TokenType::Symbol('{')) {
-                return DocumentHighlightKind::WRITE;
-            }
-        }
-    }
-
-    // Import alias declaration: identifier followed by `from` or `from_cloud`.
-    if ctx.is_import && token.section == SectionId::Imports {
-        if let Some(next) = tokens.get(index + 1) {
-            if matches!(&next.token_type,
-                TokenType::Keyword(k) if *k == "from" || *k == "from_cloud")
-            {
-                return DocumentHighlightKind::WRITE;
-            }
-        }
-    }
-
-    // Parameter declaration: identifier followed by optional `<type>` or `,` / `)` in
-    // @QUICKFUNCS and the cursor is at the function parameter position.
-    if ctx.is_param && token.section == SectionId::QuickFuncs {
-        // A parameter declaration sits right after `(` or `,` inside the param list.
-        if index > 0 {
-            let prev = &tokens[index - 1].token_type;
-            if matches!(prev, TokenType::Symbol('(') | TokenType::Symbol(',')) {
-                return DocumentHighlightKind::WRITE;
-            }
-        }
-    }
-
-    DocumentHighlightKind::READ
-}
-
-// ── Helper ────────────────────────────────────────────────────────────────────
-
-fn make_highlight(token: &Token, len: usize, kind: DocumentHighlightKind) -> DocumentHighlight {
-    let line = token.line.saturating_sub(1) as u32;
-    let col  = token.column.saturating_sub(1) as u32;
-    DocumentHighlight {
-        range: Range::new(
-            Position::new(line, col),
-            Position::new(line, col + len as u32),
-        ),
-        kind: Some(kind),
-    }
-               }

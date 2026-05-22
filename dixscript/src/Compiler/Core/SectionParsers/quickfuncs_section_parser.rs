@@ -2447,6 +2447,71 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
     final_dt
 }
+    /// Parse `<elemType>` (array) or `<e1,e2,...>` (tuple) after the base keyword
+/// has been consumed. Handles inner `<` and inner `>` including `>>` split.
+fn parse_typed_collection_qf(&mut self, base_kw: &str) -> Option<DataType> {
+    self.advance(); // consume inner '<'
+    self.skip_whitespace();
+
+    if base_kw == "array" {
+        let elem = self.parse_elem_type_keyword_qf();
+        self.skip_whitespace();
+        if !self.match_and_consume_closing_angle() {
+            let cur = self.current().clone();
+            self.error_manager.add_parse_error(
+                ParseErrorType::MissingToken,
+                "Expected '>' to close array element type (e.g. <array<int>>)".to_string(),
+                cur.line, cur.column, None,
+                self.get_source_line(&cur),
+            );
+        }
+        return Some(match elem {
+            Some(e) => DataType::TypedArray(e),
+            None    => DataType::Array,
+        });
+    }
+
+    // tuple: 1–6 comma-separated element types
+    let mut elems: [Option<ElemType>; 6] = [None; 6];
+    let mut count = 0usize;
+
+    loop {
+        self.skip_whitespace();
+        if count >= 6 {
+            // Skip remaining; semantic analysis will report TUPLE_TOO_LARGE
+            while !self.is_at_end() && !self.is_closing_angle() {
+                self.advance();
+            }
+            break;
+        }
+        let elem = self.parse_elem_type_keyword_qf();
+        elems[count] = elem;
+        count += 1;
+        self.skip_whitespace();
+        if self.check_symbol(',') {
+            self.advance();
+        } else {
+            break;
+        }
+    }
+
+    self.skip_whitespace();
+    if !self.match_and_consume_closing_angle() {
+        let cur = self.current().clone();
+        self.error_manager.add_parse_error(
+            ParseErrorType::MissingToken,
+            "Expected '>' to close tuple element types (e.g. <tuple<int,bool>>)".to_string(),
+            cur.line, cur.column, None,
+            self.get_source_line(&cur),
+        );
+    }
+
+    Some(if count == 0 {
+        DataType::Tuple
+    } else {
+        DataType::TypedTuple(elems)
+    })
+                }
 
     fn parse_dotted_path(&mut self) -> Option<String> {
         let mut path = match &self.current().token_type {

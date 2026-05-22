@@ -15,7 +15,7 @@ pub const TT_PROPERTY:    u32 = 10;
 pub const TT_PARAMETER:   u32 = 11;
 pub const TT_MACRO:       u32 = 12;
 pub const TT_DECORATOR:   u32 = 13;
-// index 14 = STRUCT reserved in legend
+// index 14 = STRUCT reserved for legend stability
 pub const TT_REGEXP:      u32 = 15;
 pub const TT_EVENT:       u32 = 16;
 
@@ -60,14 +60,15 @@ pub fn server_capabilities() -> ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Options(
             TextDocumentSyncOptions {
                 open_close: Some(true),
-                change: Some(TextDocumentSyncKind::FULL),
-                save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                change:     Some(TextDocumentSyncKind::FULL),
+                save:       Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
                     include_text: Some(true),
                 })),
                 ..Default::default()
             },
         )),
 
+        // ── Language intelligence ─────────────────────────────────────────────
         completion_provider: Some(CompletionOptions {
             resolve_provider:   Some(false),
             trigger_characters: Some(vec![
@@ -77,16 +78,35 @@ pub fn server_capabilities() -> ServerCapabilities {
             ..Default::default()
         }),
 
-        hover_provider:         Some(HoverProviderCapability::Simple(true)),
-        definition_provider:    Some(OneOf::Left(true)),
-        color_provider:         Some(ColorProviderCapability::Simple(true)),
-        inlay_hint_provider:    Some(OneOf::Left(true)),
-        code_action_provider:   Some(CodeActionProviderCapability::Simple(true)),
-        folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+        signature_help_provider: Some(SignatureHelpOptions {
+            trigger_characters:   Some(vec!["(".to_string(), ",".to_string()]),
+            retrigger_characters: Some(vec![",".to_string()]),
+            work_done_progress_options: WorkDoneProgressOptions {
+                work_done_progress: None,
+            },
+        }),
 
-        // Document symbols — powers the outline/breadcrumb panel.
+        hover_provider:      Some(HoverProviderCapability::Simple(true)),
+        definition_provider: Some(OneOf::Left(true)),
+
+        // ── Symbol navigation ─────────────────────────────────────────────────
+        references_provider: Some(OneOf::Left(true)),
+
+        document_highlight_provider: Some(OneOf::Left(true)),
+
         document_symbol_provider: Some(OneOf::Left(true)),
 
+        // ── Editing assistance ────────────────────────────────────────────────
+        rename_provider: Some(OneOf::Right(RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: WorkDoneProgressOptions {
+                work_done_progress: None,
+            },
+        })),
+
+        code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+
+        // ── Visual enrichment ─────────────────────────────────────────────────
         semantic_tokens_provider: Some(
             SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
                 legend: semantic_token_legend(),
@@ -97,6 +117,10 @@ pub fn server_capabilities() -> ServerCapabilities {
                 ..Default::default()
             }),
         ),
+
+        inlay_hint_provider:    Some(OneOf::Left(true)),
+        color_provider:         Some(ColorProviderCapability::Simple(true)),
+        folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
 
         ..Default::default()
     }

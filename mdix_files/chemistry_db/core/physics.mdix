@@ -28,68 +28,68 @@
   }
 
   ~calculateBondStrength<float>(electronegativity_diff<float>, bond_length_angstrom<float>) {
-    ionic_char = 1.0 - Math.exp(-0.25 * electronegativity_diff * electronegativity_diff)
-    strength = (1.0 / (bond_length_angstrom * bond_length_angstrom)) * (1.0 + ionic_char)
+   let ionic_char = 1.0 - Math.exp(-0.25 * electronegativity_diff * electronegativity_diff)
+   let  strength = (1.0 / (bond_length_angstrom * bond_length_angstrom)) * (1.0 + ionic_char)
     
     return strength
   }
 
   ~calculateReactivityIndex<float>(ionization_energy<float>, electron_affinity<float>, electronegativity<float>) {
-    chemical_hardness = (ionization_energy - electron_affinity) / 2.0
-    reactivity = electronegativity / chemical_hardness
+  let  chemical_hardness = (ionization_energy - electron_affinity) / 2.0
+  let  reactivity = electronegativity / chemical_hardness
     
     return reactivity
   }
 
   ~calculateDiffusionCoeff<float>(temperature_k<float>, viscosity<float>, radius_angstrom<float>) {
-    boltzmann = 1.380649e-23
-    radius_m = radius_angstrom * 1.0e-10
-    pi = 3.14159265359
+   let boltzmann = 1.380649e-23
+   let radius_m = radius_angstrom * 1.0e-10
+   let pi = 3.14159265359
     
-    diffusion = (boltzmann * temperature_k) / (6.0 * pi * viscosity * radius_m)
+   let diffusion = (boltzmann * temperature_k) / (6.0 * pi * viscosity * radius_m)
     
     return diffusion
   }
 
   ~simulateLJForce<float>(distance_angstrom<float>, epsilon_k<float>, sigma_angstrom<float>) {
-    r = distance_angstrom
-    sig = sigma_angstrom
-    eps = epsilon_k
+   let r = distance_angstrom
+   let sig = sigma_angstrom
+  let  eps = epsilon_k
     
-    sigma_over_r_6 = Math.pow(sig / r, 6.0)
-    sigma_over_r_12 = sigma_over_r_6 * sigma_over_r_6
+  let  sigma_over_r_6 = Math.pow(sig / r, 6.0)
+   let sigma_over_r_12 = sigma_over_r_6 * sigma_over_r_6
     
-    potential = 4.0 * eps * (sigma_over_r_12 - sigma_over_r_6)
+  let  potential = 4.0 * eps * (sigma_over_r_12 - sigma_over_r_6)
     
     return potential
   }
 
   ~calculateVanDerWaalsForce<float>(polarizability1<float>, polarizability2<float>, distance_angstrom<float>) {
-    r = distance_angstrom * 1.0e-10
-    alpha1 = polarizability1 * 1.0e-30
-    alpha2 = polarizability2 * 1.0e-30
+   let r = distance_angstrom * 1.0e-10
+   let alpha1 = polarizability1 * 1.0e-30
+  let  alpha2 = polarizability2 * 1.0e-30
     
-    c6 = (3.0 / 4.0) * alpha1 * alpha2
-    force = -6.0 * c6 / Math.pow(r, 7.0)
+  let  c6 = (3.0 / 4.0) * alpha1 * alpha2
+  let  force = -6.0 * c6 / Math.pow(r, 7.0)
     
     return force
   }
 
   ~calculateIonizationEnergy<float>(atomic_number<int>, electron_removed<int>) {
-    z_effective = atomic_number - (electron_removed - 1.0) * 0.35
-    n_principal = Math.sqrt(electron_removed)
+  let  z_effective = atomic_number - (electron_removed - 1.0) * 0.35
+  let  n_principal = Math.sqrt(electron_removed)
     
-    ionization_ev = 13.6 * (z_effective * z_effective) / (n_principal * n_principal)
+  let  ionization_ev = 13.6 * (z_effective * z_effective) / (n_principal * n_principal)
     
     return ionization_ev
   }
 
   ~calculateOrbitalRadius<float>(principal_quantum_number<int>, atomic_number<int>) {
-    bohr_radius_angstrom = 0.529177
-    n = principal_quantum_number
-    z = atomic_number
+  let  bohr_radius_angstrom = 0.529177
+  let  n = principal_quantum_number
+  let  z = atomic_number
     
-    radius = bohr_radius_angstrom * (n * n) / z
+  let  radius = bohr_radius_angstrom * (n * n) / z
     
     return radius
   }

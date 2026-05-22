@@ -8,7 +8,8 @@
 )
 
 @ENUMS(
-    ServerType { DEVELOPMENT = 1,
+    ServerType {
+     DEVELOPMENT = 1,
      STAGING = 2,
       PRODUCTION = 3
     }

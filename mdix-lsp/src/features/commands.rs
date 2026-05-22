@@ -42,7 +42,7 @@ impl CommandResult {
     fn ok_file(msg: impl Into<String>, path: PathBuf) -> Self {
         CommandResult { message: msg.into(), success: true, out_file: Some(path) }
     }
-    fn err(msg: impl Into<String>) -> Self {
+   pub fn err(msg: impl Into<String>) -> Self {
         CommandResult { message: msg.into(), success: false, out_file: None }
     }
 }

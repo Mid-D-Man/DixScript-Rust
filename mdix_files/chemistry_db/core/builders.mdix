@@ -36,7 +36,7 @@
   }
 
   ~createIsotope<object>(mass_num<int>, abundance_percent<float>, half_life_seconds<float>, decay_mode<enum>, decay_energy_mev<float>, neutron_xs_barns<float>) {
-    is_stable = decay_mode == enums.DecayMode.STABLE
+  let  is_stable = decay_mode == enums.DecayMode.STABLE
     
     return {
       mass_number = mass_num,
@@ -69,7 +69,7 @@
   }
 
   ~createElectronegativity<object>(pauling<float>, mulliken<float>, allred<float>, sanderson<float>, allen<float>) {
-    avg = (pauling + mulliken + allred + sanderson + allen) / 5.0
+  let  avg = (pauling + mulliken + allred + sanderson + allen) / 5.0
     
     return {
       pauling = pauling,
@@ -98,8 +98,8 @@
   }
 
   ~createCrystalLattice<object>(system<enum>, a_angstrom<float>, b_angstrom<float>, c_angstrom<float>, alpha_deg<float>, beta_deg<float>, gamma_deg<float>) {
-    abc_tuple = t:(a_angstrom, b_angstrom, c_angstrom)
-    angles_tuple = t:(alpha_deg, beta_deg, gamma_deg)
+  let  abc_tuple = t:(a_angstrom, b_angstrom, c_angstrom)
+  let  angles_tuple = t:(alpha_deg, beta_deg, gamma_deg)
     
     return {
       lattice_system = system,
@@ -109,18 +109,18 @@
   }
 
   ~createMatrix3x3<tuple>(r1c1<float>, r1c2<float>, r1c3<float>, r2c1<float>, r2c2<float>, r2c3<float>, r3c1<float>, r3c2<float>, r3c3<float>) {
-    row1 = t:(r1c1, r1c2, r1c3)
-    row2 = t:(r2c1, r2c2, r2c3)
-    row3 = t:(r3c1, r3c2, r3c3)
-    
+  let  row1 = t:(r1c1, r1c2, r1c3)
+  let  row2 = t:(r2c1, r2c2, r2c3)
+  let  row3 = t:(r3c1, r3c2, r3c3)
+
     return t:(row1, row2, row3)
   }
 
   ~createPhasePoints<object>(melting_k<float>, boiling_k<float>, triple_temp_k<float>, triple_press_pa<float>, critical_temp_k<float>, critical_press_pa<float>) {
-    melting_c = melting_k - 273.15
-    boiling_c = boiling_k - 273.15
-    triple_point = t:(triple_temp_k, triple_press_pa)
-    critical_point = t:(critical_temp_k, critical_press_pa)
+  let  melting_c = melting_k - 273.15
+  let  boiling_c = boiling_k - 273.15
+  let  triple_point = t:(triple_temp_k, triple_press_pa)
+  let  critical_point = t:(critical_temp_k, critical_press_pa)
     
     return {
       melting_point_k = melting_k,
@@ -144,7 +144,7 @@
   }
 
   ~createMechanicalProps<object>(density<float>, youngs<float>, shear<float>, bulk<float>, poisson<float>, mohs<float>, sound_speed<float>) {
-    bulk_moduli = t:(youngs, shear, bulk)
+  let  bulk_moduli = t:(youngs, shear, bulk)
     
     return {
       density_g_cm3 = density,
@@ -172,7 +172,7 @@
   }
 
   ~createLennardJones<object>(epsilon<float>, sigma<float>) {
-    potential_params = t:(epsilon, sigma)
+  let  potential_params = t:(epsilon, sigma)
     
     return {
       epsilon_well_depth_k = epsilon,
@@ -182,9 +182,9 @@
   }
 
   ~createPolarizabilityTensor<tuple>(xx<float>, xy<float>, xz<float>, yx<float>, yy<float>, yz<float>, zx<float>, zy<float>, zz<float>) {
-    row1 = t:(xx, xy, xz)
-    row2 = t:(yx, yy, yz)
-    row3 = t:(zx, zy, zz)
+  let  row1 = t:(xx, xy, xz)
+  let  row2 = t:(yx, yy, yz)
+  let  row3 = t:(zx, zy, zz)
     
     return t:(row1, row2, row3)
   }
@@ -198,8 +198,8 @@
   }
 
   ~createSpectralLine<object>(wavelength_nm<float>, intensity<float>, series<enum>, transition_desc<string>) {
-    frequency_hz = 299792458.0 / (wavelength_nm * 1.0e-9)
-    energy_ev = 1239.84193 / wavelength_nm
+  let  frequency_hz = 299792458.0 / (wavelength_nm * 1.0e-9)
+  let  energy_ev = 1239.84193 / wavelength_nm
     
     return {
       wavelength_nm = wavelength_nm,
@@ -212,7 +212,7 @@
   }
 
   ~createEinsteinCoeffs<object>(a21<float>, b12<float>, b21<float>) {
-    coefficients = t:(a21, b12, b21)
+  let  coefficients = t:(a21, b12, b21)
     
     return {
       spontaneous_emission_a21 = a21,
@@ -223,7 +223,7 @@
   }
 
   ~createPhotonCrossSections<object>(photoelectric<float>, compton<float>, pair_production<float>) {
-    total = photoelectric + compton + pair_production
+  let  total = photoelectric + compton + pair_production
     
     return {
       photoelectric_barns = photoelectric,

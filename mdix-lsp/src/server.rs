@@ -194,7 +194,7 @@ impl LanguageServer for Backend {
     async fn document_highlight(&self, params: DocumentHighlightParams) -> LspResult<Option<Vec<DocumentHighlight>>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
-        Ok(features::document_highlight::provide(self.documents.get(uri).as_deref(), pos))
+        Ok(features::document_highlights::provide(self.documents.get(uri).as_deref(), pos))
     }
 
     // ── References ────────────────────────────────────────────────────────────

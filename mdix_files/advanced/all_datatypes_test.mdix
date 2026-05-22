@@ -59,6 +59,13 @@
         let len = arr.length();
         let first = arr.first();
         let last = arr.last();
+
+        let myin = {
+        tuka = 12,
+        izak =14,
+        vibo = 99
+        }
+        let idi = myin.vibo
         return len + first + last;
     }
 
@@ -112,6 +119,7 @@
     int_zero<int> = 0,
     int_large<int> = 2147483647,
     int_small<int> = -2147483648,
+
     // Float types - with f suffix
     float_positive<float> = 3.14f,
     float_negative<float> = -2.5f,
@@ -189,7 +197,6 @@
     tuple_three = t:(42, "text", true),
     tuple_four = t:(42, "text", true, 3.14f),
     tuple_mixed_types = t:(100, "hello", false, 2.5f),
-
     // Object types
     object_simple = {
         name = "Test",

@@ -2362,73 +2362,91 @@ impl<'a> QuickFuncsSectionParser<'a> {
     }
 
     fn parse_type_annotation(&mut self) -> Option<DataType> {
-        if !self.check_symbol('<') {
-            return None;
-        }
-        self.advance(); // consume '<'
-        self.skip_whitespace();
+    if !self.check_symbol('<') { return None; }
+    self.advance(); // consume outer '<'
+    self.skip_whitespace();
 
-        let type_token = self.current().clone();
+    let type_token = self.current().clone();
 
-        let type_str = match &type_token.token_type {
-            TokenType::Keyword(kw)    => Some(kw.to_lowercase()),
-            TokenType::Identifier(id) => Some(id.to_lowercase()),
-            _ => None,
-        };
+    let type_lower = match &type_token.token_type {
+        TokenType::Keyword(kw)    => Some(kw.to_lowercase()),
+        TokenType::Identifier(id) => Some(id.to_lowercase()),
+        _ => None,
+    };
 
-        let dt = if let Some(ref s) = type_str {
-            let result = Self::str_to_data_type(s);
-            if result.is_none() {
-                self.error_manager.add_parse_error(
-                    ParseErrorType::InvalidType,
-                    format!("Invalid type annotation '{}'", s),
-                    type_token.line, type_token.column, None,
-                    self.get_source_line(&type_token),
-                );
-            }
-            result
-        } else {
+    let base_dt = if let Some(ref s) = type_lower {
+        let result = Self::str_to_data_type(s);
+        if result.is_none() {
             self.error_manager.add_parse_error(
                 ParseErrorType::InvalidType,
-                format!("Expected type name inside '<>', found {}", type_token.get_token_value()),
+                format!("Invalid type annotation '{}'", s),
                 type_token.line, type_token.column, None,
                 self.get_source_line(&type_token),
             );
-            None
-        };
-
-        if type_str.is_some() {
-            self.advance(); // consume the type token
-        } else {
-            self.advance(); // skip invalid
         }
+        result
+    } else {
+        self.error_manager.add_parse_error(
+            ParseErrorType::InvalidType,
+            format!(
+                "Expected type name inside '<>', found {}",
+                type_token.get_token_value()
+            ),
+            type_token.line, type_token.column, None,
+            self.get_source_line(&type_token),
+        );
+        None
+    };
 
-        self.skip_whitespace();
-
-        // Recover from a missing '>' by scanning forward
-        if !self.check_symbol('>') {
-            let cur = self.current().clone();
-            self.error_manager.add_parse_error(
-                ParseErrorType::MissingToken,
-                "Expected '>' to close type annotation".to_string(),
-                cur.line, cur.column, None,
-                self.get_source_line(&cur),
-            );
-            let mut depth: i32 = 1;
-            while !self.is_at_end() && depth > 0 {
-                match self.current().token_type {
-                    TokenType::Symbol('<') => depth += 1,
-                    TokenType::Symbol('>') => { depth -= 1; if depth == 0 { self.advance(); break; } }
-                    _ => {}
-                }
-                self.advance();
-            }
-        } else {
-            self.advance(); // consume '>'
-        }
-
-        dt
+    if type_lower.is_some() {
+        self.advance(); // consume the base type keyword
+    } else {
+        self.advance(); // skip invalid token
     }
+    self.skip_whitespace();
+
+    // Typed-collection syntax: <array<int>>, <tuple<int,bool>>
+    let final_dt = match base_dt {
+        Some(DataType::Array) if self.check_symbol('<') => {
+            self.parse_typed_collection_qf("array")
+        }
+        Some(DataType::Tuple) if self.check_symbol('<') => {
+            self.parse_typed_collection_qf("tuple")
+        }
+        other => other,
+    };
+
+    // Consume the outer '>' — handles ">>" split when inner type closed it halfway
+    if !self.match_and_consume_closing_angle() {
+        let cur = self.current().clone();
+        self.error_manager.add_parse_error(
+            ParseErrorType::MissingToken,
+            "Expected '>' to close type annotation".to_string(),
+            cur.line, cur.column, None,
+            self.get_source_line(&cur),
+        );
+        // Error recovery: scan for matching '>' or '>>'
+        let mut depth: i32 = 1;
+        while !self.is_at_end() && depth > 0 {
+            match &self.current().token_type {
+                TokenType::Symbol('<') => { depth += 1; self.advance(); }
+                TokenType::Symbol('>') => {
+                    depth -= 1;
+                    self.advance();
+                    if depth == 0 { break; }
+                }
+                TokenType::BitwiseOp(op) if *op == ">>" => {
+                    depth -= 2;
+                    self.advance();
+                    if depth <= 0 { break; }
+                }
+                _ => { self.advance(); }
+            }
+        }
+    }
+
+    final_dt
+}
 
     fn parse_dotted_path(&mut self) -> Option<String> {
         let mut path = match &self.current().token_type {

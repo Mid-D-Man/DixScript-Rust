@@ -951,56 +951,67 @@ pub fn new_with_error_manager(
     // ==================== CONTROL FLOW VALIDATION ====================
 
     fn validate_if_statement(
-        &self,
-        condition: &Expression,
-        then_branch: &[QuickFuncStatement],
-        else_branch: Option<&Vec<QuickFuncStatement>>,
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &mut LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
-        nesting_depth: usize,
-        max_depth: usize,
-        return_path: &mut ReturnPathAnalyzer,
-    ) {
-        self.validate_expression(condition, func, symbol_table, local_scope, result, max_depth);
+    &self,
+    condition:    &Expression,
+    then_branch:  &[QuickFuncStatement],
+    else_branch:  Option<&Vec<QuickFuncStatement>>,
+    func:         &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope:  &mut LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
+    nesting_depth: usize,
+    max_depth:    usize,
+    return_path:  &mut ReturnPathAnalyzer,
+) {
+    self.validate_expression(condition, func, symbol_table, local_scope, result, max_depth);
 
-        let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        if let Some(cond_type) = visitor.infer_type_from_expression(condition) {
-            if cond_type != DataType::Bool {
-                self.add_error(
-                    result,
-                    "QFUNC016",
-                    "NON_BOOLEAN_CONDITION",
-                    &format!("If statement condition must be boolean, got {:?}", cond_type),
-                    "Use comparison operators (==, !=, >, <, etc.) to create boolean conditions.",
-                    condition.position(),
-                );
-            }
-        }
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
 
-        let mut then_returns = ReturnPathAnalyzer::new(func.return_type.unwrap());
-        let mut else_returns = ReturnPathAnalyzer::new(func.return_type.unwrap());
-
-        for stmt in then_branch {
-            self.validate_statement(
-                stmt, func, symbol_table, local_scope, result,
-                nesting_depth + 1, max_depth, &mut then_returns,
+    if let Some(cond_type) = visitor.infer_type_from_expression(condition) {
+        // Any is permissive — skip the bool check entirely
+        if cond_type != DataType::Bool && cond_type != DataType::Any {
+            self.add_error(
+                result,
+                "QFUNC016",
+                "NON_BOOLEAN_CONDITION",
+                &format!(
+                    "If statement condition must be boolean, got {:?}",
+                    cond_type
+                ),
+                "Use comparison operators (==, !=, >, <, etc.) to create boolean conditions.",
+                condition.position(),
             );
         }
+    }
 
-        if let Some(else_stmts) = else_branch {
-            for stmt in else_stmts {
-                self.validate_statement(
-                    stmt, func, symbol_table, local_scope, result,
-                    nesting_depth + 1, max_depth, &mut else_returns,
-                );
-            }
-            if then_returns.all_paths_return() && else_returns.all_paths_return() {
-                return_path.add_return();
-            }
+    let mut then_returns = ReturnPathAnalyzer::new(func.return_type.unwrap());
+    let mut else_returns = ReturnPathAnalyzer::new(func.return_type.unwrap());
+
+    for stmt in then_branch {
+        self.validate_statement(
+            stmt, func, symbol_table, local_scope, result,
+            nesting_depth + 1, max_depth, &mut then_returns,
+        );
+    }
+
+    if let Some(else_stmts) = else_branch {
+        for stmt in else_stmts {
+            self.validate_statement(
+                stmt, func, symbol_table, local_scope, result,
+                nesting_depth + 1, max_depth, &mut else_returns,
+            );
+        }
+        if then_returns.all_paths_return() && else_returns.all_paths_return() {
+            return_path.add_return();
         }
     }
+}
 
     fn validate_switch_statement(
         &self,

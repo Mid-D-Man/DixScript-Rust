@@ -2508,60 +2508,72 @@ fn reset_parse_state(&mut self) {
     }
 
     fn parse_optional_type_annotation(&mut self) -> Option<DataType> {
-        if !self.is_current_symbol('<') {
-            return None;
-        }
-        self.advance();
+    if !self.is_current_symbol('<') {
+        return None;
+    }
+    self.advance(); // consume outer '<'
 
-        let data_type = self.parse_data_type();
-        if data_type.is_none() {
-            let current = self.current().clone();
-            self.handle_parse_error(
-                ParseErrorType::UnexpectedToken,
-                "Expected data type in type annotation",
-                &current,
-            );
-        }
-
-        if !self.match_and_consume_symbol('>') {
-            let current = self.current().clone();
-            self.handle_parse_error(
-                ParseErrorType::MissingToken,
-                "Expected '>' to close type annotation",
-                &current,
-            );
-        }
-
-        data_type
+    let data_type = self.parse_data_type();
+    if data_type.is_none() {
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::UnexpectedToken,
+            "Expected data type in type annotation",
+            &current,
+        );
     }
 
-    fn parse_data_type(&mut self) -> Option<DataType> {
-        if let TokenType::Keyword(kw) = &self.current().token_type {
-            let data_type = match *kw {
-                "int"       => Some(DataType::Int),
-                "long"      => Some(DataType::Long),
-                "float"     => Some(DataType::Float),
-                "double"    => Some(DataType::Double),
-                "string"    => Some(DataType::String),
-                "bool"      => Some(DataType::Bool),
-                "array"     => Some(DataType::Array),
-                "tuple"     => Some(DataType::Tuple),
-                "hex"       => Some(DataType::Hex),
-                "blob"      => Some(DataType::Blob),
-                "regex"     => Some(DataType::Regex),
-                "object"    => Some(DataType::Object),
-                "timestamp" => Some(DataType::Timestamp),
-                "date"      => Some(DataType::Date),
-                "enum"      => Some(DataType::Enum),
-                _           => None,
-            };
-            if data_type.is_some() {
-                self.advance();
-            }
-            return data_type;
-        }
-        None
+    // Use closing-angle helper so ">>" from nested <array<int>> is handled correctly
+    if !self.match_and_consume_closing_angle() {
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::MissingToken,
+            "Expected '>' to close type annotation",
+            &current,
+        );
     }
+
+    data_type
+}
+
+  fn parse_data_type(&mut self) -> Option<DataType> {
+    let kw_str: Option<&'static str> = match &self.current().token_type {
+        TokenType::Keyword(kw) => Some(*kw),
+        _ => None,
+    };
+
+    let kw = kw_str?;
+
+    let base: Option<DataType> = match kw {
+        "int"       => Some(DataType::Int),
+        "long"      => Some(DataType::Long),
+        "float"     => Some(DataType::Float),
+        "double"    => Some(DataType::Double),
+        "string"    => Some(DataType::String),
+        "bool"      => Some(DataType::Bool),
+        "array"     => Some(DataType::Array),
+        "tuple"     => Some(DataType::Tuple),
+        "hex"       => Some(DataType::Hex),
+        "blob"      => Some(DataType::Blob),
+        "regex"     => Some(DataType::Regex),
+        "object"    => Some(DataType::Object),
+        "timestamp" => Some(DataType::Timestamp),
+        "date"      => Some(DataType::Date),
+        "enum"      => Some(DataType::Enum),
+        _           => None,
+    };
+
+    if base.is_none() { return None; }
+
+    self.advance(); // consume the base type keyword
+
+    // Typed-collection syntax: array<int>, tuple<int,bool>
+    if (kw == "array" || kw == "tuple") && self.is_current_symbol('<') {
+        return self.parse_typed_collection(kw);
+    }
+
+    base
+                    }
 
     fn parse_table_path(&mut self) -> Option<TablePath> {
         let mut segments = Vec::new();

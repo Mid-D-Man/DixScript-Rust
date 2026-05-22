@@ -1,0 +1,153 @@
+@CONFIG(
+  version -> "1.0.0",
+  author -> "Chemistry System - Core Enums",
+  created -> 2025-01-09T00:00:00Z,
+  encoding -> "UTF-8",
+  features -> "advanced"
+)
+
+@ENUMS(
+  Phase {
+    SOLID = 1,
+    LIQUID = 2,
+    GAS = 3,
+    PLASMA = 4,
+    UNKNOWN = 5
+  }
+
+  ElementGroup {
+    NONMETAL = 1,
+    ALKALI_METAL = 2,
+    ALKALINE_EARTH = 3,
+    TRANSITION_METAL = 4,
+    POST_TRANSITION_METAL = 5,
+    METALLOID = 6,
+    HALOGEN = 7,
+    NOBLE_GAS = 8,
+    LANTHANIDE = 9,
+    ACTINIDE = 10
+  }
+
+  Block {
+    S_BLOCK = 1,
+    P_BLOCK = 2,
+    D_BLOCK = 3,
+    F_BLOCK = 4
+  }
+
+  LatticeType {
+    CUBIC = 1,
+    FCC = 2,
+    BCC = 3,
+    HCP = 4,
+    TETRAGONAL = 5,
+    ORTHORHOMBIC = 6,
+    MONOCLINIC = 7,
+    TRICLINIC = 8,
+    RHOMBOHEDRAL = 9,
+    HEXAGONAL = 10
+  }
+
+  MagneticOrdering {
+    DIAMAGNETIC = 1,
+    PARAMAGNETIC = 2,
+    FERROMAGNETIC = 3,
+    ANTIFERROMAGNETIC = 4,
+    FERRIMAGNETIC = 5
+  }
+
+  DecayMode {
+    STABLE = 0,
+    BETA_MINUS = 1,
+    BETA_PLUS = 2,
+    ALPHA = 3,
+    ELECTRON_CAPTURE = 4,
+    NEUTRON_EMISSION = 5,
+    PROTON_EMISSION = 6,
+    SPONTANEOUS_FISSION = 7
+  }
+
+  SpectralSeries {
+    LYMAN = 1,
+    BALMER = 2,
+    PASCHEN = 3,
+    BRACKETT = 4,
+    PFUND = 5,
+    HUMPHREYS = 6
+  }
+
+  BondType {
+    IONIC = 1,
+    COVALENT = 2,
+    METALLIC = 3,
+    HYDROGEN = 4,
+    VAN_DER_WAALS = 5,
+    DIPOLE_DIPOLE = 6,
+    LONDON_DISPERSION = 7
+  }
+
+  LengthUnit {
+    METER = 1,
+    CENTIMETER = 2,
+    MILLIMETER = 3,
+    MICROMETER = 4,
+    NANOMETER = 5,
+    ANGSTROM = 6,
+    PICOMETER = 7,
+    FEMTOMETER = 8,
+    BOHR_RADIUS = 9
+  }
+
+  TemperatureUnit {
+    KELVIN = 1,
+    CELSIUS = 2,
+    FAHRENHEIT = 3
+  }
+
+  EnergyUnit {
+    JOULE = 1,
+    KILOJOULE = 2,
+    MEGAJOULE = 3,
+    ELECTRONVOLT = 4,
+    KILO_EV = 5,
+    MEGA_EV = 6,
+    CALORIE = 7,
+    KILOCALORIE = 8,
+    HARTREE = 9,
+    RYDBERG = 10
+  }
+
+  PressureUnit {
+    PASCAL = 1,
+    KILOPASCAL = 2,
+    MEGAPASCAL = 3,
+    ATMOSPHERE = 4,
+    BAR = 5,
+    MILLIBAR = 6,
+    TORR = 7,
+    PSI = 8
+  }
+
+  MassUnit {
+    KILOGRAM = 1,
+    GRAM = 2,
+    MILLIGRAM = 3,
+    MICROGRAM = 4,
+    ATOMIC_MASS_UNIT = 5,
+    DALTON = 6,
+    ELECTRON_MASS = 7
+  }
+
+  TimeUnit {
+    SECOND = 1,
+    MILLISECOND = 2,
+    MICROSECOND = 3,
+    NANOSECOND = 4,
+    PICOSECOND = 5,
+    FEMTOSECOND = 6,
+    MINUTE = 7,
+    HOUR = 8,
+    DAY = 9,
+    YEAR = 10
+  }
+)

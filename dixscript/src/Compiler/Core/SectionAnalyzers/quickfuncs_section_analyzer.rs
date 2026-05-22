@@ -2290,48 +2290,71 @@ fn validate_conditional_expression(
     }
 
     fn validate_instance_method_call(
-        &self,
-        instance: &Expression,
-        method_name: &str,
-        arguments: &[Expression],
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
-        max_depth: usize,
-    ) {
-        let chain_depth = Self::count_method_chain_depth(instance);
-        if chain_depth > MAX_METHOD_CHAIN_DEPTH {
-            self.add_error(
-                result, "QFUNC066", "METHOD_CHAIN_TOO_DEEP",
-                &format!(
-                    "Method chain depth ({}) exceeds maximum of {} in function '{}'",
-                    chain_depth, MAX_METHOD_CHAIN_DEPTH, func.name
-                ),
-                "Break up the method chain into intermediate variables.", instance.position(),
-            );
-            return;
-        }
+    &self,
+    instance:     &Expression,
+    method_name:  &str,
+    arguments:    &[Expression],
+    func:         &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope:  &LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
+    max_depth:    usize,
+) {
+    let chain_depth = Self::count_method_chain_depth(instance);
+    if chain_depth > MAX_METHOD_CHAIN_DEPTH {
+        self.add_error(
+            result,
+            "QFUNC066",
+            "METHOD_CHAIN_TOO_DEEP",
+            &format!(
+                "Method chain depth ({}) exceeds maximum of {} in function '{}'",
+                chain_depth, MAX_METHOD_CHAIN_DEPTH, func.name
+            ),
+            "Break up the method chain into intermediate variables.",
+            instance.position(),
+        );
+        return;
+    }
 
-        self.validate_expression(instance, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(instance, func, symbol_table, local_scope, result, max_depth - 1);
 
-        let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        if let Some(inst_type) = visitor.infer_type_from_expression(instance) {
-            if let Some(dix_type) = Self::convert_data_type_to_dix_type(inst_type) {
+    // Element hints are essential here: .first()/.last() on a tracked array
+    // would otherwise infer as Any and skip method validation entirely.
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
+
+    if let Some(inst_type) = visitor.infer_type_from_expression(instance) {
+        // When instance type is Any (runtime-shaped / unknown), skip method
+        // existence check to avoid false INSTANCE_METHOD_NOT_FOUND errors.
+        if inst_type != DataType::Any {
+            // Strip typed-collection wrappers for DixType lookup
+            let lookup_type = inst_type.base_collection_type();
+            if let Some(dix_type) = Self::convert_data_type_to_dix_type(lookup_type) {
                 if !has_instance_method(dix_type, method_name) {
                     self.add_error(
-                        result, "QFUNC047", "INSTANCE_METHOD_NOT_FOUND",
-                        &format!("Type '{:?}' has no instance method '{}'", inst_type, method_name),
+                        result,
+                        "QFUNC047",
+                        "INSTANCE_METHOD_NOT_FOUND",
+                        &format!(
+                            "Type '{:?}' has no instance method '{}'",
+                            inst_type, method_name
+                        ),
                         &format!("Type '{:?}' has no such method.", inst_type),
                         instance.position(),
                     );
                 }
             }
         }
+    }
 
-        for arg in arguments {
-            self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
-        }
+    for arg in arguments {
+        self.validate_expression(arg, func, symbol_table, local_scope, result, max_depth - 1);
+    }
     }
 
     fn validate_static_method_call(

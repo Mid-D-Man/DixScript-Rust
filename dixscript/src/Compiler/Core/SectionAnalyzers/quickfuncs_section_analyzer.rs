@@ -1705,113 +1705,162 @@ pub fn new_with_error_manager(
 
     // ==================== OPERATOR EXPRESSION VALIDATORS ====================
 
-    fn validate_arithmetic_op_expression(
-        &self,
-        left: &Expression,
-        right: &Expression,
-        operator: &str,
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
-        max_depth: usize,
-    ) {
-        if !is_valid_arithmetic_operator(operator) {
-            self.add_error(
-                result,
-                "QFUNC025",
-                "INVALID_ARITHMETIC_OPERATOR",
-                &format!("Invalid arithmetic operator '{}' in function '{}'", operator, func.name),
-                "Valid operators: +, -, *, /, %, **, %%, %&, &%",
-                left.position(),
-            );
-            return;
-        }
+fn validate_arithmetic_op_expression(
+    &self,
+    left:         &Expression,
+    right:        &Expression,
+    operator:     &str,
+    func:         &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope:  &LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
+    max_depth:    usize,
+) {
+    if !is_valid_arithmetic_operator(operator) {
+        self.add_error(
+            result,
+            "QFUNC025",
+            "INVALID_ARITHMETIC_OPERATOR",
+            &format!(
+                "Invalid arithmetic operator '{}' in function '{}'",
+                operator, func.name
+            ),
+            "Valid operators: +, -, *, /, %, **, %%, %&, &%",
+            left.position(),
+        );
+        return;
+    }
 
-        self.validate_expression(left, func, symbol_table, local_scope, result, max_depth - 1);
-        self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(left,  func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
 
-        let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        let lt = visitor.infer_type_from_expression(left);
-        let rt = visitor.infer_type_from_expression(right);
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
 
-        if let (Some(l), Some(r)) = (lt, rt) {
-            if operator == "+" {
-                match (l, r) {
-                    (DataType::String, DataType::String) => return,
-                    (DataType::String, _) | (_, DataType::String) => {
+    let lt = visitor.infer_type_from_expression(left);
+    let rt = visitor.infer_type_from_expression(right);
+
+    if let (Some(l), Some(r)) = (lt, rt) {
+        // String concatenation path
+        if operator == "+" {
+            match (l, r) {
+                (DataType::String, DataType::String) => return,
+                (DataType::String, _) | (_, DataType::String) => {
+                    // Only error if the non-string side is a known concrete type
+                    let other = if l == DataType::String { r } else { l };
+                    if other != DataType::Any {
                         self.add_error(
                             result,
                             "QFUNC026",
                             "INVALID_STRING_OPERATION",
                             &format!(
                                 "Cannot concatenate string with {:?} in function '{}'",
-                                if l == DataType::String { r } else { l },
-                                func.name
+                                other, func.name
                             ),
                             "Use only string + string, or convert to string first.",
                             left.position(),
                         );
-                        return;
                     }
-                    _ => {}
+                    return;
                 }
-            }
-
-            if !is_numeric_type(l) {
-                self.add_error(
-                    result, "QFUNC027", "NON_NUMERIC_OPERAND",
-                    &format!("Left operand of '{}' must be numeric, got {:?} in '{}'", operator, l, func.name),
-                    "Use int, float, or double.", left.position(),
-                );
-            }
-            if !is_numeric_type(r) {
-                self.add_error(
-                    result, "QFUNC028", "NON_NUMERIC_OPERAND",
-                    &format!("Right operand of '{}' must be numeric, got {:?} in '{}'", operator, r, func.name),
-                    "Use int, float, or double.", right.position(),
-                );
+                _ => {}
             }
         }
+
+        // Numeric operand checks — skip for Any (type is unknown/deferred)
+        if l != DataType::Any && !is_numeric_type(l) {
+            self.add_error(
+                result,
+                "QFUNC027",
+                "NON_NUMERIC_OPERAND",
+                &format!(
+                    "Left operand of '{}' must be numeric, got {:?} in '{}'",
+                    operator, l, func.name
+                ),
+                "Use int, float, or double.",
+                left.position(),
+            );
+        }
+        if r != DataType::Any && !is_numeric_type(r) {
+            self.add_error(
+                result,
+                "QFUNC028",
+                "NON_NUMERIC_OPERAND",
+                &format!(
+                    "Right operand of '{}' must be numeric, got {:?} in '{}'",
+                    operator, r, func.name
+                ),
+                "Use int, float, or double.",
+                right.position(),
+            );
+        }
     }
+}
 
     fn validate_bitwise_op_expression(
-        &self,
-        left: &Expression,
-        right: &Expression,
-        operator: &str,
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
-        max_depth: usize,
-    ) {
-        if !is_valid_bitwise_operator(operator) {
-            self.add_error(
-                result, "QFUNC029", "INVALID_BITWISE_OPERATOR",
-                &format!("Invalid bitwise operator '{}' in function '{}'", operator, func.name),
-                "Valid operators: &, |, ^, <<, >>", left.position(),
-            );
-            return;
-        }
+    &self,
+    left:         &Expression,
+    right:        &Expression,
+    operator:     &str,
+    func:         &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope:  &LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
+    max_depth:    usize,
+) {
+    if !is_valid_bitwise_operator(operator) {
+        self.add_error(
+            result,
+            "QFUNC029",
+            "INVALID_BITWISE_OPERATOR",
+            &format!(
+                "Invalid bitwise operator '{}' in function '{}'",
+                operator, func.name
+            ),
+            "Valid operators: &, |, ^, <<, >>",
+            left.position(),
+        );
+        return;
+    }
 
-        self.validate_expression(left, func, symbol_table, local_scope, result, max_depth - 1);
-        self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(left,  func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
 
-        let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        for (side, expr) in [("Left", left), ("Right", right)] {
-            if let Some(t) = visitor.infer_type_from_expression(expr) {
-                if t != DataType::Int {
-                    let code = if side == "Left" { "QFUNC030" } else { "QFUNC031" };
-                    self.add_error(
-                        result, code, "NON_INT_BITWISE_OPERAND",
-                        &format!("{} operand of '{}' must be int, got {:?} in '{}'", side, operator, t, func.name),
-                        "Convert to int or use arithmetic operators instead.", expr.position(),
-                    );
-                }
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
+
+    for (side, expr, code) in [
+        ("Left",  left,  "QFUNC030"),
+        ("Right", right, "QFUNC031"),
+    ] {
+        if let Some(t) = visitor.infer_type_from_expression(expr) {
+            // Skip check for Any — type is unknown/deferred
+            if t != DataType::Int && t != DataType::Any {
+                self.add_error(
+                    result,
+                    code,
+                    "NON_INT_BITWISE_OPERAND",
+                    &format!(
+                        "{} operand of '{}' must be int, got {:?} in '{}'",
+                        side, operator, t, func.name
+                    ),
+                    "Convert to int or use arithmetic operators instead.",
+                    expr.position(),
+                );
             }
         }
     }
+}
 
     fn validate_comparison_op_expression(
         &self,
@@ -1862,94 +1911,147 @@ pub fn new_with_error_manager(
     }
 
     fn validate_logical_op_expression(
-        &self,
-        left: &Expression,
-        right: &Expression,
-        operator: &str,
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
-        max_depth: usize,
-    ) {
-        if !is_valid_logical_operator(operator) {
-            self.add_error(
-                result, "QFUNC034", "INVALID_LOGICAL_OPERATOR",
-                &format!("Invalid logical operator '{}' in function '{}'", operator, func.name),
-                "Valid operators: &&, ||, and, or", left.position(),
-            );
-            return;
-        }
+    &self,
+    left:         &Expression,
+    right:        &Expression,
+    operator:     &str,
+    func:         &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope:  &LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
+    max_depth:    usize,
+) {
+    if !is_valid_logical_operator(operator) {
+        self.add_error(
+            result,
+            "QFUNC034",
+            "INVALID_LOGICAL_OPERATOR",
+            &format!(
+                "Invalid logical operator '{}' in function '{}'",
+                operator, func.name
+            ),
+            "Valid operators: &&, ||, and, or",
+            left.position(),
+        );
+        return;
+    }
 
-        self.validate_expression(left, func, symbol_table, local_scope, result, max_depth - 1);
-        self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(left,  func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(right, func, symbol_table, local_scope, result, max_depth - 1);
 
-        let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        for (code, expr, side) in [
-            ("QFUNC035", left, "Left"),
-            ("QFUNC036", right, "Right"),
-        ] {
-            if let Some(t) = visitor.infer_type_from_expression(expr) {
-                if t != DataType::Bool {
-                    self.add_error(
-                        result, code, "NON_BOOL_LOGICAL_OPERAND",
-                        &format!("{} operand of '{}' must be bool, got {:?} in '{}'", side, operator, t, func.name),
-                        "Use comparison operators to create boolean values.", expr.position(),
-                    );
-                }
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
+
+    for (code, expr, side) in [
+        ("QFUNC035", left,  "Left"),
+        ("QFUNC036", right, "Right"),
+    ] {
+        if let Some(t) = visitor.infer_type_from_expression(expr) {
+            // Any and Bool are both acceptable — skip the error
+            if t != DataType::Bool && t != DataType::Any {
+                self.add_error(
+                    result,
+                    code,
+                    "NON_BOOL_LOGICAL_OPERAND",
+                    &format!(
+                        "{} operand of '{}' must be bool, got {:?} in '{}'",
+                        side, operator, t, func.name
+                    ),
+                    "Use comparison operators to create boolean values.",
+                    expr.position(),
+                );
             }
         }
     }
+}
 
-    fn validate_unary_op_expression(
-        &self,
-        operand: &Expression,
-        operator: &str,
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
-        max_depth: usize,
-    ) {
-        if !is_valid_unary_operator(operator) {
-            self.add_error(
-                result, "QFUNC037", "INVALID_UNARY_OPERATOR",
-                &format!("Invalid unary operator '{}' in function '{}'", operator, func.name),
-                "Valid operators: !, not, -, +, ~?", operand.position(),
-            );
-            return;
-        }
+fn validate_unary_op_expression(
+    &self,
+    operand:      &Expression,
+    operator:     &str,
+    func:         &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope:  &LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
+    max_depth:    usize,
+) {
+    if !is_valid_unary_operator(operator) {
+        self.add_error(
+            result,
+            "QFUNC037",
+            "INVALID_UNARY_OPERATOR",
+            &format!(
+                "Invalid unary operator '{}' in function '{}'",
+                operator, func.name
+            ),
+            "Valid operators: !, not, -, +, ~?",
+            operand.position(),
+        );
+        return;
+    }
 
-        self.validate_expression(operand, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(operand, func, symbol_table, local_scope, result, max_depth - 1);
 
-        let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        if let Some(ot) = visitor.infer_type_from_expression(operand) {
-            match operator {
-                "!" | "not" if ot != DataType::Bool => {
-                    self.add_error(
-                        result, "QFUNC038", "NON_BOOL_NOT_OPERAND",
-                        &format!("Logical NOT requires bool, got {:?} in '{}'", ot, func.name),
-                        "Use a comparison to create a boolean value.", operand.position(),
-                    );
-                }
-                "~?" if ot != DataType::Int => {
-                    self.add_error(
-                        result, "QFUNC039", "NON_INT_BITWISE_NOT",
-                        &format!("Bitwise NOT (~?) requires int, got {:?} in '{}'", ot, func.name),
-                        "Convert to int before using bitwise NOT.", operand.position(),
-                    );
-                }
-                "-" | "+" if !is_numeric_type(ot) => {
-                    self.add_error(
-                        result, "QFUNC040", "NON_NUMERIC_UNARY",
-                        &format!("Unary '{}' requires numeric type, got {:?} in '{}'", operator, ot, func.name),
-                        "Use int, float, or double.", operand.position(),
-                    );
-                }
-                _ => {}
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
+
+    if let Some(ot) = visitor.infer_type_from_expression(operand) {
+        if ot == DataType::Any { return; } // skip type checks for Any
+
+        match operator {
+            "!" | "not" if ot != DataType::Bool => {
+                self.add_error(
+                    result,
+                    "QFUNC038",
+                    "NON_BOOL_NOT_OPERAND",
+                    &format!(
+                        "Logical NOT requires bool, got {:?} in '{}'",
+                        ot, func.name
+                    ),
+                    "Use a comparison to create a boolean value.",
+                    operand.position(),
+                );
             }
+            "~?" if ot != DataType::Int => {
+                self.add_error(
+                    result,
+                    "QFUNC039",
+                    "NON_INT_BITWISE_NOT",
+                    &format!(
+                        "Bitwise NOT (~?) requires int, got {:?} in '{}'",
+                        ot, func.name
+                    ),
+                    "Convert to int before using bitwise NOT.",
+                    operand.position(),
+                );
+            }
+            "-" | "+" if !is_numeric_type(ot) => {
+                self.add_error(
+                    result,
+                    "QFUNC040",
+                    "NON_NUMERIC_UNARY",
+                    &format!(
+                        "Unary '{}' requires numeric type, got {:?} in '{}'",
+                        operator, ot, func.name
+                    ),
+                    "Use int, float, or double.",
+                    operand.position(),
+                );
+            }
+            _ => {}
         }
     }
+}
 
     fn validate_conditional_expression(
         &self,

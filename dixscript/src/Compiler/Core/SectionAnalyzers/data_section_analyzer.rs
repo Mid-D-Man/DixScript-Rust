@@ -32,6 +32,7 @@ const ERROR_INVALID_EXPRESSION:         &str = "INVALID_EXPRESSION";
 const ERROR_INVALID_BLOB_CONTENT:       &str = "INVALID_BLOB_CONTENT";
 const ERROR_INVALID_REGEX_PATTERN:      &str = "INVALID_REGEX_PATTERN";
 const ERROR_DUPLICATE_FLAT_PROPERTY:    &str = "DUPLICATE_FLAT_PROPERTY";
+const ERROR_DUPLICATE_TABLE_PROPERTY_NAME: &str = "DUPLICATE_TABLE_PROPERTY_NAME";
 const MAX_NESTING_DEPTH:  usize = 5;
 const MAX_TUPLE_ELEMENTS: usize = 6;
 
@@ -407,86 +408,120 @@ pub fn new_with_error_manager(
 }
 
     fn validate_table_property(
-        &mut self,
-        path: &TablePath,
-        properties: &[PropertyAssignment],
-        _position: Position,
-        symbol_table: &mut SymbolTable,
-        result: &mut SectionAnalysisResult,
-    ) {
-        let full_path = Self::join_path(&path.segments);
+    &mut self,
+    path: &TablePath,
+    properties: &[PropertyAssignment],
+    _position: Position,
+    symbol_table: &mut SymbolTable,
+    result: &mut SectionAnalysisResult,
+) {
+    let full_path = Self::join_path(&path.segments);
 
-        for assignment in properties {
-            if Keywords::is_reserved_in_context(&assignment.name, "DATA") {
+    // Track seen names within this single table path call to catch duplicates
+    let mut seen_names: FxHashSet<&str> =
+        FxHashSet::with_capacity_and_hasher(properties.len(), Default::default());
+
+    for assignment in properties {
+        // ── Duplicate property name within this table path ────────────────
+        if !seen_names.insert(assignment.name.as_str()) {
+            self.add_error(
+                result,
+                ERROR_DUPLICATE_TABLE_PROPERTY_NAME,
+                &format!(
+                    "Property '{}' is defined more than once in table path '{}'",
+                    assignment.name, full_path
+                ),
+                assignment.position,
+                Some(&format!(
+                    "Remove or rename the duplicate '{}' property in table '{}'",
+                    assignment.name, full_path
+                )),
+            );
+            continue; // Skip further validation for this duplicate
+        }
+
+        if Keywords::is_reserved_in_context(&assignment.name, "DATA") {
+            self.add_error(
+                result,
+                ERROR_RESERVED_KEYWORD,
+                &Keywords::get_keyword_usage_error(&assignment.name, "DATA"),
+                assignment.position,
+                Some(&format!(
+                    "Choose a different name for property '{}.{}'",
+                    full_path, assignment.name
+                )),
+            );
+            continue;
+        }
+
+        let context = format!("table property '{}.{}'", full_path, assignment.name);
+        let inferred_type = {
+            let visitor = TypeInferenceVisitor::new(symbol_table, None);
+            self.validate_value(&assignment.value, &context, symbol_table, &visitor, result)
+        };
+
+        if let (Some(decl), Some(mut inf)) = (assignment.data_type, inferred_type) {
+            if decl == DataType::Float
+                && matches!(inf, DataType::Int | DataType::Long | DataType::Double)
+            {
+                inf = DataType::Float;
+            }
+            if decl == DataType::Long && inf == DataType::Int {
+                inf = DataType::Long;
+            }
+            if decl == DataType::Double
+                && matches!(inf, DataType::Int | DataType::Long | DataType::Float)
+            {
+                inf = DataType::Double;
+            }
+            if !Self::is_type_compatible(decl, inf) {
                 self.add_error(
                     result,
-                    ERROR_RESERVED_KEYWORD,
-                    &Keywords::get_keyword_usage_error(&assignment.name, "DATA"),
+                    ERROR_TYPE_MISMATCH,
+                    &format!(
+                        "Property '{}.{}' declared as <{}> but value is <{}>. \
+                         These types are not compatible.",
+                        full_path, assignment.name, decl, inf
+                    ),
                     assignment.position,
                     Some(&format!(
-                        "Choose a different name for property '{}.{}'",
-                        full_path, assignment.name
+                        "Either change the type annotation to <{}> or \
+                         provide a value of type <{}>.",
+                        inf, decl
                     )),
                 );
-                continue;
             }
-
-            let context = format!("table property '{}.{}'", full_path, assignment.name);
-            let inferred_type = {
-                let visitor = TypeInferenceVisitor::new(symbol_table, None);
-                self.validate_value(&assignment.value, &context, symbol_table, &visitor, result)
-            };
-
-            if let (Some(decl), Some(mut inf)) = (assignment.data_type, inferred_type) {
-                if decl == DataType::Float && matches!(inf, DataType::Int | DataType::Long | DataType::Double) {
-                    inf = DataType::Float;
-                }
-                if decl == DataType::Long && inf == DataType::Int {
-                    inf = DataType::Long;
-                }
-                if !Self::is_type_compatible(decl, inf) {
-                    self.add_error(
-                        result,
-                        ERROR_TYPE_MISMATCH,
-                        &format!(
-                            "Property '{}.{}' declared as <{:?}> but value is {:?}",
-                            full_path, assignment.name, decl, inf
-                        ),
-                        assignment.position,
-                        None,
-                    );
-                }
-            }
-
-            let prop_path = PathBuilder::build_from(&full_path, &[&assignment.name]);
-
-            self.short_name_to_full_paths
-                .entry(assignment.name.clone())
-                .or_insert_with(Vec::new)
-                .push(prop_path.clone());
-
-            if let Some(inf) = inferred_type {
-                self.path_to_type.insert(prop_path.clone(), inf);
-            }
-
-            if self.debug_config.is_verbose {
-                self.error_manager.log_debug(&format!(
-                    "  Indexed: {} -> {}", assignment.name, prop_path
-                ));
-            }
-
-            let var_name = format!("{}.{}", full_path, assignment.name);
-            symbol_table.add_data_variable(var_name.clone(), VariableInfo {
-                name: var_name,
-                declared_type: assignment.data_type,
-                inferred_type,
-                is_inferred: assignment.data_type.is_none(),
-                scope: full_path.clone(),
-                line: assignment.position.line as i32,
-                column: assignment.position.column as i32,
-            });
         }
+
+        let prop_path = PathBuilder::build_from(&full_path, &[&assignment.name]);
+
+        self.short_name_to_full_paths
+            .entry(assignment.name.clone())
+            .or_insert_with(Vec::new)
+            .push(prop_path.clone());
+
+        if let Some(inf) = inferred_type {
+            self.path_to_type.insert(prop_path.clone(), inf);
+        }
+
+        if self.debug_config.is_verbose {
+            self.error_manager.log_debug(&format!(
+                "  Indexed: {} -> {}", assignment.name, prop_path
+            ));
+        }
+
+        let var_name = format!("{}.{}", full_path, assignment.name);
+        symbol_table.add_data_variable(var_name.clone(), VariableInfo {
+            name: var_name,
+            declared_type: assignment.data_type,
+            inferred_type,
+            is_inferred: assignment.data_type.is_none(),
+            scope: full_path.clone(),
+            line: assignment.position.line as i32,
+            column: assignment.position.column as i32,
+        });
     }
+                                            }
 
     fn validate_group_array(
         &mut self,

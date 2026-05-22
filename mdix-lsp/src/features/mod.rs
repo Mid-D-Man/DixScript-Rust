@@ -1,10 +1,13 @@
 // mdix-lsp/src/features/mod.rs
 pub mod code_actions;
+pub mod code_lens;
+pub mod commands;
 pub mod completions;
 pub mod document_color;
-pub mod document_highlight;   // singular — matches the file name
+pub mod document_highlight;
 pub mod document_symbols;
 pub mod folding;
+pub mod formatting;
 pub mod goto_definition;
 pub mod hover;
 pub mod inlay_hints;

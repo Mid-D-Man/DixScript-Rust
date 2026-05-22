@@ -81,6 +81,7 @@ pub struct QuickFuncsSectionParser<'a> {
     last_position: usize,
     stuck_count: usize,
     iteration_count: usize,
+    pending_angle: false,  
 }
 
 // =============================================================================

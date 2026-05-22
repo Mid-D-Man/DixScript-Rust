@@ -1050,90 +1050,105 @@ pub fn new_with_error_manager(
     // ==================== ASSIGNMENT VALIDATION ====================
 
     fn validate_assignment_statement(
-        &self,
-        variable: &str,
-        value: &Expression,
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &mut LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
-    ) {
-        if !Self::is_valid_identifier(variable) {
-            self.add_error(
-                result,
-                "QFUNC017",
-                "INVALID_VARIABLE_NAME",
-                &format!("Invalid variable name '{}' in function '{}'", variable, func.name),
-                "Variable names must start with a letter and contain only alphanumeric characters and underscores.",
-                value.position(),
-            );
-            return;
-        }
-
-        if !local_scope.has_variable(variable) {
-            self.add_error(
-                result,
-                "QFUNC072",
-                "UNDECLARED_VARIABLE",
-                &format!("Variable '{}' used before declaration in function '{}'", variable, func.name),
-                &format!(
-                    "Declare it first: let {} = ...; or const {} = ...;",
-                    variable, variable
-                ),
-                value.position(),
-            );
-            return;
-        }
-
-        if local_scope.is_const(variable) {
-            self.add_error(
-                result,
-                "QFUNC018",
-                "CONST_REASSIGNMENT",
-                &format!("Cannot reassign const variable '{}' in function '{}'", variable, func.name),
-                "Use 'let mut' instead of 'const' or 'let' to allow mutation.",
-                value.position(),
-            );
-            return;
-        }
-
-        let max_depth = Self::calculate_max_depth(100);
-        self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
-
-        let local_variable_types = local_scope.get_all_variable_types();
-        let visitor = TypeInferenceVisitor::new(symbol_table, Some(local_variable_types));
-
-        let existing_type = local_scope.get_variable_type(variable);
-        let new_type = visitor.infer_type_from_expression(value);
-
-        match (existing_type, new_type) {
-            (Some(existing), Some(new_t))
-                if !Self::are_types_compatible_strict(new_t, existing) =>
-            {
-                self.add_error(
-                    result,
-                    "QFUNC019",
-                    "TYPE_MISMATCH_REASSIGNMENT",
-                    &format!(
-                        "Cannot assign {:?} to variable '{}' of type {:?}",
-                        new_t, variable, existing
-                    ),
-                    "Variable types cannot change once assigned (unless type is 'any').",
-                    value.position(),
-                );
-            }
-            (None, Some(new_t)) => {
-                local_scope.update_variable_type(variable, new_t);
-                if self.debug_config.is_verbose {
-                    self.error_manager.log_debug(&format!(
-                        "Inferred type {:?} for variable '{}'",
-                        new_t, variable
-                    ));
-                }
-            }
-            _ => {}
-        }
+    &self,
+    variable:     &str,
+    value:        &Expression,
+    func:         &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope:  &mut LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
+) {
+    if !Self::is_valid_identifier(variable) {
+        self.add_error(
+            result,
+            "QFUNC017",
+            "INVALID_VARIABLE_NAME",
+            &format!("Invalid variable name '{}' in function '{}'", variable, func.name),
+            "Variable names must start with a letter and contain only alphanumeric characters and underscores.",
+            value.position(),
+        );
+        return;
     }
+
+    if !local_scope.has_variable(variable) {
+        self.add_error(
+            result,
+            "QFUNC072",
+            "UNDECLARED_VARIABLE",
+            &format!(
+                "Variable '{}' used before declaration in function '{}'",
+                variable, func.name
+            ),
+            &format!(
+                "Declare it first: let {} = ...; or const {} = ...;",
+                variable, variable
+            ),
+            value.position(),
+        );
+        return;
+    }
+
+    if local_scope.is_const(variable) {
+        self.add_error(
+            result,
+            "QFUNC018",
+            "CONST_REASSIGNMENT",
+            &format!("Cannot reassign const variable '{}' in function '{}'", variable, func.name),
+            "Use 'let mut' instead of 'const' or 'let' to allow mutation.",
+            value.position(),
+        );
+        return;
+    }
+
+    let max_depth = Self::calculate_max_depth(100);
+    self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
+
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
+
+    let existing_type = local_scope.get_variable_type(variable);
+    let new_type      = visitor.infer_type_from_expression(value);
+
+    match (existing_type, new_type) {
+        (Some(existing), Some(new_t))
+            if new_t != DataType::Any
+                && !Self::are_types_compatible_strict(new_t, existing) =>
+        {
+            self.add_error(
+                result,
+                "QFUNC019",
+                "TYPE_MISMATCH_REASSIGNMENT",
+                &format!(
+                    "Cannot assign {:?} to variable '{}' of type {:?}",
+                    new_t, variable, existing
+                ),
+                "Variable types cannot change once assigned (unless type is 'any').",
+                value.position(),
+            );
+        }
+        (None, Some(new_t)) if new_t != DataType::Any => {
+            local_scope.update_variable_type(variable, new_t);
+
+            // Also update element type if this is an array/tuple being re-assigned
+            if matches!(new_t, DataType::Array | DataType::Tuple) {
+                let new_elem = visitor.infer_element_type_from_expression(value);
+                local_scope.update_variable_element_type(variable, new_elem);
+            }
+
+            if self.debug_config.is_verbose {
+                self.error_manager.log_debug(&format!(
+                    "Inferred type {:?} for variable '{}'", new_t, variable
+                ));
+            }
+        }
+        _ => {}
+    }
+}
 
     fn validate_arithmetic_assignment_statement(
         &self,

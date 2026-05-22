@@ -2556,35 +2556,67 @@ fn validate_unary_op_expression(
 
     // ==================== TYPE SYSTEM ====================
 
-    #[inline]
-    fn are_types_compatible_strict(source: DataType, target: DataType) -> bool {
-        source == target
-            || source == DataType::Any
-            || target == DataType::Any
-            || (is_numeric_type(source) && is_numeric_type(target))
-            // Long can hold Int (widening)
-            || (source == DataType::Int && target == DataType::Long)
-            || (source == DataType::Long && target == DataType::Int)
-            || matches!(
-            (source, target),
-            (DataType::Date, DataType::Timestamp) | (DataType::Timestamp, DataType::Date)
-        )
-    }
+    // ── Type system (static methods on QuickFuncsSectionAnalyzer) ───────────────
 
-    #[inline]
-    fn are_types_comparable(a: DataType, b: DataType) -> bool {
-        a == b
-            || a == DataType::Any
-            || b == DataType::Any
-            || (is_numeric_type(a) && is_numeric_type(b))
-            || matches!(
-                (a, b),
-                (DataType::Date, DataType::Timestamp)
-                    | (DataType::Timestamp, DataType::Date)
-                    | (DataType::Timestamp, DataType::Timestamp)
-                    | (DataType::Date, DataType::Date)
-            )
+#[inline]
+fn are_types_compatible_strict(source: DataType, target: DataType) -> bool {
+    // Identical types are always compatible
+    if source == target { return true; }
+    // Any is the universal wildcard
+    if source == DataType::Any || target == DataType::Any { return true; }
+    // Numeric promotion (all four numeric types are inter-compatible)
+    if is_numeric_type(source) && is_numeric_type(target) { return true; }
+    // Long ↔ Int widening
+    if matches!((source, target),
+        (DataType::Int, DataType::Long) | (DataType::Long, DataType::Int)
+    ) { return true; }
+    // Date ↔ Timestamp
+    if matches!((source, target),
+        (DataType::Date, DataType::Timestamp) | (DataType::Timestamp, DataType::Date)
+    ) { return true; }
+
+    // Typed ↔ untyped collection compatibility
+    match (source, target) {
+        // Array: untyped ↔ typed is always OK; typed ↔ typed needs matching elem type
+        (DataType::Array, DataType::TypedArray(_))
+        | (DataType::TypedArray(_), DataType::Array) => true,
+
+        (DataType::TypedArray(s_elem), DataType::TypedArray(t_elem)) => {
+            s_elem == t_elem
+                || s_elem == ElemType::Any
+                || t_elem == ElemType::Any
+        }
+
+        // Tuple: untyped ↔ typed is always OK; typed ↔ typed is loosely OK
+        // (per-element structural checking deferred to runtime for now)
+        (DataType::Tuple, DataType::TypedTuple(_))
+        | (DataType::TypedTuple(_), DataType::Tuple) => true,
+
+        (DataType::TypedTuple(_), DataType::TypedTuple(_)) => true,
+
+        _ => false,
     }
+}
+
+#[inline]
+fn are_types_comparable(a: DataType, b: DataType) -> bool {
+    a == b
+        || a == DataType::Any
+        || b == DataType::Any
+        || (is_numeric_type(a) && is_numeric_type(b))
+        // Collections of the same class are comparable
+        || (a.is_array() && b.is_array())
+        || (a.is_tuple() && b.is_tuple())
+        || matches!(
+            (a, b),
+            (DataType::Date, DataType::Timestamp)
+                | (DataType::Timestamp, DataType::Date)
+                | (DataType::Timestamp, DataType::Timestamp)
+                | (DataType::Date, DataType::Date)
+        )
+}
+
+
 
     fn validate_arithmetic_operation(
         &self,

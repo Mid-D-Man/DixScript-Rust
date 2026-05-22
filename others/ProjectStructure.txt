@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Fri May 22 10:58:26 UTC 2026
+Generated: Fri May 22 10:59:13 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: df1419acccc118ed9118f3a5069c90dceaf4687d
+Commit: 6b17b560374c5560787c82053b74664f08c6692f
 Branch: master
 ==================================
 

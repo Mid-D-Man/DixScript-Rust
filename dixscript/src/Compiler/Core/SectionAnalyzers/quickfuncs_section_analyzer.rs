@@ -805,130 +805,148 @@ pub fn new_with_error_manager(
 }
 
     fn validate_variable_declaration_statement(
-        &self,
-        statement: &QuickFuncStatement,
-        func: &QuickFunction,
-        symbol_table: &SymbolTable,
-        local_scope: &mut LocalScopeTracker,
-        result: &mut SectionAnalysisResult,
-    ) {
-        let (declaration_type, is_mutable, variable_name, data_type, value, position) =
-            match statement {
-                QuickFuncStatement::VariableDeclaration {
-                    declaration_type,
-                    is_mutable,
-                    variable_name,
-                    data_type,
-                    value,
-                    position,
-                } => (declaration_type, is_mutable, variable_name, data_type, value, position),
-                _ => return,
-            };
-
-        if !Self::is_valid_identifier(variable_name) {
-            self.add_error(
-                result,
-                "QFUNC067",
-                "INVALID_VARIABLE_NAME",
-                &format!(
-                    "Invalid variable name '{}' in function '{}'",
-                    variable_name, func.name
-                ),
-                "Variable names must start with a letter and contain only alphanumeric characters and underscores.",
-                *position,
-            );
-            return;
-        }
-
-        if Keywords::is_data_type_keyword(variable_name) {
-            let suggestion = format!(
-                "Use a different name like 'my{}{}' or '{}Value'",
-                variable_name.chars().next().unwrap_or('X').to_uppercase(),
-                &variable_name[1..],
-                variable_name
-            );
-            self.add_error(
-                result,
-                "QFUNC067B",
-                "DATA_TYPE_KEYWORD_AS_VARIABLE",
-                &format!(
-                    "Variable '{}' in function '{}' cannot use a data type keyword as name",
-                    variable_name, func.name
-                ),
-                &suggestion,
-                *position,
-            );
-            return;
-        }
-
-        if Keywords::is_reserved_in_context(variable_name, "QUICKFUNCS") {
-            self.add_error(
-                result,
-                "QFUNC068",
-                "RESERVED_KEYWORD_AS_VARIABLE",
-                &Keywords::get_keyword_usage_error(variable_name, "QUICKFUNCS"),
-                &format!("Choose a different name for variable '{}'", variable_name),
-                *position,
-            );
-            return;
-        }
-
-        if local_scope.has_variable(variable_name) {
-            self.add_error(
-                result,
-                "QFUNC069",
-                "VARIABLE_REDECLARATION",
-                &format!(
-                    "Variable '{}' already declared in function '{}'",
-                    variable_name, func.name
-                ),
-                "Each variable must be declared only once. Use assignment to change its value.",
-                *position,
-            );
-            return;
-        }
-
-        let max_depth = Self::calculate_max_depth(100);
-        self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
-
-        // Infer type once; use for both compatibility check and scope registration.
-        let local_variable_types = local_scope.get_all_variable_types();
-        let visitor = TypeInferenceVisitor::new(symbol_table, Some(local_variable_types));
-        let inferred_type = visitor.infer_type_from_expression(value);
-
-        if let (Some(&declared), Some(inferred)) = (data_type.as_ref(), inferred_type) {
-            if !Self::are_types_compatible_strict(inferred, declared) {
-                self.add_error(
-                    result,
-                    "QFUNC071",
-                    "VARIABLE_TYPE_MISMATCH",
-                    &format!(
-                        "Variable '{}' declared as {:?} but assigned value of type {:?}",
-                        variable_name, declared, inferred
-                    ),
-                    &format!(
-                        "Change the value to match {:?} or remove the type annotation",
-                        declared
-                    ),
-                    *position,
-                );
-            }
-        }
-
-        let is_const = matches!(declaration_type, DeclarationType::Const) || !is_mutable;
-        let effective_type = data_type.or(inferred_type);
-
-        local_scope.add_variable(variable_name.clone(), effective_type, is_const);
-
-        if self.debug_config.is_verbose {
-            self.error_manager.log_debug(&format!(
-                "Declared {} variable '{}' with type {:?}",
-                if is_const { "immutable" } else { "mutable" },
+    &self,
+    statement:    &QuickFuncStatement,
+    func:         &QuickFunction,
+    symbol_table: &SymbolTable,
+    local_scope:  &mut LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
+) {
+    let (declaration_type, is_mutable, variable_name, data_type, value, position) =
+        match statement {
+            QuickFuncStatement::VariableDeclaration {
+                declaration_type,
+                is_mutable,
                 variable_name,
-                effective_type
-            ));
+                data_type,
+                value,
+                position,
+            } => (declaration_type, is_mutable, variable_name, data_type, value, position),
+            _ => return,
+        };
+
+    if !Self::is_valid_identifier(variable_name) {
+        self.add_error(
+            result,
+            "QFUNC067",
+            "INVALID_VARIABLE_NAME",
+            &format!("Invalid variable name '{}' in function '{}'", variable_name, func.name),
+            "Variable names must start with a letter and contain only alphanumeric characters and underscores.",
+            *position,
+        );
+        return;
+    }
+
+    if Keywords::is_data_type_keyword(variable_name) {
+        let suggestion = format!(
+            "Use a different name like 'my{}{}' or '{}Value'",
+            variable_name.chars().next().unwrap_or('X').to_uppercase(),
+            &variable_name[1..],
+            variable_name
+        );
+        self.add_error(
+            result,
+            "QFUNC067B",
+            "DATA_TYPE_KEYWORD_AS_VARIABLE",
+            &format!(
+                "Variable '{}' in function '{}' cannot use a data type keyword as name",
+                variable_name, func.name
+            ),
+            &suggestion,
+            *position,
+        );
+        return;
+    }
+
+    if Keywords::is_reserved_in_context(variable_name, "QUICKFUNCS") {
+        self.add_error(
+            result,
+            "QFUNC068",
+            "RESERVED_KEYWORD_AS_VARIABLE",
+            &Keywords::get_keyword_usage_error(variable_name, "QUICKFUNCS"),
+            &format!("Choose a different name for variable '{}'", variable_name),
+            *position,
+        );
+        return;
+    }
+
+    if local_scope.has_variable(variable_name) {
+        self.add_error(
+            result,
+            "QFUNC069",
+            "VARIABLE_REDECLARATION",
+            &format!(
+                "Variable '{}' already declared in function '{}'",
+                variable_name, func.name
+            ),
+            "Each variable must be declared only once. Use assignment to change its value.",
+            *position,
+        );
+        return;
+    }
+
+    let max_depth = Self::calculate_max_depth(100);
+    self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
+
+    // Build TypeInferenceVisitor with full local scope context including element hints
+    let local_variable_types = local_scope.get_all_variable_types();
+    let element_type_hints   = local_scope.get_all_element_type_hints();
+    let visitor = TypeInferenceVisitor::new_with_element_hints(
+        symbol_table,
+        Some(local_variable_types),
+        Some(element_type_hints),
+    );
+    let inferred_type = visitor.infer_type_from_expression(value);
+
+    // Type-compatibility check (only when both declared and inferred are known and not Any)
+    if let (Some(&declared), Some(inferred)) = (data_type.as_ref(), inferred_type) {
+        if inferred != DataType::Any && !Self::are_types_compatible_strict(inferred, declared) {
+            self.add_error(
+                result,
+                "QFUNC071",
+                "VARIABLE_TYPE_MISMATCH",
+                &format!(
+                    "Variable '{}' declared as {:?} but assigned value of type {:?}",
+                    variable_name, declared, inferred
+                ),
+                &format!(
+                    "Change the value to match {:?} or remove the type annotation",
+                    declared
+                ),
+                *position,
+            );
         }
     }
+
+    let is_const     = matches!(declaration_type, DeclarationType::Const) || !is_mutable;
+    let effective_type = data_type.or(inferred_type);
+
+    // Infer element type for arrays and tuples so downstream method calls can
+    // resolve .first(), .last(), .get(i), etc. to the actual element type.
+    let element_type = match effective_type {
+        Some(DataType::Array) | Some(DataType::Tuple) => {
+            visitor.infer_element_type_from_expression(value)
+        }
+        _ => None,
+    };
+
+    local_scope.add_variable_with_element_type(
+        variable_name.clone(),
+        effective_type,
+        is_const,
+        element_type,
+    );
+
+    if self.debug_config.is_verbose {
+        self.error_manager.log_debug(&format!(
+            "Declared {} variable '{}' type={:?} element_type={:?}",
+            if is_const { "immutable" } else { "mutable" },
+            variable_name,
+            effective_type,
+            element_type,
+        ));
+    }
+}
 
     // ==================== CONTROL FLOW VALIDATION ====================
 

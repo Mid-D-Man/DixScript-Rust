@@ -550,7 +550,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             DataType::Regex     => Some(DixType::Regex),
             DataType::Date      => Some(DixType::Date),
             DataType::Timestamp => Some(DixType::Timestamp),
-            DataType::Enum      => Some(DataType::Enum),
+            DataType::Enum      => Some(DixType::Enum),
             DataType::Any | DataType::Function | DataType::Range => None,
         }
     }

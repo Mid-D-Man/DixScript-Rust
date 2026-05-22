@@ -4,7 +4,6 @@ use crate::Builtins::Core::DixType;
 use std::collections::HashMap;
 
 /// Array instance methods that return the element type rather than a fixed type.
-/// The registry marks these as DixType::Any — we override using element_type_hints.
 const ARRAY_ELEMENT_METHODS: &[&str] = &[
     "first", "last", "get", "at", "pop", "random",
 ];
@@ -14,13 +13,6 @@ const TUPLE_ELEMENT_METHODS: &[&str] = &[
     "first", "second", "third", "fourth", "fifth", "sixth", "get", "at",
 ];
 
-/// Infers types from values and expressions.
-///
-/// ## element_type_hints
-/// Maps variable/parameter name → the element type of that array or tuple variable.
-/// Populated from `LocalScopeTracker::get_all_element_type_hints()` during QuickFuncs
-/// analysis. When a method like `.first()` or `.last()` is called on an array whose
-/// element type is known, this lets us return the actual element type instead of `Any`.
 pub struct TypeInferenceVisitor<'a> {
     symbol_table: &'a SymbolTable,
     local_variable_types: HashMap<String, Option<DataType>>,
@@ -28,7 +20,6 @@ pub struct TypeInferenceVisitor<'a> {
 }
 
 impl<'a> TypeInferenceVisitor<'a> {
-    /// Standard constructor — no element type hints.
     pub fn new(
         symbol_table: &'a SymbolTable,
         local_variable_types: Option<HashMap<String, Option<DataType>>>,
@@ -40,7 +31,6 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    /// Constructor with element type hints for richer array/tuple inference.
     pub fn new_with_element_hints(
         symbol_table: &'a SymbolTable,
         local_variable_types: Option<HashMap<String, Option<DataType>>>,
@@ -53,7 +43,6 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    /// Convenience: create from a QuickFunction parameter list.
     pub fn from_quickfunc_params(
         symbol_table: &'a SymbolTable,
         params: &[crate::Compiler::AST::QuickFuncParam],
@@ -71,7 +60,6 @@ impl<'a> TypeInferenceVisitor<'a> {
 
     // ── Public inference API ──────────────────────────────────────────────────
 
-    /// Infer type from a Value node.
     pub fn infer_type_from_value(&self, value: &Value) -> Option<DataType> {
         match value {
             Value::Integer { .. }            => Some(DataType::Int),
@@ -92,7 +80,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             Value::PrefixedConstructor { prefix, .. } => {
                 self.infer_prefixed_constructor_type(prefix)
             }
-            Value::EnumValue { .. }                  => Some(DataType::Enum),
+            Value::EnumValue { .. }                   => Some(DataType::Enum),
             Value::QuickFuncCall { function_name, .. } => {
                 self.infer_function_call_type(function_name)
             }
@@ -104,82 +92,59 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    /// Infer type from an Expression node.
     pub fn infer_type_from_expression(&self, expr: &Expression) -> Option<DataType> {
         match expr {
             Expression::Value { value, .. } => self.infer_type_from_value(value),
-
             Expression::Identifier { name, .. } => self.infer_identifier_type(name),
-
             Expression::QualifiedIdentifier { parts, arguments, .. } => {
                 self.infer_qualified_identifier_type(parts, arguments.as_ref())
             }
-
             Expression::ArithmeticOp { left, right, .. } => {
                 self.infer_arithmetic_op_type(left, right)
             }
-
             Expression::ComparisonOp { .. } => Some(DataType::Bool),
             Expression::LogicalOp { .. }    => Some(DataType::Bool),
             Expression::BitwiseOp { .. }    => Some(DataType::Int),
-
             Expression::UnaryOp { operator, operand, .. } => {
                 self.infer_unary_op_type(operator, operand)
             }
-
             Expression::EnumAccess { .. } => Some(DataType::Enum),
-
             Expression::QuickFuncCall { name, .. } => {
                 self.infer_quick_func_call_type(name)
             }
-
             Expression::ImportedFunctionCall { namespace_name, function_name, .. } => {
                 self.infer_imported_function_call_type(namespace_name, function_name)
             }
-
             Expression::StaticMethodCall { object_name, method_name, .. } => {
                 self.infer_static_method_call_type(object_name, method_name)
             }
-
             Expression::StaticFunction { class_name, method, .. } => {
                 self.infer_static_method_call_type(class_name, method)
             }
-
             Expression::InstanceMethodCall { instance, method_name, .. } => {
                 self.infer_instance_method_call_type(instance, method_name)
             }
-
-            // After AST enhancement, obj.prop chains become PropertyAccess nodes.
-            // Try symbol-table path lookup before giving up.
             Expression::PropertyAccess { object, property, .. } => {
                 self.infer_property_access_type(object, property)
             }
-
-            // array[i] or tuple[i] — try to return the element type
             Expression::IndexAccess { object, .. } => {
                 self.infer_index_access_type(object)
             }
-
             Expression::Conditional { true_value, false_value, .. } => {
                 self.infer_type_from_expression(true_value)
                     .or_else(|| self.infer_type_from_expression(false_value))
             }
-
             Expression::Parenthesized { expression, .. } => {
                 self.infer_type_from_expression(expression)
             }
-
+            // TypeCast is Copy so *target_type is fine regardless of TypedArray/TypedTuple
             Expression::TypeCast { target_type, .. } => Some(*target_type),
-
             _ => None,
         }
     }
 
-    // ── Element type API (called by analyzers to populate element_type_hints) ─
+    // ── Element type API ──────────────────────────────────────────────────────
 
-    /// Infer the element type of an array or tuple VALUE node.
-    /// Returns Some(T) if the collection is non-empty and has a uniform element type.
-    /// For tuples (which can be heterogeneous) this returns the first element's type.
     pub fn infer_element_type_from_value(&self, value: &Value) -> Option<DataType> {
         match value {
             Value::Array { values, .. } | Value::NestedArray { values, .. } => {
@@ -188,22 +153,35 @@ impl<'a> TypeInferenceVisitor<'a> {
             Value::PrefixedConstructor { prefix, arguments, .. }
                 if prefix.eq_ignore_ascii_case("t") =>
             {
-                // Tuple: representative type = first element
                 arguments.first().and_then(|v| self.infer_type_from_value(v))
             }
             _ => None,
         }
     }
 
-    /// Infer the element type of an array or tuple EXPRESSION node.
-    /// For an Identifier, checks element_type_hints map.
     pub fn infer_element_type_from_expression(&self, expr: &Expression) -> Option<DataType> {
         match expr {
             Expression::Value { value, .. } => self.infer_element_type_from_value(value),
+
             Expression::Identifier { name, .. } => {
-                self.element_type_hints.get(name.as_str()).copied()
+                // 1. Explicit hint (populated from TypedArray declarations in scope tracker)
+                if let Some(&hint) = self.element_type_hints.get(name.as_str()) {
+                    return Some(hint);
+                }
+                // 2. Fallback: if the variable is a TypedArray, extract elem from its type
+                if let Some(Some(var_type)) = self.local_variable_types.get(name.as_str()) {
+                    if let DataType::TypedArray(elem) = *var_type {
+                        return Some(elem.to_data_type());
+                    }
+                    // TypedTuple — first defined slot as representative
+                    if let DataType::TypedTuple(arr) = *var_type {
+                        return arr[0].map(|e| e.to_data_type());
+                    }
+                }
+                None
             }
-            // Chained: myMap.items.first() — recurse into the object to try
+
+            // Chained: myMap.items.first() — recurse into the object
             Expression::PropertyAccess { object, .. } => {
                 self.infer_element_type_from_expression(object)
             }
@@ -211,17 +189,15 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    // ── Private inference helpers ─────────────────────────────────────────────
+    // ── Private helpers ───────────────────────────────────────────────────────
 
     fn infer_identifier_type(&self, name: &str) -> Option<DataType> {
-        // Local variables / parameters take priority.
         if let Some(local_type) = self.local_variable_types.get(name) {
             return *local_type;
         }
         if self.symbol_table.has_enum(name) {
             return Some(DataType::Enum);
         }
-        // Function references — no data type (they are callables, not values).
         if self.symbol_table.has_function(name) {
             return None;
         }
@@ -239,38 +215,28 @@ impl<'a> TypeInferenceVisitor<'a> {
         parts: &[String],
         arguments: Option<&Vec<Expression>>,
     ) -> Option<DataType> {
-        if parts.len() < 2 {
-            return None;
-        }
+        if parts.len() < 2 { return None; }
 
         let first_part  = &parts[0];
         let second_part = &parts[1];
 
-        // Enum access (2 parts, no call): EnumName.VALUE
-        if parts.len() == 2 && arguments.is_none() {
-            if self.symbol_table.has_enum(first_part) {
-                return Some(DataType::Enum);
-            }
+        if parts.len() == 2 && arguments.is_none() && self.symbol_table.has_enum(first_part) {
+            return Some(DataType::Enum);
         }
 
-        // Namespaced enum access (3 parts, no call): ns.EnumName.VALUE
-        if parts.len() == 3 && arguments.is_none() {
-            if self.symbol_table.is_imported_namespace(first_part) {
-                if self.symbol_table.get_namespaced_enum(first_part, second_part).is_some() {
-                    return Some(DataType::Enum);
-                }
-            }
+        if parts.len() == 3 && arguments.is_none()
+            && self.symbol_table.is_imported_namespace(first_part)
+            && self.symbol_table.get_namespaced_enum(first_part, second_part).is_some()
+        {
+            return Some(DataType::Enum);
         }
 
         if arguments.is_some() {
-            // Static method call (2 parts, PascalCase first): Math.sqrt(x)
             if parts.len() == 2
                 && first_part.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
             {
                 return self.infer_static_method_call_return_type(first_part, second_part);
             }
-
-            // Namespaced function call (2 parts): ns.func()
             if parts.len() == 2 {
                 if let Some(func_info) =
                     self.symbol_table.get_namespaced_function(first_part, second_part)
@@ -280,8 +246,6 @@ impl<'a> TypeInferenceVisitor<'a> {
             }
         }
 
-        // Property access (2 parts, no call) — may be a DATA table path property
-        // that the enhancer hasn't turned into PropertyAccess yet (pre-enhancement path).
         if parts.len() == 2 && arguments.is_none() {
             let path = format!("{}.{}", first_part, second_part);
             if let Some(var) = self.symbol_table.try_get_data_variable(&path) {
@@ -310,39 +274,29 @@ impl<'a> TypeInferenceVisitor<'a> {
         let left_type  = self.infer_type_from_expression(left);
         let right_type = self.infer_type_from_expression(right);
 
-        // String concatenation takes precedence.
         if left_type == Some(DataType::String) || right_type == Some(DataType::String) {
             return Some(DataType::String);
         }
 
         if let (Some(lt), Some(rt)) = (left_type, right_type) {
-            // Any on one side — defer to the other operand's type.
             if lt == DataType::Any && rt == DataType::Any { return None; }
             if lt == DataType::Any { return Some(rt); }
             if rt == DataType::Any { return Some(lt); }
 
-            // Numeric promotion: Double > Float > Long > Int.
             if Self::is_numeric_type(lt) && Self::is_numeric_type(rt) {
-                if lt == DataType::Double || rt == DataType::Double {
-                    return Some(DataType::Double);
-                }
-                if lt == DataType::Float || rt == DataType::Float {
-                    return Some(DataType::Float);
-                }
-                if lt == DataType::Long || rt == DataType::Long {
-                    return Some(DataType::Long);
-                }
+                if lt == DataType::Double || rt == DataType::Double { return Some(DataType::Double); }
+                if lt == DataType::Float  || rt == DataType::Float  { return Some(DataType::Float);  }
+                if lt == DataType::Long   || rt == DataType::Long   { return Some(DataType::Long);   }
                 return Some(DataType::Int);
             }
-            // Same non-numeric type — use it.
             if lt == rt { return Some(lt); }
-            // One side known — best-effort.
             return Some(lt);
         }
 
         left_type.or(right_type)
     }
 
+    #[inline]
     fn is_numeric_type(dt: DataType) -> bool {
         matches!(dt, DataType::Int | DataType::Long | DataType::Float | DataType::Double)
     }
@@ -357,9 +311,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn infer_function_call_type(&self, function_name: &str) -> Option<DataType> {
-        self.symbol_table
-            .try_get_function(function_name)
-            .and_then(|sig| sig.return_type)
+        self.symbol_table.try_get_function(function_name).and_then(|sig| sig.return_type)
     }
 
     fn infer_unary_op_type(&self, operator: &str, operand: &Expression) -> Option<DataType> {
@@ -370,9 +322,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn infer_quick_func_call_type(&self, name: &str) -> Option<DataType> {
-        self.symbol_table
-            .try_get_function(name)
-            .and_then(|sig| sig.return_type)
+        self.symbol_table.try_get_function(name).and_then(|sig| sig.return_type)
     }
 
     fn infer_static_method_call_type(
@@ -397,10 +347,8 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     /// Infer the return type of an instance method call.
-    ///
-    /// For methods in ARRAY_ELEMENT_METHODS / TUPLE_ELEMENT_METHODS that the
-    /// instance method registry marks as returning `DixType::Any`, we try to
-    /// resolve the actual element type from `element_type_hints` first.
+    /// Handles TypedArray/TypedTuple by stripping to base type for registry lookup,
+    /// while still using the typed element info for element-returning methods.
     fn infer_instance_method_call_type(
         &self,
         instance:    &Expression,
@@ -408,33 +356,40 @@ impl<'a> TypeInferenceVisitor<'a> {
     ) -> Option<DataType> {
         let instance_data_type = self.infer_type_from_expression(instance)?;
 
-        // Array element-returning methods — check element_type_hints
-        if instance_data_type == DataType::Array
-            && ARRAY_ELEMENT_METHODS.contains(&method_name)
-        {
-            if let Some(elem) = self.infer_element_type_from_expression(instance) {
-                return Some(elem);
-            }
-            // No hint available — fall through to registry (will return None for Any)
-        }
+        // Strip typed-collection wrapper for base comparisons
+        let base_type = instance_data_type.base_collection_type();
 
-        // Tuple element-returning methods — check element_type_hints
-        if instance_data_type == DataType::Tuple
-            && TUPLE_ELEMENT_METHODS.contains(&method_name)
-        {
+        // Array element-returning methods
+        if base_type == DataType::Array && ARRAY_ELEMENT_METHODS.contains(&method_name) {
+            // TypedArray annotation is authoritative
+            if let DataType::TypedArray(elem) = instance_data_type {
+                return Some(elem.to_data_type());
+            }
+            // Fall back to element_type_hints / value inference
             if let Some(elem) = self.infer_element_type_from_expression(instance) {
                 return Some(elem);
             }
         }
 
-        let dix_type = Self::convert_data_type_to_dix_type(instance_data_type)?;
+        // Tuple element-returning methods
+        if base_type == DataType::Tuple && TUPLE_ELEMENT_METHODS.contains(&method_name) {
+            // TypedTuple: first defined slot is the representative element type
+            if let DataType::TypedTuple(arr) = instance_data_type {
+                if let Some(first) = arr[0] {
+                    return Some(first.to_data_type());
+                }
+            }
+            if let Some(elem) = self.infer_element_type_from_expression(instance) {
+                return Some(elem);
+            }
+        }
+
+        let dix_type = Self::convert_data_type_to_dix_type(base_type)?;
 
         use crate::Builtins::Resolver::instance_method_registry;
         instance_method_registry::initialize();
         if let Some(method) = instance_method_registry::get_instance_method(dix_type, method_name) {
             let ret = method.return_type();
-            // Registry returns Any → return None rather than propagating Any,
-            // which would trigger false "can't infer" warnings downstream.
             if ret == DixType::Any || ret == DixType::Void || ret == DixType::Null {
                 return None;
             }
@@ -443,12 +398,6 @@ impl<'a> TypeInferenceVisitor<'a> {
         None
     }
 
-    /// Infer type of `object.property` by building the dotted path and
-    /// looking it up in the symbol table's data variables.
-    ///
-    /// Works for TABLE properties stored as "path.field" in the symbol table.
-    /// Object properties declared as flat `name = { field = value }` are NOT
-    /// in the symbol table at field depth — their type inference returns None.
     fn infer_property_access_type(
         &self,
         object:   &Expression,
@@ -456,22 +405,27 @@ impl<'a> TypeInferenceVisitor<'a> {
     ) -> Option<DataType> {
         if let Some(base) = Self::build_property_path(object) {
             let full_path = format!("{}.{}", base, property);
-
-            // Direct symbol table lookup (covers TABLE properties: "path.field")
             if let Some(var) = self.symbol_table.try_get_data_variable(&full_path) {
                 return var.effective_type();
             }
         }
-
-        // Could not resolve via symbol table — return None rather than Any
-        // so callers know this is genuinely unknown rather than "accepts anything".
         None
     }
 
-    /// Infer the type of `array[index]` — returns the element type when known.
+    /// Infer the type of `collection[index]`.
+    /// TypedArray/TypedTuple annotations are used directly when available,
+    /// giving precise element types without needing to inspect the value.
     fn infer_index_access_type(&self, object: &Expression) -> Option<DataType> {
         let obj_type = self.infer_type_from_expression(object)?;
         match obj_type {
+            // Typed array: annotation is authoritative
+            DataType::TypedArray(elem) => Some(elem.to_data_type()),
+
+            // Typed tuple: return first defined element type as best approximation
+            // (per-index typing requires constant-index analysis — deferred)
+            DataType::TypedTuple(arr) => arr[0].map(|e| e.to_data_type()),
+
+            // Plain (untyped) collections: try element_type_hints / value inference
             DataType::Array | DataType::Tuple => {
                 self.infer_element_type_from_expression(object)
             }
@@ -479,8 +433,6 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    /// Recursively build a dotted string path from a chain of PropertyAccess /
-    /// Identifier nodes: `a.b.c` → `"a.b.c"`.
     fn build_property_path(expr: &Expression) -> Option<String> {
         match expr {
             Expression::Identifier { name, .. } => Some(name.clone()),
@@ -492,19 +444,14 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    /// Infer a uniform element type from a slice of values.
-    /// Returns `Some(T)` only when every element whose type can be inferred
-    /// shares the same type T.  Returns `None` for empty or heterogeneous slices.
     fn infer_uniform_element_type_from_values(&self, values: &[Value]) -> Option<DataType> {
-        if values.is_empty() {
-            return None;
-        }
+        if values.is_empty() { return None; }
         let first = self.infer_type_from_value(&values[0])?;
         for v in values.iter().skip(1) {
             match self.infer_type_from_value(v) {
-                Some(t) if t == first => {}    // same type — keep going
-                Some(_)               => return None, // heterogeneous
-                None                  => {}    // unknown — assume compatible, keep going
+                Some(t) if t == first => {}
+                Some(_)               => return None,
+                None                  => {}
             }
         }
         Some(first)
@@ -536,22 +483,26 @@ impl<'a> TypeInferenceVisitor<'a> {
 
     pub fn convert_data_type_to_dix_type(data_type: DataType) -> Option<DixType> {
         match data_type {
-            DataType::Int       => Some(DixType::Int),
-            DataType::Long      => Some(DixType::Long),
-            DataType::Float     => Some(DixType::Float),
-            DataType::Double    => Some(DixType::Double),
-            DataType::String    => Some(DixType::String),
-            DataType::Bool      => Some(DixType::Bool),
-            DataType::Array     => Some(DixType::Array),
-            DataType::Tuple     => Some(DixType::Tuple),
-            DataType::Object    => Some(DixType::Object),
-            DataType::Hex       => Some(DixType::Hex),
-            DataType::Blob      => Some(DixType::Blob),
-            DataType::Regex     => Some(DixType::Regex),
-            DataType::Date      => Some(DixType::Date),
-            DataType::Timestamp => Some(DixType::Timestamp),
-            DataType::Enum      => Some(DixType::Enum),
+            DataType::Int           => Some(DixType::Int),
+            DataType::Long          => Some(DixType::Long),
+            DataType::Float         => Some(DixType::Float),
+            DataType::Double        => Some(DixType::Double),
+            DataType::String        => Some(DixType::String),
+            DataType::Bool          => Some(DixType::Bool),
+            DataType::Array         => Some(DixType::Array),
+            DataType::Tuple         => Some(DixType::Tuple),
+            DataType::Object        => Some(DixType::Object),
+            DataType::Hex           => Some(DixType::Hex),
+            DataType::Blob          => Some(DixType::Blob),
+            DataType::Regex         => Some(DixType::Regex),
+            DataType::Date          => Some(DixType::Date),
+            DataType::Timestamp     => Some(DixType::Timestamp),
+            DataType::Enum          => Some(DixType::Enum),
+            // Typed collections map to their base DixType
+            DataType::TypedArray(_) => Some(DixType::Array),
+            DataType::TypedTuple(_) => Some(DixType::Tuple),
+            // No DixType mapping
             DataType::Any | DataType::Function | DataType::Range => None,
         }
     }
-}
+            }

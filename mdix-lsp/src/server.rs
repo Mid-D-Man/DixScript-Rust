@@ -1,8 +1,6 @@
 // mdix-lsp/src/server.rs
 //! The key fix here: shutdown must return IMMEDIATELY.
 //! Task cleanup happens asynchronously AFTER the response is sent.
-//! If shutdown blocks (waiting for tasks), LSP4IJ times out and kills the
-//! process anyway — but now the response was never delivered, so it retries.
 
 use dashmap::DashMap;
 use std::sync::Arc;
@@ -120,19 +118,9 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> LspResult<()> {
-        // ── MUST return immediately ────────────────────────────────────────
-        //
-        // LSP4IJ has a short timeout on shutdown. If we block here waiting
-        // for tasks to finish, the timeout fires, the client kills the process
-        // anyway, then RESTARTS it (causing the 19 "initialized" loop).
-        //
-        // Fix: set the flag and schedule cleanup asynchronously. Return Ok(())
-        // immediately so the response is delivered before any cleanup work.
         tracing::info!("mdix-lsp shutdown requested");
         self.shutdown_requested.store(true, Ordering::SeqCst);
 
-        // Drain the task list and abort all in a separate task so we don't
-        // block the response.
         let task_handles: Vec<_> = self.analysis_tasks
             .lock()
             .map(|mut g| g.drain(..).collect())
@@ -142,7 +130,6 @@ impl LanguageServer for Backend {
             tokio::spawn(async move {
                 for handle in task_handles {
                     handle.abort();
-                    // Give each task a brief window to notice the abort.
                     let _ = tokio::time::timeout(
                         std::time::Duration::from_millis(50),
                         handle,
@@ -272,5 +259,63 @@ impl LanguageServer for Backend {
         let uri = &params.text_document.uri;
         let doc = self.documents.get(uri);
         Ok(features::folding::provide(doc.as_deref()))
+    }
+
+    // ── NEW: Document highlights ───────────────────────────────────────────────
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> LspResult<Option<Vec<DocumentHighlight>>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let doc = self.documents.get(uri);
+        Ok(features::document_highlights::provide(doc.as_deref(), pos))
+    }
+
+    // ── NEW: References ────────────────────────────────────────────────────────
+    async fn references(
+        &self,
+        params: ReferenceParams,
+    ) -> LspResult<Option<Vec<Location>>> {
+        let uri  = &params.text_document_position.text_document.uri;
+        let pos  = params.text_document_position.position;
+        let doc  = self.documents.get(uri);
+        let incl = params.context.include_declaration;
+        Ok(features::references::provide(doc.as_deref(), uri, pos, incl))
+    }
+
+    // ── NEW: Prepare rename ────────────────────────────────────────────────────
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> LspResult<Option<PrepareRenameResponse>> {
+        let uri = &params.text_document.uri;
+        let pos = params.position;
+        let doc = self.documents.get(uri);
+        Ok(features::rename::prepare(doc.as_deref(), pos))
+    }
+
+    // ── NEW: Rename ────────────────────────────────────────────────────────────
+    async fn rename(
+        &self,
+        params: RenameParams,
+    ) -> LspResult<Option<WorkspaceEdit>> {
+        let uri      = &params.text_document_position.text_document.uri;
+        let pos      = params.text_document_position.position;
+        let new_name = &params.new_name;
+        let doc      = self.documents.get(uri);
+        Ok(features::rename::provide(doc.as_deref(), uri, pos, new_name))
+    }
+
+    // ── NEW: Signature help ────────────────────────────────────────────────────
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> LspResult<Option<SignatureHelp>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let ctx = params.context;
+        let doc = self.documents.get(uri);
+        Ok(features::signature_help::provide(doc.as_deref(), pos, ctx))
     }
 }

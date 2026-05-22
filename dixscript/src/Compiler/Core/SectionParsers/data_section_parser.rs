@@ -2357,84 +2357,76 @@ pub fn new_with_error_manager(
     }
 
     fn parse_tuple_constructor(&mut self, pos: Position) -> Option<Value> {
-        self.log_verbose("Parsing tuple constructor");
+    self.log_verbose("Parsing tuple constructor");
 
-        if !self.match_and_consume_symbol('(') {
-            let current = self.current().clone();
-            self.handle_parse_error(
-                ParseErrorType::MissingToken,
-                "Expected '(' after 't:'",
-                &current,
-            );
-            if self.should_halt_section() {
-                return None;
-            }
+    if !self.match_and_consume_symbol('(') {
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::MissingToken,
+            "Expected '(' after 't:'",
+            &current,
+        );
+        if self.should_halt_section() {
+            return None;
         }
-
-        let mut values = Vec::new();
-
-        while !self.is_at_end() && !self.is_current_symbol(')') && values.len() < 4 {
-            self.track_progress();
-            if self.is_stuck() {
-                if !self.recover_from_stuck() {
-                    break;
-                }
-                continue;
-            }
-
-            let value = self.parse_property_value();
-            if value.is_none() && self.should_halt_section() {
-                return None;
-            }
-            if let Some(val) = value {
-                values.push(val);
-            }
-
-            if self.is_current_symbol(',') {
-                self.advance();
-            } else if self.is_current_symbol(')') {
-                break;
-            } else if !self.is_at_end() {
-                let current = self.current().clone();
-                self.handle_parse_error(
-                    ParseErrorType::UnexpectedToken,
-                    "Expected ',' or ')' in tuple constructor",
-                    &current,
-                );
-                if self.should_halt_section() {
-                    return None;
-                }
-                self.ensure_progress();
-            }
-        }
-
-        if values.len() > 4 {
-            let current = self.current().clone();
-            self.handle_parse_error(
-                ParseErrorType::SectionSyntaxError,
-                "Tuple can have a maximum of 4 elements",
-                &current,
-            );
-        }
-
-        if !self.match_and_consume_symbol(')') {
-            let current = self.current().clone();
-            self.handle_parse_error(
-                ParseErrorType::MissingToken,
-                "Expected ')' to close tuple constructor",
-                &current,
-            );
-            if self.should_halt_section() {
-                return None;
-            }
-        }
-
-        Some(Value::PrefixedConstructor {
-            prefix: "t".to_string(),
-            arguments: values,
-            position: pos,
-        })
     }
+
+    let mut values = Vec::new();
+
+    // No element-count limit here — MAX_TUPLE_ELEMENTS = 6 is enforced by semantic analysis
+    while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
+        self.track_progress();
+        if self.is_stuck() {
+            if !self.recover_from_stuck() {
+                break;
+            }
+            continue;
+        }
+
+        let value = self.parse_property_value();
+        if value.is_none() && self.should_halt_section() {
+            return None;
+        }
+        if let Some(val) = value {
+            values.push(val);
+        }
+
+        if self.is_current_symbol(',') {
+            self.advance();
+        } else if self.is_current_symbol(')') {
+            break;
+        } else if !self.is_at_end() {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::UnexpectedToken,
+                "Expected ',' or ')' in tuple constructor",
+                &current,
+            );
+            if self.should_halt_section() {
+                return None;
+            }
+            self.ensure_progress();
+        }
+    }
+
+    if !self.match_and_consume_symbol(')') {
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::MissingToken,
+            "Expected ')' to close tuple constructor",
+            &current,
+        );
+        if self.should_halt_section() {
+            return None;
+        }
+    }
+
+    Some(Value::PrefixedConstructor {
+        prefix: "t".to_string(),
+        arguments: values,
+        position: pos,
+    })
+        }
 
     fn parse_regex_constructor(&mut self, pos: Position) -> Option<Value> {
         self.log_verbose("Parsing regex constructor");

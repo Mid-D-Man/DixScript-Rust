@@ -168,16 +168,16 @@ pub fn new_with_error_manager(
 
         Some(DataSection::new(data_entries, section_start_pos))
     }
-
-    fn reset_parse_state(&mut self) {
-        self.last_position = usize::MAX;
-        self.stuck_count = 0;
-        self.iteration_count = 0;
-        self.has_seen_grouped_data = false;
-        self.current_object_nesting_depth = 0;
-        self.current_function_call_depth = 0;
-        self.log_verbose("Parse state reset");
-    }
+fn reset_parse_state(&mut self) {
+    self.last_position = usize::MAX;
+    self.stuck_count = 0;
+    self.iteration_count = 0;
+    self.has_seen_grouped_data = false;
+    self.current_object_nesting_depth = 0;
+    self.current_function_call_depth = 0;
+    self.pending_angle = false;   // ← add this line
+    self.log_verbose("Parse state reset");
+}
 
     fn track_progress(&mut self) {
         self.iteration_count += 1;

@@ -110,11 +110,14 @@ pub fn server_capabilities() -> ServerCapabilities {
         document_formatting_provider: Some(OneOf::Left(true)),
 
         // ── Play button / commands ────────────────────────────────────────────
+        //
+        // CodeLensOptions in some lsp-types releases exposes only
+        // `resolve_provider`; use Default for any additional fields so that
+        // the code compiles regardless of the exact minor version pulled in
+        // by tower-lsp 0.20.
         code_lens_provider: Some(CodeLensOptions {
             resolve_provider: Some(false),
-            work_done_progress_options: WorkDoneProgressOptions {
-                work_done_progress: None,
-            },
+            ..Default::default()
         }),
 
         execute_command_provider: Some(ExecuteCommandOptions {

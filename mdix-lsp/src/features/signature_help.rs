@@ -44,7 +44,7 @@ fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<SignatureHelp>
 
     let (func_name, active_param) = find_call_context(&doc.tokens, pos)?;
 
-    // Look up the QuickFunc in the AST
+    // Look up the QuickFunc in the AST.
     let qf   = doc.ast.as_ref()?.quick_functions.as_ref()?;
     let func = qf.functions.iter().find(|f| f.name == func_name)?;
 
@@ -59,16 +59,19 @@ fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<SignatureHelp>
         .map(|t| format!("<{}>", t))
         .unwrap_or_default();
 
-    let full_label = format!("~{}{}({})", func_name, ret_str, param_labels.join(", "));
+    let full_label = format!(
+        "~{}{}({})",
+        func_name, ret_str, param_labels.join(", ")
+    );
 
-    // Per-parameter information with type documentation
+    // Per-parameter information with type documentation.
     let parameters: Vec<ParameterInformation> = func.parameters.iter().map(|p| {
         let type_str  = p.data_type.map(|t| format!("<{}>", t)).unwrap_or_default();
         let lbl       = format!("{}{}", p.name, type_str);
         let doc_value = build_param_doc(p);
 
         ParameterInformation {
-            label:         ParameterLabel::Simple(lbl),
+            label: ParameterLabel::Simple(lbl),
             documentation: Some(Documentation::MarkupContent(MarkupContent {
                 kind:  MarkupKind::Markdown,
                 value: doc_value,
@@ -76,7 +79,7 @@ fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<SignatureHelp>
         }
     }).collect();
 
-    // Function-level documentation
+    // Function-level documentation.
     let scope_str = func.scope_list
         .as_ref()
         .map(|s| format!("\n\n**Scope:** `=> {}`", s.join(", ")))
@@ -91,7 +94,7 @@ fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<SignatureHelp>
             .unwrap_or_else(|| "?".to_string()),
     );
 
-    // Clamp active_param to the actual parameter count
+    // Clamp active_param to the actual parameter count.
     let param_count    = func.parameters.len();
     let active_clamped = if param_count == 0 {
         0u32
@@ -114,9 +117,9 @@ fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<SignatureHelp>
     })
 }
 
-// ── Call-context detector (token-stream based) ────────────────────────────────
+// ── Call-context detector ─────────────────────────────────────────────────────
 
-/// Scan backwards through the token stream from the cursor position to find:
+/// Scan backwards through the token stream from the cursor to find:
 ///   1. The innermost unclosed `(`.
 ///   2. The QuickFunc name (Identifier) immediately before that `(`.
 ///   3. The active parameter index (comma count at depth 0 between `(` and cursor).
@@ -161,44 +164,63 @@ fn find_call_context(tokens: &[Token], pos: Position) -> Option<(String, usize)>
         }
     }
 
-    let open = open_idx?;
+    let open      = open_idx?;
     let func_name = scan_backwards_for_func_name(tokens, open)?;
     Some((func_name, active_param))
 }
 
 /// Walk backwards from `open_paren_idx` to extract the function name,
 /// skipping any `<type>` annotation between the name and `(`.
-/// Handles nested typed-collection annotations like `<array<int>>`.
+///
+/// Handles nested typed-collection annotations like `<array<int>>` where
+/// the lexer may emit `>>` as a single `BitwiseOp` token.
+///
+/// `BitwiseOp` holds `&'static str`; the match arm receives `&&'static str`,
+/// so we dereference with `*op` for a plain `&'static str == &str` comparison
+/// (stable, no nightly features needed).
 fn scan_backwards_for_func_name(tokens: &[Token], open_paren_idx: usize) -> Option<String> {
-    let mut i          = open_paren_idx.checked_sub(1)?;
+    let mut i           = open_paren_idx.checked_sub(1)?;
     let mut angle_depth = 0i32;
 
     loop {
         match &tokens[i].token_type {
-            // Closing angle — could be plain '>' or '>>' (BitwiseOp)
+            // Plain closing angle `>`
             TokenType::Symbol('>') => {
                 angle_depth += 1;
             }
-            TokenType::BitwiseOp(op) if op.as_str() == ">>" => {
-                // '>>' accounts for two closing angles (e.g. <array<int>>)
+
+            // `>>` emitted as a single BitwiseOp token — counts as two closing angles.
+            // BitwiseOp holds &&'static str; *op gives &'static str for comparison.
+            TokenType::BitwiseOp(op) if *op == ">>" => {
                 angle_depth += 2;
             }
+
+            // Opening angle `<`
             TokenType::Symbol('<') => {
                 angle_depth -= 1;
-                // angle_depth may go below 0 if we started after a valid annotation;
-                // once it hits 0 we are back outside any annotation.
                 if angle_depth < 0 { angle_depth = 0; }
             }
-            // Keywords and DataType tokens inside `<type>` annotations — skip
-            TokenType::Keyword(_) | TokenType::DataType(_) | TokenType::Symbol(',')
-                if angle_depth > 0 => { /* inside annotation, keep scanning */ }
-            // Identifier outside any angle-bracket annotation — this is the function name
+
+            // Keywords / DataType tokens / commas inside `<…>` annotations — skip
+            TokenType::Keyword(_)
+            | TokenType::DataType(_)
+            | TokenType::Symbol(',')
+                if angle_depth > 0 =>
+            {
+                // inside annotation, keep scanning
+            }
+
+            // Identifier outside any annotation — this is the function name
             TokenType::Identifier(name) if angle_depth == 0 => {
                 return Some(name.clone());
             }
+
+            // Anything else outside angle brackets means we have left the call site
             _ if angle_depth == 0 => return None,
+
             _ => {}
         }
+
         if i == 0 { break; }
         i -= 1;
     }
@@ -219,36 +241,38 @@ fn build_param_doc(param: &QuickFuncParam) -> String {
     format!("**`{}`** — {}{}", param.name, type_detail, default_note)
 }
 
-/// Produce a human-readable description for any `Option<DataType>`, including
-/// the typed-collection variants `TypedArray` and `TypedTuple`.
+/// Human-readable description for any `Option<DataType>`, including the
+/// typed-collection variants `TypedArray` and `TypedTuple`.
 fn describe_data_type(dt: Option<DataType>) -> String {
     match dt {
-        None                                => "any type (no annotation)".to_string(),
-        Some(DataType::Int)                 => "32-bit signed integer".to_string(),
-        Some(DataType::Long)                => "64-bit signed integer".to_string(),
-        Some(DataType::Float)               => "32-bit float (requires `f` suffix on literals)".to_string(),
-        Some(DataType::Double)              => "64-bit double (IEEE 754 f64)".to_string(),
-        Some(DataType::String)              => "UTF-8 string".to_string(),
-        Some(DataType::Bool)                => "boolean — `true` or `false`".to_string(),
-        Some(DataType::Array)               => "ordered collection (untyped)".to_string(),
-        Some(DataType::Tuple)               => "mixed-type collection (max 6 elements, untyped)".to_string(),
-        Some(DataType::Object)              => "key-value map `{ key = value }`".to_string(),
-        Some(DataType::Hex)                 => "hex color or integer literal".to_string(),
-        Some(DataType::Blob)                => "base64-encoded binary `b:(...)`".to_string(),
-        Some(DataType::Regex)               => "compiled regular expression `r:(...)`".to_string(),
-        Some(DataType::Date)                => "ISO 8601 date `YYYY-MM-DD`".to_string(),
-        Some(DataType::Timestamp)           => "ISO 8601 timestamp".to_string(),
-        Some(DataType::Enum)                => "enum value from @ENUMS".to_string(),
-        Some(DataType::Any)                 => "any type".to_string(),
-        Some(DataType::Function)            => "callable".to_string(),
-        Some(DataType::Range)               => "numeric range".to_string(),
+        None                              => "any type (no annotation)".to_string(),
+        Some(DataType::Int)               => "32-bit signed integer".to_string(),
+        Some(DataType::Long)              => "64-bit signed integer".to_string(),
+        Some(DataType::Float)             => "32-bit float (requires `f` suffix on literals)".to_string(),
+        Some(DataType::Double)            => "64-bit double (IEEE 754 f64)".to_string(),
+        Some(DataType::String)            => "UTF-8 string".to_string(),
+        Some(DataType::Bool)              => "boolean — `true` or `false`".to_string(),
+        Some(DataType::Array)             => "ordered collection (untyped)".to_string(),
+        Some(DataType::Tuple)             => "mixed-type collection (max 6 elements, untyped)".to_string(),
+        Some(DataType::Object)            => "key-value map `{ key = value }`".to_string(),
+        Some(DataType::Hex)               => "hex color or integer literal".to_string(),
+        Some(DataType::Blob)              => "base64-encoded binary `b:(...)`".to_string(),
+        Some(DataType::Regex)             => "compiled regular expression `r:(...)`".to_string(),
+        Some(DataType::Date)              => "ISO 8601 date `YYYY-MM-DD`".to_string(),
+        Some(DataType::Timestamp)         => "ISO 8601 timestamp".to_string(),
+        Some(DataType::Enum)              => "enum value from @ENUMS".to_string(),
+        Some(DataType::Any)               => "any type".to_string(),
+        Some(DataType::Function)          => "callable".to_string(),
+        Some(DataType::Range)             => "numeric range".to_string(),
 
         // ── Typed collections ────────────────────────────────────────────────
-        Some(DataType::TypedArray(elem))    => {
-            format!("typed array — every element must be `<{}>` (`<array<{}>>`)",
-                elem, elem)
+        Some(DataType::TypedArray(elem))  => {
+            format!(
+                "typed array — every element must be `<{}>` (annotation: `<array<{}>>`)",
+                elem, elem
+            )
         }
-        Some(DataType::TypedTuple(slots))   => {
+        Some(DataType::TypedTuple(slots)) => {
             let types: Vec<String> = slots
                 .iter()
                 .filter_map(|&s| s)
@@ -257,12 +281,16 @@ fn describe_data_type(dt: Option<DataType>) -> String {
             if types.is_empty() {
                 "typed tuple (max 6 elements)".to_string()
             } else {
-                format!("typed tuple — element types: {} (`<tuple<{}>>`)",
-                    types.join(", "),
-                    slots.iter().filter_map(|&s| s)
-                         .map(|e| format!("{}", e))
-                         .collect::<Vec<_>>()
-                         .join(","))
+                let inner: String = slots
+                    .iter()
+                    .filter_map(|&s| s)
+                    .map(|e| format!("{}", e))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(
+                    "typed tuple — element types: {} (annotation: `<tuple<{}>>`)",
+                    types.join(", "), inner
+                )
             }
         }
     }
@@ -343,7 +371,7 @@ mod tests {
         };
         let doc = build_param_doc(&param);
         assert!(doc.contains("array"), "should mention array: {}", doc);
-        assert!(doc.contains("int"), "should mention int element type: {}", doc);
+        assert!(doc.contains("int"),   "should mention int: {}", doc);
     }
 
     #[test]
@@ -360,8 +388,8 @@ mod tests {
             position:      AstPos::UNKNOWN,
         };
         let doc = build_param_doc(&param);
-        assert!(doc.contains("tuple"), "should mention tuple: {}", doc);
-        assert!(doc.contains("int"), "should mention int: {}", doc);
+        assert!(doc.contains("tuple"),  "should mention tuple: {}", doc);
+        assert!(doc.contains("int"),    "should mention int: {}", doc);
         assert!(doc.contains("string"), "should mention string: {}", doc);
     }
-            }
+}

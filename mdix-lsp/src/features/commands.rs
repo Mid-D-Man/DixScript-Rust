@@ -19,7 +19,7 @@
 
 use std::path::{Path, PathBuf};
 use dixscript::Runtime::{DixConverter, DixFormatOptions};
-use dixscript::Compiler::AST::DixScript;
+use dixscript::Compiler::AST::{DixScript, DLMModuleType, DLMModuleSubtype};
 
 use crate::features::formatting::format_source;
 
@@ -42,15 +42,14 @@ impl CommandResult {
     fn ok_file(msg: impl Into<String>, path: PathBuf) -> Self {
         CommandResult { message: msg.into(), success: true, out_file: Some(path) }
     }
-   pub fn err(msg: impl Into<String>) -> Self {
+    pub fn err(msg: impl Into<String>) -> Self {
         CommandResult { message: msg.into(), success: false, out_file: None }
     }
 }
 
 // ── Validate ──────────────────────────────────────────────────────────────────
 
-/// Returns a summary of the current diagnostic state for `source_path`.
-/// The caller already has the error list; this formats a human message.
+/// Returns a summary of the current diagnostic state.
 pub fn run_validate(error_count: usize, warning_count: usize) -> CommandResult {
     if error_count == 0 && warning_count == 0 {
         CommandResult::ok("✅ DixScript: file is valid — no errors or warnings.")
@@ -84,10 +83,11 @@ pub fn run_convert_to_json(
                         format!("→ JSON written to {}", out.display()),
                         out,
                     ),
-                    Err(e) => CommandResult::err(format!("Could not write {}: {}", out.display(), e)),
+                    Err(e) => CommandResult::err(
+                        format!("Could not write {}: {}", out.display(), e)
+                    ),
                 }
             } else {
-                // No file path (e.g. untitled:) — just confirm conversion worked
                 CommandResult::ok(format!(
                     "→ JSON ready ({} bytes). Save the file first to write output.",
                     json.len()
@@ -115,7 +115,9 @@ pub fn run_convert_to_toml(
                         format!("→ TOML written to {}", out.display()),
                         out,
                     ),
-                    Err(e) => CommandResult::err(format!("Could not write {}: {}", out.display(), e)),
+                    Err(e) => CommandResult::err(
+                        format!("Could not write {}: {}", out.display(), e)
+                    ),
                 }
             } else {
                 CommandResult::ok(format!(
@@ -140,11 +142,14 @@ pub fn run_minify(
         Err(e) => CommandResult::err(format!("Minify failed: {}", e)),
         Ok(minified) => {
             if let Some(path) = source_path {
-                let stem    = path.file_stem().unwrap_or_default().to_string_lossy();
-                let out     = path.with_file_name(format!("{}.min.mdix", stem));
+                let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+                let out  = path.with_file_name(format!("{}.min.mdix", stem));
                 match std::fs::write(&out, &minified) {
                     Ok(()) => CommandResult::ok_file(
-                        format!("⊡ Minified to {} ({} bytes)", out.display(), minified.len()),
+                        format!(
+                            "⊡ Minified to {} ({} bytes)",
+                            out.display(), minified.len()
+                        ),
                         out,
                     ),
                     Err(e) => CommandResult::err(format!("Could not write: {}", e)),
@@ -158,22 +163,95 @@ pub fn run_minify(
 
 // ── Compile (shell out to mdix-cli) ──────────────────────────────────────────
 
-pub fn run_compile(source_path: Option<&Path>) -> CommandResult {
+/// Inspect the AST's @DLM section and return a description of what output
+/// files the compiler will produce alongside the source file.
+///
+/// Returns `None` when there are no DLM modules (plain compile, no side files).
+fn describe_dlm_outputs(ast: &DixScript, source_path: &Path) -> Option<String> {
+    let dlm = ast.dlm.as_ref()?;
+    if dlm.modules.is_empty() {
+        return None;
+    }
+
+    let dir = source_path
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| ".".to_string());
+
+    let stem = source_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
+
+    let mut parts: Vec<String> = Vec::new();
+    let mut has_encryptor   = false;
+    let mut has_compressor  = false;
+    let mut has_auditor     = false;
+
+    for module in &dlm.modules {
+        match module.module_type {
+            DLMModuleType::DEncryptor  => has_encryptor  = true,
+            DLMModuleType::DCompressor => has_compressor = true,
+            DLMModuleType::DAuditor    => has_auditor    = true,
+            _                          => {}
+        }
+    }
+
+    if has_encryptor || has_compressor {
+        // Primary encrypted/compressed output
+        parts.push(format!(
+            "📦 `{}/{}.mdix.enc` — encrypted/compressed binary",
+            dir, stem
+        ));
+        // Key file is always produced alongside .enc
+        parts.push(format!(
+            "🔑 `{}/{}.mdix.key` — decryption key file (keep this safe!)",
+            dir, stem
+        ));
+    }
+
+    if has_auditor {
+        parts.push(format!(
+            "📋 `{}/{}.mdix.au` — audit/checksum file",
+            dir, stem
+        ));
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "\n\n⚙️ **@DLM detected** — the following files will be written to `{}`:\n{}",
+        dir,
+        parts.join("\n")
+    ))
+}
+
+pub fn run_compile(source_path: Option<&Path>, ast: Option<&DixScript>) -> CommandResult {
     let path = match source_path {
         Some(p) => p,
-        None => return CommandResult::err(
-            "Save the file before compiling.".to_string()
-        ),
+        None => return CommandResult::err("Save the file before compiling."),
     };
 
-    // Try to find mdix on PATH
+    // Build the DLM output-files notice before we shell out, so the user
+    // knows what to expect even if the binary is not on PATH yet.
+    let dlm_notice = ast
+        .and_then(|a| describe_dlm_outputs(a, path))
+        .unwrap_or_default();
+
     let mdix_bin = which_mdix();
 
     match mdix_bin {
-        None => CommandResult::err(concat!(
-            "⚙ 'mdix' binary not found on PATH. ",
-            "Build with `cargo build -p mdix-cli --release` and add to PATH."
-        ).to_string()),
+        None => CommandResult::err(format!(
+            concat!(
+                "⚙ 'mdix' binary not found on PATH. ",
+                "Build with `cargo build -p mdix-cli --release` and add to PATH.",
+                "{}",
+            ),
+            dlm_notice
+        )),
+
         Some(bin) => {
             let output = std::process::Command::new(&bin)
                 .arg("compile")
@@ -182,16 +260,20 @@ pub fn run_compile(source_path: Option<&Path>) -> CommandResult {
 
             match output {
                 Err(e) => CommandResult::err(format!("Failed to run mdix: {}", e)),
+
                 Ok(out) => {
                     if out.status.success() {
                         CommandResult::ok(format!(
-                            "⚙ Compiled successfully: {}",
-                            path.display()
+                            "⚙ Compiled successfully: {}{}",
+                            path.display(),
+                            dlm_notice
                         ))
                     } else {
                         let stderr = String::from_utf8_lossy(&out.stderr);
                         CommandResult::err(format!(
-                            "⚙ Compile failed:\n{}", stderr.trim()
+                            "⚙ Compile failed:\n{}{}",
+                            stderr.trim(),
+                            dlm_notice
                         ))
                     }
                 }
@@ -200,7 +282,7 @@ pub fn run_compile(source_path: Option<&Path>) -> CommandResult {
     }
 }
 
-/// Try to locate the `mdix` binary on PATH or beside the LSP binary.
+/// Try to locate the `mdix` binary on PATH or beside the running LSP binary.
 fn which_mdix() -> Option<PathBuf> {
     // 1. Check PATH
     if let Ok(path) = which::which("mdix") {
@@ -209,14 +291,9 @@ fn which_mdix() -> Option<PathBuf> {
     // 2. Check next to the running LSP binary
     if let Ok(exe) = std::env::current_exe() {
         let candidate = exe.with_file_name("mdix");
-        if candidate.exists() {
-            return Some(candidate);
-        }
-        // On Windows
+        if candidate.exists() { return Some(candidate); }
         let candidate_exe = exe.with_file_name("mdix.exe");
-        if candidate_exe.exists() {
-            return Some(candidate_exe);
-        }
+        if candidate_exe.exists() { return Some(candidate_exe); }
     }
     None
 }
@@ -247,11 +324,23 @@ pub fn run_show_ast(ast: &DixScript) -> CommandResult {
         .map(|d| d.entries.len())
         .unwrap_or(0);
 
+    // Summarise DLM modules when present
+    let dlm_summary = ast.dlm.as_ref().map(|dlm| {
+        let mods: Vec<String> = dlm.modules.iter().map(|m| {
+            match m.subtype {
+                Some(st) => format!("{}.{}", m.module_type, st),
+                None     => format!("{}", m.module_type),
+            }
+        }).collect();
+        format!("  DLM=[{}]", mods.join(", "))
+    }).unwrap_or_default();
+
     CommandResult::ok(format!(
-        "AST: sections=[{}]  QuickFuncs={}  Enums={}  DataEntries={}",
+        "AST: sections=[{}]  QuickFuncs={}  Enums={}  DataEntries={}{}",
         sections.join(", "),
         func_count,
         enum_count,
         data_entries,
+        dlm_summary,
     ))
-  }
+}

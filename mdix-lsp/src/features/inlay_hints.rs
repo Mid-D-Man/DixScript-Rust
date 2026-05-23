@@ -206,38 +206,6 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
     }
 
     if hints.is_empty() { None } else { Some(hints) }
-            }
-
-    // ── @QUICKFUNCS ───────────────────────────────────────────────────────────
-    if let Some(qf) = &ast.quick_functions {
-        for func in &qf.functions {
-            let param_types: HashMap<String, Option<DataType>> = func
-                .parameters
-                .iter()
-                .map(|p| (p.name.clone(), p.data_type))
-                .collect();
-
-            for param in &func.parameters {
-                if param.data_type.is_some() || !param.position.is_valid() {
-                    continue;
-                }
-                let line = param.position.line.saturating_sub(1) as u32;
-                let col  = (param.position.column.saturating_sub(1)
-                    + param.name.len()) as u32;
-                hints.push(make_hint(line, col, "<any>".to_string()));
-            }
-
-            collect_qf_var_hints(
-                &func.body,
-                &doc.tokens,
-                &qf_return_types,
-                &param_types,
-                &mut hints,
-            );
-        }
-    }
-
-    if hints.is_empty() { None } else { Some(hints) }
 }
 
 // ── Typed-collection formatting ───────────────────────────────────────────────

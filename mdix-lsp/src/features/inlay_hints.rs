@@ -65,31 +65,50 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     value,
                     position,
                 } => {
-                    // If the user wrote an annotation, no hint needed — it's already visible.
-                    // Exception: for typed collections we enrich with the item count.
                     if !position.is_valid() {
                         continue;
                     }
 
-                    let label = if let Some(dt) = data_type {
-                        // Annotated — only add count hint for typed/plain collections
-                        let count = collection_len(value);
-                        if count.is_some() {
-                            format_data_type_as_hint(*dt, count)
-                        } else {
-                            // Primitive annotation already visible in source — skip
-                            continue;
-                        }
-                    } else {
-                        // No annotation — infer from type_index then from value
-                        type_index
-                            .and_then(|idx| idx.get(name.as_str()))
-                            .map(|dt| {
+                    let label = match data_type {
+                        // ── User already wrote an explicit annotation ─────────
+                        Some(dt) => match dt {
+                            // Typed collection: annotation is already fully
+                            // descriptive in source — no hint needed.
+                            DataType::TypedArray(_) | DataType::TypedTuple(_) => continue,
+
+                            // Untyped collection: annotation is present but
+                            // we can usefully add a count suffix, e.g. <array[3]>.
+                            DataType::Array | DataType::Tuple => {
                                 let count = collection_len(value);
-                                format_data_type_as_hint(*dt, count)
-                            })
-                            .or_else(|| infer_value(value, &qf_return_types, &no_params))
-                            .unwrap_or_else(|| "<any>".to_string())
+                                match count {
+                                    // Only emit when we actually have a count
+                                    // and there is more than one item (trivial
+                                    // single-item arrays are not worth hinting).
+                                    Some(n) if n > 0 => {
+                                        format_data_type_as_hint(*dt, Some(n))
+                                    }
+                                    _ => continue,
+                                }
+                            }
+
+                            // Primitive / object / any annotation — skip, it's
+                            // already visible right there in the source.
+                            _ => continue,
+                        },
+
+                        // ── No annotation — infer everything ──────────────────
+                        None => {
+                            type_index
+                                .and_then(|idx| idx.get(name.as_str()))
+                                .map(|dt| {
+                                    let count = collection_len(value);
+                                    format_data_type_as_hint(*dt, count)
+                                })
+                                .or_else(|| {
+                                    infer_value(value, &qf_return_types, &no_params)
+                                })
+                                .unwrap_or_else(|| "<any>".to_string())
+                        }
                     };
 
                     let line = position.line.saturating_sub(1) as u32;
@@ -103,16 +122,29 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                             continue;
                         }
 
-                        let label = if let Some(dt) = prop.data_type {
-                            let count = collection_len(&prop.value);
-                            if count.is_some() {
-                                format_data_type_as_hint(dt, count)
-                            } else {
-                                continue; // annotated primitive — skip
+                        let label = match prop.data_type {
+                            // Typed collection annotation already in source — skip.
+                            Some(DataType::TypedArray(_))
+                            | Some(DataType::TypedTuple(_)) => continue,
+
+                            // Untyped collection — add count only.
+                            Some(dt @ DataType::Array)
+                            | Some(dt @ DataType::Tuple) => {
+                                let count = collection_len(&prop.value);
+                                match count {
+                                    Some(n) if n > 0 => format_data_type_as_hint(dt, Some(n)),
+                                    _                => continue,
+                                }
                             }
-                        } else {
-                            infer_value(&prop.value, &qf_return_types, &no_params)
-                                .unwrap_or_else(|| "<any>".to_string())
+
+                            // Any other explicit annotation — skip.
+                            Some(_) => continue,
+
+                            // No annotation — infer.
+                            None => {
+                                infer_value(&prop.value, &qf_return_types, &no_params)
+                                    .unwrap_or_else(|| "<any>".to_string())
+                            }
                         };
 
                         let line = prop.position.line.saturating_sub(1) as u32;
@@ -122,18 +154,19 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     }
                 }
 
-                DataEntry::GroupArray {
-                    path,
-                    items,
-                    position,
-                } => {
+                DataEntry::GroupArray { path, items, position } => {
                     if items.is_empty() || !position.is_valid() {
                         continue;
                     }
-                    let label = array_label_from_values(items, &qf_return_types, &no_params);
+                    // Group arrays never carry an explicit annotation in source
+                    // so we always show the inferred label.
+                    let label = array_label_from_values(
+                        items, &qf_return_types, &no_params,
+                    );
                     let path_str = path.segments.join(".");
                     let line = position.line.saturating_sub(1) as u32;
-                    let col  = (position.column.saturating_sub(1) + path_str.len()) as u32;
+                    let col  = (position.column.saturating_sub(1)
+                        + path_str.len()) as u32;
                     hints.push(make_hint(line, col, label));
                 }
 
@@ -141,6 +174,39 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
             }
         }
     }
+
+    // ── @QUICKFUNCS ───────────────────────────────────────────────────────────
+    if let Some(qf) = &ast.quick_functions {
+        for func in &qf.functions {
+            let param_types: HashMap<String, Option<DataType>> = func
+                .parameters
+                .iter()
+                .map(|p| (p.name.clone(), p.data_type))
+                .collect();
+
+            for param in &func.parameters {
+                // Any annotation — skip, already in source.
+                if param.data_type.is_some() || !param.position.is_valid() {
+                    continue;
+                }
+                let line = param.position.line.saturating_sub(1) as u32;
+                let col  = (param.position.column.saturating_sub(1)
+                    + param.name.len()) as u32;
+                hints.push(make_hint(line, col, "<any>".to_string()));
+            }
+
+            collect_qf_var_hints(
+                &func.body,
+                &doc.tokens,
+                &qf_return_types,
+                &param_types,
+                &mut hints,
+            );
+        }
+    }
+
+    if hints.is_empty() { None } else { Some(hints) }
+            }
 
     // ── @QUICKFUNCS ───────────────────────────────────────────────────────────
     if let Some(qf) = &ast.quick_functions {

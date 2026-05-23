@@ -12,7 +12,7 @@
 
 use crate::Compiler::AST::{
     DataSection, DataEntry, TablePath, PropertyAssignment, Position,
-    Value, ObjectProperty, Expression, DataType,
+    Value, ObjectProperty, Expression, DataType, ElemType,
 };
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
@@ -22,20 +22,20 @@ use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
 use crate::Utilities::{estimate_properties_count, estimate_array_items_count};
 
 
-DataSectionParser {
-    tokens,
-    operational_settings,
-    error_manager,
-    debug_config,
-    position: 0,
-    last_position: usize::MAX,
-    stuck_count: 0,
-    iteration_count: 0,
-    max_iterations,
-    has_seen_grouped_data: false,
-    current_object_nesting_depth: 0,
-    current_function_call_depth: 0,
-    pending_angle: false,   
+pub struct DataSectionParser<'a> {
+    tokens: &'a [Token],
+    operational_settings: &'a OperationalSettings,
+    error_manager: ErrorManager,
+    debug_config: DebugConfig,
+    position: usize,
+    last_position: usize,
+    stuck_count: usize,
+    iteration_count: usize,
+    max_iterations: usize,
+    has_seen_grouped_data: bool,
+    current_object_nesting_depth: usize,
+    current_function_call_depth: usize,
+    pending_angle: bool,  // tracks consumed first '>' of a '>>' token for nested <T<U>>
 }
 
 const MAX_OBJECT_NESTING_DEPTH: usize = 64;

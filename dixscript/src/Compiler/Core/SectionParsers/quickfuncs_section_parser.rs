@@ -381,167 +381,179 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
     /// Parse `(x<int>, y<float> = 42, z)`.
     fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
-        let mut parameters = Vec::with_capacity(usize::max(2, self.tokens.len() / 100));
+    let mut parameters = Vec::with_capacity(usize::max(2, self.tokens.len() / 100));
 
-        if !self.expect_symbol('(') {
-            return parameters;
+    if !self.expect_symbol('(') {
+        return parameters;
+    }
+    self.skip_whitespace();
+
+    if self.check_symbol(')') {
+        self.advance();
+        return parameters;
+    }
+
+    loop {
+        self.skip_whitespace();
+        let param_start_pos = Position::from_token(self.current());
+
+        // ── parameter name ────────────────────────────────────────────────
+        let param_name_opt = match &self.current().token_type {
+            TokenType::Identifier(id) => {
+                let name = id.clone();
+                self.advance();
+                Some(name)
+            }
+            TokenType::Keyword(kw)
+                if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
+            {
+                let name = kw.to_string();
+                self.advance();
+                if self.debug_config.is_verbose {
+                    self.error_manager.log_debug(&format!(
+                        "QuickFunctions: keyword '{}' accepted as parameter name", name
+                    ));
+                }
+                Some(name)
+            }
+            _ => {
+                let cur = self.current().clone();
+                self.error_manager.add_parse_error(
+                    ParseErrorType::MissingToken,
+                    "Expected parameter name".to_string(),
+                    cur.line, cur.column, None,
+                    self.get_source_line(&cur),
+                );
+                None
+            }
+        };
+
+        if param_name_opt.is_none() {
+            break;
         }
+        let param_name = param_name_opt.unwrap();
         self.skip_whitespace();
 
-        if self.check_symbol(')') {
-            self.advance();
-            return parameters;
-        }
+        // ── optional type annotation <type> or <array<T>> or <tuple<T,...>> ──
+        let mut param_type: Option<DataType> = None;
+        let mut default_value: Option<Expression> = None;
 
-        loop {
+        if self.check_symbol('<') {
+            self.advance(); // consume outer '<'
             self.skip_whitespace();
-            let param_start_pos = Position::from_token(self.current());
 
-            // -- parameter name -----------------------------------------------
-            let param_name_opt = match &self.current().token_type {
-                TokenType::Identifier(id) => {
-                    let name = id.clone();
-                    self.advance();
-                    Some(name)
-                }
-                TokenType::Keyword(kw)
-                if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
-                    {
-                        // kw: &&'static str — .to_string() gives owned String
-                        let name = kw.to_string();
-                        self.advance();
-                        if self.debug_config.is_verbose {
-                            self.error_manager.log_debug(&format!(
-                                "QuickFunctions: keyword '{}' accepted as parameter name",
-                                name
-                            ));
-                        }
-                        Some(name)
-                    }
-                _ => {
-                    let cur = self.current().clone();
-                    self.error_manager.add_parse_error(
-                        ParseErrorType::MissingToken,
-                        "Expected parameter name".to_string(),
-                        cur.line,
-                        cur.column,
-                        None,
-                        self.get_source_line(&cur),
-                    );
-                    None
-                }
+            let type_token = self.current().clone();
+
+            // Read the base type keyword
+            let type_lower = match &type_token.token_type {
+                TokenType::Keyword(kw)    => Some(kw.to_lowercase()),
+                TokenType::Identifier(id) => Some(id.to_lowercase()),
+                _ => None,
             };
 
-            if param_name_opt.is_none() {
-                break;
-            }
-            let param_name = param_name_opt.unwrap();
-            self.skip_whitespace();
-
-            // -- optional type annotation <type> ------------------------------
-            let mut param_type: Option<DataType> = None;
-            let mut default_value: Option<Expression> = None;
-
-            if self.check_symbol('<') {
-                self.advance(); // consume '<'
-                self.skip_whitespace();
-
-                let type_token = self.current().clone();
-
-                // Extract type string without OR-pattern (Keyword is &'static str, Identifier is String)
-                let type_lower = match &type_token.token_type {
-                    TokenType::Keyword(kw) => Some(kw.to_lowercase()),
-                    TokenType::Identifier(id) => Some(id.to_lowercase()),
-                    _ => None,
-                };
-
-                param_type = if let Some(ref s) = type_lower {
-                    let dt = Self::str_to_data_type(s);
-                    if dt.is_none() {
-                        self.error_manager.add_parse_error(
-                            ParseErrorType::InvalidType,
-                            format!("Invalid parameter type '{}'", s),
-                            type_token.line,
-                            type_token.column,
-                            None,
-                            self.get_source_line(&type_token),
-                        );
-                    }
-                    dt
-                } else {
+            // Parse base DataType from the keyword
+            let base_dt: Option<DataType> = if let Some(ref s) = type_lower {
+                let dt = Self::str_to_data_type(s);
+                if dt.is_none() {
                     self.error_manager.add_parse_error(
                         ParseErrorType::InvalidType,
-                        format!(
-                            "Expected type keyword inside '<>', found {}",
-                            type_token.get_token_value()
-                        ),
-                        type_token.line,
-                        type_token.column,
-                        None,
+                        format!("Invalid parameter type '{}'", s),
+                        type_token.line, type_token.column, None,
                         self.get_source_line(&type_token),
                     );
-                    None
-                };
-
-                if type_lower.is_some() {
-                    self.advance(); // consume the type token
-                } else {
-                    self.advance(); // skip invalid token
                 }
-                self.skip_whitespace();
+                dt
+            } else {
+                self.error_manager.add_parse_error(
+                    ParseErrorType::InvalidType,
+                    format!(
+                        "Expected type keyword inside '<>', found {}",
+                        type_token.get_token_value()
+                    ),
+                    type_token.line, type_token.column, None,
+                    self.get_source_line(&type_token),
+                );
+                None
+            };
 
-                // Default value may appear inside <type = expr>
-                if self.check_symbol('=') {
-                    self.advance();
-                    self.skip_whitespace();
-                    default_value = Some(self.parse_expression(0));
-                    self.skip_whitespace();
-                }
-
-                if !self.expect_symbol('>') {
-                    break;
-                }
+            // Consume the base type token (or skip invalid token)
+            if type_lower.is_some() {
+                self.advance();
+            } else {
+                self.advance();
             }
-
             self.skip_whitespace();
 
-            // Default value outside the type annotation: name = expr
-            if self.check_symbol('=') && default_value.is_none() {
+            // ── Typed-collection inner type: <array<int>>, <tuple<int,bool>> ──
+            param_type = match base_dt {
+                Some(DataType::Array) if self.check_symbol('<') => {
+                    self.parse_typed_collection_qf("array")
+                }
+                Some(DataType::Tuple) if self.check_symbol('<') => {
+                    self.parse_typed_collection_qf("tuple")
+                }
+                other => other,
+            };
+            self.skip_whitespace();
+
+            // ── Default value INSIDE the annotation: name<int = 42> ──
+            if self.check_symbol('=') {
                 self.advance();
                 self.skip_whitespace();
                 default_value = Some(self.parse_expression(0));
                 self.skip_whitespace();
             }
 
-            if self.debug_config.is_verbose {
-                self.error_manager.log_debug(&format!(
-                    "QuickFunctions: param '{}' type={:?} has_default={}",
-                    param_name,
-                    param_type,
-                    default_value.is_some()
-                ));
+            // ── Close outer '>' — handles ">>" split from nested typed collection ──
+            if !self.match_and_consume_closing_angle() {
+                let cur = self.current().clone();
+                self.error_manager.add_parse_error(
+                    ParseErrorType::MissingToken,
+                    "Expected '>' to close parameter type annotation".to_string(),
+                    cur.line, cur.column, None,
+                    self.get_source_line(&cur),
+                );
+                // Error recovery: keep going rather than breaking the whole param list
             }
+        }
 
-            parameters.push(QuickFuncParam::new(
-                param_name,
-                param_type,
-                default_value,
-                param_start_pos,
+        self.skip_whitespace();
+
+        // ── Default value OUTSIDE the type annotation: name = expr ──
+        if self.check_symbol('=') && default_value.is_none() {
+            self.advance();
+            self.skip_whitespace();
+            default_value = Some(self.parse_expression(0));
+            self.skip_whitespace();
+        }
+
+        if self.debug_config.is_verbose {
+            self.error_manager.log_debug(&format!(
+                "QuickFunctions: param '{}' type={:?} has_default={}",
+                param_name, param_type, default_value.is_some()
             ));
-
-            if self.check_symbol(',') {
-                self.advance();
-            } else {
-                break;
-            }
         }
 
-        if !self.expect_symbol(')') {
-            return parameters;
-        }
+        parameters.push(QuickFuncParam::new(
+            param_name,
+            param_type,
+            default_value,
+            param_start_pos,
+        ));
 
-        parameters
+        if self.check_symbol(',') {
+            self.advance();
+        } else {
+            break;
+        }
     }
+
+    if !self.expect_symbol(')') {
+        return parameters;
+    }
+
+    parameters
+}
 
     // =============================================================================
     // Statement block

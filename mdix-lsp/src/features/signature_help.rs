@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::{
     Position, SignatureHelp, SignatureHelpContext, SignatureInformation,
 };
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
-use dixscript::Compiler::AST::{DataType, QuickFuncParam};
+use dixscript::Compiler::AST::{DataType, ElemType, QuickFuncParam};
 
 use crate::document::Document;
 
@@ -168,21 +168,35 @@ fn find_call_context(tokens: &[Token], pos: Position) -> Option<(String, usize)>
 
 /// Walk backwards from `open_paren_idx` to extract the function name,
 /// skipping any `<type>` annotation between the name and `(`.
+/// Handles nested typed-collection annotations like `<array<int>>`.
 fn scan_backwards_for_func_name(tokens: &[Token], open_paren_idx: usize) -> Option<String> {
-    let mut i = open_paren_idx.checked_sub(1)?;
-    let mut skip_angle = false;
+    let mut i          = open_paren_idx.checked_sub(1)?;
+    let mut angle_depth = 0i32;
 
     loop {
         match &tokens[i].token_type {
-            TokenType::Symbol('>')   => { skip_angle = true; }
-            TokenType::Symbol('<') if skip_angle => { skip_angle = false; }
-            TokenType::Keyword(_) | TokenType::DataType(_) if skip_angle => {
-                // inside <type> annotation — skip
+            // Closing angle — could be plain '>' or '>>' (BitwiseOp)
+            TokenType::Symbol('>') => {
+                angle_depth += 1;
             }
-            TokenType::Identifier(name) if !skip_angle => {
+            TokenType::BitwiseOp(op) if op.as_str() == ">>" => {
+                // '>>' accounts for two closing angles (e.g. <array<int>>)
+                angle_depth += 2;
+            }
+            TokenType::Symbol('<') => {
+                angle_depth -= 1;
+                // angle_depth may go below 0 if we started after a valid annotation;
+                // once it hits 0 we are back outside any annotation.
+                if angle_depth < 0 { angle_depth = 0; }
+            }
+            // Keywords and DataType tokens inside `<type>` annotations — skip
+            TokenType::Keyword(_) | TokenType::DataType(_) | TokenType::Symbol(',')
+                if angle_depth > 0 => { /* inside annotation, keep scanning */ }
+            // Identifier outside any angle-bracket annotation — this is the function name
+            TokenType::Identifier(name) if angle_depth == 0 => {
                 return Some(name.clone());
             }
-            _ if !skip_angle => return None,
+            _ if angle_depth == 0 => return None,
             _ => {}
         }
         if i == 0 { break; }
@@ -194,27 +208,7 @@ fn scan_backwards_for_func_name(tokens: &[Token], open_paren_idx: usize) -> Opti
 // ── Parameter documentation ───────────────────────────────────────────────────
 
 fn build_param_doc(param: &QuickFuncParam) -> String {
-    let type_detail: &str = match param.data_type {
-        Some(DataType::Int)       => "32-bit signed integer",
-        Some(DataType::Long)      => "64-bit signed integer",
-        Some(DataType::Float)     => "32-bit float (requires `f` suffix on literals)",
-        Some(DataType::Double)    => "64-bit double (IEEE 754 f64)",
-        Some(DataType::String)    => "UTF-8 string",
-        Some(DataType::Bool)      => "boolean — `true` or `false`",
-        Some(DataType::Array)     => "ordered collection",
-        Some(DataType::Tuple)     => "mixed-type collection (max 6 elements)",
-        Some(DataType::Object)    => "key-value map `{ key = value }`",
-        Some(DataType::Hex)       => "hex color or integer literal",
-        Some(DataType::Blob)      => "base64-encoded binary `b:(...)`",
-        Some(DataType::Regex)     => "compiled regular expression `r:(...)`",
-        Some(DataType::Date)      => "ISO 8601 date `YYYY-MM-DD`",
-        Some(DataType::Timestamp) => "ISO 8601 timestamp",
-        Some(DataType::Enum)      => "enum value from @ENUMS",
-        Some(DataType::Any)       => "any type",
-        Some(DataType::Function)  => "callable",
-        Some(DataType::Range)     => "numeric range",
-        None                      => "any type (no annotation)",
-    };
+    let type_detail = describe_data_type(param.data_type);
 
     let default_note = if param.default_value.is_some() {
         "\n\n*Has a default value — this parameter is optional.*"
@@ -223,6 +217,55 @@ fn build_param_doc(param: &QuickFuncParam) -> String {
     };
 
     format!("**`{}`** — {}{}", param.name, type_detail, default_note)
+}
+
+/// Produce a human-readable description for any `Option<DataType>`, including
+/// the typed-collection variants `TypedArray` and `TypedTuple`.
+fn describe_data_type(dt: Option<DataType>) -> String {
+    match dt {
+        None                                => "any type (no annotation)".to_string(),
+        Some(DataType::Int)                 => "32-bit signed integer".to_string(),
+        Some(DataType::Long)                => "64-bit signed integer".to_string(),
+        Some(DataType::Float)               => "32-bit float (requires `f` suffix on literals)".to_string(),
+        Some(DataType::Double)              => "64-bit double (IEEE 754 f64)".to_string(),
+        Some(DataType::String)              => "UTF-8 string".to_string(),
+        Some(DataType::Bool)                => "boolean — `true` or `false`".to_string(),
+        Some(DataType::Array)               => "ordered collection (untyped)".to_string(),
+        Some(DataType::Tuple)               => "mixed-type collection (max 6 elements, untyped)".to_string(),
+        Some(DataType::Object)              => "key-value map `{ key = value }`".to_string(),
+        Some(DataType::Hex)                 => "hex color or integer literal".to_string(),
+        Some(DataType::Blob)                => "base64-encoded binary `b:(...)`".to_string(),
+        Some(DataType::Regex)               => "compiled regular expression `r:(...)`".to_string(),
+        Some(DataType::Date)                => "ISO 8601 date `YYYY-MM-DD`".to_string(),
+        Some(DataType::Timestamp)           => "ISO 8601 timestamp".to_string(),
+        Some(DataType::Enum)                => "enum value from @ENUMS".to_string(),
+        Some(DataType::Any)                 => "any type".to_string(),
+        Some(DataType::Function)            => "callable".to_string(),
+        Some(DataType::Range)               => "numeric range".to_string(),
+
+        // ── Typed collections ────────────────────────────────────────────────
+        Some(DataType::TypedArray(elem))    => {
+            format!("typed array — every element must be `<{}>` (`<array<{}>>`)",
+                elem, elem)
+        }
+        Some(DataType::TypedTuple(slots))   => {
+            let types: Vec<String> = slots
+                .iter()
+                .filter_map(|&s| s)
+                .map(|e| format!("`{}`", e))
+                .collect();
+            if types.is_empty() {
+                "typed tuple (max 6 elements)".to_string()
+            } else {
+                format!("typed tuple — element types: {} (`<tuple<{}>>`)",
+                    types.join(", "),
+                    slots.iter().filter_map(|&s| s)
+                         .map(|e| format!("{}", e))
+                         .collect::<Vec<_>>()
+                         .join(","))
+            }
+        }
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -274,7 +317,6 @@ mod tests {
             ")"
         );
         let doc  = test_doc(src);
-        // cursor after second comma — should be param index 2
         let pos  = Position::new(4, 22);
         let help = provide(Some(&doc), pos, None);
         if let Some(h) = help {
@@ -288,4 +330,38 @@ mod tests {
         let doc  = test_doc(src);
         assert!(provide(Some(&doc), Position::new(1, 4), None).is_none());
     }
-}
+
+    #[test]
+    fn typed_array_param_description() {
+        use dixscript::Compiler::AST::{DataType, ElemType, Position as AstPos};
+        use dixscript::Compiler::AST::QuickFuncParam;
+        let param = QuickFuncParam {
+            name:          "items".to_string(),
+            data_type:     Some(DataType::TypedArray(ElemType::Int)),
+            default_value: None,
+            position:      AstPos::UNKNOWN,
+        };
+        let doc = build_param_doc(&param);
+        assert!(doc.contains("array"), "should mention array: {}", doc);
+        assert!(doc.contains("int"), "should mention int element type: {}", doc);
+    }
+
+    #[test]
+    fn typed_tuple_param_description() {
+        use dixscript::Compiler::AST::{DataType, ElemType, Position as AstPos};
+        use dixscript::Compiler::AST::QuickFuncParam;
+        let mut slots = [None; 6];
+        slots[0] = Some(ElemType::Int);
+        slots[1] = Some(ElemType::String);
+        let param = QuickFuncParam {
+            name:          "pair".to_string(),
+            data_type:     Some(DataType::TypedTuple(slots)),
+            default_value: None,
+            position:      AstPos::UNKNOWN,
+        };
+        let doc = build_param_doc(&param);
+        assert!(doc.contains("tuple"), "should mention tuple: {}", doc);
+        assert!(doc.contains("int"), "should mention int: {}", doc);
+        assert!(doc.contains("string"), "should mention string: {}", doc);
+    }
+            }

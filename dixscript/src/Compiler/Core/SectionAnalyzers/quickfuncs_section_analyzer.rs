@@ -2939,23 +2939,37 @@ impl LocalScopeTracker {
     }
 
     /// Reset scope and pre-populate from function parameters.
-    fn reset_with_params(&mut self, func_parameters: &[QuickFuncParam]) {
-        self.variables.clear();
-        self.parameters.clear();
+/// TypedArray/TypedTuple annotations are used to populate element_type
+/// so downstream method calls like .first() / .last() resolve correctly
+/// even for parameters declared as <array<int>>.
+fn reset_with_params(&mut self, func_parameters: &[QuickFuncParam]) {
+    self.variables.clear();
+    self.parameters.clear();
 
-        for param in func_parameters {
-            self.parameters.insert(param.name.clone());
-            self.variables.insert(
-                param.name.clone(),
-                VariableScopeInfo {
-                    var_type:     param.data_type,
-                    is_const:     true,
-                    is_parameter: true,
-                    element_type: None, // populated later if param is array/tuple
-                },
-            );
-        }
+    for param in func_parameters {
+        self.parameters.insert(param.name.clone());
+
+        // Extract element type from typed-collection annotations so that
+        // element-returning methods (.first(), .last(), .get(), etc.) on
+        // typed parameters can resolve to the actual element type rather
+        // than returning Any.
+        let element_type: Option<DataType> = match param.data_type {
+            Some(DataType::TypedArray(elem)) => Some(elem.to_data_type()),
+            Some(DataType::TypedTuple(arr))  => arr[0].map(|e| e.to_data_type()),
+            _ => None,
+        };
+
+        self.variables.insert(
+            param.name.clone(),
+            VariableScopeInfo {
+                var_type:     param.data_type,
+                is_const:     true,
+                is_parameter: true,
+                element_type,
+            },
+        );
     }
+}
 
     // ── Variable registration ─────────────────────────────────────────────────
 

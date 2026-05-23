@@ -92,9 +92,9 @@ pub fn server_capabilities() -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
 
         // ── Symbol navigation ─────────────────────────────────────────────────
-        references_provider:          Some(OneOf::Left(true)),
-        document_highlight_provider:  Some(OneOf::Left(true)),
-        document_symbol_provider:     Some(OneOf::Left(true)),
+        references_provider:         Some(OneOf::Left(true)),
+        document_highlight_provider: Some(OneOf::Left(true)),
+        document_symbol_provider:    Some(OneOf::Left(true)),
 
         // ── Editing ───────────────────────────────────────────────────────────
         rename_provider: Some(OneOf::Right(RenameOptions {
@@ -111,13 +111,11 @@ pub fn server_capabilities() -> ServerCapabilities {
 
         // ── Play button / commands ────────────────────────────────────────────
         //
-        // CodeLensOptions in some lsp-types releases exposes only
-        // `resolve_provider`; use Default for any additional fields so that
-        // the code compiles regardless of the exact minor version pulled in
-        // by tower-lsp 0.20.
+        // tower-lsp 0.20 pulls a version of lsp-types where CodeLensOptions
+        // exposes only `resolve_provider` — no work_done_progress_options and
+        // no Default impl. Construct with just the one field we need.
         code_lens_provider: Some(CodeLensOptions {
             resolve_provider: Some(false),
-            ..Default::default()
         }),
 
         execute_command_provider: Some(ExecuteCommandOptions {
@@ -145,4 +143,4 @@ pub fn server_capabilities() -> ServerCapabilities {
 
         ..Default::default()
     }
-}
+                                  }

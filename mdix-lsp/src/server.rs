@@ -377,17 +377,18 @@ impl LanguageServer for Backend {
                 };
                 self.show_message(result.success, &result.message).await;
             }
-
-            CMD_COMPILE => {
-                // Run in blocking thread — shells out to mdix binary
-                let path_clone = source_path.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    run_compile(path_clone.as_deref())
-                }).await.unwrap_or_else(|_| {
-                    crate::features::commands::CommandResult::err("Compile task panicked.")
-                });
-                self.show_message(result.success, &result.message).await;
-            }
+CMD_COMPILE => {
+    let ast_clone = doc_ref
+        .as_ref()
+        .and_then(|d| d.ast.clone());
+    let path_clone = source_path.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        run_compile(path_clone.as_deref(), ast_clone.as_ref())
+    }).await.unwrap_or_else(|_| {
+        crate::features::commands::CommandResult::err("Compile task panicked.")
+    });
+    self.show_message(result.success, &result.message).await;
+}
 
             CMD_SHOW_AST => {
                 let result = if let Some(doc) = &doc_ref {

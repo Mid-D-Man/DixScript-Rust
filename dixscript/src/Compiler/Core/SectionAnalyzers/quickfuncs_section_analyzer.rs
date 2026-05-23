@@ -1067,9 +1067,7 @@ fn validate_variable_declaration_statement(
 ) {
     if !Self::is_valid_identifier(variable) {
         self.add_error(
-            result,
-            "QFUNC017",
-            "INVALID_VARIABLE_NAME",
+            result, "QFUNC017", "INVALID_VARIABLE_NAME",
             &format!("Invalid variable name '{}' in function '{}'", variable, func.name),
             "Variable names must start with a letter and contain only alphanumeric characters and underscores.",
             value.position(),
@@ -1079,9 +1077,7 @@ fn validate_variable_declaration_statement(
 
     if !local_scope.has_variable(variable) {
         self.add_error(
-            result,
-            "QFUNC072",
-            "UNDECLARED_VARIABLE",
+            result, "QFUNC072", "UNDECLARED_VARIABLE",
             &format!(
                 "Variable '{}' used before declaration in function '{}'",
                 variable, func.name
@@ -1097,9 +1093,7 @@ fn validate_variable_declaration_statement(
 
     if local_scope.is_const(variable) {
         self.add_error(
-            result,
-            "QFUNC018",
-            "CONST_REASSIGNMENT",
+            result, "QFUNC018", "CONST_REASSIGNMENT",
             &format!("Cannot reassign const variable '{}' in function '{}'", variable, func.name),
             "Use 'let mut' instead of 'const' or 'let' to allow mutation.",
             value.position(),
@@ -1127,9 +1121,7 @@ fn validate_variable_declaration_statement(
                 && !Self::are_types_compatible_strict(new_t, existing) =>
         {
             self.add_error(
-                result,
-                "QFUNC019",
-                "TYPE_MISMATCH_REASSIGNMENT",
+                result, "QFUNC019", "TYPE_MISMATCH_REASSIGNMENT",
                 &format!(
                     "Cannot assign {:?} to variable '{}' of type {:?}",
                     new_t, variable, existing
@@ -1141,9 +1133,19 @@ fn validate_variable_declaration_statement(
         (None, Some(new_t)) if new_t != DataType::Any => {
             local_scope.update_variable_type(variable, new_t);
 
-            // Also update element type if this is an array/tuple being re-assigned
-            if matches!(new_t, DataType::Array | DataType::Tuple) {
-                let new_elem = visitor.infer_element_type_from_expression(value);
+            // Update element type for any collection being re-assigned.
+            // TypedArray/TypedTuple annotations on the new value are
+            // authoritative; fall back to value inference for untyped collections.
+            if matches!(
+                new_t,
+                DataType::Array | DataType::Tuple
+                    | DataType::TypedArray(_) | DataType::TypedTuple(_)
+            ) {
+                let new_elem = match new_t {
+                    DataType::TypedArray(elem) => Some(elem.to_data_type()),
+                    DataType::TypedTuple(arr)  => arr[0].map(|e| e.to_data_type()),
+                    _ => visitor.infer_element_type_from_expression(value),
+                };
                 local_scope.update_variable_element_type(variable, new_elem);
             }
 

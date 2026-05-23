@@ -18,7 +18,7 @@
 
 use crate::Compiler::AST::{
     QuickFuncsSection, QuickFunction, QuickFuncParam, QuickFuncStatement, SwitchCase,
-    Position, DataType, Expression, Value, ObjectProperty, DeclarationType,
+    Position, DataType, ElemType, Expression, Value, ObjectProperty, DeclarationType,
 };
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::ErrorManager::{ErrorManager, ParseErrorType, DebugConfig};
@@ -81,7 +81,7 @@ pub struct QuickFuncsSectionParser<'a> {
     last_position: usize,
     stuck_count: usize,
     iteration_count: usize,
-    pending_angle: false,  
+    pending_angle: bool,  // tracks consumed first '>' of a '>>' token for nested <T<U>>
 }
 
 // =============================================================================

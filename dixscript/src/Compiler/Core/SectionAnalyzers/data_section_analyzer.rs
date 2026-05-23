@@ -1,6 +1,6 @@
 
 use crate::Compiler::AST::{
-    DataSection, DataEntry, TablePath, PropertyAssignment, Value, Position, DataType,
+    DataSection, DataEntry, TablePath, PropertyAssignment, Value, Position, DataType,ElemType,
 };
 use crate::Compiler::AST::Visitors::TypeInferenceVisitor;
 use crate::Compiler::Utilities::{SymbolTable, VariableInfo, PathBuilder};

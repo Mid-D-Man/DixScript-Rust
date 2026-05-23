@@ -61,6 +61,12 @@ impl TypeSystemManager {
             DataType::Enum | DataType::Any | DataType::Function | DataType::Range => {
                 Value::Null { position: pos }
             }
+            DataType::TypedArray(_)  => Value::Array { values: Vec::new(), position: pos },
+            DataType::TypedTuple(_) => Value::PrefixedConstructor {
+                prefix: "t".to_string(),
+                arguments: Vec::new(),
+                position: pos,
+            }
         }
     }
 
@@ -346,6 +352,8 @@ impl TypeSystemManager {
             DataType::Timestamp => DixType::Timestamp,
             DataType::Enum => DixType::Enum,
             DataType::Any | DataType::Function | DataType::Range => DixType::Null,
+            DataType::TypedArray(_) => DixType::Array,
+            DataType::TypedTuple(_) => DixType::Tuple,
         }
     }
 

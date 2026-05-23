@@ -84,6 +84,7 @@ pub fn new_with_error_manager(
         has_seen_grouped_data: false,
         current_object_nesting_depth: 0,
         current_function_call_depth: 0,
+        pending_angle:false,
     }
 }
     pub fn parse_section(&mut self) -> Option<DataSection> {

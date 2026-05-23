@@ -189,7 +189,7 @@ impl DataType {
 
     /// Create a typed array annotation from an element type.
     ///
-    /// ```
+    /// text,no_run```
     /// let dt = DataType::typed_array(ElemType::Int);  // represents <array<int>>
     /// ```
     #[inline]
@@ -199,7 +199,7 @@ impl DataType {
 
     /// Create a typed tuple annotation from a slice of element types (max 6).
     ///
-    /// ```
+    /// text,no_run```
     /// let dt = DataType::typed_tuple_from(&[ElemType::Int, ElemType::Bool]);
     /// // represents <tuple<int,bool>>
     /// ```

@@ -118,6 +118,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
             last_position: usize::MAX,
             stuck_count: 0,
             iteration_count: 0,
+            pending_angle:false,
         }
 }
 

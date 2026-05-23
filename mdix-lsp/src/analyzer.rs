@@ -9,6 +9,11 @@
 //! DAuditor:
 //!   DAuditor is informational — no error is emitted when it is present without
 //!   a security section. An info-level note is logged only.
+//!
+//! ENHANCED-AST FIX (2025):
+//!   doc.ast now stores the POST-enhancement AST so that all LSP features
+//!   (inlay hints, hover, highlights, goto-definition) see resolved
+//!   QualifiedIdentifier nodes and accurate type information.
 
 use std::collections::HashMap;
 use std::panic;
@@ -185,8 +190,6 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
             || msg.contains("encryptor requires");
         if is_security_missing {
             if let DixError::Semantic(se) = e {
-                // Only remove the zero-position ones; keep any that already have
-                // a real position (line > 0).
                 return se.line > 0;
             }
         }
@@ -194,10 +197,10 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     });
 
     // Now emit a correctly-positioned diagnostic for each encryptor without security.
+    // Use the original ast for DLM checks (enhancement doesn't touch DLM/SECURITY).
     let dlm_encryptors = collect_encryptors(&ast);
     if !dlm_encryptors.is_empty() && ast.security.is_none() {
         for (enc_line, enc_col, algorithm) in dlm_encryptors {
-            // Find the actual @DLM token line for a better position.
             let (diag_line, diag_col) = find_dlm_token_pos(&doc.tokens)
                 .unwrap_or((enc_line, enc_col));
 
@@ -221,8 +224,7 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         }
     }
 
-    // DAuditor: emit an informational note (not an error) so the user knows
-    // auditing is active. Only logged at debug level — no squiggly.
+    // DAuditor: informational only
     if let Some(dlm) = &ast.dlm {
         for m in &dlm.modules {
             if matches!(m.module_type, DLMModuleType::DAuditor) {
@@ -239,7 +241,6 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
             .map(|p| (p.line as i32, p.column as i32))
             .unwrap_or((0, 0));
 
-        // Skip zero-position security errors — already handled above.
         let msg_lower = err.message.to_lowercase();
         if line == 0
             && (msg_lower.contains("security") && msg_lower.contains("missing")
@@ -294,7 +295,14 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         }));
     }
 
-    doc.ast = Some(ast);
+    // ── Store state ───────────────────────────────────────────────────────────
+    //
+    // IMPORTANT: store the POST-enhancement AST, not the original.
+    // The enhancer resolves QualifiedIdentifier nodes into their concrete
+    // forms (EnumAccess, ImportedFunctionCall, PropertyAccess …), so type
+    // inference and all LSP features are accurate only on the enhanced tree.
+    let enhanced_ast = enhancement_result.enhanced_ast.clone();
+    doc.ast = Some(enhanced_ast);
     doc.semantic_result = Some(semantic_result);
     doc.enhancement_result = Some(enhancement_result);
 
@@ -331,4 +339,4 @@ fn find_dlm_token_pos(tokens: &[dixscript::Compiler::Core::Tokenizer::Token]) ->
         .iter()
         .find(|t| matches!(t.token_type, TokenType::SectionDLM))
         .map(|t| (t.line, t.column))
-}
+    }

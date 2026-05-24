@@ -2111,6 +2111,15 @@ fn validate_unary_op_expression(
     }
 }
 
+// ── validate_conditional_expression ──────────────────────────────────────────
+//
+// CHANGE: tightened QFUNC_WARN003.
+// Previously warned whenever inferred branch types were "incompatible".
+// Now only warns when BOTH sides are simple primitive types (int/float/
+// string/bool/enum/date/timestamp) so that collections, objects, and any
+// expression where inference may return a simplified or base type do not
+// produce false positives.
+
 fn validate_conditional_expression(
     &self,
     condition:    &Expression,
@@ -2122,9 +2131,10 @@ fn validate_conditional_expression(
     result:       &mut SectionAnalysisResult,
     max_depth:    usize,
 ) {
-    self.validate_expression(condition, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(
+        condition, func, symbol_table, local_scope, result, max_depth - 1,
+    );
 
-    // Build visitor with full element-hint context
     let local_variable_types = local_scope.get_all_variable_types();
     let element_type_hints   = local_scope.get_all_element_type_hints();
     let visitor = TypeInferenceVisitor::new_with_element_hints(
@@ -2134,7 +2144,6 @@ fn validate_conditional_expression(
     );
 
     if let Some(ct) = visitor.infer_type_from_expression(condition) {
-        // Any and Bool are both acceptable condition types
         if ct != DataType::Bool && ct != DataType::Any {
             self.add_error(
                 result,
@@ -2147,15 +2156,43 @@ fn validate_conditional_expression(
         }
     }
 
-    self.validate_expression(true_value,  func, symbol_table, local_scope, result, max_depth - 1);
-    self.validate_expression(false_value, func, symbol_table, local_scope, result, max_depth - 1);
+    self.validate_expression(
+        true_value, func, symbol_table, local_scope, result, max_depth - 1,
+    );
+    self.validate_expression(
+        false_value, func, symbol_table, local_scope, result, max_depth - 1,
+    );
 
     let tt = visitor.infer_type_from_expression(true_value);
     let ft = visitor.infer_type_from_expression(false_value);
 
     if let (Some(t), Some(f)) = (tt, ft) {
-        // Only warn if both sides have known concrete types that mismatch
-        if t != DataType::Any && f != DataType::Any && !Self::are_types_comparable(t, f) {
+        // Only warn when BOTH sides are known simple primitives that are clearly
+        // incompatible.  For collections, objects, Any, or inferred base-types
+        // (e.g. Array when the real type is TypedArray) skip the warning to
+        // avoid false positives caused by the inference gap.
+        #[inline]
+        fn is_simple_primitive(dt: DataType) -> bool {
+            matches!(
+                dt,
+                DataType::Int
+                    | DataType::Long
+                    | DataType::Float
+                    | DataType::Double
+                    | DataType::String
+                    | DataType::Bool
+                    | DataType::Enum
+                    | DataType::Date
+                    | DataType::Timestamp
+            )
+        }
+
+        if t != DataType::Any
+            && f != DataType::Any
+            && is_simple_primitive(t)
+            && is_simple_primitive(f)
+            && !Self::are_types_comparable(t, f)
+        {
             self.add_warning(
                 result,
                 "QFUNC_WARN003",
@@ -2168,8 +2205,7 @@ fn validate_conditional_expression(
             );
         }
     }
-}
-
+            }
     // ==================== CALL VALIDATORS ====================
 
     fn validate_quick_func_call(

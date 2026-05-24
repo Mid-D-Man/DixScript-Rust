@@ -745,13 +745,23 @@ pub fn new_with_error_manager(
         }
     }
 
-    fn validate_return_statement(
+// ── validate_return_statement ─────────────────────────────────────────────────
+//
+// CHANGE: removed QFUNC_WARN004 ("cannot infer return type").
+// The warning fired constantly for complex expressions — method chains,
+// qualified identifiers before AST enhancement, arithmetic on dynamic types,
+// conditional returns, etc.  When type inference succeeds AND the types are
+// incompatible we still emit QFUNC015 (the real error).  When inference
+// simply cannot determine the type we skip the check rather than spamming
+// the user with noise.
+
+fn validate_return_statement(
     &self,
-    value:       &Expression,
-    func:        &QuickFunction,
+    value:        &Expression,
+    func:         &QuickFunction,
     symbol_table: &SymbolTable,
-    local_scope: &LocalScopeTracker,
-    result:      &mut SectionAnalysisResult,
+    local_scope:  &LocalScopeTracker,
+    result:       &mut SectionAnalysisResult,
 ) {
     let max_depth = Self::calculate_max_depth(100);
     self.validate_expression(value, func, symbol_table, local_scope, result, max_depth);
@@ -767,7 +777,7 @@ pub fn new_with_error_manager(
     let expected = func.return_type.unwrap();
 
     match return_value_type {
-        // Any is compatible with all declared return types — no error
+        // Any is the universal wildcard — always compatible.
         Some(actual) if actual == DataType::Any => {}
 
         Some(actual) if !Self::are_types_compatible_strict(actual, expected) => {
@@ -786,27 +796,32 @@ pub fn new_with_error_manager(
                 value.position(),
             );
         }
+
         Some(actual) => {
             if self.debug_config.is_verbose {
                 self.error_manager.log_debug(&format!(
-                    "Return type {:?} matches expected {:?}", actual, expected
+                    "Return type {:?} matches expected {:?} in '{}'",
+                    actual, expected, func.name
                 ));
             }
         }
+
+        // Type cannot be inferred.  This is perfectly normal for complex
+        // expressions: method chains, qualified identifiers (resolved only
+        // after AST enhancement), arithmetic across dynamic types, etc.
+        // Skip type checking rather than emitting a spurious warning.
         None => {
-            self.add_warning(
-                result,
-                "QFUNC_WARN004",
-                &format!(
-                    "Cannot infer return type in function '{}'. Expected: {:?}",
-                    func.name, expected
-                ),
-                "QUICKFUNCS",
-                value.position(),
-            );
+            if self.debug_config.is_verbose {
+                self.error_manager.log_debug(&format!(
+                    "Cannot infer return expression type in '{}' — skipping type check \
+                     (normal for complex or pre-enhancement expressions)",
+                    func.name
+                ));
+            }
         }
     }
 }
+
 
 fn validate_variable_declaration_statement(
     &self,

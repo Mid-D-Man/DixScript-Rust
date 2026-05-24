@@ -2641,9 +2641,7 @@ fn parse_typed_collection(&mut self, base_kw: &str) -> Option<DataType> {
     })
     }
 
-    /// Parse a single element-type keyword and advance past it.
-/// Returns `None` on unknown/missing keyword (error is emitted).
-fn parse_elem_type_keyword(&mut self) -> Option<ElemType> {
+    fn parse_elem_type_keyword(&mut self) -> Option<ElemType> {
     let lower: Option<String> = match &self.current().token_type {
         TokenType::Keyword(kw)    => Some(kw.to_lowercase()),
         TokenType::Identifier(id) => Some(id.to_lowercase()),
@@ -2654,12 +2652,26 @@ fn parse_elem_type_keyword(&mut self) -> Option<ElemType> {
         Some(ref s) => {
             let elem = ElemType::from_keyword(s.as_str());
             if elem.is_some() {
-                self.advance();
+                self.advance(); // consume the type keyword
+                // If the element type is itself a typed collection
+                // (e.g. tuple<int,bool> nested inside <array<tuple<int,bool>>>),
+                // skip the inner <...> to stay in sync.
+                // ElemType is intentionally flat and cannot represent nested
+                // collection types, so we discard the inner annotation after
+                // consuming it — semantic analysis enforces limits separately.
+                if self.is_current_symbol('<') {
+                    self.skip_nested_angle_content();
+                }
             } else {
                 let current = self.current().clone();
                 self.handle_parse_error(
                     ParseErrorType::UnexpectedToken,
-                    &format!("Unknown element type '{}' in typed collection annotation", s),
+                    &format!(
+                        "Unknown element type '{}' in typed collection annotation; \
+                         valid types: int, long, float, double, string, bool, \
+                         hex, blob, regex, object, date, timestamp, enum, any, array, tuple",
+                        s
+                    ),
                     &current,
                 );
                 if !self.should_halt_section() {
@@ -2678,7 +2690,7 @@ fn parse_elem_type_keyword(&mut self) -> Option<ElemType> {
             None
         }
     }
-}
+                }
 
     fn parse_table_path(&mut self) -> Option<TablePath> {
         let mut segments = Vec::new();

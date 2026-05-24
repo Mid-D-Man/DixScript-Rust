@@ -2975,7 +2975,80 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
         }
     }
     false
-}
+} 
+    /// Consume a balanced `<…>` sequence starting at the current position
+/// (the opening `<` has NOT yet been consumed when this is called).
+///
+/// Tokenizer output to keep in mind:
+///   `>`   → Symbol('>')        — one closing angle
+///   `>>`  → BitwiseOp(">>")   — two closing angles (pending_angle mechanism)
+///
+/// When consuming `>>` would close our innermost level and leave one
+/// spare `>` that belongs to the outer annotation, we advance past the
+/// `>>` token and set `pending_angle = true`.  The outer parser's next
+/// call to `match_and_consume_closing_angle` returns true immediately
+/// without consuming another token, acting as that spare `>`.
+fn skip_nested_angle_content(&mut self) {
+    let mut depth = 0i32;
+
+    while !self.is_at_end() {
+        // Clone to avoid holding a shared borrow while mutating self
+        let tt = self.current().token_type.clone();
+
+        match tt {
+            // Opening angle — go deeper
+            TokenType::Symbol('<') => {
+                depth += 1;
+                self.advance();
+            }
+
+            // Single closing angle
+            TokenType::Symbol('>') => {
+                if depth == 0 {
+                    // Belongs to the outer annotation — do not consume
+                    break;
+                }
+                depth -= 1;
+                self.advance();
+                if depth == 0 {
+                    break;
+                }
+            }
+
+            // Double closing angle `>>`
+            TokenType::BitwiseOp(ref op) if op == ">>" => {
+                match depth {
+                    0 => {
+                        // Both angles are outside our scope — do not consume
+                        break;
+                    }
+                    1 => {
+                        // First `>` closes our level; second `>` belongs to
+                        // the outer context — hand it back via pending_angle
+                        self.advance();
+                        self.pending_angle = true;
+                        break;
+                    }
+                    _ => {
+                        // depth >= 2: both closing angles are within our nested content
+                        depth -= 2;
+                        self.advance();
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            TokenType::EndOfFile => break,
+
+            // Any other token inside the brackets — consume and continue
+            _ => {
+                self.advance();
+            }
+        }
+    }
+                        }
 
     fn handle_parse_error(&mut self, error_type: ParseErrorType, message: &str, token: &Token) {
         let source_line = self.get_source_line(token);

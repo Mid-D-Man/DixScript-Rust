@@ -2565,9 +2565,19 @@ fn parse_typed_collection_qf(&mut self, base_kw: &str) -> Option<DataType> {
         Some(path)
     }
 
-    /// Parse a single element-type keyword and advance.
+// ── parse_elem_type_keyword_qf ────────────────────────────────────────────────
+//
+// CHANGE: after consuming the base element-type keyword, if the next token is
+// `<` we call skip_nested_angle_content to consume the inner annotation.
+// ElemType is flat and cannot represent typed sub-collections
+// (e.g. the `<int>` in `<array<int>>` when nested inside a tuple), but we
+// must consume those tokens to keep the parser in sync.
+// Returning the base ElemType (Array, Tuple, etc.) is semantically correct —
+// the inner element type of the sub-collection is simply not tracked.
+
 fn parse_elem_type_keyword_qf(&mut self) -> Option<ElemType> {
     let token = self.current().clone();
+
     let lower: Option<String> = match &token.token_type {
         TokenType::Keyword(kw)    => Some(kw.to_lowercase()),
         TokenType::Identifier(id) => Some(id.to_lowercase()),
@@ -2577,30 +2587,143 @@ fn parse_elem_type_keyword_qf(&mut self) -> Option<ElemType> {
     match lower {
         Some(ref s) => {
             let elem = ElemType::from_keyword(s.as_str());
-            if elem.is_some() {
-                self.advance();
-            } else {
+
+            if elem.is_none() {
                 self.error_manager.add_parse_error(
                     ParseErrorType::InvalidType,
-                    format!("Unknown element type '{}' in typed collection annotation", s),
-                    token.line, token.column, None,
+                    format!(
+                        "Unknown element type '{}' in typed collection annotation; \
+                         valid types: int, long, float, double, string, bool, \
+                         hex, blob, regex, object, date, timestamp, enum, any, array, tuple",
+                        s
+                    ),
+                    token.line,
+                    token.column,
+                    None,
                     self.get_source_line(&token),
                 );
-                self.advance(); // skip invalid, attempt continuation
             }
+
+            self.advance(); // consume the type keyword
+
+            // If the element type is itself a typed collection
+            // (e.g. `array<int>` nested inside `<tuple<array<int>,bool>>`),
+            // consume the inner `<…>` to stay in sync.
+            // We do NOT attempt to parse it into a typed ElemType variant
+            // because ElemType is deliberately flat (no recursive Box).
+            if self.check_symbol('<') {
+                self.skip_nested_angle_content();
+            }
+
             elem
         }
         None => {
             self.error_manager.add_parse_error(
                 ParseErrorType::InvalidType,
-                "Expected element type keyword (int, string, bool, …) in typed collection".to_string(),
-                token.line, token.column, None,
+                format!(
+                    "Expected element type keyword inside typed collection, found `{}`",
+                    token.get_token_value()
+                ),
+                token.line,
+                token.column,
+                None,
                 self.get_source_line(&token),
             );
+            // Do NOT advance — let the caller see the unexpected token and recover.
             None
         }
     }
 }
+
+// ── skip_nested_angle_content ─────────────────────────────────────────────────
+//
+// Consume a balanced `<…>` sequence that starts at the current position (the
+// `<` has NOT yet been consumed when this is called).
+//
+// Angle-bracket token mapping (from the tokenizer):
+//   `>`     → Symbol('>')           — one closing angle
+//   `>>`    → BitwiseOp(">>")       — two closing angles
+//   `>>>`   → BitwiseOp(">>") + Symbol('>') — processed as two separate tokens
+//   `>>>>`  → BitwiseOp(">>") + BitwiseOp(">>") — likewise
+//
+// Because the tokenizer splits `>>>` into `BitwiseOp(">>")` then `Symbol('>')`,
+// we never need a special "three-close" case; the two tokens are processed
+// sequentially and depth is reduced correctly each time.
+//
+// When consuming `>>` would close our innermost open level AND leave one
+// "extra" `>` that belongs to the outer annotation, we advance past the `>>`
+// token and set `pending_angle = true`.  The outer parser's next call to
+// `match_and_consume_closing_angle` will then return `true` immediately
+// without a further token read — exactly as it does for the normal `>>` split
+// in `parse_type_annotation` and `parse_typed_collection_qf`.
+
+fn skip_nested_angle_content(&mut self) {
+    let mut depth = 0i32;
+
+    while !self.is_at_end() {
+        // Clone the token_type to avoid holding a borrow while we mutate self.
+        let tt = self.current().token_type.clone();
+
+        match tt {
+            // ── Opening angle ─────────────────────────────────────────────────
+            TokenType::Symbol('<') => {
+                depth += 1;
+                self.advance();
+            }
+
+            // ── Single closing angle ──────────────────────────────────────────
+            TokenType::Symbol('>') => {
+                if depth == 0 {
+                    // This `>` belongs to the outer annotation — stop without consuming.
+                    break;
+                }
+                depth -= 1;
+                self.advance();
+                if depth == 0 {
+                    break;
+                }
+            }
+
+            // ── Double closing angle `>>` ─────────────────────────────────────
+            // The tokenizer emits a single `BitwiseOp(">>")` token for any `>>`
+            // sequence.  We treat it as two closing angles with the `pending_angle`
+            // mechanism to hand the "spare" `>` back to the outer parser.
+            TokenType::BitwiseOp(ref op) if op == ">>" => {
+                match depth {
+                    0 => {
+                        // Both angles are outside our scope — do not consume.
+                        break;
+                    }
+                    1 => {
+                        // First `>` closes our innermost level; second `>`
+                        // belongs to the outer context.  Advance past `>>` and
+                        // flag the remaining angle so `match_and_consume_closing_angle`
+                        // can return it without reading another token.
+                        self.advance();
+                        self.pending_angle = true;
+                        break;
+                    }
+                    _ => {
+                        // depth >= 2: both closing angles are within our nested
+                        // content.
+                        depth -= 2;
+                        self.advance();
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            TokenType::EndOfFile => break,
+
+            // Any other token inside the brackets — consume and keep going.
+            _ => {
+                self.advance();
+            }
+        }
+    }
+                }
 
                 /// True when current token is `>` or the first `>` of a `>>` token.
 #[inline]

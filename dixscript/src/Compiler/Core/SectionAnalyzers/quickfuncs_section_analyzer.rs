@@ -474,53 +474,58 @@ pub fn new_with_error_manager(
         }
     }
 
-    fn validate_default_value_type_strict(
-        &self,
-        param: &QuickFuncParam,
-        func_name: &str,
-        symbol_table: &SymbolTable,
-        result: &mut SectionAnalysisResult,
-    ) {
-        let (default_value, expected_type) = match (&param.default_value, param.data_type) {
-            (Some(v), Some(t)) => (v, t),
-            _ => return,
-        };
+    // ── validate_default_value_type_strict ────────────────────────────────────────
+//
+// CHANGE: removed QFUNC_WARN003 on the None arm.
+// Same rationale: default-value expressions can be complex and the inference
+// gap is not actionable.  A genuine type MISMATCH (Some(actual) != expected)
+// still produces QFUNC009.
 
-        let visitor = TypeInferenceVisitor::new(symbol_table, None);
-        let inferred = visitor.infer_type_from_expression(default_value);
+fn validate_default_value_type_strict(
+    &self,
+    param:        &QuickFuncParam,
+    func_name:    &str,
+    symbol_table: &SymbolTable,
+    result:       &mut SectionAnalysisResult,
+) {
+    let (default_value, expected_type) = match (&param.default_value, param.data_type) {
+        (Some(v), Some(t)) => (v, t),
+        _ => return,
+    };
 
-        match inferred {
-            Some(actual) if !Self::are_types_compatible_strict(actual, expected_type) => {
-                self.add_error(
-                    result,
-                    "QFUNC009",
-                    "DEFAULT_VALUE_TYPE_MISMATCH",
-                    &format!(
-                        "Default value type ({:?}) does not match parameter type ({:?}) for '{}' in function '{}'",
-                        actual, expected_type, param.name, func_name
-                    ),
-                    &format!(
-                        "Change default value to match {:?} or remove the type annotation",
-                        expected_type
-                    ),
-                    param.position,
-                );
-            }
-            None => {
-                self.add_warning(
-                    result,
-                    "QFUNC_WARN003",
-                    &format!(
-                        "Cannot infer type for default value of parameter '{}' in function '{}'",
-                        param.name, func_name
-                    ),
-                    "QUICKFUNCS",
-                    param.position,
-                );
-            }
-            _ => {}
+    let visitor  = TypeInferenceVisitor::new(symbol_table, None);
+    let inferred = visitor.infer_type_from_expression(default_value);
+
+    match inferred {
+        Some(actual) if !Self::are_types_compatible_strict(actual, expected_type) => {
+            self.add_error(
+                result,
+                "QFUNC009",
+                "DEFAULT_VALUE_TYPE_MISMATCH",
+                &format!(
+                    "Default value type ({:?}) does not match parameter type ({:?}) \
+                     for '{}' in function '{}'",
+                    actual, expected_type, param.name, func_name
+                ),
+                &format!(
+                    "Change default value to match {:?} or remove the type annotation",
+                    expected_type
+                ),
+                param.position,
+            );
         }
+        None => {
+            // Cannot infer type — acceptable for complex default expressions.
+            if self.debug_config.is_verbose {
+                self.error_manager.log_debug(&format!(
+                    "Cannot infer default-value type for '{}' in '{}' — skipping",
+                    param.name, func_name
+                ));
+            }
+        }
+        _ => {}
     }
+}
 
     fn validate_scopes(
         &self,

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position};
 use dixscript::Compiler::AST::{
-    DataEntry, DataType, ElemType, Expression, QuickFuncStatement, Value,
+    DataEntry, DataType, ElemType, Expression, QuickFuncStatement, Value, TypeInferenceVisitor,
 };
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 use dixscript::Builtins::Core::DixType;
@@ -32,15 +32,14 @@ pub fn provide(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
 
 // ── Inference context ─────────────────────────────────────────────────────────
 
-/// Bundles all read-only state that type-inference helpers need.
-/// Using a single struct avoids threading 3+ parameters through every call.
+/// All read-only state threaded through type-inference helpers.
+/// Using a single struct avoids adding 3+ parameters to every call.
 struct InferCtx<'a> {
-    /// Return types of locally-declared QuickFuncs (fast path, no ST needed).
+    /// Return types of locally-declared QuickFuncs — fast path, no ST needed.
     qf_return_types: &'a HashMap<String, DataType>,
-    /// Parameter types for the active QuickFunc scope; empty at @DATA level.
+    /// Param / local-var types for the active QuickFunc scope; empty at @DATA.
     param_types:     &'a HashMap<String, Option<DataType>>,
-    /// Full semantic symbol table — present after analysis completes.
-    /// Required for imported-namespace function / enum resolution.
+    /// Full semantic symbol table — present once analysis has run.
     symbol_table:    Option<&'a SymbolTable>,
 }
 
@@ -54,6 +53,22 @@ impl<'a> InferCtx<'a> {
     }
 }
 
+// ── Precise type via compiler's TypeInferenceVisitor ─────────────────────────
+
+/// Use the full compiler TypeInferenceVisitor to get a precise `DataType` for
+/// an expression.  Handles TypedArray/TypedTuple element methods, imported
+/// function return types, and symbol-table property paths.
+///
+/// Returns `None` when no symbol table is available or when the visitor
+/// cannot determine a concrete type.
+fn precise_dt(expr: &Expression, ctx: &InferCtx<'_>) -> Option<DataType> {
+    let st = ctx.symbol_table?;
+    // Clone the param map so the visitor owns it (cheap: small map).
+    let local_vars = Some(ctx.param_types.clone());
+    let visitor    = TypeInferenceVisitor::new(st, local_vars);
+    visitor.infer_type_from_expression(expr)
+}
+
 // ── Main provider ─────────────────────────────────────────────────────────────
 
 fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
@@ -63,13 +78,11 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
     instance_method_registry::initialize();
     static_object_registry::initialize_static_registry();
 
-    // Symbol table — may be absent on the very first parse before analysis finishes.
     let symbol_table: Option<&SymbolTable> = doc
         .semantic_result
         .as_ref()
         .and_then(|sr| sr.symbol_table.as_ref());
 
-    // Build a fast lookup of locally-declared QuickFunc return types.
     let qf_return_types: HashMap<String, DataType> = ast
         .quick_functions
         .as_ref()
@@ -96,15 +109,10 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
         for entry in &data.entries {
             match entry {
                 DataEntry::SimpleProperty { name, data_type, value, position } => {
-                    if !position.is_valid() {
-                        continue;
-                    }
+                    if !position.is_valid() { continue; }
 
                     let label = match data_type {
-                        // Typed collection annotation already fully descriptive — skip.
                         Some(DataType::TypedArray(_)) | Some(DataType::TypedTuple(_)) => continue,
-
-                        // Untyped collection — append element count.
                         Some(dt @ DataType::Array) | Some(dt @ DataType::Tuple) => {
                             let count = collection_len(value);
                             match count {
@@ -112,11 +120,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                                 _                => continue,
                             }
                         }
-
-                        // Any other explicit annotation — already visible in source.
                         Some(_) => continue,
-
-                        // No annotation — infer.
                         None => {
                             type_index
                                 .and_then(|idx| idx.get(name.as_str()))
@@ -133,9 +137,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
 
                 DataEntry::TableProperty { properties, .. } => {
                     for prop in properties {
-                        if !prop.position.is_valid() {
-                            continue;
-                        }
+                        if !prop.position.is_valid() { continue; }
 
                         let label = match prop.data_type {
                             Some(DataType::TypedArray(_)) | Some(DataType::TypedTuple(_)) => continue,
@@ -159,9 +161,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                 }
 
                 DataEntry::GroupArray { path, items, position } => {
-                    if items.is_empty() || !position.is_valid() {
-                        continue;
-                    }
+                    if items.is_empty() || !position.is_valid() { continue; }
                     let label    = array_label_from_values(items, &base_ctx);
                     let path_str = path.segments.join(".");
                     let line     = position.line.saturating_sub(1) as u32;
@@ -170,21 +170,15 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     hints.push(make_hint(line, col, label));
                 }
 
-                // ── ObjectProperty ─────────────────────────────────────────────
+                // ── ObjectProperty (post-enhancement) ─────────────────────────
                 // After AST enhancement the `object` box holds the resolved Value:
-                //   • Value::QuickFuncCall   → local QuickFunc result type
-                //   • Value::Expression { expr: ImportedFunctionCall }
-                //                           → imported function return type (via ST)
-                //   • Value::Object          → <object> literal
-                //
-                // We only emit a hint when no explicit <…> annotation is present.
+                //   Value::QuickFuncCall    → local QuickFunc result type
+                //   Value::Expression { ImportedFunctionCall } → imported fn type (via ST)
+                //   Value::Object           → plain <object> literal
+                // Only emit a hint when no explicit annotation is in the source.
                 DataEntry::ObjectProperty { name, data_type, object, position } => {
-                    if !position.is_valid() {
-                        continue;
-                    }
-                    if data_type.is_some() {
-                        continue;
-                    }
+                    if !position.is_valid() { continue; }
+                    if data_type.is_some() { continue; }
 
                     let label = infer_value(object, &base_ctx)
                         .unwrap_or_else(|| "<object>".to_string());
@@ -206,13 +200,10 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                 .map(|p| (p.name.clone(), p.data_type))
                 .collect();
 
-            // Build a scoped context that carries the function's parameter types.
             let func_ctx = InferCtx::new(&qf_return_types, &param_types, symbol_table);
 
             for param in &func.parameters {
-                if param.data_type.is_some() || !param.position.is_valid() {
-                    continue;
-                }
+                if param.data_type.is_some() || !param.position.is_valid() { continue; }
                 let line = param.position.line.saturating_sub(1) as u32;
                 let col  = (param.position.column.saturating_sub(1)
                     + param.name.len()) as u32;
@@ -228,8 +219,6 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
 
 // ── Typed-collection formatting ───────────────────────────────────────────────
 
-/// Format a `DataType` into an inlay-hint label string.
-/// For array/tuple types the optional `count` is appended: `<int[3]>`.
 pub fn format_data_type_as_hint(dt: DataType, count: Option<usize>) -> String {
     match dt {
         DataType::TypedArray(elem) => match count {
@@ -263,7 +252,6 @@ pub fn format_data_type_as_hint(dt: DataType, count: Option<usize>) -> String {
     }
 }
 
-/// Return the element count for array/tuple Value variants, `None` otherwise.
 fn collection_len(value: &Value) -> Option<usize> {
     match value {
         Value::Array { values, .. } | Value::NestedArray { values, .. } => Some(values.len()),
@@ -278,7 +266,6 @@ fn collection_len(value: &Value) -> Option<usize> {
 
 // ── Array / collection label helpers ─────────────────────────────────────────
 
-/// Top-level label for a group-array or array literal, e.g. `<int[3]>`.
 fn array_label_from_values(items: &[Value], ctx: &InferCtx<'_>) -> String {
     let count = items.len();
     match uniform_base_type(items, ctx) {
@@ -287,12 +274,8 @@ fn array_label_from_values(items: &[Value], ctx: &InferCtx<'_>) -> String {
     }
 }
 
-/// Returns a uniform base-type string for a homogeneous value slice, or `None`
-/// when types are mixed or unknown.  Nested arrays produce `array<elem>`.
 fn uniform_base_type(items: &[Value], ctx: &InferCtx<'_>) -> Option<String> {
-    if items.is_empty() {
-        return None;
-    }
+    if items.is_empty() { return None; }
     let first = infer_base_type(&items[0], ctx)?;
     for v in items.iter().skip(1) {
         match infer_base_type(v, ctx) {
@@ -304,7 +287,6 @@ fn uniform_base_type(items: &[Value], ctx: &InferCtx<'_>) -> Option<String> {
     Some(first)
 }
 
-/// Return the bare base-type label (no `<>`), recursing into nested collections.
 fn infer_base_type(value: &Value, ctx: &InferCtx<'_>) -> Option<String> {
     match value {
         Value::Integer { .. }                                        => Some("int".to_string()),
@@ -320,7 +302,6 @@ fn infer_base_type(value: &Value, ctx: &InferCtx<'_>) -> Option<String> {
         Value::Object { .. }                                         => Some("object".to_string()),
         Value::Null { .. }                                           => None,
 
-        // Nested arrays — recurse.
         Value::Array { values, .. } | Value::NestedArray { values, .. } => {
             let inner = uniform_base_type(values, ctx);
             Some(match inner {
@@ -347,23 +328,21 @@ fn infer_base_type(value: &Value, ctx: &InferCtx<'_>) -> Option<String> {
             _ => None,
         },
 
-        Value::QuickFuncCall { function_name, .. } => ctx
-            .qf_return_types
-            .get(function_name.as_str())
-            .map(|rt| {
-                format!("{}", rt)
-                    .trim_start_matches('<')
-                    .trim_end_matches('>')
-                    .to_string()
-            })
-            .or_else(|| {
-                // Fallback: check the symbol table (covers locally-registered funcs
-                // that might not be in qf_return_types yet).
-                ctx.symbol_table
-                    .and_then(|st| st.try_get_function(function_name))
-                    .and_then(|sig| sig.return_type)
-                    .map(|dt| format!("{}", dt))
-            }),
+        Value::QuickFuncCall { function_name, .. } => {
+            resolve_func_name_type(function_name, ctx)
+                .map(|dt| {
+                    format!("{}", dt)
+                        .trim_start_matches('<')
+                        .trim_end_matches('>')
+                        .to_string()
+                })
+        }
+
+        // After AST enhancement, imported function calls live inside
+        // Value::Expression { expr: ImportedFunctionCall }.
+        Value::Expression { expr, .. } => infer_expr(expr, ctx).map(|s| {
+            s.trim_start_matches('<').trim_end_matches('>').to_string()
+        }),
 
         Value::Identifier { value: name, .. } => ctx
             .param_types
@@ -376,12 +355,6 @@ fn infer_base_type(value: &Value, ctx: &InferCtx<'_>) -> Option<String> {
                         .to_string()
                 })
             }),
-
-        // After AST enhancement, imported function calls live inside
-        // Value::Expression { expr: ImportedFunctionCall }.
-        Value::Expression { expr, .. } => infer_expr(expr, ctx).map(|s| {
-            s.trim_start_matches('<').trim_end_matches('>').to_string()
-        }),
 
         _ => None,
     }
@@ -396,31 +369,14 @@ fn tuple_label(arguments: &[Value], ctx: &InferCtx<'_>) -> String {
         .map(|v| infer_base_type(v, ctx).unwrap_or_else(|| "?".to_string()))
         .collect();
 
-    if types.is_empty() {
-        return "<tuple>".to_string();
-    }
-    if types.iter().all(|t| t == "?") {
-        return format!("<tuple:{}>", types.len());
-    }
+    if types.is_empty() { return "<tuple>".to_string(); }
+    if types.iter().all(|t| t == "?") { return format!("<tuple:{}>", types.len()); }
     format!("<tuple({})>", types.join(","))
-}
-
-fn tuple_label_from_slots(slots: &[Option<ElemType>; 6]) -> String {
-    let types: Vec<String> = slots
-        .iter()
-        .filter_map(|&s| s)
-        .map(|e| format!("{}", e))
-        .collect();
-    if types.is_empty() {
-        "<tuple>".to_string()
-    } else {
-        format!("<tuple({})>", types.join(","))
-    }
 }
 
 fn blob_label(arguments: &[Value]) -> String {
     let b64 = match arguments.first() {
-        Some(Value::String { value, .. })              => value.as_str(),
+        Some(Value::String { value, .. })                => value.as_str(),
         Some(Value::InterpolatedString { template, .. }) => template.as_str(),
         _ => return "<blob>".to_string(),
     };
@@ -445,50 +401,48 @@ fn blob_label(arguments: &[Value]) -> String {
     } else {
         format!("{}B", bytes.len())
     };
-
     format!("<blob:{}:{}>", category, size)
 }
 
 fn sniff_blob_category(b: &[u8]) -> &'static str {
     if b.len() < 4 { return "data"; }
-    if b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF                                       { return "image"; }
-    if b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47                      { return "image"; }
-    if b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46                                       { return "image"; }
+    if b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF                                         { return "image"; }
+    if b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47                        { return "image"; }
+    if b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46                                         { return "image"; }
     if b.len() >= 12
         && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46
-        && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50                { return "image"; }
-    if b[0] == 0x42 && b[1] == 0x4D                                                        { return "image"; }
-    if b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33                                       { return "audio"; }
-    if b[0] == 0xFF && (b[1] & 0xE0) == 0xE0                                              { return "audio"; }
-    if b[0] == 0x4F && b[1] == 0x67 && b[2] == 0x67 && b[3] == 0x53                      { return "audio"; }
-    if b[0] == 0x66 && b[1] == 0x4C && b[2] == 0x61 && b[3] == 0x43                      { return "audio"; }
+        && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50                  { return "image"; }
+    if b[0] == 0x42 && b[1] == 0x4D                                                          { return "image"; }
+    if b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33                                         { return "audio"; }
+    if b[0] == 0xFF && (b[1] & 0xE0) == 0xE0                                                { return "audio"; }
+    if b[0] == 0x4F && b[1] == 0x67 && b[2] == 0x67 && b[3] == 0x53                        { return "audio"; }
+    if b[0] == 0x66 && b[1] == 0x4C && b[2] == 0x61 && b[3] == 0x43                        { return "audio"; }
     if b.len() >= 12
         && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46
-        && b[8] == 0x57 && b[9] == 0x41 && b[10] == 0x56 && b[11] == 0x45               { return "audio"; }
+        && b[8] == 0x57 && b[9] == 0x41 && b[10] == 0x56 && b[11] == 0x45                 { return "audio"; }
     if b.len() >= 12
         && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46
-        && b[8] == 0x41 && b[9] == 0x56 && b[10] == 0x49                                 { return "video"; }
-    if b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3                      { return "video"; }
+        && b[8] == 0x41 && b[9] == 0x56 && b[10] == 0x49                                   { return "video"; }
+    if b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3                        { return "video"; }
     if b.len() >= 12 && &b[4..8] == b"ftyp" {
-        let brand = &b[8..12];
-        return match brand {
-            b"M4A " | b"M4B "                                        => "audio",
-            b"M4V " | b"mp42" | b"avc1" | b"isom" | b"iso2"         => "video",
-            _                                                         => "video",
+        return match &b[8..12] {
+            b"M4A " | b"M4B "                                          => "audio",
+            b"M4V " | b"mp42" | b"avc1" | b"isom" | b"iso2"           => "video",
+            _                                                           => "video",
         };
     }
-    if b[0] == 0x25 && b[1] == 0x50 && b[2] == 0x44 && b[3] == 0x46                     { return "pdf";  }
-    if b[0] == 0x50 && b[1] == 0x4B                                                        { return "zip";  }
-    if b[0] == 0x1F && b[1] == 0x8B                                                        { return "gzip"; }
+    if b[0] == 0x25 && b[1] == 0x50 && b[2] == 0x44 && b[3] == 0x46                       { return "pdf";  }
+    if b[0] == 0x50 && b[1] == 0x4B                                                          { return "zip";  }
+    if b[0] == 0x1F && b[1] == 0x8B                                                          { return "gzip"; }
     if b.len() >= 6
         && b[0] == 0x37 && b[1] == 0x7A && b[2] == 0xBC
-        && b[3] == 0xAF && b[4] == 0x27 && b[5] == 0x1C                                  { return "7z";   }
+        && b[3] == 0xAF && b[4] == 0x27 && b[5] == 0x1C                                    { return "7z";   }
     if b.len() >= 5
         && b[0] == 0xFD && b[1] == 0x37 && b[2] == 0x7A
-        && b[3] == 0x58 && b[4] == 0x5A                                                   { return "xz";   }
-    if b[0] == 0x77 && b[1] == 0x4F && b[2] == 0x46 && b[3] == 0x46                     { return "font"; }
-    if b[0] == 0x77 && b[1] == 0x4F && b[2] == 0x46 && b[3] == 0x32                     { return "font"; }
-    if b[0] == 0x00 && b[1] == 0x01 && b[2] == 0x00 && b[3] == 0x00                     { return "font"; }
+        && b[3] == 0x58 && b[4] == 0x5A                                                     { return "xz";   }
+    if b[0] == 0x77 && b[1] == 0x4F && b[2] == 0x46 && b[3] == 0x46                       { return "font"; }
+    if b[0] == 0x77 && b[1] == 0x4F && b[2] == 0x46 && b[3] == 0x32                       { return "font"; }
+    if b[0] == 0x00 && b[1] == 0x01 && b[2] == 0x00 && b[3] == 0x00                       { return "font"; }
     let is_printable = b.iter().take(64).all(|&byte| {
         byte == b'\t' || byte == b'\n' || byte == b'\r' || (0x20..=0x7E).contains(&byte)
     });
@@ -519,9 +473,8 @@ fn collect_qf_var_hints(
                 position,
                 ..
             } => {
-                if data_type.is_some() {
-                    continue;
-                }
+                if data_type.is_some() { continue; }
+
                 let label = infer_expr(value, ctx)
                     .unwrap_or_else(|| "<any>".to_string());
 
@@ -536,13 +489,9 @@ fn collect_qf_var_hints(
                             TokenType::Identifier(id)
                                 if id.as_str() == variable_name.as_str())
                     })
-                    .map(|tok| {
-                        (tok.column.saturating_sub(1) + variable_name.len()) as u32
-                    })
+                    .map(|tok| (tok.column.saturating_sub(1) + variable_name.len()) as u32)
                     .unwrap_or_else(|| {
-                        (position.column.saturating_sub(1)
-                            + 4
-                            + variable_name.len()) as u32
+                        (position.column.saturating_sub(1) + 4 + variable_name.len()) as u32
                     });
 
                 hints.push(make_hint(hint_line, col, label));
@@ -573,22 +522,17 @@ fn collect_qf_var_hints(
 
 fn infer_value(value: &Value, ctx: &InferCtx<'_>) -> Option<String> {
     match value {
-        // After AST enhancement expressions in values are already resolved, so
-        // ImportedFunctionCall etc. will be handled by infer_expr.
+        // Post-enhancement: qualified/imported calls live in Expression wrapper.
         Value::Expression { expr, .. } => infer_expr(expr, ctx),
 
-        Value::QuickFuncCall { function_name, .. } => ctx
-            .qf_return_types
-            .get(function_name.as_str())
-            .map(|rt| format_data_type_as_hint(*rt, None))
-            .or_else(|| {
-                // Also consult the symbol table for funcs registered there but
-                // not yet in qf_return_types (e.g. first pass).
-                ctx.symbol_table
-                    .and_then(|st| st.try_get_function(function_name))
-                    .and_then(|sig| sig.return_type)
-                    .map(|dt| format_data_type_as_hint(dt, None))
-            }),
+        // Direct QuickFunc call. Covers three sub-cases:
+        //   1. Plain local func: "createWeapon"  → qf_return_types
+        //   2. In symbol-table:  "calc"           → ST try_get_function
+        //   3. Dotted pre-enh:   "Utils.calc"     → ST namespace lookup
+        Value::QuickFuncCall { function_name, .. } => {
+            resolve_func_name_type(function_name, ctx)
+                .map(|dt| format_data_type_as_hint(dt, None))
+        }
 
         Value::Identifier { value: name, .. } => ctx
             .param_types
@@ -598,18 +542,18 @@ fn infer_value(value: &Value, ctx: &InferCtx<'_>) -> Option<String> {
                 None     => "<any>".to_string(),
             }),
 
-        Value::Null { .. }                          => Some("<null>".to_string()),
-        Value::Integer { .. }                       => Some("<int>".to_string()),
-        Value::Long { .. }                          => Some("<long>".to_string()),
-        Value::Float { .. }                         => Some("<float>".to_string()),
+        Value::Null { .. }                           => Some("<null>".to_string()),
+        Value::Integer { .. }                        => Some("<int>".to_string()),
+        Value::Long { .. }                           => Some("<long>".to_string()),
+        Value::Float { .. }                          => Some("<float>".to_string()),
         Value::Double { .. } | Value::ScientificNotation { .. } => Some("<double>".to_string()),
         Value::String { .. } | Value::InterpolatedString { .. } => Some("<string>".to_string()),
-        Value::Boolean { .. }                       => Some("<bool>".to_string()),
-        Value::HexColor { .. }                      => Some("<hex>".to_string()),
-        Value::Date { .. }                          => Some("<date>".to_string()),
-        Value::Timestamp { .. }                     => Some("<timestamp>".to_string()),
-        Value::EnumValue { .. }                     => Some("<enum>".to_string()),
-        Value::Object { .. }                        => Some("<object>".to_string()),
+        Value::Boolean { .. }                        => Some("<bool>".to_string()),
+        Value::HexColor { .. }                       => Some("<hex>".to_string()),
+        Value::Date { .. }                           => Some("<date>".to_string()),
+        Value::Timestamp { .. }                      => Some("<timestamp>".to_string()),
+        Value::EnumValue { .. }                      => Some("<enum>".to_string()),
+        Value::Object { .. }                         => Some("<object>".to_string()),
 
         Value::Array { values, .. } | Value::NestedArray { values, .. } => {
             Some(array_label_from_values(values, ctx))
@@ -626,9 +570,62 @@ fn infer_value(value: &Value, ctx: &InferCtx<'_>) -> Option<String> {
     }
 }
 
+// ── Resolve a function-name string to its return DataType ─────────────────────
+
+/// Handles three patterns for `Value::QuickFuncCall { function_name }`:
+///   1. Plain local name   → qf_return_types
+///   2. In symbol table    → ST functions map
+///   3. "ns.func" pattern  → ST namespace map (pre-enhancement dotted name)
+fn resolve_func_name_type(function_name: &str, ctx: &InferCtx<'_>) -> Option<DataType> {
+    // 1. Fast path: locally-declared QuickFunc
+    if let Some(&rt) = ctx.qf_return_types.get(function_name) {
+        return Some(rt);
+    }
+
+    if let Some(st) = ctx.symbol_table {
+        // 2. Symbol table general functions
+        if let Some(sig) = st.try_get_function(function_name) {
+            if let Some(rt) = sig.return_type {
+                return Some(rt);
+            }
+        }
+
+        // 3. "Namespace.FunctionName" dotted form (pre-enhancement or parser artefact)
+        if let Some(dot_pos) = function_name.find('.') {
+            let ns_name  = &function_name[..dot_pos];
+            let fn_name  = &function_name[dot_pos + 1..];
+            if let Some(info) = st.get_namespaced_function(ns_name, fn_name) {
+                if let Some(rt) = info.signature.return_type {
+                    return Some(rt);
+                }
+            }
+        }
+    }
+
+    None
+}
+
 // ── Expression-level type inference ──────────────────────────────────────────
 
 fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
+    // ── Fast path: TypeInferenceVisitor ───────────────────────────────────────
+    // This handles typed-collection element methods (tuple.first → <int>),
+    // imported-function return types (Utils.calc → <string>), symbol-table
+    // property paths (weapon.damage), and more — with full compiler semantics.
+    //
+    // We skip the result only for plain Array/Tuple/Any where our manual
+    // inference below produces richer output (element-type labels, counts).
+    if let Some(dt) = precise_dt(expr, ctx) {
+        match dt {
+            // Let manual inference add element-type and count info.
+            DataType::Array | DataType::Tuple | DataType::Any => {}
+            // For every other type — including TypedArray(T), TypedTuple([…]),
+            // ImportedFunctionCall return types, etc. — use the visitor result.
+            dt => return Some(format_data_type_as_hint(dt, None)),
+        }
+    }
+
+    // ── Manual / fallback inference ───────────────────────────────────────────
     match expr {
         Expression::Value { value, .. } => infer_value(value, ctx),
 
@@ -640,22 +637,16 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
                 None     => "<any>".to_string(),
             }),
 
-        Expression::QuickFuncCall { name, .. }
-        | Expression::FunctionCall { name, .. } => ctx
-            .qf_return_types
-            .get(name.as_str())
-            .map(|rt| format_data_type_as_hint(*rt, None))
-            .or_else(|| {
-                ctx.symbol_table
-                    .and_then(|st| st.try_get_function(name))
-                    .and_then(|sig| sig.return_type)
-                    .map(|dt| format_data_type_as_hint(dt, None))
-            }),
+        // Local or symbol-table QuickFunc call
+        Expression::QuickFuncCall { name, .. } | Expression::FunctionCall { name, .. } => {
+            resolve_func_name_type(name, ctx)
+                .map(|dt| format_data_type_as_hint(dt, None))
+        }
 
-        // ── Imported namespace function call (post-enhancement) ───────────────
-        // e.g. Utils.calc(x) becomes ImportedFunctionCall after the enhancer
-        // resolves the QualifiedIdentifier. We look up the return type in the
-        // symbol table's namespace registry.
+        // ── Post-enhancement: imported namespace function call ─────────────────
+        // e.g. Utils.calc(x) → ImportedFunctionCall after the enhancer resolves
+        // the QualifiedIdentifier.  The visitor fast-path above should catch this
+        // when the ST is available; this is the explicit fallback.
         Expression::ImportedFunctionCall { namespace_name, function_name, .. } => {
             ctx.symbol_table
                 .and_then(|st| st.get_namespaced_function(namespace_name, function_name))
@@ -665,8 +656,8 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
 
         Expression::DixFunctionCall { .. } => Some("<any>".to_string()),
 
-        // QualifiedIdentifier may still be present pre-enhancement or in some
-        // paths where the enhancer hasn't fully resolved (e.g. partial analysis).
+        // QualifiedIdentifier may appear in pre-enhancement AST or when the
+        // enhancer couldn't fully resolve (analysis still in progress).
         Expression::QualifiedIdentifier { parts, arguments, .. } => {
             infer_qualified(parts, arguments.as_ref(), ctx)
         }
@@ -679,6 +670,8 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
             static_return(class_name, method)
         }
 
+        // Instance method calls fall back to registry after the visitor
+        // fast-path above (which handles typed-collection element methods).
         Expression::InstanceMethodCall { instance, method_name, .. } => {
             let recv = infer_expr(instance, ctx);
             instance_return(recv.as_deref(), method_name)
@@ -690,6 +683,7 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
         }
 
         Expression::PropertyAccess { object, property, .. } => {
+            // visitor fast-path handles symbol-table paths; fallback to registry.
             let recv = infer_expr(object, ctx);
             instance_return(recv.as_deref(), property)
         }
@@ -701,13 +695,10 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
             let rt = infer_expr(right, ctx);
 
             if operator.as_str() == "+" {
-                if lt.as_deref() == Some("<string>")
-                    || rt.as_deref() == Some("<string>")
-                {
+                if lt.as_deref() == Some("<string>") || rt.as_deref() == Some("<string>") {
                     return Some("<string>".to_string());
                 }
             }
-
             match (lt.as_deref(), rt.as_deref()) {
                 (Some("<double>"), _) | (_, Some("<double>")) => Some("<double>".to_string()),
                 (Some("<float>"),  _) | (_, Some("<float>"))  => Some("<float>".to_string()),
@@ -758,29 +749,47 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
 
 // ── Qualified identifier dispatch ─────────────────────────────────────────────
 
-/// Infer the type of a `QualifiedIdentifier` expression.
-/// This path is taken for pre-enhancement ASTs or partial-analysis passes.
-/// Post-enhancement, `ImportedFunctionCall` is handled directly in `infer_expr`.
+/// Type inference for `QualifiedIdentifier` expressions — used for pre-enhancement
+/// AST nodes or when the enhancer hasn't yet resolved a call.
 fn infer_qualified(
     parts:     &[String],
     arguments: Option<&Vec<Expression>>,
     ctx:       &InferCtx<'_>,
 ) -> Option<String> {
-    if parts.len() < 2 {
-        return None;
+    if parts.is_empty() { return None; }
+
+    // ── Single-part: plain function call (e.g. createWeapon(...)) ─────────────
+    // The parser may emit single-element QualifiedIdentifier for unresolved calls
+    // inside QuickFunc bodies.
+    if parts.len() == 1 {
+        if arguments.is_some() {
+            return resolve_func_name_type(&parts[0], ctx)
+                .map(|dt| format_data_type_as_hint(dt, None));
+        }
+        // Single-part property/variable reference — look up in param types.
+        return ctx.param_types
+            .get(parts[0].as_str())
+            .and_then(|opt_dt| opt_dt.map(|dt| format_data_type_as_hint(dt, None)));
     }
+
     let head   = &parts[0];
     let member = &parts[1];
 
-    // Static object with uppercase head: Math.sqrt, DateTime.now, etc.
+    // ── Static object (uppercase head): Math.sqrt, DateTime.now … ─────────────
     if head.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
-        if parts.len() >= 3 {
-            return static_return(&parts[1], &parts[2]);
+        // Check static registry first (Math, DateTime, etc.)
+        if let Some(result) = if parts.len() >= 3 {
+            static_return(&parts[1], &parts[2])
+        } else {
+            static_return(head, member)
+        } {
+            return Some(result);
         }
-        return static_return(head, member);
+        // Not a static object — fall through to namespace check.
+        // (Imported namespace aliases often start with uppercase.)
     }
 
-    // Imported namespace function: ns.funcName(...) — check symbol table first.
+    // ── Imported namespace function: Utils.calc(...) ───────────────────────────
     if arguments.is_some() {
         if let Some(st) = ctx.symbol_table {
             if let Some(func_info) = st.get_namespaced_function(head, member) {
@@ -791,11 +800,9 @@ fn infer_qualified(
         }
     }
 
-    if arguments.is_none() {
-        return None;
-    }
+    if arguments.is_none() { return None; }
 
-    // Parameter variable: param.method(...)
+    // ── Parameter or local variable with method call ────────────────────────────
     if let Some(opt_dt) = ctx.param_types.get(head.as_str()) {
         let recv = opt_dt.map(|dt| format_data_type_as_hint(dt, None));
         if let Some(result) = instance_return(recv.as_deref(), member) {
@@ -804,7 +811,7 @@ fn infer_qualified(
         return recv;
     }
 
-    // Return value of a known QuickFunc: myFunc().property
+    // ── QuickFunc return value with method chain ────────────────────────────────
     if let Some(rt) = ctx.qf_return_types.get(head.as_str()) {
         let recv = format_data_type_as_hint(*rt, None);
         return instance_return(Some(recv.as_str()), member);
@@ -831,7 +838,9 @@ fn instance_return(receiver_hint: Option<&str>, method: &str) -> Option<String> 
 
 fn hint_to_dix(hint: &str) -> Option<DixType> {
     let s = hint.trim_start_matches('<').trim_end_matches('>');
+    // Strip count suffix: "int[3]" → "int"
     let s = match s.find('[') { Some(pos) => &s[..pos], None => s };
+    // Strip typed-collection inner: "array<int>" → "array"
     let s = match s.find('<') { Some(pos) => &s[..pos], None => s };
     match s {
         "int"       => Some(DixType::Int),
@@ -889,4 +898,4 @@ fn make_hint(line: u32, col: u32, label: String) -> InlayHint {
         padding_right: Some(true),
         data:          None,
     }
-            }
+        }

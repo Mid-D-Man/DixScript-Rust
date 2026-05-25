@@ -2656,25 +2656,20 @@ fn parse_elem_type_keyword_qf(&mut self) -> Option<ElemType> {
 // `match_and_consume_closing_angle` will then return `true` immediately
 // without a further token read — exactly as it does for the normal `>>` split
 // in `parse_type_annotation` and `parse_typed_collection_qf`.
-
 fn skip_nested_angle_content(&mut self) {
     let mut depth = 0i32;
 
     while !self.is_at_end() {
-        // Clone the token_type to avoid holding a borrow while we mutate self.
         let tt = self.current().token_type.clone();
 
         match tt {
-            // ── Opening angle ─────────────────────────────────────────────────
             TokenType::Symbol('<') => {
                 depth += 1;
                 self.advance();
             }
 
-            // ── Single closing angle ──────────────────────────────────────────
             TokenType::Symbol('>') => {
                 if depth == 0 {
-                    // This `>` belongs to the outer annotation — stop without consuming.
                     break;
                 }
                 depth -= 1;
@@ -2684,28 +2679,17 @@ fn skip_nested_angle_content(&mut self) {
                 }
             }
 
-            // ── Double closing angle `>>` ─────────────────────────────────────
-            // The tokenizer emits a single `BitwiseOp(">>")` token for any `>>`
-            // sequence.  We treat it as two closing angles with the `pending_angle`
-            // mechanism to hand the "spare" `>` back to the outer parser.
-            TokenType::BitwiseOp(ref op) if op == ">>" => {
+            TokenType::BitwiseOp(ref op) if *op == ">>" => {
                 match depth {
                     0 => {
-                        // Both angles are outside our scope — do not consume.
                         break;
                     }
                     1 => {
-                        // First `>` closes our innermost level; second `>`
-                        // belongs to the outer context.  Advance past `>>` and
-                        // flag the remaining angle so `match_and_consume_closing_angle`
-                        // can return it without reading another token.
                         self.advance();
                         self.pending_angle = true;
                         break;
                     }
                     _ => {
-                        // depth >= 2: both closing angles are within our nested
-                        // content.
                         depth -= 2;
                         self.advance();
                         if depth == 0 {
@@ -2715,27 +2699,49 @@ fn skip_nested_angle_content(&mut self) {
                 }
             }
 
+            TokenType::BitwiseOp(ref op) if *op == ">>=" => {
+                match depth {
+                    0 => {
+                        // All three chars outside our scope — do not consume.
+                        break;
+                    }
+                    1 => {
+                        // First '>' closes our level, second '>' pending outer, '=' pending.
+                        self.advance();
+                        self.pending_angle = true;
+                        self.pending_equal = true;
+                        break;
+                    }
+                    _ => {
+                        // depth >= 2: both '>'s within nested content, '=' pending.
+                        depth -= 2;
+                        self.advance();
+                        self.pending_equal = true;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+
             TokenType::EndOfFile => break,
 
-            // Any other token inside the brackets — consume and keep going.
             _ => {
                 self.advance();
             }
         }
     }
-                }
+                    }
 
-                /// True when current token is `>` or the first `>` of a `>>` token.
 #[inline]
 fn is_closing_angle(&self) -> bool {
     match &self.current().token_type {
         TokenType::Symbol('>') => true,
-        TokenType::BitwiseOp(op) if *op == ">>" => true,
+        TokenType::BitwiseOp(op) if *op == ">>" || *op == ">>=" => true,
         _ => false,
     }
-}
+    }
 
-/// Consume one closing `>`, handling the `>>` split case.
 fn match_and_consume_closing_angle(&mut self) -> bool {
     if self.pending_angle {
         self.pending_angle = false;
@@ -2751,9 +2757,16 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
             self.pending_angle = true;
             return true;
         }
+        if *op == ">>=" {
+            // Three chars fused: '>' closes inner, '>' is pending outer, '=' is pending assign.
+            self.advance();
+            self.pending_angle = true;
+            self.pending_equal = true;
+            return true;
+        }
     }
     false
-            }
+    }
 
     /// Consume a `->`  switch-case arrow (distinct from `=>` scope arrow).
     fn match_arrow(&mut self) -> bool {

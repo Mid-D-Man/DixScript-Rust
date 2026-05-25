@@ -177,7 +177,8 @@ fn reset_parse_state(&mut self) {
     self.has_seen_grouped_data = false;
     self.current_object_nesting_depth = 0;
     self.current_function_call_depth = 0;
-    self.pending_angle = false;   // ← add this line
+    self.pending_angle = false;
+    self.pending_equal = false;
     self.log_verbose("Parse state reset");
 }
 

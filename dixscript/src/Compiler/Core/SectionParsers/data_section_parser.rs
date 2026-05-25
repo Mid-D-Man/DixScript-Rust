@@ -57,7 +57,6 @@ pub fn new_with_error_manager(
     operational_settings: &'a OperationalSettings,
     error_manager: ErrorManager,
 ) -> Self {
-
     let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
 
     let dynamic_limit = tokens.len() * MAX_ITERATIONS_PER_TOKEN;
@@ -85,7 +84,8 @@ pub fn new_with_error_manager(
         has_seen_grouped_data: false,
         current_object_nesting_depth: 0,
         current_function_call_depth: 0,
-        pending_angle:false,
+        pending_angle: false,
+        pending_equal: false,
     }
 }
     pub fn parse_section(&mut self) -> Option<DataSection> {

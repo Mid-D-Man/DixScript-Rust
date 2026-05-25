@@ -2971,13 +2971,21 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
     }
     if let TokenType::BitwiseOp(op) = &self.current().token_type {
         if *op == ">>" {
+            // Two closing angles fused: consume both, the second is returned via pending_angle.
             self.advance();
             self.pending_angle = true;
             return true;
         }
+        if *op == ">>=" {
+            // Three chars fused: '>' closes inner, '>' is pending outer, '=' is pending assign.
+            self.advance();
+            self.pending_angle = true;
+            self.pending_equal = true;
+            return true;
+        }
     }
     false
-} 
+}
     /// Consume a balanced `<…>` sequence starting at the current position
 /// (the opening `<` has NOT yet been consumed when this is called).
 ///

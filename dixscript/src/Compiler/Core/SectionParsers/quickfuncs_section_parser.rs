@@ -81,7 +81,8 @@ pub struct QuickFuncsSectionParser<'a> {
     last_position: usize,
     stuck_count: usize,
     iteration_count: usize,
-    pending_angle: bool,  // tracks consumed first '>' of a '>>' token for nested <T<U>>
+    pending_angle: bool,
+    pending_equal: bool, // set when '=' was consumed as part of a '>>=' token
 }
 
 // =============================================================================
@@ -97,29 +98,28 @@ impl<'a> QuickFuncsSectionParser<'a> {
     operational_settings: &'a OperationalSettings,
     error_manager: ErrorManager,
 ) -> Self {
+    let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
 
+    if debug_config.is_enabled {
+        error_manager.log_debug(&format!(
+            "QuickFunctions parser: {} tokens, strategy: {:?}",
+            tokens.len(),
+            operational_settings.error_handling_strategy
+        ));
+    }
 
-        let debug_config = DebugConfig::from_debug_mode(operational_settings.debug_mode);
-
-        if debug_config.is_enabled {
-            error_manager.log_debug(&format!(
-                "QuickFunctions parser: {} tokens, strategy: {:?}",
-                tokens.len(),
-                operational_settings.error_handling_strategy
-            ));
-        }
-
-        QuickFuncsSectionParser {
-            tokens,
-            operational_settings,
-            error_manager,
-            debug_config,
-            position: 0,
-            last_position: usize::MAX,
-            stuck_count: 0,
-            iteration_count: 0,
-            pending_angle:false,
-        }
+    QuickFuncsSectionParser {
+        tokens,
+        operational_settings,
+        error_manager,
+        debug_config,
+        position: 0,
+        last_position: usize::MAX,
+        stuck_count: 0,
+        iteration_count: 0,
+        pending_angle: false,
+        pending_equal: false,
+    }
 }
 
     // =============================================================================

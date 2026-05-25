@@ -35,7 +35,8 @@ pub struct DataSectionParser<'a> {
     has_seen_grouped_data: bool,
     current_object_nesting_depth: usize,
     current_function_call_depth: usize,
-    pending_angle: bool,  // tracks consumed first '>' of a '>>' token for nested <T<U>>
+    pending_angle: bool,
+    pending_equal: bool, // set when '=' was consumed as part of a '>>=' token
 }
 
 const MAX_OBJECT_NESTING_DEPTH: usize = 64;

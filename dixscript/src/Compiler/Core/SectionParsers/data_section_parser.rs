@@ -3002,20 +3002,16 @@ fn skip_nested_angle_content(&mut self) {
     let mut depth = 0i32;
 
     while !self.is_at_end() {
-        // Clone to avoid holding a shared borrow while mutating self
         let tt = self.current().token_type.clone();
 
         match tt {
-            // Opening angle — go deeper
             TokenType::Symbol('<') => {
                 depth += 1;
                 self.advance();
             }
 
-            // Single closing angle
             TokenType::Symbol('>') => {
                 if depth == 0 {
-                    // Belongs to the outer annotation — do not consume
                     break;
                 }
                 depth -= 1;
@@ -3025,22 +3021,21 @@ fn skip_nested_angle_content(&mut self) {
                 }
             }
 
-            // Double closing angle `>>`
-            TokenType::BitwiseOp(ref op) if op == ">>" => {
+            // ">>" — two closing angles fused by the tokenizer.
+            TokenType::BitwiseOp(ref op) if *op == ">>" => {
                 match depth {
                     0 => {
-                        // Both angles are outside our scope — do not consume
+                        // Both angles are outside our scope — do not consume.
                         break;
                     }
                     1 => {
-                        // First `>` closes our level; second `>` belongs to
-                        // the outer context — hand it back via pending_angle
+                        // First '>' closes our level; second '>' belongs to the outer context.
                         self.advance();
                         self.pending_angle = true;
                         break;
                     }
                     _ => {
-                        // depth >= 2: both closing angles are within our nested content
+                        // depth >= 2: both angles are within our nested content.
                         depth -= 2;
                         self.advance();
                         if depth == 0 {
@@ -3050,15 +3045,54 @@ fn skip_nested_angle_content(&mut self) {
                 }
             }
 
+            // ">>=" — two closing angles plus assignment fused by the tokenizer.
+            TokenType::BitwiseOp(ref op) if *op == ">>=" => {
+                match depth {
+                    0 => {
+                        // All three chars are outside our scope — do not consume.
+                        break;
+                    }
+                    1 => {
+                        // First '>' closes our level, second '>' is pending outer, '=' is pending.
+                        self.advance();
+                        self.pending_angle = true;
+                        self.pending_equal = true;
+                        break;
+                    }
+                    _ => {
+                        // depth >= 2: both '>'s consumed within nested content, '=' is pending.
+                        depth -= 2;
+                        self.advance();
+                        self.pending_equal = true;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+
             TokenType::EndOfFile => break,
 
-            // Any other token inside the brackets — consume and continue
             _ => {
                 self.advance();
             }
         }
     }
-                        }
+                    }
+
+    /// Consume a `=` token, either the real current token or a virtual one left
+/// behind when `>>=` was split by `match_and_consume_closing_angle`.
+#[inline]
+fn consume_equal(&mut self) -> bool {
+    if self.pending_equal {
+        self.pending_equal = false;
+        return true;
+    }
+    self.match_and_consume_symbol('=')
+}
+
+
+    
 
     fn handle_parse_error(&mut self, error_type: ParseErrorType, message: &str, token: &Token) {
         let source_line = self.get_source_line(token);

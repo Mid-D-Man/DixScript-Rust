@@ -2721,66 +2721,67 @@ fn parse_typed_collection(&mut self, base_kw: &str) -> Option<DataType> {
     }
 
     fn parse_property_assignment(&mut self) -> Option<PropertyAssignment> {
-        if self.debug_config.is_verbose {
-            self.error_manager
-                .log_info("ParsePropertyAssignment START");
+    if self.debug_config.is_verbose {
+        self.error_manager
+            .log_info("ParsePropertyAssignment START");
+    }
+
+    let assign_pos = Position::from_token(self.current());
+    let assignment_name = self.parse_property_name()?;
+
+    if self.debug_config.is_verbose {
+        self.error_manager.log_info(&format!(
+            "Parsed assignment name: {}",
+            assignment_name
+        ));
+    }
+
+    let data_type = self.parse_optional_type_annotation();
+
+    // Use consume_equal so that a '=' that was part of a fused '>>=' token is handled.
+    if !self.consume_equal() {
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::MissingToken,
+            &format!("Expected '=' after assignment name '{}'", assignment_name),
+            &current,
+        );
+        if self.should_halt_section() {
+            return None;
         }
+        return None;
+    }
 
-        let assign_pos = Position::from_token(self.current());
-        let assignment_name = self.parse_property_name()?;
-
-        if self.debug_config.is_verbose {
-            self.error_manager.log_info(&format!(
-                "Parsed assignment name: {}",
-                assignment_name
-            ));
-        }
-
-        let data_type = self.parse_optional_type_annotation();
-
-        if !self.match_and_consume_symbol('=') {
+    let value = match self.parse_property_value() {
+        Some(v) => v,
+        None => {
+            if self.should_halt_section() {
+                return None;
+            }
             let current = self.current().clone();
             self.handle_parse_error(
-                ParseErrorType::MissingToken,
-                &format!("Expected '=' after assignment name '{}'", assignment_name),
+                ParseErrorType::UnexpectedToken,
+                &format!(
+                    "Expected value after '=' in assignment '{}'",
+                    assignment_name
+                ),
                 &current,
             );
             if self.should_halt_section() {
                 return None;
             }
-            return None;
+            Value::Null { position: assign_pos }
         }
+    };
 
-        let value = match self.parse_property_value() {
-            Some(v) => v,
-            None => {
-                if self.should_halt_section() {
-                    return None;
-                }
-                let current = self.current().clone();
-                self.handle_parse_error(
-                    ParseErrorType::UnexpectedToken,
-                    &format!(
-                        "Expected value after '=' in assignment '{}'",
-                        assignment_name
-                    ),
-                    &current,
-                );
-                if self.should_halt_section() {
-                    return None;
-                }
-                Value::Null { position: assign_pos }
-            }
-        };
-
-        if self.debug_config.is_verbose {
-            self.error_manager.log_info(&format!(
-                "ParsePropertyAssignment END: {} = {}",
-                assignment_name, value
-            ));
-        }
-        Some(PropertyAssignment::new(assignment_name, data_type, value, assign_pos))
+    if self.debug_config.is_verbose {
+        self.error_manager.log_info(&format!(
+            "ParsePropertyAssignment END: {} = {}",
+            assignment_name, value
+        ));
     }
+    Some(PropertyAssignment::new(assignment_name, data_type, value, assign_pos))
+}
 
     fn handle_data_entry_comma_separation(&mut self) -> bool {
         self.log_verbose("Handling data entry separation");

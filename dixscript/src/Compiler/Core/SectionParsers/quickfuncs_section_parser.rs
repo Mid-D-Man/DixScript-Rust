@@ -381,7 +381,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
     }
 
     /// Parse `(x<int>, y<float> = 42, z)`.
-    fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
+fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
     let mut parameters = Vec::with_capacity(usize::max(2, self.tokens.len() / 100));
 
     if !self.expect_symbol('(') {
@@ -399,7 +399,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
         let param_start_pos = Position::from_token(self.current());
 
         // ── parameter name ────────────────────────────────────────────────
-        let param_name_opt = match &self.current().token_type {
+        let param_name_opt: Option<String> = match &self.current().token_type {
             TokenType::Identifier(id) => {
                 let name = id.clone();
                 self.advance();
@@ -435,7 +435,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
         let param_name = param_name_opt.unwrap();
         self.skip_whitespace();
 
-        // ── optional type annotation <type> or <array<T>> or <tuple<T,...>> ──
+        // ── optional type annotation ──────────────────────────────────────
         let mut param_type: Option<DataType> = None;
         let mut default_value: Option<Expression> = None;
 
@@ -445,14 +445,12 @@ impl<'a> QuickFuncsSectionParser<'a> {
 
             let type_token = self.current().clone();
 
-            // Read the base type keyword
             let type_lower = match &type_token.token_type {
                 TokenType::Keyword(kw)    => Some(kw.to_lowercase()),
                 TokenType::Identifier(id) => Some(id.to_lowercase()),
                 _ => None,
             };
 
-            // Parse base DataType from the keyword
             let base_dt: Option<DataType> = if let Some(ref s) = type_lower {
                 let dt = Self::str_to_data_type(s);
                 if dt.is_none() {
@@ -477,12 +475,8 @@ impl<'a> QuickFuncsSectionParser<'a> {
                 None
             };
 
-            // Consume the base type token (or skip invalid token)
-            if type_lower.is_some() {
-                self.advance();
-            } else {
-                self.advance();
-            }
+            // Consume the base type token
+            self.advance();
             self.skip_whitespace();
 
             // ── Typed-collection inner type: <array<int>>, <tuple<int,bool>> ──
@@ -498,7 +492,10 @@ impl<'a> QuickFuncsSectionParser<'a> {
             self.skip_whitespace();
 
             // ── Default value INSIDE the annotation: name<int = 42> ──
-            if self.check_symbol('=') {
+            // Guard: when pending_angle is true, '>>'' was just consumed for the inner
+            // typed-collection close; the outer '>' is still pending. Any '=' we see
+            // here belongs OUTSIDE the annotation, not inside it.
+            if !self.pending_angle && self.check_symbol('=') {
                 self.advance();
                 self.skip_whitespace();
                 default_value = Some(self.parse_expression(0));
@@ -521,8 +518,15 @@ impl<'a> QuickFuncsSectionParser<'a> {
         self.skip_whitespace();
 
         // ── Default value OUTSIDE the type annotation: name = expr ──
-        if self.check_symbol('=') && default_value.is_none() {
-            self.advance();
+        // Also handles the case where '=' was fused into a '>>=' token: pending_equal is
+        // true after match_and_consume_closing_angle consumed '>>=' for the inner close.
+        if (self.check_symbol('=') || self.pending_equal) && default_value.is_none() {
+            if self.pending_equal {
+                // The '=' was already consumed as part of '>>=' — clear the flag.
+                self.pending_equal = false;
+            } else {
+                self.advance(); // consume the actual '=' token
+            }
             self.skip_whitespace();
             default_value = Some(self.parse_expression(0));
             self.skip_whitespace();

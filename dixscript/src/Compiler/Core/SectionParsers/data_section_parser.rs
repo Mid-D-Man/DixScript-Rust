@@ -807,24 +807,46 @@ fn reset_parse_state(&mut self) {
     }
 
     fn parse_data_entry_object_property(&mut self) -> Option<DataEntry> {
-        self.log_verbose("Parsing object property");
+    self.log_verbose("Parsing object property");
 
-        let start_pos = Position::from_token(self.current());
-        let property_name = self.parse_property_name()?;
+    let start_pos = Position::from_token(self.current());
+    let property_name = self.parse_property_name()?;
 
-        if self.debug_config.is_verbose {
-            self.error_manager
-                .log_info(&format!("Parsed object property name: {}", property_name));
+    if self.debug_config.is_verbose {
+        self.error_manager
+            .log_info(&format!("Parsed object property name: {}", property_name));
+    }
+
+    let data_type = self.parse_optional_type_annotation();
+
+    // Use consume_equal so that a '=' that was part of a fused '>>=' token is handled.
+    if !self.consume_equal() {
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::MissingToken,
+            &format!(
+                "Expected '=' after object property name '{}'",
+                property_name
+            ),
+            &current,
+        );
+        if self.should_halt_section() {
+            return None;
         }
+    }
 
-        let data_type = self.parse_optional_type_annotation();
-
-        if !self.match_and_consume_symbol('=') {
+    let object_literal = match self.parse_object_literal() {
+        Some(obj) => obj,
+        None => {
+            if self.should_halt_section() {
+                self.log_debug("HALT detected during object literal parsing");
+                return None;
+            }
             let current = self.current().clone();
             self.handle_parse_error(
-                ParseErrorType::MissingToken,
+                ParseErrorType::UnexpectedToken,
                 &format!(
-                    "Expected '=' after object property name '{}'",
+                    "Expected object literal after '=' in object property '{}'",
                     property_name
                 ),
                 &current,
@@ -832,45 +854,24 @@ fn reset_parse_state(&mut self) {
             if self.should_halt_section() {
                 return None;
             }
-        }
-
-        let object_literal = match self.parse_object_literal() {
-            Some(obj) => obj,
-            None => {
-                if self.should_halt_section() {
-                    self.log_debug("HALT detected during object literal parsing");
-                    return None;
-                }
-                let current = self.current().clone();
-                self.handle_parse_error(
-                    ParseErrorType::UnexpectedToken,
-                    &format!(
-                        "Expected object literal after '=' in object property '{}'",
-                        property_name
-                    ),
-                    &current,
-                );
-                if self.should_halt_section() {
-                    return None;
-                }
-                Value::Object {
-                    properties: Vec::new(),
-                    position: start_pos,
-                }
+            Value::Object {
+                properties: Vec::new(),
+                position: start_pos,
             }
-        };
-
-        if self.debug_config.is_verbose {
-            self.error_manager
-                .log_info(&format!("Created object property AST node: {}", property_name));
         }
-        Some(DataEntry::ObjectProperty {
-            name: property_name,
-            data_type,
-            object: Box::new(object_literal),
-            position: start_pos,
-        })
+    };
+
+    if self.debug_config.is_verbose {
+        self.error_manager
+            .log_info(&format!("Created object property AST node: {}", property_name));
     }
+    Some(DataEntry::ObjectProperty {
+        name: property_name,
+        data_type,
+        object: Box::new(object_literal),
+        position: start_pos,
+    })
+}
 
     fn parse_property_value(&mut self) -> Option<Value> {
         self.log_verbose("Parsing property value");

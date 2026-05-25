@@ -2951,7 +2951,7 @@ fn parse_typed_collection(&mut self, base_kw: &str) -> Option<DataType> {
 fn is_closing_angle(&self) -> bool {
     match &self.current().token_type {
         TokenType::Symbol('>') => true,
-        TokenType::BitwiseOp(op) if *op == ">>" => true,
+        TokenType::BitwiseOp(op) if *op == ">>" || *op == ">>=" => true,
         _ => false,
     }
 }

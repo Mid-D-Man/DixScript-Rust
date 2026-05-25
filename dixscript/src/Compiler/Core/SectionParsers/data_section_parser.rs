@@ -411,110 +411,110 @@ fn reset_parse_state(&mut self) {
     }
 
     fn parse_simple_property(&mut self) -> Option<DataEntry> {
-        self.log_verbose("Parsing simple property");
+    self.log_verbose("Parsing simple property");
 
-        let start_pos = Position::from_token(self.current());
+    let start_pos = Position::from_token(self.current());
 
-        if self.has_seen_grouped_data {
-            let attempted_property_name = match &self.current().token_type {
-                TokenType::Identifier(id) => id.clone(),
-                // kw is &&'static str; .to_string() produces an owned String.
-                TokenType::Keyword(kw) => kw.to_string(),
-                _ => "unknown".to_string(),
-            };
+    if self.has_seen_grouped_data {
+        let attempted_property_name = match &self.current().token_type {
+            TokenType::Identifier(id) => id.clone(),
+            TokenType::Keyword(kw) => kw.to_string(),
+            _ => "unknown".to_string(),
+        };
 
-            let current = self.current().clone();
-            self.handle_parse_error(
-                ParseErrorType::SectionSyntaxError,
-                &format!(
-                    "TWO-TIER VIOLATION: Flat property '{}' cannot appear after grouped data.\n\
-                    \n\
-                    DixScript uses a two-tier system (inspired by TOML):\n\
-                    \n\
-                    TIER 1 (Flat Properties): property = value\n\
-                    TIER 2 (Grouped Data):    table.path: ... OR array.path:: ...\n\
-                    \n\
-                    Correct order:\n\
-                       @DATA(\n\
-                         flat1 = \"value\",     // Tier 1 first\n\
-                         flat2 = 42,\n\
-                         table.prop: x = 1   // Tier 2 follows\n\
-                         array:: item1, item2\n\
-                       )\n\
-                    \n\
-                    Fix: Move '{}' before any table properties or group arrays.",
-                    attempted_property_name, attempted_property_name
-                ),
-                &current,
-            );
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::SectionSyntaxError,
+            &format!(
+                "TWO-TIER VIOLATION: Flat property '{}' cannot appear after grouped data.\n\
+                \n\
+                DixScript uses a two-tier system (inspired by TOML):\n\
+                \n\
+                TIER 1 (Flat Properties): property = value\n\
+                TIER 2 (Grouped Data):    table.path: ... OR array.path:: ...\n\
+                \n\
+                Correct order:\n\
+                   @DATA(\n\
+                     flat1 = \"value\",     // Tier 1 first\n\
+                     flat2 = 42,\n\
+                     table.prop: x = 1   // Tier 2 follows\n\
+                     array:: item1, item2\n\
+                   )\n\
+                \n\
+                Fix: Move '{}' before any table properties or group arrays.",
+                attempted_property_name, attempted_property_name
+            ),
+            &current,
+        );
 
-            if self.should_halt_section() {
-                return None;
-            }
-
-            if self.debug_config.is_enabled {
-                self.error_manager.log_debug(&format!(
-                    "Skipping illegal flat property '{}' after grouped data",
-                    attempted_property_name
-                ));
-            }
-            self.advance();
+        if self.should_halt_section() {
             return None;
         }
 
-        let property_name = self.parse_property_name()?;
-        if self.debug_config.is_verbose {
-            self.error_manager
-                .log_info(&format!("Parsed simple property name: {}", property_name));
+        if self.debug_config.is_enabled {
+            self.error_manager.log_debug(&format!(
+                "Skipping illegal flat property '{}' after grouped data",
+                attempted_property_name
+            ));
         }
+        self.advance();
+        return None;
+    }
 
-        let data_type = self.parse_optional_type_annotation();
+    let property_name = self.parse_property_name()?;
+    if self.debug_config.is_verbose {
+        self.error_manager
+            .log_info(&format!("Parsed simple property name: {}", property_name));
+    }
 
-        if !self.match_and_consume_symbol('=') {
+    let data_type = self.parse_optional_type_annotation();
+
+    // Use consume_equal so that a '=' that was part of a fused '>>=' token is handled.
+    if !self.consume_equal() {
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::MissingToken,
+            &format!("Expected '=' after property name '{}'", property_name),
+            &current,
+        );
+        if self.should_halt_section() {
+            return None;
+        }
+    }
+
+    let value = match self.parse_property_value() {
+        Some(v) => v,
+        None => {
+            if self.should_halt_section() {
+                return None;
+            }
             let current = self.current().clone();
             self.handle_parse_error(
-                ParseErrorType::MissingToken,
-                &format!("Expected '=' after property name '{}'", property_name),
+                ParseErrorType::UnexpectedToken,
+                &format!(
+                    "Expected property value after '=' in property '{}'",
+                    property_name
+                ),
                 &current,
             );
             if self.should_halt_section() {
                 return None;
             }
+            Value::Null { position: start_pos }
         }
+    };
 
-        let value = match self.parse_property_value() {
-            Some(v) => v,
-            None => {
-                if self.should_halt_section() {
-                    return None;
-                }
-                let current = self.current().clone();
-                self.handle_parse_error(
-                    ParseErrorType::UnexpectedToken,
-                    &format!(
-                        "Expected property value after '=' in property '{}'",
-                        property_name
-                    ),
-                    &current,
-                );
-                if self.should_halt_section() {
-                    return None;
-                }
-                Value::Null { position: start_pos }
-            }
-        };
-
-        if self.debug_config.is_verbose {
-            self.error_manager
-                .log_info(&format!("Created simple property AST node: {}", property_name));
-        }
-        Some(DataEntry::SimpleProperty {
-            name: property_name,
-            data_type,
-            value,
-            position: start_pos,
-        })
+    if self.debug_config.is_verbose {
+        self.error_manager
+            .log_info(&format!("Created simple property AST node: {}", property_name));
     }
+    Some(DataEntry::SimpleProperty {
+        name: property_name,
+        data_type,
+        value,
+        position: start_pos,
+    })
+}
 
     fn parse_table_property(&mut self) -> Option<DataEntry> {
         self.log_verbose("Parsing table property");

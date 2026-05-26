@@ -1,0 +1,53 @@
+{
+  "app_name": "BenchmarkApp",
+  "app_version": "3.2.1",
+  "environment": "production",
+  "debug_mode": false,
+  "log_level": "info",
+  "port": 8443,
+  "max_connections": 1000,
+  "request_timeout": 30,
+  "keep_alive": true,
+  "workers": 8,
+  "database": {
+    "host": "db-primary.internal",
+    "port": 5432,
+    "name": "bench_db",
+    "pool_size": 20,
+    "ssl": true,
+    "connect_timeout": 10
+  },
+  "cache": {
+    "host": "redis.internal",
+    "port": 6379,
+    "ttl": 3600,
+    "max_memory": "512mb",
+    "eviction": "allkeys-lru"
+  },
+  "tls": {
+    "cert_path": "/etc/ssl/bench.crt",
+    "key_path": "/etc/ssl/bench.key",
+    "min_version": "TLSv1.2",
+    "verify_peer": true
+  },
+  "feature_flags": {
+    "auth_v2": true,
+    "new_dashboard": false,
+    "beta_api": true,
+    "analytics": true,
+    "rate_limiting": true,
+    "dark_mode": false,
+    "export_csv": true
+  },
+  "allowed_origins": [
+    "https://app.bench.com",
+    "https://admin.bench.com",
+    "https://api.bench.com",
+    "https://mobile.bench.com"
+  ],
+  "admin_emails": [
+    "ops@bench.com",
+    "devops@bench.com",
+    "security@bench.com"
+  ]
+}

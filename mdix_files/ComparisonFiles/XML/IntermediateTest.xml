@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <gameConfig>
+        <title>Space Explorer</title>
+        <version>2.1.0</version>
+        <maxPlayers>64</maxPlayers>
+        <difficulty>NORMAL</difficulty>
+        <features>
+            <multiplayerEnabled>true</multiplayerEnabled>
+            <voiceChatEnabled>true</voiceChatEnabled>
+            <crossPlatformPlay>false</crossPlatformPlay>
+        </features>
+    </gameConfig>
+    <player>
+        <defaultClass>WARRIOR</defaultClass>
+        <startingStats>
+            <health>100</health>
+            <mana>50</mana>
+            <stamina>80</stamina>
+            <armor>25</armor>
+        </startingStats>
+        <inventory>
+            <maxSlots>40</maxSlots>
+            <startingGold>1000</startingGold>
+            <defaultItems>
+                <item>
+                    <id>1</id>
+                    <name>Iron Sword</name>
+                    <damage>25</damage>
+                    <durability>100</durability>
+                    <rarity>COMMON</rarity>
+                </item>
+                <item>
+                    <id>2</id>
+                    <name>Leather Armor</name>
+                    <defense>15</defense>
+                    <durability>80</durability>
+                    <rarity>COMMON</rarity>
+                </item>
+                <item>
+                    <id>3</id>
+                    <name>Health Potion</name>
+                    <healAmount>50</healAmount>
+                    <stackSize>5</stackSize>
+                    <rarity>COMMON</rarity>
+                </item>
+            </defaultItems>
+        </inventory>
+    </player>
+    <enemies>
+        <types>
+            <enemy>
+                <id>goblin</id>
+                <name>Goblin</name>
+                <level>5</level>
+                <health>80</health>
+                <damage>15</damage>
+                <xpReward>50</xpReward>
+                <goldDrop>25</goldDrop>
+                <dropTable>
+                    <drop>health_potion</drop>
+                    <drop>iron_dagger</drop>
+                    <drop>goblin_tooth</drop>
+                </dropTable>
+            </enemy>
+            <enemy>
+                <id>orc</id>
+                <name>Orc Warrior</name>
+                <level>10</level>
+                <health>150</health>
+                <damage>30</damage>
+                <xpReward>120</xpReward>
+                <goldDrop>75</goldDrop>
+                <dropTable>
+                    <drop>health_potion</drop>
+                    <drop>iron_sword</drop>
+                    <drop>orc_hide</drop>
+                </dropTable>
+            </enemy>
+            <enemy>
+                <id>dragon</id>
+                <name>Ancient Dragon</name>
+                <level>50</level>
+                <health>5000</health>
+                <damage>200</damage>
+                <xpReward>10000</xpReward>
+                <goldDrop>5000</goldDrop>
+                <dropTable>
+                    <drop>legendary_weapon</drop>
+                    <drop>dragon_scale</drop>
+                    <drop>rare_gem</drop>
+                </dropTable>
+            </enemy>
+        </types>
+    </enemies>
+    <quests>
+        <main>
+            <quest>
+                <id>q001</id>
+                <name>The Beginning</name>
+                <description>Start your adventure</description>
+                <objectives>
+                    <objective>Talk to village elder</objective>
+                    <objective>Collect 3 wolf pelts</objective>
+                </objectives>
+                <rewards>
+                    <xp>100</xp>
+                    <gold>50</gold>
+                    <items>
+                        <item>steel_sword</item>
+                    </items>
+                </rewards>
+            </quest>
+            <quest>
+                <id>q002</id>
+                <name>Goblin Threat</name>
+                <description>Clear the goblin camp</description>
+                <objectives>
+                    <objective>Defeat 10 goblins</objective>
+                    <objective>Find the goblin chief</objective>
+                </objectives>
+                <rewards>
+                    <xp>500</xp>
+                    <gold>200</gold>
+                    <items>
+                        <item>rare_armor</item>
+                        <item>health_potion</item>
+                    </items>
+                </rewards>
+            </quest>
+        </main>
+        <side>
+            <quest>
+                <id>sq001</id>
+                <name>Herb Gathering</name>
+                <description>Collect herbs for the alchemist</description>
+                <objectives>
+                    <objective>Collect 5 red herbs</objective>
+                    <objective>Collect 3 blue flowers</objective>
+                </objectives>
+                <rewards>
+                    <xp>50</xp>
+                    <gold>25</gold>
+                </rewards>
+            </quest>
+        </side>
+    </quests>
+</root>

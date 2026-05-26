@@ -62,7 +62,7 @@ fn provide_inner(
             if is_security_missing_msg(&msg) {
                 if !added_security_insert {
                     let algorithm = infer_algorithm_from_doc(doc);
-                    if let Some(action) = fix_insert_security(doc, algorithm) {
+                    if let Some(action) = fix_insert_security(doc, algorithm.as_str()) {
                         actions.push(CodeActionOrCommand::CodeAction(action));
                         added_security_insert = true;
                     }

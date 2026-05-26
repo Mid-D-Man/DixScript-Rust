@@ -1,0 +1,561 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <EquipableItemCamoClassId>ALL_SMG_CAMOS_CONFIG</EquipableItemCamoClassId>
+    <InventoryItemCamos>
+        <item>
+            <MainItemId>ALIYAHOO419</MainItemId>
+            <MainItemClass>BASIC_SMG</MainItemClass>
+            <CamoRaritySubClass>
+                <subclass>
+                    <RaritySubClassId>Aliyahoo419_Basic_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>ALIYAHOO419</CamoId>
+                            <CamoIndex>0</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Basic</CamoRarity>
+                            <CamoAtlasSpriteName>Aliyahoo419(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Aliyahoo419</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                    </MainItemCamos>
+                </subclass>
+                <subclass>
+                    <RaritySubClassId>Aliyahoo419_Epic_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>ALIYAHOO419_HORIZON</CamoId>
+                            <CamoIndex>0</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Rare</CamoRarity>
+                            <CamoAtlasSpriteName>Aliyahoo419_Horizon(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Aliyahoo419-Horizon</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>ALIYAHOO419_ROSE</CamoId>
+                            <CamoIndex>1</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>Aliyahoo419_Rose(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Aliyahoo419-Rose</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>ALIYAHOO419_UNDERCAMO</CamoId>
+                            <CamoIndex>2</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>Aliyahoo419_UnderCamo(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Aliyahoo419-UnderCamo</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>ALIYAHOO419_DARKNIGHTSKY</CamoId>
+                            <CamoIndex>3</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>Aliyahoo419_DarkNightSky(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Aliyahoo419-DarkNightSky</CamoInGameName>
+                            <CamoType>SpriteAndMaterial</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>ALIYAHOO419_GOLDENLINE</CamoId>
+                            <CamoIndex>4</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>Aliyahoo419_GoldenLine(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Aliyahoo419-GoldenLine</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                    </MainItemCamos>
+                </subclass>
+            </CamoRaritySubClass>
+        </item>
+        <item>
+            <MainItemId>BEATLE</MainItemId>
+            <MainItemClass>BASIC_SMG</MainItemClass>
+            <CamoRaritySubClass>
+                <subclass>
+                    <RaritySubClassId>Beatle_Basic_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>BEATLE</CamoId>
+                            <CamoIndex>0</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Basic</CamoRarity>
+                            <CamoAtlasSpriteName>Beatle(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Beatle</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                    </MainItemCamos>
+                </subclass>
+                <subclass>
+                    <RaritySubClassId>Beatle_Rare_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>BEATLE_BLOODYCHESS</CamoId>
+                            <CamoIndex>0</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Rare</CamoRarity>
+                            <CamoAtlasSpriteName>Beatle_BloodyChess(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Beatle-BloodyChess</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                    </MainItemCamos>
+                </subclass>
+                <subclass>
+                    <RaritySubClassId>Beatle_Epic_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>BEATLE_ZAWOOD</CamoId>
+                            <CamoIndex>0</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>Beatle_ZaWood(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Beatle-ZaWood</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>BEATLE_UNDERCAMO</CamoId>
+                            <CamoIndex>1</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>Beatle_UnderCamo(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Beatle-UnderCamo</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>BEATLE_CRYSTALISED</CamoId>
+                            <CamoIndex>2</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>Beatle_Crystalised(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Beatle-Crystalised</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>BEATLE_WAVYDRIP</CamoId>
+                            <CamoIndex>3</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>Beatle_WavyDrip(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Beatle-WavyDrip</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>BEATLE_DARKNIGHTSKY</CamoId>
+                            <CamoIndex>4</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>Beatle_DarkNightSky(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Beatle-DarkNightSky</CamoInGameName>
+                            <CamoType>SpriteAndMaterial</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>BEATLE_GOLDENLINE</CamoId>
+                            <CamoIndex>5</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>Beatle_GoldenLine(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>Beatle-GoldenLine</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                    </MainItemCamos>
+                </subclass>
+            </CamoRaritySubClass>
+        </item>
+        <item>
+            <MainItemId>HOODGUN</MainItemId>
+            <MainItemClass>BASIC_SMG</MainItemClass>
+            <CamoRaritySubClass>
+                <subclass>
+                    <RaritySubClassId>HoodGun_Basic_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>HOODGUN</CamoId>
+                            <CamoIndex>0</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Basic</CamoRarity>
+                            <CamoAtlasSpriteName>HoodGun(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>HoodGun</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                    </MainItemCamos>
+                </subclass>
+                <subclass>
+                    <RaritySubClassId>HoodGun_Epic_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>HOODGUN_UNDERCAMO</CamoId>
+                            <CamoIndex>3</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>HoodGun_UnderCamo(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>HoodGun-UnderCamo</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>HOODGUN_CRYSTALISED</CamoId>
+                            <CamoIndex>4</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>HoodGun_Crystalised(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>HoodGun-Crystalised</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>HOODGUN_WAVYDRIP</CamoId>
+                            <CamoIndex>5</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>HoodGun_WavyDrip(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>HoodGun-WavyDrip</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>HOODGUN_DARKNIGHTSKY</CamoId>
+                            <CamoIndex>6</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>HoodGun_DarkNightSky(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>HoodGun-DarkNightSky</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>HOODGUN_GOLDENLINE</CamoId>
+                            <CamoIndex>7</CamoIndex>
+                            <CamoAttainmentType>Mission</CamoAttainmentType>
+                            <CamoAttainmentCurrency>Null</CamoAttainmentCurrency>
+                            <CamoAttainmentCurrencyAmount>0</CamoAttainmentCurrencyAmount>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>HoodGun_GoldenLine(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>HoodGun-GoldenLine</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                    </MainItemCamos>
+                </subclass>
+            </CamoRaritySubClass>
+        </item>
+        <item>
+            <MainItemId>KIG88</MainItemId>
+            <MainItemClass>BASIC_SMG</MainItemClass>
+            <CamoRaritySubClass>
+                <subclass>
+                    <RaritySubClassId>KiG88_Basic_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>KIG88</CamoId>
+                            <CamoIndex>0</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Basic</CamoRarity>
+                            <CamoAtlasSpriteName>KiG88(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>KiG88</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                    </MainItemCamos>
+                </subclass>
+                <subclass>
+                    <RaritySubClassId>KiG88_Epic_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>KIG88_POLYCHROMATIC</CamoId>
+                            <CamoIndex>1</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>KiG88_Polychromatic(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>KiG88-PolyChromatic</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>KIG88_JAPANISESUNSET</CamoId>
+                            <CamoIndex>2</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>KiG88_JapanesseSunset(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>KiG88-JpSunset</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>KIG88_DOUBLESUN</CamoId>
+                            <CamoIndex>3</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>KiG88_DoubleSun(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>KiG88-DoubleSun</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>KIG88_DARKGOLD</CamoId>
+                            <CamoIndex>4</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>KiG88_DarkGold(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>KiG88-DarkGold</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>KIG88_DIAMODMARBLES</CamoId>
+                            <CamoIndex>5</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>KiG88_DiamondMarbles(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>KiG88-DiamodMarbles</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>KIG88_CRYSTALISED</CamoId>
+                            <CamoIndex>6</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>KiG88_Crystalised(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>KiG88-Crystalised</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>KIG88_WAVYDRIP</CamoId>
+                            <CamoIndex>7</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>KiG88_WavyDrip(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>KiG88-WavyDrip</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>KIG88_DARKNIGHTSKY</CamoId>
+                            <CamoIndex>8</CamoIndex>
+                            <CamoAttainmentType>DarkNightSky_Codex</CamoAttainmentType>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>KiG88_DarkNightSky(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>KiG88-DarkNightSky</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>KIG88_GOLDENLINE</CamoId>
+                            <CamoIndex>9</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>KiG88_GoldenLine(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>KiG88-GoldenLine</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                    </MainItemCamos>
+                </subclass>
+            </CamoRaritySubClass>
+        </item>
+        <item>
+            <MainItemId>STINGERA27</MainItemId>
+            <MainItemClass>BASIC_SMG</MainItemClass>
+            <CamoRaritySubClass>
+                <subclass>
+                    <RaritySubClassId>StingerA27_Basic_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>STINGERA27</CamoId>
+                            <CamoIndex>0</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Basic</CamoRarity>
+                            <CamoAtlasSpriteName>StingerA27(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>StingerA27</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                    </MainItemCamos>
+                </subclass>
+                <subclass>
+                    <RaritySubClassId>Stinger_Rare_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>STINGERA27_SPLASH</CamoId>
+                            <CamoIndex>1</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Rare</CamoRarity>
+                            <CamoAtlasSpriteName>StingerA27_Splash(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>StingerA27-Splash</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                    </MainItemCamos>
+                </subclass>
+                <subclass>
+                    <RaritySubClassId>Stinger_Epic_Camos</RaritySubClassId>
+                    <MainItemCamos>
+                        <camo>
+                            <CamoId>STINGERA27_COLDART</CamoId>
+                            <CamoIndex>2</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>StingerA27_ColdArt(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>StingerA27-ColdArt</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>STINGERA27_ARCANE</CamoId>
+                            <CamoIndex>3</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>StingerA27_Arcane(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>StingerA27-Arcane</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>STINGERA27_ROSE</CamoId>
+                            <CamoIndex>4</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>StingerA27_Rose(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>StingerA27-Rose</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>STINGERA27_JASMINE</CamoId>
+                            <CamoIndex>5</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>StingerA27_Jasmine(Clone)</CamoAtlasSpriteName>
+                            <CamoInGameName>StingerA27-Jasmine</CamoInGameName>
+                            <CamoType>Sprite</CamoType>
+                            <MaterialAddress>Null</MaterialAddress>
+                        </camo>
+                        <camo>
+                            <CamoId>STINGERA27_UNDERCAMO</CamoId>
+                            <CamoIndex>6</CamoIndex>
+                            <CamoAvailableInSeason>1</CamoAvailableInSeason>
+                            <CamoRarity>Epic</CamoRarity>
+                            <CamoAtlasSpriteName>StingerA27_UnderCamo(Clone)</CamoAtlasSpriteName>
+<CamoInGameName>StingerA27-UnderCamo</CamoInGameName>
+<CamoType>Sprite</CamoType>
+<MaterialAddress>Null</MaterialAddress>
+</camo>
+<camo>
+<CamoId>STINGERA27_DARKNIGHTSKY</CamoId>
+<CamoIndex>7</CamoIndex>
+<CamoAvailableInSeason>1</CamoAvailableInSeason>
+<CamoRarity>Epic</CamoRarity>
+<CamoAtlasSpriteName>StingerA27_DarkNightSky(Clone)</CamoAtlasSpriteName>
+<CamoInGameName>StingerA27-DarkNightSky</CamoInGameName>
+<CamoType>Sprite</CamoType>
+<MaterialAddress>Null</MaterialAddress>
+</camo>
+<camo>
+<CamoId>STINGERA27_GOLDENLINE</CamoId>
+<CamoIndex>8</CamoIndex>
+<CamoAvailableInSeason>1</CamoAvailableInSeason>
+<CamoRarity>Epic</CamoRarity>
+<CamoAtlasSpriteName>StingerA27_GoldenLine(Clone)</CamoAtlasSpriteName>
+<CamoInGameName>StingerA27-GoldenLine</CamoInGameName>
+<CamoType>Sprite</CamoType>
+<MaterialAddress>Null</MaterialAddress>
+</camo>
+</MainItemCamos>
+</subclass>
+</CamoRaritySubClass>
+</item>
+<item>
+<MainItemId>X39XX</MainItemId>
+<MainItemClass>BASIC_SMG</MainItemClass>
+<CamoRaritySubClass>
+<subclass>
+<RaritySubClassId>X39xx_Basic_Camos</RaritySubClassId>
+<MainItemCamos>
+<camo>
+<CamoId>X39XX</CamoId>
+<CamoIndex>0</CamoIndex>
+<CamoAvailableInSeason>1</CamoAvailableInSeason>
+<CamoRarity>Basic</CamoRarity>
+<CamoAtlasSpriteName>X39xx(Clone)</CamoAtlasSpriteName>
+<CamoInGameName>X39xx</CamoInGameName>
+<CamoType>Sprite</CamoType>
+<MaterialAddress>Null</MaterialAddress>
+</camo>
+</MainItemCamos>
+</subclass>
+<subclass>
+<RaritySubClassId>X39xx_Rare_Camos</RaritySubClassId>
+<MainItemCamos>
+<camo>
+<CamoId>X39XX_ZABURNER</CamoId>
+<CamoIndex>1</CamoIndex>
+<CamoAvailableInSeason>1</CamoAvailableInSeason>
+<CamoRarity>Rare</CamoRarity>
+<CamoAtlasSpriteName>X39xx_ZaBurner(Clone)</CamoAtlasSpriteName>
+<CamoInGameName>X39xx-ZaBurner</CamoInGameName>
+<CamoType>Sprite</CamoType>
+<MaterialAddress>Null</MaterialAddress>
+</camo>
+</MainItemCamos>
+</subclass>
+<subclass>
+<RaritySubClassId>X39xx_Epic_Camos</RaritySubClassId>
+<MainItemCamos>
+<camo>
+<CamoId>X39XX_UNDERCAMO</CamoId>
+<CamoIndex>2</CamoIndex>
+<CamoAvailableInSeason>1</CamoAvailableInSeason>
+<CamoRarity>Epic</CamoRarity>
+<CamoAtlasSpriteName>X39xx_UnderCamo(Clone)</CamoAtlasSpriteName>
+<CamoInGameName>X39xx-UnderCamo</CamoInGameName>
+<CamoType>Sprite</CamoType>
+<MaterialAddress>Null</MaterialAddress>
+</camo>
+<camo>
+<CamoId>X39XX_DARKNIGHTSKY</CamoId>
+<CamoIndex>3</CamoIndex>
+<CamoAvailableInSeason>1</CamoAvailableInSeason>
+<CamoRarity>Epic</CamoRarity>
+<CamoAtlasSpriteName>X39xx_DrakNightSky(Clone)</CamoAtlasSpriteName>
+<CamoInGameName>X39xx-DarkNightSky</CamoInGameName>
+<CamoType>Sprite</CamoType>
+<MaterialAddress>Null</MaterialAddress>
+</camo>
+<camo>
+<CamoId>X39XX_GOLDENLINE</CamoId>
+<CamoIndex>4</CamoIndex>
+<CamoAvailableInSeason>1</CamoAvailableInSeason>
+<CamoRarity>Epic</CamoRarity>
+<CamoAtlasSpriteName>X39xx_GoldenLine(Clone)</CamoAtlasSpriteName>
+<CamoInGameName>X39xx-GoldenLine</CamoInGameName>
+<CamoType>Sprite</CamoType>
+<MaterialAddress>Null</MaterialAddress>
+</camo>
+</MainItemCamos>
+</subclass>
+</CamoRaritySubClass>
+</item>
+</InventoryItemCamos>
+</root>

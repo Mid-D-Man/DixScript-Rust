@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GameBotConfigs>
+    <botName>TestBot</botName>
+    <version>1.0.0</version>
+    <enabled>true</enabled>
+    <settings>
+        <maxRetries>3</maxRetries>
+        <timeout>5000</timeout>
+        <endpoints>
+            <endpoint>https://api.example.com/v1</endpoint>
+            <endpoint>https://api.example.com/v2</endpoint>
+        </endpoints>
+    </settings>
+    <roles>
+        <role>
+            <name>admin</name>
+            <permissions>
+                <permission>read</permission>
+                <permission>write</permission>
+                <permission>delete</permission>
+            </permissions>
+        </role>
+        <role>
+            <name>user</name>
+            <permissions>
+                <permission>read</permission>
+            </permissions>
+        </role>
+    </roles>
+</GameBotConfigs>

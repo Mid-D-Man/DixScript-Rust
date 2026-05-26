@@ -1,0 +1,182 @@
+{
+  "gameWorld": {
+    "name": "Aetheria",
+    "seed": 982374619,
+    "difficulty": "HARD",
+    "pvpEnabled": true
+  },
+  "enemySpawns": {
+    "zone_1_forest": [
+      { "enemyId": "wolf", "level": 1, "spawnChance": 0.8, "maxCount": 5, "respawnTime": 60 },
+      { "enemyId": "bear", "level": 3, "spawnChance": 0.3, "maxCount": 2, "respawnTime": 120 },
+      { "enemyId": "goblin_scout", "level": 2, "spawnChance": 0.5, "maxCount": 3, "respawnTime": 90 }
+    ],
+    "zone_2_cave": [
+      { "enemyId": "bat", "level": 4, "spawnChance": 0.9, "maxCount": 10, "respawnTime": 45 },
+      { "enemyId": "spider", "level": 5, "spawnChance": 0.6, "maxCount": 4, "respawnTime": 80 },
+      { "enemyId": "cave_troll", "level": 8, "spawnChance": 0.2, "maxCount": 1, "respawnTime": 300 }
+    ],
+    "zone_3_mountain": [
+      { "enemyId": "harpy", "level": 10, "spawnChance": 0.5, "maxCount": 3, "respawnTime": 120 },
+      { "enemyId": "rock_golem", "level": 12, "spawnChance": 0.3, "maxCount": 2, "respawnTime": 200 },
+      { "enemyId": "frost_giant", "level": 15, "spawnChance": 0.1, "maxCount": 1, "respawnTime": 400 }
+    ],
+    "zone_4_desert": [
+      { "enemyId": "scorpion", "level": 6, "spawnChance": 0.7, "maxCount": 5, "respawnTime": 70 },
+      { "enemyId": "sand_worm", "level": 9, "spawnChance": 0.4, "maxCount": 2, "respawnTime": 150 },
+      { "enemyId": "desert_bandit", "level": 7, "spawnChance": 0.5, "maxCount": 4, "respawnTime": 100 }
+    ],
+    "zone_5_swamp": [
+      { "enemyId": "slime", "level": 3, "spawnChance": 0.8, "maxCount": 8, "respawnTime": 50 },
+      { "enemyId": "alligator", "level": 8, "spawnChance": 0.4, "maxCount": 3, "respawnTime": 120 },
+      { "enemyId": "swamp_witch", "level": 11, "spawnChance": 0.2, "maxCount": 1, "respawnTime": 250 }
+    ]
+  },
+  "lootTables": {
+    "common_drops": [
+      { "itemId": "health_potion_small", "dropChance": 0.5, "minQuantity": 1, "maxQuantity": 3 },
+      { "itemId": "mana_potion_small", "dropChance": 0.4, "minQuantity": 1, "maxQuantity": 2 },
+      { "itemId": "gold_coins", "dropChance": 0.9, "minQuantity": 5, "maxQuantity": 20 },
+      { "itemId": "iron_ore", "dropChance": 0.3, "minQuantity": 1, "maxQuantity": 5 }
+    ],
+    "uncommon_drops": [
+      { "itemId": "health_potion_medium", "dropChance": 0.3, "minQuantity": 1, "maxQuantity": 2 },
+      { "itemId": "mana_potion_medium", "dropChance": 0.25, "minQuantity": 1, "maxQuantity": 2 },
+      { "itemId": "silver_ore", "dropChance": 0.2, "minQuantity": 1, "maxQuantity": 3 },
+      { "itemId": "enchanted_fabric", "dropChance": 0.15, "minQuantity": 1, "maxQuantity": 2 }
+    ],
+    "rare_drops": [
+      { "itemId": "health_potion_large", "dropChance": 0.1, "minQuantity": 1, "maxQuantity": 1 },
+      { "itemId": "mana_potion_large", "dropChance": 0.1, "minQuantity": 1, "maxQuantity": 1 },
+      { "itemId": "gold_ore", "dropChance": 0.08, "minQuantity": 1, "maxQuantity": 2 },
+      { "itemId": "rare_gem", "dropChance": 0.05, "minQuantity": 1, "maxQuantity": 1 }
+    ],
+    "epic_drops": [
+      { "itemId": "legendary_weapon_fragment", "dropChance": 0.02, "minQuantity": 1, "maxQuantity": 1 },
+      { "itemId": "dragon_scale", "dropChance": 0.03, "minQuantity": 1, "maxQuantity": 2 },
+      { "itemId": "epic_armor_piece", "dropChance": 0.04, "minQuantity": 1, "maxQuantity": 1 }
+    ]
+  },
+  "craftingRecipes": {
+    "weapons": [
+      { "recipeId": "iron_sword", "resultItem": "iron_sword", "resultQuantity": 1, "requiredLevel": 5, "requiredGold": 50, "craftingTime": 120 },
+      { "recipeId": "steel_sword", "resultItem": "steel_sword", "resultQuantity": 1, "requiredLevel": 15, "requiredGold": 200, "craftingTime": 300 },
+      { "recipeId": "mithril_sword", "resultItem": "mithril_sword", "resultQuantity": 1, "requiredLevel": 30, "requiredGold": 1000, "craftingTime": 600 },
+      { "recipeId": "iron_axe", "resultItem": "iron_axe", "resultQuantity": 1, "requiredLevel": 6, "requiredGold": 60, "craftingTime": 130 },
+      { "recipeId": "steel_axe", "resultItem": "steel_axe", "resultQuantity": 1, "requiredLevel": 16, "requiredGold": 220, "craftingTime": 320 },
+      { "recipeId": "iron_dagger", "resultItem": "iron_dagger", "resultQuantity": 1, "requiredLevel": 3, "requiredGold": 30, "craftingTime": 80 },
+      { "recipeId": "steel_dagger", "resultItem": "steel_dagger", "resultQuantity": 1, "requiredLevel": 12, "requiredGold": 150, "craftingTime": 200 }
+    ],
+    "armor": [
+      { "recipeId": "leather_helmet", "resultItem": "leather_helmet", "resultQuantity": 1, "requiredLevel": 3, "requiredGold": 25, "craftingTime": 60 },
+      { "recipeId": "leather_chest", "resultItem": "leather_chest", "resultQuantity": 1, "requiredLevel": 5, "requiredGold": 80, "craftingTime": 150 },
+      { "recipeId": "leather_legs", "resultItem": "leather_legs", "resultQuantity": 1, "requiredLevel": 4, "requiredGold": 60, "craftingTime": 120 },
+      { "recipeId": "leather_boots", "resultItem": "leather_boots", "resultQuantity": 1, "requiredLevel": 2, "requiredGold": 40, "craftingTime": 90 },
+      { "recipeId": "iron_helmet", "resultItem": "iron_helmet", "resultQuantity": 1, "requiredLevel": 8, "requiredGold": 100, "craftingTime": 180 },
+      { "recipeId": "iron_chest", "resultItem": "iron_chest", "resultQuantity": 1, "requiredLevel": 10, "requiredGold": 200, "craftingTime": 300 },
+      { "recipeId": "iron_legs", "resultItem": "iron_legs", "resultQuantity": 1, "requiredLevel": 9, "requiredGold": 150, "craftingTime": 240 },
+      { "recipeId": "iron_boots", "resultItem": "iron_boots", "resultQuantity": 1, "requiredLevel": 7, "requiredGold": 80, "craftingTime": 150 }
+    ],
+    "potions": [
+      { "recipeId": "health_potion_small", "resultItem": "health_potion_small", "resultQuantity": 3, "requiredLevel": 1, "requiredGold": 10, "craftingTime": 30 },
+      { "recipeId": "health_potion_medium", "resultItem": "health_potion_medium", "resultQuantity": 2, "requiredLevel": 10, "requiredGold": 40, "craftingTime": 60 },
+      { "recipeId": "health_potion_large", "resultItem": "health_potion_large", "resultQuantity": 1, "requiredLevel": 25, "requiredGold": 150, "craftingTime": 120 },
+      { "recipeId": "mana_potion_small", "resultItem": "mana_potion_small", "resultQuantity": 3, "requiredLevel": 2, "requiredGold": 15, "craftingTime": 35 },
+      { "recipeId": "mana_potion_medium", "resultItem": "mana_potion_medium", "resultQuantity": 2, "requiredLevel": 11, "requiredGold": 50, "craftingTime": 70 },
+      { "recipeId": "mana_potion_large", "resultItem": "mana_potion_large", "resultQuantity": 1, "requiredLevel": 26, "requiredGold": 180, "craftingTime": 140 },
+      { "recipeId": "stamina_potion", "resultItem": "stamina_potion", "resultQuantity": 2, "requiredLevel": 5, "requiredGold": 30, "craftingTime": 50 },
+      { "recipeId": "antidote", "resultItem": "antidote", "resultQuantity": 3, "requiredLevel": 4, "requiredGold": 20, "craftingTime": 40 }
+    ]
+  },
+  "npcShops": {
+    "blacksmith_shop": {
+      "npcName": "Thorin Ironforge",
+      "location": "Village Square",
+      "shopType": "WEAPONS_AND_ARMOR",
+      "inventory": [
+        { "itemId": "iron_sword", "price": 100, "stock": 5, "restockTime": 3600 },
+        { "itemId": "iron_axe", "price": 120, "stock": 3, "restockTime": 3600 },
+        { "itemId": "iron_helmet", "price": 80, "stock": 5, "restockTime": 3600 },
+        { "itemId": "iron_chest", "price": 150, "stock": 4, "restockTime": 3600 },
+        { "itemId": "steel_sword", "price": 500, "stock": 2, "restockTime": 7200 },
+        { "itemId": "steel_shield", "price": 400, "stock": 2, "restockTime": 7200 },
+        { "itemId": "steel_axe", "price": 550, "stock": 2, "restockTime": 7200 },
+        { "itemId": "mithril_dagger", "price": 1200, "stock": 1, "restockTime": 14400 }
+      ]
+    },
+    "potion_shop": {
+      "npcName": "Elara Moonwhisper",
+      "location": "Market District",
+      "shopType": "POTIONS",
+      "inventory": [
+        { "itemId": "health_potion_small", "price": 20, "stock": 20, "restockTime": 1800 },
+        { "itemId": "mana_potion_small", "price": 25, "stock": 15, "restockTime": 1800 },
+        { "itemId": "health_potion_medium", "price": 80, "stock": 10, "restockTime": 3600 },
+        { "itemId": "mana_potion_medium", "price": 100, "stock": 8, "restockTime": 3600 },
+        { "itemId": "antidote", "price": 50, "stock": 12, "restockTime": 2400 },
+        { "itemId": "stamina_potion", "price": 60, "stock": 10, "restockTime": 2400 },
+        { "itemId": "strength_potion", "price": 150, "stock": 5, "restockTime": 5400 },
+        { "itemId": "defense_potion", "price": 150, "stock": 5, "restockTime": 5400 }
+      ]
+    },
+    "general_store": {
+      "npcName": "Marcus Goldleaf",
+      "location": "Town Center",
+      "shopType": "GENERAL",
+      "inventory": [
+        { "itemId": "torch", "price": 5, "stock": 50, "restockTime": 900 },
+        { "itemId": "rope", "price": 10, "stock": 30, "restockTime": 1800 },
+        { "itemId": "lockpick", "price": 15, "stock": 20, "restockTime": 2400 },
+        { "itemId": "backpack_upgrade", "price": 500, "stock": 3, "restockTime": 14400 },
+        { "itemId": "map", "price": 100, "stock": 10, "restockTime": 7200 },
+        { "itemId": "compass", "price": 75, "stock": 15, "restockTime": 5400 }
+      ]
+    }
+  },
+  "skillTrees": {
+    "warrior": {
+      "className": "Warrior",
+      "skills": [
+        { "skillId": "heavy_strike", "name": "Heavy Strike", "maxLevel": 5, "baseDamage": 50, "damagePerLevel": 10, "manaCost": 15, "cooldown": 5, "requiredLevel": 1 },
+        { "skillId": "shield_bash", "name": "Shield Bash", "maxLevel": 5, "baseDamage": 30, "damagePerLevel": 8, "manaCost": 20, "cooldown": 8, "requiredLevel": 5 },
+        { "skillId": "whirlwind", "name": "Whirlwind", "maxLevel": 5, "baseDamage": 40, "damagePerLevel": 12, "manaCost": 35, "cooldown": 15, "requiredLevel": 10 },
+        { "skillId": "berserk", "name": "Berserk", "maxLevel": 3, "baseDamage": 0, "damagePerLevel": 0, "manaCost": 50, "cooldown": 60, "requiredLevel": 20 },
+        { "skillId": "war_cry", "name": "War Cry", "maxLevel": 3, "baseDamage": 0, "damagePerLevel": 0, "manaCost": 30, "cooldown": 45, "requiredLevel": 15 },
+        { "skillId": "charge", "name": "Charge", "maxLevel": 4, "baseDamage": 35, "damagePerLevel": 9, "manaCost": 25, "cooldown": 12, "requiredLevel": 8 }
+      ]
+    },
+    "mage": {
+      "className": "Mage",
+      "skills": [
+        { "skillId": "fireball", "name": "Fireball", "maxLevel": 5, "baseDamage": 60, "damagePerLevel": 15, "manaCost": 25, "cooldown": 4, "requiredLevel": 1 },
+        { "skillId": "ice_shard", "name": "Ice Shard", "maxLevel": 5, "baseDamage": 45, "damagePerLevel": 12, "manaCost": 20, "cooldown": 3, "requiredLevel": 5 },
+        { "skillId": "lightning_bolt", "name": "Lightning Bolt", "maxLevel": 5, "baseDamage": 80, "damagePerLevel": 20, "manaCost": 40, "cooldown": 10, "requiredLevel": 15 },
+        { "skillId": "meteor", "name": "Meteor", "maxLevel": 3, "baseDamage": 200, "damagePerLevel": 50, "manaCost": 100, "cooldown": 45, "requiredLevel": 30 },
+        { "skillId": "frost_nova", "name": "Frost Nova", "maxLevel": 4, "baseDamage": 50, "damagePerLevel": 13, "manaCost": 35, "cooldown": 18, "requiredLevel": 12 },
+        { "skillId": "arcane_missiles", "name": "Arcane Missiles", "maxLevel": 5, "baseDamage": 35, "damagePerLevel": 10, "manaCost": 18, "cooldown": 2, "requiredLevel": 3 }
+      ]
+    },
+    "rogue": {
+      "className": "Rogue",
+      "skills": [
+        { "skillId": "backstab", "name": "Backstab", "maxLevel": 5, "baseDamage": 70, "damagePerLevel": 18, "manaCost": 20, "cooldown": 6, "requiredLevel": 1 },
+        { "skillId": "poison_blade", "name": "Poison Blade", "maxLevel": 5, "baseDamage": 35, "damagePerLevel": 10, "manaCost": 25, "cooldown": 8, "requiredLevel": 8 },
+        { "skillId": "shadow_step", "name": "Shadow Step", "maxLevel": 3, "baseDamage": 0, "damagePerLevel": 0, "manaCost": 30, "cooldown": 12, "requiredLevel": 15 },
+        { "skillId": "assassinate", "name": "Assassinate", "maxLevel": 3, "baseDamage": 300, "damagePerLevel": 100, "manaCost": 80, "cooldown": 60, "requiredLevel": 25 },
+        { "skillId": "smoke_bomb", "name": "Smoke Bomb", "maxLevel": 4, "baseDamage": 0, "damagePerLevel": 0, "manaCost": 40, "cooldown": 30, "requiredLevel": 10 },
+        { "skillId": "dual_strike", "name": "Dual Strike", "maxLevel": 5, "baseDamage": 45, "damagePerLevel": 11, "manaCost": 22, "cooldown": 5, "requiredLevel": 6 }
+      ]
+    },
+    "healer": {
+      "className": "Healer",
+      "skills": [
+        { "skillId": "heal", "name": "Heal", "maxLevel": 5, "baseDamage": 50, "damagePerLevel": 12, "manaCost": 20, "cooldown": 3, "requiredLevel": 1 },
+        { "skillId": "group_heal", "name": "Group Heal", "maxLevel": 5, "baseDamage": 30, "damagePerLevel": 8, "manaCost": 50, "cooldown": 10, "requiredLevel": 10 },
+        { "skillId": "resurrection", "name": "Resurrection", "maxLevel": 1, "baseDamage": 0, "damagePerLevel": 0, "manaCost": 100, "cooldown": 300, "requiredLevel": 30 },
+        { "skillId": "holy_shield", "name": "Holy Shield", "maxLevel": 4, "baseDamage": 0, "damagePerLevel": 0, "manaCost": 35, "cooldown": 20, "requiredLevel": 8 },
+        { "skillId": "cleanse", "name": "Cleanse", "maxLevel": 3, "baseDamage": 0, "damagePerLevel": 0, "manaCost": 25, "cooldown": 15, "requiredLevel": 5 },
+        { "skillId": "divine_light", "name": "Divine Light", "maxLevel": 5, "baseDamage": 40, "damagePerLevel": 10, "manaCost": 30, "cooldown": 8, "requiredLevel": 12 }
+      ]
+    }
+  }
+}

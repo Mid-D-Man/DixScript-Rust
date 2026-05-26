@@ -1,0 +1,106 @@
+[gameConfig]
+title = "Space Explorer"
+version = "2.1.0"
+maxPlayers = 64
+difficulty = "NORMAL"
+
+[gameConfig.features]
+multiplayerEnabled = true
+voiceChatEnabled = true
+crossPlatformPlay = false
+
+[player]
+defaultClass = "WARRIOR"
+
+[player.startingStats]
+health = 100
+mana = 50
+stamina = 80
+armor = 25
+
+[player.inventory]
+maxSlots = 40
+startingGold = 1000
+
+[[player.inventory.defaultItems]]
+id = 1
+name = "Iron Sword"
+damage = 25
+durability = 100
+rarity = "COMMON"
+
+[[player.inventory.defaultItems]]
+id = 2
+name = "Leather Armor"
+defense = 15
+durability = 80
+rarity = "COMMON"
+
+[[player.inventory.defaultItems]]
+id = 3
+name = "Health Potion"
+healAmount = 50
+stackSize = 5
+rarity = "COMMON"
+
+[[enemies.types]]
+id = "goblin"
+name = "Goblin"
+level = 5
+health = 80
+damage = 15
+xpReward = 50
+goldDrop = 25
+dropTable = ["health_potion", "iron_dagger", "goblin_tooth"]
+
+[[enemies.types]]
+id = "orc"
+name = "Orc Warrior"
+level = 10
+health = 150
+damage = 30
+xpReward = 120
+goldDrop = 75
+dropTable = ["health_potion", "iron_sword", "orc_hide"]
+
+[[enemies.types]]
+id = "dragon"
+name = "Ancient Dragon"
+level = 50
+health = 5000
+damage = 200
+xpReward = 10000
+goldDrop = 5000
+dropTable = ["legendary_weapon", "dragon_scale", "rare_gem"]
+
+[[quests.main]]
+id = "q001"
+name = "The Beginning"
+description = "Start your adventure"
+objectives = ["Talk to village elder", "Collect 3 wolf pelts"]
+
+[quests.main.rewards]
+xp = 100
+gold = 50
+items = ["steel_sword"]
+
+[[quests.main]]
+id = "q002"
+name = "Goblin Threat"
+description = "Clear the goblin camp"
+objectives = ["Defeat 10 goblins", "Find the goblin chief"]
+
+[quests.main.rewards]
+xp = 500
+gold = 200
+items = ["rare_armor", "health_potion"]
+
+[[quests.side]]
+id = "sq001"
+name = "Herb Gathering"
+description = "Collect herbs for the alchemist"
+objectives = ["Collect 5 red herbs", "Collect 3 blue flowers"]
+
+[quests.side.rewards]
+xp = 50
+gold = 25

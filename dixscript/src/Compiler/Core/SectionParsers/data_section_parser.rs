@@ -523,100 +523,106 @@ fn reset_parse_state(&mut self) {
     })
 }
 
-    fn parse_table_property(&mut self) -> Option<DataEntry> {
-        self.log_verbose("Parsing table property");
+fn parse_table_property(&mut self) -> Option<DataEntry> {
+    self.log_verbose("Parsing table property");
 
-        let start_pos = Position::from_token(self.current());
-        let table_path = self.parse_table_path()?;
+    let start_pos = Position::from_token(self.current());
+    let table_path = self.parse_table_path()?;
 
-        if !self.match_and_consume_symbol(':') {
-            let current = self.current().clone();
-            self.handle_parse_error(
-                ParseErrorType::MissingToken,
-                &format!("Expected ':' after table path '{}'", table_path),
-                &current,
-            );
-            if self.should_halt_section() {
-                return None;
-            }
+    if !self.match_and_consume_symbol(':') {
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::MissingToken,
+            &format!("Expected ':' after table path '{}'", table_path),
+            &current,
+        );
+        if self.should_halt_section() {
+            return None;
         }
-
-        let estimated_props = estimate_properties_count(self.tokens.len());
-        let mut properties = Vec::with_capacity(estimated_props);
-
-        while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
-            self.track_progress();
-            if self.is_stuck() {
-                if !self.recover_from_stuck() {
-                    break;
-                }
-                continue;
-            }
-
-            if self.is_start_of_new_data_entry() {
-                self.log_verbose("Detected start of new data entry — ending table property");
-                break;
-            }
-
-            let assignment = self.parse_property_assignment();
-            if assignment.is_none() && self.should_halt_section() {
-                return None;
-            }
-
-            if let Some(assign) = assignment {
-                properties.push(assign);
-            }
-
-            if self.is_current_symbol(',') {
-                self.advance();
-                self.log_verbose("Consumed optional comma within table property");
-            } else if self.is_current_symbol(')') || self.is_start_of_new_data_entry() {
-                self.log_verbose("Ending table property parsing");
-                break;
-            } else if !self.is_at_end() {
-                let next_token = self.current();
-                if matches!(
-                    next_token.token_type,
-                    TokenType::Identifier(_) | TokenType::Keyword(_)
-                ) {
-                    let mut look_ahead = 1;
-                    let mut after_ident = self.peek_ahead(look_ahead);
-
-                    if let Some(token) = after_ident {
-                        if let TokenType::Symbol('<') = token.token_type {
-                            look_ahead += 1;
-                            while let Some(token) = self.peek_ahead(look_ahead) {
-                                if let TokenType::Symbol('>') = token.token_type {
-                                    look_ahead += 1;
-                                    break;
-                                }
-                                look_ahead += 1;
-                            }
-                            after_ident = self.peek_ahead(look_ahead);
-                        }
-                    }
-
-                    if let Some(token) = after_ident {
-                        if let TokenType::Symbol('=') = token.token_type {
-                            self.log_verbose("Next property detected without comma — continuing");
-                            continue;
-                        }
-                    }
-
-                    self.log_verbose("Token after identifier is not '=' — ending table property");
-                    break;
-                }
-                self.log_verbose("No more properties detected — ending table property");
-                break;
-            }
-        }
-
-        Some(DataEntry::TableProperty {
-            path: table_path,
-            properties,
-            position: start_pos,
-        })
     }
+
+    let estimated_props = estimate_properties_count(self.tokens.len());
+    let mut properties = Vec::with_capacity(estimated_props);
+
+    while !self.is_at_end() && !self.is_current_symbol(')') && !self.should_terminate_loop() {
+        self.track_progress();
+        if self.is_stuck() {
+            if !self.recover_from_stuck() {
+                break;
+            }
+            continue;
+        }
+
+        if self.is_start_of_new_data_entry() {
+            self.log_verbose("Detected start of new data entry — ending table property");
+            break;
+        }
+
+        let assignment = self.parse_property_assignment();
+        if assignment.is_none() && self.should_halt_section() {
+            return None;
+        }
+
+        if let Some(assign) = assignment {
+            properties.push(assign);
+        }
+
+        if self.is_current_symbol(',') {
+            self.advance();
+            self.log_verbose("Consumed optional comma within table property");
+        } else if self.is_current_symbol(')') || self.is_start_of_new_data_entry() {
+            self.log_verbose("Ending table property parsing");
+            break;
+        } else if !self.is_at_end() {
+            let next_token = self.current();
+            if matches!(
+                next_token.token_type,
+                TokenType::Identifier(_) | TokenType::Keyword(_)
+            ) {
+                // Look ahead past an optional type annotation to find the '='.
+                // Uses skip_annotation_lookahead so that fused tokens produced by
+                // the tokenizer when there is no space between the closing '>' and
+                // the following '=' (e.g. `key<int>=value` → '>=') are handled.
+                let mut look_ahead = 1;
+                let mut eq_fused   = false;
+
+                if let Some(token) = self.peek_ahead(look_ahead) {
+                    if let TokenType::Symbol('<') = token.token_type {
+                        let (new_look_ahead, fused) =
+                            self.skip_annotation_lookahead(look_ahead);
+                        look_ahead = new_look_ahead;
+                        eq_fused   = fused;
+                    }
+                }
+
+                // A property follows when either:
+                //   - the '=' was fused into the closing angle token, OR
+                //   - the token at look_ahead is a plain '='
+                let is_next_property = eq_fused
+                    || matches!(
+                        self.peek_ahead(look_ahead).map(|t| &t.token_type),
+                        Some(TokenType::Symbol('='))
+                    );
+
+                if is_next_property {
+                    self.log_verbose("Next property detected without comma — continuing");
+                    continue;
+                }
+
+                self.log_verbose("Token after identifier is not '=' — ending table property");
+                break;
+            }
+            self.log_verbose("No more properties detected — ending table property");
+            break;
+        }
+    }
+
+    Some(DataEntry::TableProperty {
+        path: table_path,
+        properties,
+        position: start_pos,
+    })
+}
 
     fn parse_group_array(&mut self) -> Option<DataEntry> {
         self.log_verbose("Parsing group array");

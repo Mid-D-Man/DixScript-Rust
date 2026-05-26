@@ -1,0 +1,79 @@
+{
+  "game_title": "Benchmark RPG",
+  "game_version": "1.4.2",
+  "build_number": 4201,
+  "min_client": "1.0.0",
+  "server_region": "us-east-1",
+  "session_settings": {
+    "max_players": 8, "match_duration": 600, "respawn_time": 15,
+    "friendly_fire": false, "pvp_enabled": true
+  },
+  "economy_settings": {
+    "base_gold_drop": 10, "gold_multiplier": 1.5,
+    "shop_tax_rate": 0.05, "auction_fee": 0.03
+  },
+  "weapons": [
+    {"id":"WPN_001","name":"Rusty Sword",     "class":1,"rarity":0,"damage":15, "weight":2.5,"dps":6.0, "sell_value":45,  "two_handed":true},
+    {"id":"WPN_002","name":"Iron Sword",      "class":1,"rarity":0,"damage":22, "weight":3.0,"dps":7.333333,"sell_value":66,  "two_handed":true},
+    {"id":"WPN_003","name":"Steel Sword",     "class":1,"rarity":1,"damage":60, "weight":3.2,"dps":18.75,"sell_value":180, "two_handed":true},
+    {"id":"WPN_004","name":"Silver Sword",    "class":1,"rarity":1,"damage":80, "weight":3.5,"dps":22.857142,"sell_value":240, "two_handed":true},
+    {"id":"WPN_005","name":"Elven Blade",     "class":1,"rarity":2,"damage":220,"weight":2.8,"dps":78.571428,"sell_value":660, "two_handed":true},
+    {"id":"WPN_006","name":"Runic Sword",     "class":1,"rarity":2,"damage":280,"weight":3.0,"dps":93.333333,"sell_value":840, "two_handed":true},
+    {"id":"WPN_007","name":"Dragon Blade",    "class":1,"rarity":3,"damage":720,"weight":4.0,"dps":180.0,"sell_value":2160,"two_handed":true},
+    {"id":"WPN_008","name":"Excalibur",       "class":1,"rarity":4,"damage":1920,"weight":3.8,"dps":505.263157,"sell_value":5760,"two_handed":true},
+    {"id":"WPN_009","name":"Iron Axe",        "class":2,"rarity":0,"damage":20, "weight":4.0,"dps":5.0, "sell_value":60,  "two_handed":true},
+    {"id":"WPN_010","name":"Steel Axe",       "class":2,"rarity":1,"damage":64, "weight":4.5,"dps":14.222222,"sell_value":192, "two_handed":true},
+    {"id":"WPN_011","name":"Orcish Axe",      "class":2,"rarity":2,"damage":192,"weight":5.0,"dps":38.4,"sell_value":576, "two_handed":true},
+    {"id":"WPN_012","name":"Executioner Axe", "class":2,"rarity":3,"damage":600,"weight":5.5,"dps":109.090909,"sell_value":1800,"two_handed":true},
+    {"id":"WPN_013","name":"Hunting Bow",     "class":3,"rarity":0,"damage":18, "weight":1.5,"dps":12.0,"sell_value":54,  "two_handed":false},
+    {"id":"WPN_014","name":"Elven Bow",       "class":3,"rarity":2,"damage":140,"weight":1.2,"dps":116.666666,"sell_value":420, "two_handed":false},
+    {"id":"WPN_015","name":"Arcane Staff",    "class":4,"rarity":1,"damage":50, "weight":2.0,"dps":25.0,"sell_value":150, "two_handed":false},
+    {"id":"WPN_016","name":"Elder Staff",     "class":4,"rarity":3,"damage":480,"weight":2.2,"dps":218.181818,"sell_value":1440,"two_handed":false},
+    {"id":"WPN_017","name":"Shadow Dagger",   "class":5,"rarity":1,"damage":56, "weight":0.8,"dps":70.0,"sell_value":168, "two_handed":false},
+    {"id":"WPN_018","name":"Venomfang",       "class":5,"rarity":2,"damage":220,"weight":0.9,"dps":244.444444,"sell_value":660, "two_handed":false}
+  ],
+  "armors": [
+    {"id":"ARM_001","name":"Leather Cap",    "slot":1,"rarity":0,"defense":5,  "weight":0.8,"sell_value":10},
+    {"id":"ARM_002","name":"Iron Helmet",    "slot":1,"rarity":1,"defense":24, "weight":2.0,"sell_value":48},
+    {"id":"ARM_003","name":"Steel Helm",     "slot":1,"rarity":2,"defense":80, "weight":2.5,"sell_value":160},
+    {"id":"ARM_004","name":"Dragon Helm",    "slot":1,"rarity":3,"defense":280,"weight":3.0,"sell_value":560},
+    {"id":"ARM_005","name":"Leather Vest",   "slot":2,"rarity":0,"defense":8,  "weight":1.5,"sell_value":16},
+    {"id":"ARM_006","name":"Chain Mail",     "slot":2,"rarity":1,"defense":36, "weight":4.0,"sell_value":72},
+    {"id":"ARM_007","name":"Plate Armor",    "slot":2,"rarity":2,"defense":120,"weight":6.0,"sell_value":240},
+    {"id":"ARM_008","name":"Mythril Plate",  "slot":2,"rarity":4,"defense":880,"weight":5.0,"sell_value":1760},
+    {"id":"ARM_009","name":"Leather Pants",  "slot":3,"rarity":0,"defense":6,  "weight":1.0,"sell_value":12},
+    {"id":"ARM_010","name":"Iron Greaves",   "slot":3,"rarity":1,"defense":30, "weight":3.0,"sell_value":60},
+    {"id":"ARM_011","name":"Leather Gloves", "slot":4,"rarity":0,"defense":4,  "weight":0.4,"sell_value":8},
+    {"id":"ARM_012","name":"Iron Gauntlets", "slot":4,"rarity":1,"defense":20, "weight":1.0,"sell_value":40},
+    {"id":"ARM_013","name":"Leather Boots",  "slot":5,"rarity":0,"defense":5,  "weight":0.6,"sell_value":10},
+    {"id":"ARM_014","name":"Iron Boots",     "slot":5,"rarity":1,"defense":22, "weight":1.8,"sell_value":44}
+  ],
+  "enemies": [
+    {"id":"ENE_001","name":"Goblin",         "type":1,"rarity":0,"health":20,  "xp_reward":5,   "gold_drop":2,  "drop_rate":60,"is_boss":false},
+    {"id":"ENE_002","name":"Orc Warrior",    "type":1,"rarity":0,"health":60,  "xp_reward":15,  "gold_drop":7,  "drop_rate":30,"is_boss":false},
+    {"id":"ENE_003","name":"Orc Shaman",     "type":1,"rarity":1,"health":90,  "xp_reward":40,  "gold_drop":20, "drop_rate":10,"is_boss":false},
+    {"id":"ENE_004","name":"Troll",          "type":2,"rarity":1,"health":240, "xp_reward":70,  "gold_drop":35, "drop_rate":30,"is_boss":false},
+    {"id":"ENE_005","name":"Forest Wolf",    "type":2,"rarity":0,"health":35,  "xp_reward":8,   "gold_drop":4,  "drop_rate":60,"is_boss":false},
+    {"id":"ENE_006","name":"Giant Spider",   "type":2,"rarity":0,"health":55,  "xp_reward":12,  "gold_drop":6,  "drop_rate":30,"is_boss":false},
+    {"id":"ENE_007","name":"Cave Bear",      "type":2,"rarity":1,"health":300, "xp_reward":80,  "gold_drop":40, "drop_rate":10,"is_boss":false},
+    {"id":"ENE_008","name":"Skeleton",       "type":3,"rarity":0,"health":25,  "xp_reward":6,   "gold_drop":3,  "drop_rate":60,"is_boss":false},
+    {"id":"ENE_009","name":"Zombie",         "type":3,"rarity":0,"health":40,  "xp_reward":10,  "gold_drop":5,  "drop_rate":30,"is_boss":false},
+    {"id":"ENE_010","name":"Lich",           "type":3,"rarity":2,"health":800, "xp_reward":320, "gold_drop":160,"drop_rate":10,"is_boss":false},
+    {"id":"ENE_011","name":"Fire Elemental", "type":4,"rarity":2,"health":320, "xp_reward":100, "gold_drop":50, "drop_rate":10,"is_boss":false},
+    {"id":"ENE_012","name":"Ice Elemental",  "type":4,"rarity":2,"health":320, "xp_reward":100, "gold_drop":50, "drop_rate":10,"is_boss":false},
+    {"id":"ENE_013","name":"Storm Lord",     "type":5,"rarity":3,"health":4000,"xp_reward":1600,"gold_drop":800,"drop_rate":30,"is_boss":true},
+    {"id":"ENE_014","name":"Dragon King",    "type":5,"rarity":4,"health":16000,"xp_reward":8000,"gold_drop":4000,"drop_rate":10,"is_boss":true}
+  ],
+  "levels": [
+    {"level":1, "name":"Novice",       "xp_required":0,    "bonus_hp":10,  "bonus_attack":2,  "bonus_defense":1, "unlocks":0},
+    {"level":2, "name":"Apprentice",   "xp_required":100,  "bonus_hp":20,  "bonus_attack":4,  "bonus_defense":2, "unlocks":1},
+    {"level":3, "name":"Journeyman",   "xp_required":250,  "bonus_hp":30,  "bonus_attack":6,  "bonus_defense":3, "unlocks":1},
+    {"level":4, "name":"Adept",        "xp_required":500,  "bonus_hp":40,  "bonus_attack":8,  "bonus_defense":4, "unlocks":2},
+    {"level":5, "name":"Expert",       "xp_required":900,  "bonus_hp":50,  "bonus_attack":10, "bonus_defense":5, "unlocks":2},
+    {"level":6, "name":"Veteran",      "xp_required":1400, "bonus_hp":60,  "bonus_attack":12, "bonus_defense":6, "unlocks":3},
+    {"level":7, "name":"Master",       "xp_required":2100, "bonus_hp":70,  "bonus_attack":14, "bonus_defense":7, "unlocks":3},
+    {"level":8, "name":"Grandmaster",  "xp_required":3000, "bonus_hp":80,  "bonus_attack":16, "bonus_defense":8, "unlocks":4},
+    {"level":9, "name":"Champion",     "xp_required":4200, "bonus_hp":90,  "bonus_attack":18, "bonus_defense":9, "unlocks":4},
+    {"level":10,"name":"Legend",       "xp_required":6000, "bonus_hp":100, "bonus_attack":20, "bonus_defense":10,"unlocks":5}
+  ]
+    }

@@ -1855,7 +1855,25 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
 
         self.skip_whitespace();
 
-        if !self.check_symbol(':') && !self.check_symbol('=') {
+        // Parse and discard optional type annotation.
+        // ObjectProperty has no data_type field; the annotation is consumed here
+        // so that `key<type>=value` sequences (no space before `=`) do not
+        // confuse the separator check below.  If the annotation ends with a
+        // fused `>=` or `>>=` token, `pending_equal` is set automatically by
+        // `parse_type_annotation` / `match_and_consume_closing_angle`.
+        if self.check_symbol('<') {
+            let _ = self.parse_type_annotation();
+            self.skip_whitespace();
+        }
+
+        // Consume the separator — '=' or ':' (both accepted in object literals).
+        // If the type annotation parser consumed a fused `>=` or `>>=` token, the
+        // '=' is already signalled via pending_equal and must not be consumed again.
+        if self.pending_equal {
+            self.pending_equal = false;
+        } else if self.check_symbol(':') || self.check_symbol('=') {
+            self.advance();
+        } else {
             let cur = self.current().clone();
             self.error_manager.add_parse_error(
                 ParseErrorType::MissingToken,
@@ -1863,14 +1881,12 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 cur.line, cur.column, None,
                 self.get_source_line(&cur),
             );
-            // Recover: skip to next comma, newline separator, or closing brace
+            // Recover: skip to next comma, newline separator, or closing brace.
             while !self.is_at_end() && !self.check_symbol(',') && !self.check_symbol('}') {
                 self.advance();
             }
             continue;
         }
-
-        self.advance(); // consume ':' or '='
         self.skip_whitespace();
 
         let val_expr = self.parse_expression(0);
@@ -1880,9 +1896,6 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         self.skip_whitespace();
 
         // Comma is optional — newline-separated properties are valid DixScript.
-        // If there is a comma, consume it and continue.
-        // If next token is '}', the outer while condition handles exit.
-        // Otherwise just loop — skip_whitespace already consumed the newline.
         if self.check_symbol(',') {
             self.advance();
             self.skip_whitespace();
@@ -1895,7 +1908,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
     if self.check_symbol('}') { self.advance(); }
 
     Value::Object { properties, position: obj_pos }
-        }
+}
     fn parse_tuple_constructor(&mut self) -> Expression {
         let pos = Position::from_token(self.current());
         self.advance();

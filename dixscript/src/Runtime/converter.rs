@@ -630,72 +630,77 @@ impl DixConverter {
         // skipped — path collisions are prevented at the DixScript parser level.
     }
 
-    /// Convert a DixValue to a toml::Value.
-    ///
-    /// Returns None for Null (TOML has no null type — callers should skip it).
-    ///
-    /// Tuple note: DixScript tuples are positional and may be heterogeneous.
-    /// TOML 1.0 allows heterogeneous inline arrays; older TOML 0.5 parsers
-    /// may reject them.  We emit a toml::Value::Array regardless and let the
-    /// consuming TOML parser decide.
-    fn dix_value_to_toml_value(&self, value: &DixValue) -> Option<toml::Value> {
-        match value {
-            // TOML has no null — caller should skip None return values.
-            DixValue::Null => None,
+/// Convert a DixValue to a toml::Value.
+///
+/// Returns None for Null (TOML has no null type — callers should skip it).
+///
+/// Enum note: exported as its integer ordinal, consistent with the JSON
+/// export path.  Both formats export the raw integer so that consuming code
+/// can switch on the value directly.  If full round-trip fidelity
+/// (enum_name + field_name + ordinal) is required, use the binary
+/// `.mdix.enc` format instead.
+///
+/// Tuple note: DixScript tuples are positional and may be heterogeneous.
+/// TOML 1.0 allows heterogeneous inline arrays; older TOML 0.5 parsers
+/// may reject them.  We emit a toml::Value::Array regardless and let the
+/// consuming TOML parser decide.
+fn dix_value_to_toml_value(&self, value: &DixValue) -> Option<toml::Value> {
+    match value {
+        // TOML has no null — caller should skip None return values.
+        DixValue::Null => None,
 
-            DixValue::Bool(b)      => Some(toml::Value::Boolean(*b)),
-            DixValue::Int(i)       => Some(toml::Value::Integer(*i as i64)),
-            DixValue::Long(l)      => Some(toml::Value::Integer(*l)),
-            DixValue::Float(f)     => Some(toml::Value::Float(*f as f64)),
-            DixValue::Double(d)    => Some(toml::Value::Float(*d)),
-            DixValue::String(s)    => Some(toml::Value::String(s.clone())),
-            DixValue::Date(d)      => Some(toml::Value::String(d.clone())),
-            DixValue::Timestamp(t) => Some(toml::Value::String(t.clone())),
-            DixValue::HexColor(c)  => Some(toml::Value::String(c.clone())),
+        DixValue::Bool(b)      => Some(toml::Value::Boolean(*b)),
+        DixValue::Int(i)       => Some(toml::Value::Integer(*i as i64)),
+        DixValue::Long(l)      => Some(toml::Value::Integer(*l)),
+        DixValue::Float(f)     => Some(toml::Value::Float(*f as f64)),
+        DixValue::Double(d)    => Some(toml::Value::Float(*d)),
+        DixValue::String(s)    => Some(toml::Value::String(s.clone())),
+        DixValue::Date(d)      => Some(toml::Value::String(d.clone())),
+        DixValue::Timestamp(t) => Some(toml::Value::String(t.clone())),
+        DixValue::HexColor(c)  => Some(toml::Value::String(c.clone())),
 
-            // Blob and Regex: no TOML equivalent — export as plain strings.
-            // The type annotation is dropped; use the binary format to preserve it.
-            DixValue::Blob(b)  => Some(toml::Value::String(b.clone())),
-            DixValue::Regex(r) => Some(toml::Value::String(r.clone())),
+        // Blob and Regex: no TOML equivalent — export as plain strings.
+        // The type annotation is dropped; use the binary format to preserve it.
+        DixValue::Blob(b)  => Some(toml::Value::String(b.clone())),
+        DixValue::Regex(r) => Some(toml::Value::String(r.clone())),
 
-            // Enum: export as "EnumName.FIELD" string.
-            // The integer ordinal is available via to_hashmap() if needed.
-            DixValue::Enum { enum_name, field_name, .. } => {
-                Some(toml::Value::String(format!("{}.{}", enum_name, field_name)))
-            }
+        // Enum: export as integer ordinal, consistent with the JSON export.
+        // Consuming code switches on the integer value, not the name string.
+        // Use to_hashmap() or the binary format if you need enum_name/field_name.
+        DixValue::Enum { value, .. } => Some(toml::Value::Integer(*value as i64)),
 
-            DixValue::Array(arr) => {
-                // Items that are Null (no TOML equivalent) are dropped from the array.
-                let items: Vec<toml::Value> = arr.iter()
-                    .filter_map(|v| self.dix_value_to_toml_value(v))
-                    .collect();
-                Some(toml::Value::Array(items))
-                // Note: if items are Table values the toml crate will serialise
-                // this as [[array-of-tables]] headers automatically.
-            }
+        DixValue::Array(arr) => {
+            // Items that are Null (no TOML equivalent) are dropped from the array.
+            let items: Vec<toml::Value> = arr.iter()
+                .filter_map(|v| self.dix_value_to_toml_value(v))
+                .collect();
+            Some(toml::Value::Array(items))
+            // Note: if items are Table values the toml crate will serialise
+            // this as [[array-of-tables]] headers automatically.
+        }
 
-            DixValue::Object(obj) => {
-                let mut table = toml::map::Map::new();
-                for (k, v) in obj {
-                    if let Some(tv) = self.dix_value_to_toml_value(v) {
-                        table.insert(k.clone(), tv);
-                    }
+        DixValue::Object(obj) => {
+            let mut table = toml::map::Map::new();
+            for (k, v) in obj {
+                if let Some(tv) = self.dix_value_to_toml_value(v) {
+                    table.insert(k.clone(), tv);
                 }
-                Some(toml::Value::Table(table))
             }
+            Some(toml::Value::Table(table))
+        }
 
-            // Tuple: positional heterogeneous collection.  Maps to TOML inline
-            // array.  TOML 1.0 allows heterogeneous inline arrays; TOML 0.5
-            // technically requires homogeneous arrays (though many parsers are
-            // lenient).  Drop any Null slots since TOML has no null type.
-            DixValue::Tuple(items) => {
-                let arr: Vec<toml::Value> = items.iter()
-                    .filter_map(|v| self.dix_value_to_toml_value(v))
-                    .collect();
-                Some(toml::Value::Array(arr))
-            }
+        // Tuple: positional heterogeneous collection.  Maps to TOML inline
+        // array.  TOML 1.0 allows heterogeneous inline arrays; TOML 0.5
+        // technically requires homogeneous arrays (though many parsers are
+        // lenient).  Drop any Null slots since TOML has no null type.
+        DixValue::Tuple(items) => {
+            let arr: Vec<toml::Value> = items.iter()
+                .filter_map(|v| self.dix_value_to_toml_value(v))
+                .collect();
+            Some(toml::Value::Array(arr))
         }
     }
+}
 
     // ── TOML import ───────────────────────────────────────────────────────────
 

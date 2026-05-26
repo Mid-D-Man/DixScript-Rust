@@ -1,0 +1,225 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Benchmark Fixture — Large Schema"
+  features -> "advanced"
+)
+
+@ENUMS(
+  ServiceTier   { BASIC = 1, STANDARD = 2, PREMIUM = 3, ENTERPRISE = 4 }
+  Region        { US_EAST = 1, US_WEST = 2, EU_WEST = 3, EU_CENTRAL = 4, APAC = 5, SA_EAST = 6 }
+  Protocol      { HTTP = 1, HTTPS = 2, GRPC = 3, WEBSOCKET = 4 }
+  StorageClass  { HOT = 1, WARM = 2, COLD = 3, ARCHIVE = 4 }
+  AlertSeverity { INFO = 1, WARNING = 2, ERROR = 3, CRITICAL = 4 }
+  ScalePolicy   { MANUAL = 1, CPU_BASED = 2, MEMORY_BASED = 3, REQUEST_BASED = 4, CUSTOM = 5 }
+  DatabaseType  { POSTGRES = 1, MYSQL = 2, REDIS = 3, MONGODB = 4, ELASTICSEARCH = 5 }
+  CacheStrategy { NONE = 0, LRU = 1, LFU = 2, FIFO = 3, TTL = 4 }
+)
+
+@QUICKFUNCS(
+  ~serviceEndpoint<object>(id<string>, host<string>, port<int>, proto<enum>, tier<enum>, region<enum>) {
+    let tls<bool>    = proto == Protocol.HTTPS || proto == Protocol.GRPC
+    let base_url<string> = tls ? $"https://{host}:{port}" : $"http://{host}:{port}"
+    let weight<int>  = tier == ServiceTier.ENTERPRISE ? 100 :
+                       tier == ServiceTier.PREMIUM     ? 75  :
+                       tier == ServiceTier.STANDARD    ? 50  : 25
+    return {
+      id       = id
+      host     = host
+      port     = port
+      protocol = proto
+      tier     = tier
+      region   = region
+      base_url = base_url
+      tls      = tls
+      weight   = weight
+      health_check = $"{base_url}/health"
+    }
+  }
+
+  ~databaseNode<object>(id<string>, dtype<enum>, host<string>, port<int>, replicas<int>, storage_class<enum>) {
+    let read_replicas<int>  = replicas
+    let write_primary<bool> = true
+    let backup_enabled<bool>= storage_class != StorageClass.ARCHIVE
+    return {
+      id             = id
+      type           = dtype
+      host           = host
+      port           = port
+      read_replicas  = read_replicas
+      write_primary  = write_primary
+      backup_enabled = backup_enabled
+      storage_class  = storage_class
+      connection_string = $"db+{host}:{port}"
+    }
+  }
+
+  ~cacheLayer<object>(id<string>, host<string>, port<int>, strategy<enum>, ttl<int>, max_memory_mb<int>) {
+    let shards<int>  = max_memory_mb / 256
+    let evict<bool>  = strategy != CacheStrategy.NONE
+    return {
+      id             = id
+      host           = host
+      port           = port
+      strategy       = strategy
+      ttl_seconds    = ttl
+      max_memory_mb  = max_memory_mb
+      shard_count    = shards
+      eviction_enabled = evict
+    }
+  }
+
+  ~scalingRule<object>(id<string>, policy<enum>, min_inst<int>, max_inst<int>, target<float>, cooldown<int>) {
+    let range<int>    = max_inst - min_inst
+    let aggressive<bool> = cooldown < 120
+    return {
+      id             = id
+      policy         = policy
+      min_instances  = min_inst
+      max_instances  = max_inst
+      target_metric  = target
+      cooldown_seconds = cooldown
+      instance_range = range
+      aggressive_scaling = aggressive
+    }
+  }
+
+  ~alertRule<object>(id<string>, name<string>, severity<enum>, threshold<float>, window_secs<int>, notify<bool>) {
+    let critical<bool> = severity == AlertSeverity.CRITICAL || severity == AlertSeverity.ERROR
+    let slo_impact<bool> = critical && window_secs <= 300
+    return {
+      id              = id
+      name            = name
+      severity        = severity
+      threshold       = threshold
+      window_seconds  = window_secs
+      notify_oncall   = notify
+      is_critical     = critical
+      slo_impact      = slo_impact
+    }
+  }
+
+  ~storageVolume<object>(id<string>, path<string>, size_gb<int>, storage_class<enum>, encrypted<bool>) {
+    let monthly_cost<float> = storage_class == StorageClass.HOT     ? size_gb * 0.12f :
+                              storage_class == StorageClass.WARM     ? size_gb * 0.05f :
+                              storage_class == StorageClass.COLD     ? size_gb * 0.02f : size_gb * 0.004f
+    return {
+      id            = id
+      mount_path    = path
+      size_gb       = size_gb
+      storage_class = storage_class
+      encrypted     = encrypted
+      monthly_cost_usd = monthly_cost
+    }
+  }
+)
+
+@DATA(
+  schema_name      = "LargeBenchmarkSchema"
+  schema_version   = "4.0.0"
+  generated_at     = 2025-05-26T00:00:00Z
+  entry_count<int> = 250
+  environment      = "production"
+
+  global_settings: max_request_size_mb = 64, default_timeout_ms = 30000, compression_enabled = true, tracing_sample_rate = 0.01f
+
+  service_endpoints::
+    serviceEndpoint("svc-api-01",      "api-01.internal",      8080,  Protocol.HTTPS,     ServiceTier.PREMIUM,    Region.US_EAST),
+    serviceEndpoint("svc-api-02",      "api-02.internal",      8080,  Protocol.HTTPS,     ServiceTier.PREMIUM,    Region.US_EAST),
+    serviceEndpoint("svc-api-03",      "api-03.internal",      8080,  Protocol.HTTPS,     ServiceTier.PREMIUM,    Region.US_WEST),
+    serviceEndpoint("svc-api-04",      "api-04.internal",      8080,  Protocol.HTTPS,     ServiceTier.STANDARD,   Region.EU_WEST),
+    serviceEndpoint("svc-api-05",      "api-05.internal",      8080,  Protocol.HTTPS,     ServiceTier.STANDARD,   Region.EU_CENTRAL),
+    serviceEndpoint("svc-api-06",      "api-06.internal",      8080,  Protocol.HTTPS,     ServiceTier.STANDARD,   Region.APAC),
+    serviceEndpoint("svc-grpc-01",     "grpc-01.internal",     9090,  Protocol.GRPC,      ServiceTier.ENTERPRISE, Region.US_EAST),
+    serviceEndpoint("svc-grpc-02",     "grpc-02.internal",     9090,  Protocol.GRPC,      ServiceTier.ENTERPRISE, Region.US_WEST),
+    serviceEndpoint("svc-grpc-03",     "grpc-03.internal",     9090,  Protocol.GRPC,      ServiceTier.PREMIUM,    Region.EU_WEST),
+    serviceEndpoint("svc-ws-01",       "ws-01.internal",       8765,  Protocol.WEBSOCKET, ServiceTier.PREMIUM,    Region.US_EAST),
+    serviceEndpoint("svc-ws-02",       "ws-02.internal",       8765,  Protocol.WEBSOCKET, ServiceTier.PREMIUM,    Region.US_WEST),
+    serviceEndpoint("svc-internal-01", "internal-01.cluster",  8888,  Protocol.HTTP,      ServiceTier.BASIC,      Region.US_EAST),
+    serviceEndpoint("svc-internal-02", "internal-02.cluster",  8888,  Protocol.HTTP,      ServiceTier.BASIC,      Region.US_EAST),
+    serviceEndpoint("svc-internal-03", "internal-03.cluster",  8888,  Protocol.HTTP,      ServiceTier.BASIC,      Region.US_WEST),
+    serviceEndpoint("svc-internal-04", "internal-04.cluster",  8888,  Protocol.HTTP,      ServiceTier.BASIC,      Region.EU_WEST),
+    serviceEndpoint("svc-internal-05", "internal-05.cluster",  8888,  Protocol.HTTP,      ServiceTier.BASIC,      Region.APAC)
+
+  database_nodes::
+    databaseNode("db-pg-primary",  DatabaseType.POSTGRES,      "pg-primary.db",   5432, 3, StorageClass.HOT),
+    databaseNode("db-pg-replica1", DatabaseType.POSTGRES,      "pg-replica1.db",  5432, 0, StorageClass.HOT),
+    databaseNode("db-pg-replica2", DatabaseType.POSTGRES,      "pg-replica2.db",  5432, 0, StorageClass.WARM),
+    databaseNode("db-pg-analytics",DatabaseType.POSTGRES,      "pg-analytics.db", 5432, 2, StorageClass.WARM),
+    databaseNode("db-mysql-01",    DatabaseType.MYSQL,          "mysql-01.db",     3306, 2, StorageClass.HOT),
+    databaseNode("db-mysql-02",    DatabaseType.MYSQL,          "mysql-02.db",     3306, 1, StorageClass.WARM),
+    databaseNode("db-mongo-01",    DatabaseType.MONGODB,        "mongo-01.db",     27017,3, StorageClass.HOT),
+    databaseNode("db-mongo-02",    DatabaseType.MONGODB,        "mongo-02.db",     27017,1, StorageClass.WARM),
+    databaseNode("db-es-01",       DatabaseType.ELASTICSEARCH,  "es-01.db",        9200, 2, StorageClass.WARM),
+    databaseNode("db-es-02",       DatabaseType.ELASTICSEARCH,  "es-02.db",        9200, 2, StorageClass.COLD)
+
+  cache_layers::
+    cacheLayer("cache-redis-01",    "redis-01.cache",  6379, CacheStrategy.LRU, 3600,  4096),
+    cacheLayer("cache-redis-02",    "redis-02.cache",  6379, CacheStrategy.LRU, 3600,  4096),
+    cacheLayer("cache-redis-03",    "redis-03.cache",  6379, CacheStrategy.LFU, 1800,  2048),
+    cacheLayer("cache-redis-04",    "redis-04.cache",  6379, CacheStrategy.TTL, 900,   1024),
+    cacheLayer("cache-redis-05",    "redis-05.cache",  6379, CacheStrategy.LRU, 7200,  8192),
+    cacheLayer("cache-session-01",  "session-01.cache",6380, CacheStrategy.TTL, 86400, 512),
+    cacheLayer("cache-session-02",  "session-02.cache",6380, CacheStrategy.TTL, 86400, 512),
+    cacheLayer("cache-rate-01",     "rate-01.cache",   6381, CacheStrategy.FIFO,60,    256)
+
+  scaling_rules::
+    scalingRule("scale-api-cpu",       ScalePolicy.CPU_BASED,      2, 20, 0.70f, 180),
+    scalingRule("scale-api-req",       ScalePolicy.REQUEST_BASED,  2, 20, 1000.0f, 120),
+    scalingRule("scale-grpc-cpu",      ScalePolicy.CPU_BASED,      2, 16, 0.65f, 240),
+    scalingRule("scale-worker-mem",    ScalePolicy.MEMORY_BASED,   1, 10, 0.80f, 300),
+    scalingRule("scale-worker-custom", ScalePolicy.CUSTOM,         1, 8,  0.50f, 600),
+    scalingRule("scale-ws-req",        ScalePolicy.REQUEST_BASED,  2, 12, 500.0f, 90),
+    scalingRule("scale-cache-mem",     ScalePolicy.MEMORY_BASED,   1, 4,  0.85f, 360),
+    scalingRule("scale-db-manual",     ScalePolicy.MANUAL,         1, 3,  0.0f,  900)
+
+  alert_rules::
+    alertRule("alert-api-p99",      "API P99 Latency",           AlertSeverity.ERROR,    500.0f,  300, true),
+    alertRule("alert-api-error",    "API Error Rate",             AlertSeverity.CRITICAL, 0.01f,   60,  true),
+    alertRule("alert-api-sat",      "API Saturation",             AlertSeverity.WARNING,  0.80f,   300, false),
+    alertRule("alert-db-conn",      "DB Connection Pool",         AlertSeverity.CRITICAL, 0.90f,   120, true),
+    alertRule("alert-db-slow",      "DB Slow Queries",            AlertSeverity.ERROR,    1000.0f, 300, true),
+    alertRule("alert-cache-hit",    "Cache Hit Rate Low",         AlertSeverity.WARNING,  0.70f,   600, false),
+    alertRule("alert-cache-mem",    "Cache Memory High",          AlertSeverity.ERROR,    0.90f,   180, true),
+    alertRule("alert-disk-usage",   "Disk Usage High",            AlertSeverity.WARNING,  0.80f,   900, false),
+    alertRule("alert-disk-crit",    "Disk Usage Critical",        AlertSeverity.CRITICAL, 0.95f,   300, true),
+    alertRule("alert-cpu-high",     "CPU Usage High",             AlertSeverity.WARNING,  0.85f,   300, false),
+    alertRule("alert-mem-high",     "Memory Pressure",            AlertSeverity.ERROR,    0.90f,   120, true),
+    alertRule("alert-net-in",       "Network Ingress Saturation", AlertSeverity.WARNING,  0.75f,   600, false),
+    alertRule("alert-net-out",      "Network Egress Saturation",  AlertSeverity.ERROR,    0.85f,   300, true),
+    alertRule("alert-cert-expiry",  "TLS Certificate Expiry",     AlertSeverity.CRITICAL, 30.0f,   86400,true),
+    alertRule("alert-dep-health",   "Dependency Health",          AlertSeverity.ERROR,    0.0f,    60,  true),
+    alertRule("alert-slo-breach",   "SLO Breach Imminent",        AlertSeverity.CRITICAL, 0.999f,  300, true)
+
+  storage_volumes::
+    storageVolume("vol-pg-primary",  "/data/pg/primary",    500,  StorageClass.HOT,     true),
+    storageVolume("vol-pg-replica1", "/data/pg/replica1",   500,  StorageClass.HOT,     true),
+    storageVolume("vol-pg-replica2", "/data/pg/replica2",   500,  StorageClass.WARM,    true),
+    storageVolume("vol-pg-analytics","/data/pg/analytics",  2000, StorageClass.WARM,    true),
+    storageVolume("vol-pg-archive",  "/data/pg/archive",    10000,StorageClass.COLD,    true),
+    storageVolume("vol-mysql-01",    "/data/mysql/01",      300,  StorageClass.HOT,     true),
+    storageVolume("vol-mysql-02",    "/data/mysql/02",      300,  StorageClass.WARM,    true),
+    storageVolume("vol-mongo-01",    "/data/mongo/01",      1000, StorageClass.HOT,     true),
+    storageVolume("vol-mongo-02",    "/data/mongo/02",      1000, StorageClass.WARM,    true),
+    storageVolume("vol-es-data-01",  "/data/es/01",         2000, StorageClass.WARM,    false),
+    storageVolume("vol-es-data-02",  "/data/es/02",         2000, StorageClass.COLD,    false),
+    storageVolume("vol-logs-hot",    "/data/logs/hot",      500,  StorageClass.HOT,     false),
+    storageVolume("vol-logs-warm",   "/data/logs/warm",     5000, StorageClass.WARM,    false),
+    storageVolume("vol-logs-cold",   "/data/logs/cold",     50000,StorageClass.COLD,    false),
+    storageVolume("vol-backups",     "/data/backups",       20000,StorageClass.ARCHIVE, true),
+    storageVolume("vol-uploads",     "/data/uploads",       1000, StorageClass.HOT,     true),
+    storageVolume("vol-static",      "/data/static",        200,  StorageClass.WARM,    false),
+    storageVolume("vol-tmp",         "/tmp/scratch",        100,  StorageClass.HOT,     false)
+
+  regions.us_east: api_count = 6, db_count = 4, cache_count = 3, enabled = true, primary = true
+  regions.us_west: api_count = 3, db_count = 2, cache_count = 2, enabled = true, primary = false
+  regions.eu_west: api_count = 2, db_count = 1, cache_count = 1, enabled = true, primary = false
+  regions.eu_central: api_count = 1, db_count = 1, cache_count = 1, enabled = true, primary = false
+  regions.apac: api_count = 1, db_count = 0, cache_count = 1, enabled = true, primary = false
+  regions.sa_east: api_count = 0, db_count = 0, cache_count = 0, enabled = false, primary = false
+
+  retention_policies: hot_days = 7, warm_days = 30, cold_days = 90, archive_days = 365, delete_after_days = 2555
+
+  security_settings: mfa_required = true, session_timeout_minutes = 60, max_login_attempts = 5, ip_whitelist_enabled = true, audit_log_enabled = true, pii_masking = true
+
+  feature_matrix: graphql_api = true, rest_v3 = true, grpc_streaming = true, websocket_push = true, batch_api = true, export_csv = true, export_parquet = false, ai_features = false, beta_dashboard = false
+)

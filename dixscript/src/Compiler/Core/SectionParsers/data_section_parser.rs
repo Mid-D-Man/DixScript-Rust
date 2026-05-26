@@ -2125,67 +2125,99 @@ fn reset_parse_state(&mut self) {
         })
     }
 
-    fn parse_object_property(&mut self) -> Option<ObjectProperty> {
-        self.log_verbose("Parsing object property");
+ fn parse_object_property(&mut self) -> Option<ObjectProperty> {
+    self.log_verbose("Parsing object property");
 
-        let prop_pos = Position::from_token(self.current());
-        let property_key = self.parse_property_name()?;
+    let prop_pos = Position::from_token(self.current());
+    let property_key = self.parse_property_name()?;
 
-        if matches!(self.current().token_type, TokenType::DoubleColon) {
-            let current = self.current().clone();
-            self.handle_parse_error(
-                ParseErrorType::SectionSyntaxError,
-                &format!(
-                    "NESTED GROUP ARRAY: Property '{}' uses '::' inside an object.\n\
-                    Group arrays can only appear at the top level of the DATA section.\n\
-                    \n\
-                    Wrong:   {{ {}:: item1, item2 }}\n\
-                    Correct: {{ {} = [item1, item2] }}\n\
-                    Or move to top level: path.{}:: item1, item2",
-                    property_key, property_key, property_key, property_key
-                ),
-                &current,
-            );
+    // Parse and discard optional type annotation.
+    // ObjectProperty has no data_type field; the annotation is consumed here so
+    // that `key<type>=value` sequences (no space before `=`) do not confuse the
+    // separator check below.  The `pending_equal` flag is set automatically by
+    // `parse_optional_type_annotation` when the annotation ends with a fused
+    // `>=` or `>>=` token.
+    let _ = self.parse_optional_type_annotation();
+
+    if matches!(self.current().token_type, TokenType::DoubleColon) {
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::SectionSyntaxError,
+            &format!(
+                "NESTED GROUP ARRAY: Property '{}' uses '::' inside an object.\n\
+                Group arrays can only appear at the top level of the DATA section.\n\
+                \n\
+                Wrong:   {{ {}:: item1, item2 }}\n\
+                Correct: {{ {} = [item1, item2] }}\n\
+                Or move to top level: path.{}:: item1, item2",
+                property_key, property_key, property_key, property_key
+            ),
+            &current,
+        );
+        if self.should_halt_section() {
+            return None;
+        }
+        while !self.is_at_end()
+            && !self.is_current_symbol(',')
+            && !self.is_current_symbol('}')
+        {
+            self.advance();
+        }
+        return None;
+    }
+
+    if self.is_current_symbol(':') {
+        if let Some(next) = self.peek_ahead(1) {
+            if !matches!(next.token_type, TokenType::Symbol(':')) {
+                let current = self.current().clone();
+                self.handle_parse_error(
+                    ParseErrorType::SectionSyntaxError,
+                    &format!(
+                        "WRONG SYNTAX: Property '{}' uses ':' but DATA section requires '='.\n\
+                        Wrong:   {{ {}: value }}\n\
+                        Correct: {{ {} = value }}",
+                        property_key, property_key, property_key
+                    ),
+                    &current,
+                );
+                if self.should_halt_section() {
+                    return None;
+                }
+                return None;
+            }
+        }
+    }
+
+    // Use consume_equal() so that a '=' fused into a '>=', '>>=', or '>>='
+    // token consumed during type annotation parsing is handled correctly via
+    // the pending_equal flag rather than requiring a real '=' token.
+    if !self.consume_equal() {
+        let current = self.current().clone();
+        self.handle_parse_error(
+            ParseErrorType::MissingToken,
+            &format!(
+                "Expected '=' after property key '{}' in object literal",
+                property_key
+            ),
+            &current,
+        );
+        if self.should_halt_section() {
+            return None;
+        }
+        return None;
+    }
+
+    let property_value = match self.parse_property_value() {
+        Some(v) => v,
+        None => {
             if self.should_halt_section() {
                 return None;
             }
-            while !self.is_at_end()
-                && !self.is_current_symbol(',')
-                && !self.is_current_symbol('}')
-            {
-                self.advance();
-            }
-            return None;
-        }
-
-        if self.is_current_symbol(':') {
-            if let Some(next) = self.peek_ahead(1) {
-                if !matches!(next.token_type, TokenType::Symbol(':')) {
-                    let current = self.current().clone();
-                    self.handle_parse_error(
-                        ParseErrorType::SectionSyntaxError,
-                        &format!(
-                            "WRONG SYNTAX: Property '{}' uses ':' but DATA section requires '='.\n\
-                            Wrong:   {{ {}: value }}\n\
-                            Correct: {{ {} = value }}",
-                            property_key, property_key, property_key
-                        ),
-                        &current,
-                    );
-                    if self.should_halt_section() {
-                        return None;
-                    }
-                    return None;
-                }
-            }
-        }
-
-        if !self.match_and_consume_symbol('=') {
             let current = self.current().clone();
             self.handle_parse_error(
-                ParseErrorType::MissingToken,
+                ParseErrorType::UnexpectedToken,
                 &format!(
-                    "Expected '=' after property key '{}' in object literal",
+                    "Expected property value after '=' for key '{}'",
                     property_key
                 ),
                 &current,
@@ -2193,39 +2225,18 @@ fn reset_parse_state(&mut self) {
             if self.should_halt_section() {
                 return None;
             }
-            return None;
+            Value::Null { position: prop_pos }
         }
+    };
 
-        let property_value = match self.parse_property_value() {
-            Some(v) => v,
-            None => {
-                if self.should_halt_section() {
-                    return None;
-                }
-                let current = self.current().clone();
-                self.handle_parse_error(
-                    ParseErrorType::UnexpectedToken,
-                    &format!(
-                        "Expected property value after '=' for key '{}'",
-                        property_key
-                    ),
-                    &current,
-                );
-                if self.should_halt_section() {
-                    return None;
-                }
-                Value::Null { position: prop_pos }
-            }
-        };
-
-        if self.debug_config.is_verbose {
-            self.error_manager.log_info(&format!(
-                "Parsed object property: {}",
-                property_key
-            ));
-        }
-        Some(ObjectProperty::new(property_key, property_value, prop_pos))
+    if self.debug_config.is_verbose {
+        self.error_manager.log_info(&format!(
+            "Parsed object property: {}",
+            property_key
+        ));
     }
+    Some(ObjectProperty::new(property_key, property_value, prop_pos))
+}
 
     fn parse_array_literal(&mut self) -> Option<Value> {
         self.log_verbose("Parsing array literal");

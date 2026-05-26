@@ -1,0 +1,172 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Benchmark Fixture — Medium Game Config"
+  features -> "advanced"
+)
+
+@ENUMS(
+  Rarity      { COMMON = 0, UNCOMMON = 1, RARE = 2, EPIC = 3, LEGENDARY = 4 }
+  WeaponClass { SWORD = 1, AXE = 2, BOW = 3, STAFF = 4, DAGGER = 5 }
+  ArmorSlot   { HEAD = 1, CHEST = 2, LEGS = 3, HANDS = 4, FEET = 5 }
+  EnemyType   { HUMANOID = 1, BEAST = 2, UNDEAD = 3, ELEMENTAL = 4, BOSS = 5 }
+  DropChance  { ALWAYS = 100, COMMON_DROP = 60, UNCOMMON_DROP = 30, RARE_DROP = 10, LEGENDARY_DROP = 2 }
+)
+
+@QUICKFUNCS(
+  ~rarityMultiplier<int>(r<enum>) {
+    return r == Rarity.COMMON    ? 1  :
+           r == Rarity.UNCOMMON  ? 2  :
+           r == Rarity.RARE      ? 4  :
+           r == Rarity.EPIC      ? 8  : 16
+  }
+
+  ~weapon<object>(id<string>, name<string>, wclass<enum>, base_dmg<int>, rarity<enum>, weight<float>) {
+    let mult<int>       = rarityMultiplier(rarity)
+    let damage<int>     = base_dmg * mult
+    let sell_value<int> = damage * 3
+    let dps<float>      = damage / weight
+    return {
+      id         = id
+      name       = name
+      class      = wclass
+      rarity     = rarity
+      damage     = damage
+      weight     = weight
+      dps        = dps
+      sell_value = sell_value
+      two_handed = wclass == WeaponClass.SWORD || wclass == WeaponClass.AXE
+    }
+  }
+
+  ~armor<object>(id<string>, name<string>, slot<enum>, base_def<int>, rarity<enum>, weight<float>) {
+    let mult<int>       = rarityMultiplier(rarity)
+    let defense<int>    = base_def * mult
+    let sell_value<int> = defense * 2
+    return {
+      id         = id
+      name       = name
+      slot       = slot
+      rarity     = rarity
+      defense    = defense
+      weight     = weight
+      sell_value = sell_value
+    }
+  }
+
+  ~enemy<object>(id<string>, name<string>, etype<enum>, base_hp<int>, xp<int>, rarity<enum>, drop_rate<enum>) {
+    let mult<int>      = rarityMultiplier(rarity)
+    let health<int>    = base_hp * mult
+    let xp_reward<int> = xp * mult
+    let gold<int>      = xp_reward / 2
+    return {
+      id         = id
+      name       = name
+      type       = etype
+      rarity     = rarity
+      health     = health
+      xp_reward  = xp_reward
+      gold_drop  = gold
+      drop_rate  = drop_rate
+      is_boss    = etype == EnemyType.BOSS
+    }
+  }
+
+  ~loot<object>(id<string>, item_id<string>, chance<enum>) {
+    return {
+      loot_id  = id
+      item_id  = item_id
+      chance   = chance
+    }
+  }
+
+  ~level<object>(num<int>, name<string>, xp_required<int>, unlock_count<int>) {
+    let bonus_hp<int>   = num * 10
+    let bonus_atk<int>  = num * 2
+    let bonus_def<int>  = num * 1
+    return {
+      level        = num
+      name         = name
+      xp_required  = xp_required
+      bonus_hp     = bonus_hp
+      bonus_attack = bonus_atk
+      bonus_defense= bonus_def
+      unlocks      = unlock_count
+    }
+  }
+)
+
+@DATA(
+  game_title       = "Benchmark RPG"
+  game_version     = "1.4.2"
+  build_number<int>= 4201
+  min_client       = "1.0.0"
+  server_region    = "us-east-1"
+
+  session_settings: max_players = 8, match_duration = 600, respawn_time = 15, friendly_fire = false, pvp_enabled = true
+
+  economy_settings: base_gold_drop = 10, gold_multiplier = 1.5f, shop_tax_rate = 0.05f, auction_fee = 0.03f
+
+  weapons::
+    weapon("WPN_001", "Rusty Sword",      WeaponClass.SWORD,  15, Rarity.COMMON,    2.5f),
+    weapon("WPN_002", "Iron Sword",       WeaponClass.SWORD,  22, Rarity.COMMON,    3.0f),
+    weapon("WPN_003", "Steel Sword",      WeaponClass.SWORD,  30, Rarity.UNCOMMON,  3.2f),
+    weapon("WPN_004", "Silver Sword",     WeaponClass.SWORD,  40, Rarity.UNCOMMON,  3.5f),
+    weapon("WPN_005", "Elven Blade",      WeaponClass.SWORD,  55, Rarity.RARE,      2.8f),
+    weapon("WPN_006", "Runic Sword",      WeaponClass.SWORD,  70, Rarity.RARE,      3.0f),
+    weapon("WPN_007", "Dragon Blade",     WeaponClass.SWORD,  90, Rarity.EPIC,      4.0f),
+    weapon("WPN_008", "Excalibur",        WeaponClass.SWORD, 120, Rarity.LEGENDARY, 3.8f),
+    weapon("WPN_009", "Iron Axe",         WeaponClass.AXE,    20, Rarity.COMMON,    4.0f),
+    weapon("WPN_010", "Steel Axe",        WeaponClass.AXE,    32, Rarity.UNCOMMON,  4.5f),
+    weapon("WPN_011", "Orcish Axe",       WeaponClass.AXE,    48, Rarity.RARE,      5.0f),
+    weapon("WPN_012", "Executioner Axe",  WeaponClass.AXE,    75, Rarity.EPIC,      5.5f),
+    weapon("WPN_013", "Hunting Bow",      WeaponClass.BOW,    18, Rarity.COMMON,    1.5f),
+    weapon("WPN_014", "Elven Bow",        WeaponClass.BOW,    35, Rarity.RARE,      1.2f),
+    weapon("WPN_015", "Arcane Staff",     WeaponClass.STAFF,  25, Rarity.UNCOMMON,  2.0f),
+    weapon("WPN_016", "Elder Staff",      WeaponClass.STAFF,  60, Rarity.EPIC,      2.2f),
+    weapon("WPN_017", "Shadow Dagger",    WeaponClass.DAGGER, 28, Rarity.UNCOMMON,  0.8f),
+    weapon("WPN_018", "Venomfang",        WeaponClass.DAGGER, 55, Rarity.RARE,      0.9f)
+
+  armors::
+    armor("ARM_001", "Leather Cap",       ArmorSlot.HEAD,   5,  Rarity.COMMON,    0.8f),
+    armor("ARM_002", "Iron Helmet",       ArmorSlot.HEAD,   12, Rarity.UNCOMMON,  2.0f),
+    armor("ARM_003", "Steel Helm",        ArmorSlot.HEAD,   20, Rarity.RARE,      2.5f),
+    armor("ARM_004", "Dragon Helm",       ArmorSlot.HEAD,   35, Rarity.EPIC,      3.0f),
+    armor("ARM_005", "Leather Vest",      ArmorSlot.CHEST,  8,  Rarity.COMMON,    1.5f),
+    armor("ARM_006", "Chain Mail",        ArmorSlot.CHEST,  18, Rarity.UNCOMMON,  4.0f),
+    armor("ARM_007", "Plate Armor",       ArmorSlot.CHEST,  30, Rarity.RARE,      6.0f),
+    armor("ARM_008", "Mythril Plate",     ArmorSlot.CHEST,  55, Rarity.LEGENDARY, 5.0f),
+    armor("ARM_009", "Leather Pants",     ArmorSlot.LEGS,   6,  Rarity.COMMON,    1.0f),
+    armor("ARM_010", "Iron Greaves",      ArmorSlot.LEGS,   15, Rarity.UNCOMMON,  3.0f),
+    armor("ARM_011", "Leather Gloves",    ArmorSlot.HANDS,  4,  Rarity.COMMON,    0.4f),
+    armor("ARM_012", "Iron Gauntlets",    ArmorSlot.HANDS,  10, Rarity.UNCOMMON,  1.0f),
+    armor("ARM_013", "Leather Boots",     ArmorSlot.FEET,   5,  Rarity.COMMON,    0.6f),
+    armor("ARM_014", "Iron Boots",        ArmorSlot.FEET,   11, Rarity.UNCOMMON,  1.8f)
+
+  enemies::
+    enemy("ENE_001", "Goblin",          EnemyType.HUMANOID, 20,  5,  Rarity.COMMON,    DropChance.COMMON_DROP),
+    enemy("ENE_002", "Orc Warrior",     EnemyType.HUMANOID, 60,  15, Rarity.COMMON,    DropChance.UNCOMMON_DROP),
+    enemy("ENE_003", "Orc Shaman",      EnemyType.HUMANOID, 45,  20, Rarity.UNCOMMON,  DropChance.RARE_DROP),
+    enemy("ENE_004", "Troll",           EnemyType.BEAST,    120, 35, Rarity.UNCOMMON,  DropChance.UNCOMMON_DROP),
+    enemy("ENE_005", "Forest Wolf",     EnemyType.BEAST,    35,  8,  Rarity.COMMON,    DropChance.COMMON_DROP),
+    enemy("ENE_006", "Giant Spider",    EnemyType.BEAST,    55,  12, Rarity.COMMON,    DropChance.UNCOMMON_DROP),
+    enemy("ENE_007", "Cave Bear",       EnemyType.BEAST,    150, 40, Rarity.UNCOMMON,  DropChance.RARE_DROP),
+    enemy("ENE_008", "Skeleton",        EnemyType.UNDEAD,   25,  6,  Rarity.COMMON,    DropChance.COMMON_DROP),
+    enemy("ENE_009", "Zombie",          EnemyType.UNDEAD,   40,  10, Rarity.COMMON,    DropChance.UNCOMMON_DROP),
+    enemy("ENE_010", "Lich",            EnemyType.UNDEAD,   200, 80, Rarity.RARE,      DropChance.RARE_DROP),
+    enemy("ENE_011", "Fire Elemental",  EnemyType.ELEMENTAL,80,  25, Rarity.RARE,      DropChance.RARE_DROP),
+    enemy("ENE_012", "Ice Elemental",   EnemyType.ELEMENTAL,80,  25, Rarity.RARE,      DropChance.RARE_DROP),
+    enemy("ENE_013", "Storm Lord",      EnemyType.BOSS,     500, 200, Rarity.EPIC,     DropChance.UNCOMMON_DROP),
+    enemy("ENE_014", "Dragon King",     EnemyType.BOSS,     1000,500, Rarity.LEGENDARY,DropChance.RARE_DROP)
+
+  levels::
+    level(1,  "Novice",       0,     0),
+    level(2,  "Apprentice",   100,   1),
+    level(3,  "Journeyman",   250,   1),
+    level(4,  "Adept",        500,   2),
+    level(5,  "Expert",       900,   2),
+    level(6,  "Veteran",      1400,  3),
+    level(7,  "Master",       2100,  3),
+    level(8,  "Grandmaster",  3000,  4),
+    level(9,  "Champion",     4200,  4),
+    level(10, "Legend",       6000,  5)
+)

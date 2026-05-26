@@ -2683,17 +2683,37 @@ fn skip_nested_angle_content(&mut self) {
                 }
             }
 
+            // ">=" — one closing angle plus '=' fused by the tokenizer (no space).
+            TokenType::ComparisonOp(ref op) if *op == ">=" => {
+                if depth == 0 {
+                    // The '>' belongs outside our scope — do not consume.
+                    break;
+                }
+                depth -= 1;
+                self.advance();
+                self.pending_equal = true;
+                if depth == 0 {
+                    break;
+                }
+                // depth > 0: the '=' was embedded inside nested content.
+                // pending_equal is set; loop continues for the remaining depth.
+            }
+
+            // ">>" — two closing angles fused by the tokenizer.
             TokenType::BitwiseOp(ref op) if *op == ">>" => {
                 match depth {
                     0 => {
+                        // Both angles are outside our scope — do not consume.
                         break;
                     }
                     1 => {
+                        // First '>' closes our level; second '>' belongs to the outer context.
                         self.advance();
                         self.pending_angle = true;
                         break;
                     }
                     _ => {
+                        // depth >= 2: both angles are within our nested content.
                         depth -= 2;
                         self.advance();
                         if depth == 0 {
@@ -2703,21 +2723,22 @@ fn skip_nested_angle_content(&mut self) {
                 }
             }
 
+            // ">>=" — two closing angles plus assignment fused by the tokenizer.
             TokenType::BitwiseOp(ref op) if *op == ">>=" => {
                 match depth {
                     0 => {
-                        // All three chars outside our scope — do not consume.
+                        // All three chars are outside our scope — do not consume.
                         break;
                     }
                     1 => {
-                        // First '>' closes our level, second '>' pending outer, '=' pending.
+                        // First '>' closes our level, second '>' is pending outer, '=' is pending.
                         self.advance();
                         self.pending_angle = true;
                         self.pending_equal = true;
                         break;
                     }
                     _ => {
-                        // depth >= 2: both '>'s within nested content, '=' pending.
+                        // depth >= 2: both '>'s consumed within nested content, '=' is pending.
                         depth -= 2;
                         self.advance();
                         self.pending_equal = true;
@@ -2735,16 +2756,17 @@ fn skip_nested_angle_content(&mut self) {
             }
         }
     }
-                    }
+                }
 
 #[inline]
 fn is_closing_angle(&self) -> bool {
     match &self.current().token_type {
         TokenType::Symbol('>') => true,
         TokenType::BitwiseOp(op) if *op == ">>" || *op == ">>=" => true,
+        TokenType::ComparisonOp(op) if *op == ">=" => true,
         _ => false,
     }
-    }
+}
 
 fn match_and_consume_closing_angle(&mut self) -> bool {
     if self.pending_angle {
@@ -2769,8 +2791,17 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
             return true;
         }
     }
-    false
+    if let TokenType::ComparisonOp(op) = &self.current().token_type {
+        if *op == ">=" {
+            // Tokenizer fused '>' and '=' with no space between them.
+            // '>' closes this annotation level; '=' is left pending for the caller.
+            self.advance();
+            self.pending_equal = true;
+            return true;
+        }
     }
+    false
+}
 
     /// Consume a `->`  switch-case arrow (distinct from `=>` scope arrow).
     fn match_arrow(&mut self) -> bool {

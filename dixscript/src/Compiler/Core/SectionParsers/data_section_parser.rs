@@ -315,72 +315,79 @@ fn reset_parse_state(&mut self) {
     }
 
     fn determine_data_entry_type(&self) -> DataEntryType {
-        self.log_verbose("Determining data entry type");
+    self.log_verbose("Determining data entry type");
 
-        if self.is_at_end() {
+    if self.is_at_end() {
+        return DataEntryType::Unknown;
+    }
+
+    let current_token = self.current();
+
+    let identifier_value = match &current_token.token_type {
+        TokenType::Identifier(id) => Some(id.as_str()),
+        // kw is &&'static str; *kw gives &'static str which coerces to &str.
+        TokenType::Keyword(kw) => Some(*kw),
+        _ => None,
+    };
+
+    if let Some(_id) = identifier_value {
+        let mut look_ahead = 1;
+
+        // Skip optional type annotation <...>.
+        // Use skip_annotation_lookahead so that fused tokens (>>, >>=, >=)
+        // produced by the tokenizer when there is no space between the closing
+        // '>' and the following '=' are handled correctly.
+        if let Some(token) = self.peek_ahead(look_ahead) {
+            if let TokenType::Symbol('<') = token.token_type {
+                let (new_look_ahead, eq_fused) =
+                    self.skip_annotation_lookahead(look_ahead);
+                look_ahead = new_look_ahead;
+
+                // When the closing '>' was fused with '=' (e.g. `prop<int>=value`
+                // becomes  Identifier  '<'  Keyword  '>='  Identifier),
+                // look_ahead is now pointing past the '=' already.
+                // Determine whether this is a simple or object property directly.
+                if eq_fused {
+                    return self.determine_simple_or_object_property(look_ahead);
+                }
+            }
+        }
+
+        let next_token = self.peek_ahead(look_ahead);
+        if next_token.is_none() {
             return DataEntryType::Unknown;
         }
 
-        let current_token = self.current();
+        let next = next_token.unwrap();
 
-        let identifier_value = match &current_token.token_type {
-            TokenType::Identifier(id) => Some(id.as_str()),
-            // kw is &&'static str; *kw gives &'static str which coerces to &str.
-            TokenType::Keyword(kw) => Some(*kw),
-            _ => None,
-        };
+        if matches!(next.token_type, TokenType::DoubleColon) {
+            self.log_verbose("Detected group array via DoubleColon token");
+            return DataEntryType::GroupArray;
+        }
 
-        if let Some(_id) = identifier_value {
-            let mut look_ahead = 1;
-
-            if let Some(token) = self.peek_ahead(look_ahead) {
-                if let TokenType::Symbol('<') = token.token_type {
-                    look_ahead += 1;
-                    while let Some(token) = self.peek_ahead(look_ahead) {
-                        if let TokenType::Symbol('>') = token.token_type {
-                            look_ahead += 1;
-                            break;
-                        }
-                        look_ahead += 1;
-                    }
-                }
-            }
-
-            let next_token = self.peek_ahead(look_ahead);
-            if next_token.is_none() {
-                return DataEntryType::Unknown;
-            }
-
-            let next = next_token.unwrap();
-
-            if matches!(next.token_type, TokenType::DoubleColon) {
-                self.log_verbose("Detected group array via DoubleColon token");
-                return DataEntryType::GroupArray;
-            }
-
-            if let TokenType::Symbol(sym) = next.token_type {
-                return match sym {
-                    '=' => self.determine_simple_or_object_property(look_ahead + 1),
-                    '.' => self.determine_table_or_group_property(look_ahead + 1),
-                    ':' => {
-                        if let Some(after_colon) = self.peek_ahead(look_ahead + 1) {
-                            if let TokenType::Symbol(':') = after_colon.token_type {
-                                DataEntryType::GroupArray
-                            } else {
-                                DataEntryType::TableProperty
-                            }
+        if let TokenType::Symbol(sym) = next.token_type {
+            return match sym {
+                '=' => self.determine_simple_or_object_property(look_ahead + 1),
+                '.' => self.determine_table_or_group_property(look_ahead + 1),
+                ':' => {
+                    if let Some(after_colon) = self.peek_ahead(look_ahead + 1) {
+                        if let TokenType::Symbol(':') = after_colon.token_type {
+                            DataEntryType::GroupArray
                         } else {
                             DataEntryType::TableProperty
                         }
+                    } else {
+                        DataEntryType::TableProperty
                     }
-                    _ => DataEntryType::Unknown,
-                };
-            }
+                }
+                _ => DataEntryType::Unknown,
+            };
         }
-
-        self.log_verbose("Could not determine entry type, defaulting to Unknown");
-        DataEntryType::Unknown
     }
+
+    self.log_verbose("Could not determine entry type, defaulting to Unknown");
+    DataEntryType::Unknown
+}
 
     fn determine_simple_or_object_property(&self, value_position: usize) -> DataEntryType {
         if let Some(value_token) = self.peek_ahead(value_position) {

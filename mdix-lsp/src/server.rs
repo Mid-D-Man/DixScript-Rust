@@ -276,6 +276,127 @@ impl LanguageServer for Backend {
         Ok(features::formatting::provide(self.documents.get(uri).as_deref(), opts))
     }
 
+    // ── On-type formatting ────────────────────────────────────────────────────
+    //
+    // Triggered when the user presses Enter after typing `{`, `(`, or `[`.
+    // We detect whether the character immediately before the newline is an
+    // unmatched open bracket, and if so insert indentation + the matching
+    // close bracket on the following line.
+    //
+    // Example — user types `{` then Enter in @QUICKFUNCS:
+    //
+    //   Before:   ~foo() {|          (cursor at |)
+    //   After:    ~foo() {
+    //               |                (cursor indented here)
+    //             }
+
+    async fn on_type_formatting(
+        &self,
+        params: DocumentOnTypeFormattingParams,
+    ) -> LspResult<Option<Vec<TextEdit>>> {
+        // We only act on Enter (\n)
+        if params.ch != "\n" {
+            return Ok(None);
+        }
+
+        let uri = &params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+
+        let doc_ref = self.documents.get(uri);
+        let source  = match &doc_ref {
+            Some(d) => d.source.clone(),
+            None    => return Ok(None),
+        };
+        drop(doc_ref); // release DashMap guard before any await
+
+        // `pos` is where the cursor is AFTER the newline was inserted.
+        // The line the user just finished is `pos.line - 1`.
+        let prev_line_idx = match pos.line.checked_sub(1) {
+            Some(l) => l as usize,
+            None    => return Ok(None),
+        };
+
+        let lines: Vec<&str> = source.lines().collect();
+        let prev_line = match lines.get(prev_line_idx) {
+            Some(l) => *l,
+            None    => return Ok(None),
+        };
+
+        // Find the last non-whitespace character on the previous line.
+        let last_ch = prev_line.trim_end().chars().last();
+        let (open, close) = match last_ch {
+            Some('{') => ('{', '}'),
+            Some('(') => ('(', ')'),
+            Some('[') => ('[', ']'),
+            _         => return Ok(None),
+        };
+
+        // Determine current indentation (leading spaces/tabs of the previous line)
+        let indent: String = prev_line
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .collect();
+
+        // For `{` we add one extra level (2 spaces by default, match options)
+        let inner_indent_size = params.options.tab_size as usize;
+        let inner_indent      = if params.options.insert_spaces {
+            " ".repeat(inner_indent_size)
+        } else {
+            "\t".to_string()
+        };
+
+        // Build the two edits:
+        //   1. On the CURRENT (new) line — add indentation for the cursor.
+        //   2. After that — insert the close bracket on its own line.
+        //
+        // The current line (`pos.line`) was just created by the Enter press;
+        // it may already contain the text that was to the right of the cursor
+        // (split-line). We keep it simple: we assume the cursor is at column 0
+        // of the new line and insert indented inner content + closing bracket.
+
+        let cur_line_text = lines.get(pos.line as usize).copied().unwrap_or("");
+
+        // If the close bracket is already on the next line, don't duplicate it.
+        let next_line_has_close = lines
+            .get(pos.line as usize + 1)
+            .map(|l| l.trim_start().starts_with(close))
+            .unwrap_or(false);
+
+        let mut edits: Vec<TextEdit> = Vec::new();
+
+        if next_line_has_close {
+            // Just indent the cursor line — the close bracket already exists.
+            edits.push(TextEdit {
+                range: Range::new(
+                    Position::new(pos.line, 0),
+                    Position::new(pos.line, cur_line_text.len() as u32),
+                ),
+                new_text: format!("{}{}{}", indent, inner_indent, cur_line_text.trim_start()),
+            });
+        } else {
+            // Insert indented cursor position + close bracket below.
+            // We replace the current new line with:
+            //   <base_indent><inner_indent>\n<base_indent><close>
+            let new_text = format!(
+                "{}{}\n{}{}",
+                indent, inner_indent,
+                indent, close
+            );
+            edits.push(TextEdit {
+                range: Range::new(
+                    Position::new(pos.line, 0),
+                    Position::new(pos.line, cur_line_text.len() as u32),
+                ),
+                new_text,
+            });
+        }
+
+        // Suppress unused-variable warning for `open` (used in the match for clarity)
+        let _ = open;
+
+        if edits.is_empty() { Ok(None) } else { Ok(Some(edits)) }
+    }
+
     // ── CodeLens (play button) ────────────────────────────────────────────────
 
     async fn code_lens(&self, params: CodeLensParams) -> LspResult<Option<Vec<CodeLens>>> {
@@ -309,13 +430,13 @@ impl LanguageServer for Backend {
         match command {
             CMD_VALIDATE => {
                 let (errors, warnings) = if let Some(doc) = &doc_ref {
-                    let all     = doc.error_manager.get_all_errors_flat();
-                    let errs    = all.iter().filter(|e| {
+                    let all   = doc.error_manager.get_all_errors_flat();
+                    let errs  = all.iter().filter(|e| {
                         matches!(e.severity(),
                             dixscript::ErrorManager::ErrorSeverity::Error
                             | dixscript::ErrorManager::ErrorSeverity::Fatal)
                     }).count();
-                    let warns   = all.iter().filter(|e| {
+                    let warns = all.iter().filter(|e| {
                         matches!(e.severity(),
                             dixscript::ErrorManager::ErrorSeverity::Warning)
                     }).count();
@@ -377,18 +498,17 @@ impl LanguageServer for Backend {
                 };
                 self.show_message(result.success, &result.message).await;
             }
-CMD_COMPILE => {
-    let ast_clone = doc_ref
-        .as_ref()
-        .and_then(|d| d.ast.clone());
-    let path_clone = source_path.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        run_compile(path_clone.as_deref(), ast_clone.as_ref())
-    }).await.unwrap_or_else(|_| {
-        crate::features::commands::CommandResult::err("Compile task panicked.")
-    });
-    self.show_message(result.success, &result.message).await;
-}
+
+            CMD_COMPILE => {
+                let ast_clone  = doc_ref.as_ref().and_then(|d| d.ast.clone());
+                let path_clone = source_path.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    run_compile(path_clone.as_deref(), ast_clone.as_ref())
+                }).await.unwrap_or_else(|_| {
+                    crate::features::commands::CommandResult::err("Compile task panicked.")
+                });
+                self.show_message(result.success, &result.message).await;
+            }
 
             CMD_SHOW_AST => {
                 let result = if let Some(doc) = &doc_ref {
@@ -406,7 +526,10 @@ CMD_COMPILE => {
             other => {
                 tracing::warn!("Unknown command: {}", other);
                 self.client
-                    .show_message(MessageType::WARNING, &format!("Unknown command: {}", other))
+                    .show_message(
+                        MessageType::WARNING,
+                        &format!("Unknown command: {}", other),
+                    )
                     .await;
             }
         }

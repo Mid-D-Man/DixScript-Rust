@@ -12,171 +12,171 @@
 
 @QUICKFUNCS(
 
-  ~createValueWithUnit<tuple>(value<float>, unit<enum>) {
+  ~createValueWithUnit<tuple<float,enum>>(value<float>, unit<enum>) {
     return t:(value, unit)
   }
 
-  ~createValueWithUnitAndUncertainty<tuple>(value<float>, unit<enum>, uncertainty<float>) {
+  ~createValueWithUnitAndUncertainty<tuple<float,enum,float>>(value<float>, unit<enum>, uncertainty<float>) {
     return t:(value, unit, uncertainty)
   }
 
-  ~convertLength<tuple>(value_with_unit<tuple>, target_unit<enum>) {
-   let value        = value_with_unit.first()
-   let current_unit = value_with_unit.second()
+  ~convertLength<tuple<float,enum>>(value_with_unit<tuple<float,enum>>, target_unit<enum>) {
+    let value<float>        = value_with_unit.first()
+    let current_unit<enum>  = value_with_unit.second()
 
-   let meters = current_unit == enums.LengthUnit.METER      ? value :
-             current_unit == enums.LengthUnit.CENTIMETER ? value * 0.01 :
-             current_unit == enums.LengthUnit.MILLIMETER ? value * 0.001 :
-             current_unit == enums.LengthUnit.MICROMETER ? value * 1.0e-6 :
-             current_unit == enums.LengthUnit.NANOMETER  ? value * 1.0e-9 :
-             current_unit == enums.LengthUnit.ANGSTROM   ? value * 1.0e-10 :
-             current_unit == enums.LengthUnit.PICOMETER  ? value * 1.0e-12 :
-             current_unit == enums.LengthUnit.FEMTOMETER ? value * 1.0e-15 :
-             current_unit == enums.LengthUnit.BOHR_RADIUS ? value * 5.29177210903e-11 : value
+    let meters<float> = current_unit == enums.LengthUnit.METER       ? value :
+              current_unit == enums.LengthUnit.CENTIMETER  ? value * 0.01 :
+              current_unit == enums.LengthUnit.MILLIMETER  ? value * 0.001 :
+              current_unit == enums.LengthUnit.MICROMETER  ? value * 1.0e-6 :
+              current_unit == enums.LengthUnit.NANOMETER   ? value * 1.0e-9 :
+              current_unit == enums.LengthUnit.ANGSTROM    ? value * 1.0e-10 :
+              current_unit == enums.LengthUnit.PICOMETER   ? value * 1.0e-12 :
+              current_unit == enums.LengthUnit.FEMTOMETER  ? value * 1.0e-15 :
+              current_unit == enums.LengthUnit.BOHR_RADIUS ? value * 5.29177210903e-11 : value
 
-   let result = target_unit == enums.LengthUnit.METER      ? meters :
-             target_unit == enums.LengthUnit.CENTIMETER ? meters / 0.01 :
-             target_unit == enums.LengthUnit.MILLIMETER ? meters / 0.001 :
-             target_unit == enums.LengthUnit.MICROMETER ? meters / 1.0e-6 :
-             target_unit == enums.LengthUnit.NANOMETER  ? meters / 1.0e-9 :
-             target_unit == enums.LengthUnit.ANGSTROM   ? meters / 1.0e-10 :
-             target_unit == enums.LengthUnit.PICOMETER  ? meters / 1.0e-12 :
-             target_unit == enums.LengthUnit.FEMTOMETER ? meters / 1.0e-15 :
-             target_unit == enums.LengthUnit.BOHR_RADIUS ? meters / 5.29177210903e-11 : meters
-
-    return t:(result, target_unit)
-  }
-
-  ~convertTemperature<tuple>(value_with_unit<tuple>, target_unit<enum>) {
-  let  value        = value_with_unit.first()
-  let  current_unit = value_with_unit.second()
-
-  let  kelvin = current_unit == enums.TemperatureUnit.KELVIN     ? value :
-             current_unit == enums.TemperatureUnit.CELSIUS    ? value + 273.15 :
-             current_unit == enums.TemperatureUnit.FAHRENHEIT ? (value - 32.0) * 5.0 / 9.0 + 273.15 : value
-
-  let  result = target_unit == enums.TemperatureUnit.KELVIN     ? kelvin :
-             target_unit == enums.TemperatureUnit.CELSIUS    ? kelvin - 273.15 :
-             target_unit == enums.TemperatureUnit.FAHRENHEIT ? (kelvin - 273.15) * 9.0 / 5.0 + 32.0 : kelvin
+    let result<float> = target_unit == enums.LengthUnit.METER       ? meters :
+              target_unit == enums.LengthUnit.CENTIMETER  ? meters / 0.01 :
+              target_unit == enums.LengthUnit.MILLIMETER  ? meters / 0.001 :
+              target_unit == enums.LengthUnit.MICROMETER  ? meters / 1.0e-6 :
+              target_unit == enums.LengthUnit.NANOMETER   ? meters / 1.0e-9 :
+              target_unit == enums.LengthUnit.ANGSTROM    ? meters / 1.0e-10 :
+              target_unit == enums.LengthUnit.PICOMETER   ? meters / 1.0e-12 :
+              target_unit == enums.LengthUnit.FEMTOMETER  ? meters / 1.0e-15 :
+              target_unit == enums.LengthUnit.BOHR_RADIUS ? meters / 5.29177210903e-11 : meters
 
     return t:(result, target_unit)
   }
 
-  ~convertEnergy<tuple>(value_with_unit<tuple>, target_unit<enum>) {
-  let  value        = value_with_unit.first()
-  let  current_unit = value_with_unit.second()
+  ~convertTemperature<tuple<float,enum>>(value_with_unit<tuple<float,enum>>, target_unit<enum>) {
+    let value<float>        = value_with_unit.first()
+    let current_unit<enum>  = value_with_unit.second()
 
- let   joules = current_unit == enums.EnergyUnit.JOULE      ? value :
-             current_unit == enums.EnergyUnit.KILOJOULE  ? value * 1000.0 :
-             current_unit == enums.EnergyUnit.MEGAJOULE  ? value * 1.0e6 :
-             current_unit == enums.EnergyUnit.ELECTRONVOLT ? value * 1.602176634e-19 :
-             current_unit == enums.EnergyUnit.KILO_EV    ? value * 1.602176634e-16 :
-             current_unit == enums.EnergyUnit.MEGA_EV    ? value * 1.602176634e-13 :
-             current_unit == enums.EnergyUnit.CALORIE    ? value * 4.184 :
-             current_unit == enums.EnergyUnit.KILOCALORIE ? value * 4184.0 :
-             current_unit == enums.EnergyUnit.HARTREE    ? value * 4.3597447222071e-18 :
-             current_unit == enums.EnergyUnit.RYDBERG    ? value * 2.1798723611035e-18 : value
+    let kelvin<float> = current_unit == enums.TemperatureUnit.KELVIN     ? value :
+               current_unit == enums.TemperatureUnit.CELSIUS    ? value + 273.15 :
+               current_unit == enums.TemperatureUnit.FAHRENHEIT ? (value - 32.0) * 5.0 / 9.0 + 273.15 : value
 
- let   result = target_unit == enums.EnergyUnit.JOULE      ? joules :
-             target_unit == enums.EnergyUnit.KILOJOULE  ? joules / 1000.0 :
-             target_unit == enums.EnergyUnit.MEGAJOULE  ? joules / 1.0e6 :
-             target_unit == enums.EnergyUnit.ELECTRONVOLT ? joules / 1.602176634e-19 :
-             target_unit == enums.EnergyUnit.KILO_EV    ? joules / 1.602176634e-16 :
-             target_unit == enums.EnergyUnit.MEGA_EV    ? joules / 1.602176634e-13 :
-             target_unit == enums.EnergyUnit.CALORIE    ? joules / 4.184 :
-             target_unit == enums.EnergyUnit.KILOCALORIE ? joules / 4184.0 :
-             target_unit == enums.EnergyUnit.HARTREE    ? joules / 4.3597447222071e-18 :
-             target_unit == enums.EnergyUnit.RYDBERG    ? joules / 2.1798723611035e-18 : joules
+    let result<float> = target_unit == enums.TemperatureUnit.KELVIN     ? kelvin :
+               target_unit == enums.TemperatureUnit.CELSIUS    ? kelvin - 273.15 :
+               target_unit == enums.TemperatureUnit.FAHRENHEIT ? (kelvin - 273.15) * 9.0 / 5.0 + 32.0 : kelvin
 
     return t:(result, target_unit)
   }
 
-  ~convertPressure<tuple>(value_with_unit<tuple>, target_unit<enum>) {
-  let  value        = value_with_unit.first()
-  let  current_unit = value_with_unit.second()
+  ~convertEnergy<tuple<float,enum>>(value_with_unit<tuple<float,enum>>, target_unit<enum>) {
+    let value<float>        = value_with_unit.first()
+    let current_unit<enum>  = value_with_unit.second()
 
-  let  pascals = current_unit == enums.PressureUnit.PASCAL     ? value :
-              current_unit == enums.PressureUnit.KILOPASCAL ? value * 1000.0 :
-              current_unit == enums.PressureUnit.MEGAPASCAL ? value * 1.0e6 :
-              current_unit == enums.PressureUnit.ATMOSPHERE ? value * 101325.0 :
-              current_unit == enums.PressureUnit.BAR        ? value * 100000.0 :
-              current_unit == enums.PressureUnit.MILLIBAR   ? value * 100.0 :
-              current_unit == enums.PressureUnit.TORR       ? value * 133.322 :
-              current_unit == enums.PressureUnit.PSI        ? value * 6894.76 : value
+    let joules<float> = current_unit == enums.EnergyUnit.JOULE       ? value :
+               current_unit == enums.EnergyUnit.KILOJOULE   ? value * 1000.0 :
+               current_unit == enums.EnergyUnit.MEGAJOULE   ? value * 1.0e6 :
+               current_unit == enums.EnergyUnit.ELECTRONVOLT ? value * 1.602176634e-19 :
+               current_unit == enums.EnergyUnit.KILO_EV     ? value * 1.602176634e-16 :
+               current_unit == enums.EnergyUnit.MEGA_EV     ? value * 1.602176634e-13 :
+               current_unit == enums.EnergyUnit.CALORIE     ? value * 4.184 :
+               current_unit == enums.EnergyUnit.KILOCALORIE ? value * 4184.0 :
+               current_unit == enums.EnergyUnit.HARTREE     ? value * 4.3597447222071e-18 :
+               current_unit == enums.EnergyUnit.RYDBERG     ? value * 2.1798723611035e-18 : value
 
-  let  result = target_unit == enums.PressureUnit.PASCAL     ? pascals :
-             target_unit == enums.PressureUnit.KILOPASCAL ? pascals / 1000.0 :
-             target_unit == enums.PressureUnit.MEGAPASCAL ? pascals / 1.0e6 :
-             target_unit == enums.PressureUnit.ATMOSPHERE ? pascals / 101325.0 :
-             target_unit == enums.PressureUnit.BAR        ? pascals / 100000.0 :
-             target_unit == enums.PressureUnit.MILLIBAR   ? pascals / 100.0 :
-             target_unit == enums.PressureUnit.TORR       ? pascals / 133.322 :
-             target_unit == enums.PressureUnit.PSI        ? pascals / 6894.76 : pascals
-
-    return t:(result, target_unit)
-  }
-
-  ~convertMass<tuple>(value_with_unit<tuple>, target_unit<enum>) {
-  let  value        = value_with_unit.first()
-  let  current_unit = value_with_unit.second()
-
-  let  kilograms = current_unit == enums.MassUnit.KILOGRAM        ? value :
-                current_unit == enums.MassUnit.GRAM            ? value * 0.001 :
-                current_unit == enums.MassUnit.MILLIGRAM       ? value * 1.0e-6 :
-                current_unit == enums.MassUnit.MICROGRAM       ? value * 1.0e-9 :
-                current_unit == enums.MassUnit.ATOMIC_MASS_UNIT ? value * 1.66053906660e-27 :
-                current_unit == enums.MassUnit.DALTON          ? value * 1.66053906660e-27 :
-                current_unit == enums.MassUnit.ELECTRON_MASS   ? value * 9.1093837015e-31 : value
-
-  let  result = target_unit == enums.MassUnit.KILOGRAM        ? kilograms :
-             target_unit == enums.MassUnit.GRAM            ? kilograms / 0.001 :
-             target_unit == enums.MassUnit.MILLIGRAM       ? kilograms / 1.0e-6 :
-             target_unit == enums.MassUnit.MICROGRAM       ? kilograms / 1.0e-9 :
-             target_unit == enums.MassUnit.ATOMIC_MASS_UNIT ? kilograms / 1.66053906660e-27 :
-             target_unit == enums.MassUnit.DALTON          ? kilograms / 1.66053906660e-27 :
-             target_unit == enums.MassUnit.ELECTRON_MASS   ? kilograms / 9.1093837015e-31 : kilograms
+    let result<float> = target_unit == enums.EnergyUnit.JOULE       ? joules :
+               target_unit == enums.EnergyUnit.KILOJOULE   ? joules / 1000.0 :
+               target_unit == enums.EnergyUnit.MEGAJOULE   ? joules / 1.0e6 :
+               target_unit == enums.EnergyUnit.ELECTRONVOLT ? joules / 1.602176634e-19 :
+               target_unit == enums.EnergyUnit.KILO_EV     ? joules / 1.602176634e-16 :
+               target_unit == enums.EnergyUnit.MEGA_EV     ? joules / 1.602176634e-13 :
+               target_unit == enums.EnergyUnit.CALORIE     ? joules / 4.184 :
+               target_unit == enums.EnergyUnit.KILOCALORIE ? joules / 4184.0 :
+               target_unit == enums.EnergyUnit.HARTREE     ? joules / 4.3597447222071e-18 :
+               target_unit == enums.EnergyUnit.RYDBERG     ? joules / 2.1798723611035e-18 : joules
 
     return t:(result, target_unit)
   }
 
-  ~convertTime<tuple>(value_with_unit<tuple>, target_unit<enum>) {
-  let  value        = value_with_unit.first()
-  let  current_unit = value_with_unit.second()
+  ~convertPressure<tuple<float,enum>>(value_with_unit<tuple<float,enum>>, target_unit<enum>) {
+    let value<float>        = value_with_unit.first()
+    let current_unit<enum>  = value_with_unit.second()
 
-  let  seconds = current_unit == enums.TimeUnit.SECOND      ? value :
-              current_unit == enums.TimeUnit.MILLISECOND ? value * 0.001 :
-              current_unit == enums.TimeUnit.MICROSECOND ? value * 1.0e-6 :
-              current_unit == enums.TimeUnit.NANOSECOND  ? value * 1.0e-9 :
-              current_unit == enums.TimeUnit.PICOSECOND  ? value * 1.0e-12 :
-              current_unit == enums.TimeUnit.FEMTOSECOND ? value * 1.0e-15 :
-              current_unit == enums.TimeUnit.MINUTE      ? value * 60.0 :
-              current_unit == enums.TimeUnit.HOUR        ? value * 3600.0 :
-              current_unit == enums.TimeUnit.DAY         ? value * 86400.0 :
-              current_unit == enums.TimeUnit.YEAR        ? value * 31_557_600.0 : value
+    let pascals<float> = current_unit == enums.PressureUnit.PASCAL     ? value :
+               current_unit == enums.PressureUnit.KILOPASCAL ? value * 1000.0 :
+               current_unit == enums.PressureUnit.MEGAPASCAL ? value * 1.0e6 :
+               current_unit == enums.PressureUnit.ATMOSPHERE ? value * 101325.0 :
+               current_unit == enums.PressureUnit.BAR        ? value * 100000.0 :
+               current_unit == enums.PressureUnit.MILLIBAR   ? value * 100.0 :
+               current_unit == enums.PressureUnit.TORR       ? value * 133.322 :
+               current_unit == enums.PressureUnit.PSI        ? value * 6894.76 : value
 
-  let  result = target_unit == enums.TimeUnit.SECOND      ? seconds :
-             target_unit == enums.TimeUnit.MILLISECOND ? seconds / 0.001 :
-             target_unit == enums.TimeUnit.MICROSECOND ? seconds / 1.0e-6 :
-             target_unit == enums.TimeUnit.NANOSECOND  ? seconds / 1.0e-9 :
-             target_unit == enums.TimeUnit.PICOSECOND  ? seconds / 1.0e-12 :
-             target_unit == enums.TimeUnit.FEMTOSECOND ? seconds / 1.0e-15 :
-             target_unit == enums.TimeUnit.MINUTE      ? seconds / 60.0 :
-             target_unit == enums.TimeUnit.HOUR        ? seconds / 3600.0 :
-             target_unit == enums.TimeUnit.DAY         ? seconds / 86400.0 :
-             target_unit == enums.TimeUnit.YEAR        ? seconds / 31_557_600.0 : seconds
+    let result<float> = target_unit == enums.PressureUnit.PASCAL     ? pascals :
+               target_unit == enums.PressureUnit.KILOPASCAL ? pascals / 1000.0 :
+               target_unit == enums.PressureUnit.MEGAPASCAL ? pascals / 1.0e6 :
+               target_unit == enums.PressureUnit.ATMOSPHERE ? pascals / 101325.0 :
+               target_unit == enums.PressureUnit.BAR        ? pascals / 100000.0 :
+               target_unit == enums.PressureUnit.MILLIBAR   ? pascals / 100.0 :
+               target_unit == enums.PressureUnit.TORR       ? pascals / 133.322 :
+               target_unit == enums.PressureUnit.PSI        ? pascals / 6894.76 : pascals
 
     return t:(result, target_unit)
   }
 
-  ~getValueFromTuple<float>(value_with_unit<tuple>) {
+  ~convertMass<tuple<float,enum>>(value_with_unit<tuple<float,enum>>, target_unit<enum>) {
+    let value<float>        = value_with_unit.first()
+    let current_unit<enum>  = value_with_unit.second()
+
+    let kilograms<float> = current_unit == enums.MassUnit.KILOGRAM         ? value :
+               current_unit == enums.MassUnit.GRAM             ? value * 0.001 :
+               current_unit == enums.MassUnit.MILLIGRAM        ? value * 1.0e-6 :
+               current_unit == enums.MassUnit.MICROGRAM        ? value * 1.0e-9 :
+               current_unit == enums.MassUnit.ATOMIC_MASS_UNIT ? value * 1.66053906660e-27 :
+               current_unit == enums.MassUnit.DALTON           ? value * 1.66053906660e-27 :
+               current_unit == enums.MassUnit.ELECTRON_MASS    ? value * 9.1093837015e-31 : value
+
+    let result<float> = target_unit == enums.MassUnit.KILOGRAM         ? kilograms :
+               target_unit == enums.MassUnit.GRAM             ? kilograms / 0.001 :
+               target_unit == enums.MassUnit.MILLIGRAM        ? kilograms / 1.0e-6 :
+               target_unit == enums.MassUnit.MICROGRAM        ? kilograms / 1.0e-9 :
+               target_unit == enums.MassUnit.ATOMIC_MASS_UNIT ? kilograms / 1.66053906660e-27 :
+               target_unit == enums.MassUnit.DALTON           ? kilograms / 1.66053906660e-27 :
+               target_unit == enums.MassUnit.ELECTRON_MASS    ? kilograms / 9.1093837015e-31 : kilograms
+
+    return t:(result, target_unit)
+  }
+
+  ~convertTime<tuple<float,enum>>(value_with_unit<tuple<float,enum>>, target_unit<enum>) {
+    let value<float>        = value_with_unit.first()
+    let current_unit<enum>  = value_with_unit.second()
+
+    let seconds<float> = current_unit == enums.TimeUnit.SECOND      ? value :
+               current_unit == enums.TimeUnit.MILLISECOND  ? value * 0.001 :
+               current_unit == enums.TimeUnit.MICROSECOND  ? value * 1.0e-6 :
+               current_unit == enums.TimeUnit.NANOSECOND   ? value * 1.0e-9 :
+               current_unit == enums.TimeUnit.PICOSECOND   ? value * 1.0e-12 :
+               current_unit == enums.TimeUnit.FEMTOSECOND  ? value * 1.0e-15 :
+               current_unit == enums.TimeUnit.MINUTE       ? value * 60.0 :
+               current_unit == enums.TimeUnit.HOUR         ? value * 3600.0 :
+               current_unit == enums.TimeUnit.DAY          ? value * 86400.0 :
+               current_unit == enums.TimeUnit.YEAR         ? value * 31_557_600.0 : value
+
+    let result<float> = target_unit == enums.TimeUnit.SECOND      ? seconds :
+               target_unit == enums.TimeUnit.MILLISECOND  ? seconds / 0.001 :
+               target_unit == enums.TimeUnit.MICROSECOND  ? seconds / 1.0e-6 :
+               target_unit == enums.TimeUnit.NANOSECOND   ? seconds / 1.0e-9 :
+               target_unit == enums.TimeUnit.PICOSECOND   ? seconds / 1.0e-12 :
+               target_unit == enums.TimeUnit.FEMTOSECOND  ? seconds / 1.0e-15 :
+               target_unit == enums.TimeUnit.MINUTE       ? seconds / 60.0 :
+               target_unit == enums.TimeUnit.HOUR         ? seconds / 3600.0 :
+               target_unit == enums.TimeUnit.DAY          ? seconds / 86400.0 :
+               target_unit == enums.TimeUnit.YEAR         ? seconds / 31_557_600.0 : seconds
+
+    return t:(result, target_unit)
+  }
+
+  ~getValueFromTuple<float>(value_with_unit<tuple<float,enum>>) {
     return value_with_unit.first()
   }
 
-  ~getUnitFromTuple<enum>(value_with_unit<tuple>) {
+  ~getUnitFromTuple<enum>(value_with_unit<tuple<float,enum>>) {
     return value_with_unit.second()
   }
 
-  ~getUncertaintyFromTuple<float>(value_with_unit_uncertainty<tuple>) {
+  ~getUncertaintyFromTuple<float>(value_with_unit_uncertainty<tuple<float,enum,float>>) {
     return value_with_unit_uncertainty.third()
   }
 

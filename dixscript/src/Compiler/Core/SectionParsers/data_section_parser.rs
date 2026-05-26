@@ -2948,12 +2948,13 @@ fn parse_typed_collection(&mut self, base_kw: &str) -> Option<DataType> {
             false
         }
     }
-    /// True if the current token is `>` or the first `>` of `>>`.
+    /// True if the current token is `>` or the first `>` of `>>` / `>>=` / `>=`.
 #[inline]
 fn is_closing_angle(&self) -> bool {
     match &self.current().token_type {
         TokenType::Symbol('>') => true,
         TokenType::BitwiseOp(op) if *op == ">>" || *op == ">>=" => true,
+        TokenType::ComparisonOp(op) if *op == ">=" => true,
         _ => false,
     }
 }
@@ -2962,6 +2963,9 @@ fn is_closing_angle(&self) -> bool {
 /// For plain `>`: advance normally.
 /// For `>>` (emitted as `BitwiseOp(">>")`): advance and set `pending_angle = true`
 /// so the next call returns `true` without advancing (acts as the second `>`).
+/// For `>>=`: advance and set both `pending_angle` and `pending_equal`.
+/// For `>=` (emitted as `ComparisonOp(">=")`): advance and set `pending_equal = true`
+/// so the next `=` consumption succeeds without reading another token.
 fn match_and_consume_closing_angle(&mut self) -> bool {
     if self.pending_angle {
         self.pending_angle = false;
@@ -2973,15 +2977,22 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
     }
     if let TokenType::BitwiseOp(op) = &self.current().token_type {
         if *op == ">>" {
-            // Two closing angles fused: consume both, the second is returned via pending_angle.
             self.advance();
             self.pending_angle = true;
             return true;
         }
         if *op == ">>=" {
-            // Three chars fused: '>' closes inner, '>' is pending outer, '=' is pending assign.
             self.advance();
             self.pending_angle = true;
+            self.pending_equal = true;
+            return true;
+        }
+    }
+    if let TokenType::ComparisonOp(op) = &self.current().token_type {
+        if *op == ">=" {
+            // Tokenizer fused '>' and '=' into one token (no space between them).
+            // '>' closes this annotation level; '=' is left pending for consume_equal().
+            self.advance();
             self.pending_equal = true;
             return true;
         }
@@ -2992,8 +3003,10 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
 /// (the opening `<` has NOT yet been consumed when this is called).
 ///
 /// Tokenizer output to keep in mind:
-///   `>`   → Symbol('>')        — one closing angle
-///   `>>`  → BitwiseOp(">>")   — two closing angles (pending_angle mechanism)
+///   `>`     → Symbol('>')           — one closing angle
+///   `>=`    → ComparisonOp(">=")    — one closing angle + fused '='
+///   `>>`    → BitwiseOp(">>")       — two closing angles (pending_angle mechanism)
+///   `>>=`   → BitwiseOp(">>=")      — two closing angles + fused '='
 ///
 /// When consuming `>>` would close our innermost level and leave one
 /// spare `>` that belongs to the outer annotation, we advance past the
@@ -3021,6 +3034,22 @@ fn skip_nested_angle_content(&mut self) {
                 if depth == 0 {
                     break;
                 }
+            }
+
+            // ">=" — one closing angle plus '=' fused by the tokenizer (no space).
+            TokenType::ComparisonOp(ref op) if *op == ">=" => {
+                if depth == 0 {
+                    // The '>' belongs outside our scope — do not consume.
+                    break;
+                }
+                depth -= 1;
+                self.advance();
+                self.pending_equal = true;
+                if depth == 0 {
+                    break;
+                }
+                // depth > 0: the '=' was embedded inside nested content.
+                // pending_equal is set; loop continues for the remaining depth.
             }
 
             // ">>" — two closing angles fused by the tokenizer.
@@ -3080,7 +3109,7 @@ fn skip_nested_angle_content(&mut self) {
             }
         }
     }
-                    }
+}
 
     /// Consume a `=` token, either the real current token or a virtual one left
 /// behind when `>>=` was split by `match_and_consume_closing_angle`.

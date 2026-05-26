@@ -3133,7 +3133,64 @@ fn consume_equal(&mut self) -> bool {
     self.match_and_consume_symbol('=')
 }
 
+/// Look-ahead helper: given `at` pointing at a `<` token, returns
+/// `(new_position, eq_was_fused)`.
+///
+/// `new_position` is the lookahead offset of the token immediately after the
+/// closing `>`.  `eq_was_fused` is `true` when the closing `>` was part of a
+/// fused `>=` or `>>=` token, meaning the `=` that separates the annotation
+/// from the value was already consumed by that token and must NOT be sought
+/// again as a separate `Symbol('=')`.
+///
+/// Handles all fused-token forms produced by the tokenizer:
+///   `>`     → Symbol('>')           — one closing angle
+///   `>=`    → ComparisonOp(">=")   — one closing angle + fused '='
+///   `>>`    → BitwiseOp(">>")      — two closing angles
+///   `>>=`   → BitwiseOp(">>=")     — two closing angles + fused '='
+fn skip_annotation_lookahead(&self, at: usize) -> (usize, bool) {
+    // `at` points to the opening '<'; start scanning from the token after it.
+    let mut pos   = at + 1;
+    let mut depth = 1i32;
 
+    while let Some(token) = self.peek_ahead(pos) {
+        match &token.token_type {
+            TokenType::Symbol('<') => {
+                depth += 1;
+                pos   += 1;
+            }
+            TokenType::Symbol('>') => {
+                depth -= 1;
+                pos   += 1;
+                if depth == 0 { return (pos, false); }
+            }
+            // ">=" — one closing angle with a fused '='
+            TokenType::ComparisonOp(op) if *op == ">=" => {
+                depth -= 1;
+                pos   += 1;
+                if depth == 0 { return (pos, true); }
+                // depth > 0: the '=' is embedded inside nested angle content;
+                // keep scanning.
+            }
+            // ">>" — two closing angles in one token
+            TokenType::BitwiseOp(op) if *op == ">>" => {
+                depth -= 2;
+                pos   += 1;
+                if depth <= 0 { return (pos, false); }
+            }
+            // ">>=" — two closing angles + fused '='
+            TokenType::BitwiseOp(op) if *op == ">>=" => {
+                depth -= 2;
+                pos   += 1;
+                if depth <= 0 { return (pos, true); }
+                // depth > 0: the '=' is inside nested content; keep scanning.
+            }
+            TokenType::EndOfFile => break,
+            _ => { pos += 1; }
+        }
+    }
+
+    (pos, false)
+            }
     
 
     fn handle_parse_error(&mut self, error_type: ParseErrorType, message: &str, token: &Token) {

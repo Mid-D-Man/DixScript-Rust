@@ -1,12 +1,15 @@
 // mdix-lsp/src/features/code_actions.rs
 //! Code action / quick-fix provider.
 //!
-//! FIXES:
-//!   1. Security missing squiggly is now at the @DLM line (not 0:0)
-//!   2. DAuditor has its own validation — if auditor present with no DAuditor
-//!      subtype that is fine; it warns on unrecognised subtype.
-//!   3. Light bulb to insert @SECURITY fires reliably via both diagnostics
-//!      AND a proactive check when no diagnostics are present.
+//! ## Security quick-fix
+//! A "Insert @SECURITY section" code action fires in two ways:
+//!   1. Diagnostic-based: when a SEC001 squiggly is clicked (lightbulb).
+//!   2. Proactive: whenever the document has DEncryptor in @DLM but no
+//!      @SECURITY section, even if diagnostics haven't propagated yet.
+//!
+//! The generated @SECURITY block is customised to the encryption algorithm
+//! detected in @DLM (aes256-gcm, aes128-gcm, chacha20-poly1305, or xor).
+//! It also contains a `key_file` or `password` mode choice snippet.
 
 use std::panic;
 use std::collections::HashMap;
@@ -19,11 +22,15 @@ use dixscript::Compiler::AST::data_types::{DLMModuleType, DLMModuleSubtype};
 use dixscript::Compiler::Core::Tokenizer::TokenType;
 use crate::document::Document;
 
+// ── Entry point ───────────────────────────────────────────────────────────────
+
 pub fn provide(
-    doc: Option<&Document>,
+    doc:         Option<&Document>,
     diagnostics: &[Diagnostic],
 ) -> Option<CodeActionResponse> {
-    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| provide_inner(doc, diagnostics)));
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        provide_inner(doc, diagnostics)
+    }));
     match result {
         Ok(r) => r,
         Err(payload) => {
@@ -37,33 +44,33 @@ pub fn provide(
 }
 
 fn provide_inner(
-    doc: Option<&Document>,
+    doc:         Option<&Document>,
     diagnostics: &[Diagnostic],
 ) -> Option<CodeActionResponse> {
     let doc = doc?;
     let mut actions: Vec<CodeActionOrCommand> = Vec::new();
     let mut added_security_insert = false;
 
-    // ── Actions derived from diagnostics ──────────────────────────────────────
+    // ── 1. Diagnostic-driven actions ──────────────────────────────────────────
     for diag in diagnostics {
         let source = diag.source.as_deref().unwrap_or("");
         let msg    = diag.message.to_lowercase();
 
-        if source.contains("semantic") || source.contains("parser") {
-            // Missing @SECURITY section (squiggly is now on @DLM line)
-            if (msg.contains("security") && msg.contains("missing"))
-                || msg.contains("@security section is required")
-                || msg.contains("encryptor requires")
-            {
+        if source.contains("semantic") || source.contains("parser") || source.contains("dixscript") {
+
+            // Missing @SECURITY — main quick-fix
+            if is_security_missing_msg(&msg) {
                 if !added_security_insert {
-                    if let Some(action) = fix_insert_security(doc, infer_algorithm_from_doc(doc)) {
+                    let algorithm = infer_algorithm_from_doc(doc);
+                    if let Some(action) = fix_insert_security(doc, algorithm) {
                         actions.push(CodeActionOrCommand::CodeAction(action));
                         added_security_insert = true;
                     }
                 }
+                continue;
             }
 
-            // Weak XOR encryption
+            // Weak XOR encryption warning
             if msg.contains("xor") || msg.contains("weak") || msg.contains("obfuscation") {
                 if let Some(action) = fix_replace_xor_in_dlm(doc) {
                     actions.push(CodeActionOrCommand::CodeAction(action));
@@ -79,64 +86,99 @@ fn provide_inner(
         }
     }
 
-    // ── Proactive: DEncryptor present, no @SECURITY ───────────────────────────
-    if !added_security_insert && has_encryptor_no_security(doc) {
-        if let Some(action) = fix_insert_security(doc, infer_algorithm_from_doc(doc)) {
-            actions.push(CodeActionOrCommand::CodeAction(action));
+    // ── 2. Proactive: DEncryptor present but no @SECURITY ────────────────────
+    //
+    // This fires even before the diagnostic squiggly appears (e.g. immediately
+    // after the user adds DEncryptor to @DLM but the analysis hasn't finished).
+    if !added_security_insert {
+        if let Some(info) = encryptor_without_security(doc) {
+            if let Some(action) = fix_insert_security(doc, &info.algorithm) {
+                actions.push(CodeActionOrCommand::CodeAction(action));
+
+                // Also offer a "Replace xor with aes256" fix when xor is the culprit
+                if info.algorithm == "xor" {
+                    if let Some(xor_fix) = fix_replace_xor_in_dlm(doc) {
+                        actions.push(CodeActionOrCommand::CodeAction(xor_fix));
+                    }
+                }
+            }
         }
     }
 
     if actions.is_empty() { None } else { Some(actions) }
 }
 
-// ── Security insertion ────────────────────────────────────────────────────────
+// ── Security-message detection ────────────────────────────────────────────────
 
-fn infer_algorithm_from_doc(doc: &Document) -> &'static str {
-    let ast = match &doc.ast { Some(a) => a, None => return "aes256-gcm" };
-    let dlm = match &ast.dlm { Some(d) => d, None => return "aes256-gcm" };
-    for m in &dlm.modules {
-        if matches!(m.module_type, DLMModuleType::DEncryptor) {
-            return match m.subtype {
-                Some(DLMModuleSubtype::Aes128)   => "aes128-gcm",
-                Some(DLMModuleSubtype::Chacha20)  => "chacha20-poly1305",
-                Some(DLMModuleSubtype::Xor)       => "xor",
-                _                                 => "aes256-gcm",
-            };
-        }
-    }
-    "aes256-gcm"
+fn is_security_missing_msg(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    (lower.contains("security") && lower.contains("missing"))
+        || lower.contains("@security section is required")
+        || lower.contains("encryptor requires")
+        || lower.contains("sec001")
 }
 
+// ── DLM introspection ─────────────────────────────────────────────────────────
+
+struct EncryptorInfo {
+    algorithm: String,
+}
+
+/// Returns Some if the document has DEncryptor but no @SECURITY, else None.
+fn encryptor_without_security(doc: &Document) -> Option<EncryptorInfo> {
+    let ast = doc.ast.as_ref()?;
+
+    if ast.security.is_some() {
+        return None; // @SECURITY already present — nothing to do
+    }
+
+    let dlm = ast.dlm.as_ref()?;
+    let enc = dlm.modules.iter().find(|m| matches!(m.module_type, DLMModuleType::DEncryptor))?;
+
+    let algorithm = match enc.subtype {
+        Some(DLMModuleSubtype::Aes128)  => "aes128-gcm",
+        Some(DLMModuleSubtype::Aes256)  => "aes256-gcm",
+        Some(DLMModuleSubtype::Chacha20) => "chacha20-poly1305",
+        Some(DLMModuleSubtype::Xor)      => "xor",
+        _                                => "aes256-gcm",
+    };
+
+    Some(EncryptorInfo { algorithm: algorithm.to_string() })
+}
+
+/// Infer the algorithm string from the AST (used for diagnostic-driven path).
+fn infer_algorithm_from_doc(doc: &Document) -> String {
+    encryptor_without_security(doc)
+        .map(|i| i.algorithm)
+        .unwrap_or_else(|| "aes256-gcm".to_string())
+}
+
+// ── @SECURITY insertion ───────────────────────────────────────────────────────
+
+/// Build a TextEdit that appends a complete @SECURITY block at the end of the file.
 fn fix_insert_security(doc: &Document, algorithm: &str) -> Option<CodeAction> {
     let line_count = doc.source.lines().count() as u32;
 
-    // Choose KDF block only when password mode is sensible
-    let security_block = if algorithm == "xor" {
-        concat!(
-            "\n\n@SECURITY(\n",
-            "  encryption -> {\n",
-            "    mode      = \"keyfile\",\n",
-            "    algorithm = \"xor\"\n",
-            "  }\n",
-            ")"
-        ).to_string()
-    } else {
-        format!(
-            "\n\n@SECURITY(\n  encryption -> {{\n    mode      = \"${{1|password,keyfile|}}\",\n    algorithm = \"{}\"\n  }}\n)",
-            algorithm
-        )
-    };
+    // Determine whether the file already has a trailing newline
+    let needs_leading_newline = !doc.source.ends_with('\n');
+    let prefix = if needs_leading_newline { "\n" } else { "" };
+
+    let security_block = build_security_block(prefix, algorithm);
+
+    let insert_pos = Position::new(line_count, 0);
 
     let edit = TextEdit {
-        range:    Range::new(
-            Position::new(line_count, 0),
-            Position::new(line_count, 0),
-        ),
+        range:    Range::new(insert_pos, insert_pos),
         new_text: security_block,
     };
 
+    let title = format!(
+        "Insert @SECURITY section ({})",
+        algorithm_display_name(algorithm)
+    );
+
     Some(make_action(
-        &format!("Insert @SECURITY section ({})", algorithm),
+        &title,
         CodeActionKind::QUICKFIX,
         doc.uri.clone(),
         vec![edit],
@@ -144,10 +186,60 @@ fn fix_insert_security(doc: &Document, algorithm: &str) -> Option<CodeAction> {
     ))
 }
 
-// ── XOR fix ───────────────────────────────────────────────────────────────────
+/// Build the @SECURITY block text for the given algorithm.
+///
+/// For real encryption algorithms (aes256-gcm, aes128-gcm, chacha20-poly1305)
+/// we produce a block with both mode options and the correct algorithm name.
+/// For xor (weak) we just produce keyfile mode with a comment.
+fn build_security_block(prefix: &str, algorithm: &str) -> String {
+    match algorithm {
+        "xor" => format!(
+            "{}\n\
+             @SECURITY(\n\
+             \x20 // XOR is obfuscation only — consider upgrading to aes256\n\
+             \x20 encryption -> {{\n\
+             \x20   mode      = \"keyfile\",\n\
+             \x20   algorithm = \"xor\"\n\
+             \x20 }}\n\
+             )\n",
+            prefix
+        ),
+
+        _ => {
+            // Map DLM subtype name to @SECURITY algorithm string
+            let sec_algo = match algorithm {
+                "aes128-gcm"         => "aes128-gcm",
+                "chacha20-poly1305"  => "chacha20-poly1305",
+                _                    => "aes256-gcm",  // default / aes256-gcm
+            };
+            format!(
+                "{}\n\
+                 @SECURITY(\n\
+                 \x20 encryption -> {{\n\
+                 \x20   // mode: \"keyfile\" (auto-generates .mdix.key) or \"password\" (prompts at compile time)\n\
+                 \x20   mode      = \"keyfile\",\n\
+                 \x20   algorithm = \"{}\"\n\
+                 \x20 }}\n\
+                 )\n",
+                prefix, sec_algo
+            )
+        }
+    }
+}
+
+fn algorithm_display_name(algorithm: &str) -> &str {
+    match algorithm {
+        "aes256-gcm"         => "AES-256-GCM",
+        "aes128-gcm"         => "AES-128-GCM",
+        "chacha20-poly1305"  => "ChaCha20-Poly1305",
+        "xor"                => "XOR (weak)",
+        _                    => algorithm,
+    }
+}
+
+// ── XOR → aes256 replacement ──────────────────────────────────────────────────
 
 fn fix_replace_xor_in_dlm(doc: &Document) -> Option<CodeAction> {
-    // Find the `xor` identifier token inside @DLM
     for token in &doc.tokens {
         if let TokenType::Identifier(id) = &token.token_type {
             if id.eq_ignore_ascii_case("xor") {
@@ -161,7 +253,7 @@ fn fix_replace_xor_in_dlm(doc: &Document) -> Option<CodeAction> {
                     new_text: "aes256".to_string(),
                 };
                 return Some(make_action(
-                    "Replace weak 'xor' with 'aes256'",
+                    "Replace weak 'xor' with 'aes256' in @DLM",
                     CodeActionKind::QUICKFIX,
                     doc.uri.clone(),
                     vec![edit],
@@ -208,17 +300,7 @@ fn fix_unknown_enum(doc: &Document, diag: &Diagnostic) -> Vec<CodeActionOrComman
     actions
 }
 
-// ── Proactive check ───────────────────────────────────────────────────────────
-
-fn has_encryptor_no_security(doc: &Document) -> bool {
-    let ast = match &doc.ast { Some(a) => a, None => return false };
-    let has_enc = ast.dlm.as_ref()
-        .map(|d| d.modules.iter().any(|m| matches!(m.module_type, DLMModuleType::DEncryptor)))
-        .unwrap_or(false);
-    has_enc && ast.security.is_none()
-}
-
-// ── Constructors ──────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn make_action(
     title:        &str,

@@ -74,8 +74,14 @@ pub fn server_capabilities() -> ServerCapabilities {
         completion_provider: Some(CompletionOptions {
             resolve_provider:   Some(false),
             trigger_characters: Some(vec![
-                "@".to_string(), ".".to_string(),
-                "<".to_string(), "~".to_string(),
+                "@".to_string(),
+                ".".to_string(),
+                "<".to_string(),
+                "~".to_string(),
+                // Bracket auto-close triggers
+                "{".to_string(),
+                "(".to_string(),
+                "[".to_string(),
             ]),
             ..Default::default()
         }),
@@ -109,11 +115,13 @@ pub fn server_capabilities() -> ServerCapabilities {
         // ── Formatting ────────────────────────────────────────────────────────
         document_formatting_provider: Some(OneOf::Left(true)),
 
+        // ── On-type formatting: add closing brace after '{' + Enter ───────────
+        document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
+            first_trigger_character: "\n".to_string(),
+            more_trigger_character:  None,
+        }),
+
         // ── Play button / commands ────────────────────────────────────────────
-        //
-        // tower-lsp 0.20 pulls a version of lsp-types where CodeLensOptions
-        // exposes only `resolve_provider` — no work_done_progress_options and
-        // no Default impl. Construct with just the one field we need.
         code_lens_provider: Some(CodeLensOptions {
             resolve_provider: Some(false),
         }),
@@ -143,4 +151,4 @@ pub fn server_capabilities() -> ServerCapabilities {
 
         ..Default::default()
     }
-                                  }
+}

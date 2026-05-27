@@ -8,7 +8,12 @@ use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::analyzer::{run_pipeline, get_resolved_ast};
+use dixscript::Compiler::AST::DixScript;
+use dixscript::Compiler::AST::data_types::DebugMode;
+use dixscript::Compiler::Core::SemanticAnalysisResult;
+use dixscript::Compiler::Core::ValueResolution::ValueResolver;
+
+use crate::analyzer::run_pipeline;
 use crate::capabilities::server_capabilities;
 use crate::converters::to_diagnostics;
 use crate::document::Document;
@@ -89,23 +94,72 @@ impl Backend {
         let kind = if success { MessageType::INFO } else { MessageType::ERROR };
         self.client.show_message(kind, msg).await;
     }
+}
 
-    /// Get the fully value-resolved AST for a document (for commands only).
-    /// Runs value resolution synchronously — must be called from spawn_blocking.
-    ///
-    /// Falls back to the enhanced-but-unresolved AST when:
-    ///   - the document has no QuickFuncs / no @DATA (nothing to resolve)
-    ///   - value resolution fails or panics
-    ///
-    /// Returns None only when the document is not in the store or has never
-    /// been parsed.
-    fn resolved_ast_for_command(
-        doc_ref: &Option<dashmap::mapref::one::Ref<'_, Url, Document>>,
-    ) -> Option<dixscript::Compiler::AST::DixScript> {
-        let doc = doc_ref.as_ref()?;
-        // get_resolved_ast returns Some(ast) even on resolution failure
-        // (falls back to enhanced AST), so we only get None if doc.ast is None.
-        get_resolved_ast(doc).or_else(|| doc.ast.clone())
+// ── Standalone value-resolution helper ────────────────────────────────────────
+//
+// Takes fully OWNED data so it can be safely passed into spawn_blocking.
+// This replaces the old `resolved_ast_for_command` method which tried to move
+// a non-'static dashmap::Ref into spawn_blocking.
+
+fn resolve_ast_owned(
+    ast:             Option<DixScript>,
+    semantic_result: Option<SemanticAnalysisResult>,
+) -> Option<DixScript> {
+    let ast = ast?;
+
+    // Fast path: if there are no QuickFuncs or no DATA, nothing to resolve.
+    let has_local_fns = ast
+        .quick_functions
+        .as_ref()
+        .map(|q| !q.functions.is_empty())
+        .unwrap_or(false);
+
+    let has_imported_fns = semantic_result
+        .as_ref()
+        .and_then(|sr| sr.symbol_table.as_ref())
+        .map(|st| st.namespaces.values().any(|ns| !ns.functions.is_empty()))
+        .unwrap_or(false);
+
+    if (!has_local_fns && !has_imported_fns) || ast.data.is_none() {
+        return Some(ast);
+    }
+
+    let st = match semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref()) {
+        Some(st) => st,
+        None     => return Some(ast),
+    };
+
+    let ast_clone = ast.clone();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let resolver = ValueResolver::new(ast_clone, st, DebugMode::Off);
+        resolver.resolve()
+    }));
+
+    match result {
+        Ok(resolution) if resolution.is_success => {
+            tracing::debug!(
+                "Value resolution complete: {} call(s) resolved",
+                resolution.function_calls_resolved
+            );
+            resolution.resolved_ast.or(Some(ast))
+        }
+        Ok(resolution) => {
+            tracing::warn!(
+                "Value resolution failed ({} error(s)), using enhanced AST",
+                resolution.errors.len()
+            );
+            Some(ast)
+        }
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "unknown panic".to_string());
+            tracing::error!("Value resolution panicked: {}", msg);
+            Some(ast)
+        }
     }
 }
 
@@ -377,7 +431,6 @@ impl LanguageServer for Backend {
         }
 
         let _ = open;
-
         if edits.is_empty() { Ok(None) } else { Ok(Some(edits)) }
     }
 
@@ -390,13 +443,15 @@ impl LanguageServer for Backend {
 
     // ── Execute command ───────────────────────────────────────────────────────
     //
-    // Commands that produce output (→ JSON, → TOML, minify) use the fully
-    // value-resolved AST so QuickFunc calls in @DATA are expanded to their
-    // actual objects/values rather than appearing as null.
+    // FIX: dashmap::Ref<'_, K, V> holds a read-lock on the map and its lifetime
+    // is NOT 'static.  tokio::task::spawn_blocking requires the closure to be
+    // 'static + Send, so moving a Ref into it is a compile error.
     //
-    // Value resolution runs synchronously inside spawn_blocking, so it never
-    // blocks the async executor.  The regular analysis pipeline is NOT changed —
-    // resolution only happens on demand here.
+    // Pattern for every command that needs the document:
+    //   1. Acquire the dashmap Ref inside a short block.
+    //   2. Clone the fields we need into owned values.
+    //   3. The block ends → Ref is dropped, lock released.
+    //   4. Move the owned values into spawn_blocking — no lifetime issues.
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> LspResult<Option<serde_json::Value>> {
         let command = params.command.as_str();
@@ -417,39 +472,50 @@ impl LanguageServer for Backend {
         match command {
 
             // ── Validate ─────────────────────────────────────────────────────
-            // Uses the existing diagnostic state — no resolution needed.
+            // Only needs error counts — no spawn_blocking required.
             CMD_VALIDATE => {
-                let doc_ref = uri.as_ref().and_then(|u| self.documents.get(u));
-                let (errors, warnings) = if let Some(doc) = &doc_ref {
-                    let all   = doc.error_manager.get_all_errors_flat();
-                    let errs  = all.iter().filter(|e| {
-                        matches!(e.severity(),
+                let (errors, warnings) = {
+                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
+                    if let Some(d) = &doc {
+                        let all   = d.error_manager.get_all_errors_flat();
+                        let errs  = all.iter().filter(|e| matches!(
+                            e.severity(),
                             dixscript::ErrorManager::ErrorSeverity::Error
-                            | dixscript::ErrorManager::ErrorSeverity::Fatal)
-                    }).count();
-                    let warns = all.iter().filter(|e| {
-                        matches!(e.severity(),
-                            dixscript::ErrorManager::ErrorSeverity::Warning)
-                    }).count();
-                    (errs, warns)
-                } else {
-                    (0, 0)
+                            | dixscript::ErrorManager::ErrorSeverity::Fatal
+                        )).count();
+                        let warns = all.iter().filter(|e| matches!(
+                            e.severity(),
+                            dixscript::ErrorManager::ErrorSeverity::Warning
+                        )).count();
+                        (errs, warns)
+                    } else {
+                        (0, 0)
+                    }
+                    // `doc` (the Ref) is dropped here
                 };
                 let result = run_validate(errors, warnings);
                 self.show_message(result.success, &result.message).await;
             }
 
             // ── Convert → JSON ────────────────────────────────────────────────
-            // Runs value resolution so QuickFunc calls in @DATA are expanded.
+            // Clone ast + semantic_result before spawn_blocking so the dashmap
+            // Ref is not moved into the 'static closure.
             CMD_TO_JSON => {
-                let doc_ref    = uri.as_ref().and_then(|u| self.documents.get(u));
+                let (ast_opt, semantic_opt) = {
+                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
+                    (
+                        doc.as_ref().and_then(|d| d.ast.clone()),
+                        doc.as_ref().and_then(|d| d.semantic_result.clone()),
+                    )
+                    // Ref dropped here
+                };
                 let path_clone = source_path.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    match Self::resolved_ast_for_command(&doc_ref) {
+                    match resolve_ast_owned(ast_opt, semantic_opt) {
                         Some(ast) => run_convert_to_json(&ast, path_clone.as_deref()),
-                        None => CommandResult::err(
-                            "File has not been parsed yet — wait for analysis to complete."
+                        None      => CommandResult::err(
+                            "File has not been parsed yet — wait for analysis to complete.",
                         ),
                     }
                 }).await.unwrap_or_else(|_| {
@@ -460,16 +526,21 @@ impl LanguageServer for Backend {
             }
 
             // ── Convert → TOML ────────────────────────────────────────────────
-            // Runs value resolution so QuickFunc calls in @DATA are expanded.
             CMD_TO_TOML => {
-                let doc_ref    = uri.as_ref().and_then(|u| self.documents.get(u));
+                let (ast_opt, semantic_opt) = {
+                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
+                    (
+                        doc.as_ref().and_then(|d| d.ast.clone()),
+                        doc.as_ref().and_then(|d| d.semantic_result.clone()),
+                    )
+                };
                 let path_clone = source_path.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    match Self::resolved_ast_for_command(&doc_ref) {
+                    match resolve_ast_owned(ast_opt, semantic_opt) {
                         Some(ast) => run_convert_to_toml(&ast, path_clone.as_deref()),
-                        None => CommandResult::err(
-                            "File has not been parsed yet — wait for analysis to complete."
+                        None      => CommandResult::err(
+                            "File has not been parsed yet — wait for analysis to complete.",
                         ),
                     }
                 }).await.unwrap_or_else(|_| {
@@ -480,17 +551,21 @@ impl LanguageServer for Backend {
             }
 
             // ── Minify ────────────────────────────────────────────────────────
-            // Runs value resolution so the minified output contains actual
-            // resolved values rather than function call stubs.
             CMD_MINIFY => {
-                let doc_ref    = uri.as_ref().and_then(|u| self.documents.get(u));
+                let (ast_opt, semantic_opt) = {
+                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
+                    (
+                        doc.as_ref().and_then(|d| d.ast.clone()),
+                        doc.as_ref().and_then(|d| d.semantic_result.clone()),
+                    )
+                };
                 let path_clone = source_path.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    match Self::resolved_ast_for_command(&doc_ref) {
+                    match resolve_ast_owned(ast_opt, semantic_opt) {
                         Some(ast) => run_minify(&ast, path_clone.as_deref()),
-                        None => CommandResult::err(
-                            "File has not been parsed yet — wait for analysis to complete."
+                        None      => CommandResult::err(
+                            "File has not been parsed yet — wait for analysis to complete.",
                         ),
                     }
                 }).await.unwrap_or_else(|_| {
@@ -501,10 +576,14 @@ impl LanguageServer for Backend {
             }
 
             // ── Compile ───────────────────────────────────────────────────────
-            // Shells out to `mdix compile` — no in-process resolution needed.
+            // Shells out to `mdix` — only needs the AST for the DLM notice,
+            // no value resolution required.
             CMD_COMPILE => {
-                let doc_ref    = uri.as_ref().and_then(|u| self.documents.get(u));
-                let ast_clone  = doc_ref.as_ref().and_then(|d| d.ast.clone());
+                let ast_clone = {
+                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
+                    doc.as_ref().and_then(|d| d.ast.clone())
+                    // Ref dropped here
+                };
                 let path_clone = source_path.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
@@ -517,17 +596,16 @@ impl LanguageServer for Backend {
             }
 
             // ── Show AST ──────────────────────────────────────────────────────
-            // Uses the enhanced AST (resolution not needed for structure display).
+            // Only needs the AST structure — no resolution, no spawn_blocking.
             CMD_SHOW_AST => {
-                let doc_ref = uri.as_ref().and_then(|u| self.documents.get(u));
-                let result  = if let Some(doc) = &doc_ref {
-                    if let Some(ast) = &doc.ast {
-                        run_show_ast(ast)
-                    } else {
-                        CommandResult::err("AST not available — wait for analysis.")
-                    }
-                } else {
-                    CommandResult::err("Document not found.")
+                let ast_clone = {
+                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
+                    doc.as_ref().and_then(|d| d.ast.clone())
+                };
+
+                let result = match ast_clone {
+                    Some(ast) => run_show_ast(&ast),
+                    None      => CommandResult::err("AST not available — wait for analysis."),
                 };
                 self.show_message(result.success, &result.message).await;
             }
@@ -545,4 +623,4 @@ impl LanguageServer for Backend {
 
         Ok(None)
     }
-                }
+}

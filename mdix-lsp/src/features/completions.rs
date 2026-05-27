@@ -4,17 +4,12 @@
 //! ## Dot completions (improved)
 //! When `.` is typed, the provider now:
 //!   1. Finds the last token before the dot on the same line (token stream).
-//!   2. Converts that token to a `DixType` (literals → direct, identifiers →
-//!      QuickFunc param types → type_index → symbol table).
-//!   3. Queries `instance_method_registry` for ALL registered methods of that type
-//!      (including universal methods) and builds completion items with proper
-//!      signatures and snippet insert text.
-//!   4. For static objects / enum access / imported namespaces: unchanged path.
-//!
-//! ## Bracket completions
-//! `{`, `(`, `[` are now trigger characters. When fired, the provider offers
-//! a bracket-closing snippet so the user can accept to get the matching close
-//! bracket inserted automatically.
+//!   2. Converts that token to a `DixType` — literals → direct, identifiers →
+//!      (a) QuickFunc params, (b) QuickFunc body local declarations,
+//!      (c) type_index from semantic analysis, (d) symbol table DATA vars.
+//!   3. Queries `instance_method_registry` for ALL registered methods of that
+//!      type and builds completion items.
+//!   4. Static objects / enum access / imported namespaces: unchanged path.
 
 use std::panic;
 
@@ -25,7 +20,7 @@ use tower_lsp::lsp_types::{
 };
 use dixscript::Builtins::Core::DixType;
 use dixscript::Builtins::Resolver::{instance_method_registry, static_object_registry};
-use dixscript::Compiler::AST::{DataType, DixScript};
+use dixscript::Compiler::AST::{DataType, DixScript, QuickFuncStatement, Value};
 use dixscript::Compiler::Core::Tokenizer::Token;
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
 use dixscript::Compiler::Core::Tokenizer::TokenType;
@@ -414,11 +409,6 @@ fn quickfunc_declaration_snippets() -> Vec<CompletionItem> {
 }
 
 // ── Bracket pair completions ──────────────────────────────────────────────────
-//
-// When a bracket trigger char fires, the character is already in the document.
-// We provide a snippet whose insert_text goes AFTER the typed character.
-// The `text_edit` approach replaces the typed char with the full pair snippet so
-// the cursor ends up between the brackets.
 
 fn bracket_completions(ch: char, pos: Position) -> Vec<CompletionItem> {
     let (close, label_inline, snippet_inline, label_multi, snippet_multi) = match ch {
@@ -446,8 +436,6 @@ fn bracket_completions(ch: char, pos: Position) -> Vec<CompletionItem> {
         _ => return vec![],
     };
 
-    // The trigger char is already in the document at pos.character - 1 (0-based).
-    // We replace it with the full pair snippet.
     let start_char = pos.character.saturating_sub(1);
 
     let make = |label: &str, snippet: &str, sort: &str| CompletionItem {
@@ -457,7 +445,6 @@ fn bracket_completions(ch: char, pos: Position) -> Vec<CompletionItem> {
         insert_text_format: Some(InsertTextFormat::SNIPPET),
         filter_text: Some(ch.to_string()),
         sort_text: Some(sort.to_string()),
-        // Replace the already-typed open bracket with the full snippet pair.
         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
             range: Range::new(
                 Position::new(pos.line, start_char),
@@ -476,27 +463,122 @@ fn bracket_completions(ch: char, pos: Position) -> Vec<CompletionItem> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DOT COMPLETIONS  (major rewrite — uses token stream + registry)
+// LOCAL VARIABLE TYPE LOOKUP FOR QuickFunc BODY
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// KEY FIX (issue 3): When the user types `myVar.` inside @QUICKFUNCS, we now
+// search the QuickFunc body for `let myVar = …` / `let myVar<T> = …` declarations
+// so we can resolve the receiver's DixType and show the correct instance methods.
+
+/// Search `stmts` for a `VariableDeclaration` for `name` and return its DataType.
+/// Returns:
+///   - the explicit annotation type if present (`let x<string> = …` → String)
+///   - a type inferred from the RHS value literal if unannotated
+///   - None if not found or type cannot be determined
+fn find_local_var_dt_in_stmts(stmts: &[QuickFuncStatement], name: &str) -> Option<DataType> {
+    for stmt in stmts {
+        match stmt {
+            QuickFuncStatement::VariableDeclaration {
+                variable_name, data_type, value, ..
+            } if variable_name == name => {
+                // Explicit annotation wins immediately
+                if let Some(dt) = data_type {
+                    return Some(*dt);
+                }
+                // Otherwise infer from the RHS expression
+                return infer_datatype_from_expr_simple(value);
+            }
+
+            QuickFuncStatement::If { then_branch, else_branch, .. } => {
+                if let Some(dt) = find_local_var_dt_in_stmts(then_branch, name) {
+                    return Some(dt);
+                }
+                if let Some(eb) = else_branch {
+                    if let Some(dt) = find_local_var_dt_in_stmts(eb, name) {
+                        return Some(dt);
+                    }
+                }
+            }
+
+            QuickFuncStatement::Switch { cases, default_case, .. } => {
+                for case in cases {
+                    if let Some(dt) = find_local_var_dt_in_stmts(&case.statements, name) {
+                        return Some(dt);
+                    }
+                }
+                if let Some(dc) = default_case {
+                    if let Some(dt) = find_local_var_dt_in_stmts(&dc.statements, name) {
+                        return Some(dt);
+                    }
+                }
+            }
+
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Quick, context-free DataType inference from an expression's top-level
+/// structure.  Used only for completion purposes (good enough for literals
+/// and simple calls; complex chains fall back to None).
+fn infer_datatype_from_expr_simple(expr: &dixscript::Compiler::AST::Expression) -> Option<DataType> {
+    use dixscript::Compiler::AST::Expression;
+    match expr {
+        Expression::Value { value, .. } => infer_datatype_from_value_simple(value),
+        Expression::Parenthesized { expression, .. } => {
+            infer_datatype_from_expr_simple(expression)
+        }
+        _ => None,
+    }
+}
+
+/// Quick, context-free DataType inference directly from a Value literal.
+fn infer_datatype_from_value_simple(value: &Value) -> Option<DataType> {
+    use dixscript::Compiler::AST::Value;
+    match value {
+        Value::Integer { .. }                                    => Some(DataType::Int),
+        Value::Long { .. }                                       => Some(DataType::Long),
+        Value::Float { .. }                                      => Some(DataType::Float),
+        Value::Double { .. } | Value::ScientificNotation { .. } => Some(DataType::Double),
+        Value::String { .. } | Value::InterpolatedString { .. } => Some(DataType::String),
+        Value::Boolean { .. }                                    => Some(DataType::Bool),
+        Value::HexColor { .. }                                   => Some(DataType::Hex),
+        Value::Date { .. }                                       => Some(DataType::Date),
+        Value::Timestamp { .. }                                  => Some(DataType::Timestamp),
+        Value::EnumValue { .. }                                  => Some(DataType::Enum),
+        Value::Object { .. }                                     => Some(DataType::Object),
+        Value::Array { .. } | Value::NestedArray { .. }         => Some(DataType::Array),
+        Value::PrefixedConstructor { prefix, .. } => match prefix.as_str() {
+            "t" => Some(DataType::Tuple),
+            "b" => Some(DataType::Blob),
+            "r" => Some(DataType::Regex),
+            _   => None,
+        },
+        Value::Expression { expr, .. } => infer_datatype_from_expr_simple(expr),
+        _ => None,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOT COMPLETIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Find the last token that starts on the same line BEFORE the dot position.
-/// Positions: tokens are 1-based, `pos` is 0-based LSP.
+/// Find the last token on the same line that starts strictly before the dot.
 fn token_before_dot<'a>(tokens: &'a [Token], pos: Position) -> Option<&'a Token> {
-    let target_line_1 = (pos.line + 1) as usize;   // 1-based
-    let dot_col_0     = pos.character as usize;      // 0-based position of the '.'
+    let target_line_1 = (pos.line + 1) as usize;
+    let dot_col_0     = pos.character as usize;
 
     tokens
         .iter()
         .filter(|t| {
             t.line == target_line_1
-                // token starts before the dot (convert 1-based col → 0-based)
                 && (t.column.saturating_sub(1)) < dot_col_0
         })
         .last()
 }
 
 /// Convert a token to its `DixType` for instance-method dispatch.
-/// Literal tokens map directly; identifiers go through semantic analysis.
 fn dix_type_of_token(token: &Token, doc: &Document) -> Option<DixType> {
     match &token.token_type {
         // ── Literals ─────────────────────────────────────────────────────────
@@ -505,45 +587,42 @@ fn dix_type_of_token(token: &Token, doc: &Document) -> Option<DixType> {
         | TokenType::InterpolatedString(_) => Some(DixType::String),
 
         TokenType::Integer(_) | TokenType::HexLiteral(_) => Some(DixType::Int),
-        TokenType::Long(_) => Some(DixType::Long),
-        TokenType::Float(_) => Some(DixType::Float),
+        TokenType::Long(_)                                => Some(DixType::Long),
+        TokenType::Float(_)                               => Some(DixType::Float),
         TokenType::Double(_) | TokenType::ScientificNotation(_) => Some(DixType::Double),
-        TokenType::Bool(_) => Some(DixType::Bool),
-        TokenType::HexColor(_) => Some(DixType::Hex),
-        TokenType::Date(_) => Some(DixType::Date),
-        TokenType::Timestamp(_) => Some(DixType::Timestamp),
-        TokenType::RegexConstructor(_) => Some(DixType::Regex),
-        TokenType::BlobConstructor(_) => Some(DixType::Blob),
-        TokenType::TupleConstructor(_) => Some(DixType::Tuple),
-
-        // ── Closing brackets (end of collection literal) ──────────────────────
-        TokenType::Symbol(']') => Some(DixType::Array),
+        TokenType::Bool(_)   => Some(DixType::Bool),
+        TokenType::HexColor(_)              => Some(DixType::Hex),
+        TokenType::Date(_)                  => Some(DixType::Date),
+        TokenType::Timestamp(_)             => Some(DixType::Timestamp),
+        TokenType::RegexConstructor(_)      => Some(DixType::Regex),
+        TokenType::BlobConstructor(_)       => Some(DixType::Blob),
+        TokenType::TupleConstructor(_)      => Some(DixType::Tuple),
+        TokenType::Symbol(']')              => Some(DixType::Array),
+        TokenType::EnumAccess { .. }        => Some(DixType::Enum),
 
         // ── Identifiers: resolve via semantic data ────────────────────────────
         TokenType::Identifier(name) => {
             completion_identifier_dix_type(name, doc, token.section)
         }
 
-        // ── EnumAccess is an enum value ───────────────────────────────────────
-        TokenType::EnumAccess { .. } => Some(DixType::Enum),
-
         _ => None,
     }
 }
 
-/// Infer the `DixType` of an identifier for completion purposes.
+/// Resolve the `DixType` of an identifier for dot-completion purposes.
+///
 /// Priority order:
 ///   1. QuickFunc parameter type annotation
-///   2. type_index from last semantic analysis
-///   3. symbol table data variable
+///   2. QuickFunc body local variable declaration (NEW — fixes issue 3)
+///   3. type_index from last semantic analysis
+///   4. Symbol table DATA variable
 fn completion_identifier_dix_type(
     name:    &str,
     doc:     &Document,
     section: SectionId,
 ) -> Option<DixType> {
-    // 1. QuickFunc parameters (check in any section — a param name might be used in @DATA calls)
+    // 1. QuickFunc parameter type annotation
     if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
-        // Only restrict to @QUICKFUNCS section if we're actually inside a function body.
         let restrict = section == SectionId::QuickFuncs;
         for func in &qf.functions {
             for param in &func.parameters {
@@ -556,7 +635,19 @@ fn completion_identifier_dix_type(
         }
     }
 
-    // 2. Type index from semantic result
+    // 2. QuickFunc body local variable declaration (NEW)
+    //    This is the fix for: `let name = "hello"` → `name.` shows string methods.
+    if section == SectionId::QuickFuncs {
+        if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
+            for func in &qf.functions {
+                if let Some(dt) = find_local_var_dt_in_stmts(&func.body, name) {
+                    return completion_dt_to_dix(dt);
+                }
+            }
+        }
+    }
+
+    // 3. Type index from semantic result
     if let Some(type_idx) = doc
         .semantic_result
         .as_ref()
@@ -567,7 +658,7 @@ fn completion_identifier_dix_type(
         }
     }
 
-    // 3. Symbol table
+    // 4. Symbol table DATA variable
     let st = doc.semantic_result.as_ref()?.symbol_table.as_ref()?;
 
     let var = st
@@ -600,7 +691,6 @@ fn completion_dt_to_dix(dt: DataType) -> Option<DixType> {
 }
 
 /// Build completion items for ALL instance methods of `dix_type` from the registry.
-/// Includes universal methods (toString, type, isNull, …).
 fn registry_instance_method_completions(dix_type: DixType) -> Vec<CompletionItem> {
     instance_method_registry::initialize();
 
@@ -615,7 +705,6 @@ fn registry_instance_method_completions(dix_type: DixType) -> Vec<CompletionItem
         .filter_map(|name| {
             let method = instance_method_registry::get_instance_method(dix_type, name)?;
 
-            // parameter_count includes the instance as param 0 — subtract 1.
             let pc            = method.parameter_count();
             let is_variadic   = pc < 0;
             let min_pc        = method.min_parameter_count();
@@ -678,11 +767,6 @@ fn registry_instance_method_completions(dix_type: DixType) -> Vec<CompletionItem
 }
 
 /// Main dot-completion entry point.
-///
-/// 1. Identify the token before the dot (token stream, post-enhancement).
-/// 2. Convert to `DixType` using literal types or semantic inference.
-/// 3. Fetch ALL methods for that type from the instance method registry.
-/// 4. Add static-object methods / enum fields / namespace members as before.
 fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
     let mut items: Vec<CompletionItem> = Vec::new();
 
@@ -701,12 +785,9 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
         if let Some(ast) = &doc.ast {
             let enum_items = enum_value_completions(ast, &word_before);
             if !enum_items.is_empty() {
-                // Enum fields come first — they're more precise
                 let mut merged = enum_items;
                 merged.extend(items);
-                items = merged;
-                // Don't add generic instance methods on top of enum completions
-                return items;
+                return merged;
             }
         }
 
@@ -714,7 +795,6 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
         let static_items = static_method_completions(&word_before);
         if !static_items.is_empty() {
             items.extend(static_items);
-            // If we found static methods, stop (static and instance don't mix)
             if receiver_dix_type.is_none() {
                 return items;
             }
@@ -746,7 +826,7 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
             }
         }
 
-        // Fallback: if still empty and no type was inferred, use name heuristics
+        // Fallback: name-heuristic instance methods only when no type could be resolved
         if items.is_empty() {
             items.extend(instance_method_completions_heuristic(&word_before));
         }
@@ -785,7 +865,7 @@ fn enum_value_completions(ast: &DixScript, enum_name: &str) -> Vec<CompletionIte
     vec![]
 }
 
-// ── Static method completions (hardcoded catalogue) ───────────────────────────
+// ── Static method completions ─────────────────────────────────────────────────
 
 fn static_method_completions(object_name: &str) -> Vec<CompletionItem> {
     let catalogue: &[(&str, &[(&str, &str)])] = &[
@@ -867,9 +947,6 @@ fn static_method_completions(object_name: &str) -> Vec<CompletionItem> {
 }
 
 // ── Instance method completions — name-based fallback ─────────────────────────
-//
-// Only used when we cannot infer the receiver type from the token stream.
-// Kept for backwards compatibility / robustness.
 
 fn instance_method_completions_heuristic(word: &str) -> Vec<CompletionItem> {
     let lower = word.to_lowercase();
@@ -1036,7 +1113,6 @@ fn word_before_cursor(source: &str, pos: Position) -> String {
 
 fn word_before_dot(source: &str, pos: Position) -> String {
     let line = source.lines().nth(pos.line as usize).unwrap_or("");
-    // Take chars up to (but not including) the dot
     let up_to: String = line
         .char_indices()
         .take_while(|(i, _)| *i < pos.character.saturating_sub(1) as usize)
@@ -1121,7 +1197,6 @@ mod tests {
         instance_method_registry::initialize();
         let items = registry_instance_method_completions(DixType::Tuple);
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-        // Tuple should have positional accessors
         assert!(
             labels.iter().any(|l| *l == "first" || *l == "get" || *l == "length"),
             "tuple methods missing positional accessors; got: {:?}", labels
@@ -1129,16 +1204,48 @@ mod tests {
     }
 
     #[test]
+    fn find_local_var_dt_string_literal() {
+        // Simulate finding type of a string-literal declaration
+        use dixscript::Compiler::AST::{Position as AstPos, Value, Expression, DeclarationType};
+        let stmt = QuickFuncStatement::VariableDeclaration {
+            declaration_type: DeclarationType::Let,
+            is_mutable: false,
+            variable_name: "greeting".to_string(),
+            data_type: None,
+            value: Expression::Value {
+                value: Value::String { value: "hello".to_string(), position: AstPos::UNKNOWN },
+                position: AstPos::UNKNOWN,
+            },
+            position: AstPos::UNKNOWN,
+        };
+        let dt = find_local_var_dt_in_stmts(&[stmt], "greeting");
+        assert_eq!(dt, Some(DataType::String));
+    }
+
+    #[test]
+    fn find_local_var_dt_explicit_annotation() {
+        use dixscript::Compiler::AST::{Position as AstPos, Value, Expression, DeclarationType};
+        let stmt = QuickFuncStatement::VariableDeclaration {
+            declaration_type: DeclarationType::Let,
+            is_mutable: false,
+            variable_name: "count".to_string(),
+            data_type: Some(DataType::Int),
+            value: Expression::Value {
+                value: Value::Integer { value: 0, position: AstPos::UNKNOWN },
+                position: AstPos::UNKNOWN,
+            },
+            position: AstPos::UNKNOWN,
+        };
+        let dt = find_local_var_dt_in_stmts(&[stmt], "count");
+        assert_eq!(dt, Some(DataType::Int));
+    }
+
+    #[test]
     fn dot_completions_after_string_literal() {
         let src = "@DATA(\n  x = \"hello\"\n)";
         let doc  = test_doc(src);
-        // Simulate completion at the position of '.' in '"hello".'
-        // Token stream should have String("hello") on line 2, col 7 (1-based).
-        // We call the function directly with a fabricated position.
         let items = dot_completions(&doc, Position::new(1, 16));
-        // Items may be empty if the document state doesn't match exactly,
-        // but the function should not panic.
-        let _ = items;
+        let _ = items; // should not panic
     }
 
     #[test]
@@ -1165,4 +1272,4 @@ mod tests {
         let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
         assert!(labels.iter().any(|l| l == "calc"), "QuickFunc 'calc' missing; got: {:?}", labels);
     }
-}
+                        }

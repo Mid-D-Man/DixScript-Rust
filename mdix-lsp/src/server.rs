@@ -8,7 +8,7 @@ use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::analyzer::run_pipeline;
+use crate::analyzer::{run_pipeline, get_resolved_ast};
 use crate::capabilities::server_capabilities;
 use crate::converters::to_diagnostics;
 use crate::document::Document;
@@ -19,7 +19,7 @@ use crate::features::code_lens::{
 };
 use crate::features::commands::{
     run_compile, run_convert_to_json, run_convert_to_toml,
-    run_minify, run_show_ast, run_validate,
+    run_minify, run_show_ast, run_validate, CommandResult,
 };
 
 const ANALYSIS_TIMEOUT_SECS: u64 = 10;
@@ -85,10 +85,27 @@ impl Backend {
         }
     }
 
-    /// Helper: show a message in the IDE notification area.
     async fn show_message(&self, success: bool, msg: &str) {
         let kind = if success { MessageType::INFO } else { MessageType::ERROR };
         self.client.show_message(kind, msg).await;
+    }
+
+    /// Get the fully value-resolved AST for a document (for commands only).
+    /// Runs value resolution synchronously — must be called from spawn_blocking.
+    ///
+    /// Falls back to the enhanced-but-unresolved AST when:
+    ///   - the document has no QuickFuncs / no @DATA (nothing to resolve)
+    ///   - value resolution fails or panics
+    ///
+    /// Returns None only when the document is not in the store or has never
+    /// been parsed.
+    fn resolved_ast_for_command(
+        doc_ref: &Option<dashmap::mapref::one::Ref<'_, Url, Document>>,
+    ) -> Option<dixscript::Compiler::AST::DixScript> {
+        let doc = doc_ref.as_ref()?;
+        // get_resolved_ast returns Some(ast) even on resolution failure
+        // (falls back to enhanced AST), so we only get None if doc.ast is None.
+        get_resolved_ast(doc).or_else(|| doc.ast.clone())
     }
 }
 
@@ -277,24 +294,11 @@ impl LanguageServer for Backend {
     }
 
     // ── On-type formatting ────────────────────────────────────────────────────
-    //
-    // Triggered when the user presses Enter after typing `{`, `(`, or `[`.
-    // We detect whether the character immediately before the newline is an
-    // unmatched open bracket, and if so insert indentation + the matching
-    // close bracket on the following line.
-    //
-    // Example — user types `{` then Enter in @QUICKFUNCS:
-    //
-    //   Before:   ~foo() {|          (cursor at |)
-    //   After:    ~foo() {
-    //               |                (cursor indented here)
-    //             }
 
     async fn on_type_formatting(
         &self,
         params: DocumentOnTypeFormattingParams,
     ) -> LspResult<Option<Vec<TextEdit>>> {
-        // We only act on Enter (\n)
         if params.ch != "\n" {
             return Ok(None);
         }
@@ -307,10 +311,8 @@ impl LanguageServer for Backend {
             Some(d) => d.source.clone(),
             None    => return Ok(None),
         };
-        drop(doc_ref); // release DashMap guard before any await
+        drop(doc_ref);
 
-        // `pos` is where the cursor is AFTER the newline was inserted.
-        // The line the user just finished is `pos.line - 1`.
         let prev_line_idx = match pos.line.checked_sub(1) {
             Some(l) => l as usize,
             None    => return Ok(None),
@@ -322,7 +324,6 @@ impl LanguageServer for Backend {
             None    => return Ok(None),
         };
 
-        // Find the last non-whitespace character on the previous line.
         let last_ch = prev_line.trim_end().chars().last();
         let (open, close) = match last_ch {
             Some('{') => ('{', '}'),
@@ -331,13 +332,11 @@ impl LanguageServer for Backend {
             _         => return Ok(None),
         };
 
-        // Determine current indentation (leading spaces/tabs of the previous line)
         let indent: String = prev_line
             .chars()
             .take_while(|c| *c == ' ' || *c == '\t')
             .collect();
 
-        // For `{` we add one extra level (2 spaces by default, match options)
         let inner_indent_size = params.options.tab_size as usize;
         let inner_indent      = if params.options.insert_spaces {
             " ".repeat(inner_indent_size)
@@ -345,18 +344,8 @@ impl LanguageServer for Backend {
             "\t".to_string()
         };
 
-        // Build the two edits:
-        //   1. On the CURRENT (new) line — add indentation for the cursor.
-        //   2. After that — insert the close bracket on its own line.
-        //
-        // The current line (`pos.line`) was just created by the Enter press;
-        // it may already contain the text that was to the right of the cursor
-        // (split-line). We keep it simple: we assume the cursor is at column 0
-        // of the new line and insert indented inner content + closing bracket.
-
         let cur_line_text = lines.get(pos.line as usize).copied().unwrap_or("");
 
-        // If the close bracket is already on the next line, don't duplicate it.
         let next_line_has_close = lines
             .get(pos.line as usize + 1)
             .map(|l| l.trim_start().starts_with(close))
@@ -365,7 +354,6 @@ impl LanguageServer for Backend {
         let mut edits: Vec<TextEdit> = Vec::new();
 
         if next_line_has_close {
-            // Just indent the cursor line — the close bracket already exists.
             edits.push(TextEdit {
                 range: Range::new(
                     Position::new(pos.line, 0),
@@ -374,9 +362,6 @@ impl LanguageServer for Backend {
                 new_text: format!("{}{}{}", indent, inner_indent, cur_line_text.trim_start()),
             });
         } else {
-            // Insert indented cursor position + close bracket below.
-            // We replace the current new line with:
-            //   <base_indent><inner_indent>\n<base_indent><close>
             let new_text = format!(
                 "{}{}\n{}{}",
                 indent, inner_indent,
@@ -391,7 +376,6 @@ impl LanguageServer for Backend {
             });
         }
 
-        // Suppress unused-variable warning for `open` (used in the match for clarity)
         let _ = open;
 
         if edits.is_empty() { Ok(None) } else { Ok(Some(edits)) }
@@ -405,11 +389,18 @@ impl LanguageServer for Backend {
     }
 
     // ── Execute command ───────────────────────────────────────────────────────
+    //
+    // Commands that produce output (→ JSON, → TOML, minify) use the fully
+    // value-resolved AST so QuickFunc calls in @DATA are expanded to their
+    // actual objects/values rather than appearing as null.
+    //
+    // Value resolution runs synchronously inside spawn_blocking, so it never
+    // blocks the async executor.  The regular analysis pipeline is NOT changed —
+    // resolution only happens on demand here.
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> LspResult<Option<serde_json::Value>> {
         let command = params.command.as_str();
 
-        // Extract URI from first argument
         let uri_str = params.arguments
             .first()
             .and_then(|v| v.as_str())
@@ -419,16 +410,16 @@ impl LanguageServer for Backend {
             .as_deref()
             .and_then(|s| Url::parse(s).ok());
 
-        // Get document from store
-        let doc_ref = uri.as_ref().and_then(|u| self.documents.get(u));
-
-        // Derive filesystem path from URI
         let source_path: Option<std::path::PathBuf> = uri
             .as_ref()
             .and_then(|u| u.to_file_path().ok());
 
         match command {
+
+            // ── Validate ─────────────────────────────────────────────────────
+            // Uses the existing diagnostic state — no resolution needed.
             CMD_VALIDATE => {
+                let doc_ref = uri.as_ref().and_then(|u| self.documents.get(u));
                 let (errors, warnings) = if let Some(doc) = &doc_ref {
                     let all   = doc.error_manager.get_all_errors_flat();
                     let errs  = all.iter().filter(|e| {
@@ -448,77 +439,95 @@ impl LanguageServer for Backend {
                 self.show_message(result.success, &result.message).await;
             }
 
+            // ── Convert → JSON ────────────────────────────────────────────────
+            // Runs value resolution so QuickFunc calls in @DATA are expanded.
             CMD_TO_JSON => {
-                let result = if let Some(doc) = &doc_ref {
-                    if let Some(ast) = &doc.ast {
-                        run_convert_to_json(ast, source_path.as_deref())
-                    } else {
-                        crate::features::commands::CommandResult::err(
+                let doc_ref    = uri.as_ref().and_then(|u| self.documents.get(u));
+                let path_clone = source_path.clone();
+
+                let result = tokio::task::spawn_blocking(move || {
+                    match Self::resolved_ast_for_command(&doc_ref) {
+                        Some(ast) => run_convert_to_json(&ast, path_clone.as_deref()),
+                        None => CommandResult::err(
                             "File has not been parsed yet — wait for analysis to complete."
-                        )
+                        ),
                     }
-                } else {
-                    crate::features::commands::CommandResult::err(
-                        "Document not found in workspace. Open the file first."
-                    )
-                };
+                }).await.unwrap_or_else(|_| {
+                    CommandResult::err("JSON conversion task panicked.")
+                });
+
                 self.show_message(result.success, &result.message).await;
             }
 
+            // ── Convert → TOML ────────────────────────────────────────────────
+            // Runs value resolution so QuickFunc calls in @DATA are expanded.
             CMD_TO_TOML => {
-                let result = if let Some(doc) = &doc_ref {
-                    if let Some(ast) = &doc.ast {
-                        run_convert_to_toml(ast, source_path.as_deref())
-                    } else {
-                        crate::features::commands::CommandResult::err(
-                            "File has not been parsed yet."
-                        )
+                let doc_ref    = uri.as_ref().and_then(|u| self.documents.get(u));
+                let path_clone = source_path.clone();
+
+                let result = tokio::task::spawn_blocking(move || {
+                    match Self::resolved_ast_for_command(&doc_ref) {
+                        Some(ast) => run_convert_to_toml(&ast, path_clone.as_deref()),
+                        None => CommandResult::err(
+                            "File has not been parsed yet — wait for analysis to complete."
+                        ),
                     }
-                } else {
-                    crate::features::commands::CommandResult::err(
-                        "Document not found."
-                    )
-                };
+                }).await.unwrap_or_else(|_| {
+                    CommandResult::err("TOML conversion task panicked.")
+                });
+
                 self.show_message(result.success, &result.message).await;
             }
 
+            // ── Minify ────────────────────────────────────────────────────────
+            // Runs value resolution so the minified output contains actual
+            // resolved values rather than function call stubs.
             CMD_MINIFY => {
-                let result = if let Some(doc) = &doc_ref {
-                    if let Some(ast) = &doc.ast {
-                        run_minify(ast, source_path.as_deref())
-                    } else {
-                        crate::features::commands::CommandResult::err(
-                            "File has not been parsed yet."
-                        )
+                let doc_ref    = uri.as_ref().and_then(|u| self.documents.get(u));
+                let path_clone = source_path.clone();
+
+                let result = tokio::task::spawn_blocking(move || {
+                    match Self::resolved_ast_for_command(&doc_ref) {
+                        Some(ast) => run_minify(&ast, path_clone.as_deref()),
+                        None => CommandResult::err(
+                            "File has not been parsed yet — wait for analysis to complete."
+                        ),
                     }
-                } else {
-                    crate::features::commands::CommandResult::err(
-                        "Document not found."
-                    )
-                };
+                }).await.unwrap_or_else(|_| {
+                    CommandResult::err("Minify task panicked.")
+                });
+
                 self.show_message(result.success, &result.message).await;
             }
 
+            // ── Compile ───────────────────────────────────────────────────────
+            // Shells out to `mdix compile` — no in-process resolution needed.
             CMD_COMPILE => {
+                let doc_ref    = uri.as_ref().and_then(|u| self.documents.get(u));
                 let ast_clone  = doc_ref.as_ref().and_then(|d| d.ast.clone());
                 let path_clone = source_path.clone();
+
                 let result = tokio::task::spawn_blocking(move || {
                     run_compile(path_clone.as_deref(), ast_clone.as_ref())
                 }).await.unwrap_or_else(|_| {
-                    crate::features::commands::CommandResult::err("Compile task panicked.")
+                    CommandResult::err("Compile task panicked.")
                 });
+
                 self.show_message(result.success, &result.message).await;
             }
 
+            // ── Show AST ──────────────────────────────────────────────────────
+            // Uses the enhanced AST (resolution not needed for structure display).
             CMD_SHOW_AST => {
-                let result = if let Some(doc) = &doc_ref {
+                let doc_ref = uri.as_ref().and_then(|u| self.documents.get(u));
+                let result  = if let Some(doc) = &doc_ref {
                     if let Some(ast) = &doc.ast {
                         run_show_ast(ast)
                     } else {
-                        crate::features::commands::CommandResult::err("AST not available.")
+                        CommandResult::err("AST not available — wait for analysis.")
                     }
                 } else {
-                    crate::features::commands::CommandResult::err("Document not found.")
+                    CommandResult::err("Document not found.")
                 };
                 self.show_message(result.success, &result.message).await;
             }
@@ -534,6 +543,6 @@ impl LanguageServer for Backend {
             }
         }
 
-        Ok(None) // executeCommand always returns null per LSP spec
+        Ok(None)
     }
-}
+                }

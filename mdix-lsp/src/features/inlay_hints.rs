@@ -33,13 +33,9 @@ pub fn provide(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
 // ── Inference context ─────────────────────────────────────────────────────────
 
 /// All read-only state threaded through type-inference helpers.
-/// Using a single struct avoids adding 3+ parameters to every call.
 struct InferCtx<'a> {
-    /// Return types of locally-declared QuickFuncs — fast path, no ST needed.
     qf_return_types: &'a HashMap<String, DataType>,
-    /// Param / local-var types for the active QuickFunc scope; empty at @DATA.
     param_types:     &'a HashMap<String, Option<DataType>>,
-    /// Full semantic symbol table — present once analysis has run.
     symbol_table:    Option<&'a SymbolTable>,
 }
 
@@ -55,18 +51,176 @@ impl<'a> InferCtx<'a> {
 
 // ── Precise type via compiler's TypeInferenceVisitor ─────────────────────────
 
-/// Use the full compiler TypeInferenceVisitor to get a precise `DataType` for
-/// an expression.  Handles TypedArray/TypedTuple element methods, imported
-/// function return types, and symbol-table property paths.
-///
-/// Returns `None` when no symbol table is available or when the visitor
-/// cannot determine a concrete type.
 fn precise_dt(expr: &Expression, ctx: &InferCtx<'_>) -> Option<DataType> {
     let st = ctx.symbol_table?;
-    // Clone the param map so the visitor owns it (cheap: small map).
     let local_vars = Some(ctx.param_types.clone());
     let visitor    = TypeInferenceVisitor::new(st, local_vars);
     visitor.infer_type_from_expression(expr)
+}
+
+// ── NEW: Build full typed DataType (TypedTuple / TypedArray) from expression ─
+
+/// Returns the full `DataType` – including `TypedArray(elem)` and
+/// `TypedTuple([Some(Int), Some(Bool), …])` – for the given expression in the
+/// current accumulating scope context.  Used both to emit the inlay label AND
+/// to store the variable's type in `running_types` so that subsequent
+/// expressions (e.g. `mytuple.first()`) can resolve correctly.
+fn build_typed_dt(expr: &Expression, ctx: &InferCtx<'_>) -> Option<DataType> {
+    // Let the full TypeInferenceVisitor go first – it handles TypedArray/
+    // TypedTuple returned by static/instance methods, imported functions, etc.
+    if let Some(dt) = precise_dt(expr, ctx) {
+        return Some(dt);
+    }
+
+    match expr {
+        Expression::Value { value, .. } => build_typed_dt_from_value(value, ctx),
+
+        Expression::Identifier { name, .. } => {
+            // Look up in running scope (params + previously declared locals)
+            ctx.param_types.get(name.as_str()).copied().flatten()
+        }
+
+        Expression::QuickFuncCall { name, .. }
+        | Expression::FunctionCall { name, .. } => {
+            resolve_func_name_type(name, ctx)
+        }
+
+        Expression::ImportedFunctionCall { namespace_name, function_name, .. } => {
+            ctx.symbol_table
+                .and_then(|st| st.get_namespaced_function(namespace_name, function_name))
+                .and_then(|i| i.signature.return_type)
+        }
+
+        Expression::QualifiedIdentifier { parts, arguments, .. } if arguments.is_some() => {
+            // Pre-enhancement call like Utils.calc(…)
+            if parts.len() == 2 {
+                if let Some(st) = ctx.symbol_table {
+                    if let Some(info) = st.get_namespaced_function(&parts[0], &parts[1]) {
+                        return info.signature.return_type;
+                    }
+                }
+                static_return_dt(&parts[0], &parts[1])
+            } else {
+                None
+            }
+        }
+
+        _ => {
+            // Fall back: convert the string hint to a basic DataType
+            infer_expr(expr, ctx).and_then(|h| basic_hint_str_to_dt(&h))
+        }
+    }
+}
+
+fn build_typed_dt_from_value(value: &Value, ctx: &InferCtx<'_>) -> Option<DataType> {
+    match value {
+        // ── Tuple constructor t:(…) ─────────────────────────────────────────
+        Value::PrefixedConstructor { prefix, arguments, .. }
+            if prefix.eq_ignore_ascii_case("t") =>
+        {
+            let mut slots = [None; 6];
+            for (i, arg) in arguments.iter().enumerate().take(6) {
+                if let Some(type_name) = infer_base_type(arg, ctx) {
+                    slots[i] = ElemType::from_keyword(&type_name);
+                }
+            }
+            if slots.iter().any(|s| s.is_some()) {
+                Some(DataType::TypedTuple(slots))
+            } else {
+                Some(DataType::Tuple)
+            }
+        }
+
+        // ── Array literals ─────────────────────────────────────────────────
+        Value::Array { values, .. } | Value::NestedArray { values, .. } => {
+            if values.is_empty() {
+                return Some(DataType::Array);
+            }
+            let first_name = infer_base_type(&values[0], ctx)?;
+            let elem       = ElemType::from_keyword(&first_name)?;
+            let all_same   = values.iter().skip(1).all(|v| {
+                infer_base_type(v, ctx).as_deref() == Some(first_name.as_str())
+            });
+            if all_same {
+                Some(DataType::TypedArray(elem))
+            } else {
+                Some(DataType::Array)
+            }
+        }
+
+        // ── Primitives ─────────────────────────────────────────────────────
+        Value::Integer { .. }                                       => Some(DataType::Int),
+        Value::Long { .. }                                          => Some(DataType::Long),
+        Value::Float { .. }                                         => Some(DataType::Float),
+        Value::Double { .. } | Value::ScientificNotation { .. }    => Some(DataType::Double),
+        Value::String { .. } | Value::InterpolatedString { .. }    => Some(DataType::String),
+        Value::Boolean { .. }                                       => Some(DataType::Bool),
+        Value::HexColor { .. }                                      => Some(DataType::Hex),
+        Value::Date { .. }                                          => Some(DataType::Date),
+        Value::Timestamp { .. }                                     => Some(DataType::Timestamp),
+        Value::EnumValue { .. }                                     => Some(DataType::Enum),
+        Value::Object { .. }                                        => Some(DataType::Object),
+        Value::Null { .. }                                          => None,
+
+        // ── Other prefixed constructors ────────────────────────────────────
+        Value::PrefixedConstructor { prefix, .. } => match prefix.as_str() {
+            "b" => Some(DataType::Blob),
+            "r" => Some(DataType::Regex),
+            _   => None,
+        },
+
+        // ── Function call (local or via symbol table) ──────────────────────
+        Value::QuickFuncCall { function_name, .. } => {
+            resolve_func_name_type(function_name, ctx)
+        }
+
+        // ── Identifier reference ────────────────────────────────────────────
+        Value::Identifier { value: name, .. } => {
+            ctx.param_types.get(name.as_str()).copied().flatten()
+        }
+
+        // ── Wrapped expression ─────────────────────────────────────────────
+        Value::Expression { expr, .. } => build_typed_dt(expr, ctx),
+
+        _ => None,
+    }
+}
+
+/// Convert a hint label string (e.g. `"<tuple(int,bool)>"`) back to a basic
+/// `DataType`.  Used when `precise_dt` returned nothing but `infer_expr` did.
+fn basic_hint_str_to_dt(hint: &str) -> Option<DataType> {
+    let s = hint.trim_start_matches('<').trim_end_matches('>');
+    // Strip element-count suffix like "int[3]"
+    let s = s.split('[').next().unwrap_or(s);
+    // Strip typed inner like "array<int>" → "array", "tuple(int,bool)" → "tuple"
+    let s = s.split('<').next().unwrap_or(s);
+    let s = s.split('(').next().unwrap_or(s);
+    match s {
+        "int"       => Some(DataType::Int),
+        "long"      => Some(DataType::Long),
+        "float"     => Some(DataType::Float),
+        "double"    => Some(DataType::Double),
+        "string"    => Some(DataType::String),
+        "bool"      => Some(DataType::Bool),
+        "array"     => Some(DataType::Array),
+        "tuple"     => Some(DataType::Tuple),
+        "object"    => Some(DataType::Object),
+        "hex"       => Some(DataType::Hex),
+        "blob"      => Some(DataType::Blob),
+        "regex"     => Some(DataType::Regex),
+        "date"      => Some(DataType::Date),
+        "timestamp" => Some(DataType::Timestamp),
+        "enum"      => Some(DataType::Enum),
+        _           => None,
+    }
+}
+
+/// Returns element count for collection expressions (for hint labelling only).
+fn collection_elem_count(expr: &Expression) -> Option<usize> {
+    match expr {
+        Expression::Value { value, .. } => collection_len(value),
+        _ => None,
+    }
 }
 
 // ── Main provider ─────────────────────────────────────────────────────────────
@@ -154,8 +308,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                         };
 
                         let line = prop.position.line.saturating_sub(1) as u32;
-                        let col  = (prop.position.column.saturating_sub(1)
-                            + prop.name.len()) as u32;
+                        let col  = (prop.position.column.saturating_sub(1) + prop.name.len()) as u32;
                         hints.push(make_hint(line, col, label));
                     }
                 }
@@ -165,17 +318,10 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     let label    = array_label_from_values(items, &base_ctx);
                     let path_str = path.segments.join(".");
                     let line     = position.line.saturating_sub(1) as u32;
-                    let col      = (position.column.saturating_sub(1)
-                        + path_str.len()) as u32;
+                    let col      = (position.column.saturating_sub(1) + path_str.len()) as u32;
                     hints.push(make_hint(line, col, label));
                 }
 
-                // ── ObjectProperty (post-enhancement) ─────────────────────────
-                // After AST enhancement the `object` box holds the resolved Value:
-                //   Value::QuickFuncCall    → local QuickFunc result type
-                //   Value::Expression { ImportedFunctionCall } → imported fn type (via ST)
-                //   Value::Object           → plain <object> literal
-                // Only emit a hint when no explicit annotation is in the source.
                 DataEntry::ObjectProperty { name, data_type, object, position } => {
                     if !position.is_valid() { continue; }
                     if data_type.is_some() { continue; }
@@ -194,23 +340,33 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
     // ── @QUICKFUNCS ───────────────────────────────────────────────────────────
     if let Some(qf) = &ast.quick_functions {
         for func in &qf.functions {
-            let param_types: HashMap<String, Option<DataType>> = func
+            // Build initial context from explicit param type annotations
+            let initial_types: HashMap<String, Option<DataType>> = func
                 .parameters
                 .iter()
                 .map(|p| (p.name.clone(), p.data_type))
                 .collect();
 
-            let func_ctx = InferCtx::new(&qf_return_types, &param_types, symbol_table);
-
+            // Emit <any> hints for unannotated parameters
             for param in &func.parameters {
                 if param.data_type.is_some() || !param.position.is_valid() { continue; }
                 let line = param.position.line.saturating_sub(1) as u32;
-                let col  = (param.position.column.saturating_sub(1)
-                    + param.name.len()) as u32;
+                let col  = (param.position.column.saturating_sub(1) + param.name.len()) as u32;
                 hints.push(make_hint(line, col, "<any>".to_string()));
             }
 
-            collect_qf_var_hints(&func.body, &doc.tokens, &func_ctx, &mut hints);
+            // Process body with an accumulating type context.
+            // collect_qf_var_hints updates `running_types` as it walks statements,
+            // so each new `let x = expr` adds `x`'s type to the context used for
+            // all subsequent expressions in the same scope.
+            collect_qf_var_hints(
+                &func.body,
+                &doc.tokens,
+                &qf_return_types,
+                initial_types,
+                symbol_table,
+                &mut hints,
+            );
         }
     }
 
@@ -338,8 +494,6 @@ fn infer_base_type(value: &Value, ctx: &InferCtx<'_>) -> Option<String> {
                 })
         }
 
-        // After AST enhancement, imported function calls live inside
-        // Value::Expression { expr: ImportedFunctionCall }.
         Value::Expression { expr, .. } => infer_expr(expr, ctx).map(|s| {
             s.trim_start_matches('<').trim_end_matches('>').to_string()
         }),
@@ -456,15 +610,32 @@ fn sniff_blob_category(b: &[u8]) -> &'static str {
     "data"
 }
 
-// ── QuickFunc variable-declaration hints ─────────────────────────────────────
+// ── QuickFunc variable-declaration hints — accumulating context ───────────────
+//
+// KEY FIX: unlike the old version that took a fixed `&InferCtx`, this version
+// takes the running type map by value and returns the updated map.  Each new
+// `let x = expr` declaration:
+//   1. Emits an inlay hint for unannotated variables.
+//   2. Infers the FULL typed DataType (TypedTuple / TypedArray / …) and stores
+//      it back in `running` so subsequent statements see it.
+//
+// This means that after `let mytuple = t:(12, false)`, the entry
+// `running["mytuple"] = Some(DataType::TypedTuple([Some(Int), Some(Bool), …]))`
+// is visible when we process `let x = mytuple.first()`, and the
+// TypeInferenceVisitor can correctly resolve `.first()` to `DataType::Int`.
 
 fn collect_qf_var_hints(
-    stmts:  &[QuickFuncStatement],
-    tokens: &[Token],
-    ctx:    &InferCtx<'_>,
-    hints:  &mut Vec<InlayHint>,
-) {
+    stmts:           &[QuickFuncStatement],
+    tokens:          &[Token],
+    qf_return_types: &HashMap<String, DataType>,
+    mut running:     HashMap<String, Option<DataType>>,
+    symbol_table:    Option<&SymbolTable>,
+    hints:           &mut Vec<InlayHint>,
+) -> HashMap<String, Option<DataType>> {
     for stmt in stmts {
+        // Rebuild the context for each statement using the LATEST running map.
+        let ctx = InferCtx::new(qf_return_types, &running, symbol_table);
+
         match stmt {
             QuickFuncStatement::VariableDeclaration {
                 variable_name,
@@ -473,62 +644,90 @@ fn collect_qf_var_hints(
                 position,
                 ..
             } => {
-                if data_type.is_some() { continue; }
+                if data_type.is_none() {
+                    // --- Infer the full typed DataType ---
+                    let typed_dt = build_typed_dt(value, &ctx);
 
-                let label = infer_expr(value, ctx)
-                    .unwrap_or_else(|| "<any>".to_string());
+                    // --- Choose the hint label ---
+                    let label = match &typed_dt {
+                        Some(dt) => format_data_type_as_hint(*dt, collection_elem_count(value)),
+                        None     => infer_expr(value, &ctx)
+                            .unwrap_or_else(|| "<any>".to_string()),
+                    };
 
-                let target_line = position.line;
-                let hint_line   = target_line.saturating_sub(1) as u32;
+                    // --- Emit the hint ---
+                    if position.is_valid() {
+                        let target_line = position.line;
+                        let hint_line   = target_line.saturating_sub(1) as u32;
 
-                let col = tokens
-                    .iter()
-                    .filter(|t| t.line == target_line)
-                    .find(|t| {
-                        matches!(&t.token_type,
-                            TokenType::Identifier(id)
-                                if id.as_str() == variable_name.as_str())
-                    })
-                    .map(|tok| (tok.column.saturating_sub(1) + variable_name.len()) as u32)
-                    .unwrap_or_else(|| {
-                        (position.column.saturating_sub(1) + 4 + variable_name.len()) as u32
-                    });
+                        let col = tokens
+                            .iter()
+                            .filter(|t| t.line == target_line)
+                            .find(|t| {
+                                matches!(&t.token_type,
+                                    TokenType::Identifier(id)
+                                        if id.as_str() == variable_name.as_str())
+                            })
+                            .map(|tok| (tok.column.saturating_sub(1) + variable_name.len()) as u32)
+                            .unwrap_or_else(|| {
+                                (position.column.saturating_sub(1) + 4 + variable_name.len()) as u32
+                            });
 
-                hints.push(make_hint(hint_line, col, label));
+                        hints.push(make_hint(hint_line, col, label));
+                    }
+
+                    // --- Store inferred type in running context ---
+                    running.insert(variable_name.clone(), typed_dt);
+                } else {
+                    // Annotated — no hint, but DO update context with the declared type
+                    running.insert(variable_name.clone(), *data_type);
+                }
             }
 
+            // For branching statements, recurse with a CLONE of the current
+            // running context so variables declared inside a branch don't leak
+            // into sibling branches or the outer scope.
             QuickFuncStatement::If { then_branch, else_branch, .. } => {
-                collect_qf_var_hints(then_branch, tokens, ctx, hints);
-                if let Some(else_stmts) = else_branch {
-                    collect_qf_var_hints(else_stmts, tokens, ctx, hints);
+                collect_qf_var_hints(
+                    then_branch, tokens, qf_return_types,
+                    running.clone(), symbol_table, hints,
+                );
+                if let Some(eb) = else_branch {
+                    collect_qf_var_hints(
+                        eb, tokens, qf_return_types,
+                        running.clone(), symbol_table, hints,
+                    );
                 }
             }
 
             QuickFuncStatement::Switch { cases, default_case, .. } => {
                 for case in cases {
-                    collect_qf_var_hints(&case.statements, tokens, ctx, hints);
+                    collect_qf_var_hints(
+                        &case.statements, tokens, qf_return_types,
+                        running.clone(), symbol_table, hints,
+                    );
                 }
                 if let Some(dc) = default_case {
-                    collect_qf_var_hints(&dc.statements, tokens, ctx, hints);
+                    collect_qf_var_hints(
+                        &dc.statements, tokens, qf_return_types,
+                        running.clone(), symbol_table, hints,
+                    );
                 }
             }
 
             _ => {}
         }
     }
+
+    running
 }
 
 // ── Value-level type inference ────────────────────────────────────────────────
 
 fn infer_value(value: &Value, ctx: &InferCtx<'_>) -> Option<String> {
     match value {
-        // Post-enhancement: qualified/imported calls live in Expression wrapper.
         Value::Expression { expr, .. } => infer_expr(expr, ctx),
 
-        // Direct QuickFunc call. Covers three sub-cases:
-        //   1. Plain local func: "createWeapon"  → qf_return_types
-        //   2. In symbol-table:  "calc"           → ST try_get_function
-        //   3. Dotted pre-enh:   "Utils.calc"     → ST namespace lookup
         Value::QuickFuncCall { function_name, .. } => {
             resolve_func_name_type(function_name, ctx)
                 .map(|dt| format_data_type_as_hint(dt, None))
@@ -572,12 +771,8 @@ fn infer_value(value: &Value, ctx: &InferCtx<'_>) -> Option<String> {
 
 // ── Resolve a function-name string to its return DataType ─────────────────────
 
-/// Handles three patterns for `Value::QuickFuncCall { function_name }`:
-///   1. Plain local name   → qf_return_types
-///   2. In symbol table    → ST functions map
-///   3. "ns.func" pattern  → ST namespace map (pre-enhancement dotted name)
 fn resolve_func_name_type(function_name: &str, ctx: &InferCtx<'_>) -> Option<DataType> {
-    // 1. Fast path: locally-declared QuickFunc
+    // 1. Locally-declared QuickFunc
     if let Some(&rt) = ctx.qf_return_types.get(function_name) {
         return Some(rt);
     }
@@ -590,10 +785,10 @@ fn resolve_func_name_type(function_name: &str, ctx: &InferCtx<'_>) -> Option<Dat
             }
         }
 
-        // 3. "Namespace.FunctionName" dotted form (pre-enhancement or parser artefact)
+        // 3. "Namespace.FunctionName" dotted form
         if let Some(dot_pos) = function_name.find('.') {
-            let ns_name  = &function_name[..dot_pos];
-            let fn_name  = &function_name[dot_pos + 1..];
+            let ns_name = &function_name[..dot_pos];
+            let fn_name = &function_name[dot_pos + 1..];
             if let Some(info) = st.get_namespaced_function(ns_name, fn_name) {
                 if let Some(rt) = info.signature.return_type {
                     return Some(rt);
@@ -609,18 +804,10 @@ fn resolve_func_name_type(function_name: &str, ctx: &InferCtx<'_>) -> Option<Dat
 
 fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
     // ── Fast path: TypeInferenceVisitor ───────────────────────────────────────
-    // This handles typed-collection element methods (tuple.first → <int>),
-    // imported-function return types (Utils.calc → <string>), symbol-table
-    // property paths (weapon.damage), and more — with full compiler semantics.
-    //
-    // We skip the result only for plain Array/Tuple/Any where our manual
-    // inference below produces richer output (element-type labels, counts).
     if let Some(dt) = precise_dt(expr, ctx) {
         match dt {
-            // Let manual inference add element-type and count info.
+            // For plain Array/Tuple/Any, let manual inference add richer info.
             DataType::Array | DataType::Tuple | DataType::Any => {}
-            // For every other type — including TypedArray(T), TypedTuple([…]),
-            // ImportedFunctionCall return types, etc. — use the visitor result.
             dt => return Some(format_data_type_as_hint(dt, None)),
         }
     }
@@ -637,16 +824,11 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
                 None     => "<any>".to_string(),
             }),
 
-        // Local or symbol-table QuickFunc call
         Expression::QuickFuncCall { name, .. } | Expression::FunctionCall { name, .. } => {
             resolve_func_name_type(name, ctx)
                 .map(|dt| format_data_type_as_hint(dt, None))
         }
 
-        // ── Post-enhancement: imported namespace function call ─────────────────
-        // e.g. Utils.calc(x) → ImportedFunctionCall after the enhancer resolves
-        // the QualifiedIdentifier.  The visitor fast-path above should catch this
-        // when the ST is available; this is the explicit fallback.
         Expression::ImportedFunctionCall { namespace_name, function_name, .. } => {
             ctx.symbol_table
                 .and_then(|st| st.get_namespaced_function(namespace_name, function_name))
@@ -656,8 +838,6 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
 
         Expression::DixFunctionCall { .. } => Some("<any>".to_string()),
 
-        // QualifiedIdentifier may appear in pre-enhancement AST or when the
-        // enhancer couldn't fully resolve (analysis still in progress).
         Expression::QualifiedIdentifier { parts, arguments, .. } => {
             infer_qualified(parts, arguments.as_ref(), ctx)
         }
@@ -670,8 +850,6 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
             static_return(class_name, method)
         }
 
-        // Instance method calls fall back to registry after the visitor
-        // fast-path above (which handles typed-collection element methods).
         Expression::InstanceMethodCall { instance, method_name, .. } => {
             let recv = infer_expr(instance, ctx);
             instance_return(recv.as_deref(), method_name)
@@ -683,7 +861,9 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
         }
 
         Expression::PropertyAccess { object, property, .. } => {
-            // visitor fast-path handles symbol-table paths; fallback to registry.
+            // visitor fast-path (precise_dt) handles symbol-table paths and
+            // typed-collection element access.  If that returned nothing, try
+            // registry instance method lookup as a fallback.
             let recv = infer_expr(object, ctx);
             instance_return(recv.as_deref(), property)
         }
@@ -749,8 +929,6 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
 
 // ── Qualified identifier dispatch ─────────────────────────────────────────────
 
-/// Type inference for `QualifiedIdentifier` expressions — used for pre-enhancement
-/// AST nodes or when the enhancer hasn't yet resolved a call.
 fn infer_qualified(
     parts:     &[String],
     arguments: Option<&Vec<Expression>>,
@@ -758,15 +936,11 @@ fn infer_qualified(
 ) -> Option<String> {
     if parts.is_empty() { return None; }
 
-    // ── Single-part: plain function call (e.g. createWeapon(...)) ─────────────
-    // The parser may emit single-element QualifiedIdentifier for unresolved calls
-    // inside QuickFunc bodies.
     if parts.len() == 1 {
         if arguments.is_some() {
             return resolve_func_name_type(&parts[0], ctx)
                 .map(|dt| format_data_type_as_hint(dt, None));
         }
-        // Single-part property/variable reference — look up in param types.
         return ctx.param_types
             .get(parts[0].as_str())
             .and_then(|opt_dt| opt_dt.map(|dt| format_data_type_as_hint(dt, None)));
@@ -775,21 +949,15 @@ fn infer_qualified(
     let head   = &parts[0];
     let member = &parts[1];
 
-    // ── Static object (uppercase head): Math.sqrt, DateTime.now … ─────────────
     if head.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
-        // Check static registry first (Math, DateTime, etc.)
-        if let Some(result) = if parts.len() >= 3 {
+        let static_result = if parts.len() >= 3 {
             static_return(&parts[1], &parts[2])
         } else {
             static_return(head, member)
-        } {
-            return Some(result);
-        }
-        // Not a static object — fall through to namespace check.
-        // (Imported namespace aliases often start with uppercase.)
+        };
+        if static_result.is_some() { return static_result; }
     }
 
-    // ── Imported namespace function: Utils.calc(...) ───────────────────────────
     if arguments.is_some() {
         if let Some(st) = ctx.symbol_table {
             if let Some(func_info) = st.get_namespaced_function(head, member) {
@@ -802,7 +970,6 @@ fn infer_qualified(
 
     if arguments.is_none() { return None; }
 
-    // ── Parameter or local variable with method call ────────────────────────────
     if let Some(opt_dt) = ctx.param_types.get(head.as_str()) {
         let recv = opt_dt.map(|dt| format_data_type_as_hint(dt, None));
         if let Some(result) = instance_return(recv.as_deref(), member) {
@@ -811,7 +978,6 @@ fn infer_qualified(
         return recv;
     }
 
-    // ── QuickFunc return value with method chain ────────────────────────────────
     if let Some(rt) = ctx.qf_return_types.get(head.as_str()) {
         let recv = format_data_type_as_hint(*rt, None);
         return instance_return(Some(recv.as_str()), member);
@@ -823,8 +989,18 @@ fn infer_qualified(
 // ── Registry-backed return type lookups ──────────────────────────────────────
 
 fn static_return(object: &str, method: &str) -> Option<String> {
-    let info = static_object_registry::get_method_info(object, method)?;
-    dix_to_hint(info.return_type)
+    static_object_registry::get_method_info(object, method)
+        .and_then(|info| dix_to_hint(info.return_type))
+}
+
+/// Returns just the DataType (not String) for static method return — used by
+/// `build_typed_dt` for the QualifiedIdentifier case.
+fn static_return_dt(object: &str, method: &str) -> Option<DataType> {
+    static_object_registry::get_method_info(object, method)
+        .and_then(|info| {
+            use dixscript::Compiler::AST::TypeInferenceVisitor;
+            TypeInferenceVisitor::convert_dix_type_to_data_type(info.return_type)
+        })
 }
 
 fn instance_return(receiver_hint: Option<&str>, method: &str) -> Option<String> {
@@ -838,10 +1014,9 @@ fn instance_return(receiver_hint: Option<&str>, method: &str) -> Option<String> 
 
 fn hint_to_dix(hint: &str) -> Option<DixType> {
     let s = hint.trim_start_matches('<').trim_end_matches('>');
-    // Strip count suffix: "int[3]" → "int"
     let s = match s.find('[') { Some(pos) => &s[..pos], None => s };
-    // Strip typed-collection inner: "array<int>" → "array"
     let s = match s.find('<') { Some(pos) => &s[..pos], None => s };
+    let s = match s.find('(') { Some(pos) => &s[..pos], None => s };
     match s {
         "int"       => Some(DixType::Int),
         "long"      => Some(DixType::Long),
@@ -898,4 +1073,4 @@ fn make_hint(line: u32, col: u32, label: String) -> InlayHint {
         padding_right: Some(true),
         data:          None,
     }
-        }
+    }

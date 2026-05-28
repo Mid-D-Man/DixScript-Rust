@@ -12,6 +12,7 @@ use dixscript::Compiler::AST::DixScript;
 use dixscript::Compiler::AST::data_types::DebugMode;
 use dixscript::Compiler::Core::SemanticAnalysisResult;
 use dixscript::Compiler::Core::ValueResolution::ValueResolver;
+use dixscript::Runtime::DixLoader;
 
 use crate::analyzer::run_pipeline;
 use crate::capabilities::server_capabilities;
@@ -19,12 +20,12 @@ use crate::converters::to_diagnostics;
 use crate::document::Document;
 use crate::features;
 use crate::features::code_lens::{
-    CMD_COMPILE, CMD_CREATE_RESOLVED, CMD_MINIFY, CMD_SHOW_AST,
-    CMD_TO_JSON, CMD_TO_TOML, CMD_VALIDATE,
+    CMD_COMPILE, CMD_CREATE_RESOLVED, CMD_MINIFY,
+    CMD_SHOW_AST, CMD_TO_JSON, CMD_TO_TOML,
 };
 use crate::features::commands::{
     run_compile, run_convert_to_json, run_convert_to_toml,
-    run_create_resolved, run_minify, run_show_ast, run_validate, CommandResult,
+    run_create_resolved, run_minify, run_show_ast, CommandResult,
 };
 
 const ANALYSIS_TIMEOUT_SECS: u64 = 10;
@@ -96,7 +97,11 @@ impl Backend {
     }
 }
 
-// ── Value-resolution helper (owned data, safe for spawn_blocking) ─────────────
+// ── Value-resolution helper used by JSON / TOML / Minify commands ────────────
+//
+// These commands use the stored LSP document state (sufficient for single-file
+// projects).  The "Create Resolved" command uses a fresh DixLoader compile
+// instead so that imports are always properly resolved.
 
 fn resolve_ast_owned(
     ast:             Option<DixScript>,
@@ -128,11 +133,17 @@ fn resolve_ast_owned(
 
     match result {
         Ok(resolution) if resolution.is_success => {
-            tracing::debug!("Value resolution: {} call(s) resolved", resolution.function_calls_resolved);
+            tracing::debug!(
+                "Value resolution: {} call(s) resolved",
+                resolution.function_calls_resolved
+            );
             resolution.resolved_ast.or(Some(ast))
         }
         Ok(resolution) => {
-            tracing::warn!("Value resolution failed ({} error(s)), using enhanced AST", resolution.errors.len());
+            tracing::warn!(
+                "Value resolution failed ({} error(s)), using enhanced AST",
+                resolution.errors.len()
+            );
             Some(ast)
         }
         Err(payload) => {
@@ -172,7 +183,9 @@ impl LanguageServer for Backend {
             tokio::spawn(async move {
                 for h in handles {
                     h.abort();
-                    let _ = tokio::time::timeout(std::time::Duration::from_millis(50), h).await;
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_millis(50), h
+                    ).await;
                 }
             });
         }
@@ -186,7 +199,11 @@ impl LanguageServer for Backend {
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         if let Some(change) = params.content_changes.into_iter().last() {
-            self.spawn_analysis(params.text_document.uri, change.text, params.text_document.version);
+            self.spawn_analysis(
+                params.text_document.uri,
+                change.text,
+                params.text_document.version,
+            );
         }
     }
 
@@ -197,17 +214,27 @@ impl LanguageServer for Backend {
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
 
-    async fn completion(&self, params: CompletionParams) -> LspResult<Option<CompletionResponse>> {
+    async fn completion(
+        &self,
+        params: CompletionParams,
+    ) -> LspResult<Option<CompletionResponse>> {
         let uri     = &params.text_document_position.text_document.uri;
         let pos     = params.text_document_position.position;
         let trigger = params.context.and_then(|c| c.trigger_character);
-        Ok(features::completions::provide(self.documents.get(uri).as_deref(), pos, trigger.as_deref()))
+        Ok(features::completions::provide(
+            self.documents.get(uri).as_deref(), pos, trigger.as_deref(),
+        ))
     }
 
-    async fn signature_help(&self, params: SignatureHelpParams) -> LspResult<Option<SignatureHelp>> {
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> LspResult<Option<SignatureHelp>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
-        Ok(features::signature_help::provide(self.documents.get(uri).as_deref(), pos, params.context))
+        Ok(features::signature_help::provide(
+            self.documents.get(uri).as_deref(), pos, params.context,
+        ))
     }
 
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
@@ -216,26 +243,40 @@ impl LanguageServer for Backend {
         Ok(features::hover::provide(self.documents.get(uri).as_deref(), pos))
     }
 
-    async fn goto_definition(&self, params: GotoDefinitionParams) -> LspResult<Option<GotoDefinitionResponse>> {
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> LspResult<Option<GotoDefinitionResponse>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
         Ok(features::goto_definition::provide(self.documents.get(uri).as_deref(), pos))
     }
 
-    async fn document_highlight(&self, params: DocumentHighlightParams) -> LspResult<Option<Vec<DocumentHighlight>>> {
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> LspResult<Option<Vec<DocumentHighlight>>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
         Ok(features::document_highlights::provide(self.documents.get(uri).as_deref(), pos))
     }
 
-    async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
+    async fn references(
+        &self,
+        params: ReferenceParams,
+    ) -> LspResult<Option<Vec<Location>>> {
         let uri  = &params.text_document_position.text_document.uri;
         let pos  = params.text_document_position.position;
         let incl = params.context.include_declaration;
-        Ok(features::references::provide(self.documents.get(uri).as_deref(), uri, pos, incl))
+        Ok(features::references::provide(
+            self.documents.get(uri).as_deref(), uri, pos, incl,
+        ))
     }
 
-    async fn prepare_rename(&self, params: TextDocumentPositionParams) -> LspResult<Option<PrepareRenameResponse>> {
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> LspResult<Option<PrepareRenameResponse>> {
         let uri = &params.text_document.uri;
         Ok(features::rename::prepare(self.documents.get(uri).as_deref(), params.position))
     }
@@ -243,45 +284,71 @@ impl LanguageServer for Backend {
     async fn rename(&self, params: RenameParams) -> LspResult<Option<WorkspaceEdit>> {
         let uri = &params.text_document_position.text_document.uri;
         let pos = params.text_document_position.position;
-        Ok(features::rename::provide(self.documents.get(uri).as_deref(), uri, pos, &params.new_name))
+        Ok(features::rename::provide(
+            self.documents.get(uri).as_deref(), uri, pos, &params.new_name,
+        ))
     }
 
-    async fn document_symbol(&self, params: DocumentSymbolParams) -> LspResult<Option<DocumentSymbolResponse>> {
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> LspResult<Option<DocumentSymbolResponse>> {
         let uri = &params.text_document.uri;
         Ok(features::document_symbols::provide(self.documents.get(uri).as_deref()))
     }
 
-    async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> LspResult<Option<SemanticTokensResult>> {
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> LspResult<Option<SemanticTokensResult>> {
         let uri = &params.text_document.uri;
         Ok(features::semantic_tokens::provide(self.documents.get(uri).as_deref()))
     }
 
-    async fn document_color(&self, params: DocumentColorParams) -> LspResult<Vec<ColorInformation>> {
+    async fn document_color(
+        &self,
+        params: DocumentColorParams,
+    ) -> LspResult<Vec<ColorInformation>> {
         let uri = &params.text_document.uri;
         Ok(features::document_color::provide(self.documents.get(uri).as_deref()))
     }
 
-    async fn color_presentation(&self, params: ColorPresentationParams) -> LspResult<Vec<ColorPresentation>> {
+    async fn color_presentation(
+        &self,
+        params: ColorPresentationParams,
+    ) -> LspResult<Vec<ColorPresentation>> {
         Ok(features::document_color::presentation(params.color, params.range))
     }
 
-    async fn inlay_hint(&self, params: InlayHintParams) -> LspResult<Option<Vec<InlayHint>>> {
+    async fn inlay_hint(
+        &self,
+        params: InlayHintParams,
+    ) -> LspResult<Option<Vec<InlayHint>>> {
         let uri = &params.text_document.uri;
         Ok(features::inlay_hints::provide(self.documents.get(uri).as_deref()))
     }
 
-    async fn code_action(&self, params: CodeActionParams) -> LspResult<Option<CodeActionResponse>> {
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> LspResult<Option<CodeActionResponse>> {
         let uri   = &params.text_document.uri;
         let diags = &params.context.diagnostics;
         Ok(features::code_actions::provide(self.documents.get(uri).as_deref(), diags))
     }
 
-    async fn folding_range(&self, params: FoldingRangeParams) -> LspResult<Option<Vec<FoldingRange>>> {
+    async fn folding_range(
+        &self,
+        params: FoldingRangeParams,
+    ) -> LspResult<Option<Vec<FoldingRange>>> {
         let uri = &params.text_document.uri;
         Ok(features::folding::provide(self.documents.get(uri).as_deref()))
     }
 
-    async fn formatting(&self, params: DocumentFormattingParams) -> LspResult<Option<Vec<TextEdit>>> {
+    async fn formatting(
+        &self,
+        params: DocumentFormattingParams,
+    ) -> LspResult<Option<Vec<TextEdit>>> {
         let uri  = &params.text_document.uri;
         let opts = &params.options;
         Ok(features::formatting::provide(self.documents.get(uri).as_deref(), opts))
@@ -322,7 +389,10 @@ impl LanguageServer for Backend {
             _         => return Ok(None),
         };
 
-        let indent = prev_line.chars().take_while(|c| *c == ' ' || *c == '\t').collect::<String>();
+        let indent = prev_line
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .collect::<String>();
         let inner_indent = if params.options.insert_spaces {
             " ".repeat(params.options.tab_size as usize)
         } else {
@@ -330,7 +400,8 @@ impl LanguageServer for Backend {
         };
 
         let cur_line_text = lines.get(pos.line as usize).copied().unwrap_or("");
-        let next_line_has_close = lines.get(pos.line as usize + 1)
+        let next_line_has_close = lines
+            .get(pos.line as usize + 1)
             .map(|l| l.trim_start().starts_with(close))
             .unwrap_or(false);
 
@@ -341,7 +412,12 @@ impl LanguageServer for Backend {
                     Position::new(pos.line, 0),
                     Position::new(pos.line, cur_line_text.len() as u32),
                 ),
-                new_text: format!("{}{}{}", indent, inner_indent, cur_line_text.trim_start()),
+                new_text: format!(
+                    "{}{}{}",
+                    indent,
+                    inner_indent,
+                    cur_line_text.trim_start()
+                ),
             });
         } else {
             edits.push(TextEdit {
@@ -356,46 +432,37 @@ impl LanguageServer for Backend {
         if edits.is_empty() { Ok(None) } else { Ok(Some(edits)) }
     }
 
-    async fn code_lens(&self, params: CodeLensParams) -> LspResult<Option<Vec<CodeLens>>> {
+    async fn code_lens(
+        &self,
+        params: CodeLensParams,
+    ) -> LspResult<Option<Vec<CodeLens>>> {
         let uri = &params.text_document.uri;
         Ok(features::code_lens::provide(self.documents.get(uri).as_deref()))
     }
 
-    async fn execute_command(&self, params: ExecuteCommandParams) -> LspResult<Option<serde_json::Value>> {
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> LspResult<Option<serde_json::Value>> {
         let command = params.command.as_str();
 
         let uri_str = params.arguments.first()
-            .and_then(|v| v.as_str()).map(|s| s.to_string());
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let uri = uri_str.as_deref().and_then(|s| Url::parse(s).ok());
-        let source_path: Option<std::path::PathBuf> = uri.as_ref().and_then(|u| u.to_file_path().ok());
+        let source_path: Option<std::path::PathBuf> =
+            uri.as_ref().and_then(|u| u.to_file_path().ok());
 
         match command {
 
-            CMD_VALIDATE => {
-                let (errors, warnings) = {
-                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
-                    if let Some(d) = &doc {
-                        let all   = d.error_manager.get_all_errors_flat();
-                        let errs  = all.iter().filter(|e| matches!(
-                            e.severity(),
-                            dixscript::ErrorManager::ErrorSeverity::Error
-                            | dixscript::ErrorManager::ErrorSeverity::Fatal
-                        )).count();
-                        let warns = all.iter().filter(|e| matches!(
-                            e.severity(), dixscript::ErrorManager::ErrorSeverity::Warning
-                        )).count();
-                        (errs, warns)
-                    } else { (0, 0) }
-                };
-                let result = run_validate(errors, warnings);
-                self.show_message(result.success, &result.message).await;
-            }
-
+            // ── JSON ──────────────────────────────────────────────────────────
             CMD_TO_JSON => {
                 let (ast_opt, semantic_opt) = {
                     let doc = uri.as_ref().and_then(|u| self.documents.get(u));
-                    (doc.as_ref().and_then(|d| d.ast.clone()),
-                     doc.as_ref().and_then(|d| d.semantic_result.clone()))
+                    (
+                        doc.as_ref().and_then(|d| d.ast.clone()),
+                        doc.as_ref().and_then(|d| d.semantic_result.clone()),
+                    )
                 };
                 let path_clone = source_path.clone();
                 let result = tokio::task::spawn_blocking(move || {
@@ -403,15 +470,20 @@ impl LanguageServer for Backend {
                         Some(ast) => run_convert_to_json(&ast, path_clone.as_deref()),
                         None      => CommandResult::err("File has not been parsed yet."),
                     }
-                }).await.unwrap_or_else(|_| CommandResult::err("JSON conversion task panicked."));
+                })
+                .await
+                .unwrap_or_else(|_| CommandResult::err("JSON conversion task panicked."));
                 self.show_message(result.success, &result.message).await;
             }
 
+            // ── TOML ──────────────────────────────────────────────────────────
             CMD_TO_TOML => {
                 let (ast_opt, semantic_opt) = {
                     let doc = uri.as_ref().and_then(|u| self.documents.get(u));
-                    (doc.as_ref().and_then(|d| d.ast.clone()),
-                     doc.as_ref().and_then(|d| d.semantic_result.clone()))
+                    (
+                        doc.as_ref().and_then(|d| d.ast.clone()),
+                        doc.as_ref().and_then(|d| d.semantic_result.clone()),
+                    )
                 };
                 let path_clone = source_path.clone();
                 let result = tokio::task::spawn_blocking(move || {
@@ -419,15 +491,20 @@ impl LanguageServer for Backend {
                         Some(ast) => run_convert_to_toml(&ast, path_clone.as_deref()),
                         None      => CommandResult::err("File has not been parsed yet."),
                     }
-                }).await.unwrap_or_else(|_| CommandResult::err("TOML conversion task panicked."));
+                })
+                .await
+                .unwrap_or_else(|_| CommandResult::err("TOML conversion task panicked."));
                 self.show_message(result.success, &result.message).await;
             }
 
+            // ── Minify ────────────────────────────────────────────────────────
             CMD_MINIFY => {
                 let (ast_opt, semantic_opt) = {
                     let doc = uri.as_ref().and_then(|u| self.documents.get(u));
-                    (doc.as_ref().and_then(|d| d.ast.clone()),
-                     doc.as_ref().and_then(|d| d.semantic_result.clone()))
+                    (
+                        doc.as_ref().and_then(|d| d.ast.clone()),
+                        doc.as_ref().and_then(|d| d.semantic_result.clone()),
+                    )
                 };
                 let path_clone = source_path.clone();
                 let result = tokio::task::spawn_blocking(move || {
@@ -435,31 +512,49 @@ impl LanguageServer for Backend {
                         Some(ast) => run_minify(&ast, path_clone.as_deref()),
                         None      => CommandResult::err("File has not been parsed yet."),
                     }
-                }).await.unwrap_or_else(|_| CommandResult::err("Minify task panicked."));
+                })
+                .await
+                .unwrap_or_else(|_| CommandResult::err("Minify task panicked."));
                 self.show_message(result.success, &result.message).await;
             }
 
-            // ── Create .resolved.mdix ──────────────────────────────────────────
-            // Uses the post-value-resolution AST so all QuickFunc calls are
-            // already inlined.  This is what will be written to disk.
+            // ── Create Resolved ───────────────────────────────────────────────
+            //
+            // Uses a FRESH DixLoader compile so that:
+            //   1. Imported functions (builders, physics, units) are properly loaded.
+            //   2. Value resolution runs with the complete symbol table.
+            //   3. Only the @DATA section is written to the .resolved.mdix file.
             CMD_CREATE_RESOLVED => {
-                let (ast_opt, semantic_opt) = {
-                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
-                    (doc.as_ref().and_then(|d| d.ast.clone()),
-                     doc.as_ref().and_then(|d| d.semantic_result.clone()))
-                };
                 let path_clone = source_path.clone();
                 let result = tokio::task::spawn_blocking(move || {
-                    match resolve_ast_owned(ast_opt, semantic_opt) {
-                        Some(ast) => run_create_resolved(&ast, path_clone.as_deref()),
-                        None      => CommandResult::err(
-                            "File has not been parsed yet — wait for analysis to complete.",
+                    match path_clone {
+                        Some(ref path) if path.exists() => {
+                            let loader = DixLoader::new();
+                            match loader.compile_to_resolved_ast(
+                                path.to_str().unwrap_or(""),
+                            ) {
+                                Ok(resolved_ast) => {
+                                    run_create_resolved(&resolved_ast, Some(path))
+                                }
+                                Err(e) => {
+                                    CommandResult::err(format!("⊞ Resolution failed: {}", e))
+                                }
+                            }
+                        }
+                        Some(ref path) => CommandResult::err(format!(
+                            "⊞ File not found: {}", path.display()
+                        )),
+                        None => CommandResult::err(
+                            "⊞ Save the file before resolving.",
                         ),
                     }
-                }).await.unwrap_or_else(|_| CommandResult::err("Create resolved task panicked."));
+                })
+                .await
+                .unwrap_or_else(|_| CommandResult::err("⊞ Resolve task panicked."));
                 self.show_message(result.success, &result.message).await;
             }
 
+            // ── Compile ───────────────────────────────────────────────────────
             CMD_COMPILE => {
                 let ast_clone = {
                     let doc = uri.as_ref().and_then(|u| self.documents.get(u));
@@ -468,10 +563,13 @@ impl LanguageServer for Backend {
                 let path_clone = source_path.clone();
                 let result = tokio::task::spawn_blocking(move || {
                     run_compile(path_clone.as_deref(), ast_clone.as_ref())
-                }).await.unwrap_or_else(|_| CommandResult::err("Compile task panicked."));
+                })
+                .await
+                .unwrap_or_else(|_| CommandResult::err("Compile task panicked."));
                 self.show_message(result.success, &result.message).await;
             }
 
+            // ── Show AST ──────────────────────────────────────────────────────
             CMD_SHOW_AST => {
                 let ast_clone = {
                     let doc = uri.as_ref().and_then(|u| self.documents.get(u));
@@ -486,13 +584,15 @@ impl LanguageServer for Backend {
 
             other => {
                 tracing::warn!("Unknown command: {}", other);
-                self.client.show_message(
-                    MessageType::WARNING,
-                    &format!("Unknown command: {}", other),
-                ).await;
+                self.client
+                    .show_message(
+                        MessageType::WARNING,
+                        &format!("Unknown command: {}", other),
+                    )
+                    .await;
             }
         }
 
         Ok(None)
     }
-                            }
+                    }

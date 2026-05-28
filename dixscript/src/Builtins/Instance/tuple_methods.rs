@@ -1,5 +1,4 @@
 // dixscript/src/Builtins/Instance/tuple_methods.rs
-// src/Builtins/Instance/tuple_methods.rs
 //! Tuple instance methods for DixScript
 //! Tuples have max 6 elements in DixScript
 
@@ -14,52 +13,51 @@ pub fn get_methods() -> HashMap<String, Box<dyn IBuiltinMethod>> {
         "Returns the number of elements in the tuple".to_string(),
     )));
 
-    // All positional accessors return Any — the element type varies per position
     methods.insert("get".to_string(), Box::new(BuiltinMethod::new(
         "get".to_string(), 2,
-        DixType::Any,   // ← was Null (unhelpful); element type varies
+        DixType::Any,
         get,
-        "Returns the element at the specified index (0–5)".to_string(),
+        "Returns the element at the specified index (0-5)".to_string(),
     )));
 
     methods.insert("first".to_string(), Box::new(BuiltinMethod::new(
         "first".to_string(), 1,
-        DixType::Any,   // ← was Null
+        DixType::Any,
         first,
         "Returns the first element (index 0)".to_string(),
     )));
 
     methods.insert("second".to_string(), Box::new(BuiltinMethod::new(
         "second".to_string(), 1,
-        DixType::Any,   // ← was Null
+        DixType::Any,
         second,
         "Returns the second element (index 1)".to_string(),
     )));
 
     methods.insert("third".to_string(), Box::new(BuiltinMethod::new(
         "third".to_string(), 1,
-        DixType::Any,   // ← was Null
+        DixType::Any,
         third,
         "Returns the third element (index 2)".to_string(),
     )));
 
     methods.insert("fourth".to_string(), Box::new(BuiltinMethod::new(
         "fourth".to_string(), 1,
-        DixType::Any,   // ← was Null
+        DixType::Any,
         fourth,
         "Returns the fourth element (index 3)".to_string(),
     )));
 
     methods.insert("fifth".to_string(), Box::new(BuiltinMethod::new(
         "fifth".to_string(), 1,
-        DixType::Any,   // ← was Null
+        DixType::Any,
         fifth,
         "Returns the fifth element (index 4)".to_string(),
     )));
 
     methods.insert("sixth".to_string(), Box::new(BuiltinMethod::new(
         "sixth".to_string(), 1,
-        DixType::Any,   // ← was Null
+        DixType::Any,
         sixth,
         "Returns the sixth element (index 5)".to_string(),
     )));
@@ -67,6 +65,12 @@ pub fn get_methods() -> HashMap<String, Box<dyn IBuiltinMethod>> {
     methods.insert("contains".to_string(), Box::new(BuiltinMethod::new(
         "contains".to_string(), 2, DixType::Bool, contains,
         "Checks if the tuple contains the specified value".to_string(),
+    )));
+
+    // Renamed from any() — 'any' clashes with DataType::Any keyword
+    methods.insert("containsAny".to_string(), Box::new(BuiltinMethod::new(
+        "containsAny".to_string(), 2, DixType::Bool, contains_any,
+        "Checks if the tuple contains any element equal to the specified value (alias for contains with intent clarity)".to_string(),
     )));
 
     methods.insert("toArray".to_string(), Box::new(BuiltinMethod::new(
@@ -125,7 +129,6 @@ fn second(args: &[DixValue]) -> Result<DixValue, String> {
 
 fn third(args: &[DixValue]) -> Result<DixValue, String> {
     let elements = require_tuple(args, "third")?;
-    // dixscript/src/Builtins/Instance/tuple_methods.rs  (continued)
     if elements.len() < 3 { return Err("Tuple does not have a third element".to_string()); }
     Ok(elements[2].clone())
 }
@@ -150,6 +153,14 @@ fn sixth(args: &[DixValue]) -> Result<DixValue, String> {
 
 fn contains(args: &[DixValue]) -> Result<DixValue, String> {
     let elements = require_tuple(args, "contains")?;
+    let search = &args[1];
+    Ok(DixValue::from_bool(elements.iter().any(|e| e.equal_to(search))))
+}
+
+fn contains_any(args: &[DixValue]) -> Result<DixValue, String> {
+    // Same logic as contains — exists as a distinct named method for intent clarity
+    // and to replace the old any() which clashed with DataType::Any
+    let elements = require_tuple(args, "containsAny")?;
     let search = &args[1];
     Ok(DixValue::from_bool(elements.iter().any(|e| e.equal_to(search))))
 }
@@ -188,7 +199,7 @@ mod tests {
     #[test]
     fn test_positional_accessors_return_type_is_any() {
         let methods = get_methods();
-        for name in ["first","second","third","fourth","fifth","sixth","get"] {
+        for name in ["first", "second", "third", "fourth", "fifth", "sixth", "get"] {
             assert_eq!(
                 methods[name].return_type(), DixType::Any,
                 "{} should return Any, not {:?}", name, methods[name].return_type()
@@ -236,6 +247,22 @@ mod tests {
     }
 
     #[test]
+    fn test_tuple_contains_any() {
+        let tuple = DixValue::from_tuple(vec![
+            DixValue::from_int(10), DixValue::from_int(20),
+        ]);
+        assert!(contains_any(&[tuple.clone(), DixValue::from_int(10)]).unwrap().as_bool());
+        assert!(!contains_any(&[tuple, DixValue::from_int(99)]).unwrap().as_bool());
+    }
+
+    #[test]
+    fn test_no_any_method_exists() {
+        let methods = get_methods();
+        assert!(!methods.contains_key("any"), "'any' clashes with DataType::Any and must not exist");
+        assert!(methods.contains_key("containsAny"), "containsAny must exist as replacement");
+    }
+
+    #[test]
     fn test_tuple_reverse() {
         let tuple = DixValue::from_tuple(vec![
             DixValue::from_int(1), DixValue::from_int(2), DixValue::from_int(3),
@@ -264,4 +291,4 @@ mod tests {
         let not_a_tuple = DixValue::from_array(vec![DixValue::from_int(1)]);
         assert!(first(&[not_a_tuple]).is_err());
     }
-}
+        }

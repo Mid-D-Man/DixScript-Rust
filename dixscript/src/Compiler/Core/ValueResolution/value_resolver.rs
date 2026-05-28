@@ -1854,86 +1854,149 @@ fn execute_iterative_resolution(
             }),
         }
     }
+// value_resolver.rs — fn resolve_value_to_dix
+// (Builtins::Core::DixValue, used in Phase 4 argument resolution)
 
-    fn resolve_value_to_dix(
-        value: &Value,
-        ctx: &FxHashMap<String, DixValue>,
-        call_pos: Position,
-    ) -> Result<DixValue, ResolverError> {
-        match value {
-            Value::Integer { value, .. }  => Ok(DixValue::from_int(*value)),
-            Value::Long { value, .. }     => Ok(DixValue::from_long(*value)),
-            Value::Float { value, .. }    => Ok(DixValue::from_float(*value)),
-            Value::Double { value, .. }   => Ok(DixValue::from_double(*value)),
-            Value::String { value, .. }   => Ok(DixValue::from_string(value.clone())),
-            Value::Boolean { value, .. }  => Ok(DixValue::from_bool(*value)),
-            Value::Null { .. }            => Ok(DixValue::null()),
-            Value::HexColor { value, .. } => Ok(DixValue::from_hex(value.clone())),
-            Value::Identifier { value: id, .. } => {
-                ctx.get(id.as_str()).cloned().ok_or_else(|| ResolverError::Fatal {
-                    message: format!("identifier '{}' missing at {}", id, call_pos),
-                })
-            }
-            Value::Array { values, .. } => {
-                let items: Result<Vec<DixValue>, ResolverError> = values
-                    .iter()
-                    .map(|v| Self::resolve_value_to_dix(v, ctx, call_pos))
-                    .collect();
-                Ok(DixValue::from_array(items?))
-            }
-            Value::Object { properties, .. } => {
-                let mut map = FxHashMap::with_capacity_and_hasher(
-                    properties.len().max(MIN_CAPACITY),
-                    Default::default(),
-                );
-                for prop in properties {
-                    map.insert(
-                        prop.key.clone(),
-                        Self::resolve_value_to_dix(&prop.value, ctx, call_pos)?,
-                    );
-                }
-                Ok(DixValue::from_object(map.into_iter().collect()))
-            }
-            Value::PrefixedConstructor { prefix, arguments, .. } => {
-                match prefix.to_lowercase().as_str() {
-                    "b" => {
-                        let data = arguments
-                            .first()
-                            .and_then(|a| {
-                                if let Value::String { value, .. } = a { Some(value.clone()) } else { None }
-                            })
-                            .unwrap_or_default();
-                        DixValue::from_blob(data).map_err(|e| ResolverError::Fatal { message: e })
-                    }
-                    "r" => {
-                        let pattern = arguments
-                            .first()
-                            .and_then(|a| {
-                                if let Value::String { value, .. } = a { Some(value.clone()) } else { None }
-                            })
-                            .unwrap_or_else(|| ".*".to_string());
-                        DixValue::from_regex(pattern)
-                            .map_err(|e| ResolverError::Fatal { message: e })
-                    }
-                    "t" => {
-                        let items: Result<Vec<DixValue>, ResolverError> = arguments
-                            .iter()
-                            .take(6)
-                            .map(|a| Self::resolve_value_to_dix(a, ctx, call_pos))
-                            .collect();
-                        Ok(DixValue::from_tuple(items?))
-                    }
-                    _ => Err(ResolverError::Fatal {
-                        message: format!("unknown prefix constructor: {}", prefix),
-                    }),
-                }
-            }
-            _ => Err(ResolverError::Fatal {
-                message: format!("cannot convert value variant to DixValue at {}", call_pos),
-            }),
+fn resolve_value_to_dix(
+    value: &Value,
+    ctx: &FxHashMap<String, DixValue>,
+    call_pos: Position,
+) -> Result<DixValue, ResolverError> {
+    match value {
+        // ── Primitives ────────────────────────────────────────────────────────
+        Value::Integer { value, .. }  => Ok(DixValue::from_int(*value)),
+        Value::Long { value, .. }     => Ok(DixValue::from_long(*value)),
+        Value::Float { value, .. }    => Ok(DixValue::from_float(*value)),
+        Value::Double { value, .. }   => Ok(DixValue::from_double(*value)),
+        // FIX: was falling through to Fatal error — causes every chemistry-DB
+        // constant (6.62607015e-34, 6.02214076e23, …) to abort resolution.
+        Value::ScientificNotation { value, .. } => Ok(DixValue::from_double(*value)),
+        Value::String { value, .. }   => Ok(DixValue::from_string(value.clone())),
+        Value::Boolean { value, .. }  => Ok(DixValue::from_bool(*value)),
+        Value::Null { .. }            => Ok(DixValue::null()),
+        Value::HexColor { value, .. } => Ok(DixValue::from_hex(value.clone())),
+
+        // Date/Timestamp: parse string → DateTime<Utc>.
+        Value::Date { value: d, .. } => {
+            let dt = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                .ok()
+                .and_then(|nd| nd.and_hms_opt(0, 0, 0))
+                .map(|ndt| ndt.and_utc())
+                .or_else(|| d.parse::<chrono::DateTime<chrono::Utc>>().ok())
+                .unwrap_or_else(chrono::Utc::now);
+            Ok(DixValue::from_date(dt))
         }
-    }
+        Value::Timestamp { value: t, .. } => {
+            let dt = t.parse::<chrono::DateTime<chrono::Utc>>()
+                .unwrap_or_else(|_| chrono::Utc::now());
+            Ok(DixValue::from_timestamp(dt))
+        }
 
+        // InterpolatedString: use template text.
+        Value::InterpolatedString { template, .. } => {
+            Ok(DixValue::from_string(template.clone()))
+        }
+
+        // EnumValue: should be Integer after Phase 1; this is a safety net so
+        // a missed enum doesn't abort the entire resolution pass.
+        Value::EnumValue { .. } => Ok(DixValue::from_int(0)),
+
+        // Identifier: resolve from data context.
+        Value::Identifier { value: id, .. } => {
+            ctx.get(id.as_str()).cloned().ok_or_else(|| ResolverError::Fatal {
+                message: format!(
+                    "identifier '{}' missing from context at {}",
+                    id, call_pos
+                ),
+            })
+        }
+
+        // ── Collections ───────────────────────────────────────────────────────
+        Value::Array { values, .. } => {
+            let items: Result<Vec<DixValue>, ResolverError> = values
+                .iter()
+                .map(|v| Self::resolve_value_to_dix(v, ctx, call_pos))
+                .collect();
+            Ok(DixValue::from_array(items?))
+        }
+
+        // NestedArray: treat identically to Array.
+        Value::NestedArray { values, .. } => {
+            let items: Result<Vec<DixValue>, ResolverError> = values
+                .iter()
+                .map(|v| Self::resolve_value_to_dix(v, ctx, call_pos))
+                .collect();
+            Ok(DixValue::from_array(items?))
+        }
+
+        Value::Object { properties, .. } => {
+            let mut map = FxHashMap::with_capacity_and_hasher(
+                properties.len().max(MIN_CAPACITY),
+                Default::default(),
+            );
+            for prop in properties {
+                map.insert(
+                    prop.key.clone(),
+                    Self::resolve_value_to_dix(&prop.value, ctx, call_pos)?,
+                );
+            }
+            Ok(DixValue::from_object(map.into_iter().collect()))
+        }
+
+        Value::PrefixedConstructor { prefix, arguments, .. } => {
+            match prefix.to_lowercase().as_str() {
+                "b" => {
+                    let data = arguments
+                        .first()
+                        .and_then(|a| {
+                            if let Value::String { value, .. } = a {
+                                Some(value.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_default();
+                    DixValue::from_blob(data)
+                        .map_err(|e| ResolverError::Fatal { message: e })
+                }
+                "r" => {
+                    let pattern = arguments
+                        .first()
+                        .and_then(|a| {
+                            if let Value::String { value, .. } = a {
+                                Some(value.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_else(|| ".*".to_string());
+                    DixValue::from_regex(pattern)
+                        .map_err(|e| ResolverError::Fatal { message: e })
+                }
+                // "t" recurses — nested tuples like t:(t:(1,2), t:(3,4)) resolve correctly.
+                "t" => {
+                    let items: Result<Vec<DixValue>, ResolverError> = arguments
+                        .iter()
+                        .take(6)
+                        .map(|a| Self::resolve_value_to_dix(a, ctx, call_pos))
+                        .collect();
+                    Ok(DixValue::from_tuple(items?))
+                }
+                _ => Err(ResolverError::Fatal {
+                    message: format!("unknown prefix constructor: {}", prefix),
+                }),
+            }
+        }
+
+        _ => Err(ResolverError::Fatal {
+            message: format!(
+                "cannot convert value variant {:?} to DixValue at {}",
+                std::mem::discriminant(value),
+                call_pos
+            ),
+        }),
+    }
+}
     // ==================== AST REPLACEMENT ====================
 
     fn replace_value_in_ast_by_location(
@@ -2494,63 +2557,88 @@ fn try_value_to_dix(value: &Value) -> Option<DixValue> {
     }
 }
 
-    pub fn convert_dix_value_to_value(dix: &DixValue, position: Position) -> Value {
-        match dix.get_type() {
-            DixType::Int   => Value::Integer { value: dix.as_int(),   position },
-            DixType::Long  => Value::Long    { value: dix.as_long(),  position },
-            DixType::Float => Value::Float   { value: dix.as_float(), position },
-            DixType::Double => Value::Double { value: dix.as_double(), position },
-            DixType::String => Value::String { value: dix.as_string(), position },
-            DixType::Bool   => Value::Boolean { value: dix.as_bool(), position },
-            DixType::Null   => Value::Null { position },
-            DixType::Hex    => Value::HexColor { value: dix.as_string(), position },
+ // value_resolver.rs — fn convert_dix_value_to_value
+// (Builtins::Core::DixValue → AST Value, used after Phase 4 to write results back)
 
-            DixType::Blob => Value::PrefixedConstructor {
-                prefix: "b".to_string(),
-                arguments: vec![Value::String {
-                    value: dix.as_blob_base64().unwrap_or_default(),
-                    position,
-                }],
+pub fn convert_dix_value_to_value(dix: &DixValue, position: Position) -> Value {
+    match dix.get_type() {
+        DixType::Int    => Value::Integer { value: dix.as_int(),    position },
+        DixType::Long   => Value::Long    { value: dix.as_long(),   position },
+        DixType::Float  => Value::Float   { value: dix.as_float(),  position },
+        DixType::Double => Value::Double  { value: dix.as_double(), position },
+        DixType::String => Value::String  { value: dix.as_string(), position },
+        DixType::Bool   => Value::Boolean { value: dix.as_bool(),   position },
+        DixType::Null   => Value::Null    { position },
+        DixType::Hex    => Value::HexColor { value: dix.as_string(), position },
+
+        DixType::Blob => Value::PrefixedConstructor {
+            prefix: "b".to_string(),
+            arguments: vec![Value::String {
+                value: dix.as_blob_base64().unwrap_or_default(),
                 position,
-            },
+            }],
+            position,
+        },
 
-            DixType::Regex => Value::PrefixedConstructor {
-                prefix: "r".to_string(),
-                arguments: vec![Value::String {
-                    value: dix.as_string(),
-                    position,
-                }],
+        DixType::Regex => Value::PrefixedConstructor {
+            prefix: "r".to_string(),
+            arguments: vec![Value::String {
+                value: dix.as_string(),
                 position,
-            },
+            }],
+            position,
+        },
 
-            DixType::Array | DixType::Tuple => {
-                let values: Vec<Value> = dix
-                    .as_array()
-                    .iter()
-                    .map(|item| Self::convert_dix_value_to_value(item, position))
-                    .collect();
-                Value::Array { values, position }
-            }
-
-            DixType::Object => {
-                let properties: Vec<ObjectProperty> = dix
-                    .as_object()
-                    .iter()
-                    .map(|(key, val)| ObjectProperty {
-                        key: key.clone(),
-                        value: Self::convert_dix_value_to_value(val, position),
-                        position,
-                    })
-                    .collect();
-                Value::Object { properties, position }
-            }
-
-            DixType::Date      => Value::Date      { value: dix.as_string(), position },
-            DixType::Timestamp => Value::Timestamp { value: dix.as_string(), position },
-
-            _ => Value::String { value: dix.as_string(), position },
+        // FIX: Tuple must round-trip as t:(...) not as [...].
+        // Previously both Array and Tuple produced Value::Array, which broke
+        // subsequent resolution passes that needed to re-read tuple elements
+        // (e.g. createLennardJones returns t:(epsilon, sigma), then the caller
+        // does lj_parameters.first()). Now Tuple → PrefixedConstructor{"t"}
+        // which try_value_to_dix handles correctly via the "t" branch,
+        // and Display renders as `t:(...)` in the .resolved.mdix output.
+        DixType::Array => {
+            let values: Vec<Value> = dix
+                .as_array()
+                .iter()
+                .map(|item| Self::convert_dix_value_to_value(item, position))
+                .collect();
+            Value::Array { values, position }
         }
+
+        DixType::Tuple => {
+            // Recursion preserves nested tuples: t:(t:(1,2), t:(3,4)) → correct.
+            let arguments: Vec<Value> = dix
+                .as_array()
+                .iter()
+                .map(|item| Self::convert_dix_value_to_value(item, position))
+                .collect();
+            Value::PrefixedConstructor {
+                prefix: "t".to_string(),
+                arguments,
+                position,
+            }
+        }
+
+        DixType::Object => {
+            let properties: Vec<ObjectProperty> = dix
+                .as_object()
+                .iter()
+                .map(|(key, val)| ObjectProperty {
+                    key:      key.clone(),
+                    value:    Self::convert_dix_value_to_value(val, position),
+                    position,
+                })
+                .collect();
+            Value::Object { properties, position }
+        }
+
+        DixType::Date      => Value::Date      { value: dix.as_string(), position },
+        DixType::Timestamp => Value::Timestamp { value: dix.as_string(), position },
+
+        // Enum: already converted to Integer in Phase 1; unreachable in practice.
+        _ => Value::String { value: dix.as_string(), position },
     }
+}
 
     // ==================== DIAGNOSTIC UTILITIES ====================
 

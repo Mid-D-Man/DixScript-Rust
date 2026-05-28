@@ -1,5 +1,4 @@
 // dixscript/src/Builtins/Static/random_object.rs
-// src/Builtins/Static/random_object.rs
 //! Random static object implementation for DixScript
 //! Provides random number generation and selection functions
 
@@ -56,27 +55,30 @@ impl RandomObject {
             validation_helpers::all_numeric,
         )));
 
-        // Random.float() — random f32 in [0.0, 1.0)
+        // Random.nextFloat() — random f32 in [0.0, 1.0)
+        // Renamed from float() to avoid clash with DataType::Float keyword
         base.register_method(Box::new(BuiltinMethod::new(
-            "float".to_string(),
+            "nextFloat".to_string(),
             0,
             DixType::Float,
             |_| Ok(DixValue::from_float(rand::thread_rng().gen::<f32>())),
             "Returns a random float between 0.0 and 1.0".to_string(),
         )));
 
-        // Random.double() — random f64 in [0.0, 1.0)
+        // Random.nextDouble() — random f64 in [0.0, 1.0)
+        // Renamed from double() to avoid clash with DataType::Double keyword
         base.register_method(Box::new(BuiltinMethod::new(
-            "double".to_string(),
+            "nextDouble".to_string(),
             0,
             DixType::Double,
             |_| Ok(DixValue::from_double(rand::thread_rng().gen::<f64>())),
             "Returns a random double between 0.0 and 1.0".to_string(),
         )));
 
-        // Random.boolean()
+        // Random.nextBool()
+        // Renamed from boolean() for consistency with nextFloat/nextDouble naming
         base.register_method(Box::new(BuiltinMethod::new(
-            "boolean".to_string(),
+            "nextBool".to_string(),
             0,
             DixType::Bool,
             |_| Ok(DixValue::from_bool(rand::thread_rng().gen::<bool>())),
@@ -247,9 +249,10 @@ impl RandomObject {
             validation_helpers::all_numeric,
         )));
 
-        // Random.string(length, charset)
+        // Random.randomString(length, charset)
+        // Renamed from string() to avoid clash with DataType::String keyword
         base.register_method(Box::new(BuiltinMethod::new_with_validator(
-            "string".to_string(),
+            "randomString".to_string(),
             2,
             DixType::String,
             |args| {
@@ -415,8 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn test_random_long_range_with_int_inputs_promoted() {
-        // Int is numeric so all_numeric validator passes for Long too
+    fn test_random_long_range_with_zero() {
         let obj = RandomObject::new();
         let result = obj.call_method("longRange", &[
             DixValue::from_long(0_i64),
@@ -426,9 +428,27 @@ mod tests {
     }
 
     #[test]
-    fn test_random_boolean() {
+    fn test_random_next_float_in_range() {
         let obj = RandomObject::new();
-        let result = obj.call_method("boolean", &[]).unwrap();
+        let result = obj.call_method("nextFloat", &[]).unwrap();
+        assert_eq!(result.get_type(), DixType::Float);
+        let v = result.as_float();
+        assert!(v >= 0.0 && v < 1.0);
+    }
+
+    #[test]
+    fn test_random_next_double_in_range() {
+        let obj = RandomObject::new();
+        let result = obj.call_method("nextDouble", &[]).unwrap();
+        assert_eq!(result.get_type(), DixType::Double);
+        let v = result.as_double();
+        assert!(v >= 0.0 && v < 1.0);
+    }
+
+    #[test]
+    fn test_random_next_bool() {
+        let obj = RandomObject::new();
+        let result = obj.call_method("nextBool", &[]).unwrap();
         assert_eq!(result.get_type(), DixType::Bool);
     }
 
@@ -450,4 +470,31 @@ mod tests {
         let result = obj.call_method("alphanumeric", &[DixValue::from_int(20)]).unwrap();
         assert_eq!(result.as_string().len(), 20);
     }
-}
+
+    #[test]
+    fn test_random_string_with_charset() {
+        let obj = RandomObject::new();
+        let result = obj.call_method("randomString", &[
+            DixValue::from_int(10),
+            DixValue::from_string("abc".to_string()),
+        ]).unwrap();
+        let s = result.as_string();
+        assert_eq!(s.len(), 10);
+        assert!(s.chars().all(|c| "abc".contains(c)));
+    }
+
+    #[test]
+    fn test_old_names_no_longer_exist() {
+        let obj = RandomObject::new();
+        // Verify old clashing names are gone
+        assert!(!obj.has_method("float"));
+        assert!(!obj.has_method("double"));
+        assert!(!obj.has_method("boolean"));
+        assert!(!obj.has_method("string"));
+        // Verify new names exist
+        assert!(obj.has_method("nextFloat"));
+        assert!(obj.has_method("nextDouble"));
+        assert!(obj.has_method("nextBool"));
+        assert!(obj.has_method("randomString"));
+    }
+            }

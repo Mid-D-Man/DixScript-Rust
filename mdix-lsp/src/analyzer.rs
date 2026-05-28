@@ -1,19 +1,5 @@
 // mdix-lsp/src/analyzer.rs
 //! Pipeline runner — Approach B (tokenizer-first).
-//!
-//! SECURITY DIAGNOSTIC:
-//!   When @DLM contains DEncryptor and @SECURITY is absent, we always emit
-//!   one correctly-positioned diagnostic per encryptor module, anchored to the
-//!   @DLM section-keyword token.  All security-missing errors from the core
-//!   semantic analyzer are removed first to prevent duplicates.
-//!
-//! DAuditor:
-//!   Informational only — no error is emitted when present without @SECURITY.
-//!
-//! COMMAND RESOLUTION:
-//!   get_resolved_ast() runs value resolution on the stored AST for commands
-//!   that need fully-resolved data (JSON conversion, TOML conversion, minify).
-//!   This is NOT run during regular analysis — only on demand for commands.
 
 use std::collections::HashMap;
 use std::panic;
@@ -57,16 +43,10 @@ pub fn run_pipeline(doc: &mut Document) -> Vec<DixError> {
 
 // ── Command resolution ────────────────────────────────────────────────────────
 
-/// Run value resolution on the document's stored AST, returning the fully
-/// resolved AST. Used only for commands (JSON/TOML/minify), never for the
-/// regular analysis pipeline.
-///
-/// Returns `Some(ast)` always — falls back to the unresolved AST on failure.
 pub fn get_resolved_ast(doc: &Document) -> Option<DixScript> {
     let ast = doc.ast.as_ref()?;
     let semantic_result = doc.semantic_result.as_ref()?;
 
-    // Check whether resolution is actually needed.
     let has_local_fns = ast
         .quick_functions
         .as_ref()
@@ -80,7 +60,6 @@ pub fn get_resolved_ast(doc: &Document) -> Option<DixScript> {
         .unwrap_or(false);
 
     if (!has_local_fns && !has_imported_fns) || ast.data.is_none() {
-        // Nothing to resolve — return the enhanced AST as-is.
         return Some(ast.clone());
     }
 
@@ -89,8 +68,6 @@ pub fn get_resolved_ast(doc: &Document) -> Option<DixScript> {
         None => return Some(ast.clone()),
     };
 
-    // Run value resolution inside a panic guard so a resolution bug never
-    // crashes the LSP server.
     let ast_clone = ast.clone();
     let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let resolver = ValueResolver::new(ast_clone, st, DebugMode::Off);
@@ -184,6 +161,8 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         }
     }
 
+    // Store the full token stream NOW so all feature providers can use it,
+    // including the security check below.
     doc.tokens = all_tokens;
 
     // ── Stage 3: parse ────────────────────────────────────────────────────────
@@ -210,7 +189,6 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
 
     tracing::debug!("Parse complete");
 
-    // Skip cloud imports to prevent tokio-inside-async panic
     let has_cloud_imports = ast
         .imports
         .as_ref()
@@ -250,40 +228,54 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     );
 
     // ── Stage 6: build the diagnostic list ────────────────────────────────────
-
-    // Start with all errors collected by the ErrorManager during the pipeline.
     let mut all_errors = em.get_all_errors_flat();
 
-    // Remove EVERY security-missing diagnostic the core may have emitted —
-    // regardless of line number — so we can re-emit exactly one per encryptor
-    // at the correct (token-derived) position.
+    // Remove any security-missing diagnostics the core emitted so we can
+    // re-emit exactly one per encryptor at the correct token position.
     all_errors.retain(|e| !is_security_missing_error(e));
 
-    // ── Security validation: DEncryptor present without @SECURITY ─────────────
+    // ── Security validation ───────────────────────────────────────────────────
     //
-    // We use the pre-enhancement AST here (DLM/SECURITY sections are never
-    // touched by the enhancer, so both ASTs are identical for this check).
+    // IMPORTANT: We check the TOKEN STREAM for @SECURITY, not ast.security.
+    // The semantic pipeline may auto-generate a default SecuritySection in the
+    // AST even when the user hasn't written @SECURITY. The token stream is the
+    // ground truth for what the user actually typed.
+    let user_has_security_token = doc.tokens
+        .iter()
+        .any(|t| matches!(t.token_type, TokenType::SectionSecurity));
+
     let dlm_encryptors = collect_encryptors(&ast);
 
-    if !dlm_encryptors.is_empty() && ast.security.is_none() {
+    tracing::debug!(
+        "Security check: encryptors={:?}, user_has_security_token={}",
+        dlm_encryptors,
+        user_has_security_token
+    );
+
+    if !dlm_encryptors.is_empty() && !user_has_security_token {
         let (diag_line, diag_col) =
             find_section_token_pos(&doc.tokens, TokenType::SectionDLM)
                 .unwrap_or((1, 1));
+
+        tracing::debug!(
+            "Emitting SEC001 at {}:{} for encryptors: {:?}",
+            diag_line, diag_col, dlm_encryptors
+        );
 
         for algorithm in &dlm_encryptors {
             all_errors.push(DixError::Semantic(SemanticError {
                 error_id:     "SEC001".to_string(),
                 error_type:   SemanticErrorType::InvalidConfiguration,
                 message:      format!(
-                    "@SECURITY section is required when DEncryptor.{} is present in @DLM.",
+                    "@SECURITY section required: DEncryptor.{} is present in @DLM but no @SECURITY block was found.",
                     algorithm
                 ),
                 line:         diag_line as i32,
                 column:       diag_col  as i32,
                 section_name: Some("DLM".to_string()),
                 suggestion:   Some(
-                    "Add an @SECURITY section: \
-                     encryption -> { mode = \"keyfile\", algorithm = \"...\" }"
+                    "Add an @SECURITY section, e.g.: \
+                     @SECURITY( encryption -> { mode = \"keyfile\", algorithm = \"...\", key_length = 32 } )"
                         .to_string(),
                 ),
                 severity:     ErrorSeverity::Error,
@@ -291,16 +283,9 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
                 metadata:     HashMap::new(),
             }));
         }
-
-        tracing::debug!(
-            "Emitted {} SEC001 diagnostics at {}:{}",
-            dlm_encryptors.len(),
-            diag_line,
-            diag_col
-        );
     }
 
-    // DAuditor: informational only (no error)
+    // DAuditor: informational only — no error emitted.
     if let Some(dlm) = &ast.dlm {
         for m in &dlm.modules {
             if matches!(m.module_type, DLMModuleType::DAuditor) {
@@ -312,7 +297,7 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         }
     }
 
-    // ── Convert semantic_result errors/warnings ───────────────────────────────
+    // ── Convert semantic_result errors / warnings ─────────────────────────────
     for err in &semantic_result.errors {
         if is_security_missing_str(&err.message) {
             continue;
@@ -375,8 +360,8 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
 
     // ── Store state ───────────────────────────────────────────────────────────
     let enhanced_ast = enhancement_result.enhanced_ast.clone();
-    doc.ast              = Some(enhanced_ast);
-    doc.semantic_result  = Some(semantic_result);
+    doc.ast               = Some(enhanced_ast);
+    doc.semantic_result   = Some(semantic_result);
     doc.enhancement_result = Some(enhancement_result);
 
     tracing::debug!("Pipeline complete: {} total diagnostics", all_errors.len());
@@ -391,13 +376,14 @@ fn is_security_missing_error(e: &DixError) -> bool {
 
 fn is_security_missing_str(msg: &str) -> bool {
     let lower = msg.to_lowercase();
+    // Match any phrasing the core or LSP might use
     (lower.contains("security") && lower.contains("missing"))
-        || lower.contains("@security section is required")
+        || (lower.contains("security") && lower.contains("required"))
         || lower.contains("encryptor requires")
         || lower.contains("sec001")
 }
 
-fn collect_encryptors(ast: &dixscript::Compiler::AST::DixScript) -> Vec<String> {
+fn collect_encryptors(ast: &DixScript) -> Vec<String> {
     let dlm = match &ast.dlm {
         Some(d) => d,
         None    => return vec![],
@@ -422,13 +408,13 @@ fn find_section_token_pos(
     let is_match = |tt: &TokenType| -> bool {
         matches!(
             (&target_type, tt),
-            (TokenType::SectionDLM,        TokenType::SectionDLM)
-            | (TokenType::SectionConfig,   TokenType::SectionConfig)
-            | (TokenType::SectionData,     TokenType::SectionData)
-            | (TokenType::SectionEnums,    TokenType::SectionEnums)
-            | (TokenType::SectionImports,  TokenType::SectionImports)
+            (TokenType::SectionDLM,          TokenType::SectionDLM)
+            | (TokenType::SectionConfig,     TokenType::SectionConfig)
+            | (TokenType::SectionData,       TokenType::SectionData)
+            | (TokenType::SectionEnums,      TokenType::SectionEnums)
+            | (TokenType::SectionImports,    TokenType::SectionImports)
             | (TokenType::SectionQuickFuncs, TokenType::SectionQuickFuncs)
-            | (TokenType::SectionSecurity, TokenType::SectionSecurity)
+            | (TokenType::SectionSecurity,   TokenType::SectionSecurity)
         )
     };
 
@@ -436,4 +422,4 @@ fn find_section_token_pos(
         .iter()
         .find(|t| is_match(&t.token_type))
         .map(|t| (t.line, t.column))
-        }
+                               }

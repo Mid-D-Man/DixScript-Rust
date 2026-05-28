@@ -225,6 +225,27 @@ impl DixLoader {
         result
     }
 
+    // ── NEW: Compile-only path for the LSP "Create Resolved" command ──────────
+    //
+    // Runs the full tokenise → parse → semantic → enhance → value-resolve
+    // pipeline and returns the resolved AST without running any DLM modules.
+    // Imports are resolved using the file's own directory as the base path,
+    // so multi-file projects (like the chemistry DB) resolve correctly.
+
+    pub fn compile_to_resolved_ast(&self, file_path: &str) -> Result<DixScript, String> {
+        self.error_manager.clear_errors();
+        self.error_manager.log_info(&format!("compile_to_resolved_ast: {}", file_path));
+
+        if !Path::new(file_path).exists() {
+            return Err(format!("File not found: {}", file_path));
+        }
+
+        let source_text = fs::read_to_string(file_path)
+            .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
+
+        self.compile_source(&source_text, file_path)
+    }
+
     // ── Shared decryption + deserialization ───────────────────────────────────
 
     fn decrypt_and_deserialize(
@@ -301,7 +322,6 @@ impl DixLoader {
         source_file_path: &str,
     ) -> Result<DixScript, String> {
         // Stage 1: tokenize the full source with minimal initial settings.
-        // Real operational settings come from the @CONFIG section below.
         let initial_settings = OperationalSettings {
             source_file_path: Some(source_file_path.to_string()),
             ..OperationalSettings::default()
@@ -321,7 +341,7 @@ impl DixLoader {
         operational_settings.source_file_path = Some(source_file_path.to_string());
         self.error_manager.update_settings(operational_settings.clone());
 
-        // Stage 4: parse the rest of the token stream (everything except @CONFIG).
+        // Stage 4: parse the rest of the token stream.
         let parser = GeneralParser::new(
             split.rest_tokens,
             &config_result.config_section,
@@ -715,4 +735,4 @@ mod tests {
         let errors = loader.error_manager.get_runtime_errors();
         assert_eq!(errors.len(), 1, "only the most recent load's error should remain");
     }
-}
+    }

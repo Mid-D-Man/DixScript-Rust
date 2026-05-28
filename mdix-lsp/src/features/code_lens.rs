@@ -1,7 +1,4 @@
 // mdix-lsp/src/features/code_lens.rs
-// mdix-lsp/src/features/code_lens.rs
-//! CodeLens provider — the "play button" for DixScript.
-
 use std::panic;
 
 use tower_lsp::lsp_types::{CodeLens, Command, Position, Range};
@@ -10,7 +7,7 @@ use dixscript::Compiler::Core::Tokenizer::TokenType;
 
 use crate::document::Document;
 
-pub const CMD_VALIDATE:         &str = "mdix.validate";
+// CMD_VALIDATE intentionally removed from ALL_COMMANDS and the lens list.
 pub const CMD_TO_JSON:          &str = "mdix.convertToJson";
 pub const CMD_TO_TOML:          &str = "mdix.convertToToml";
 pub const CMD_MINIFY:           &str = "mdix.minify";
@@ -19,7 +16,6 @@ pub const CMD_SHOW_AST:         &str = "mdix.showAst";
 pub const CMD_CREATE_RESOLVED:  &str = "mdix.createResolved";
 
 pub const ALL_COMMANDS: &[&str] = &[
-    CMD_VALIDATE,
     CMD_TO_JSON,
     CMD_TO_TOML,
     CMD_MINIFY,
@@ -52,12 +48,12 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<CodeLens>> {
 
     let file_range = Range::new(Position::new(0, 0), Position::new(0, 0));
 
-    lenses.push(make_lens(file_range, "▶ Validate",   CMD_VALIDATE,        vec![uri_arg.clone()]));
-    lenses.push(make_lens(file_range, "→ JSON",        CMD_TO_JSON,         vec![uri_arg.clone()]));
-    lenses.push(make_lens(file_range, "→ TOML",        CMD_TO_TOML,         vec![uri_arg.clone()]));
-    lenses.push(make_lens(file_range, "⊡ Minify",      CMD_MINIFY,          vec![uri_arg.clone()]));
-    lenses.push(make_lens(file_range, "⊞ Resolve",     CMD_CREATE_RESOLVED, vec![uri_arg.clone()]));
-    lenses.push(make_lens(file_range, "⚙ Compile",     CMD_COMPILE,         vec![uri_arg.clone()]));
+    // Five top-level lenses (Validate removed, Compile replaces it)
+    lenses.push(make_lens(file_range, "→ JSON",    CMD_TO_JSON,         vec![uri_arg.clone()]));
+    lenses.push(make_lens(file_range, "→ TOML",    CMD_TO_TOML,         vec![uri_arg.clone()]));
+    lenses.push(make_lens(file_range, "⊡ Minify",  CMD_MINIFY,          vec![uri_arg.clone()]));
+    lenses.push(make_lens(file_range, "⊞ Resolve", CMD_CREATE_RESOLVED, vec![uri_arg.clone()]));
+    lenses.push(make_lens(file_range, "⚙ Compile", CMD_COMPILE,         vec![uri_arg.clone()]));
 
     for token in &doc.tokens {
         let is_data = matches!(token.token_type, TokenType::SectionData);
@@ -100,4 +96,4 @@ fn make_lens(range: Range, title: &str, command: &str, args: Vec<JsonValue>) -> 
         }),
         data: None,
     }
-    }
+                          }

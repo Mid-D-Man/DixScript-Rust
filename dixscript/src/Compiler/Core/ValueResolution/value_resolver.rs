@@ -2382,68 +2382,117 @@ fn execute_iterative_resolution(
     }
 
     // ==================== VALUE ↔ DIX CONVERSIONS ====================
+// value_resolver.rs — fn try_value_to_dix
+// (Builtins::Core::DixValue, used in Phase 2 data-context build)
 
-    fn try_value_to_dix(value: &Value) -> Option<DixValue> {
-        match value {
-            Value::Integer { value, .. }            => Some(DixValue::from_int(*value)),
-            Value::Long { value, .. }               => Some(DixValue::from_long(*value)),
-            Value::Float { value, .. }              => Some(DixValue::from_float(*value)),
-            Value::Double { value, .. }             => Some(DixValue::from_double(*value)),
-            Value::String { value, .. }             => Some(DixValue::from_string(value.clone())),
-            Value::Boolean { value, .. }            => Some(DixValue::from_bool(*value)),
-            Value::Null { .. }                      => Some(DixValue::null()),
-            Value::HexColor { value, .. }           => Some(DixValue::from_hex(value.clone())),
+fn try_value_to_dix(value: &Value) -> Option<DixValue> {
+    match value {
+        // ── Primitives ────────────────────────────────────────────────────────
+        Value::Integer { value, .. }            => Some(DixValue::from_int(*value)),
+        Value::Long { value, .. }               => Some(DixValue::from_long(*value)),
+        Value::Float { value, .. }              => Some(DixValue::from_float(*value)),
+        Value::Double { value, .. }             => Some(DixValue::from_double(*value)),
+        Value::ScientificNotation { value, .. } => Some(DixValue::from_double(*value)),
+        Value::String { value, .. }             => Some(DixValue::from_string(value.clone())),
+        Value::Boolean { value, .. }            => Some(DixValue::from_bool(*value)),
+        Value::Null { .. }                      => Some(DixValue::null()),
+        Value::HexColor { value, .. }           => Some(DixValue::from_hex(value.clone())),
 
-            Value::PrefixedConstructor { prefix, arguments, .. } => {
-                match prefix.to_lowercase().as_str() {
-                    "b" => {
-                        let data = arguments
-                            .first()
-                            .and_then(|a| {
-                                if let Value::String { value, .. } = a { Some(value.clone()) } else { None }
-                            })
-                            .unwrap_or_default();
-                        DixValue::from_blob(data).ok()
-                    }
-                    "r" => {
-                        let pattern = arguments
-                            .first()
-                            .and_then(|a| {
-                                if let Value::String { value, .. } = a { Some(value.clone()) } else { None }
-                            })
-                            .unwrap_or_else(|| ".*".to_string());
-                        DixValue::from_regex(pattern).ok()
-                    }
-                    "t" => {
-                        let items: Option<Vec<DixValue>> = arguments
-                            .iter()
-                            .take(6)
-                            .map(|a| Self::try_value_to_dix(a))
-                            .collect();
-                        items.map(DixValue::from_tuple)
-                    }
-                    _ => None,
-                }
-            }
-
-            Value::Array { values, .. } | Value::NestedArray { values, .. } => {
-                let items: Option<Vec<DixValue>> =
-                    values.iter().map(|v| Self::try_value_to_dix(v)).collect();
-                items.map(DixValue::from_array)
-            }
-
-            Value::Object { properties, .. } => {
-                let mut map =
-                    std::collections::HashMap::with_capacity(properties.len().max(MIN_CAPACITY));
-                for prop in properties {
-                    map.insert(prop.key.clone(), Self::try_value_to_dix(&prop.value)?);
-                }
-                Some(DixValue::from_object(map))
-            }
-
-            _ => None,
+        // Date/Timestamp: parse string → DateTime<Utc> for Builtins::DixValue.
+        Value::Date { value: d, .. } => {
+            let dt = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                .ok()
+                .and_then(|nd| nd.and_hms_opt(0, 0, 0))
+                .map(|ndt| ndt.and_utc())
+                .or_else(|| d.parse::<chrono::DateTime<chrono::Utc>>().ok())
+                .unwrap_or_else(chrono::Utc::now);
+            Some(DixValue::from_date(dt))
         }
+        Value::Timestamp { value: t, .. } => {
+            let dt = t.parse::<chrono::DateTime<chrono::Utc>>()
+                .unwrap_or_else(|_| chrono::Utc::now());
+            Some(DixValue::from_timestamp(dt))
+        }
+
+        // InterpolatedString: expressions are compile-time; use template text.
+        Value::InterpolatedString { template, .. } => {
+            Some(DixValue::from_string(template.clone()))
+        }
+
+        // EnumValue: Phase 1 should have converted all enums to Integer.
+        // This arm is a safety-net for any that slip through.
+        Value::EnumValue { .. } => Some(DixValue::from_int(0)),
+
+        // ── Collections ───────────────────────────────────────────────────────
+        Value::PrefixedConstructor { prefix, arguments, .. } => {
+            match prefix.to_lowercase().as_str() {
+                "b" => {
+                    let data = arguments
+                        .first()
+                        .and_then(|a| {
+                            if let Value::String { value, .. } = a {
+                                Some(value.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_default();
+                    DixValue::from_blob(data).ok()
+                }
+                "r" => {
+                    let pattern = arguments
+                        .first()
+                        .and_then(|a| {
+                            if let Value::String { value, .. } = a {
+                                Some(value.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_else(|| ".*".to_string());
+                    DixValue::from_regex(pattern).ok()
+                }
+                // "t" recurses, so nested tuples like t:(t:(1,2), t:(3,4)) work correctly.
+                "t" => {
+                    let items: Option<Vec<DixValue>> = arguments
+                        .iter()
+                        .take(6)
+                        .map(|a| Self::try_value_to_dix(a))
+                        .collect();
+                    items.map(DixValue::from_tuple)
+                }
+                _ => None,
+            }
+        }
+
+        Value::Array { values, .. } => {
+            let items: Option<Vec<DixValue>> =
+                values.iter().map(|v| Self::try_value_to_dix(v)).collect();
+            items.map(DixValue::from_array)
+        }
+
+        // NestedArray ([[1,2],[3,4]]) — same treatment as Array.
+        Value::NestedArray { values, .. } => {
+            let items: Option<Vec<DixValue>> =
+                values.iter().map(|v| Self::try_value_to_dix(v)).collect();
+            items.map(DixValue::from_array)
+        }
+
+        Value::Object { properties, .. } => {
+            let mut map = std::collections::HashMap::with_capacity(
+                properties.len().max(MIN_CAPACITY),
+            );
+            for prop in properties {
+                map.insert(prop.key.clone(), Self::try_value_to_dix(&prop.value)?);
+            }
+            Some(DixValue::from_object(map.into_iter().collect()))
+        }
+
+        // Everything else (Identifier, Expression, Lambda, Range, errors) is
+        // not representable as a static data-context value.
+        _ => None,
     }
+}
 
     pub fn convert_dix_value_to_value(dix: &DixValue, position: Position) -> Value {
         match dix.get_type() {

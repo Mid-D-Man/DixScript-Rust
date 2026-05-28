@@ -26,21 +26,6 @@ impl CommandResult {
     }
 }
 
-// ── Validate ──────────────────────────────────────────────────────────────────
-
-pub fn run_validate(error_count: usize, warning_count: usize) -> CommandResult {
-    if error_count == 0 && warning_count == 0 {
-        CommandResult::ok("✅ DixScript: file is valid — no errors or warnings.")
-    } else if error_count == 0 {
-        CommandResult::ok(format!("⚠️ DixScript: {} warning(s), no errors.", warning_count))
-    } else {
-        CommandResult::err(format!(
-            "❌ DixScript: {} error(s), {} warning(s). Check the Problems panel.",
-            error_count, warning_count
-        ))
-    }
-}
-
 // ── Convert → JSON ────────────────────────────────────────────────────────────
 
 pub fn run_convert_to_json(ast: &DixScript, source_path: Option<&Path>) -> CommandResult {
@@ -115,20 +100,30 @@ pub fn run_minify(ast: &DixScript, source_path: Option<&Path>) -> CommandResult 
 
 // ── Create Resolved ───────────────────────────────────────────────────────────
 //
-// Writes a `.resolved.mdix` file — the AST after full value-resolution
-// (QuickFunc calls replaced with their results), unformatted, as-is.
-// The caller is responsible for passing the post-resolution AST.
+// Outputs ONLY the @DATA section of the fully-resolved AST.
+// The caller is responsible for passing a post-resolution AST (obtained via
+// DixLoader::compile_to_resolved_ast so imports are properly loaded).
 
 pub fn run_create_resolved(ast: &DixScript, source_path: Option<&Path>) -> CommandResult {
-    // DixScript's Display impl re-serialises the AST back to .mdix syntax
-    let output = format!("{}", ast);
+    // Only output the resolved @DATA section — QuickFuncs / imports are
+    // compile-time artefacts and are not useful in the resolved output.
+    let data_section = match &ast.data {
+        Some(d) => d,
+        None    => return CommandResult::err("⊞ No @DATA section found in the resolved AST."),
+    };
+
+    let output = format!("{}", data_section);
 
     if let Some(path) = source_path {
         let stem = path.file_stem().unwrap_or_default().to_string_lossy();
         let out  = path.with_file_name(format!("{}.resolved.mdix", stem));
         match std::fs::write(&out, &output) {
             Ok(()) => CommandResult::ok_file(
-                format!("⊞ Resolved file written to {} ({} bytes)", out.display(), output.len()),
+                format!(
+                    "⊞ Resolved @DATA written to {} ({} bytes)",
+                    out.display(),
+                    output.len()
+                ),
                 out,
             ),
             Err(e) => CommandResult::err(format!("Could not write {}: {}", out.display(), e)),
@@ -259,4 +254,4 @@ pub fn run_show_ast(ast: &DixScript) -> CommandResult {
         "AST: sections=[{}]  QuickFuncs={}  Enums={}  DataEntries={}{}",
         sections.join(", "), func_count, enum_count, data_entries, dlm_summary,
     ))
-                    }
+                }

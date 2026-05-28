@@ -275,7 +275,11 @@ impl DixData {
         }
     }
 
-    fn flatten_dix_value(path: &str, value: &DixValue, result: &mut HashMap<String, DixValue>) {
+    fn flatten_dix_value(
+        path: &str,
+        value: &DixValue,
+        result: &mut HashMap<String, DixValue>,
+    ) {
         result.insert(path.to_string(), value.clone());
         match value {
             DixValue::Object(obj) => {
@@ -295,7 +299,11 @@ impl DixData {
     }
 
     fn build_path(prefix: &str, segment: &str) -> String {
-        if prefix.is_empty() { segment.to_string() } else { format!("{}.{}", prefix, segment) }
+        if prefix.is_empty() {
+            segment.to_string()
+        } else {
+            format!("{}.{}", prefix, segment)
+        }
     }
 
     // ── Conversion helpers ────────────────────────────────────────────────────
@@ -323,9 +331,11 @@ impl DixData {
             Value::Null { .. }                => Some(DixValue::Null),
             Value::Boolean { value: b, .. }   => Some(DixValue::Bool(*b)),
             Value::Integer { value: i, .. }   => Some(DixValue::Int(*i)),
-            Value::Long { value: l, .. }      => Some(DixValue::Long(*l)),  // ← NEW
+            Value::Long { value: l, .. }      => Some(DixValue::Long(*l)),
             Value::Float { value: f, .. }     => Some(DixValue::Float(*f)),
             Value::Double { value: d, .. }    => Some(DixValue::Double(*d)),
+            // ── FIX: scientific notation literals (e.g. 6.62607015e-34) ───────
+            Value::ScientificNotation { value: d, .. } => Some(DixValue::Double(*d)),
             Value::String { value: s, .. }    => Some(DixValue::String(s.clone())),
             Value::Date { value: d, .. }      => Some(DixValue::Date(d.clone())),
             Value::Timestamp { value: t, .. } => Some(DixValue::Timestamp(t.clone())),
@@ -408,7 +418,6 @@ impl TryFrom<DixValue> for i32 {
     fn try_from(value: DixValue) -> Result<Self, Self::Error> {
         match value {
             DixValue::Int(i)             => Ok(i),
-            // Long truncates — use get::<i64>() if you need the full range
             DixValue::Long(l)            => Ok(l as i32),
             DixValue::Float(f)           => Ok(f as i32),
             DixValue::Double(d)          => Ok(d as i32),
@@ -502,16 +511,24 @@ mod tests {
         let mut flattened = HashMap::new();
         flattened.insert("big_num".to_string(), DixValue::Long(9_000_000_000_i64));
         let data = dix_data_from_flat(flattened);
-
         let v: i64 = data.get("big_num").unwrap();
         assert_eq!(v, 9_000_000_000_i64);
+    }
+
+    #[test]
+    fn test_scientific_notation_stored_as_double() {
+        // 6.62607015e-34 parsed as Value::ScientificNotation must reach DixValue::Double
+        let mut flattened = HashMap::new();
+        flattened.insert("planck".to_string(), DixValue::Double(6.62607015e-34_f64));
+        let data = dix_data_from_flat(flattened);
+        let v: f64 = data.get("planck").unwrap();
+        assert!((v - 6.62607015e-34_f64).abs() < 1e-50);
     }
 
     #[test]
     fn test_long_try_from_i32_truncates() {
         let v = DixValue::Long(i64::MAX);
         let as_i32: i32 = i32::try_from(v).unwrap();
-        // truncation expected, just no panic
         let _ = as_i32;
     }
 
@@ -532,7 +549,9 @@ mod tests {
     #[test]
     fn test_dix_data_creation() {
         let ast  = DixScript::new();
-        let data = DixData::from_ast(ast, "1.0.0".to_string(), Utc::now(), false, false, vec![]);
+        let data = DixData::from_ast(
+            ast, "1.0.0".to_string(), Utc::now(), false, false, vec![],
+        );
         assert_eq!(data.version, "1.0.0");
     }
 
@@ -546,4 +565,4 @@ mod tests {
         children.sort();
         assert_eq!(children, vec!["host", "port"]);
     }
-}
+    }

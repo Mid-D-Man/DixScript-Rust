@@ -1,18 +1,15 @@
 // mdix-lsp/src/features/hover.rs
 //! Hover provider.
-//!
-//! Imported-symbol hover (2025):
-//!   When the cursor is on a member of an imported namespace (e.g. `calc` in
-//!   `Utils.calc(x)`) the function signature from the stored QuickFunctionInfo
-//!   is displayed.  3-part qualified enum fields (ns.EnumName.FIELD) also show
-//!   the integer value and provenance.
 
+use std::collections::HashMap;
 use std::panic;
 
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
-use dixscript::Compiler::AST::{DataType, QuickFuncStatement};
+use dixscript::Compiler::AST::{
+    DataType, Expression, QuickFuncStatement, TypeInferenceVisitor,
+};
 use dixscript::Builtins::Core::DixType;
 use dixscript::Builtins::Resolver::{instance_method_registry, static_object_registry};
 
@@ -165,6 +162,7 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
         TokenType::ComparisonOp(op)       => hover_operator(op, "comparison"),
         TokenType::LogicalOp(op)          => hover_operator(op, "logical"),
         TokenType::BitwiseOp(op)          => hover_operator(op, "bitwise"),
+        TokenType::MultiCharSymbol(_)     => None,
         TokenType::DoubleColon            => Some("**`::`** — group array operator\n\n```mdix\ntags:: \"alpha\", \"beta\", \"v1\"\n```".to_string()),
         TokenType::Arrow                  => Some("**`=>`** — association / scope operator".to_string()),
         TokenType::SwitchCase             => Some("**`->`** — switch-case / association operator\n\n```mdix\nencryption -> { mode = \"password\" }\n```".to_string()),
@@ -197,10 +195,7 @@ fn hover_after_dot(
 
     let receiver = doc.tokens.get(token_index - 2)?;
 
-    // ── NEW: Imported namespace member (highest priority) ─────────────────────
-    // Check this before static-object registry so that user namespaces whose
-    // alias happens to share a name with a built-in (unlikely but possible)
-    // don't get shadowed.
+    // ── Imported namespace member (highest priority) ───────────────────────────
     if let TokenType::Identifier(recv_name) = &receiver.token_type {
         if let Some(content) = hover_imported_namespace_member(doc, recv_name, method_name) {
             return Some(content);
@@ -238,6 +233,7 @@ fn hover_after_dot(
     }
 
     // ── Instance method ────────────────────────────────────────────────────────
+    // infer_receiver_dix_type now correctly handles QF locals and typed collections
     let receiver_type = infer_receiver_dix_type(doc, receiver, section)?;
 
     instance_method_registry::initialize();
@@ -254,20 +250,65 @@ fn hover_after_dot(
             .join(", ")
     };
 
+    // For element-returning methods on typed collections, try to get element type
+    let ret_type_str = {
+        // Attempt to look up the full DataType of the receiver for richer return info
+        let recv_full_dt = if let TokenType::Identifier(recv_name) = &receiver.token_type {
+            infer_identifier_full_data_type(doc, recv_name, section)
+        } else {
+            None
+        };
+
+        let method_ret = method.return_type();
+
+        // If the method returns Any/Array/Tuple but we know the typed collection,
+        // show the element type as a hint
+        match recv_full_dt {
+            Some(DataType::TypedArray(elem))
+                if matches!(method_ret, DixType::Any)
+                    && ARRAY_ELEMENT_METHODS.contains(&method_name) =>
+            {
+                format!("{} *(element type)*", elem)
+            }
+            Some(DataType::TypedTuple(slots))
+                if matches!(method_ret, DixType::Any)
+                    && TUPLE_ELEMENT_METHODS.contains(&method_name) =>
+            {
+                let types: Vec<String> = slots.iter()
+                    .filter_map(|&s| s)
+                    .map(|e| format!("{}", e))
+                    .collect();
+                if types.is_empty() {
+                    method_ret.get_type_name().to_string()
+                } else {
+                    format!("tuple element ({})", types.join("|"))
+                }
+            }
+            _ => method_ret.get_type_name().to_string(),
+        }
+    };
+
     Some(format!(
-        "**`{method}({params})`** — `{type}` instance method\n\n{desc}\n\n**Returns:** `<{ret}>`",
+        "**`{method}({params})`** — `{type_}` instance method\n\n{desc}\n\n**Returns:** `<{ret}>`",
         method = method_name,
         params = params_str,
-        type   = type_name,
+        type_  = type_name,
         desc   = method.description(),
-        ret    = method.return_type().get_type_name(),
+        ret    = ret_type_str,
     ))
 }
 
-// ── NEW: Imported namespace hover helpers ──────────────────────────────────────
+/// Methods that return the element type of an array.
+const ARRAY_ELEMENT_METHODS: &[&str] = &[
+    "first", "last", "get", "at", "pop", "random",
+];
+/// Methods that return the element type of a tuple.
+const TUPLE_ELEMENT_METHODS: &[&str] = &[
+    "first", "second", "third", "fourth", "fifth", "sixth", "get", "at",
+];
 
-/// Show hover info for `namespace_name.member_name` where `namespace_name` is
-/// a registered imported namespace (function or enum type).
+// ── Imported namespace hover helpers ──────────────────────────────────────────
+
 fn hover_imported_namespace_member(
     doc:            &Document,
     namespace_name: &str,
@@ -276,7 +317,6 @@ fn hover_imported_namespace_member(
     let st = doc.semantic_result.as_ref()?.symbol_table.as_ref()?;
     let ns = st.try_get_namespace(namespace_name)?;
 
-    // ── Imported QuickFunc ────────────────────────────────────────────────────
     if let Some(func_info) = ns.functions.get(member_name) {
         let params: Vec<String> = func_info.signature.parameters.iter().map(|p| {
             let t = p.param_type.map(|dt| format!("<{}>", dt)).unwrap_or_default();
@@ -308,7 +348,6 @@ fn hover_imported_namespace_member(
         ));
     }
 
-    // ── Imported enum type ────────────────────────────────────────────────────
     if let Some(fields) = ns.enums.get(member_name) {
         let mut field_list: Vec<String> = fields.iter()
             .map(|(f, v)| format!("`{} = {}`", f, v))
@@ -333,8 +372,6 @@ fn hover_imported_namespace_member(
     None
 }
 
-/// Show hover info for 3-part `ns.EnumName.FIELD` when the cursor is on FIELD.
-/// Checks that tokens at [index-4..index] match `ns . EnumName . FIELD`.
 fn hover_imported_enum_field_at(
     doc:         &Document,
     field_name:  &str,
@@ -366,7 +403,7 @@ fn hover_imported_enum_field_at(
     let value = fields.get(field_name)?;
 
     Some(format!(
-        "**`{ns}.{enum_}.{field}`** — imported enum field\n\nValue: **`{value}`**\n\nNamespace: `{ns}`  \nFile: `{file}`\n\n```mdix\nmy_var<enum> = {ns}.{enum_}.{field}\n```\n\nAt runtime: `{{ enum_name = \"{enum_}\", field_name = \"{field}\", value = {value} }}`",
+        "**`{ns}.{enum_}.{field}`** — imported enum field\n\nValue: **`{value}`**\n\nNamespace: `{ns}`  \nFile: `{file}`\n\n```mdix\nmy_var<enum> = {ns}.{enum_}.{field}\n```",
         ns     = namespace_name,
         enum_  = enum_name,
         field  = field_name,
@@ -374,6 +411,8 @@ fn hover_imported_enum_field_at(
         file   = ns.file_path,
     ))
 }
+
+// ── Type resolution ───────────────────────────────────────────────────────────
 
 fn infer_receiver_dix_type(doc: &Document, tok: &Token, section: SectionId) -> Option<DixType> {
     match &tok.token_type {
@@ -391,19 +430,101 @@ fn infer_receiver_dix_type(doc: &Document, tok: &Token, section: SectionId) -> O
         TokenType::BlobConstructor(_)                     => Some(DixType::Blob),
         TokenType::RegexConstructor(_)                    => Some(DixType::Regex),
         TokenType::TupleConstructor(_)                    => Some(DixType::Tuple),
+        // Identifiers: use the improved inference that handles QF locals + typed collections
         TokenType::Identifier(name) => infer_identifier_dix_type(doc, name, section),
         _ => None,
     }
 }
 
+/// Infer the base DixType for an identifier.
+///
+/// Priority:
+/// 1. QuickFunc parameters (annotated type)
+/// 2. QuickFunc body local variable declarations (annotated, then inferred from value)
+/// 3. Semantic type_index
+/// 4. Symbol table DATA variables
+///
+/// Handles TypedArray/TypedTuple by mapping to the base DixType (Array/Tuple).
 fn infer_identifier_dix_type(doc: &Document, name: &str, section: SectionId) -> Option<DixType> {
+    if section == SectionId::QuickFuncs {
+        if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
+            for func in &qf.functions {
+                // 1. Check params
+                for param in &func.parameters {
+                    if param.name == name {
+                        return param.data_type.and_then(ast_data_type_to_dix_type);
+                    }
+                }
+                // 2. Check body local vars
+                if let Some((dt_opt, _)) = find_var_decl_in_stmts(&func.body, name) {
+                    if let Some(dt) = dt_opt {
+                        // Declared type — covers TypedArray/TypedTuple correctly
+                        return ast_data_type_to_dix_type(dt);
+                    }
+                    // Unannotated var: infer from its value expression
+                    if let Some(val_expr) = find_var_value_in_stmts(&func.body, name) {
+                        if let Some(st) = doc.semantic_result.as_ref()
+                            .and_then(|sr| sr.symbol_table.as_ref())
+                        {
+                            let param_types: HashMap<String, Option<DataType>> =
+                                func.parameters.iter()
+                                    .map(|p| (p.name.clone(), p.data_type))
+                                    .collect();
+                            let visitor = TypeInferenceVisitor::new(st, Some(param_types));
+                            if let Some(dt) = visitor.infer_type_from_expression(val_expr) {
+                                return ast_data_type_to_dix_type(dt);
+                            }
+                        }
+                    }
+                    // Found a declaration but couldn't determine type
+                    return None;
+                }
+            }
+        }
+    }
+
+    // 3. type_index from semantic result
+    if let Some(type_idx) = doc.semantic_result.as_ref()?.type_index.as_ref() {
+        if let Some(&dt) = type_idx.get(name) {
+            return ast_data_type_to_dix_type(dt);
+        }
+    }
+
+    // 4. Symbol table DATA variable
+    let st  = doc.semantic_result.as_ref()?.symbol_table.as_ref()?;
+    let var = st.try_get_data_variable(name)
+        .or_else(|| st.try_get_data_variable(&format!("DATA.{}", name)))?;
+    ast_data_type_to_dix_type(var.effective_type()?)
+}
+
+/// Same as `infer_identifier_dix_type` but returns the full `DataType` (including
+/// TypedArray/TypedTuple) for use in richer hover display.
+fn infer_identifier_full_data_type(doc: &Document, name: &str, section: SectionId) -> Option<DataType> {
     if section == SectionId::QuickFuncs {
         if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
             for func in &qf.functions {
                 for param in &func.parameters {
                     if param.name == name {
-                        return param.data_type.and_then(ast_data_type_to_dix_type);
+                        return param.data_type;
                     }
+                }
+                if let Some((dt_opt, _)) = find_var_decl_in_stmts(&func.body, name) {
+                    if let Some(dt) = dt_opt {
+                        return Some(dt);
+                    }
+                    if let Some(val_expr) = find_var_value_in_stmts(&func.body, name) {
+                        if let Some(st) = doc.semantic_result.as_ref()
+                            .and_then(|sr| sr.symbol_table.as_ref())
+                        {
+                            let param_types: HashMap<String, Option<DataType>> =
+                                func.parameters.iter()
+                                    .map(|p| (p.name.clone(), p.data_type))
+                                    .collect();
+                            let visitor = TypeInferenceVisitor::new(st, Some(param_types));
+                            return visitor.infer_type_from_expression(val_expr);
+                        }
+                    }
+                    return None;
                 }
             }
         }
@@ -411,35 +532,76 @@ fn infer_identifier_dix_type(doc: &Document, name: &str, section: SectionId) -> 
 
     if let Some(type_idx) = doc.semantic_result.as_ref()?.type_index.as_ref() {
         if let Some(&dt) = type_idx.get(name) {
-            return ast_data_type_to_dix_type(dt);
+            return Some(dt);
         }
     }
 
     let st  = doc.semantic_result.as_ref()?.symbol_table.as_ref()?;
     let var = st.try_get_data_variable(name)
         .or_else(|| st.try_get_data_variable(&format!("DATA.{}", name)))?;
-    ast_data_type_to_dix_type(var.effective_type()?)
+    var.effective_type()
 }
 
+/// Convert AST `DataType` to the builtin registry `DixType`.
+///
+/// **Correctly handles TypedArray and TypedTuple** by mapping them to the
+/// base `DixType::Array` / `DixType::Tuple` for method registry lookups.
 fn ast_data_type_to_dix_type(dt: DataType) -> Option<DixType> {
     match dt {
-        DataType::Int       => Some(DixType::Int),
-        DataType::Long      => Some(DixType::Long),
-        DataType::Float     => Some(DixType::Float),
-        DataType::Double    => Some(DixType::Double),
-        DataType::String    => Some(DixType::String),
-        DataType::Bool      => Some(DixType::Bool),
-        DataType::Array     => Some(DixType::Array),
-        DataType::Tuple     => Some(DixType::Tuple),
-        DataType::Object    => Some(DixType::Object),
-        DataType::Hex       => Some(DixType::Hex),
-        DataType::Blob      => Some(DixType::Blob),
-        DataType::Regex     => Some(DixType::Regex),
-        DataType::Date      => Some(DixType::Date),
-        DataType::Timestamp => Some(DixType::Timestamp),
-        DataType::Enum      => Some(DixType::Enum),
-        _                   => None,
+        DataType::Int                               => Some(DixType::Int),
+        DataType::Long                              => Some(DixType::Long),
+        DataType::Float                             => Some(DixType::Float),
+        DataType::Double                            => Some(DixType::Double),
+        DataType::String                            => Some(DixType::String),
+        DataType::Bool                              => Some(DixType::Bool),
+        // TypedArray maps to Array so the method registry can find all array methods
+        DataType::Array | DataType::TypedArray(_)   => Some(DixType::Array),
+        // TypedTuple maps to Tuple similarly
+        DataType::Tuple | DataType::TypedTuple(_)   => Some(DixType::Tuple),
+        DataType::Object                            => Some(DixType::Object),
+        DataType::Hex                               => Some(DixType::Hex),
+        DataType::Blob                              => Some(DixType::Blob),
+        DataType::Regex                             => Some(DixType::Regex),
+        DataType::Date                              => Some(DixType::Date),
+        DataType::Timestamp                         => Some(DixType::Timestamp),
+        DataType::Enum                              => Some(DixType::Enum),
+        _                                           => None,
     }
+}
+
+// ── New helper: find the value expression of a declared variable ──────────────
+
+/// Walk a QuickFunc body recursively and return the initialiser `Expression`
+/// for the first `VariableDeclaration` whose name matches `name`.
+fn find_var_value_in_stmts<'a>(
+    stmts: &'a [QuickFuncStatement],
+    name:  &str,
+) -> Option<&'a Expression> {
+    for stmt in stmts {
+        match stmt {
+            QuickFuncStatement::VariableDeclaration { variable_name, value, .. }
+                if variable_name == name =>
+            {
+                return Some(value);
+            }
+            QuickFuncStatement::If { then_branch, else_branch, .. } => {
+                if let Some(r) = find_var_value_in_stmts(then_branch, name) { return Some(r); }
+                if let Some(eb) = else_branch {
+                    if let Some(r) = find_var_value_in_stmts(eb, name) { return Some(r); }
+                }
+            }
+            QuickFuncStatement::Switch { cases, default_case, .. } => {
+                for case in cases {
+                    if let Some(r) = find_var_value_in_stmts(&case.statements, name) { return Some(r); }
+                }
+                if let Some(dc) = default_case {
+                    if let Some(r) = find_var_value_in_stmts(&dc.statements, name) { return Some(r); }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 // ── Section hover helper ───────────────────────────────────────────────────────
@@ -563,8 +725,8 @@ fn hover_data_type(dt: &str) -> Option<String> {
         "double"    => "**`<double>`** — 64-bit double-precision float (IEEE 754 f64)\n\nDefault for decimal literals without `f`. ~15–17 digits.\n\n```mdix\nprecision<double> = 3.14159265358979\n```",
         "string"    => "**`<string>`** — UTF-8 text\n\n```mdix\napp_name<string> = \"DixScript\"\n```",
         "bool"      => "**`<bool>`** — boolean\n\n```mdix\nenabled<bool> = true\n```",
-        "array"     => "**`<array>`** — ordered collection\n\n```mdix\ntags:: \"alpha\", \"beta\"\n```\n\nMethods: `.length()`, `.contains(v)`, `.get(i)`, `.push(v)`, `.pop()`, `.join(sep)`, `.sort()`, `.first()`, `.last()`, `.sum()`, `.average()` …",
-        "tuple"     => "**`<tuple>`** — mixed-type collection (max 6 elements)\n\n```mdix\ncoord = t:(128.5, 0.0, -64.3)\n```\n\nMethods: `.first()`, `.second()` … `.sixth()`, `.get(i)`, `.length()`, `.toArray()`",
+        "array"     => "**`<array>`** — ordered collection\n\n```mdix\ntags:: \"alpha\", \"beta\"\n```\n\nMethods: `.length()`, `.contains(v)`, `.get(i)`, `.push(v)`, `.pop()`, `.join(sep)`, `.sort()`, `.first()`, `.last()`, `.sum()`, `.average()` …\n\nUse `<array<int>>` for a typed array.",
+        "tuple"     => "**`<tuple>`** — mixed-type collection (max 6 elements)\n\n```mdix\ncoord = t:(128.5, 0.0, -64.3)\n```\n\nMethods: `.first()`, `.second()` … `.sixth()`, `.get(i)`, `.length()`, `.toArray()`\n\nUse `<tuple<int,bool>>` for a typed tuple.",
         "object"    => "**`<object>`** — key-value map `{ key = value }`",
         "hex"       => "**`<hex>`** — hex color or integer\n\n```mdix\ncolor<hex> = #FF5733\nmask<hex>  = 0xFF00FF\n```",
         "blob"      => "**`<blob>`** — base64-encoded binary\n\n```mdix\navatar<blob> = b:(\"SGVsbG8gV29ybGQ=\")\n```",
@@ -625,16 +787,84 @@ fn hover_enum_access(doc: &Document, enum_name: &str, field: &str) -> Option<Str
 
 // ── QuickFunc local variable hover ────────────────────────────────────────────
 
+/// Improved hover for QF local variables — shows the declared OR inferred type,
+/// including full TypedArray/TypedTuple annotations.
 fn hover_qf_local_var(doc: &Document, name: &str) -> Option<String> {
     let qf = doc.ast.as_ref()?.quick_functions.as_ref()?;
+    let st = doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref());
 
     for func in &qf.functions {
-        if let Some((dt, is_mutable)) = find_var_decl_in_stmts(&func.body, name) {
-            let type_str = dt.map(|t| format!("{}", t)).unwrap_or_else(|| "?".to_string());
-            let mut_str  = if is_mutable { "mut " } else { "" };
+        if let Some((dt_opt, is_mutable)) = find_var_decl_in_stmts(&func.body, name) {
+            let (type_str, note) = match dt_opt {
+                Some(dt) => {
+                    // Declared annotation — format!("{}", dt) handles TypedArray/TypedTuple
+                    (format!("{}", dt), "*(declared)*")
+                }
+                None => {
+                    // No annotation: try to infer from the initialiser expression
+                    let inferred = st.and_then(|st| {
+                        let param_types: HashMap<String, Option<DataType>> =
+                            func.parameters.iter()
+                                .map(|p| (p.name.clone(), p.data_type))
+                                .collect();
+                        find_var_value_in_stmts(&func.body, name).and_then(|val| {
+                            TypeInferenceVisitor::new(st, Some(param_types))
+                                .infer_type_from_expression(val)
+                                .map(|dt| format!("{}", dt))
+                        })
+                    });
+                    match inferred {
+                        Some(s) => (s, "*(inferred)*"),
+                        None    => ("any".to_string(), "*(unknown)*"),
+                    }
+                }
+            };
+
+            let mut_str = if is_mutable { "mut " } else { "" };
+
+            // Build a hint about available methods
+            let method_hint = {
+                let dix = ast_data_type_to_dix_type(
+                    dt_opt.unwrap_or_else(|| {
+                        // try to parse from type_str for the method hint
+                        match type_str.as_str() {
+                            "string" => DataType::String,
+                            "int"    => DataType::Int,
+                            "long"   => DataType::Long,
+                            "float"  => DataType::Float,
+                            "double" => DataType::Double,
+                            "bool"   => DataType::Bool,
+                            "array"  => DataType::Array,
+                            "tuple"  => DataType::Tuple,
+                            "object" => DataType::Object,
+                            _        => DataType::Any,
+                        }
+                    })
+                );
+                if let Some(dt) = dix {
+                    instance_method_registry::initialize();
+                    let methods = instance_method_registry::get_instance_methods(dt);
+                    if !methods.is_empty() {
+                        let shown: Vec<&str> = methods.iter().take(5)
+                            .map(|s| s.as_str()).collect();
+                        format!("\n\nType methods: {} …  *(type `.` to see all)*",
+                            shown.iter().map(|m| format!("`{}`", m)).collect::<Vec<_>>().join(", "))
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                }
+            };
+
             return Some(format!(
-                "**`{}`** — local variable in `~{}`\n\nDeclared as: `let {}{}<{}>`\n\nType: `<{}>` *(from declaration)*",
-                name, func.name, mut_str, name, type_str, type_str
+                "**`{name}`** — local variable in `~{fn_name}`\n\nDeclared as: `let {mut_}{name}<{ty}>`\n\nType: `<{ty}>` {note}{methods}",
+                name    = name,
+                fn_name = func.name,
+                mut_    = mut_str,
+                ty      = type_str,
+                note    = note,
+                methods = method_hint,
             ));
         }
     }
@@ -743,9 +973,23 @@ fn hover_identifier(doc: &Document, name: &str, section: SectionId, token_index:
                     let default_note = if param.default_value.is_some() {
                         "\n\n*(has a default value)*"
                     } else { "" };
+
+                    // Show available methods for the param type
+                    let method_hint = param.data_type
+                        .and_then(ast_data_type_to_dix_type)
+                        .map(|dix| {
+                            instance_method_registry::initialize();
+                            let methods = instance_method_registry::get_instance_methods(dix);
+                            if methods.is_empty() { return String::new(); }
+                            let shown: Vec<&str> = methods.iter().take(5).map(|s| s.as_str()).collect();
+                            format!("\n\nType methods: {} … *(type `.` to see all)*",
+                                shown.iter().map(|m| format!("`{}`", m)).collect::<Vec<_>>().join(", "))
+                        })
+                        .unwrap_or_default();
+
                     return Some(format!(
-                        "**`{}`** — parameter of `~{}`\n\nType: `<{}>`{}",
-                        name, func.name, type_str, default_note
+                        "**`{}`** — parameter of `~{}`\n\nType: `<{}>`{}{}",
+                        name, func.name, type_str, default_note, method_hint
                     ));
                 }
             }
@@ -867,9 +1111,23 @@ fn format_data_var_hover(
         .map(|t| format!("{}", t))
         .unwrap_or_else(|| "unknown".to_string());
     let inferred = if var.is_inferred { " *(inferred)*" } else { "" };
+
+    // Show available methods hint
+    let method_hint = var.effective_type()
+        .and_then(ast_data_type_to_dix_type)
+        .map(|dix| {
+            instance_method_registry::initialize();
+            let methods = instance_method_registry::get_instance_methods(dix);
+            if methods.is_empty() { return String::new(); }
+            let shown: Vec<&str> = methods.iter().take(5).map(|s| s.as_str()).collect();
+            format!("\n\nType methods: {} … *(type `.` to see all)*",
+                shown.iter().map(|m| format!("`{}`", m)).collect::<Vec<_>>().join(", "))
+        })
+        .unwrap_or_default();
+
     format!(
-        "**`{}`** — DATA variable\n\nType: `<{}>`{}\n\nRuntime access:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```",
-        name, type_str, inferred, type_str, name
+        "**`{}`** — DATA variable\n\nType: `<{}>`{}\n\nRuntime access:\n```rust\nlet val: {} = data.get(\"{}\")?;\n```{}",
+        name, type_str, inferred, type_str, name, method_hint
     )
 }
 

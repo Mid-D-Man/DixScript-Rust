@@ -7,7 +7,7 @@
     debug_mode -> "verbose",
     error_handling -> "halt"
 )
-//note data is a keyword so we have to avoid using it in quick functions and stuff as a param if possibel,
+
 @ENUMS(
     Status {
         Active = 1,
@@ -31,308 +31,257 @@
     // ============================================================
     // BASIC RETURN TYPES AND PARAMETERS
     // ============================================================
-    
-    // No parameters
+
     ~getConstant<int> => global() {
         return 42;
     }
-    
-    // Single parameter
+
     ~doubletest<int> => global(x<int>) {
         return x * 2;
     }
-    
-    // Multiple parameters with types
+
     ~add<int> => global(a<int>, b<int>) {
         return a + b;
     }
-    
-    // Mixed parameter types
+
     ~formatData<string> => global(id<int>, name<string>, active<bool>) {
-       let result = "formatted";
+        let result = "formatted";
         return result;
     }
-    
-    // Default parameter values
+
     ~greet<string> => global(name<string> = "Guest", greeting<string> = "Hello") {
         return greeting;
     }
-    
-    // Array parameter
+
     ~processArray<int> => global(items<array>) {
-     let   count = 5;
+        let count = 5;
         return count;
     }
-    
-    // Object parameter
+
     ~processObject<string> => global(data<object>) {
-     let   status = "processed";
+        let status = "processed";
         return status;
     }
-    
-    // Float return type
+
     ~calculateFloat<float> => global(x<float>, y<float>) {
         return x + y;
     }
-    
-    // Boolean return type
+
     ~isPositive<bool> => global(num<int>) {
         return num > 0;
     }
-    //void is no longer a valid return type
+
     // ============================================================
     // SCOPE DECLARATIONS
     // ============================================================
-    
-    // Global scope
+
     ~globalFunction<int> => global() {
         return 100;
     }
-    
-    // Single scope
+
     ~userOperation<int> => users(id<int>) {
         return id * 2;
     }
-    
-    // Multiple scopes
+
     ~sharedCalculation<float> => orders, invoices(amount<float>) {
         return amount * 1.1;
     }
-    
-    // Qualified scope path sheet ,yeah we gonna have to accept it
+
     ~deepScopeFunction<int> => data.users.profiles(value<int>) {
         return value + 10;
     }
-    
+
     // ============================================================
     // ARITHMETIC OPERATORS
     // ============================================================
-    
-    // Addition
+
     ~testAdd<int> => global(a<int>, b<int>) {
         return a + b;
     }
-    
-    // Subtraction
+
     ~testSubtract<int> => global(a<int>, b<int>) {
         return a - b;
     }
-    
-    // Multiplication
+
     ~testMultiply<int> => global(a<int>, b<int>) {
         return a * b;
     }
-    
-    // Division
+
     ~testDivide<float> => global(a<float>, b<float>) {
         return a / b;
     }
-    
-    // Modulo
+
     ~testModulo<int> => global(a<int>, b<int>) {
         return a % b;
     }
-    
-    // Exponentiation
+
     ~testPower<int> => global(base<int>, exp<int>) {
         return base ^ exp;
     }
-    
-    // Complex arithmetic with precedence
+
     ~testPrecedence<int> => global(a<int>, b<int>, c<int>) {
         return a + b * c - (a + b) / 2;
     }
-    
-    // Chained arithmetic
+
     ~testChained<int> => global(x<int>) {
-     let   result = x + 5 * 2 - 3 / 1 + 10;
+        let result = x + 5 * 2 - 3 / 1 + 10;
         return result;
     }
-    
+
     // ============================================================
     // COMPARISON OPERATORS
     // ============================================================
-    
-    // Greater than
+
     ~testGreater<bool> => global(a<int>, b<int>) {
         return a > b;
     }
-    
-    // Less than
+
     ~testLess<bool> => global(a<int>, b<int>) {
         return a < b;
     }
-    
-    // Greater or equal
+
     ~testGreaterEqual<bool> => global(a<int>, b<int>) {
         return a >= b;
     }
-    
-    // Less or equal
+
     ~testLessEqual<bool> => global(a<int>, b<int>) {
         return a <= b;
     }
-    
-    // Equality
+
     ~testEqual<bool> => global(a<int>, b<int>) {
         return a == b;
     }
-    
-    // Inequality
+
     ~testNotEqual<bool> => global(a<int>, b<int>) {
         return a != b;
     }
-    
-    // Complex comparison
+
     ~testComplexComparison<bool> => global(x<int>, y<int>, z<int>) {
         return x < y && y < z;
     }
-    
+
     // ============================================================
     // LOGICAL OPERATORS
     // ============================================================
-    
-    // Logical AND (&&)
+
     ~testAnd<bool> => global(a<bool>, b<bool>) {
         return a && b;
     }
-    
-    // Logical OR (||)
+
     ~testOr<bool> => global(a<bool>, b<bool>) {
         return a || b;
     }
-    
-    // Logical AND (word form)
+
     ~testAndWord<bool> => global(a<bool>, b<bool>) {
         return a and b;
     }
-    
-    // Logical OR (word form)
+
     ~testOrWord<bool> => global(a<bool>, b<bool>) {
         return a or b;
     }
-    
-    // Logical NOT (!)
+
     ~testNot<bool> => global(flag<bool>) {
         return !flag;
     }
-    
-    // Logical NOT (word form)
+
     ~testNotWord<bool> => global(flag<bool>) {
         return not flag;
     }
-    
-    // Complex logical expression
+
     ~testComplexLogic<bool> => global(a<bool>, b<bool>, c<bool>) {
         return (a && b) || (!c && (a || b));
     }
-    
-    // Short-circuit evaluation
+
     ~testShortCircuit<bool> => global(x<int>, y<int>) {
         return x > 0 && y < 100 || x == 0;
     }
-    
+
     // ============================================================
     // UNARY OPERATORS
     // ============================================================
-    
-    // Unary minus
+
     ~testUnaryMinus<int> => global(x<int>) {
         return -x;
     }
-    
-    // Unary plus
+
     ~testUnaryPlus<int> => global(x<int>) {
         return +x;
     }
-    
-    // Double unary
+
     ~testDoubleUnary<int> => global(x<int>) {
         return --x;
     }
-    
-    // Unary with expression
+
     ~testUnaryExpr<int> => global(a<int>, b<int>) {
         return -(a + b);
     }
-    
-    // NOT with comparison
+
     ~testNotComparison<bool> => global(x<int>) {
         return !(x > 10);
     }
-    
+
     // ============================================================
-    // SINGLE-LINE IF STATEMENTS (with "then" keyword)
+    // SINGLE-LINE IF STATEMENTS
     // ============================================================
-    
-    // Single-line if with return
+
     ~singleLineIfReturn<int> => global(x<int>) {
         if: x > 0 then return 1;
         return 0;
     }
-    
-    // Single-line if with assignment
+
     ~singleLineIfAssign<int> => global(x<int>) {
-        result = 0;
+        let mut result = 0;
         if: x > 10 then result = 100;
         return result;
     }
-    
-    // Single-line if-else with return
+
     ~singleLineIfElseReturn<int> => global(x<int>) {
         if: x > 0 then return 1;
         else return -1;
     }
-    
-    // Single-line if-else with assignment
+
     ~singleLineIfElseAssign<int> => global(x<int>) {
-        result = 0;
+        let mut result = 0;
         if: x > 0 then result = 10;
         else result = -10;
         return result;
     }
-    
-    // Multiple single-line if statements
+
     ~multipleSingleLineIf<int> => global(score<int>) {
-        bonus = 0;
+        let mut bonus = 0;
         if: score > 90 then bonus = 50;
         if: score > 80 then bonus = 30;
         if: score > 70 then bonus = 10;
         return bonus;
     }
-    
-    // Single-line if with complex condition
+
     ~singleLineIfComplex<bool> => global(a<int>, b<int>) {
         if: a > 0 && b > 0 then return true;
         return false;
     }
-    
-    // Single-line if with arithmetic assignment
+
     ~singleLineIfArithmetic<int> => global(x<int>) {
-        total = 0;
+        let mut total = 0;
         if: x > 5 then total += 100;
         return total;
     }
-    
-    // Single-line if with log
+
     ~singleLineIfLog<int> => global(x<int>) {
         if: x > 0 then log: "Positive value";
         return x;
     }
-    
+
     // ============================================================
     // MULTI-LINE IF STATEMENTS
     // ============================================================
-    
-    // Simple if with braces
+
     ~multiLineIf<int> => global(x<int>) {
         if: x > 0 {
             return 1;
         }
         return 0;
     }
-    
-    // If-else with braces
+
     ~multiLineIfElse<int> => global(x<int>) {
         if: x > 0 {
             return 1;
@@ -340,8 +289,7 @@
             return -1;
         }
     }
-    
-    // If-elif-else chain
+
     ~ifElifElse<string> => global(score<int>) {
         if: score >= 90 {
             return "A";
@@ -355,8 +303,7 @@
             return "F";
         }
     }
-    
-    // Multiple elif branches
+
     ~multipleElif<int> => global(value<int>) {
         if: value == 1 {
             return 10;
@@ -372,22 +319,20 @@
             return 0;
         }
     }
-    
-    // If with multiple statements
+
     ~ifMultipleStatements<int> => global(x<int>) {
         if: x > 0 {
-            temp = x * 2;
-            result = temp + 10;
+            let temp = x * 2;
+            let result = temp + 10;
             return result;
         }
         return 0;
     }
-    
+
     // ============================================================
     // NESTED IF STATEMENTS
     // ============================================================
-    
-    // Nested if - Level 1
+
     ~nestedIfLevel1<int> => global(x<int>, y<int>) {
         if: x > 0 {
             if: y > 0 {
@@ -399,8 +344,7 @@
             return 3;
         }
     }
-    
-    // Nested if - Level 2
+
     ~nestedIfLevel2<int> => global(a<int>, b<int>, c<int>) {
         if: a > 0 {
             if: b > 0 {
@@ -416,8 +360,7 @@
             return 4;
         }
     }
-    
-    // Nested if - Level 3 (deep)
+
     ~nestedIfLevel3<int> => global(w<int>, x<int>, y<int>, z<int>) {
         if: w > 0 {
             if: x > 0 {
@@ -437,8 +380,7 @@
             return 5;
         }
     }
-    
-    // Nested if with elif
+
     ~nestedIfElif<int> => global(x<int>, y<int>) {
         if: x > 0 {
             if: y > 10 {
@@ -452,8 +394,7 @@
             return 0;
         }
     }
-    
-    // Mixed: single-line if inside multi-line if
+
     ~mixedIfStyle<int> => global(a<int>, b<int>) {
         if: a > 0 {
             if: b > 0 then return 100;
@@ -461,12 +402,11 @@
         }
         return 0;
     }
-    
+
     // ============================================================
-    // SINGLE-LINE SWITCH (CHK) STATEMENTS (with "then" or "=>")
+    // SINGLE-LINE SWITCH (CHK) STATEMENTS
     // ============================================================
-    
-    // Single-line switch cases with "then" and return
+
     ~singleLineSwitchThenReturn<string> => global(value<int>) {
         chk: value {
             -> 1 then return "One";
@@ -475,8 +415,7 @@
             -> miss then return "Unknown";
         }
     }
-    
-    // Single-line switch cases with "=>" and return
+
     ~singleLineSwitchArrowReturn<string> => global(value<int>) {
         chk: value {
             -> 1 => return "One";
@@ -485,10 +424,9 @@
             -> miss => return "Unknown";
         }
     }
-    
-    // Single-line switch with "then" and assignment
+
     ~singleLineSwitchThenAssign<int> => global(status<string>) {
-        result = 0;
+        let mut result = 0;
         chk: status {
             -> "active" then result = 1;
             -> "inactive" then result = -1;
@@ -497,10 +435,9 @@
         }
         return result;
     }
-    
-    // Single-line switch with "=>" and assignment
+
     ~singleLineSwitchArrowAssign<int> => global(status<string>) {
-        result = 0;
+        let mut result = 0;
         chk: status {
             -> "active" => result = 1;
             -> "inactive" => result = -1;
@@ -509,10 +446,9 @@
         }
         return result;
     }
-    
-    // Single-line switch with arithmetic assignment
+
     ~singleLineSwitchArithmetic<int> => global(op<string>) {
-        total = 10;
+        let mut total = 10;
         chk: op {
             -> "add" then total += 5;
             -> "sub" then total -= 3;
@@ -522,8 +458,7 @@
         }
         return total;
     }
-    
-    // Single-line switch with log statements
+
     ~singleLineSwitchLog<int> => global(level<int>) {
         chk: level {
             -> 1 then log: "Level 1";
@@ -533,10 +468,9 @@
         }
         return level;
     }
-    
-    // Mixed: "then" and "=>" in same switch
+
     ~singleLineSwitchMixed<int> => global(value<int>) {
-        result = 0;
+        let mut result = 0;
         chk: value {
             -> 1 then result = 10;
             -> 2 => result = 20;
@@ -546,12 +480,11 @@
         }
         return result;
     }
-    
+
     // ============================================================
     // MULTI-LINE SWITCH (CHK) STATEMENTS
     // ============================================================
-    
-    // Switch with multi-line cases
+
     ~multiLineSwitch<int> => global(value<int>) {
         chk: value {
             -> 1 {
@@ -568,8 +501,7 @@
             }
         }
     }
-    
-    // Switch with string cases
+
     ~switchString<int> => global(cmd<string>) {
         chk: cmd {
             -> "start" {
@@ -586,8 +518,7 @@
             }
         }
     }
-    
-    // Switch with enum cases
+
     ~switchEnum<int> => global(priority<int>) {
         chk: priority {
             -> Priority.Low {
@@ -607,8 +538,7 @@
             }
         }
     }
-    
-    // Switch without default case
+
     ~switchNoDefault<int> => global(x<int>) {
         chk: x {
             -> 1 {
@@ -619,18 +549,17 @@
             }
         }
     }
-    
-    // Switch with multiple statements per case
+
     ~switchMultiStatements<int> => global(action<string>) {
         chk: action {
             -> "calculate" {
-                x = 10;
-                y = 20;
-                result = x + y;
+                let x = 10;
+                let y = 20;
+                let result = x + y;
                 return result;
             }
             -> "process" {
-                data = 100;
+                let mut data = 100;
                 data *= 2;
                 return data;
             }
@@ -639,8 +568,7 @@
             }
         }
     }
-    
-    // Switch with expression as condition
+
     ~switchExpression<string> => global(x<int>, y<int>) {
         chk: x + y {
             -> 10 {
@@ -657,14 +585,13 @@
             }
         }
     }
-    
+
     // ============================================================
     // NESTED SWITCH STATEMENTS
     // ============================================================
-    
-    // Nested switch - Level 1
-    ~nestedSwitchLevel1<int> => global(type<string>, value<int>) {
-        chk: type {
+
+    ~nestedSwitchLevel1<int> => global(typeStr<string>, value<int>) {
+        chk: typeStr {
             -> "number" {
                 chk: value {
                     -> 1 {
@@ -686,8 +613,7 @@
             }
         }
     }
-    
-    // Nested switch - Level 2
+
     ~nestedSwitchLevel2<int> => global(cat<string>, sub<string>, val<int>) {
         chk: cat {
             -> "A" {
@@ -715,8 +641,7 @@
             }
         }
     }
-    
-    // Mixed: single-line cases in nested switch
+
     ~mixedSwitchStyle<int> => global(x<int>, y<int>) {
         chk: x {
             -> 1 {
@@ -730,12 +655,11 @@
             -> miss => return 0;
         }
     }
-    
+
     // ============================================================
-    // MIXED CONTROL FLOW (IF inside SWITCH, SWITCH inside IF)
+    // MIXED CONTROL FLOW
     // ============================================================
-    
-    // If inside switch
+
     ~ifInsideSwitch<int> => global(category<string>, value<int>) {
         chk: category {
             -> "numbers" {
@@ -754,8 +678,7 @@
             }
         }
     }
-    
-    // Switch inside if
+
     ~switchInsideIf<int> => global(enabled<bool>, status<string>) {
         if: enabled {
             chk: status {
@@ -767,8 +690,7 @@
             return 0;
         }
     }
-    
-    // Complex: if -> switch -> if
+
     ~complexNesting1<int> => global(a<bool>, b<string>, c<int>) {
         if: a {
             chk: b {
@@ -781,8 +703,7 @@
         }
         return -1;
     }
-    
-    // Complex: switch -> if -> switch
+
     ~complexNesting2<int> => global(x<int>, y<bool>, z<string>) {
         chk: x {
             -> 1 {
@@ -800,42 +721,37 @@
             -> miss => return 0;
         }
     }
-    
+
     // ============================================================
     // VARIABLE ASSIGNMENTS
     // ============================================================
-    
-    // Simple assignment
+
     ~simpleAssignment<int> => global(x<int>) {
-        y = x;
+        let y = x;
         return y;
     }
-    
-    // Assignment with expression
+
     ~assignmentExpression<int> => global(a<int>, b<int>) {
-        result = a + b * 2;
+        let result = a + b * 2;
         return result;
     }
-    
-    // Multiple assignments
+
     ~multipleAssignments<int> => global(x<int>) {
-        a = x;
-        b = a * 2;
-        c = b + 10;
+        let a = x;
+        let b = a * 2;
+        let c = b + 10;
         return c;
     }
-    
-    // Reassignment
+
     ~reassignment<int> => global(x<int>) {
-        y = x;
+        let mut y = x;
         y = y + 10;
         y = y * 2;
         return y;
     }
-    
-    // Assignment in control flow
+
     ~assignmentInControl<int> => global(flag<bool>) {
-        result = 0;
+        let mut result = 0;
         if: flag {
             result = 100;
         } else {
@@ -843,72 +759,64 @@
         }
         return result;
     }
-    
+
     // ============================================================
     // ARITHMETIC ASSIGNMENT OPERATORS
     // ============================================================
-    
-    // Add-assign
+
     ~addAssign<int> => global(x<int>) {
-        y = 10;
+        let mut y = 10;
         y += x;
         return y;
     }
-    
-    // Subtract-assign
+
     ~subtractAssign<int> => global(x<int>) {
-        y = 100;
+        let mut y = 100;
         y -= x;
         return y;
     }
-    
-    // Multiply-assign
+
     ~multiplyAssign<int> => global(x<int>) {
-        y = 5;
+        let mut y = 5;
         y *= x;
         return y;
     }
-    
-    // Divide-assign
+
     ~divideAssign<float> => global(x<float>) {
-        y = 100.0;
+        let mut y = 100.0;
         y /= x;
         return y;
     }
-    
-    // Modulo-assign
+
     ~moduloAssign<int> => global(x<int>) {
-        y = 100;
+        let mut y = 100;
         y %= x;
         return y;
     }
-    
-    // Chained arithmetic assignments
+
     ~chainedArithAssign<int> => global(x<int>) {
-        y = 10;
+        let mut y = 10;
         y += 5;
         y *= 2;
         y -= 3;
         y /= 2;
         return y;
     }
-    
+
     // ============================================================
     // OBJECT CREATION
     // ============================================================
-    
-    // Simple object
+
     ~createSimpleObject<object> => global() {
-        obj = {
+        let obj = {
             id = 1,
             name = "Test"
         };
         return obj;
     }
-    
-    // Object with various types
+
     ~createComplexObject<object> => global(userId<int>, active<bool>) {
-        user = {
+        let user = {
             id = userId,
             name = "User",
             active = active,
@@ -916,10 +824,9 @@
         };
         return user;
     }
-    
-    // Nested object
+
     ~createNestedObject<object> => global() {
-        data = {
+        let data = {
             user = {
                 id = 1,
                 name = "John"
@@ -930,73 +837,64 @@
         };
         return data;
     }
-    
-    // Object with arrays
+
     ~objectWithArrays<object> => global() {
-        obj = {
+        let obj = {
             numbers = [1, 2, 3],
             names = ["Alice", "Bob"]
         };
         return obj;
     }
-    
-    // Empty object
+
     ~emptyObject<object> => global() {
-        obj = {};
+        let obj = {};
         return obj;
     }
-    
+
     // ============================================================
     // ARRAY LITERALS
     // ============================================================
-    
-    // Simple array
+
     ~simpleArray<array> => global() {
-        arr = [1, 2, 3, 4, 5];
+        let arr = [1, 2, 3, 4, 5];
         return arr;
     }
-    
-    // Mixed type array
+
     ~mixedArray<array> => global() {
-        arr = [1, "text", true, 3.14];
+        let arr = [1, "text", true, 3.14];
         return arr;
     }
-    
-    // Array with expressions
+
     ~arrayWithExpressions<array> => global(x<int>) {
-        arr = [x, x + 1, x * 2, x ^ 2];
+        let arr = [x, x + 1, x * 2, x ^ 2];
         return arr;
     }
-    
-    // Nested arrays
+
     ~nestedArrays<array> => global() {
-        arr = [
+        let arr = [
             [1, 2, 3],
             [4, 5, 6],
             [7, 8, 9]
         ];
         return arr;
     }
-    
-    // Empty array
+
     ~emptyArray<array> => global() {
-        arr = [];
+        let arr = [];
         return arr;
     }
-    
+
     // ============================================================
     // OBJECT LITERALS IN EXPRESSIONS
     // ============================================================
-    
-    // Return object literal directly
+
     ~returnObjectLiteral<object> => global() {
         return {
             id = 1,
             value = "data"
         };
     }
-    
-    // Object with all primitive types
+
     ~objectAllTypes<object> => global() {
         return {
             intVal = 42,
@@ -1005,8 +903,7 @@
             boolVal = true
         };
     }
-    
-    // Object with nested structures
+
     ~objectNested<object> => global() {
         return {
             data = {
@@ -1018,110 +915,93 @@
             }
         };
     }
-    
-    // Object with expressions
+
     ~objectWithExpressions<object> => global(x<int>, y<int>) {
         return {
-            sum = x  + y,
-            product =  x * y,
+            sum = x + y,
+            product = x * y,
             difference = y - x + 3
         };
     }
-    
+
     // ============================================================
     // PREFIXED CONSTRUCTORS
     // ============================================================
-    
-    // Tuple - 2 elements
+
     ~tuple2<tuple> => global(x<int>, y<int>) {
         return t:(x, y);
     }
-    
-    // Tuple - 3 elements
+
     ~tuple3<tuple> => global(x<int>, y<int>, z<int>) {
         return t:(x, y, z);
     }
-    
-    // Tuple - 4 elements (max)
+
     ~tuple4<tuple> => global(a<int>, b<int>, c<int>, d<int>) {
         return t:(a, b, c, d);
     }
-    
-    // Tuple with mixed types
+
     ~tupleMixed<tuple> => global() {
         return t:(1, "text", true, 3.14);
     }
-    
-    // Tuple with expressions
+
     ~tupleExpressions<tuple> => global(x<int>, y<int>) {
         return t:(x + y, x * y, x - y);
     }
-    
-    // Blob constructor
-    ~blobCreate<blob> => global(data<string>) {
-        return b:(data);
+
+    ~blobCreate<blob> => global(blobData<string>) {
+        return b:(blobData);
     }
-    
-    // Regex constructor
+
     ~regexCreate<regex> => global(pattern<string>) {
         return r:(pattern);
     }
-    
+
     // ============================================================
     // PARENTHESIZED EXPRESSIONS
     // ============================================================
-    
-    // Simple parentheses
+
     ~simpleParens<int> => global(a<int>, b<int>) {
         return (a + b);
     }
-    
-    // Nested parentheses
+
     ~nestedParens<int> => global(a<int>, b<int>, c<int>) {
         return ((a + b) * c);
     }
-    
-    // Parentheses for precedence
+
     ~precedenceParens<int> => global(x<int>) {
         return (x + 5) * (x - 3);
     }
-    
-    // Complex parenthesized expression
+
     ~complexParens<int> => global(a<int>, b<int>, c<int>, d<int>) {
         return ((a + b) * (c - d)) / 2;
     }
-    
+
     // ============================================================
     // LOG STATEMENTS
     // ============================================================
-    
-    // Simple log
+
     ~simpleLog<int> => global(x<int>) {
         log: x;
         return x;
     }
-    
-    // Log with expression
+
     ~logExpression<int> => global(a<int>, b<int>) {
         log: a + b;
         return a + b;
     }
-    
-    // Log with string
+
     ~logString<string> => global() {
         log: "Processing";
         return "Done";
     }
-    
-    // Multiple logs
+
     ~multipleLogs<int> => global(x<int>) {
         log: "Start";
         log: x;
         log: "End";
         return x;
     }
-    
-    // Log in control flow
+
     ~logInControl<int> => global(flag<bool>) {
         if: flag {
             log: "Flag is true";
@@ -1130,284 +1010,247 @@
         }
         return 0;
     }
-    
+
     // ============================================================
     // TERNARY CONDITIONAL OPERATOR
     // ============================================================
-    
-    // Simple ternary
+
     ~simpleTernary<int> => global(x<int>) {
         return x > 0 ? 1 : -1;
     }
-    
-    // Ternary with expressions
+
     ~ternaryExpressions<int> => global(a<int>, b<int>) {
         return a > b ? a * 2 : b * 2;
     }
-    
-    // Nested ternary
+
     ~nestedTernary<string> => global(score<int>) {
         return score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : "F";
     }
-    
-    // Ternary in assignment
+
     ~ternaryAssignment<int> => global(flag<bool>) {
-        result = flag ? 100 : -100;
+        let result = flag ? 100 : -100;
         return result;
     }
-    
-    // Complex ternary
+
     ~complexTernary<int> => global(x<int>, y<int>, z<int>) {
         return x > y ? (y > z ? x : z) : (x > z ? y : z);
     }
-    
+
     // ============================================================
     // STRING INTERPOLATION
     // ============================================================
-    
-    // Simple interpolation
+
     ~simpleInterpolation<string> => global(name<string>) {
         return $"Hello, {name}!";
     }
-    
-    // Multiple interpolations
+
     ~multipleInterpolations<string> => global(first<string>, last<string>) {
         return $"Name: {first} {last}";
     }
-    
-    // Interpolation with expressions
+
     ~interpolationExpressions<string> => global(x<int>, y<int>) {
         return $"Sum: {x + y}, Product: {x * y}";
     }
-    
-    // Interpolation with method calls
+
     ~interpolationMethods<string> => global(text<string>) {
         return $"Upper: {text.toUpper()}, Lower: {text.toLower()}";
     }
-    
-    // Complex interpolation
+
     ~complexInterpolation<string> => global(name<string>, age<int>, active<bool>) {
-        status = active ? "Active" : "Inactive";
+        let status = active ? "Active" : "Inactive";
         return $"User: {name}, Age: {age}, Status: {status}";
     }
-    
+
     // ============================================================
     // STATIC OBJECT METHOD CALLS
     // ============================================================
-    
-    // Math methods
+
     ~mathMethods<int> => global(a<int>, b<int>) {
-        maximum = Math.max(a, b);
-        minimum = Math.min(a, b);
-        power = Math.pow(2, 8);
-        rounded = Math.round(3.7);
+        let maximum = Math.max(a, b);
+        let minimum = Math.min(a, b);
+        let power = Math.pow(2, 8);
+        let rounded = Math.round(3.7);
         return maximum;
     }
-    
-    // DateTime methods
+
     ~dateTimeMethods<string> => global() {
-        now = DateTime.now();
-        today = DateTime.today();
-        formatted = now.format("yyyy-MM-dd");
+        let now = DateTime.now();
+        let today = DateTime.today();
+        let formatted = now.format("yyyy-MM-dd");
         return formatted;
     }
-    
-    // Array methods
+
     ~arrayStaticMethods<array> => global() {
-        range = Array.range(1, 10);
-        filled = Array.fill(5, "test");
+        let range = Array.range(1, 10);
+        let filled = Array.fill(5, "test");
         return range;
     }
-    
-    // Random methods
+
     ~randomMethods<int> => global() {
-        rand_int = Random.range(1, 100);
-        rand_bool = Random.boolean();
+        let rand_int = Random.range(1, 100);
+        let rand_bool = Random.boolean();
         return rand_int;
     }
-    
+
     // ============================================================
     // INSTANCE METHOD CALLS
     // ============================================================
-    
-    // String instance methods
+
     ~stringInstanceMethods<string> => global(text<string>) {
-        upper = text.toUpper();
-        lower = text.toLower();
-        trimmed = text.trim();
-        sub = text.substring(0, 5);
+        let upper = text.toUpper();
+        let lower = text.toLower();
+        let trimmed = text.trim();
+        let sub = text.substring(0, 5);
         return upper;
     }
-    
-    // Array instance methods
+
     ~arrayInstanceMethods<int> => global(numbers<array>) {
-        length = numbers.length();
-        contains = numbers.contains(5);
-        joined = numbers.join(", ");
+        let length = numbers.length();
+        let contains = numbers.contains(5);
+        let joined = numbers.join(", ");
         return length;
     }
-    
-    // Numeric instance methods
+
     ~numericInstanceMethods<int> => global(value<float>) {
-        rounded = value.round();
-        floored = value.floor();
-        ceiled = value.ceil();
-        absolute = value.abs();
+        let rounded = value.round();
+        let floored = value.floor();
+        let ceiled = value.ceil();
+        let absolute = value.abs();
         return rounded;
     }
-    
+
     // ============================================================
     // METHOD CHAINING
     // ============================================================
-    
-    // String method chaining
+
     ~stringChaining<string> => global(text<string>) {
         return text.trim().toUpper().substring(0, 10);
     }
-    
-    // Array method chaining
+
     ~arrayChaining<string> => global(numbers<array>) {
         return numbers.reverse().slice(0, 5).join("-");
     }
-    
-    // Complex chaining
+
     ~complexChaining<string> => global(input<string>) {
         return input.trim().split(" ").join("-").toUpper();
     }
-    
-    // Chaining with DateTime
+
     ~dateTimeChaining<string> => global() {
         return DateTime.now().addDays(7).addHours(2).format("yyyy-MM-dd HH:mm:ss");
     }
-    
+
     // ============================================================
     // LAMBDA EXPRESSIONS (ANONYMOUS FUNCTIONS)
     // ============================================================
-    
-    // Simple lambda - no parameters
+
     ~simpleLambda<int> => global() {
-        func = () => 42;
+        let func = () => 42;
         return func();
     }
-    
-    // Lambda with single parameter
+
     ~lambdaSingleParam<int> => global(x<int>) {
-        double = (n) => n * 2;
+        let double = (n) => n * 2;
         return double(x);
     }
-    
-    // Lambda with multiple parameters
+
     ~lambdaMultiParams<int> => global(a<int>, b<int>) {
-        add = (x, y) => x + y;
-        return add(a, b);
+        let addFn = (x, y) => x + y;
+        return addFn(a, b);
     }
-    
-    // Lambda with typed parameters
+
     ~lambdaTypedParams<int> => global(x<int>, y<int>) {
-        multiply = (a<int>, b<int>) => a * b;
+        let multiply = (a<int>, b<int>) => a * b;
         return multiply(x, y);
     }
-    
-    // Lambda with block body
+
     ~lambdaBlockBody<int> => global(x<int>) {
-        calculate = (n<int>) => {
-            temp = n * 2;
-            result = temp + 10;
+        let calculate = (n<int>) => {
+            let temp = n * 2;
+            let result = temp + 10;
             return result;
         };
         return calculate(x);
     }
-    
-    // Lambda stored in variable
+
     ~lambdaInVariable<int> => global(x<int>) {
-        processor = (value<int>) => value * 3 + 5;
-        result = processor(x);
+        let processor = (value<int>) => value * 3 + 5;
+        let result = processor(x);
         return result;
     }
-    
-    // Lambda passed as expression
+
     ~lambdaAsExpression<int> => global(x<int>) {
-        apply = (n<int>, fn) => fn(n);
-        result = apply(x, (v) => v * 2);
+        let apply = (n<int>, fn) => fn(n);
+        let result = apply(x, (v) => v * 2);
         return result;
     }
-    
-    // Lambda with conditional
+
     ~lambdaWithConditional<int> => global(x<int>) {
-        check = (n<int>) => n > 0 ? n : -n;
+        let check = (n<int>) => n > 0 ? n : -n;
         return check(x);
     }
-    
-    // Lambda returning object
+
     ~lambdaReturnObject<object> => global(id<int>, name<string>) {
-        createUser = (userId<int>, userName<string>) => {
+        let createUser = (userId<int>, userName<string>) => {
             id = userId,
             name = userName,
             active = true
         };
         return createUser(id, name);
     }
-    
-    // Lambda returning array
+
     ~lambdaReturnArray<array> => global(size<int>) {
-        createRange = (n<int>) => Array.range(1, n);
+        let createRange = (n<int>) => Array.range(1, n);
         return createRange(size);
     }
-    
+
     // ============================================================
     // NESTED LAMBDAS
     // ============================================================
-    
-    // Lambda returning lambda
+
     ~nestedLambda1<int> => global(x<int>) {
-        outer = (a<int>) => {
-            inner = (b<int>) => a + b;
+        let outer = (a<int>) => {
+            let inner = (b<int>) => a + b;
             return inner;
         };
-        addFive = outer(5);
+        let addFive = outer(5);
         return addFive(x);
     }
-    
-    // Two-level nested lambda
+
     ~nestedLambda2<int> => global(x<int>) {
-        outer = (a<int>) => (b<int>) => a * b;
-        multiplyByTen = outer(10);
+        let outer = (a<int>) => (b<int>) => a * b;
+        let multiplyByTen = outer(10);
         return multiplyByTen(x);
     }
-    
-    // Three-level nested lambda
+
     ~nestedLambda3<int> => global(x<int>) {
-        level1 = (a<int>) => (b<int>) => (c<int>) => a + b * c;
-        level2 = level1(10);
-        level3 = level2(5);
+        let level1 = (a<int>) => (b<int>) => (c<int>) => a + b * c;
+        let level2 = level1(10);
+        let level3 = level2(5);
         return level3(x);
     }
-    
-    // Nested lambda with captured variables
+
     ~nestedLambdaClosure<int> => global(base<int>) {
-        multiplier = 3;
-        outer = (x<int>) => {
-            inner = (y<int>) => x * y * multiplier;
+        let multiplier = 3;
+        let outer = (x<int>) => {
+            let inner = (y<int>) => x * y * multiplier;
             return inner;
         };
-        func = outer(base);
+        let func = outer(base);
         return func(2);
     }
-    
-    // Nested lambda with conditional
+
     ~nestedLambdaConditional<int> => global(x<int>) {
-        outer = (n<int>) => {
-            inner = (m<int>) => n > 0 ? n + m : n - m;
+        let outer = (n<int>) => {
+            let inner = (m<int>) => n > 0 ? n + m : n - m;
             return inner;
         };
-        process = outer(x);
+        let process = outer(x);
         return process(10);
     }
-    
-    // Complex nested lambda
+
     ~nestedLambdaComplex<int> => global(a<int>, b<int>) {
-        calculator = (op<string>) => {
-            executor = (x<int>, y<int>) => {
+        let calculator = (op<string>) => {
+            let executor = (x<int>, y<int>) => {
                 chk: op {
                     -> "add" then return x + y;
                     -> "sub" then return x - y;
@@ -1418,91 +1261,83 @@
             };
             return executor;
         };
-        adder = calculator("add");
+        let adder = calculator("add");
         return adder(a, b);
     }
-    
-    // Nested lambda in control flow
+
     ~nestedLambdaInControl<int> => global(flag<bool>, x<int>) {
         if: flag {
-            positive = (n<int>) => {
-                double = (m<int>) => m * 2;
+            let positive = (n<int>) => {
+                let double = (m<int>) => m * 2;
                 return double(n);
             };
             return positive(x);
         } else {
-            negative = (n<int>) => {
-                half = (m<int>) => m / 2;
+            let negative = (n<int>) => {
+                let half = (m<int>) => m / 2;
                 return half(n);
             };
             return negative(x);
         }
     }
-    
+
     // ============================================================
     // LAMBDA WITH METHOD CHAINING
     // ============================================================
-    
-    // Lambda with string chaining
+
     ~lambdaStringChaining<string> => global(text<string>) {
-        process = (s<string>) => s.trim().toUpper().substring(0, 5);
+        let process = (s<string>) => s.trim().toUpper().substring(0, 5);
         return process(text);
     }
-    
-    // Lambda with array chaining
+
     ~lambdaArrayChaining<string> => global(numbers<array>) {
-        format = (arr<array>) => arr.reverse().slice(0, 3).join(", ");
+        let format = (arr<array>) => arr.reverse().slice(0, 3).join(", ");
         return format(numbers);
     }
-    
-    // Lambda with complex chaining
+
     ~lambdaComplexChaining<string> => global(input<string>) {
-        transform = (s<string>) => s.trim().split(" ").join("-").toLowerCase();
+        let transform = (s<string>) => s.trim().split(" ").join("-").toLower();
         return transform(input);
     }
-    
+
     // ============================================================
     // LAMBDA IN COLLECTIONS
     // ============================================================
-    
-    // Array of lambdas
+
     ~lambdaArray<int> => global(x<int>) {
-        operations = [
+        let operations = [
             (n<int>) => n + 10,
             (n<int>) => n * 2,
             (n<int>) => n - 5
         ];
-        result = operations[0](x);
+        let result = operations[0](x);
         return result;
     }
-    
-    // Object with lambda properties
+
     ~lambdaInObject<int> => global(x<int>) {
-        calculator = {
+        let calculator = {
             add = (a<int>, b<int>) => a + b,
             subtract = (a<int>, b<int>) => a - b,
             multiply = (a<int>, b<int>) => a * b
         };
         return calculator.add(x, 10);
     }
-    
+
     // ============================================================
     // PROPERTY AND ARRAY ACCESS
     // ============================================================
-    
-    // Object property access
+
     ~objectPropertyAccess<string> => global() {
-       let user = {
+        let user = {
             name = "Alice",
             age = 30,
             email = "alice@example.com"
         };
         return user.name;
     }
-    
-    // Nested property access
+
     ~nestedPropertyAccess<string> => global() {
-        config = {
+        let config = {
             server = {
                 database = {
                     host = "localhost"
@@ -1511,25 +1346,22 @@
         };
         return config.server.database.host;
     }
-    
-    // Array element access
+
     ~arrayElementAccess<int> => global() {
-        numbers = [10, 20, 30, 40, 50];
+        let numbers = [10, 20, 30, 40, 50];
         return numbers[2];
     }
-    
-    // Array of objects access
+
     ~arrayObjectAccess<string> => global() {
-        users = [
+        let users = [
             { name = "Alice", age = 30 },
             { name = "Bob", age = 25 }
         ];
         return users[0].name;
     }
-    
-    // Complex access chain
+
     ~complexAccessChain<int> => global() {
-        data = {
+        let data = {
             levels = [
                 { values = [1, 2, 3] },
                 { values = [4, 5, 6] }
@@ -1537,22 +1369,19 @@
         };
         return data.levels[1].values[2];
     }
-    
+
     // ============================================================
     // ENUM ACCESS
     // ============================================================
-    
-    // Simple enum access
+
     ~simpleEnumAccess<int> => global() {
         return Status.Active;
     }
-    
-    // Enum in comparison
+
     ~enumInComparison<bool> => global(status<int>) {
         return status == Status.Active;
     }
-    
-    // Enum in switch
+
     ~enumInSwitch<string> => global(priority<int>) {
         chk: priority {
             -> Priority.Low then return "Low priority";
@@ -1561,40 +1390,29 @@
             -> miss then return "Unknown";
         }
     }
-    
-    // Multiple enum usage
+
     ~multipleEnumUsage<int> => global() {
-        status_val = Status.Active;
-        priority_val = Priority.High;
-        color_val = Color.Red;
+        let status_val = Status.Active;
+        let priority_val = Priority.High;
+        let color_val = Color.Red;
         return status_val + priority_val;
     }
-    
-    // ============================================================
-    // CONFIG ACCESS (if allowed in QuickFuncs - verify)
-    // ============================================================
-    
-    // Note: QuickFuncs typically have isolated scope
-    // Config access shown for completeness but may not be allowed
-    
+
     // ============================================================
     // COMPREHENSIVE EXPRESSION MIXING
     // ============================================================
-    
-    // All operators combined
+
     ~allOperatorsCombined<int> => global(a<int>, b<int>, c<int>) {
-        result = (a + b) * c - (a / 2) + (b % 3) ^ 2;
+        let result = (a + b) * c - (a / 2) + (b % 3) ^ 2;
         return result;
     }
-    
-    // Complex boolean logic
+
     ~complexBooleanLogic<bool> => global(x<int>, y<int>, z<int>) {
         return (x > 0 && y > 0) || (z > 0 && (x == y || y == z));
     }
-    
-    // Mixed control flow and expressions
+
     ~mixedControlAndExpression<int> => global(a<int>, b<int>) {
-        result = 0;
+        let mut result = 0;
         if: a > b {
             chk: a - b {
                 -> 1 then result = 10;
@@ -1606,26 +1424,20 @@
         }
         return result;
     }
-    
-    // Everything combined
+
     ~kitchenSink<string> => global(x<int>, flag<bool>) {
-        // Lambda with nested lambda
-        processor = (n<int>) => {
-            inner = (m<int>) => m * 2;
+        let processor = (n<int>) => {
+            let inner = (m<int>) => m * 2;
             return inner(n);
         };
-        
-        // Process value
-        processed = processor(x);
-        
-        // Ternary with method chaining
-        text = flag ? "positive" : "negative";
-        formatted = text.toUpper().substring(0, 3);
-        
-        // String interpolation with expressions
-        message = $"Value: {processed}, Status: {formatted}";
-        
-        // Control flow
+
+        let processed = processor(x);
+
+        let text = flag ? "positive" : "negative";
+        let formatted = text.toUpper().substring(0, 3);
+
+        let mut message = $"Value: {processed}, Status: {formatted}";
+
         if: processed > 10 {
             log: "High value";
             chk: formatted {
@@ -1633,7 +1445,7 @@
                 -> miss then message = $"{message} - Unknown";
             }
         }
-        
+
         return message;
     }
 )
@@ -1642,12 +1454,12 @@
     test_name = "Complete QuickFuncs Test Suite",
     version = "1.0.0",
     total_functions = 150
-    
+
     test.results:
         passed = 0,
         failed = 0,
         skipped = 0
-    
+
     test.categories::
         "Basic Functions",
         "Control Flow",

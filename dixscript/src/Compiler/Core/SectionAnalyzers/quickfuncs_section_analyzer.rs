@@ -101,7 +101,7 @@ fn is_valid_data_type(data_type: DataType) -> bool {
 /// `true` for numeric types eligible for arithmetic promotion.
 #[inline]
 fn is_numeric_type(dt: DataType) -> bool {
-    matches!(dt, DataType::Int | DataType::Long | DataType::Float | DataType::Double)
+    matches!(dt, DataType::Int | DataType::Long | DataType::Float | DataType::Double | DataType::Enum)
 }
 
 // ==================== ANALYZER ====================

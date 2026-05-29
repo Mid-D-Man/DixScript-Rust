@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Thu May 28 20:10:00 UTC 2026
+Generated: Fri May 29 03:49:02 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 6264e22215ab3e5d34ac3bf5cbe9204a06d4cc59
+Commit: a5b9ffa02596e23f818e77e4918fcf0d02800b07
 Branch: master
 ==================================
 
@@ -335,12 +335,34 @@ Benchmark Files:
 
 DixScript Sample Files (.mdix):
 ================================
+  mdix_files/ComparisonFiles/MDIX/AdvancedTest.mdix
+  mdix_files/ComparisonFiles/MDIX/BasicTest.mdix
+  mdix_files/ComparisonFiles/MDIX/BigBoy.mdix
+  mdix_files/ComparisonFiles/MDIX/IntermediateTest.mdix
+  mdix_files/ComparisonFiles/MDIX/Unholy.mdix
+  mdix_files/advanced/BuiltinSystem.mdix
+  mdix_files/advanced/FullFunctionTest.mdix
   mdix_files/advanced/all_datatypes_test.mdix
+  mdix_files/advanced/array_instance_test.mdix
+  mdix_files/advanced/array_static_test.mdix
   mdix_files/advanced/data_variable_usage.mdix
+  mdix_files/advanced/datetime_static_test.mdix
+  mdix_files/advanced/dix_static_test.mdix
+  mdix_files/advanced/enum_static_test.mdix
   mdix_files/advanced/enum_test.mdix
+  mdix_files/advanced/guid_static_test.mdix
+  mdix_files/advanced/ip_static_test.mdix
+  mdix_files/advanced/math_static_test.mdix
+  mdix_files/advanced/number_instance_test.mdix
+  mdix_files/advanced/random_static_test.mdix
+  mdix_files/advanced/string_instance_test.mdix
+  mdix_files/advanced/tuple_instance_test.mdix
+  mdix_files/advanced/universal_instance_test.mdix
+  mdix_files/basic/EnumUsage.mdix
   mdix_files/basic/a_test.mdix
   mdix_files/basic/basic_test.mdix
   mdix_files/basic/lsp_tester.mdix
+  mdix_files/basic/tuple_instance_test.mdix
   mdix_files/chemistry_db/core/builders.mdix
   mdix_files/chemistry_db/core/enums.mdix
   mdix_files/chemistry_db/core/physics.mdix

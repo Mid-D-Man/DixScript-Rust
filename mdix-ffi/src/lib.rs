@@ -6,6 +6,7 @@ mod string_utils;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
 use std::sync::OnceLock;
+use std::collections::HashMap;
 
 use dixscript::Runtime::{
     DixCompactor, DixConverter, DixFormatOptions, DixLoader, DixLoadOptions, DixValue,
@@ -76,6 +77,21 @@ unsafe fn as_builder<'a>(ptr: *const c_void) -> Option<&'a MdixBuilderHandle> {
 #[inline]
 unsafe fn as_builder_mut<'a>(ptr: *mut c_void) -> Option<&'a mut MdixBuilderHandle> {
     if ptr.is_null() { None } else { Some(&mut *(ptr as *mut MdixBuilderHandle)) }
+}
+
+// =============================================================================
+// Helper: strip indexed array keys from a hashmap
+//
+// DixData.to_hashmap() adds both the parent array key ("enemies") AND every
+// indexed item ("enemies[0]", "enemies[0].name", etc.) for fast runtime lookup.
+// When round-tripping through from_hashmap → to_json/to_toml/to_mdix the
+// indexed keys produce duplicate / malformed output.  Strip them here.
+// =============================================================================
+
+fn strip_indexed_keys(raw: HashMap<String, DixValue>) -> HashMap<String, DixValue> {
+    raw.into_iter()
+        .filter(|(k, _)| !k.contains('['))
+        .collect()
 }
 
 // =============================================================================
@@ -311,7 +327,7 @@ pub extern "C" fn mdix_get_type(handle: *const c_void, path: *const c_char) -> M
         Some(DixValue::Null)         => MdixType::Null,
         Some(DixValue::Bool(_))      => MdixType::Bool,
         Some(DixValue::Int(_))       => MdixType::Int,
-        Some(DixValue::Long(_))      => MdixType::Long,       // ← NEW
+        Some(DixValue::Long(_))      => MdixType::Long,
         Some(DixValue::Float(_))     => MdixType::Float,
         Some(DixValue::Double(_))    => MdixType::Double,
         Some(DixValue::String(_))    => MdixType::String,
@@ -365,6 +381,7 @@ pub extern "C" fn mdix_get_string(handle: *const c_void, path: *const c_char) ->
 }
 
 /// Get an integer (i32). Returns 0 on failure. Use mdix_exists() to distinguish from stored 0.
+/// NOTE: for Long values, use mdix_get_long() to avoid truncation.
 #[no_mangle]
 pub extern "C" fn mdix_get_int(handle: *const c_void, path: *const c_char) -> i32 {
     clear_last_error();
@@ -381,8 +398,8 @@ pub extern "C" fn mdix_get_int(handle: *const c_void, path: *const c_char) -> i3
     }
 }
 
-/// Get a 64-bit integer (i64). Works for Long and Int values.
-/// Returns 0 on failure. Use mdix_get_type() to distinguish Long from Int if needed.
+/// Get a 64-bit integer (i64). Works for both Long and Int values (Int is widened without loss).
+/// Returns 0 on failure. Use mdix_get_type() to check whether the value is Long or Int.
 #[no_mangle]
 pub extern "C" fn mdix_get_long(handle: *const c_void, path: *const c_char) -> i64 {
     clear_last_error();
@@ -590,6 +607,16 @@ pub extern "C" fn mdix_clear_error() { clear_last_error(); }
 
 // =============================================================================
 // Conversion — database export
+//
+// FIX: mdix_to_json previously used serde_json::to_string(&map) on a
+// HashMap<String, DixValue>, which serializes DixValue::Enum as a JSON object
+// {"enum_name":"...","field_name":"...","value":3} instead of just 3.
+// Now uses converter.to_json() which correctly emits enum integer values.
+//
+// FIX: All three export functions now strip indexed array keys (e.g. "enemies[0]")
+// before converting via from_hashmap.  Those keys exist in the flattened store
+// for fast runtime access but produce duplicate/malformed output when round-tripped
+// through the AST converter.
 // =============================================================================
 
 #[no_mangle]
@@ -602,7 +629,7 @@ pub extern "C" fn mdix_to_json(handle: *const c_void, indented: bool) -> *mut c_
             return std::ptr::null_mut();
         }
     };
-    let entries   = h.data.to_hashmap();
+    let entries   = strip_indexed_keys(h.data.to_hashmap());
     let converter = DixConverter::new();
     let ast       = match converter.from_hashmap(entries) {
         Ok(a)  => a,
@@ -611,12 +638,11 @@ pub extern "C" fn mdix_to_json(handle: *const c_void, indented: bool) -> *mut c_
             return std::ptr::null_mut();
         }
     };
-    let map    = converter.to_hashmap(&ast);
-    let result = if indented { serde_json::to_string_pretty(&map) } else { serde_json::to_string(&map) };
-    match result {
+    // Use converter.to_json so enum values are emitted as integers, not objects.
+    match converter.to_json(&ast, indented) {
         Ok(s)  => str_to_c_char(s),
         Err(e) => {
-            set_last_error(&format!("mdix_to_json: JSON serialization failed: {}", e));
+            set_last_error(&format!("mdix_to_json: {}", e));
             std::ptr::null_mut()
         }
     }
@@ -632,7 +658,7 @@ pub extern "C" fn mdix_to_mdix(handle: *const c_void, mode: MdixFormatMode) -> *
             return std::ptr::null_mut();
         }
     };
-    let entries   = h.data.to_hashmap();
+    let entries   = strip_indexed_keys(h.data.to_hashmap());
     let converter = DixConverter::new();
     let ast       = match converter.from_hashmap(entries) {
         Ok(a)  => a,
@@ -870,7 +896,7 @@ pub extern "C" fn mdix_builder_get_int(builder: *const c_void, path: *const c_ch
     };
     match b.entries.get(path_str) {
         Some(DixValue::Int(i))    => *i,
-        Some(DixValue::Long(l))   => *l as i32,  // truncates — expected
+        Some(DixValue::Long(l))   => *l as i32,
         Some(DixValue::Float(f))  => *f as i32,
         Some(DixValue::Double(d)) => *d as i32,
         Some(other) => {
@@ -1006,7 +1032,9 @@ pub extern "C" fn mdix_builder_save(builder: *const c_void, path: *const c_char)
             return false;
         }
     };
-    let entries   = b.entries.clone();
+    // Builder entries are programmatically inserted so they won't have indexed
+    // array keys, but filter defensively.
+    let entries   = strip_indexed_keys(b.entries.clone());
     let converter = DixConverter::new();
     let ast       = match converter.from_hashmap(entries) {
         Ok(a)  => a,
@@ -1047,7 +1075,7 @@ pub extern "C" fn mdix_builder_to_string(builder: *const c_void) -> *mut c_char 
             return std::ptr::null_mut();
         }
     };
-    let entries   = b.entries.clone();
+    let entries   = strip_indexed_keys(b.entries.clone());
     let converter = DixConverter::new();
     let ast       = match converter.from_hashmap(entries) {
         Ok(a)  => a,
@@ -1079,7 +1107,7 @@ pub extern "C" fn mdix_to_toml(handle: *const c_void) -> *mut c_char {
             return std::ptr::null_mut();
         }
     };
-    let entries   = h.data.to_hashmap();
+    let entries   = strip_indexed_keys(h.data.to_hashmap());
     let converter = DixConverter::new();
     let ast       = match converter.from_hashmap(entries) {
         Ok(a)  => a,
@@ -1223,4 +1251,4 @@ fn format_mode_to_options(mode: MdixFormatMode) -> DixFormatOptions {
         MdixFormatMode::Compact  => DixFormatOptions::compact(),
         MdixFormatMode::Minified => DixFormatOptions::minified(),
     }
-}
+    }

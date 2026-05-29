@@ -1,0 +1,127 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "regular",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@QUICKFUNCS(
+    ~testRandomIntegers<int>() {
+        let rand1<int> = Random.range(1, 100);
+        let rand2<int> = Random.range(1, 100);
+        let rand3<int> = Random.range(1, 100);
+        return rand1 + rand2 + rand3;
+    }
+
+    ~testRandomFloats<double>() {
+        let flt1 = Random.float();
+        let flt2 = Random.double();
+        let flt3 = Random.floatRange(10.0f, 20.0f);
+        let flt4 = Random.doubleRange(10.0, 20.0);
+        return flt2 + flt4;
+    }
+
+    ~testRandomBoolean<bool>() {
+        let bool1 = Random.boolean();
+        let bool2 = Random.boolean();
+        let bool3 = Random.boolean();
+        return bool1;
+    }
+
+    ~testRandomChoice<string>() {
+        let options = Array.of("red", "green", "blue", "yellow");
+        let chosen = Random.choice(options);
+        return chosen;
+    }
+
+    ~testRandomChoices<array>() {
+        let options = Array.of(10, 20, 30, 40, 50);
+        let chosen = Random.choices(options, 3);
+        return chosen;
+    }
+
+    ~testRandomSample<array>() {
+        let arr = Array.range(1, 10);
+        let sampled = Random.sample(arr, 5);
+        return sampled;
+    }
+
+    ~testRandomShuffle<array>() {
+        let arr = Array.range(1, 10);
+        let shuffled = Random.shuffle(arr);
+        return shuffled;
+    }
+
+    ~testRandomString<string>() {
+        let alphaNum = Random.alphanumeric(10);
+        let customCharset = Random.string(8, "ABC123");
+        return alphaNum;
+    }
+
+    ~testRandomBytes<array>() {
+        let bytes = Random.bytes(16);
+        return bytes;
+    }
+
+    ~testRandomWeighted<string>() {
+        let values = Array.of(10, 20, 30);
+        let weights = Array.of(1, 2, 3);
+        let chosen = Random.weighted(values, weights);
+        return chosen;
+    }
+
+    ~testRandomInControlFlow<string>() {
+        let val<int> = Random.range(1, 100);
+        if: val > 75 {
+            return "high";
+        }
+        elif: val > 50 {
+            return "medium-high";
+        }
+        elif: val > 25 {
+            return "medium-low";
+        }
+        else {
+            return "low";
+        }
+    }
+
+    ~testRandomInChk<string>(operation<string>) {
+        chk: operation {
+            -> "int" {
+                let mut val<any> = Random.range(1, 100);
+                return $"{val}";
+            }
+            -> "bool" {
+                 val = Random.boolean();
+                return $"{val}";
+            }
+            -> "string" {
+                return Random.alphanumeric(8);
+            }
+            -> miss {
+                return "unknown";
+            }
+        }
+    }
+    
+)
+
+@DATA(
+    test_integers = testRandomIntegers(),
+    test_floats = testRandomFloats(),
+    test_boolean = testRandomBoolean(),
+    test_choice = testRandomChoice(),
+    test_choices = testRandomChoices(),
+    test_sample = testRandomSample(),
+    test_shuffle = testRandomShuffle(),
+    test_string = testRandomString(),
+    test_bytes = testRandomBytes(),
+    test_weighted = testRandomWeighted(),
+    test_control_flow = testRandomInControlFlow(),
+    test_chk_int = testRandomInChk("int"),
+    test_chk_bool = testRandomInChk("bool"),
+    test_chk_string = testRandomInChk("string"),
+    test_chk_miss = testRandomInChk("unknown")
+)

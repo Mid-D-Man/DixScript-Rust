@@ -37,9 +37,9 @@ impl DixData {
         }
 
         let prefix_index = Self::build_prefix_index(&flattened_data);
-        let config       = Self::extract_config_section(ast.config.as_ref());
-        let security     = Self::extract_security_section(ast.security.as_ref());
-        let dlm          = Self::extract_dlm_section(ast.dlm.as_ref());
+        let config = Self::extract_config_section(ast.config.as_ref());
+        let security = Self::extract_security_section(ast.security.as_ref());
+        let dlm = Self::extract_dlm_section(ast.dlm.as_ref());
 
         DixData {
             flattened_data,
@@ -91,7 +91,7 @@ impl DixData {
     pub fn get_keys(&self, path: &str) -> Vec<String> {
         match self.prefix_index.get(path) {
             Some(children) => children.iter().cloned().collect(),
-            None           => Vec::new(),
+            None => Vec::new(),
         }
     }
 
@@ -146,7 +146,7 @@ impl DixData {
                 }
                 Some(dot_pos) => {
                     let parent = &remaining[..dot_pos];
-                    let child  = &remaining[dot_pos + 1..];
+                    let child = &remaining[dot_pos + 1..];
                     index.entry(parent.to_string()).or_default().insert(child.to_string());
                     remaining = parent;
                 }
@@ -174,7 +174,9 @@ impl DixData {
                 let mut auto_value = 0i32;
                 let fields: HashMap<String, i32> = decl.fields.iter().map(|field| {
                     let value = field.value.unwrap_or_else(|| {
-                        let v = auto_value; auto_value += 1; v
+                        let v = auto_value;
+                        auto_value += 1;
+                        v
                     });
                     auto_value = value + 1;
                     (field.name.clone(), value)
@@ -311,109 +313,109 @@ impl DixData {
     fn config_value_to_string(value: &crate::Compiler::AST::ConfigValue) -> String {
         use crate::Compiler::AST::ConfigValue;
         match value {
-            ConfigValue::String(s)    => s.clone(),
-            ConfigValue::Integer(i)   => i.to_string(),
-            ConfigValue::Float(f)     => f.to_string(),
-            ConfigValue::Boolean(b)   => b.to_string(),
-            ConfigValue::Date(d)      => d.clone(),
+            ConfigValue::String(s) => s.clone(),
+            ConfigValue::Integer(i) => i.to_string(),
+            ConfigValue::Float(f) => f.to_string(),
+            ConfigValue::Boolean(b) => b.to_string(),
+            ConfigValue::Date(d) => d.clone(),
             ConfigValue::Timestamp(t) => t.clone(),
-            _                         => String::new(),
+            _ => String::new(),
         }
     }
 
-  // dix_data.rs — fn ast_value_to_dix_value  (replaces the version in Response 2)
-// Uses Runtime::DixValue which stores Date/Timestamp as String — no parsing needed.
+    // dix_data.rs — fn ast_value_to_dix_value  (replaces the version in Response 2)
+    // Uses Runtime::DixValue which stores Date/Timestamp as String — no parsing needed.
 
-fn ast_value_to_dix_value(
-    value: &crate::Compiler::AST::Value,
-    enums: Option<&HashMap<String, HashMap<String, i32>>>,
-) -> Option<DixValue> {
-    use crate::Compiler::AST::Value;
+    fn ast_value_to_dix_value(
+        value: &crate::Compiler::AST::Value,
+        enums: Option<&HashMap<String, HashMap<String, i32>>>,
+    ) -> Option<DixValue> {
+        use crate::Compiler::AST::Value;
 
-    match value {
-        // ── Primitives ────────────────────────────────────────────────────────
-        Value::Null { .. }                             => Some(DixValue::Null),
-        Value::Boolean { value: b, .. }                => Some(DixValue::Bool(*b)),
-        Value::Integer { value: i, .. }                => Some(DixValue::Int(*i)),
-        Value::Long { value: l, .. }                   => Some(DixValue::Long(*l)),
-        Value::Float { value: f, .. }                  => Some(DixValue::Float(*f)),
-        Value::Double { value: d, .. }                 => Some(DixValue::Double(*d)),
-        // FIX: scientific notation (e.g. 6.62607015e-34) — was silently None
-        Value::ScientificNotation { value: d, .. }     => Some(DixValue::Double(*d)),
-        Value::String { value: s, .. }                 => Some(DixValue::String(s.clone())),
-        Value::Date { value: d, .. }                   => Some(DixValue::Date(d.clone())),
-        Value::Timestamp { value: t, .. }              => Some(DixValue::Timestamp(t.clone())),
-        Value::HexColor { value: c, .. }               => Some(DixValue::HexColor(c.clone())),
-        // FIX: interpolated string — use template text
-        Value::InterpolatedString { template, .. }     => Some(DixValue::String(template.clone())),
+        match value {
+            // ── Primitives ────────────────────────────────────────────────────────
+            Value::Null { .. } => Some(DixValue::Null),
+            Value::Boolean { value: b, .. } => Some(DixValue::Bool(*b)),
+            Value::Integer { value: i, .. } => Some(DixValue::Int(*i)),
+            Value::Long { value: l, .. } => Some(DixValue::Long(*l)),
+            Value::Float { value: f, .. } => Some(DixValue::Float(*f)),
+            Value::Double { value: d, .. } => Some(DixValue::Double(*d)),
+            // FIX: scientific notation (e.g. 6.62607015e-34) — was silently None
+            Value::ScientificNotation { value: d, .. } => Some(DixValue::Double(*d)),
+            Value::String { value: s, .. } => Some(DixValue::String(s.clone())),
+            Value::Date { value: d, .. } => Some(DixValue::Date(d.clone())),
+            Value::Timestamp { value: t, .. } => Some(DixValue::Timestamp(t.clone())),
+            Value::HexColor { value: c, .. } => Some(DixValue::HexColor(c.clone())),
+            // FIX: interpolated string — use template text
+            Value::InterpolatedString { template, .. } => Some(DixValue::String(template.clone())),
 
-        // ── Collections ───────────────────────────────────────────────────────
-        Value::Array { values, .. } => {
-            let items: Vec<DixValue> = values.iter()
-                .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
-                .collect();
-            Some(DixValue::Array(items))
-        }
+            // ── Collections ───────────────────────────────────────────────────────
+            Value::Array { values, .. } => {
+                let items: Vec<DixValue> = values.iter()
+                    .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
+                    .collect();
+                Some(DixValue::Array(items))
+            }
 
-        // FIX: nested arrays — was silently None
-        Value::NestedArray { values, .. } => {
-            let items: Vec<DixValue> = values.iter()
-                .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
-                .collect();
-            Some(DixValue::Array(items))
-        }
+            // FIX: nested arrays — was silently None
+            Value::NestedArray { values, .. } => {
+                let items: Vec<DixValue> = values.iter()
+                    .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
+                    .collect();
+                Some(DixValue::Array(items))
+            }
 
-        Value::Object { properties, .. } => {
-            let mut obj = HashMap::new();
-            for prop in properties {
-                if let Some(dix_value) = Self::ast_value_to_dix_value(&prop.value, enums) {
-                    obj.insert(prop.key.clone(), dix_value);
+            Value::Object { properties, .. } => {
+                let mut obj = HashMap::new();
+                for prop in properties {
+                    if let Some(dix_value) = Self::ast_value_to_dix_value(&prop.value, enums) {
+                        obj.insert(prop.key.clone(), dix_value);
+                    }
+                }
+                Some(DixValue::Object(obj))
+            }
+
+            Value::EnumValue { enum_name, value: field_name, .. } => {
+                let resolved = enums
+                    .and_then(|e| e.get(enum_name.as_str()))
+                    .and_then(|fields| fields.get(field_name.as_str()))
+                    .copied()
+                    .unwrap_or(0);
+                Some(DixValue::Enum {
+                    enum_name: enum_name.clone(),
+                    field_name: field_name.clone(),
+                    value: resolved,
+                })
+            }
+
+            Value::PrefixedConstructor { prefix, arguments, .. } => {
+                match prefix.as_str() {
+                    // Tuple — recurses, so nested tuples like t:(t:(1,2), t:(3,4)) work correctly.
+                    "t" => {
+                        let items: Vec<DixValue> = arguments.iter()
+                            .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
+                            .collect();
+                        Some(DixValue::Tuple(items))
+                    }
+                    "b" => {
+                        if let Some(Value::String { value: s, .. }) = arguments.first() {
+                            Some(DixValue::Blob(s.clone()))
+                        } else { None }
+                    }
+                    "r" => {
+                        if let Some(Value::String { value: s, .. }) = arguments.first() {
+                            Some(DixValue::Regex(s.clone()))
+                        } else { None }
+                    }
+                    _ => None,
                 }
             }
-            Some(DixValue::Object(obj))
-        }
 
-        Value::EnumValue { enum_name, value: field_name, .. } => {
-            let resolved = enums
-                .and_then(|e| e.get(enum_name.as_str()))
-                .and_then(|fields| fields.get(field_name.as_str()))
-                .copied()
-                .unwrap_or(0);
-            Some(DixValue::Enum {
-                enum_name:  enum_name.clone(),
-                field_name: field_name.clone(),
-                value:      resolved,
-            })
+            // Unresolved / runtime-only nodes — not representable as static data.
+            _ => None,
         }
-
-        Value::PrefixedConstructor { prefix, arguments, .. } => {
-            match prefix.as_str() {
-                // Tuple — recurses, so nested tuples like t:(t:(1,2), t:(3,4)) work correctly.
-                "t" => {
-                    let items: Vec<DixValue> = arguments.iter()
-                        .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
-                        .collect();
-                    Some(DixValue::Tuple(items))
-                }
-                "b" => {
-                    if let Some(Value::String { value: s, .. }) = arguments.first() {
-                        Some(DixValue::Blob(s.clone()))
-                    } else { None }
-                }
-                "r" => {
-                    if let Some(Value::String { value: s, .. }) = arguments.first() {
-                        Some(DixValue::Regex(s.clone()))
-                    } else { None }
-                }
-                _ => None,
-            }
-        }
-
-        // Unresolved / runtime-only nodes — not representable as static data.
-        _ => None,
     }
 }
-
 // ── TryFrom implementations ───────────────────────────────────────────────────
 
 impl TryFrom<DixValue> for String {

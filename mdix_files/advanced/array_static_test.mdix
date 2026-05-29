@@ -1,0 +1,108 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "regular",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@QUICKFUNCS(
+    ~testArrayCreation<array>() {
+        let rangeArr = Array.range(1, 10);
+        let fillArr = Array.fill(42, 5);
+        let emptyArr = Array.empty();
+        let ofArr = Array.of(10, 20, 30, 40);
+        return rangeArr;
+    }
+
+    ~testArrayManipulation<array>() {
+        let baseArr = Array.of(1, 2, 3, 4, 5);
+        let repeated = Array.repeat(baseArr, 2);
+        let reversed = Array.reverse(baseArr);
+        let sorted = Array.sort(reversed);
+        let unique = Array.unique(Array.of(1, 2, 2, 3, 3, 3));
+        return unique;
+    }
+
+    ~testArraySlicing<array>() {
+        let arr = Array.range(1, 20);
+        let sliced = Array.slice(arr, 5, 15);
+        let filtered = Array.filter(sliced, 10);
+        return sliced;
+    }
+
+    ~testArraySearch<int>() {
+        let arr = Array.of(10, 20, 30, 20, 40);
+        let hasValue = Array.contains(arr, 30);
+        let firstIdx<int> = Array.indexOf(arr, 20);
+        let lastIdx<int> = Array.lastIndexOf(arr, 20);
+        if: hasValue {
+            return firstIdx + lastIdx;
+        }
+        else {
+            return -1;
+        }
+    }
+
+    ~testArrayAggregation<double>() {
+        let arr = Array.of(10, 20, 30, 40, 50);
+        let sumVal = Array.sum(arr);
+        let avgVal = Array.average(arr);
+        let minVal = Array.min(arr);
+        let maxVal = Array.max(arr);
+        return sumVal + avgVal;
+    }
+
+    ~testArrayConcat<array>() {
+        let arr1 = Array.of(1, 2, 3);
+        let arr2 = Array.of(4, 5, 6);
+        let arr3 = Array.of(7, 8, 9);
+        let combined = Array.concat(arr1, arr2, arr3);
+        return combined;
+    }
+
+    ~testArrayFromString<array>() {
+        let withSep = Array.fromString("apple,banana,cherry", ",");
+        let chars = Array.fromString("hello", "");
+        return withSep;
+    }
+
+    ~testArrayFlatten<array>() {
+        let nested = Array.of(Array.of(1, 2), Array.of(3, 4), Array.of(5, 6));
+        let flattened = Array.flatten(nested);
+        return flattened;
+    }
+
+    ~testArrayInChk<array>(operation<string>) {
+        let arr = Array.range(1, 10);
+        chk: operation {
+            -> "reverse" {
+                return Array.reverse(arr);
+            }
+            -> "sort" {
+                return Array.sort(Array.reverse(arr));
+            }
+            -> "unique" {
+                return Array.unique(Array.of(1, 1, 2, 2, 3));
+            }
+            -> miss {
+                return Array.empty();
+            }
+        }
+    }
+)
+
+@DATA(
+    test_creation = testArrayCreation(),
+    test_manipulation = testArrayManipulation(),
+    test_slicing = testArraySlicing(),
+    test_search = testArraySearch(),
+    test_aggregation = testArrayAggregation(),
+    test_concat = testArrayConcat(),
+    test_from_string = testArrayFromString(),
+    test_flatten = testArrayFlatten(),
+    test_chk_reverse = testArrayInChk("reverse"),
+    test_chk_sort = testArrayInChk("sort"),
+    test_chk_unique = testArrayInChk("unique"),
+    test_chk_miss = testArrayInChk("unknown")
+)

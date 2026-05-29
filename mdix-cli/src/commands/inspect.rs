@@ -7,6 +7,7 @@ use crate::output::{json_output, printer, table};
 use crate::services::validation;
 use dixscript::Runtime::{DixLoader, DixLoadOptions};
 
+
 #[derive(Args)]
 pub struct InspectArgs {
     /// Path to the .mdix file

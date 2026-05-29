@@ -1,0 +1,131 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "regular",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@QUICKFUNCS(
+    ~testIpParsing<string>() {
+        let ipv4 = IpAddress.parse("192.168.1.1");
+        let ipv6 = IpAddress.parse("2001:0db8::1");
+        let tryParsed = IpAddress.tryParse("192.168.1.1");
+        return ipv4;
+    }
+
+    ~testIpValidation<bool>() {
+        let valid = "192.168.1.1";
+        let invalid = "999.999.999.999";
+        let isValid1 = IpAddress.validate(valid);
+        let isValid2 = IpAddress.validate(invalid);
+        return isValid1;
+    }
+
+    ~testIpVersionCheck<bool>() {
+        let ipv4 = "192.168.1.1";
+        let ipv6 = "2001:0db8::1";
+        let isV4_1 = IpAddress.isV4(ipv4);
+        let isV4_2 = IpAddress.isV4(ipv6);
+        let isV6_1 = IpAddress.isV6(ipv4);
+        let isV6_2 = IpAddress.isV6(ipv6);
+        return isV4_1;
+    }
+
+    ~testIpPrivatePublic<bool>() {
+        let private1 = "192.168.1.1";
+        let private2 = "10.0.0.1";
+        let public1 = "8.8.8.8";
+        let isPrivate1 = IpAddress.isPrivate(private1);
+        let isPrivate2 = IpAddress.isPrivate(private2);
+        let isPublic = IpAddress.isPublic(public1);
+        return isPrivate1;
+    }
+
+    ~testIpLoopback<bool>() {
+        let localhost = "127.0.0.1";
+        let localv6 = "::1";
+        let normal = "192.168.1.1";
+        let isLoop1 = IpAddress.isLoopback(localhost);
+        let isLoop2 = IpAddress.isLoopback(localv6);
+        let isLoop3 = IpAddress.isLoopback(normal);
+        return isLoop1;
+    }
+
+    ~testIpBytes<array>() {
+        let ip = "192.168.1.100";
+        let bytes = IpAddress.toBytes(ip);
+        let reconstructed = IpAddress.fromBytes(bytes);
+        return bytes;
+    }
+
+    ~testIpRange<bool>() {
+        let ip = "192.168.1.50";
+        let start = "192.168.1.1";
+        let end = "192.168.1.100";
+        let inRange = IpAddress.inRange(ip, start, end);
+        return inRange;
+    }
+
+    ~testIpConstants<string>() {
+        let local = IpAddress.localhost();
+        let _any = IpAddress.any();
+        let broadcast = IpAddress.broadcast();
+        return local;
+    }
+
+    ~testIpInControlFlow<string>(ip<string>) {
+        let isValid = IpAddress.validate(ip);
+        if: isValid {
+            let isPrivate = IpAddress.isPrivate(ip);
+            if: isPrivate {
+                return "private";
+            }
+            else {
+                return "public";
+            }
+        }
+        else {
+            return "invalid";
+        }
+    }
+
+    ~testIpInChk<string>(operation<string>) {
+        let ip = "192.168.1.100";
+        chk: operation {
+            -> "is_v4" {
+                let mut result = IpAddress.isV4(ip);
+                return $"{result}";
+            }
+            -> "is_private" {
+                 result = IpAddress.isPrivate(ip);
+                return $"{result}";
+            }
+            -> "to_bytes" {
+                let bytes = IpAddress.toBytes(ip);
+                return "bytes-converted";
+            }
+            -> miss {
+                return "unknown";
+            }
+        }
+    }
+)
+
+@DATA(
+    test_parsing = testIpParsing(),
+    test_validation = testIpValidation(),
+    test_version = testIpVersionCheck(),
+    test_private_public = testIpPrivatePublic(),
+    test_loopback = testIpLoopback(),
+    test_bytes = testIpBytes(),
+    test_range = testIpRange(),
+    test_constants = testIpConstants(),
+    test_control_private = testIpInControlFlow("192.168.1.1"),
+    test_control_public = testIpInControlFlow("8.8.8.8"),
+    test_control_invalid = testIpInControlFlow("invalid-ip"),
+    test_chk_is_v4 = testIpInChk("is_v4"),
+    test_chk_is_private = testIpInChk("is_private"),
+    test_chk_to_bytes = testIpInChk("to_bytes"),
+    test_chk_miss = testIpInChk("unknown")
+)

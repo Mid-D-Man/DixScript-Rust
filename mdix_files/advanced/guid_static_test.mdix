@@ -1,0 +1,91 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "regular",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@QUICKFUNCS(
+    ~testGuidCreation<string>() {
+        let guid1 = Guid.new();
+        let guid2 = Guid.new();
+        let empty = Guid.empty();
+        return guid1;
+    }
+
+    ~testGuidParsing<string>() {
+        let validGuid = "550e8400-e29b-41d4-a716-446655440000";
+        let parsed = Guid.parse(validGuid);
+        let tryParsed = Guid.tryParse(validGuid);
+        return parsed;
+    }
+
+    ~testGuidValidation<bool>() {
+        let valid = "550e8400-e29b-41d4-a716-446655440000";
+        let invalid = "not-a-guid";
+        let isValid1 = Guid.validate(valid);
+        let isValid2 = Guid.validate(invalid);
+        return isValid1;
+    }
+
+    ~testGuidFormatting<string>() {
+        let guid = Guid.parse("550e8400-e29b-41d4-a716-446655440000");
+        let formatN = Guid.format(guid, "N");
+        let formatD = Guid.format(guid, "D");
+        let formatB = Guid.format(guid, "B");
+        let formatP = Guid.format(guid, "P");
+        return formatD;
+    }
+
+    ~testGuidBytes<array>() {
+        let guid = Guid.new();
+        let bytes = Guid.toBytes(guid);
+        let reconstructed = Guid.fromBytes(bytes);
+        return bytes;
+    }
+
+    ~testGuidInControlFlow<string>() {
+        let guid = Guid.new();
+        let isValid = Guid.validate(guid);
+        if: isValid {
+            return "valid-guid";
+        }
+        else {
+            return "invalid-guid";
+        }
+    }
+
+    ~testGuidInChk<string>(operation<string>) {
+        let guid = "550e8400-e29b-41d4-a716-446655440000";
+        chk: operation {
+            -> "parse" {
+                return Guid.parse(guid);
+            }
+            -> "format_n" {
+                let parsed = Guid.parse(guid);
+                return Guid.format(parsed, "N");
+            }
+            -> "validate" {
+                let isValid = Guid.validate(guid);
+                return $"{isValid}";
+            }
+            -> miss {
+                return "unknown";
+            }
+        }
+    }
+)
+
+@DATA(
+    test_creation = testGuidCreation(),
+    test_parsing = testGuidParsing(),
+    test_validation = testGuidValidation(),
+    test_formatting = testGuidFormatting(),
+    test_bytes = testGuidBytes(),
+    test_control_flow = testGuidInControlFlow(),
+    test_chk_parse = testGuidInChk("parse"),
+    test_chk_format = testGuidInChk("format_n"),
+    test_chk_validate = testGuidInChk("validate"),
+    test_chk_miss = testGuidInChk("unknown")
+)

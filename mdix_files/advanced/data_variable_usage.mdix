@@ -29,6 +29,7 @@
   ~formatServerInfo<string> => global(name<string>, type<enum>, port<int>) {
     let typeStr<string> = type == ServerType.DEVELOPMENT ? "DEV" :
                           type == ServerType.STAGING      ? "STAGE" : "PROD"
+
     return $"{name} ({typeStr}:{port})"
   }
 
@@ -92,8 +93,8 @@
 
   // Test 8: Objects passed to functions
   app_config = {
-    name    = "MyApp"
-    version = "1.0.0"
+    name    = "MyApp",
+    version = "1.0.0",
     debug   = false
   }
   config_processed = processConfig(app_config)

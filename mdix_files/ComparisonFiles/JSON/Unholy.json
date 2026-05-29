@@ -1,0 +1,3340 @@
+{
+  "store": {
+    "configuration": {
+      "general": {
+        "store_name": "TechMart Global",
+        "store_id": "TM-2025-GLOBAL",
+        "version": "3.2.1",
+        "established": "2020-03-15T00:00:00Z",
+        "timezone": "UTC",
+        "default_currency": "USD",
+        "supported_currencies": ["USD", "EUR", "GBP", "JPY", "AUD"],
+        "default_language": "en",
+        "supported_languages": ["en", "es", "fr", "de", "ja"],
+        "contact": {
+          "support_email": "support@techmart.global",
+          "sales_email": "sales@techmart.global",
+          "phone": {
+            "main": "+1-800-TECHMART",
+            "support": "+1-800-TECH-SUP",
+            "international": "+44-20-7123-4567"
+          },
+          "address": {
+            "street": "123 Innovation Boulevard",
+            "suite": "Suite 500",
+            "city": "San Francisco",
+            "state": "CA",
+            "postal_code": "94105",
+            "country": "United States",
+            "coordinates": {
+              "latitude": 37.7749,
+              "longitude": -122.4194
+            }
+          }
+        }
+      },
+      "business_hours": {
+        "timezone": "America/Los_Angeles",
+        "support_hours": {
+          "monday": {
+            "open": "08:00",
+            "close": "20:00",
+            "lunch_break": {
+              "start": "12:00",
+              "end": "13:00"
+            }
+          },
+          "tuesday": {
+            "open": "08:00",
+            "close": "20:00",
+            "lunch_break": {
+              "start": "12:00",
+              "end": "13:00"
+            }
+          },
+          "wednesday": {
+            "open": "08:00",
+            "close": "20:00",
+            "lunch_break": {
+              "start": "12:00",
+              "end": "13:00"
+            }
+          },
+          "thursday": {
+            "open": "08:00",
+            "close": "20:00",
+            "lunch_break": {
+              "start": "12:00",
+              "end": "13:00"
+            }
+          },
+          "friday": {
+            "open": "08:00",
+            "close": "20:00",
+            "lunch_break": {
+              "start": "12:00",
+              "end": "13:00"
+            }
+          },
+          "saturday": {
+            "open": "10:00",
+            "close": "18:00",
+            "lunch_break": null
+          },
+          "sunday": {
+            "open": "10:00",
+            "close": "18:00",
+            "lunch_break": null
+          }
+        }
+      },
+      "payment_methods": {
+        "credit_cards": {
+          "enabled": true,
+          "accepted_types": ["visa", "mastercard", "amex", "discover"],
+          "processing_fee_percent": 2.9,
+          "processing_fee_fixed": 0.30,
+          "minimum_amount": 1.00,
+          "maximum_amount": 50000.00,
+          "refund_policy": {
+            "full_refund_days": 30,
+            "partial_refund_days": 60,
+            "restocking_fee_percent": 15
+          }
+        },
+        "paypal": {
+          "enabled": true,
+          "processing_fee_percent": 2.9,
+          "processing_fee_fixed": 0.30,
+          "minimum_amount": 1.00,
+          "maximum_amount": 50000.00,
+          "refund_policy": {
+            "full_refund_days": 30,
+            "partial_refund_days": 60,
+            "restocking_fee_percent": 15
+          }
+        },
+        "apple_pay": {
+          "enabled": true,
+          "processing_fee_percent": 2.9,
+          "processing_fee_fixed": 0.30,
+          "minimum_amount": 1.00,
+          "maximum_amount": 50000.00,
+          "refund_policy": {
+            "full_refund_days": 30,
+            "partial_refund_days": 60,
+            "restocking_fee_percent": 15
+          }
+        },
+        "google_pay": {
+          "enabled": true,
+          "processing_fee_percent": 2.9,
+          "processing_fee_fixed": 0.30,
+          "minimum_amount": 1.00,
+          "maximum_amount": 50000.00,
+          "refund_policy": {
+            "full_refund_days": 30,
+            "partial_refund_days": 60,
+            "restocking_fee_percent": 15
+          }
+        },
+        "cryptocurrency": {
+          "enabled": true,
+          "accepted_coins": ["BTC", "ETH", "USDC"],
+          "processing_fee_percent": 1.5,
+          "processing_fee_fixed": 0.00,
+          "minimum_amount": 10.00,
+          "maximum_amount": 100000.00,
+          "refund_policy": {
+            "full_refund_days": 14,
+            "partial_refund_days": 30,
+            "restocking_fee_percent": 20
+          }
+        }
+      },
+      "shipping": {
+        "domestic": {
+          "standard": {
+            "name": "Standard Shipping",
+            "base_cost": 5.99,
+            "cost_per_pound": 0.50,
+            "estimated_days_min": 5,
+            "estimated_days_max": 7,
+            "free_shipping_threshold": 50.00,
+            "tracking_included": true,
+            "insurance_included": false,
+            "signature_required": false
+          },
+          "expedited": {
+            "name": "Expedited Shipping",
+            "base_cost": 12.99,
+            "cost_per_pound": 1.00,
+            "estimated_days_min": 3,
+            "estimated_days_max": 4,
+            "free_shipping_threshold": 100.00,
+            "tracking_included": true,
+            "insurance_included": true,
+            "signature_required": false
+          },
+          "overnight": {
+            "name": "Overnight Shipping",
+            "base_cost": 29.99,
+            "cost_per_pound": 2.50,
+            "estimated_days_min": 1,
+            "estimated_days_max": 1,
+            "free_shipping_threshold": null,
+            "tracking_included": true,
+            "insurance_included": true,
+            "signature_required": true
+          }
+        },
+        "international": {
+          "standard": {
+            "name": "International Standard",
+            "base_cost": 25.99,
+            "cost_per_pound": 3.00,
+            "estimated_days_min": 10,
+            "estimated_days_max": 15,
+            "free_shipping_threshold": 200.00,
+            "tracking_included": true,
+            "insurance_included": true,
+            "signature_required": false,
+            "customs_declaration_required": true
+          },
+          "express": {
+            "name": "International Express",
+            "base_cost": 59.99,
+            "cost_per_pound": 5.00,
+            "estimated_days_min": 5,
+            "estimated_days_max": 7,
+            "free_shipping_threshold": null,
+            "tracking_included": true,
+            "insurance_included": true,
+            "signature_required": true,
+            "customs_declaration_required": true
+          }
+        }
+      },
+      "tax_configuration": {
+        "enabled": true,
+        "calculation_method": "destination_based",
+        "rates": {
+          "california": {
+            "state_rate": 7.25,
+            "county_rates": {
+              "los_angeles": 2.00,
+              "san_francisco": 1.50,
+              "san_diego": 1.00
+            },
+            "city_rates": {
+              "los_angeles": 0.50,
+              "san_francisco": 0.00,
+              "san_diego": 0.50
+            }
+          },
+          "new_york": {
+            "state_rate": 4.00,
+            "county_rates": {
+              "new_york": 4.50,
+              "kings": 4.50,
+              "queens": 4.50
+            },
+            "city_rates": {
+              "new_york_city": 0.38
+            }
+          },
+          "texas": {
+            "state_rate": 6.25,
+            "county_rates": {
+              "harris": 1.00,
+              "dallas": 1.00,
+              "travis": 1.00
+            },
+            "city_rates": {
+              "houston": 1.00,
+              "dallas": 1.00,
+              "austin": 1.00
+            }
+          }
+        }
+      }
+    },
+    "categories": {
+      "electronics": {
+        "id": "CAT-ELEC-001",
+        "name": "Electronics",
+        "slug": "electronics",
+        "description": "All electronic devices and accessories",
+        "parent_id": null,
+        "level": 1,
+        "display_order": 1,
+        "is_active": true,
+        "seo": {
+          "meta_title": "Electronics - TechMart Global",
+          "meta_description": "Shop the latest electronics",
+          "meta_keywords": ["electronics", "tech", "gadgets"]
+        },
+        "subcategories": {
+          "computers": {
+            "id": "CAT-COMP-001",
+            "name": "Computers",
+            "slug": "computers",
+            "description": "Desktop and laptop computers",
+            "parent_id": "CAT-ELEC-001",
+            "level": 2,
+            "display_order": 1,
+            "is_active": true,
+            "seo": {
+              "meta_title": "Computers - TechMart Global",
+              "meta_description": "Shop desktop and laptop computers",
+              "meta_keywords": ["computers", "laptops", "desktops"]
+            },
+            "subcategories": {
+              "laptops": {
+                "id": "CAT-LAPT-001",
+                "name": "Laptops",
+                "slug": "laptops",
+                "description": "Portable laptop computers",
+                "parent_id": "CAT-COMP-001",
+                "level": 3,
+                "display_order": 1,
+                "is_active": true,
+                "seo": {
+                  "meta_title": "Laptops - TechMart Global",
+                  "meta_description": "Shop laptop computers",
+                  "meta_keywords": ["laptops", "notebooks", "portable"]
+                },
+                "subcategories": {
+                  "gaming_laptops": {
+                    "id": "CAT-GAML-001",
+                    "name": "Gaming Laptops",
+                    "slug": "gaming-laptops",
+                    "description": "High-performance gaming laptops",
+                    "parent_id": "CAT-LAPT-001",
+                    "level": 4,
+                    "display_order": 1,
+                    "is_active": true,
+                    "seo": {
+                      "meta_title": "Gaming Laptops - TechMart Global",
+                      "meta_description": "Shop gaming laptops",
+                      "meta_keywords": ["gaming", "laptops", "performance"]
+                    }
+                  },
+                  "business_laptops": {
+                    "id": "CAT-BUSL-001",
+                    "name": "Business Laptops",
+                    "slug": "business-laptops",
+                    "description": "Professional business laptops",
+                    "parent_id": "CAT-LAPT-001",
+                    "level": 4,
+                    "display_order": 2,
+                    "is_active": true,
+                    "seo": {
+                      "meta_title": "Business Laptops - TechMart Global",
+                      "meta_description": "Shop business laptops",
+                      "meta_keywords": ["business", "professional", "enterprise"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+          },{
+  "products": {
+    "laptop_001": {
+      "product_id": "PROD-LAPT-001",
+      "sku": "LAPT-GAM-RTX4090-001",
+      "name": "UltraBook Pro Gaming Laptop 17\"",
+      "slug": "ultrabook-pro-gaming-laptop-17",
+      "category_id": "CAT-GAML-001",
+      "brand": {
+        "id": "BRAND-001",
+        "name": "UltraBook",
+        "country": "United States",
+        "founded": 2015,
+        "website": "https://ultrabook.com"
+      },
+      "description": {
+        "short": "High-performance gaming laptop with RTX 4090",
+        "long": "The UltraBook Pro Gaming Laptop features the latest NVIDIA RTX 4090 GPU, Intel Core i9-13900HX processor, and 32GB DDR5 RAM. Perfect for gaming, content creation, and professional work.",
+        "features": [
+          "NVIDIA RTX 4090 16GB GDDR6",
+          "Intel Core i9-13900HX (24 cores)",
+          "32GB DDR5-5600MHz RAM (upgradeable to 64GB)",
+          "2TB NVMe PCIe 4.0 SSD",
+          "17.3\" QHD 240Hz display",
+          "RGB mechanical keyboard",
+          "Advanced cooling system",
+          "Thunderbolt 4 ports"
+        ],
+        "specifications": {
+          "processor": {
+            "brand": "Intel",
+            "model": "Core i9-13900HX",
+            "generation": "13th Gen",
+            "cores": 24,
+            "threads": 32,
+            "base_clock_ghz": 2.2,
+            "boost_clock_ghz": 5.4,
+            "cache_mb": 36,
+            "tdp_watts": 55
+          },
+          "graphics": {
+            "brand": "NVIDIA",
+            "model": "GeForce RTX 4090",
+            "vram_gb": 16,
+            "vram_type": "GDDR6",
+            "cuda_cores": 16384,
+            "base_clock_mhz": 1980,
+            "boost_clock_mhz": 2610,
+            "ray_tracing": true,
+            "dlss_version": "3.5"
+          },
+          "memory": {
+            "capacity_gb": 32,
+            "type": "DDR5",
+            "speed_mhz": 5600,
+            "slots": 2,
+            "max_capacity_gb": 64,
+            "upgradeable": true
+          },
+          "storage": {
+            "primary": {
+              "capacity_gb": 2000,
+              "type": "NVMe SSD",
+              "interface": "PCIe 4.0 x4",
+              "read_speed_mbps": 7000,
+              "write_speed_mbps": 6000,
+              "form_factor": "M.2 2280"
+            },
+            "expansion_slots": [
+              {
+                "slot_number": 1,
+                "type": "M.2 2280",
+                "interface": "PCIe 4.0 x4",
+                "occupied": false
+              }
+            ]
+          },
+          "display": {
+            "size_inches": 17.3,
+            "resolution": {
+              "width": 2560,
+              "height": 1440,
+              "name": "QHD"
+            },
+            "refresh_rate_hz": 240,
+            "response_time_ms": 3,
+            "panel_type": "IPS",
+            "brightness_nits": 500,
+            "color_gamut": {
+              "srgb_percent": 100,
+              "adobe_rgb_percent": 89,
+              "dci_p3_percent": 98
+            },
+            "features": ["G-Sync", "HDR400", "Anti-glare"]
+          },
+          "connectivity": {
+            "wifi": {
+              "standard": "Wi-Fi 6E",
+              "speed_mbps": 2400,
+              "bands": ["2.4GHz", "5GHz", "6GHz"]
+            },
+            "bluetooth": {
+              "version": "5.3",
+              "range_meters": 10
+            },
+            "ports": {
+              "usb_c_thunderbolt_4": 2,
+              "usb_a_3_2_gen2": 3,
+              "hdmi": {
+                "count": 1,
+                "version": "2.1"
+              },
+              "ethernet": {
+                "count": 1,
+                "speed_gbps": 2.5
+              },
+              "audio_jack": 1,
+              "sd_card_reader": {
+                "included": true,
+                "type": "UHS-III"
+              }
+            }
+          },
+          "battery": {
+            "capacity_wh": 99,
+            "cells": 8,
+            "type": "Lithium Polymer",
+            "life_hours": 6,
+            "charging": {
+              "power_watts": 330,
+              "fast_charge": true,
+              "charge_time_hours": 2.5
+            }
+          },
+          "dimensions": {
+            "width_mm": 397,
+            "depth_mm": 284,
+            "height_mm": 27.9,
+            "weight_kg": 3.2
+          },
+          "operating_system": {
+            "name": "Windows 11 Pro",
+            "version": "23H2",
+            "architecture": "64-bit",
+            "license_type": "OEM"
+          }
+        }
+      },
+      "pricing": {
+        "base_price": 3299.99,
+        "currency": "USD",
+        "discounts": {
+          "current_discount": {
+            "type": "percentage",
+            "value": 10,
+            "start_date": "2025-01-01T00:00:00Z",
+            "end_date": "2025-01-31T23:59:59Z",
+            "reason": "New Year Sale"
+          },
+          "volume_discounts": [
+            {
+              "quantity_min": 5,
+              "quantity_max": 9,
+              "discount_percent": 5
+            },
+            {
+              "quantity_min": 10,
+              "quantity_max": 24,
+              "discount_percent": 8
+            },
+            {
+              "quantity_min": 25,
+              "quantity_max": null,
+              "discount_percent": 12
+            }
+          ]
+        },
+        "final_price": 2969.99,
+        "msrp": 3499.99,
+        "cost": 2100.00,
+        "margin_percent": 41.45,
+        "tax_class": "electronics",
+        "price_history": [
+          {
+            "date": "2024-12-01T00:00:00Z",
+            "price": 3299.99,
+            "reason": "Base price"
+          },
+          {
+            "date": "2024-12-15T00:00:00Z",
+            "price": 3199.99,
+            "reason": "Holiday promotion"
+          },
+          {
+            "date": "2025-01-01T00:00:00Z",
+            "price": 2969.99,
+            "reason": "New Year Sale"
+          }
+        ]
+      },
+      "inventory": {
+        "warehouses": {
+          "warehouse_us_west": {
+            "warehouse_id": "WH-US-WEST-001",
+            "location": {
+              "name": "California Distribution Center",
+              "street": "456 Logistics Way",
+              "city": "Los Angeles",
+              "state": "CA",
+              "postal_code": "90001",
+              "country": "United States"
+            },
+            "stock": {
+              "quantity": 45,
+              "reserved": 12,
+              "available": 33,
+              "incoming": 100,
+              "incoming_date": "2025-01-20T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "A",
+              "shelf": "12",
+              "bin": "03"
+            }
+          },
+          "warehouse_us_east": {
+            "warehouse_id": "WH-US-EAST-001",
+            "location": {
+              "name": "New York Distribution Center",
+              "street": "789 Commerce Blvd",
+              "city": "Newark",
+              "state": "NJ",
+              "postal_code": "07102",
+              "country": "United States"
+            },
+            "stock": {
+              "quantity": 38,
+              "reserved": 8,
+              "available": 30,
+              "incoming": 75,
+              "incoming_date": "2025-01-22T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "B",
+              "shelf": "08",
+              "bin": "15"
+            }
+          },
+          "warehouse_eu_central": {
+            "warehouse_id": "WH-EU-CENT-001",
+            "location": {
+              "name": "Germany Distribution Center",
+              "street": "123 Industriestraße",
+              "city": "Frankfurt",
+              "postal_code": "60308",
+              "country": "Germany"
+            },
+            "stock": {
+              "quantity": 52,
+              "reserved": 15,
+              "available": 37,
+              "incoming": 80,
+              "incoming_date": "2025-01-25T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "C",
+              "shelf": "05",
+              "bin": "22"
+            }
+          }
+        },
+        "stock_alerts": {
+          "low_stock_threshold": 20,
+          "out_of_stock_threshold": 0,
+          "overstocked_threshold": 200,
+          "reorder_point": 30,
+          "reorder_quantity": 100
+        }
+      },
+      "shipping": {
+        "weight_kg": 4.5,
+        "dimensions": {
+          "length_cm": 50,
+          "width_cm": 40,
+          "height_cm": 10
+        },
+        "package_type": "box",
+        "fragile": true,
+        "requires_signature": true,
+        "shipping_class": "standard",
+        "handling_time_days": 2
+      },
+      "media": {
+        "images": [
+          {
+            "url": "https://cdn.techmart.com/products/lapt-001/main.jpg",
+            "alt": "UltraBook Pro Gaming Laptop Front View",
+            "type": "main",
+            "order": 1,
+            "width": 2000,
+            "height": 2000
+          },
+          {
+            "url": "https://cdn.techmart.com/products/lapt-001/side.jpg",
+            "alt": "UltraBook Pro Gaming Laptop Side View",
+            "type": "gallery",
+            "order": 2,
+            "width": 2000,
+            "height": 2000
+          },
+          {
+            "url": "https://cdn.techmart.com/products/lapt-001/keyboard.jpg",
+            "alt": "RGB Keyboard Close-up",
+            "type": "gallery",
+            "order": 3,
+            "width": 2000,
+            "height": 2000
+          },
+          {
+            "url": "https://cdn.techmart.com/products/lapt-001/ports.jpg",
+            "alt": "Available Ports",
+            "type": "gallery",
+            "order": 4,
+            "width": 2000,
+            "height": 2000
+          }
+        ],
+        "videos": [
+          {
+            "url": "https://cdn.techmart.com/products/lapt-001/review.mp4",
+            "title": "Product Review",
+            "duration_seconds": 300,
+            "thumbnail": "https://cdn.techmart.com/products/lapt-001/review-thumb.jpg"
+          }
+        ]
+      },
+      "reviews": {
+        "average_rating": 4.7,
+        "total_reviews": 234,
+        "rating_distribution": {
+          "5_star": 156,
+          "4_star": 52,
+          "3_star": 18,
+          "2_star": 5,
+          "1_star": 3
+        }
+      },
+      "warranty": {
+        "manufacturer_warranty": {
+          "duration_months": 12,
+          "type": "limited",
+          "coverage": ["manufacturing defects", "hardware failures"],
+          "exclusions": ["accidental damage", "liquid damage", "cosmetic damage"]
+        },
+        "extended_warranty_options": [
+          {
+            "duration_months": 24,
+            "price": 299.99,
+            "coverage": ["manufacturing defects", "hardware failures", "accidental damage"],
+            "deductible": 99.00
+          },
+          {
+            "duration_months": 36,
+            "price": 499.99,
+            "coverage": ["manufacturing defects", "hardware failures", "accidental damage", "liquid damage"],
+            "deductible": 149.00
+          }
+        ]
+      },
+      "related_products": [
+        "PROD-LAPT-002",
+        "PROD-ACC-COOL-001",
+        "PROD-ACC-BAG-001",
+        "PROD-ACC-MOUSE-001"
+      ],
+      "tags": ["gaming", "laptop", "rtx4090", "high-performance", "17-inch"],
+      "is_active": true,
+      "is_featured": true,
+      "created_at": "2024-11-15T10:30:00Z",
+      "updated_at": "2025-01-10T15:45:00Z"
+    },
+    "laptop_002": {
+      "product_id": "PROD-LAPT-002",
+      "sku": "LAPT-BUS-I7-002",
+      "name": "ProWork Business Laptop 15.6\"",
+      "slug": "prowork-business-laptop-156",
+      "category_id": "CAT-BUSL-001",
+      "brand": {
+        "id": "BRAND-002",
+        "name": "ProWork",
+        "country": "Japan",
+        "founded": 2005,
+        "website": "https://prowork.com"
+      },
+      "description": {
+        "short": "Professional business laptop with enterprise features",
+        "long": "The ProWork Business Laptop is designed for professionals who need reliability, security, and performance. Features include enterprise-grade security, long battery life, and professional support.",
+        "features": [
+          "Intel Core i7-13700H processor",
+          "16GB DDR5 RAM",
+          "512GB NVMe SSD",
+          "15.6\" Full HD IPS display",
+          "TPM 2.0 security chip",
+          "Fingerprint reader",
+          "Windows 11 Pro",
+          "3-year warranty"
+        ],
+        "specifications": {
+          "processor": {
+            "brand": "Intel",
+            "model": "Core i7-13700H",
+            "generation": "13th Gen",
+            "cores": 14,
+            "threads": 20,
+            "base_clock_ghz": 2.4,
+            "boost_clock_ghz": 5.0,
+            "cache_mb": 24,
+            "tdp_watts": 45
+          },
+          "graphics": {
+            "brand": "Intel",
+            "model": "Iris Xe Graphics",
+            "vram_gb": 0,
+            "vram_type": "Shared",
+            "execution_units": 96,
+            "base_clock_mhz": 300,
+            "boost_clock_mhz": 1500,
+            "ray_tracing": false,
+            "dlss_version": null
+          },
+          "memory": {
+            "capacity_gb": 16,
+            "type": "DDR5",
+            "speed_mhz": 4800,
+            "slots": 2,
+            "max_capacity_gb": 32,
+            "upgradeable": true
+          },
+          "storage": {
+            "primary": {
+              "capacity_gb": 512,
+              "type": "NVMe SSD",
+              "interface": "PCIe 4.0 x4",
+              "read_speed_mbps": 5000,
+              "write_speed_mbps": 4500,
+              "form_factor": "M.2 2280"
+            },
+            "expansion_slots": [
+              {
+                "slot_number": 1,
+                "type": "M.2 2280",
+                "interface": "PCIe 4.0 x4",
+                "occupied": false
+              }
+            ]
+          },
+          "display": {
+            "size_inches": 15.6,
+            "resolution": {
+              "width": 1920,
+              "height": 1080,
+              "name": "Full HD"
+            },
+            "refresh_rate_hz": 60,
+            "response_time_ms": 8,
+            "panel_type": "IPS",
+            "brightness_nits": 300,
+            "color_gamut": {
+              "srgb_percent": 100,
+              "adobe_rgb_percent": 72,
+              "dci_p3_percent": 75
+            },
+            "features": ["Anti-glare", "Touch screen"]
+          },
+          "connectivity": {
+            "wifi": {
+              "standard": "Wi-Fi 6",
+              "speed_mbps": 1200,
+              "bands": ["2.4GHz", "5GHz"]
+            },
+            "bluetooth": {
+              "version": "5.2",
+              "range_meters": 10
+            },
+            "ports": {
+              "usb_c_thunderbolt_4": 1,
+              "usb_a_3_2_gen2": 2,
+              "hdmi": {
+                "count": 1,
+                "version": "2.0"
+              },
+              "ethernet": {
+                "count": 1,
+                "speed_gbps": 1
+              },
+              "audio_jack": 1,
+              "sd_card_reader": {
+                "included": false,
+                "type": null
+              }
+            }
+          },
+          "battery": {
+            "capacity_wh": 72,
+            "cells": 6,
+            "type": "Lithium Polymer",
+            "life_hours": 12,
+            "charging": {
+              "power_watts": 65,
+              "fast_charge": true,
+              "charge_time_hours": 1.5
+            }
+          },
+          "dimensions": {
+            "width_mm": 359,
+            "depth_mm": 238,
+            "height_mm": 19.9,
+            "weight_kg": 1.8
+          },
+          "operating_system": {
+            "name": "Windows 11 Pro",
+            "version": "23H2",
+            "architecture": "64-bit",
+            "license_type": "OEM"
+          }
+        }
+      },
+      "pricing": {
+        "base_price": 1299.99,
+        "currency": "USD",
+        "discounts": {
+          "current_discount": {
+            "type": "percentage",
+            "value": 15,
+            "start_date": "2025-01-01T00:00:00Z",
+            "end_date": "2025-01-31T23:59:59Z",
+            "reason": "New Year Sale"
+          },
+          "volume_discounts": [
+            {
+              "quantity_min": 10,
+              "quantity_max": 24,
+              "discount_percent": 5
+            },
+            {
+              "quantity_min": 25,
+              "quantity_max": 49,
+              "discount_percent": 8
+            },
+            {
+              "quantity_min": 50,
+              "quantity_max": null,
+              "discount_percent": 12
+            }
+          ]
+        },
+        "final_price": 1104.99,
+        "msrp": 1399.99,
+        "cost": 750.00,
+        "margin_percent": 47.33,
+        "tax_class": "electronics",
+        "price_history": [
+          {
+            "date": "2024-11-15T00:00:00Z",
+            "price": 1299.99,
+            "reason": "Base price"
+          },
+          {
+            "date": "2024-12-20T00:00:00Z",
+            "price": 1249.99,
+            "reason": "Holiday promotion"
+          },
+          {
+            "date": "2025-01-01T00:00:00Z",
+            "price": 1104.99,
+            "reason": "New Year Sale"
+          }
+        ]
+      },
+      "inventory": {
+        "warehouses": {
+          "warehouse_us_west": {
+            "warehouse_id": "WH-US-WEST-001",
+            "location": {
+              "name": "California Distribution Center",
+              "street": "456 Logistics Way",
+              "city": "Los Angeles",
+              "state": "CA",
+              "postal_code": "90001",
+              "country": "United States"
+            },
+            "stock": {
+              "quantity": 150,
+              "reserved": 35,
+              "available": 115,
+              "incoming": 200,
+              "incoming_date": "2025-01-18T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "A",
+              "shelf": "15",
+              "bin": "08"
+            }
+          },
+          "warehouse_us_east": {
+            "warehouse_id": "WH-US-EAST-001",
+            "location": {
+              "name": "New York Distribution Center",
+              "street": "789 Commerce Blvd",
+              "city": "Newark",
+              "state": "NJ",
+              "postal_code": "07102",
+              "country": "United States"
+            },
+            "stock": {
+              "quantity": 125,
+              "reserved": 28,
+              "available": 97,
+              "incoming": 150,
+              "incoming_date": "2025-01-20T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "B",
+              "shelf": "12",
+              "bin": "20"
+            }
+          },
+          "warehouse_eu_central": {
+            "warehouse_id": "WH-EU-CENT-001",
+            "location": {
+              "name": "Germany Distribution Center",
+              "street": "123 Industriestraße",
+              "city": "Frankfurt",
+              "postal_code": "60308",
+              "country": "Germany"
+            },
+            "stock": {
+              "quantity": 180,
+              "reserved": 42,
+              "available": 138,
+              "incoming": 250,
+              "incoming_date": "2025-01-22T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "C",
+              "shelf": "08",
+              "bin": "12"
+            }
+          }
+        },
+        "stock_alerts": {
+          "low_stock_threshold": 50,
+          "out_of_stock_threshold": 0,
+          "overstocked_threshold": 500,
+          "reorder_point": 75,
+          "reorder_quantity": 200
+        }
+      },
+      "shipping": {
+        "weight_kg": 2.5,
+        "dimensions": {
+          "length_cm": 40,
+          "width_cm": 30,
+          "height_cm": 8
+        },
+        "package_type": "box",
+        "fragile": true,
+        "requires_signature": false,
+        "shipping_class": "standard",
+        "handling_time_days": 1
+      },
+      "media": {
+        "images": [
+          {
+            "url": "https://cdn.techmart.com/products/lapt-002/main.jpg",
+            "alt": "ProWork Business Laptop Front View",
+            "type": "main",
+            "order": 1,
+            "width": 2000,
+            "height": 2000
+          },
+          {
+            "url": "https://cdn.techmart.com/products/lapt-002/side.jpg",
+            "alt": "ProWork Business Laptop Side View",
+            "type": "gallery",
+            "order": 2,
+            "width": 2000,
+            "height": 2000
+          }
+        ],
+        "videos": []
+      },
+      "reviews": {
+        "average_rating": 4.5,
+        "total_reviews": 89,
+        "rating_distribution": {
+          "5_star": 52,
+          "4_star": 25,
+          "3_star": 8,
+          "2_star": 3,
+          "1_star": 1
+        }
+      },
+      "warranty": {
+        "manufacturer_warranty": {
+          "duration_months": 36,
+          "type": "limited",
+          "coverage": ["manufacturing defects", "hardware failures"],
+          "exclusions": ["accidental damage", "liquid damage"]
+        },
+        "extended_warranty_options": []
+      },
+      "related_products": [
+        "PROD-LAPT-001",
+        "PROD-ACC-DOCK-001",
+        "PROD-ACC-BAG-002"
+      ],
+      "tags": ["business", "laptop", "professional", "enterprise"],
+      "is_active": true,
+      "is_featured": false,
+      "created_at": "2024-11-20T14:20:00Z",
+      "updated_at": "2025-01-08T11:30:00Z"
+    }
+  }
+            },
+    "accessory_cooling_001": {
+      "product_id": "PROD-ACC-COOL-001",
+      "sku": "ACC-COOL-RGB-001",
+      "name": "CoolMaster RGB Laptop Cooling Pad",
+      "slug": "coolmaster-rgb-laptop-cooling-pad",
+      "category_id": "CAT-ACC-COOL-001",
+      "brand": {
+        "id": "BRAND-003",
+        "name": "CoolMaster",
+        "country": "Taiwan",
+        "founded": 2010,
+        "website": "https://coolmaster.com"
+      },
+      "description": {
+        "short": "Professional laptop cooling pad with RGB lighting",
+        "long": "Keep your laptop cool during intense gaming sessions or heavy workloads. Features 6 high-speed fans, RGB lighting, and adjustable height settings.",
+        "features": [
+          "6 high-speed cooling fans (1200 RPM)",
+          "Customizable RGB lighting (16.8M colors)",
+          "5 adjustable height settings",
+          "Dual USB ports",
+          "Fits laptops up to 17.3 inches",
+          "Non-slip surface",
+          "Quiet operation (<25dB)"
+        ],
+        "specifications": {
+          "fans": {
+            "count": 6,
+            "size_mm": 110,
+            "speed_rpm": 1200,
+            "airflow_cfm": 85,
+            "noise_level_db": 23
+          },
+          "lighting": {
+            "type": "RGB LED",
+            "colors": 16777216,
+            "modes": ["static", "breathing", "rainbow", "wave"],
+            "controllable": true
+          },
+          "dimensions": {
+            "width_mm": 420,
+            "depth_mm": 300,
+            "height_mm_min": 25,
+            "height_mm_max": 45,
+            "weight_kg": 0.85
+          },
+          "compatibility": {
+            "max_laptop_size_inches": 17.3,
+            "supported_weights_kg": 5
+          },
+          "power": {
+            "input": "USB 5V",
+            "consumption_watts": 5,
+            "cable_length_cm": 80
+          }
+        }
+      },
+      "pricing": {
+        "base_price": 39.99,
+        "currency": "USD",
+        "discounts": {
+          "current_discount": null,
+          "volume_discounts": [
+            {
+              "quantity_min": 5,
+              "quantity_max": 9,
+              "discount_percent": 10
+            },
+            {
+              "quantity_min": 10,
+              "quantity_max": null,
+              "discount_percent": 15
+            }
+          ]
+        },
+        "final_price": 39.99,
+        "msrp": 49.99,
+        "cost": 18.50,
+        "margin_percent": 116.16,
+        "tax_class": "electronics",
+        "price_history": [
+          {
+            "date": "2024-10-01T00:00:00Z",
+            "price": 44.99,
+            "reason": "Base price"
+          },
+          {
+            "date": "2024-11-01T00:00:00Z",
+            "price": 39.99,
+            "reason": "Price adjustment"
+          }
+        ]
+      },
+      "inventory": {
+        "warehouses": {
+          "warehouse_us_west": {
+            "warehouse_id": "WH-US-WEST-001",
+            "location": {
+              "name": "California Distribution Center",
+              "street": "456 Logistics Way",
+              "city": "Los Angeles",
+              "state": "CA",
+              "postal_code": "90001",
+              "country": "United States"
+            },
+            "stock": {
+              "quantity": 450,
+              "reserved": 85,
+              "available": 365,
+              "incoming": 500,
+              "incoming_date": "2025-01-15T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "D",
+              "shelf": "03",
+              "bin": "12"
+            }
+          },
+          "warehouse_us_east": {
+            "warehouse_id": "WH-US-EAST-001",
+            "location": {
+              "name": "New York Distribution Center",
+              "street": "789 Commerce Blvd",
+              "city": "Newark",
+              "state": "NJ",
+              "postal_code": "07102",
+              "country": "United States"
+            },
+            "stock": {
+              "quantity": 380,
+              "reserved": 72,
+              "available": 308,
+              "incoming": 400,
+              "incoming_date": "2025-01-16T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "D",
+              "shelf": "05",
+              "bin": "18"
+            }
+          },
+          "warehouse_eu_central": {
+            "warehouse_id": "WH-EU-CENT-001",
+            "location": {
+              "name": "Germany Distribution Center",
+              "street": "123 Industriestraße",
+              "city": "Frankfurt",
+              "postal_code": "60308",
+              "country": "Germany"
+            },
+            "stock": {
+              "quantity": 520,
+              "reserved": 98,
+              "available": 422,
+              "incoming": 600,
+              "incoming_date": "2025-01-18T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "D",
+              "shelf": "02",
+              "bin": "25"
+            }
+          }
+        },
+        "stock_alerts": {
+          "low_stock_threshold": 100,
+          "out_of_stock_threshold": 0,
+          "overstocked_threshold": 2000,
+          "reorder_point": 150,
+          "reorder_quantity": 500
+        }
+      },
+      "shipping": {
+        "weight_kg": 1.2,
+        "dimensions": {
+          "length_cm": 45,
+          "width_cm": 32,
+          "height_cm": 6
+        },
+        "package_type": "box",
+        "fragile": false,
+        "requires_signature": false,
+        "shipping_class": "standard",
+        "handling_time_days": 1
+      },
+      "media": {
+        "images": [
+          {
+            "url": "https://cdn.techmart.com/products/cool-001/main.jpg",
+            "alt": "CoolMaster RGB Cooling Pad",
+            "type": "main",
+            "order": 1,
+            "width": 2000,
+            "height": 2000
+          },
+          {
+            "url": "https://cdn.techmart.com/products/cool-001/rgb.jpg",
+            "alt": "RGB Lighting Effects",
+            "type": "gallery",
+            "order": 2,
+            "width": 2000,
+            "height": 2000
+          },
+          {
+            "url": "https://cdn.techmart.com/products/cool-001/side.jpg",
+            "alt": "Side View with Height Adjustment",
+            "type": "gallery",
+            "order": 3,
+            "width": 2000,
+            "height": 2000
+          }
+        ],
+        "videos": []
+      },
+      "reviews": {
+        "average_rating": 4.3,
+        "total_reviews": 567,
+        "rating_distribution": {
+          "5_star": 298,
+          "4_star": 189,
+          "3_star": 52,
+          "2_star": 18,
+          "1_star": 10
+        }
+      },
+      "warranty": {
+        "manufacturer_warranty": {
+          "duration_months": 12,
+          "type": "limited",
+          "coverage": ["manufacturing defects"],
+          "exclusions": ["physical damage", "water damage"]
+        },
+        "extended_warranty_options": []
+      },
+      "related_products": [
+        "PROD-LAPT-001",
+        "PROD-ACC-BAG-001",
+        "PROD-ACC-CLEAN-001"
+      ],
+      "tags": ["cooling", "rgb", "laptop-accessory", "gaming"],
+      "is_active": true,
+      "is_featured": true,
+      "created_at": "2024-09-10T09:15:00Z",
+      "updated_at": "2025-01-05T16:20:00Z"
+    },
+    "monitor_001": {
+      "product_id": "PROD-MON-001",
+      "sku": "MON-GAM-4K-240-001",
+      "name": "UltraVision 4K Gaming Monitor 32\"",
+      "slug": "ultravision-4k-gaming-monitor-32",
+      "category_id": "CAT-MON-GAM-001",
+      "brand": {
+        "id": "BRAND-004",
+        "name": "UltraVision",
+        "country": "South Korea",
+        "founded": 2008,
+        "website": "https://ultravision.com"
+      },
+      "description": {
+        "short": "Premium 4K gaming monitor with 240Hz refresh rate",
+        "long": "Experience gaming at its finest with the UltraVision 4K Gaming Monitor. Features include 4K resolution, 240Hz refresh rate, HDR1000, and NVIDIA G-Sync Ultimate for the smoothest gaming experience.",
+        "features": [
+          "32-inch 4K UHD (3840x2160) display",
+          "240Hz refresh rate",
+          "1ms response time (GtG)",
+          "HDR1000 certification",
+          "NVIDIA G-Sync Ultimate",
+          "Quantum Dot technology",
+          "99% DCI-P3 color gamut",
+          "Ergonomic stand with full adjustability"
+        ],
+        "specifications": {
+          "display": {
+            "size_inches": 32,
+            "resolution": {
+              "width": 3840,
+              "height": 2160,
+              "name": "4K UHD"
+            },
+            "aspect_ratio": "16:9",
+            "refresh_rate_hz": 240,
+            "response_time_ms": 1,
+            "panel_type": "Quantum Dot IPS",
+            "brightness_nits": 1000,
+            "contrast_ratio": "1000:1",
+            "viewing_angle": {
+              "horizontal": 178,
+              "vertical": 178
+            },
+            "color_gamut": {
+              "srgb_percent": 100,
+              "adobe_rgb_percent": 98,
+              "dci_p3_percent": 99
+            },
+            "color_depth": "10-bit (1.07B colors)",
+            "features": [
+              "G-Sync Ultimate",
+              "HDR1000",
+              "Anti-glare coating",
+              "Flicker-free",
+              "Low blue light"
+            ]
+          },
+          "connectivity": {
+            "inputs": {
+              "displayport": {
+                "count": 2,
+                "version": "2.0"
+              },
+              "hdmi": {
+                "count": 2,
+                "version": "2.1"
+              },
+              "usb_c": {
+                "count": 1,
+                "power_delivery_watts": 90,
+                "video_input": true
+              }
+            },
+            "outputs": {
+              "audio_jack": 1,
+              "usb_hub": {
+                "ports": 4,
+                "version": "3.2 Gen 1"
+              }
+            }
+          },
+          "ergonomics": {
+            "stand": {
+              "height_adjustment_mm": 150,
+              "tilt_degrees": {
+                "forward": -5,
+                "backward": 20
+              },
+              "swivel_degrees": {
+                "left": 30,
+                "right": 30
+              },
+              "pivot": true,
+              "portrait_mode": true
+            },
+            "vesa_mount": {
+              "compatible": true,
+              "pattern": "100x100mm"
+            }
+          },
+          "power": {
+            "consumption_typical_watts": 65,
+            "consumption_max_watts": 150,
+            "standby_watts": 0.5,
+            "voltage": "100-240V AC",
+            "power_supply": "Internal"
+          },
+          "dimensions": {
+            "with_stand": {
+              "width_mm": 714,
+              "height_mm": 532,
+              "depth_mm": 235,
+              "weight_kg": 8.9
+            },
+            "without_stand": {
+              "width_mm": 714,
+              "height_mm": 415,
+              "depth_mm": 58,
+              "weight_kg": 6.2
+            }
+          },
+          "certifications": [
+            "VESA DisplayHDR 1000",
+            "TÜV Rheinland Eye Comfort",
+            "Energy Star",
+            "EPEAT Gold"
+          ]
+        }
+      },
+      "pricing": {
+        "base_price": 1299.99,
+        "currency": "USD",
+        "discounts": {
+          "current_discount": {
+            "type": "percentage",
+            "value": 20,
+            "start_date": "2025-01-01T00:00:00Z",
+            "end_date": "2025-01-31T23:59:59Z",
+            "reason": "New Year Sale"
+          },
+          "volume_discounts": [
+            {
+              "quantity_min": 3,
+              "quantity_max": 4,
+              "discount_percent": 5
+            },
+            {
+              "quantity_min": 5,
+              "quantity_max": 9,
+              "discount_percent": 8
+            },
+            {
+              "quantity_min": 10,
+              "quantity_max": null,
+              "discount_percent": 12
+            }
+          ]
+        },
+        "final_price": 1039.99,
+        "msrp": 1499.99,
+        "cost": 650.00,
+        "margin_percent": 60.00,
+        "tax_class": "electronics",
+        "price_history": [
+          {
+            "date": "2024-09-01T00:00:00Z",
+            "price": 1399.99,
+            "reason": "Launch price"
+          },
+          {
+            "date": "2024-11-15T00:00:00Z",
+            "price": 1299.99,
+            "reason": "Price adjustment"
+          },
+          {
+            "date": "2025-01-01T00:00:00Z",
+            "price": 1039.99,
+            "reason": "New Year Sale"
+          }
+        ]
+      },
+      "inventory": {
+        "warehouses": {
+          "warehouse_us_west": {
+            "warehouse_id": "WH-US-WEST-001",
+            "location": {
+              "name": "California Distribution Center",
+              "street": "456 Logistics Way",
+              "city": "Los Angeles",
+              "state": "CA",
+              "postal_code": "90001",
+              "country": "United States"
+            },
+            "stock": {
+              "quantity": 78,
+              "reserved": 23,
+              "available": 55,
+              "incoming": 150,
+              "incoming_date": "2025-01-22T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "E",
+              "shelf": "08",
+              "bin": "05"
+            }
+          },
+          "warehouse_us_east": {
+            "warehouse_id": "WH-US-EAST-001",
+            "location": {
+              "name": "New York Distribution Center",
+              "street": "789 Commerce Blvd",
+              "city": "Newark",
+              "state": "NJ",
+              "postal_code": "07102",
+              "country": "United States"
+            },
+            "stock": {
+              "quantity": 62,
+              "reserved": 18,
+              "available": 44,
+              "incoming": 120,
+              "incoming_date": "2025-01-24T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "E",
+              "shelf": "10",
+              "bin": "12"
+            }
+          },
+          "warehouse_eu_central": {
+            "warehouse_id": "WH-EU-CENT-001",
+            "location": {
+              "name": "Germany Distribution Center",
+              "street": "123 Industriestraße",
+              "city": "Frankfurt",
+              "postal_code": "60308",
+              "country": "Germany"
+            },
+            "stock": {
+              "quantity": 95,
+              "reserved": 28,
+              "available": 67,
+              "incoming": 180,
+              "incoming_date": "2025-01-26T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "E",
+              "shelf": "06",
+              "bin": "18"
+            }
+          }
+        },
+        "stock_alerts": {
+          "low_stock_threshold": 30,
+          "out_of_stock_threshold": 0,
+          "overstocked_threshold": 300,
+          "reorder_point": 40,
+          "reorder_quantity": 150
+        }
+      },
+      "shipping": {
+        "weight_kg": 12.5,
+        "dimensions": {
+          "length_cm": 85,
+          "width_cm": 55,
+          "height_cm": 25
+        },
+        "package_type": "box",
+        "fragile": true,
+        "requires_signature": true,
+        "shipping_class": "oversized",
+        "handling_time_days": 2
+      },
+      "media": {
+        "images": [
+          {
+            "url": "https://cdn.techmart.com/products/mon-001/main.jpg",
+            "alt": "UltraVision 4K Gaming Monitor Front",
+            "type": "main",
+            "order": 1,
+            "width": 2000,
+            "height": 2000
+          },
+          {
+            "url": "https://cdn.techmart.com/products/mon-001/side.jpg",
+            "alt": "Monitor Side Profile",
+            "type": "gallery",
+            "order": 2,
+            "width": 2000,
+            "height": 2000
+          },
+          {
+            "url": "https://cdn.techmart.com/products/mon-001/ports.jpg",
+            "alt": "Connection Ports",
+            "type": "gallery",
+            "order": 3,
+            "width": 2000,
+            "height": 2000
+          },
+          {
+            "url": "https://cdn.techmart.com/products/mon-001/stand.jpg",
+            "alt": "Ergonomic Stand",
+            "type": "gallery",
+            "order": 4,
+            "width": 2000,
+            "height": 2000
+          }
+        ],
+        "videos": [
+          {
+            "url": "https://cdn.techmart.com/products/mon-001/demo.mp4",
+            "title": "Gaming Demo",
+            "duration_seconds": 180,
+            "thumbnail": "https://cdn.techmart.com/products/mon-001/demo-thumb.jpg"
+          }
+        ]
+      },
+      "reviews": {
+        "average_rating": 4.8,
+        "total_reviews": 412,
+        "rating_distribution": {
+          "5_star": 315,
+          "4_star": 72,
+          "3_star": 18,
+          "2_star": 5,
+          "1_star": 2
+        }
+      },
+      "warranty": {
+        "manufacturer_warranty": {
+          "duration_months": 36,
+          "type": "limited",
+          "coverage": ["manufacturing defects", "dead pixels (>5)"],
+          "exclusions": ["physical damage", "burn-in"]
+        },
+        "extended_warranty_options": [
+          {
+            "duration_months": 24,
+            "price": 199.99,
+            "coverage": ["manufacturing defects", "dead pixels (any)", "burn-in"],
+            "deductible": 0
+          }
+        ]
+      },
+      "related_products": [
+        "PROD-LAPT-001",
+        "PROD-ACC-MOUNT-001",
+        "PROD-ACC-CALIB-001"
+      ],
+      "tags": ["monitor", "gaming", "4k", "240hz", "hdr"],
+      "is_active": true,
+      "is_featured": true,
+      "created_at": "2024-09-01T08:00:00Z",
+      "updated_at": "2025-01-09T13:45:00Z"
+    },
+    "mouse_001": {
+      "product_id": "PROD-ACC-MOUSE-001",
+      "sku": "MOUSE-GAM-RGB-001",
+      "name": "ProGamer Elite Wireless Mouse",
+      "slug": "progamer-elite-wireless-mouse",
+      "category_id": "CAT-ACC-MOUSE-001",
+      "brand": {
+        "id": "BRAND-005",
+        "name": "ProGamer",
+        "country": "United States",
+        "founded": 2012,
+        "website": "https://progamer.com"
+      },
+      "description": {
+        "short": "Professional wireless gaming mouse with 30,000 DPI sensor",
+        "long": "The ProGamer Elite features a top-tier optical sensor, customizable RGB lighting, and ultra-low latency wireless connection. Designed for professional esports players.",
+        "features": [
+          "30,000 DPI optical sensor",
+          "1ms wireless latency",
+          "11 programmable buttons",
+          "100-hour battery life",
+          "Customizable RGB lighting (16.8M colors)",
+          "Onboard memory profiles",
+          "Adjustable weight system",
+          "PTFE feet for smooth gliding"
+        ],
+        "specifications": {
+          "sensor": {
+            "type": "Optical (PMW3395)",
+            "dpi_range": {
+              "min": 100,
+              "max": 30000
+            },
+            "dpi_increments": 50,
+            "ips_max": 750,
+            "acceleration_g": 50,
+            "polling_rate_hz": [125, 250, 500, 1000, 2000]
+          },
+          "buttons": {
+            "total": 11,
+            "programmable": 11,
+            "durability_clicks": 80000000
+          },
+          "connectivity": {
+            "wireless": {
+              "technology": "2.4GHz + Bluetooth 5.2",
+              "latency_ms": 1,
+              "range_meters": 10
+            },
+            "wired": {
+              "usb_type": "USB-C",
+              "cable_length_cm": 180,
+              "braided": true
+            }
+          },
+          "battery": {
+            "type": "Lithium-ion rechargeable",
+            "capacity_mah": 950,
+            "life_hours": {
+              "rgb_off": 100,
+              "rgb_on": 70
+            },
+            "charge_time_hours": 3,
+            "fast_charge": {
+              "enabled": true,
+              "minutes_for_10_hours": 15
+            }
+          },
+          "lighting": {
+            "zones": 3,
+            "colors": 16777216,
+            "effects": ["static", "breathing", "wave", "reactive", "spectrum"],
+            "brightness_levels": 5
+          },
+          "ergonomics": {
+            "hand_size": "Medium to Large",
+            "grip_types": ["palm", "claw", "fingertip"],
+            "orientation": "Right-handed",
+            "weight": {
+              "base_grams": 74,
+              "adjustable": true,
+              "weight_range_grams": {
+                "min": 74,
+                "max": 90
+              }
+            }
+          },
+          "dimensions": {
+            "length_mm": 128,
+            "width_mm": 68,
+            "height_mm": 43,
+            "weight_g": 74
+          },
+          "software": {
+            "name": "ProGamer Control Center",
+            "platforms": ["Windows", "macOS"],
+            "features": [
+              "DPI adjustment",
+              "Button remapping",
+              "Macro recording",
+              "RGB customization",
+              "Profile management",
+              "Firmware updates"
+            ]
+          }
+        }
+      },
+      "pricing": {
+        "base_price": 129.99,
+        "currency": "USD",
+        "discounts": {
+          "current_discount": {
+            "type": "fixed",
+            "value": 20.00,
+            "start_date": "2025-01-01T00:00:00Z",
+            "end_date": "2025-01-31T23:59:59Z",
+            "reason": "New Year Sale"
+          },
+          "volume_discounts": [
+            {
+              "quantity_min": 5,
+              "quantity_max": 9,
+              "discount_percent": 10
+            },
+            {
+              "quantity_min": 10,
+              "quantity_max": null,
+              "discount_percent": 15
+            }
+          ]
+        },
+        "final_price": 109.99,
+        "msrp": 149.99,
+        "cost": 52.00,
+        "margin_percent": 111.52,
+        "tax_class": "electronics",
+        "price_history": [
+          {
+            "date": "2024-08-15T00:00:00Z",
+            "price": 149.99,
+            "reason": "Launch price"
+          },
+          {
+            "date": "2024-10-01T00:00:00Z",
+            "price": 129.99,
+            "reason": "Price reduction"
+          },
+          {
+            "date": "2025-01-01T00:00:00Z",
+            "price": 109.99,
+            "reason": "New Year Sale"
+          }
+        ]
+      },
+      "inventory": {
+        "warehouses": {
+          "warehouse_us_west": {
+            "warehouse_id": "WH-US-WEST-001",
+            "location": {
+              "name": "California Distribution Center",
+              "street": "456 Logistics Way",
+              "city": "Los Angeles",
+              "state": "CA",
+              "postal_code": "90001",
+              "country": "United States"
+            },
+            "stock": {
+              "quantity": 1250,
+              "reserved": 342,
+              "available": 908,
+              "incoming": 2000,
+              "incoming_date": "2025-01-14T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "F",
+              "shelf": "12",
+              "bin": "08"
+            }
+          },
+          "warehouse_us_east": {
+            "warehouse_id": "WH-US-EAST-001",
+            "location": {
+              "name": "New York Distribution Center",
+              "street": "789 Commerce Blvd",
+              "city": "Newark",
+              "state": "NJ",
+              "postal_code": "07102",
+              "country": "United States"
+            },
+            "stock": {
+              "quantity": 980,
+              "reserved": 278,
+              "available": 702,
+              "incoming": 1500,
+              "incoming_date": "2025-01-16T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "F",
+              "shelf": "15",
+              "bin": "22"
+            }
+          },
+          "warehouse_eu_central": {
+            "warehouse_id": "WH-EU-CENT-001",
+            "location": {
+              "name": "Germany Distribution Center",
+              "street": "123 Industriestraße",
+              "city": "Frankfurt",
+              "postal_code": "60308",
+              "country": "Germany"
+            },
+            "stock": {
+              "quantity": 1420,
+              "reserved": 398,
+              "available": 1022,
+              "incoming": 2500,
+              "incoming_date": "2025-01-17T00:00:00Z"
+            },
+            "location_in_warehouse": {
+              "aisle": "F",
+              "shelf": "09",
+              "bin": "14"
+            }
+          }
+        },
+        "stock_alerts": {
+          "low_stock_threshold": 200,
+          "out_of_stock_threshold": 0,
+          "overstocked_threshold": 5000,
+          "reorder_point": 300,
+          "reorder_quantity": 2000
+        }
+      },
+      "shipping": {
+        "weight_kg": 0.3,
+        "dimensions": {
+          "length_cm": 18,
+          "width_cm": 12,
+          "height_cm": 8
+        },
+        "package_type": "box",
+        "fragile": false,
+        "requires_signature": false,
+        "shipping_class": "standard",
+        "handling_time_days": 1
+      },
+      "media": {
+        "images": [
+          {
+            "url": "https://cdn.techmart.com/products/mouse-001/main.jpg",
+            "alt": "ProGamer Elite Mouse",
+            "type": "main",
+            "order": 1,
+            "width": 2000,
+            "height": 2000
+          },
+          {
+            "url": "https://cdn.techmart.com/products/mouse-001/rgb.jpg",
+            "alt": "RGB Lighting",
+            "type": "gallery",
+            "order": 2,
+            "width": 2000,
+            "height": 2000
+          },
+          {
+            "url": "https://cdn.techmart.com/products/mouse-001/grip.jpg",
+            "alt": "Ergonomic Grip",
+            "type": "gallery",
+            "order": 3,
+            "width": 2000,
+            "height": 2000
+          }
+        ],
+        "videos": []
+      },
+      "reviews": {
+        "average_rating": 4.6,
+        "total_reviews": 1823,
+        "rating_distribution": {
+          "5_star": 1205,
+          "4_star": 458,
+          "3_star": 98,
+          "2_star": 42,
+          "1_star": 20
+        }
+      },
+      "warranty": {
+        "manufacturer_warranty": {
+          "duration_months": 24,
+          "type": "limited",
+          "coverage": ["manufacturing defects", "button failures"],
+          "exclusions": ["physical damage", "water damage"]
+        },
+        "extended_warranty_options": []
+      },
+      "related_products": [
+        "PROD-LAPT-001",
+        "PROD-ACC-PAD-001",
+        "PROD-ACC-BUNGEE-001"
+      ],
+      "tags": ["mouse", "gaming", "wireless", "rgb", "esports"],
+      "is_active": true,
+      "is_featured": true,
+      "created_at": "2024-08-15T11:30:00Z",
+      "updated_at": "2025-01-07T09:15:00Z"
+    }
+  },
+  "customers": {
+    "customer_001": {
+      "customer_id": "CUST-001-2024",
+      "account_status": "active",
+      "account_type": "premium",
+      "joined_date": "2024-03-15T14:30:00Z",
+      "last_login": "2025-01-10T18:45:00Z",
+      "personal_info": {
+        "first_name": "John",
+        "last_name": "Anderson",
+        "email": "john.anderson@email.com",
+        "phone": {
+          "primary": "+1-555-0123",
+          "secondary": "+1-555-0124",
+          "verified": true
+        },
+        "date_of_birth": "1985-06-20",
+        "gender": "male",
+        "preferred_language": "en",
+        "newsletter_subscribed": true
+      },
+      "addresses": {
+        "billing": {
+          "address_id": "ADDR-BILL-001",
+          "is_default": true,
+          "label": "Home",
+          "recipient_name": "John Anderson",
+          "street_line_1": "456 Oak Street",
+          "street_line_2": "Apartment 3B",
+          "city": "San Francisco",
+          "state": "California",
+          "postal_code": "94102",
+          "country": "United States",
+          "phone": "+1-555-0123",
+          "delivery_instructions": "Leave at door",
+          "coordinates": {
+            "latitude": 37.7749,
+            "longitude": -122.4194
+          }
+        },
+        "shipping": [
+          {
+            "address_id": "ADDR-SHIP-001",
+            "is_default": true,
+            "label": "Home",
+            "recipient_name": "John Anderson",
+            "street_line_1": "456 Oak Street",
+            "street_line_2": "Apartment 3B",
+            "city": "San Francisco",
+            "state": "California",
+            "postal_code": "94102",
+            "country": "United States",
+            "phone": "+1-555-0123",
+            "delivery_instructions": "Leave at door",
+            "coordinates": {
+              "latitude": 37.7749,
+              "longitude": -122.4194
+            }
+          },
+          {
+            "address_id": "ADDR-SHIP-002",
+            "is_default": false,
+            "label": "Work",
+            "recipient_name": "John Anderson",
+            "street_line_1": "789 Market Street",
+            "street_line_2": "Suite 1200",
+            "city": "San Francisco",
+            "state": "California",
+            "postal_code": "94103",
+            "country": "United States",
+            "phone": "+1-555-0125",
+            "delivery_instructions": "Call upon arrival",
+            "coordinates": {
+              "latitude": 37.7858,
+              "longitude": -122.4064
+            }
+          }
+        ]
+      },
+      "payment_methods": {
+        "credit_cards": [
+          {
+            "payment_method_id": "PAY-CC-001",
+            "is_default": true,
+            "card_type": "visa",
+            "last_four_digits": "4532",
+            "expiry_month": 12,
+            "expiry_year": 2027,
+            "cardholder_name": "John Anderson",
+            "billing_address_id": "ADDR-BILL-001",
+            "is_verified": true,
+            "added_date": "2024-03-15T14:45:00Z"
+          },
+          {
+            "payment_method_id": "PAY-CC-002",
+            "is_default": false,
+            "card_type": "mastercard",
+            "last_four_digits": "8899",
+            "expiry_month": 8,
+            "expiry_year": 2026,
+            "cardholder_name": "John Anderson",
+            "billing_address_id": "ADDR-BILL-001",
+            "is_verified": true,
+            "added_date": "2024-06-20T10:15:00Z"
+          }
+        ],
+        "paypal": {
+          "payment_method_id": "PAY-PP-001",
+          "email": "john.anderson@email.com",
+          "is_verified": true,
+          "added_date": "2024-04-10T09:30:00Z"
+        }
+      },
+      "account_statistics": {
+        "total_orders": 15,
+        "total_spent": 18450.85,
+        "average_order_value": 1230.06,
+        "lifetime_value": 18450.85,
+        "loyalty_points": 18451,
+        "referrals": 3,
+        "reviews_written": 8,
+        "wishlist_items": 12
+      },
+      "preferences": {
+        "email_notifications": {
+          "order_updates": true,
+          "promotions": true,
+          "product_recommendations": true,
+          "price_drops": true,
+          "newsletter": true
+        },
+        "sms_notifications": {
+          "order_updates": true,
+          "delivery_alerts": true,
+          "promotions": false
+        },
+        "marketing_preferences": {
+          "personalized_ads": true,
+          "third_party_sharing": false
+        }
+      }
+    }
+  }
+          },
+    "customer_002": {
+      "customer_id": "CUST-002-2024",
+      "account_status": "active",
+      "account_type": "standard",
+      "joined_date": "2024-05-22T09:15:00Z",
+      "last_login": "2025-01-09T12:20:00Z",
+      "personal_info": {
+        "first_name": "Sarah",
+        "last_name": "Martinez",
+        "email": "sarah.martinez@email.com",
+        "phone": {
+          "primary": "+1-555-0456",
+          "secondary": null,
+          "verified": true
+        },
+        "date_of_birth": "1992-11-08",
+        "gender": "female",
+        "preferred_language": "en",
+        "newsletter_subscribed": true
+      },
+      "addresses": {
+        "billing": {
+          "address_id": "ADDR-BILL-002",
+          "is_default": true,
+          "label": "Home",
+          "recipient_name": "Sarah Martinez",
+          "street_line_1": "123 Elm Avenue",
+          "street_line_2": null,
+          "city": "Austin",
+          "state": "Texas",
+          "postal_code": "78701",
+          "country": "United States",
+          "phone": "+1-555-0456",
+          "delivery_instructions": "Ring doorbell",
+          "coordinates": {
+            "latitude": 30.2672,
+            "longitude": -97.7431
+          }
+        },
+        "shipping": [
+          {
+            "address_id": "ADDR-SHIP-003",
+            "is_default": true,
+            "label": "Home",
+            "recipient_name": "Sarah Martinez",
+            "street_line_1": "123 Elm Avenue",
+            "street_line_2": null,
+            "city": "Austin",
+            "state": "Texas",
+            "postal_code": "78701",
+            "country": "United States",
+            "phone": "+1-555-0456",
+            "delivery_instructions": "Ring doorbell",
+            "coordinates": {
+              "latitude": 30.2672,
+              "longitude": -97.7431
+            }
+          }
+        ]
+      },
+      "payment_methods": {
+        "credit_cards": [
+          {
+            "payment_method_id": "PAY-CC-003",
+            "is_default": true,
+            "card_type": "amex",
+            "last_four_digits": "1005",
+            "expiry_month": 3,
+            "expiry_year": 2028,
+            "cardholder_name": "Sarah Martinez",
+            "billing_address_id": "ADDR-BILL-002",
+            "is_verified": true,
+            "added_date": "2024-05-22T09:30:00Z"
+          }
+        ],
+        "paypal": null
+      },
+      "account_statistics": {
+        "total_orders": 7,
+        "total_spent": 3890.45,
+        "average_order_value": 555.78,
+        "lifetime_value": 3890.45,
+        "loyalty_points": 3890,
+        "referrals": 1,
+        "reviews_written": 3,
+        "wishlist_items": 8
+      },
+      "preferences": {
+        "email_notifications": {
+          "order_updates": true,
+          "promotions": false,
+          "product_recommendations": true,
+          "price_drops": true,
+          "newsletter": true
+        },
+        "sms_notifications": {
+          "order_updates": true,
+          "delivery_alerts": true,
+          "promotions": false
+        },
+        "marketing_preferences": {
+          "personalized_ads": true,
+          "third_party_sharing": false
+        }
+      }
+    },
+    "customer_003": {
+      "customer_id": "CUST-003-2024",
+      "account_status": "active",
+      "account_type": "premium",
+      "joined_date": "2024-02-10T16:45:00Z",
+      "last_login": "2025-01-11T08:30:00Z",
+      "personal_info": {
+        "first_name": "Michael",
+        "last_name": "Chen",
+        "email": "michael.chen@email.com",
+        "phone": {
+          "primary": "+1-555-0789",
+          "secondary": "+1-555-0790",
+          "verified": true
+        },
+        "date_of_birth": "1988-03-25",
+        "gender": "male",
+        "preferred_language": "en",
+        "newsletter_subscribed": true
+      },
+      "addresses": {
+        "billing": {
+          "address_id": "ADDR-BILL-003",
+          "is_default": true,
+          "label": "Home",
+          "recipient_name": "Michael Chen",
+          "street_line_1": "789 Pine Road",
+          "street_line_2": "Unit 12",
+          "city": "Seattle",
+          "state": "Washington",
+          "postal_code": "98101",
+          "country": "United States",
+          "phone": "+1-555-0789",
+          "delivery_instructions": "Leave with concierge",
+          "coordinates": {
+            "latitude": 47.6062,
+            "longitude": -122.3321
+          }
+        },
+        "shipping": [
+          {
+            "address_id": "ADDR-SHIP-004",
+            "is_default": true,
+            "label": "Home",
+            "recipient_name": "Michael Chen",
+            "street_line_1": "789 Pine Road",
+            "street_line_2": "Unit 12",
+            "city": "Seattle",
+            "state": "Washington",
+            "postal_code": "98101",
+            "country": "United States",
+            "phone": "+1-555-0789",
+            "delivery_instructions": "Leave with concierge",
+            "coordinates": {
+              "latitude": 47.6062,
+              "longitude": -122.3321
+            }
+          },
+          {
+            "address_id": "ADDR-SHIP-005",
+            "is_default": false,
+            "label": "Office",
+            "recipient_name": "Michael Chen",
+            "street_line_1": "1000 Tech Drive",
+            "street_line_2": "Floor 5",
+            "city": "Seattle",
+            "state": "Washington",
+            "postal_code": "98109",
+            "country": "United States",
+            "phone": "+1-555-0790",
+            "delivery_instructions": "Reception desk",
+            "coordinates": {
+              "latitude": 47.6205,
+              "longitude": -122.3493
+            }
+          }
+        ]
+      },
+      "payment_methods": {
+        "credit_cards": [
+          {
+            "payment_method_id": "PAY-CC-004",
+            "is_default": true,
+            "card_type": "visa",
+            "last_four_digits": "7788",
+            "expiry_month": 9,
+            "expiry_year": 2027,
+            "cardholder_name": "Michael Chen",
+            "billing_address_id": "ADDR-BILL-003",
+            "is_verified": true,
+            "added_date": "2024-02-10T17:00:00Z"
+          }
+        ],
+        "paypal": {
+          "payment_method_id": "PAY-PP-002",
+          "email": "michael.chen@email.com",
+          "is_verified": true,
+          "added_date": "2024-03-05T11:20:00Z"
+        }
+      },
+      "account_statistics": {
+        "total_orders": 23,
+        "total_spent": 28750.92,
+        "average_order_value": 1250.04,
+        "lifetime_value": 28750.92,
+        "loyalty_points": 28751,
+        "referrals": 5,
+        "reviews_written": 12,
+        "wishlist_items": 15
+      },
+      "preferences": {
+        "email_notifications": {
+          "order_updates": true,
+          "promotions": true,
+          "product_recommendations": true,
+          "price_drops": true,
+          "newsletter": true
+        },
+        "sms_notifications": {
+          "order_updates": true,
+          "delivery_alerts": true,
+          "promotions": true
+        },
+        "marketing_preferences": {
+          "personalized_ads": true,
+          "third_party_sharing": false
+        }
+      }
+    }
+  },
+  "orders": {
+    "order_001": {
+      "order_id": "ORD-2025-00001",
+      "order_number": "TM20250001",
+      "customer_id": "CUST-001-2024",
+      "status": "delivered",
+      "created_at": "2025-01-05T10:30:00Z",
+      "updated_at": "2025-01-08T14:45:00Z",
+      "payment": {
+        "payment_id": "PAY-2025-00001",
+        "payment_method_id": "PAY-CC-001",
+        "payment_method": "credit_card",
+        "card_type": "visa",
+        "last_four_digits": "4532",
+        "amount": 3389.98,
+        "currency": "USD",
+        "status": "completed",
+        "transaction_id": "TXN-20250105-103045",
+        "authorization_code": "AUTH-445566",
+        "processed_at": "2025-01-05T10:30:45Z",
+        "breakdown": {
+          "subtotal": 2969.99,
+          "shipping": 0.00,
+          "tax": 267.00,
+          "discount": 0.00,
+          "total": 3236.99
+        }
+      },
+      "shipping": {
+        "shipping_address": {
+          "address_id": "ADDR-SHIP-001",
+          "recipient_name": "John Anderson",
+          "street_line_1": "456 Oak Street",
+          "street_line_2": "Apartment 3B",
+          "city": "San Francisco",
+          "state": "California",
+          "postal_code": "94102",
+          "country": "United States",
+          "phone": "+1-555-0123"
+        },
+        "shipping_method": {
+          "method_id": "SHIP-OVERNIGHT",
+          "name": "Overnight Shipping",
+          "carrier": "FedEx",
+          "estimated_days": 1,
+          "cost": 0.00,
+          "tracking_number": "FDX123456789012",
+          "tracking_url": "https://fedex.com/track?num=FDX123456789012"
+        },
+        "status_history": [
+          {
+            "status": "pending",
+            "timestamp": "2025-01-05T10:30:00Z",
+            "location": null,
+            "notes": "Order received"
+          },
+          {
+            "status": "processing",
+            "timestamp": "2025-01-05T11:00:00Z",
+            "location": "California Distribution Center",
+            "notes": "Order being prepared"
+          },
+          {
+            "status": "shipped",
+            "timestamp": "2025-01-05T15:30:00Z",
+            "location": "California Distribution Center",
+            "notes": "Package handed to carrier"
+          },
+          {
+            "status": "in_transit",
+            "timestamp": "2025-01-05T18:00:00Z",
+            "location": "Oakland, CA",
+            "notes": "In transit to destination"
+          },
+          {
+            "status": "out_for_delivery",
+            "timestamp": "2025-01-06T08:00:00Z",
+            "location": "San Francisco, CA",
+            "notes": "Out for delivery"
+          },
+          {
+            "status": "delivered",
+            "timestamp": "2025-01-06T14:30:00Z",
+            "location": "456 Oak Street, San Francisco, CA",
+            "notes": "Delivered - Signature received"
+          }
+        ]
+      },
+      "items": [
+        {
+          "order_item_id": "ORDITEM-2025-00001",
+          "product_id": "PROD-LAPT-001",
+          "sku": "LAPT-GAM-RTX4090-001",
+          "name": "UltraBook Pro Gaming Laptop 17\"",
+          "quantity": 1,
+          "unit_price": 2969.99,
+          "discount_per_item": 0.00,
+          "tax_per_item": 267.00,
+          "subtotal": 2969.99,
+          "total": 3236.99,
+          "warehouse_id": "WH-US-WEST-001",
+          "warranty_selected": {
+            "duration_months": 36,
+            "price": 499.99,
+            "coverage": ["manufacturing defects", "hardware failures", "accidental damage", "liquid damage"],
+            "deductible": 149.00
+          }
+        },
+        {
+          "order_item_id": "ORDITEM-2025-00002",
+          "product_id": "PROD-ACC-COOL-001",
+          "sku": "ACC-COOL-RGB-001",
+          "name": "CoolMaster RGB Laptop Cooling Pad",
+          "quantity": 1,
+          "unit_price": 39.99,
+          "discount_per_item": 0.00,
+          "tax_per_item": 3.60,
+          "subtotal": 39.99,
+          "total": 43.59,
+          "warehouse_id": "WH-US-WEST-001",
+          "warranty_selected": null
+        },
+        {
+          "order_item_id": "ORDITEM-2025-00003",
+          "product_id": "PROD-ACC-MOUSE-001",
+          "sku": "MOUSE-GAM-RGB-001",
+          "name": "ProGamer Elite Wireless Mouse",
+          "quantity": 1,
+          "unit_price": 109.99,
+          "discount_per_item": 0.00,
+          "tax_per_item": 9.90,
+          "subtotal": 109.99,
+          "total": 119.89,
+          "warehouse_id": "WH-US-WEST-001",
+          "warranty_selected": null
+        }
+      ],
+      "order_summary": {
+        "item_count": 3,
+        "total_quantity": 3,
+        "subtotal": 3119.97,
+        "shipping": 0.00,
+        "tax": 280.50,
+        "discount": 0.00,
+        "grand_total": 3400.47
+      },
+      "notes": {
+        "customer_notes": "Please deliver after 2 PM",
+        "internal_notes": "Premium customer - priority handling",
+        "gift_message": null
+      },
+      "metadata": {
+        "ip_address": "192.168.1.100",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "referrer": "https://google.com/search",
+        "marketing_source": "organic_search",
+        "device_type": "desktop"
+      }
+    },
+    "order_002": {
+      "order_id": "ORD-2025-00002",
+      "order_number": "TM20250002",
+      "customer_id": "CUST-002-2024",
+      "status": "processing",
+      "created_at": "2025-01-10T14:15:00Z",
+      "updated_at": "2025-01-10T15:30:00Z",
+      "payment": {
+        "payment_id": "PAY-2025-00002",
+        "payment_method_id": "PAY-CC-003",
+        "payment_method": "credit_card",
+        "card_type": "amex",
+        "last_four_digits": "1005",
+        "amount": 1264.98,
+        "currency": "USD",
+        "status": "completed",
+        "transaction_id": "TXN-20250110-141530",
+        "authorization_code": "AUTH-778899",
+        "processed_at": "2025-01-10T14:15:30Z",
+        "breakdown": {
+          "subtotal": 1144.98,
+          "shipping": 5.99,
+          "tax": 114.01,
+          "discount": 0.00,
+          "total": 1264.98
+        }
+      },
+      "shipping": {
+        "shipping_address": {
+          "address_id": "ADDR-SHIP-003",
+          "recipient_name": "Sarah Martinez",
+          "street_line_1": "123 Elm Avenue",
+          "street_line_2": null,
+          "city": "Austin",
+          "state": "Texas",
+          "postal_code": "78701",
+          "country": "United States",
+          "phone": "+1-555-0456"
+        },
+        "shipping_method": {
+          "method_id": "SHIP-STANDARD",
+          "name": "Standard Shipping",
+          "carrier": "UPS",
+          "estimated_days": 5,
+          "cost": 5.99,
+          "tracking_number": "1Z999AA10123456784",
+          "tracking_url": "https://ups.com/track?num=1Z999AA10123456784"
+        },
+        "status_history": [
+          {
+            "status": "pending",
+            "timestamp": "2025-01-10T14:15:00Z",
+            "location": null,
+            "notes": "Order received"
+          },
+          {
+            "status": "processing",
+            "timestamp": "2025-01-10T15:00:00Z",
+            "location": "California Distribution Center",
+            "notes": "Order being prepared"
+          }
+        ]
+      },
+      "items": [
+        {
+          "order_item_id": "ORDITEM-2025-00004",
+          "product_id": "PROD-LAPT-002",
+          "sku": "LAPT-BUS-I7-002",
+          "name": "ProWork Business Laptop 15.6\"",
+          "quantity": 1,
+          "unit_price": 1104.99,
+          "discount_per_item": 0.00,
+          "tax_per_item": 99.45,
+          "subtotal": 1104.99,
+          "total": 1204.44,
+          "warehouse_id": "WH-US-WEST-001",
+          "warranty_selected": null
+        },
+        {
+          "order_item_id": "ORDITEM-2025-00005",
+          "product_id": "PROD-ACC-COOL-001",
+          "sku": "ACC-COOL-RGB-001",
+          "name": "CoolMaster RGB Laptop Cooling Pad",
+          "quantity": 1,
+          "unit_price": 39.99,
+          "discount_per_item": 0.00,
+          "tax_per_item": 3.60,
+          "subtotal": 39.99,
+          "total": 43.59,
+          "warehouse_id": "WH-US-WEST-001",
+          "warranty_selected": null
+        }
+      ],
+      "order_summary": {
+        "item_count": 2,
+        "total_quantity": 2,
+        "subtotal": 1144.98,
+        "shipping": 5.99,
+        "tax": 103.05,
+        "discount": 0.00,
+        "grand_total": 1254.02
+      },
+      "notes": {
+        "customer_notes": null,
+        "internal_notes": "Check stock before shipping",
+        "gift_message": null
+      },
+      "metadata": {
+        "ip_address": "10.0.0.45",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        "referrer": "https://techmart.global/products",
+        "marketing_source": "direct",
+        "device_type": "desktop"
+      }
+    },
+    "order_003": {
+      "order_id": "ORD-2025-00003",
+      "order_number": "TM20250003",
+      "customer_id": "CUST-003-2024",
+      "status": "shipped",
+      "created_at": "2025-01-08T09:20:00Z",
+      "updated_at": "2025-01-09T16:45:00Z",
+      "payment": {
+        "payment_id": "PAY-2025-00003",
+        "payment_method_id": "PAY-PP-002",
+        "payment_method": "paypal",
+        "card_type": null,
+        "last_four_digits": null,
+        "amount": 1379.98,
+        "currency": "USD",
+        "status": "completed",
+        "transaction_id": "PAYPAL-20250108-092045",
+        "authorization_code": "PP-AUTH-112233",
+        "processed_at": "2025-01-08T09:20:45Z",
+        "breakdown": {
+          "subtotal": 1149.98,
+          "shipping": 12.99,
+          "tax": 117.01,
+          "discount": 0.00,
+          "total": 1279.98
+        }
+      },
+      "shipping": {
+        "shipping_address": {
+          "address_id": "ADDR-SHIP-005",
+          "recipient_name": "Michael Chen",
+          "street_line_1": "1000 Tech Drive",
+          "street_line_2": "Floor 5",
+          "city": "Seattle",
+          "state": "Washington",
+          "postal_code": "98109",
+          "country": "United States",
+          "phone": "+1-555-0790"
+        },
+        "shipping_method": {
+          "method_id": "SHIP-EXPEDITED",
+          "name": "Expedited Shipping",
+          "carrier": "FedEx",
+          "estimated_days": 3,
+          "cost": 12.99,
+          "tracking_number": "FDX987654321098",
+          "tracking_url": "https://fedex.com/track?num=FDX987654321098"
+        },
+        "status_history": [
+          {
+            "status": "pending",
+            "timestamp": "2025-01-08T09:20:00Z",
+            "location": null,
+            "notes": "Order received"
+          },
+          {
+            "status": "processing",
+            "timestamp": "2025-01-08T10:00:00Z",
+            "location": "California Distribution Center",
+            "notes": "Order being prepared"
+          },
+          {
+            "status": "shipped",
+            "timestamp": "2025-01-08T16:30:00Z",
+            "location": "California Distribution Center",
+            "notes": "Package handed to carrier"
+          },
+          {
+            "status": "in_transit",
+            "timestamp": "2025-01-09T06:00:00Z",
+            "location": "Portland, OR",
+            "notes": "In transit to destination"
+          }
+        ]
+      },
+      "items": [
+        {
+          "order_item_id": "ORDITEM-2025-00006",
+          "product_id": "PROD-MON-001",
+          "sku": "MON-GAM-4K-240-001",
+          "name": "UltraVision 4K Gaming Monitor 32\"",
+          "quantity": 1,
+          "unit_price": 1039.99,
+          "discount_per_item": 0.00,
+          "tax_per_item": 93.60,
+          "subtotal": 1039.99,
+          "total": 1133.59,
+          "warehouse_id": "WH-US-WEST-001",
+          "warranty_selected": {
+            "duration_months": 24,
+            "price": 199.99,
+            "coverage": ["manufacturing defects", "dead pixels (any)", "burn-in"],
+            "deductible": 0
+          }
+        },
+        {
+          "order_item_id": "ORDITEM-2025-00007",
+          "product_id": "PROD-ACC-MOUSE-001",
+          "sku": "MOUSE-GAM-RGB-001",
+          "name": "ProGamer Elite Wireless Mouse",
+          "quantity": 1,
+          "unit_price": 109.99,
+          "discount_per_item": 0.00,
+          "tax_per_item": 9.90,
+          "subtotal": 109.99,
+          "total": 119.89,
+          "warehouse_id": "WH-US-WEST-001",
+          "warranty_selected": null
+        }
+      ],
+      "order_summary": {
+        "item_count": 2,
+        "total_quantity": 2,
+        "subtotal": 1149.98,
+        "shipping": 12.99,
+        "tax": 103.50,
+        "discount": 0.00,
+        "grand_total": 1266.47
+      },
+      "notes": {
+        "customer_notes": "Office delivery - reception desk",
+        "internal_notes": "Priority customer",
+        "gift_message": null
+      },
+      "metadata": {
+        "ip_address": "172.16.0.88",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "referrer": "https://techmart.global/monitors",
+        "marketing_source": "email_campaign",
+        "device_type": "desktop"
+      }
+    }
+  },
+  "product_reviews": {
+    "review_001": {
+      "review_id": "REV-2025-00001",
+      "product_id": "PROD-LAPT-001",
+      "customer_id": "CUST-001-2024",
+      "order_id": "ORD-2025-00001",
+      "rating": 5,
+      "title": "Exceptional Gaming Performance",
+      "review_text": "This laptop exceeds all expectations! The RTX 4090 handles every game at max settings with ease. The 240Hz display is incredibly smooth, and the build quality is top-notch. Battery life is decent for a gaming laptop. Highly recommended for serious gamers.",
+      "pros": [
+        "Excellent GPU performance",
+        "Beautiful high refresh display",
+        "Great cooling system",
+        "Premium build quality"
+      ],
+      "cons": [
+        "Heavy to carry around",
+        "Price is high",
+        "Fans can be loud under load"
+      ],
+      "verified_purchase": true,
+      "helpful_count": 45,
+      "not_helpful_count": 2,
+      "status": "published",
+      "created_at": "2025-01-08T18:30:00Z",
+      "updated_at": "2025-01-08T18:30:00Z",
+      "moderation": {
+        "flagged": false,
+        "reviewed_by": "MOD-001",
+        "reviewed_at": "2025-01-08T19:00:00Z"
+      },
+      "media": {
+        "images": [
+          {
+            "url": "https://cdn.techmart.com/reviews/rev-001/img1.jpg",
+            "caption": "Unboxing",
+            "uploaded_at": "2025-01-08T18:25:00Z"
+          },
+          {
+            "url": "https://cdn.techmart.com/reviews/rev-001/img2.jpg",
+            "caption": "Gaming test",
+            "uploaded_at": "2025-01-08T18:27:00Z"
+          }
+        ],
+        "videos": []
+      },
+      "merchant_response": {
+        "response_text": "Thank you for the amazing review! We're thrilled you're enjoying your new gaming laptop. Happy gaming!",
+        "responded_by": "TechMart Support Team",
+        "responded_at": "2025-01-09T10:00:00Z"
+      }
+    },
+    "review_002": {
+      "review_id": "REV-2025-00002",
+      "product_id": "PROD-ACC-COOL-001",
+      "customer_id": "CUST-002-2024",
+      "order_id": "ORD-2024-00156",
+      "rating": 4,
+      "title": "Good cooling, great RGB",
+      "review_text": "The cooling pad works well and keeps my laptop temperatures down by about 10-15 degrees. The RGB lighting is vibrant and customizable. My only complaint is that it's a bit bulky to travel with.",
+      "pros": [
+        "Effective cooling",
+        "Beautiful RGB effects",
+        "Quiet operation",
+        "Adjustable height"
+      ],
+      "cons": [
+        "Bulky size",
+        "USB cable could be longer"
+      ],
+      "verified_purchase": true,
+      "helpful_count": 28,
+      "not_helpful_count": 1,
+      "status": "published",
+      "created_at": "2024-12-20T15:45:00Z",
+      "updated_at": "2024-12-20T15:45:00Z",
+      "moderation": {
+        "flagged": false,
+        "reviewed_by": "MOD-002",
+        "reviewed_at": "2024-12-20T16:00:00Z"
+      },
+      "media": {
+        "images": [],
+        "videos": []
+      },
+      "merchant_response": {
+        "response_text": "Thanks for your feedback! We're glad it's keeping your laptop cool. We'll pass along your cable length suggestion to our product team.",
+        "responded_by": "TechMart Support Team",
+        "responded_at": "2024-12-21T09:30:00Z"
+      }
+    },
+    "review_003": {
+      "review_id": "REV-2025-00003",
+      "product_id": "PROD-MON-001",
+      "customer_id": "CUST-003-2024",
+      "order_id": "ORD-2025-00003",
+      "rating": 5,
+      "title": "Best monitor I've ever owned",
+      "review_text": "Absolutely stunning display! The 4K resolution at 240Hz is a game changer. Colors are incredibly accurate, and the HDR1000 makes movies look amazing. G-Sync Ultimate works flawlessly. Worth every penny.",
+      "pros": [
+        "Incredible image quality",
+        "Smooth 240Hz refresh",
+        "HDR1000 is stunning",
+        "Excellent build quality",
+        "Great stand adjustability"
+      ],
+      "cons": [
+        "Expensive",
+        "Takes up desk space"
+      ],
+      "verified_purchase": true,
+      "helpful_count": 67,
+      "not_helpful_count": 3,
+      "status": "published",
+      "created_at": "2025-01-10T20:15:00Z",
+      "updated_at": "2025-01-10T20:15:00Z",
+      "moderation": {
+        "flagged": false,
+        "reviewed_by": "MOD-001",
+        "reviewed_at": "2025-01-10T20:45:00Z"
+      },
+      "media": {
+        "images": [
+          {
+            "url": "https://cdn.techmart.com/reviews/rev-003/img1.jpg",
+            "caption": "Setup on desk",
+            "uploaded_at": "2025-01-10T20:10:00Z"
+          }
+        ],
+        "videos": []
+      },
+      "merchant_response": null
+    }
+  },
+  "analytics": {
+    "sales_summary": {
+      "period": "2025-01",
+      "total_revenue": 456789.50,
+      "total_orders": 1523,
+      "average_order_value": 299.86,
+      "total_items_sold": 4892,
+      "new_customers": 234,
+      "returning_customers": 1289,
+      "by_category": {
+        "electronics": {
+          "revenue": 389456.20,
+          "orders": 987,
+          "items_sold": 2145
+        },
+        "accessories": {
+          "revenue": 67333.30,
+          "orders": 536,
+          "items_sold": 2747
+        }
+      },
+      "top_products": [
+        {
+          "product_id": "PROD-LAPT-001",
+          "name": "UltraBook Pro Gaming Laptop 17\"",
+          "units_sold": 145,
+          "revenue": 430498.55
+        },
+        {
+          "product_id": "PROD-ACC-MOUSE-001",
+          "name": "ProGamer Elite Wireless Mouse",
+          "units_sold": 892,
+          "revenue": 98108.08
+        },
+        {
+          "product_id": "PROD-MON-001",
+          "name": "UltraVision 4K Gaming Monitor 32\"",
+          "units_sold": 267,
+          "revenue": 277697.33
+        }
+      ]
+    },
+    "inventory_summary": {
+      "total_warehouses": 3,
+      "total_sku_count": 4,
+      "total_units_in_stock": 5765,
+      "total_units_reserved": 1318,
+      "total_units_available": 4447,
+      "low_stock_items": 2,
+      "out_of_stock_items": 0,
+      "overstocked_items": 0
+    }
+  }
+      },
+  "promotions": {
+    "promo_001": {
+      "promotion_id": "PROMO-NY-2025",
+      "name": "New Year Sale 2025",
+      "description": "Start the year with amazing deals on gaming laptops, monitors, and accessories",
+      "type": "percentage",
+      "discount_value": 15,
+      "start_date": "2025-01-01T00:00:00Z",
+      "end_date": "2025-01-31T23:59:59Z",
+      "status": "active",
+      "applicable_products": [
+        "PROD-LAPT-001",
+        "PROD-LAPT-002",
+        "PROD-MON-001",
+        "PROD-ACC-MOUSE-001"
+      ],
+      "minimum_purchase_amount": 0.00,
+      "maximum_discount_amount": 500.00,
+      "usage_limit": {
+        "per_customer": 5,
+        "total": 10000
+      },
+      "current_usage": {
+        "unique_customers": 1247,
+        "total_redemptions": 1523
+      },
+      "conditions": {
+        "customer_types": ["standard", "premium"],
+        "excluded_categories": [],
+        "stackable_with_other_promos": false,
+        "requires_coupon_code": false
+      }
+    },
+    "promo_002": {
+      "promotion_id": "PROMO-FLASH-001",
+      "name": "Flash Sale - Gaming Peripherals",
+      "description": "24-hour flash sale on gaming mice and keyboards",
+      "type": "fixed",
+      "discount_value": 20.00,
+      "start_date": "2025-01-15T00:00:00Z",
+      "end_date": "2025-01-15T23:59:59Z",
+      "status": "scheduled",
+      "applicable_products": [
+        "PROD-ACC-MOUSE-001"
+      ],
+      "minimum_purchase_amount": 0.00,
+      "maximum_discount_amount": 20.00,
+      "usage_limit": {
+        "per_customer": 2,
+        "total": 5000
+      },
+      "current_usage": {
+        "unique_customers": 0,
+        "total_redemptions": 0
+      },
+      "conditions": {
+        "customer_types": ["standard", "premium"],
+        "excluded_categories": [],
+        "stackable_with_other_promos": false,
+        "requires_coupon_code": false
+      }
+    }
+  },
+  "coupons": {
+    "coupon_001": {
+      "coupon_id": "COUP-WELCOME10",
+      "code": "WELCOME10",
+      "name": "New Customer Welcome",
+      "description": "10% off first order",
+      "type": "percentage",
+      "discount_value": 10,
+      "start_date": "2024-01-01T00:00:00Z",
+      "end_date": "2025-12-31T23:59:59Z",
+      "status": "active",
+      "applicable_to": "all_products",
+      "minimum_purchase_amount": 50.00,
+      "maximum_discount_amount": 100.00,
+      "usage_limit": {
+        "per_customer": 1,
+        "total": null
+      },
+      "current_usage": {
+        "unique_customers": 3421,
+        "total_redemptions": 3421
+      },
+      "conditions": {
+        "customer_types": ["new"],
+        "excluded_products": [],
+        "excluded_categories": [],
+        "stackable": false
+      }
+    },
+    "coupon_002": {
+      "coupon_id": "COUP-FREESHIP",
+      "code": "FREESHIP50",
+      "name": "Free Shipping",
+      "description": "Free shipping on orders over $50",
+      "type": "free_shipping",
+      "discount_value": 0,
+      "start_date": "2025-01-01T00:00:00Z",
+      "end_date": "2025-03-31T23:59:59Z",
+      "status": "active",
+      "applicable_to": "all_products",
+      "minimum_purchase_amount": 50.00,
+      "maximum_discount_amount": null,
+      "usage_limit": {
+        "per_customer": null,
+        "total": null
+      },
+      "current_usage": {
+        "unique_customers": 892,
+        "total_redemptions": 1456
+      },
+      "conditions": {
+        "customer_types": ["standard", "premium"],
+        "excluded_products": [],
+        "excluded_categories": [],
+        "stackable": true
+      }
+    }
+  },
+  "wishlists": {
+    "wishlist_001": {
+      "wishlist_id": "WISH-CUST001-001",
+      "customer_id": "CUST-001-2024",
+      "name": "My Gaming Setup",
+      "is_public": false,
+      "created_at": "2024-11-20T10:00:00Z",
+      "updated_at": "2025-01-09T14:30:00Z",
+      "items": [
+        {
+          "wishlist_item_id": "WISHITEM-001",
+          "product_id": "PROD-MON-001",
+          "added_at": "2024-11-20T10:15:00Z",
+          "priority": "high",
+          "notes": "Waiting for next sale",
+          "price_at_addition": 1299.99,
+          "current_price": 1039.99,
+          "price_drop_alert": true
+        },
+        {
+          "wishlist_item_id": "WISHITEM-002",
+          "product_id": "PROD-ACC-MOUSE-001",
+          "added_at": "2024-12-05T16:20:00Z",
+          "priority": "medium",
+          "notes": null,
+          "price_at_addition": 129.99,
+          "current_price": 109.99,
+          "price_drop_alert": true
+        }
+      ],
+      "total_items": 2,
+      "estimated_total_value": 1149.98
+    },
+    "wishlist_002": {
+      "wishlist_id": "WISH-CUST002-001",
+      "customer_id": "CUST-002-2024",
+      "name": "Office Upgrade",
+      "is_public": false,
+      "created_at": "2024-09-10T08:30:00Z",
+      "updated_at": "2025-01-05T11:15:00Z",
+      "items": [
+        {
+          "wishlist_item_id": "WISHITEM-003",
+          "product_id": "PROD-MON-001",
+          "added_at": "2024-09-10T08:45:00Z",
+          "priority": "high",
+          "notes": "For work from home setup",
+          "price_at_addition": 1399.99,
+          "current_price": 1039.99,
+          "price_drop_alert": true
+        }
+      ],
+      "total_items": 1,
+      "estimated_total_value": 1039.99
+    }
+  },
+  "support_tickets": {
+    "ticket_001": {
+      "ticket_id": "TKT-2025-00001",
+      "customer_id": "CUST-001-2024",
+      "order_id": "ORD-2025-00001",
+      "subject": "Question about warranty coverage",
+      "category": "warranty",
+      "priority": "medium",
+      "status": "resolved",
+      "created_at": "2025-01-07T09:30:00Z",
+      "updated_at": "2025-01-07T14:45:00Z",
+      "resolved_at": "2025-01-07T14:45:00Z",
+      "assigned_to": "AGENT-003",
+      "messages": [
+        {
+          "message_id": "MSG-001",
+          "sender_type": "customer",
+          "sender_id": "CUST-001-2024",
+          "message": "Hi, I purchased the extended warranty. Does it cover accidental damage from drops?",
+          "timestamp": "2025-01-07T09:30:00Z",
+          "attachments": []
+        },
+        {
+          "message_id": "MSG-002",
+          "sender_type": "agent",
+          "sender_id": "AGENT-003",
+          "message": "Hello John! Yes, the 36-month extended warranty you purchased includes coverage for accidental damage, including drops. There is a $149 deductible per incident. Is there anything else I can help you with?",
+          "timestamp": "2025-01-07T10:15:00Z",
+          "attachments": []
+        },
+        {
+          "message_id": "MSG-003",
+          "sender_type": "customer",
+          "sender_id": "CUST-001-2024",
+          "message": "Perfect, that's exactly what I needed to know. Thank you!",
+          "timestamp": "2025-01-07T14:45:00Z",
+          "attachments": []
+        }
+      ],
+      "resolution": {
+        "resolution_type": "information_provided",
+        "resolution_notes": "Customer inquiry about warranty coverage - confirmed accidental damage coverage",
+        "customer_satisfied": true,
+        "satisfaction_rating": 5
+      }
+    },
+    "ticket_002": {
+      "ticket_id": "TKT-2025-00002",
+      "customer_id": "CUST-002-2024",
+      "order_id": "ORD-2025-00002",
+      "subject": "Delivery delay concern",
+      "category": "shipping",
+      "priority": "high",
+      "status": "open",
+      "created_at": "2025-01-11T16:00:00Z",
+      "updated_at": "2025-01-11T16:30:00Z",
+      "resolved_at": null,
+      "assigned_to": "AGENT-001",
+      "messages": [
+        {
+          "message_id": "MSG-004",
+          "sender_type": "customer",
+          "sender_id": "CUST-002-2024",
+          "message": "I ordered my laptop on Jan 10th with standard shipping (5-7 days), but the tracking hasn't updated since yesterday. Can you help?",
+          "timestamp": "2025-01-11T16:00:00Z",
+          "attachments": []
+        },
+        {
+          "message_id": "MSG-005",
+          "sender_type": "agent",
+          "sender_id": "AGENT-001",
+          "message": "Hi Sarah! I'm looking into your order right now. Let me check with our shipping partner and I'll get back to you within the hour.",
+          "timestamp": "2025-01-11T16:30:00Z",
+          "attachments": []
+        }
+      ],
+      "resolution": null
+    }
+  },
+  "loyalty_program": {
+    "program_name": "TechMart Rewards",
+    "program_id": "LOYALTY-TECHMART",
+    "tiers": {
+      "bronze": {
+        "tier_name": "Bronze",
+        "tier_level": 1,
+        "requirements": {
+          "min_annual_spend": 0.00,
+          "min_orders": 0
+        },
+        "benefits": {
+          "points_per_dollar": 1,
+          "birthday_bonus_points": 100,
+          "exclusive_sales_access": false,
+          "free_shipping_threshold": 50.00,
+          "priority_support": false
+        }
+      },
+      "silver": {
+        "tier_name": "Silver",
+        "tier_level": 2,
+        "requirements": {
+          "min_annual_spend": 1000.00,
+          "min_orders": 5
+        },
+        "benefits": {
+          "points_per_dollar": 1.5,
+          "birthday_bonus_points": 250,
+          "exclusive_sales_access": true,
+          "free_shipping_threshold": 25.00,
+          "priority_support": false
+        }
+      },
+      "gold": {
+        "tier_name": "Gold",
+        "tier_level": 3,
+        "requirements": {
+          "min_annual_spend": 5000.00,
+          "min_orders": 15
+        },
+        "benefits": {
+          "points_per_dollar": 2,
+          "birthday_bonus_points": 500,
+          "exclusive_sales_access": true,
+          "free_shipping_threshold": 0.00,
+          "priority_support": true
+        }
+      },
+      "platinum": {
+        "tier_name": "Platinum",
+        "tier_level": 4,
+        "requirements": {
+          "min_annual_spend": 15000.00,
+          "min_orders": 30
+        },
+        "benefits": {
+          "points_per_dollar": 3,
+          "birthday_bonus_points": 1000,
+          "exclusive_sales_access": true,
+          "free_shipping_threshold": 0.00,
+          "priority_support": true,
+          "dedicated_account_manager": true,
+          "early_access_new_products": true
+        }
+      }
+    },
+    "points_redemption": {
+      "points_per_dollar_value": 100,
+      "minimum_redemption": 1000,
+      "redemption_increments": 500,
+      "expiration_months": 24
+    }
+  },
+  "site_settings": {
+    "maintenance_mode": {
+      "enabled": false,
+      "scheduled_maintenance": null,
+      "maintenance_message": "We're currently updating our systems. Please check back soon!"
+    },
+    "feature_flags": {
+      "enable_reviews": true,
+      "enable_wishlists": true,
+      "enable_loyalty_program": true,
+      "enable_live_chat": true,
+      "enable_product_recommendations": true,
+      "enable_virtual_assistant": false,
+      "enable_ar_product_preview": false
+    },
+    "api_configuration": {
+      "rate_limiting": {
+        "enabled": true,
+        "requests_per_minute": 100,
+        "burst_limit": 150
+      },
+      "webhook_endpoints": {
+        "order_created": "https://webhooks.techmart.com/orders/created",
+        "order_shipped": "https://webhooks.techmart.com/orders/shipped",
+        "order_delivered": "https://webhooks.techmart.com/orders/delivered",
+        "payment_completed": "https://webhooks.techmart.com/payments/completed",
+        "customer_registered": "https://webhooks.techmart.com/customers/registered"
+      }
+    },
+    "seo_configuration": {
+      "default_meta": {
+        "title": "TechMart Global - Premium Electronics & Tech Gear",
+        "description": "Shop the latest electronics, gaming laptops, monitors, and accessories at TechMart Global. Free shipping on orders over $50.",
+        "keywords": ["electronics", "gaming", "laptops", "monitors", "tech", "accessories"]
+      },
+      "social_media": {
+        "facebook": "https://facebook.com/techmartglobal",
+        "twitter": "https://twitter.com/techmartglobal",
+        "instagram": "https://instagram.com/techmartglobal",
+        "youtube": "https://youtube.com/techmartglobal",
+        "linkedin": "https://linkedin.com/company/techmartglobal"
+      },
+      "structured_data": {
+        "organization": {
+          "name": "TechMart Global",
+          "url": "https://techmart.global",
+          "logo": "https://cdn.techmart.com/logo.png",
+          "same_as": [
+            "https://facebook.com/techmartglobal",
+            "https://twitter.com/techmartglobal",
+            "https://instagram.com/techmartglobal"
+          ]
+        }
+      }
+    }
+  }
+    }

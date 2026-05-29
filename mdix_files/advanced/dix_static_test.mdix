@@ -1,0 +1,105 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "regular",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@QUICKFUNCS(
+    ~testDixFormat<string>() {
+        let msg1 = Dix.Format("Hello {0}!", "World");
+        let msg2 = Dix.Format("Count: {0}, Price: {1}", 42, 19.99);
+        let msg3 = Dix.Format("{0} + {1} = {2}", 10, 20, 30);
+        return msg1;
+    }
+
+    ~testDixJoin<string>() {
+        let joined1 = Dix.Join(", ", "apple", "banana", "cherry");
+        let joined2 = Dix.Join(" - ", "one", "two", "three");
+        let joined3 = Dix.Join("|", "a", "b", "c", "d");
+        return joined1;
+    }
+
+    ~testDixFormatComplex<string>(name<string>, age<int>, score<float>) {
+        let message = Dix.Format("User: {0}, Age: {1}, Score: {2}", name, age, score);
+        return message;
+    }
+
+    ~testDixJoinArray<string>() {
+        let items = Array.of("red", "green", "blue");
+        let result = Dix.Join(", ", items);
+        return result;
+    }
+
+    ~testDixFormatNumbers<string>() {
+        let intVal<int> = 42;
+        let floatVal<float> = 3.14f;
+        let doubleVal = 2.718;
+        let result = Dix.Format("int={0}, float={1}, double={2}", intVal, floatVal, doubleVal);
+        return result;
+    }
+
+    ~testDixInControlFlow<string>(count<int>) {
+        if: count > 10 {
+            return Dix.Format("Large count: {0}", count);
+        }
+        elif: count > 5 {
+            return Dix.Format("Medium count: {0}", count);
+        }
+        else {
+            return Dix.Format("Small count: {0}", count);
+        }
+    }
+
+    ~testDixInChk<string>(operation<string>) {
+        chk: operation {
+            -> "format_simple" {
+                return Dix.Format("Value: {0}", 42);
+            }
+            -> "format_multi" {
+                return Dix.Format("{0}, {1}, {2}", "a", "b", "c");
+            }
+            -> "join_simple" {
+                return Dix.Join("-", "one", "two", "three");
+            }
+            -> "join_complex" {
+                return Dix.Join(" | ", "alpha", "beta", "gamma", "delta");
+            }
+            -> miss {
+                return "unknown";
+            }
+        }
+    }
+
+    ~testDixInterpolation<string>(user<string>, status<int>) {
+        let interpolated = $"User {user} has status {status}";
+        let formatted = Dix.Format("User {0} has status {1}", user, status);
+        return formatted;
+    }
+
+    ~testDixMultipleFormats<string>() {
+        let part1 = Dix.Format("First: {0}", "value1");
+        let part2 = Dix.Format("Second: {0}", "value2");
+        let combined = Dix.Join(" | ", part1, part2);
+        return combined;
+    }
+)
+
+@DATA(
+    test_format = testDixFormat(),
+    test_join = testDixJoin(),
+    test_format_complex = testDixFormatComplex("Alice", 30, 95.5f),
+    test_join_array = testDixJoinArray(),
+    test_format_numbers = testDixFormatNumbers(),
+    test_control_large = testDixInControlFlow(15),
+    test_control_medium = testDixInControlFlow(7),
+    test_control_small = testDixInControlFlow(3),
+    test_chk_format_simple = testDixInChk("format_simple"),
+    test_chk_format_multi = testDixInChk("format_multi"),
+    test_chk_join_simple = testDixInChk("join_simple"),
+    test_chk_join_complex = testDixInChk("join_complex"),
+    test_chk_miss = testDixInChk("unknown"),
+    test_interpolation = testDixInterpolation("Bob", 100),
+    test_multiple_formats = testDixMultipleFormats()
+)

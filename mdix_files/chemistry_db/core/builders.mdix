@@ -13,15 +13,15 @@
 @QUICKFUNCS(
   ~createIdentity<object>(name<string>, symbol<string>, atomic_num<int>, atomic_weight<float>, group<enum>, period<int>, block<enum>, category<enum>, state<enum>) {
     return {
-      name = name,
-      symbol = symbol,
-      atomic_number = atomic_num,
-      atomic_weight = atomic_weight,
-      group = group,
-      period = period,
-      block = block,
-      category = category,
-      standard_state = state
+      _name = name,
+      _symbol = symbol,
+      _atomic_number = atomic_num,
+      _atomic_weight = atomic_weight,
+      _group = group,
+      _period = period,
+      _block = block,
+      _category = category,
+      _standard_state = state
     }
   }
 

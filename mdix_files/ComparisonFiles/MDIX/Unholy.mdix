@@ -1,0 +1,1478 @@
+//note this could easily be further reduced maybe even surpass 70 percent reduction but ehm I don't feel like it 
+
+@CONFIG(
+  version -> "1.0.0",
+  features -> "advanced"
+)
+
+@ENUMS(
+  Currency { USD, EUR, GBP, JPY, AUD }
+  Language { EN, ES, FR, DE, JA }
+  PaymentType { CREDIT_CARD, PAYPAL, APPLE_PAY, GOOGLE_PAY, CRYPTO }
+  CardBrand { VISA, MASTERCARD, AMEX, DISCOVER }
+  ShippingClass { STANDARD, EXPEDITED, OVERNIGHT, OVERSIZED }
+  OrderStatus { PENDING, PROCESSING, SHIPPED, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED }
+  AccountType { STANDARD, PREMIUM }
+  AccountStatus { ACTIVE, INACTIVE, SUSPENDED }
+  PanelType { IPS, VA, OLED, TN }
+  DayOfWeek { MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY }
+)
+
+@QUICKFUNCS(
+  ~coords<object>(lat<float>, lon<float>) {
+    return { latitude = lat, longitude = lon };
+  }
+
+  ~address<object>(street<string>, suite<string>, city<string>, state<string>, zip<string>, country<string>, coords<object>) {
+    return {
+      street = street,
+      suite = suite,
+      city = city,
+      state = state,
+      postal_code = zip,
+      country = country,
+      coordinates = coords
+    };
+  }
+
+  ~shipAddr<object>(id<string>, is_def<bool>, label<string>, recipient<string>, street<string>, suite<string>, city<string>, state<string>, zip<string>, country<string>, phone<string>, inst<string>, coords<object>) {
+    return {
+      address_id = id,
+      is_default = is_def,
+      label = label,
+      recipient_name = recipient,
+      street_line_1 = street,
+      street_line_2 = suite,
+      city = city,
+      state = state,
+      postal_code = zip,
+      country = country,
+      phone = phone,
+      delivery_instructions = inst,
+      coordinates = coords
+    };
+  }
+
+  ~phones<object>(main<string>, support<string>, intl<string>) {
+    return { main = main, support = support, international = intl };
+  }
+
+  ~creditCard<object>(id<string>, is_def<bool>, card_type<string>, last_four<string>, exp_month<int>, exp_year<int>, holder<string>, billing_addr_id<string>, verified<bool>, added<string>) {
+    return {
+      payment_method_id = id,
+      is_default = is_def,
+      card_type = card_type,
+      last_four_digits = last_four,
+      expiry_month = exp_month,
+      expiry_year = exp_year,
+      cardholder_name = holder,
+      billing_address_id = billing_addr_id,
+      is_verified = verified,
+      added_date = added
+    };
+  }
+
+  ~paypal<object>(id<string>, email<string>, verified<bool>, added<string>) {
+    return {
+      payment_method_id = id,
+      email = email,
+      is_verified = verified,
+      added_date = added
+    };
+  }
+
+  ~shipMethod<object>(name<string>, base<float>, per_lb<float>, days_min<int>, days_max<int>, free_thresh<float>, track<bool>, insure<bool>, sign<bool>) {
+    return {
+      name = name,
+      base_cost = base,
+      cost_per_pound = per_lb,
+      estimated_days_min = days_min,
+      estimated_days_max = days_max,
+      free_shipping_threshold = free_thresh,
+      tracking_included = track,
+      insurance_included = insure,
+      signature_required = sign
+    };
+  }
+
+  ~intlShip<object>(name<string>, base<float>, per_lb<float>, days_min<int>, days_max<int>, free_thresh<float>, customs<bool>) {
+    return {
+      name = name,
+      base_cost = base,
+      cost_per_pound = per_lb,
+      estimated_days_min = days_min,
+      estimated_days_max = days_max,
+      free_shipping_threshold = free_thresh,
+      tracking_included = true,
+      insurance_included = true,
+      signature_required = customs,
+      customs_declaration_required = customs
+    };
+  }
+
+  ~whStock<object>(wh_id<string>, qty<int>, reserved<int>, incoming<int>, incoming_date<string>, aisle<string>, shelf<string>, bin<string>) {
+   let available = qty - reserved;
+    return {
+      warehouse_id = wh_id,
+      stock = {
+        quantity = qty,
+        reserved = reserved,
+        available = available,
+        incoming = incoming,
+        incoming_date = incoming_date
+      },
+      location_in_warehouse = {
+        aisle = aisle,
+        shelf = shelf,
+        bin = bin
+      }
+    };
+  }
+
+  ~whLoc<object>(id<string>, name<string>, street<string>, city<string>, state<string>, zip<string>, country<string>) {
+    return {
+      warehouse_id = id,
+      location = {
+        name = name,
+        street = street,
+        city = city,
+        state = state,
+        postal_code = zip,
+        country = country
+      }
+    };
+  }
+
+  ~img<object>(url<string>, alt<string>, img_type<string>, order<int>, w<int>, h<int>) {
+    return { url = url, alt = alt, type = img_type, order = order, width = w, height = h };
+  }
+
+  ~video<object>(url<string>, title<string>, duration<int>, thumb<string>) {
+    return { url = url, title = title, duration_seconds = duration, thumbnail = thumb };
+  }
+
+  ~ratingDist<object>(five<int>, four<int>, three<int>, two<int>, one<int>) {
+    return { "5_star" = five, "4_star" = four, "3_star" = three, "2_star" = two, "1_star" = one };
+  }
+
+  ~warranty<object>(duration<int>, w_type<string>, coverage<array>, exclusions<array>) {
+    return {
+      duration_months = duration,
+      type = w_type,
+      coverage = coverage,
+      exclusions = exclusions
+    };
+  }
+
+  ~extWarranty<object>(duration<int>, price<float>, coverage<array>, deduct<float>) {
+    return {
+      duration_months = duration,
+      price = price,
+      coverage = coverage,
+      deductible = deduct
+    };
+  }
+
+  ~priceHist<object>(date_<string>, price<float>, reason<string>) {
+    return { _date = date_, price = price, reason = reason };
+  }
+
+  ~volDisc<object>(min<int>, max<int>, disc<float>) {
+    return { quantity_min = min, quantity_max = max, discount_percent = disc };
+  }
+
+  ~orderItem<object>(item_id<string>, prod_id<string>, sku<string>, name<string>, qty<int>, unit_price<float>, disc<float>, tax<float>, wh_id<string>, warranty<object>) {
+   let subtotal = unit_price * qty;
+   let  total = subtotal + tax - disc;
+    return {
+      order_item_id = item_id,
+      product_id = prod_id,
+      sku = sku,
+      name = name,
+      quantity = qty,
+      unit_price = unit_price,
+      discount_per_item = disc,
+      tax_per_item = tax,
+      subtotal = subtotal,
+      total = total,
+      warehouse_id = wh_id,
+      warranty_selected = warranty
+    };
+  }
+
+  ~shipStatus<object>(status<string>, timestamp<string>, location<string>, notes<string>) {
+    return { status = status, timestamp = timestamp, location = location, notes = notes };
+  }
+
+  ~review<object>(rev_id<string>, prod_id<string>, cust_id<string>, ord_id<string>, rating<int>, title<string>, text<string>, pros<array>, cons<array>, verified<bool>, helpful<int>, not_help<int>, created<string>, merchant_resp<object>) {
+    return {
+      review_id = rev_id,
+      product_id = prod_id,
+      customer_id = cust_id,
+      order_id = ord_id,
+      rating = rating,
+      title = title,
+      review_text = text,
+      pros = pros,
+      cons = cons,
+      verified_purchase = verified,
+      helpful_count = helpful,
+      not_helpful_count = not_help,
+      status = "published",
+      created_at = created,
+      updated_at = created,
+      merchant_response = merchant_resp
+    };
+  }
+
+  ~merchantResp<object>(resp_text<string>, resp_by<string>, resp_at<string>) {
+    return { response_text = resp_text, responded_by = resp_by, responded_at = resp_at };
+  }
+
+  ~bizHours<object>(open<string>, close<string>, lunch_obj<object>) {
+    return { open = open, close = close, lunch_break = lunch_obj };
+  }
+
+  ~lunchBreak<object>(start<string>, end<string>) {
+    return { start = start, end = end };
+  }
+
+  ~paymentConfig<object>(enabled<bool>, types<array>, fee_pct<float>, fee_fixed<float>, min<float>, max<float>, refund_obj<object>) {
+    return {
+      enabled = enabled,
+      accepted_types = types,
+      processing_fee_percent = fee_pct,
+      processing_fee_fixed = fee_fixed,
+      minimum_amount = min,
+      maximum_amount = max,
+      refund_policy = refund_obj
+    };
+  }
+
+  ~cryptoPayment<object>(enabled<bool>, coins<array>, fee_pct<float>, min<float>, max<float>, refund_obj<object>) {
+    return {
+      enabled = enabled,
+      accepted_coins = coins,
+      processing_fee_percent = fee_pct,
+      processing_fee_fixed = 0.00,
+      minimum_amount = min,
+      maximum_amount = max,
+      refund_policy = refund_obj
+    };
+  }
+
+  ~refundPolicy<object>(full<int>, partial<int>, restock<float>) {
+    return {
+      full_refund_days = full,
+      partial_refund_days = partial,
+      restocking_fee_percent = restock
+    };
+  }
+
+  ~seoMeta<object>(title<string>, desc<string>, keywords<array>) {
+    return {
+      meta_title = title,
+      meta_description = desc,
+      meta_keywords = keywords
+    };
+  }
+
+  ~category<object>(id<string>, name<string>, slug<string>, desc<string>, parent<string>, level<int>, order<int>, active<bool>, seo<object>) {
+    return {
+      id = id,
+      name = name,
+      slug = slug,
+      description = desc,
+      parent_id = parent,
+      level = level,
+      display_order = order,
+      is_active = active,
+      seo = seo
+    };
+  }
+
+  ~brand<object>(id<string>, name<string>, country<string>, founded<int>, website<string>) {
+    return { id = id, name = name, country = country, founded = founded, website = website };
+  }
+
+  ~prodDesc<object>(short<string>, long<string>, features<array>) {
+    return { short = short, long = long, features = features };
+  }
+
+  ~processor<object>(brand<string>, model<string>, gen<string>, cores<int>, threads<int>, base_ghz<float>, boost_ghz<float>, cache_mb<int>, tdp<int>) {
+    return {
+      brand = brand,
+      model = model,
+      generation = gen,
+      cores = cores,
+      threads = threads,
+      base_clock_ghz = base_ghz,
+      boost_clock_ghz = boost_ghz,
+      cache_mb = cache_mb,
+      tdp_watts = tdp
+    };
+  }
+
+  ~graphics<object>(brand<string>, model<string>, vram_gb<int>, vram_type<string>, cuda<int>, base_mhz<int>, boost_mhz<int>, rt<bool>, dlss<string>) {
+    return {
+      brand = brand,
+      model = model,
+      vram_gb = vram_gb,
+      vram_type = vram_type,
+      cuda_cores = cuda,
+      base_clock_mhz = base_mhz,
+      boost_clock_mhz = boost_mhz,
+      ray_tracing = rt,
+      dlss_version = dlss
+    };
+  }
+
+  ~memory<object>(cap_gb<int>, mem_type<string>, speed_mhz<int>, slots<int>, max_gb<int>, upgradeable<bool>) {
+    return {
+      capacity_gb = cap_gb,
+      type = mem_type,
+      speed_mhz = speed_mhz,
+      slots = slots,
+      max_capacity_gb = max_gb,
+      upgradeable = upgradeable
+    };
+  }
+
+  ~storagePrimary<object>(cap_gb<int>, stor_type<string>, interface<string>, read_mbps<int>, write_mbps<int>, form<string>) {
+    return {
+      capacity_gb = cap_gb,
+      type = stor_type,
+      interface = interface,
+      read_speed_mbps = read_mbps,
+      write_speed_mbps = write_mbps,
+      form_factor = form
+    };
+  }
+
+  ~storageSlot<object>(slot_num<int>, slot_type<string>, interface<string>, occupied<bool>) {
+    return {
+      slot_number = slot_num,
+      type = slot_type,
+      interface = interface,
+      occupied = occupied
+    };
+  }
+
+  ~display<object>(size<float>, res_obj<object>, refresh<int>, response<int>, panel<string>, brightness<int>, gamut_obj<object>, features<array>) {
+    return {
+      size_inches = size,
+      resolution = res_obj,
+      refresh_rate_hz = refresh,
+      response_time_ms = response,
+      panel_type = panel,
+      brightness_nits = brightness,
+      color_gamut = gamut_obj,
+      features = features
+    };
+  }
+
+  ~resolution<object>(w<int>, h<int>, name<string>) {
+    return { width = w, height = h, name = name };
+  }
+
+  ~colorGamut<object>(srgb<int>, adobe<int>, dci<int>) {
+    return { srgb_percent = srgb, adobe_rgb_percent = adobe, dci_p3_percent = dci };
+  }
+
+  ~wifi<object>(standard<string>, speed<int>, bands<array>) {
+    return { standard = standard, speed_mbps = speed, bands = bands };
+  }
+
+  ~bluetooth<object>(ver<string>, range<int>) {
+    return { version = ver, range_meters = range };
+  }
+
+  ~hdmiPort<object>(count<int>, ver<string>) {
+    return { count = count, version = ver };
+  }
+
+  ~ethPort<object>(count<int>, speed_gbps<float>) {
+    return { count = count, speed_gbps = speed_gbps };
+  }
+
+  ~sdCard<object>(included<bool>, card_type<string>) {
+    return { included = included, type = card_type };
+  }
+
+  ~battery<object>(cap_wh<int>, cells<int>, bat_type<string>, life_hrs<int>, charge_obj<object>) {
+    return {
+      capacity_wh = cap_wh,
+      cells = cells,
+      type = bat_type,
+      life_hours = life_hrs,
+      charging = charge_obj
+    };
+  }
+
+  ~charging<object>(power<int>, fast<bool>, time_hrs<float>) {
+    return { power_watts = power, fast_charge = fast, charge_time_hours = time_hrs };
+  }
+
+  ~dimensions<object>(w<int>, d<int>, h<float>, weight<float>) {
+    return { width_mm = w, depth_mm = d, height_mm = h, weight_kg = weight };
+  }
+
+  ~os<object>(name<string>, ver<string>, arch<string>, lic<string>) {
+    return { name = name, version = ver, architecture = arch, license_type = lic };
+  }
+
+  ~pricing<object>(base<float>, curr<string>, disc_obj<object>, final<float>, msrp<float>, cost<float>, margin<float>, tax_class<string>, hist<array>) {
+    return {
+      base_price = base,
+      currency = curr,
+      discounts = disc_obj,
+      final_price = final,
+      msrp = msrp,
+      cost = cost,
+      margin_percent = margin,
+      tax_class = tax_class,
+      price_history = hist
+    };
+  }
+
+  ~currentDisc<object>(disc_type<string>, val<float>, start<string>, end<string>, reason<string>) {
+    return {
+      type = disc_type,
+      value = val,
+      start_date = start,
+      end_date = end,
+      reason = reason
+    };
+  }
+
+  ~discounts<object>(current<object>, volume<array>) {
+    return { current_discount = current, volume_discounts = volume };
+  }
+
+  ~inventory<object>(warehouses<object>, alerts<object>) {
+    return { warehouses = warehouses, stock_alerts = alerts };
+  }
+
+  ~stockAlerts<object>(low<int>, out<int>, over<int>, reorder<int>, reorder_qty<int>) {
+    return {
+      low_stock_threshold = low,
+      out_of_stock_threshold = out,
+      overstocked_threshold = over,
+      reorder_point = reorder,
+      reorder_quantity = reorder_qty
+    };
+  }
+
+  ~shipping<object>(weight<float>, dims<object>, pkg_type<string>, fragile<bool>, sign<bool>, ship_class<string>, handle_days<int>) {
+    return {
+      weight_kg = weight,
+      dimensions = dims,
+      package_type = pkg_type,
+      fragile = fragile,
+      requires_signature = sign,
+      shipping_class = ship_class,
+      handling_time_days = handle_days
+    };
+  }
+
+  ~shipDims<object>(len<int>, wid<int>, hgt<int>) {
+    return { length_cm = len, width_cm = wid, height_cm = hgt };
+  }
+
+  ~media<object>(images<array>, videos<array>) {
+    return { images = images, videos = videos };
+  }
+
+  ~reviews<object>(avg<float>, total<int>, dist<object>) {
+    return {
+      average_rating = avg,
+      total_reviews = total,
+      rating_distribution = dist
+    };
+  }
+
+  ~prodWarranty<object>(mfr<object>, ext_options<array>) {
+    return {
+      manufacturer_warranty = mfr,
+      extended_warranty_options = ext_options
+    };
+  }
+
+  ~customer<object>(id<string>, status<string>, acc_type<string>, joined<string>, last_login<string>, personal<object>, addrs<object>, payments<object>, stats<object>, prefs<object>) {
+    return {
+      customer_id = id,
+      account_status = status,
+      account_type = acc_type,
+      joined_date = joined,
+      last_login = last_login,
+      personal_info = personal,
+      addresses = addrs,
+      payment_methods = payments,
+      account_statistics = stats,
+      preferences = prefs
+    };
+  }
+
+  ~personalInfo<object>(first<string>, last<string>, email<string>, phone<object>, dob<string>, gender<string>, lang<string>, newsletter<bool>) {
+    return {
+      first_name = first,
+      last_name = last,
+      email = email,
+      phone = phone,
+      date_of_birth = dob,
+      gender = gender,
+      preferred_language = lang,
+      newsletter_subscribed = newsletter
+    };
+  }
+
+  ~phoneInfo<object>(primary<string>, secondary<string>, verified<bool>) {
+    return { primary = primary, secondary = secondary, verified = verified };
+  }
+
+  ~custAddresses<object>(billing<object>, shipping<array>) {
+    return { billing = billing, shipping = shipping };
+  }
+
+  ~custPayments<object>(cards<array>, paypal_obj<object>) {
+    return { credit_cards = cards, paypal = paypal_obj };
+  }
+
+  ~custStats<object>(orders<int>, spent<float>, avg<float>, lifetime<float>, points<int>, referrals<int>, reviews<int>, wishlist<int>) {
+    return {
+      total_orders = orders,
+      total_spent = spent,
+      average_order_value = avg,
+      lifetime_value = lifetime,
+      loyalty_points = points,
+      referrals = referrals,
+      reviews_written = reviews,
+      wishlist_items = wishlist
+    };
+  }
+
+  ~custPrefs<object>(email_notifs<object>, sms_notifs<object>, marketing<object>) {
+    return {
+      email_notifications = email_notifs,
+      sms_notifications = sms_notifs,
+      marketing_preferences = marketing
+    };
+  }
+
+  ~emailNotifs<object>(order_updates<bool>, promos<bool>, recs<bool>, price_drops<bool>, newsletter<bool>) {
+    return {
+      order_updates = order_updates,
+      promotions = promos,
+      product_recommendations = recs,
+      price_drops = price_drops,
+      newsletter = newsletter
+    };
+  }
+
+  ~smsNotifs<object>(order_updates<bool>, delivery<bool>, promos<bool>) {
+    return {
+      order_updates = order_updates,
+      delivery_alerts = delivery,
+      promotions = promos
+    };
+  }
+
+  ~marketingPrefs<object>(personalized<bool>, third_party<bool>) {
+    return {
+      personalized_ads = personalized,
+      third_party_sharing = third_party
+    };
+  }
+
+  ~order<object>(ord_id<string>, ord_num<string>, cust_id<string>, status<string>, created<string>, updated<string>, payment<object>, shipping_obj<object>, items<array>, summary<object>, notes<object>, metadata<object>) {
+    return {
+      order_id = ord_id,
+      order_number = ord_num,
+      customer_id = cust_id,
+      status = status,
+      created_at = created,
+      updated_at = updated,
+      payment = payment,
+      shipping = shipping_obj,
+      items = items,
+      order_summary = summary,
+      notes = notes,
+      metadata = metadata
+    };
+  }
+
+  ~payment<object>(pay_id<string>, method_id<string>, method<string>, card_type<string>, last_four<string>, amount<float>, curr<string>, status<string>, txn_id<string>, auth_code<string>, processed<string>, breakdown<object>) {
+    return {
+      payment_id = pay_id,
+      payment_method_id = method_id,
+      payment_method = method,
+      card_type = card_type,
+      last_four_digits = last_four,
+      amount = amount,
+      currency = curr,
+      status = status,
+      transaction_id = txn_id,
+      authorization_code = auth_code,
+      processed_at = processed,
+      breakdown = breakdown
+    };
+  }
+
+  ~paymentBreakdown<object>(subtotal<float>, shipping<float>, tax<float>, disc<float>, total<float>) {
+    return {
+      subtotal = subtotal,
+      shipping = shipping,
+      tax = tax,
+      discount = disc,
+      total = total
+    };
+  }
+
+  ~orderShipping<object>(ship_addr<object>, method<object>, history<array>) {
+    return {
+      shipping_address = ship_addr,
+      shipping_method = method,
+      status_history = history
+    };
+  }
+
+  ~shipMethodInfo<object>(method_id<string>, name<string>, carrier<string>, days<int>, cost<float>, tracking<string>, track_url<string>) {
+    return {
+      method_id = method_id,
+      name = name,
+      carrier = carrier,
+      estimated_days = days,
+      cost = cost,
+      tracking_number = tracking,
+      tracking_url = track_url
+    };
+  }
+
+  ~orderSummary<object>(item_count<int>, total_qty<int>, subtotal<float>, ship<float>, tax<float>, disc<float>, grand<float>) {
+    return {
+      item_count = item_count,
+      total_quantity = total_qty,
+      subtotal = subtotal,
+      shipping = ship,
+      tax = tax,
+      discount = disc,
+      grand_total = grand
+    };
+  }
+
+  ~orderNotes<object>(cust<string>, internal<string>, gift<string>) {
+    return {
+      customer_notes = cust,
+      internal_notes = internal,
+      gift_message = gift
+    };
+  }
+
+  ~orderMetadata<object>(ip<string>, ua<string>, referrer<string>, source<string>, device<string>) {
+    return {
+      ip_address = ip,
+      user_agent = ua,
+      referrer = referrer,
+      marketing_source = source,
+      device_type = device
+    };
+  }
+)@DATA(
+  store_name = "TechMart Global",
+  store_id = "TM-2025-GLOBAL",
+  version = "3.2.1",
+  established = 2020-03-15T00:00:00Z,
+  timezone = "UTC",
+  default_currency = "USD",
+  default_language = "en"
+  
+  store.configuration.general:
+    store_name = "TechMart Global",
+    store_id = "TM-2025-GLOBAL",
+    version = "3.2.1",
+    established = 2020-03-15T00:00:00Z,
+    timezone = "UTC",
+    default_currency = "USD",
+    supported_currencies = ["USD", "EUR", "GBP", "JPY", "AUD"],
+    default_language = "en",
+    supported_languages = ["en", "es", "fr", "de", "ja"],
+    contact = {
+      support_email = "support@techmart.global",
+      sales_email = "sales@techmart.global",
+      phone = phones("+1-800-TECHMART", "+1-800-TECH-SUP", "+44-20-7123-4567"),
+      address = address("123 Innovation Boulevard", "Suite 500", "San Francisco", "CA", "94105", "United States", coords(37.7749, -122.4194))
+    }
+  
+  store.configuration.business_hours:
+    timezone = "America/Los_Angeles",
+    support_hours = {
+      monday = bizHours("08:00", "20:00", lunchBreak("12:00", "13:00")),
+      tuesday = bizHours("08:00", "20:00", lunchBreak("12:00", "13:00")),
+      wednesday = bizHours("08:00", "20:00", lunchBreak("12:00", "13:00")),
+      thursday = bizHours("08:00", "20:00", lunchBreak("12:00", "13:00")),
+      friday = bizHours("08:00", "20:00", lunchBreak("12:00", "13:00")),
+      saturday = bizHours("10:00", "18:00", null),
+      sunday = bizHours("10:00", "18:00", null)
+    }
+  
+  store.configuration.payment_methods:
+    credit_cards = paymentConfig(true, ["visa", "mastercard", "amex", "discover"], 2.9, 0.30, 1.00, 50000.00, refundPolicy(30, 60, 15)),
+    paypal = paymentConfig(true, [], 2.9, 0.30, 1.00, 50000.00, refundPolicy(30, 60, 15)),
+    apple_pay = paymentConfig(true, [], 2.9, 0.30, 1.00, 50000.00, refundPolicy(30, 60, 15)),
+    google_pay = paymentConfig(true, [], 2.9, 0.30, 1.00, 50000.00, refundPolicy(30, 60, 15)),
+    cryptocurrency = cryptoPayment(true, ["BTC", "ETH", "USDC"], 1.5, 10.00, 100000.00, refundPolicy(14, 30, 20))
+  
+  store.configuration.shipping.domestic:
+    standard = shipMethod("Standard Shipping", 5.99, 0.50, 5, 7, 50.00, true, false, false),
+    expedited = shipMethod("Expedited Shipping", 12.99, 1.00, 3, 4, 100.00, true, true, false),
+    overnight = shipMethod("Overnight Shipping", 29.99, 2.50, 1, 1, null, true, true, true)
+  
+  store.configuration.shipping.international:
+    standard = intlShip("International Standard", 25.99, 3.00, 10, 15, 200.00, true),
+    express = intlShip("International Express", 59.99, 5.00, 5, 7, null, true)
+  
+  store.configuration.tax_configuration:
+    enabled = true,
+    calculation_method = "destination_based",
+    rates = {
+      california = {
+        state_rate = 7.25,
+        county_rates = { los_angeles = 2.00, san_francisco = 1.50, san_diego = 1.00 },
+        city_rates = { los_angeles = 0.50, san_francisco = 0.00, san_diego = 0.50 }
+      },
+      new_york = {
+        state_rate = 4.00,
+        county_rates = { new_york = 4.50, kings = 4.50, queens = 4.50 },
+        city_rates = { new_york_city = 0.38 }
+      },
+      texas = {
+        state_rate = 6.25,
+        county_rates = { harris = 1.00, dallas = 1.00, travis = 1.00 },
+        city_rates = { houston = 1.00, dallas = 1.00, austin = 1.00 }
+      }
+    }
+  
+  store.categories.electronics:
+    id = "CAT-ELEC-001",
+    name = "Electronics",
+    slug = "electronics",
+    description = "All electronic devices and accessories",
+    parent_id = null,
+    level = 1,
+    display_order = 1,
+    is_active = true,
+    seo = seoMeta("Electronics - TechMart Global", "Shop the latest electronics", ["electronics", "tech", "gadgets"]),
+    subcategories = {
+      computers = category("CAT-COMP-001", "Computers", "computers", "Desktop and laptop computers", "CAT-ELEC-001", 2, 1, true, seoMeta("Computers - TechMart Global", "Shop desktop and laptop computers", ["computers", "laptops", "desktops"])),
+      laptops_sub = {
+        laptops = category("CAT-LAPT-001", "Laptops", "laptops", "Portable laptop computers", "CAT-COMP-001", 3, 1, true, seoMeta("Laptops - TechMart Global", "Shop laptop computers", ["laptops", "notebooks", "portable"])),
+        gaming_laptops = category("CAT-GAML-001", "Gaming Laptops", "gaming-laptops", "High-performance gaming laptops", "CAT-LAPT-001", 4, 1, true, seoMeta("Gaming Laptops - TechMart Global", "Shop gaming laptops", ["gaming", "laptops", "performance"])),
+        business_laptops = category("CAT-BUSL-001", "Business Laptops", "business-laptops", "Professional business laptops", "CAT-LAPT-001", 4, 2, true, seoMeta("Business Laptops - TechMart Global", "Shop business laptops", ["business", "professional", "enterprise"]))
+      }
+    }
+  
+  products.laptop_001:
+    product_id = "PROD-LAPT-001",
+    sku = "LAPT-GAM-RTX4090-001",
+    name = "UltraBook Pro Gaming Laptop 17\"",
+    slug = "ultrabook-pro-gaming-laptop-17",
+    category_id = "CAT-GAML-001",
+    brand = brand("BRAND-001", "UltraBook", "United States", 2015, "https://ultrabook.com"),
+    description = prodDesc("High-performance gaming laptop with RTX 4090", "The UltraBook Pro Gaming Laptop features the latest NVIDIA RTX 4090 GPU, Intel Core i9-13900HX processor, and 32GB DDR5 RAM. Perfect for gaming, content creation, and professional work.", ["NVIDIA RTX 4090 16GB GDDR6", "Intel Core i9-13900HX (24 cores)", "32GB DDR5-5600MHz RAM (upgradeable to 64GB)", "2TB NVMe PCIe 4.0 SSD", "17.3\" QHD 240Hz display", "RGB mechanical keyboard", "Advanced cooling system", "Thunderbolt 4 ports"]),
+    specifications = {
+      processor = processor("Intel", "Core i9-13900HX", "13th Gen", 24, 32, 2.2, 5.4, 36, 55),
+      graphics = graphics("NVIDIA", "GeForce RTX 4090", 16, "GDDR6", 16384, 1980, 2610, true, "3.5"),
+      memory = memory(32, "DDR5", 5600, 2, 64, true),
+      storage = {
+        primary = storagePrimary(2000, "NVMe SSD", "PCIe 4.0 x4", 7000, 6000, "M.2 2280"),
+        expansion_slots = [storageSlot(1, "M.2 2280", "PCIe 4.0 x4", false)]
+      },
+      display = display(17.3, resolution(2560, 1440, "QHD"), 240, 3, "IPS", 500, colorGamut(100, 89, 98), ["G-Sync", "HDR400", "Anti-glare"]),
+      connectivity = {
+        wifi = wifi("Wi-Fi 6E", 2400, ["2.4GHz", "5GHz", "6GHz"]),
+        bluetooth = bluetooth("5.3", 10),
+        ports = {
+          usb_c_thunderbolt_4 = 2,
+          usb_a_3_2_gen2 = 3,
+          hdmi = hdmiPort(1, "2.1"),
+          ethernet = ethPort(1, 2.5),
+          audio_jack = 1,
+          sd_card_reader = sdCard(true, "UHS-III")
+        }
+      },
+      battery = battery(99, 8, "Lithium Polymer", 6, charging(330, true, 2.5)),
+      dimensions = dimensions(397, 284, 27.9, 3.2),
+      operating_system = os("Windows 11 Pro", "23H2", "64-bit", "OEM")
+    },
+    pricing = pricing(3299.99, "USD", discounts(currentDisc("percentage", 10, "2025-01-01T00:00:00Z", "2025-01-31T23:59:59Z", "New Year Sale"), [volDisc(5, 9, 5), volDisc(10, 24, 8), volDisc(25, null, 12)]), 2969.99, 3499.99, 2100.00, 41.45, "electronics", [priceHist("2024-12-01T00:00:00Z", 3299.99, "Base price"), priceHist("2024-12-15T00:00:00Z", 3199.99, "Holiday promotion"), priceHist("2025-01-01T00:00:00Z", 2969.99, "New Year Sale")]),
+    inventory = inventory({
+      warehouse_us_west = whStock("WH-US-WEST-001", 45, 12, 100, "2025-01-20T00:00:00Z", "A", "12", "03"),
+      warehouse_us_east = whStock("WH-US-EAST-001", 38, 8, 75, "2025-01-22T00:00:00Z", "B", "08", "15"),
+      warehouse_eu_central = whStock("WH-EU-CENT-001", 52, 15, 80, "2025-01-25T00:00:00Z", "C", "05", "22")
+    }, stockAlerts(20, 0, 200, 30, 100)),
+    shipping = shipping(4.5, shipDims(50, 40, 10), "box", true, true, "standard", 2),
+    media = media([img("https://cdn.techmart.com/products/lapt-001/main.jpg", "UltraBook Pro Gaming Laptop Front View", "main", 1, 2000, 2000), img("https://cdn.techmart.com/products/lapt-001/side.jpg", "UltraBook Pro Gaming Laptop Side View", "gallery", 2, 2000, 2000), img("https://cdn.techmart.com/products/lapt-001/keyboard.jpg", "RGB Keyboard Close-up", "gallery", 3, 2000, 2000), img("https://cdn.techmart.com/products/lapt-001/ports.jpg", "Available Ports", "gallery", 4, 2000, 2000)], [video("https://cdn.techmart.com/products/lapt-001/review.mp4", "Product Review", 300, "https://cdn.techmart.com/products/lapt-001/review-thumb.jpg")]),
+    reviews = reviews(4.7, 234, ratingDist(156, 52, 18, 5, 3)),
+    warranty = prodWarranty(warranty(12, "limited", ["manufacturing defects", "hardware failures"], ["accidental damage", "liquid damage", "cosmetic damage"]), [extWarranty(24, 299.99, ["manufacturing defects", "hardware failures", "accidental damage"], 99.00), extWarranty(36, 499.99, ["manufacturing defects", "hardware failures", "accidental damage", "liquid damage"], 149.00)]),
+    related_products = ["PROD-LAPT-002", "PROD-ACC-COOL-001", "PROD-ACC-BAG-001", "PROD-ACC-MOUSE-001"],
+    tags = ["gaming", "laptop", "rtx4090", "high-performance", "17-inch"],
+    is_active = true,
+    is_featured = true,
+    created_at = 2024-11-15T10:30:00Z,
+    updated_at = 2025-01-10T15:45:00Z
+  
+  products.laptop_002:
+    product_id = "PROD-LAPT-002",
+    sku = "LAPT-BUS-I7-002",
+    name = "ProWork Business Laptop 15.6\"",
+    slug = "prowork-business-laptop-156",
+    category_id = "CAT-BUSL-001",
+    brand = brand("BRAND-002", "ProWork", "Japan", 2005, "https://prowork.com"),
+    description = prodDesc("Professional business laptop with enterprise features", "The ProWork Business Laptop is designed for professionals who need reliability, security, and performance. Features include enterprise-grade security, long battery life, and professional support.", ["Intel Core i7-13700H processor", "16GB DDR5 RAM", "512GB NVMe SSD", "15.6\" Full HD IPS display", "TPM 2.0 security chip", "Fingerprint reader", "Windows 11 Pro", "3-year warranty"]),
+    specifications = {
+      processor = processor("Intel", "Core i7-13700H", "13th Gen", 14, 20, 2.4, 5.0, 24, 45),
+      graphics = graphics("Intel", "Iris Xe Graphics", 0, "Shared", 96, 300, 1500, false, null),
+      memory = memory(16, "DDR5", 4800, 2, 32, true),
+      storage = {
+        primary = storagePrimary(512, "NVMe SSD", "PCIe 4.0 x4", 5000, 4500, "M.2 2280"),
+        expansion_slots = [storageSlot(1, "M.2 2280", "PCIe 4.0 x4", false)]
+      },
+      display = display(15.6, resolution(1920, 1080, "Full HD"), 60, 8, "IPS", 300, colorGamut(100, 72, 75), ["Anti-glare", "Touch screen"]),
+      connectivity = {
+        wifi = wifi("Wi-Fi 6", 1200, ["2.4GHz", "5GHz"]),
+        bluetooth = bluetooth("5.2", 10),
+        ports = {
+          usb_c_thunderbolt_4 = 1,
+          usb_a_3_2_gen2 = 2,
+          hdmi = hdmiPort(1, "2.0"),
+          ethernet = ethPort(1, 1),
+          audio_jack = 1,
+          sd_card_reader = sdCard(false, null)
+        }
+      },
+      battery = battery(72, 6, "Lithium Polymer", 12, charging(65, true, 1.5)),
+      dimensions = dimensions(359, 238, 19.9, 1.8),
+      operating_system = os("Windows 11 Pro", "23H2", "64-bit", "OEM")
+    },
+    pricing = pricing(1299.99, "USD", discounts(currentDisc("percentage", 15, "2025-01-01T00:00:00Z", "2025-01-31T23:59:59Z", "New Year Sale"), [volDisc(10, 24, 5), volDisc(25, 49, 8), volDisc(50, null, 12)]), 1104.99, 1399.99, 750.00, 47.33, "electronics", [priceHist("2024-11-15T00:00:00Z", 1299.99, "Base price"), priceHist("2024-12-20T00:00:00Z", 1249.99, "Holiday promotion"), priceHist("2025-01-01T00:00:00Z", 1104.99, "New Year Sale")]),
+    inventory = inventory({
+      warehouse_us_west = whStock("WH-US-WEST-001", 150, 35, 200, "2025-01-18T00:00:00Z", "A", "15", "08"),
+      warehouse_us_east = whStock("WH-US-EAST-001", 125, 28, 150, "2025-01-20T00:00:00Z", "B", "12", "20"),
+      warehouse_eu_central = whStock("WH-EU-CENT-001", 180, 42, 250, "2025-01-22T00:00:00Z", "C", "08", "12")
+    }, stockAlerts(50, 0, 500, 75, 200)),
+    shipping = shipping(2.5, shipDims(40, 30, 8), "box", true, false, "standard", 1),
+    media = media([img("https://cdn.techmart.com/products/lapt-002/main.jpg", "ProWork Business Laptop Front View", "main", 1, 2000, 2000), img("https://cdn.techmart.com/products/lapt-002/side.jpg", "ProWork Business Laptop Side View", "gallery", 2, 2000, 2000)], []),
+    reviews = reviews(4.5, 89, ratingDist(52, 25, 8, 3, 1)),
+    warranty = prodWarranty(warranty(36, "limited", ["manufacturing defects", "hardware failures"], ["accidental damage", "liquid damage"]), []),
+    related_products = ["PROD-LAPT-001", "PROD-ACC-DOCK-001", "PROD-ACC-BAG-002"],
+    tags = ["business", "laptop", "professional", "enterprise"],
+    is_active = true,
+    is_featured = false,
+    created_at = 2024-11-20T14:20:00Z,
+    updated_at = 2025-01-08T11:30:00Zproducts.accessory_cooling_001:
+    product_id = "PROD-ACC-COOL-001",
+    sku = "ACC-COOL-RGB-001",
+    name = "CoolMaster RGB Laptop Cooling Pad",
+    slug = "coolmaster-rgb-laptop-cooling-pad",
+    category_id = "CAT-ACC-COOL-001",
+    brand = brand("BRAND-003", "CoolMaster", "Taiwan", 2010, "https://coolmaster.com"),
+    description = prodDesc("Professional laptop cooling pad with RGB lighting", "Keep your laptop cool during intense gaming sessions or heavy workloads. Features 6 high-speed fans, RGB lighting, and adjustable height settings.", ["6 high-speed cooling fans (1200 RPM)", "Customizable RGB lighting (16.8M colors)", "5 adjustable height settings", "Dual USB ports", "Fits laptops up to 17.3 inches", "Non-slip surface", "Quiet operation (<25dB)"]),
+    specifications = {
+      fans = {
+        count = 6,
+        size_mm = 110,
+        speed_rpm = 1200,
+        airflow_cfm = 85,
+        noise_level_db = 23
+      },
+      lighting = {
+        type = "RGB LED",
+        colors = 16777216,
+        modes = ["static", "breathing", "rainbow", "wave"],
+        controllable = true
+      },
+      dimensions = dimensions(420, 300, 25, 0.85),
+      compatibility = {
+        max_laptop_size_inches = 17.3,
+        supported_weights_kg = 5
+      },
+      power = {
+        input = "USB 5V",
+        consumption_watts = 5,
+        cable_length_cm = 80
+      }
+    },
+    pricing = pricing(39.99, "USD", discounts(null, [volDisc(5, 9, 10), volDisc(10, null, 15)]), 39.99, 49.99, 18.50, 116.16, "electronics", [priceHist("2024-10-01T00:00:00Z", 44.99, "Base price"), priceHist("2024-11-01T00:00:00Z", 39.99, "Price adjustment")]),
+    inventory = inventory({
+      warehouse_us_west = whStock("WH-US-WEST-001", 450, 85, 500, "2025-01-15T00:00:00Z", "D", "03", "12"),
+      warehouse_us_east = whStock("WH-US-EAST-001", 380, 72, 400, "2025-01-16T00:00:00Z", "D", "05", "18"),
+      warehouse_eu_central = whStock("WH-EU-CENT-001", 520, 98, 600, "2025-01-18T00:00:00Z", "D", "02", "25")
+    }, stockAlerts(100, 0, 2000, 150, 500)),
+    shipping = shipping(1.2, shipDims(45, 32, 6), "box", false, false, "standard", 1),
+    media = media([img("https://cdn.techmart.com/products/cool-001/main.jpg", "CoolMaster RGB Cooling Pad", "main", 1, 2000, 2000), img("https://cdn.techmart.com/products/cool-001/rgb.jpg", "RGB Lighting Effects", "gallery", 2, 2000, 2000), img("https://cdn.techmart.com/products/cool-001/side.jpg", "Side View with Height Adjustment", "gallery", 3, 2000, 2000)], []),
+    reviews = reviews(4.3, 567, ratingDist(298, 189, 52, 18, 10)),
+    warranty = prodWarranty(warranty(12, "limited", ["manufacturing defects"], ["physical damage", "water damage"]), []),
+    related_products = ["PROD-LAPT-001", "PROD-ACC-BAG-001", "PROD-ACC-CLEAN-001"],
+    tags = ["cooling", "rgb", "laptop-accessory", "gaming"],
+    is_active = true,
+    is_featured = true,
+    created_at = 2024-09-10T09:15:00Z,
+    updated_at = 2025-01-05T16:20:00Z
+  
+  products.monitor_001:
+    product_id = "PROD-MON-001",
+    sku = "MON-GAM-4K-240-001",
+    name = "UltraVision 4K Gaming Monitor 32\"",
+    slug = "ultravision-4k-gaming-monitor-32",
+    category_id = "CAT-MON-GAM-001",
+    brand = brand("BRAND-004", "UltraVision", "South Korea", 2008, "https://ultravision.com"),
+    description = prodDesc("Premium 4K gaming monitor with 240Hz refresh rate", "Experience gaming at its finest with the UltraVision 4K Gaming Monitor. Features include 4K resolution, 240Hz refresh rate, HDR1000, and NVIDIA G-Sync Ultimate for the smoothest gaming experience.", ["32-inch 4K UHD (3840x2160) display", "240Hz refresh rate", "1ms response time (GtG)", "HDR1000 certification", "NVIDIA G-Sync Ultimate", "Quantum Dot technology", "99% DCI-P3 color gamut", "Ergonomic stand with full adjustability"]),
+    specifications = {
+      display = display(32, resolution(3840, 2160, "4K UHD"), 240, 1, "Quantum Dot IPS", 1000, colorGamut(100, 98, 99), ["G-Sync Ultimate", "HDR1000", "Anti-glare coating", "Flicker-free", "Low blue light"]),
+      connectivity = {
+        inputs = {
+          displayport = { count = 2, version = "2.0" },
+          hdmi = hdmiPort(2, "2.1"),
+          usb_c = { count = 1, power_delivery_watts = 90, video_input = true }
+        },
+        outputs = {
+          audio_jack = 1,
+          usb_hub = { ports = 4, version = "3.2 Gen 1" }
+        }
+      },
+      ergonomics = {
+        stand = {
+          height_adjustment_mm = 150,
+          tilt_degrees = { forward = -5, backward = 20 },
+          swivel_degrees = { left = 30, right = 30 },
+          pivot = true,
+          portrait_mode = true
+        },
+        vesa_mount = { compatible = true, pattern = "100x100mm" }
+      },
+      power = {
+        consumption_typical_watts = 65,
+        consumption_max_watts = 150,
+        standby_watts = 0.5,
+        voltage = "100-240V AC",
+        power_supply = "Internal"
+      },
+      dimensions = {
+        with_stand = dimensions(714, 235, 532, 8.9),
+        without_stand = dimensions(714, 58, 415, 6.2)
+      },
+      certifications = ["VESA DisplayHDR 1000", "TÜV Rheinland Eye Comfort", "Energy Star", "EPEAT Gold"]
+    },
+    pricing = pricing(1299.99, "USD", discounts(currentDisc("percentage", 20, "2025-01-01T00:00:00Z", "2025-01-31T23:59:59Z", "New Year Sale"), [volDisc(3, 4, 5), volDisc(5, 9, 8), volDisc(10, null, 12)]), 1039.99, 1499.99, 650.00, 60.00, "electronics", [priceHist("2024-09-01T00:00:00Z", 1399.99, "Launch price"), priceHist("2024-11-15T00:00:00Z", 1299.99, "Price adjustment"), priceHist("2025-01-01T00:00:00Z", 1039.99, "New Year Sale")]),
+    inventory = inventory({
+      warehouse_us_west = whStock("WH-US-WEST-001", 78, 23, 150, "2025-01-22T00:00:00Z", "E", "08", "05"),
+      warehouse_us_east = whStock("WH-US-EAST-001", 62, 18, 120, "2025-01-24T00:00:00Z", "E", "10", "12"),
+      warehouse_eu_central = whStock("WH-EU-CENT-001", 95, 28, 180, "2025-01-26T00:00:00Z", "E", "06", "18")
+    }, stockAlerts(30, 0, 300, 40, 150)),
+    shipping = shipping(12.5, shipDims(85, 55, 25), "box", true, true, "oversized", 2),
+    media = media([img("https://cdn.techmart.com/products/mon-001/main.jpg", "UltraVision 4K Gaming Monitor Front", "main", 1, 2000, 2000), img("https://cdn.techmart.com/products/mon-001/side.jpg", "Monitor Side Profile", "gallery", 2, 2000, 2000), img("https://cdn.techmart.com/products/mon-001/ports.jpg", "Connection Ports", "gallery", 3, 2000, 2000), img("https://cdn.techmart.com/products/mon-001/stand.jpg", "Ergonomic Stand", "gallery", 4, 2000, 2000)], [video("https://cdn.techmart.com/products/mon-001/demo.mp4", "Gaming Demo", 180, "https://cdn.techmart.com/products/mon-001/demo-thumb.jpg")]),
+    reviews = reviews(4.8, 412, ratingDist(315, 72, 18, 5, 2)),
+    warranty = prodWarranty(warranty(36, "limited", ["manufacturing defects", "dead pixels (>5)"], ["physical damage", "burn-in"]), [extWarranty(24, 199.99, ["manufacturing defects", "dead pixels (any)", "burn-in"], 0)]),
+    related_products = ["PROD-LAPT-001", "PROD-ACC-MOUNT-001", "PROD-ACC-CALIB-001"],
+    tags = ["monitor", "gaming", "4k", "240hz", "hdr"],
+    is_active = true,
+    is_featured = true,
+    created_at = 2024-09-01T08:00:00Z,
+    updated_at = 2025-01-09T13:45:00Z
+  
+  products.mouse_001:
+    product_id = "PROD-ACC-MOUSE-001",
+    sku = "MOUSE-GAM-RGB-001",
+    name = "ProGamer Elite Wireless Mouse",
+    slug = "progamer-elite-wireless-mouse",
+    category_id = "CAT-ACC-MOUSE-001",
+    brand = brand("BRAND-005", "ProGamer", "United States", 2012, "https://progamer.com"),
+    description = prodDesc("Professional wireless gaming mouse with 30,000 DPI sensor", "The ProGamer Elite features a top-tier optical sensor, customizable RGB lighting, and ultra-low latency wireless connection. Designed for professional esports players.", ["30,000 DPI optical sensor", "1ms wireless latency", "11 programmable buttons", "100-hour battery life", "Customizable RGB lighting (16.8M colors)", "Onboard memory profiles", "Adjustable weight system", "PTFE feet for smooth gliding"]),
+    specifications = {
+      sensor = {
+        type = "Optical (PMW3395)",
+        dpi_range = { min = 100, max = 30000 },
+        dpi_increments = 50,
+        ips_max = 750,
+        acceleration_g = 50,
+        polling_rate_hz = [125, 250, 500, 1000, 2000]
+      },
+      buttons = {
+        total = 11,
+        programmable = 11,
+        durability_clicks = 80000000
+      },
+      connectivity = {
+        wireless = { technology = "2.4GHz + Bluetooth 5.2", latency_ms = 1, range_meters = 10 },
+        wired = { usb_type = "USB-C", cable_length_cm = 180, braided = true }
+      },
+      battery = battery(950, null, "Lithium-ion rechargeable", 100, charging(null, true, 3)),
+      lighting = {
+        zones = 3,
+        colors = 16777216,
+        effects = ["static", "breathing", "wave", "reactive", "spectrum"],
+        brightness_levels = 5
+      },
+      ergonomics = {
+        hand_size = "Medium to Large",
+        grip_types = ["palm", "claw", "fingertip"],
+        orientation = "Right-handed",
+        weight = {
+          base_grams = 74,
+          adjustable = true,
+          weight_range_grams = { min = 74, max = 90 }
+        }
+      },
+      dimensions = dimensions(128, 68, 43, 0.074),
+      software = {
+        name = "ProGamer Control Center",
+        platforms = ["Windows", "macOS"],
+        features = ["DPI adjustment", "Button remapping", "Macro recording", "RGB customization", "Profile management", "Firmware updates"]
+      }
+    },
+    pricing = pricing(129.99, "USD", discounts(currentDisc("fixed", 20.00, "2025-01-01T00:00:00Z", "2025-01-31T23:59:59Z", "New Year Sale"), [volDisc(5, 9, 10), volDisc(10, null, 15)]), 109.99, 149.99, 52.00, 111.52, "electronics", [priceHist("2024-08-15T00:00:00Z", 149.99, "Launch price"), priceHist("2024-10-01T00:00:00Z", 129.99, "Price reduction"), priceHist("2025-01-01T00:00:00Z", 109.99, "New Year Sale")]),
+    inventory = inventory({
+      warehouse_us_west = whStock("WH-US-WEST-001", 1250, 342, 2000, "2025-01-14T00:00:00Z", "F", "12", "08"),
+      warehouse_us_east = whStock("WH-US-EAST-001", 980, 278, 1500, "2025-01-16T00:00:00Z", "F", "15", "22"),
+      warehouse_eu_central = whStock("WH-EU-CENT-001", 1420, 398, 2500, "2025-01-17T00:00:00Z", "F", "09", "14")
+    }, stockAlerts(200, 0, 5000, 300, 2000)),
+    shipping = shipping(0.3, shipDims(18, 12, 8), "box", false, false, "standard", 1),
+    media = media([img("https://cdn.techmart.com/products/mouse-001/main.jpg", "ProGamer Elite Mouse", "main", 1, 2000, 2000), img("https://cdn.techmart.com/products/mouse-001/rgb.jpg", "RGB Lighting", "gallery", 2, 2000, 2000), img("https://cdn.techmart.com/products/mouse-001/grip.jpg", "Ergonomic Grip", "gallery", 3, 2000, 2000)], []),
+    reviews = reviews(4.6, 1823, ratingDist(1205, 458, 98, 42, 20)),
+    warranty = prodWarranty(warranty(24, "limited", ["manufacturing defects", "button failures"], ["physical damage", "water damage"]), []),
+    related_products = ["PROD-LAPT-001", "PROD-ACC-PAD-001", "PROD-ACC-BUNGEE-001"],
+    tags = ["mouse", "gaming", "wireless", "rgb", "esports"],
+    is_active = true,
+    is_featured = true,
+    created_at = 2024-08-15T11:30:00Z,
+    updated_at = 2025-01-07T09:15:00Z
+  
+  customers.customer_001 = customer("CUST-001-2024", "active", "premium", "2024-03-15T14:30:00Z", "2025-01-10T18:45:00Z", 
+    personalInfo("John", "Anderson", "john.anderson@email.com", phoneInfo("+1-555-0123", "+1-555-0124", true), "1985-06-20", "male", "en", true),
+    custAddresses(
+      shipAddr("ADDR-BILL-001", true, "Home", "John Anderson", "456 Oak Street", "Apartment 3B", "San Francisco", "California", "94102", "United States", "+1-555-0123", "Leave at door", coords(37.7749, -122.4194)),
+      [shipAddr("ADDR-SHIP-001", true, "Home", "John Anderson", "456 Oak Street", "Apartment 3B", "San Francisco", "California", "94102", "United States", "+1-555-0123", "Leave at door", coords(37.7749, -122.4194)), shipAddr("ADDR-SHIP-002", false, "Work", "John Anderson", "789 Market Street", "Suite 1200", "San Francisco", "California", "94103", "United States", "+1-555-0125", "Call upon arrival", coords(37.7858, -122.4064))]
+    ),
+    custPayments([creditCard("PAY-CC-001", true, "visa", "4532", 12, 2027, "John Anderson", "ADDR-BILL-001", true, "2024-03-15T14:45:00Z"), creditCard("PAY-CC-002", false, "mastercard", "8899", 8, 2026, "John Anderson", "ADDR-BILL-001", true, "2024-06-20T10:15:00Z")], paypal("PAY-PP-001", "john.anderson@email.com", true, "2024-04-10T09:30:00Z")),
+    custStats(15, 18450.85, 1230.06, 18450.85, 18451, 3, 8, 12),
+    custPrefs(emailNotifs(true, true, true, true, true), smsNotifs(true, true, false), marketingPrefs(true, false))
+  )
+  
+  customers.customer_002 = customer("CUST-002-2024", "active", "standard", "2024-05-22T09:15:00Z", "2025-01-09T12:20:00Z",
+    personalInfo("Sarah", "Martinez", "sarah.martinez@email.com", phoneInfo("+1-555-0456", null, true), "1992-11-08", "female", "en", true),
+    custAddresses(
+      shipAddr("ADDR-BILL-002", true, "Home", "Sarah Martinez", "123 Elm Avenue", null, "Austin", "Texas", "78701", "United States", "+1-555-0456", "Ring doorbell", coords(30.2672, -97.7431)),
+      [shipAddr("ADDR-SHIP-003", true, "Home", "Sarah Martinez", "123 Elm Avenue", null, "Austin", "Texas", "78701", "United States", "+1-555-0456", "Ring doorbell", coords(30.2672, -97.7431))]
+    ),
+    custPayments([creditCard("PAY-CC-003", true, "amex", "1005", 3, 2028, "Sarah Martinez", "ADDR-BILL-002", true, "2024-05-22T09:30:00Z")], null),
+    custStats(7, 3890.45, 555.78, 3890.45, 3890, 1, 3, 8),
+    custPrefs(emailNotifs(true, false, true, true, true), smsNotifs(true, true, false), marketingPrefs(true, false))
+  )
+  
+  customers.customer_003 = customer("CUST-003-2024", "active", "premium", "2024-02-10T16:45:00Z", "2025-01-11T08:30:00Z",
+    personalInfo("Michael", "Chen", "michael.chen@email.com", phoneInfo("+1-555-0789", "+1-555-0790", true), "1988-03-25", "male", "en", true),
+    custAddresses(
+      shipAddr("ADDR-BILL-003", true, "Home", "Michael Chen", "789 Pine Road", "Unit 12", "Seattle", "Washington", "98101", "United States", "+1-555-0789", "Leave with concierge", coords(47.6062, -122.3321)),
+      [shipAddr("ADDR-SHIP-004", true, "Home", "Michael Chen", "789 Pine Road", "Unit 12", "Seattle", "Washington", "98101", "United States", "+1-555-0789", "Leave with concierge", coords(47.6062, -122.3321)), shipAddr("ADDR-SHIP-005", false, "Office", "Michael Chen", "1000 Tech Drive", "Floor 5", "Seattle", "Washington", "98109", "United States", "+1-555-0790", "Reception desk", coords(47.6205, -122.3493))]
+    ),
+    custPayments([creditCard("PAY-CC-004", true, "visa", "7788", 9, 2027, "Michael Chen", "ADDR-BILL-003", true, "2024-02-10T17:00:00Z")], paypal("PAY-PP-002", "michael.chen@email.com", true, "2024-03-05T11:20:00Z")),
+    custStats(23, 28750.92, 1250.04, 28750.92, 28751, 5, 12, 15),
+    custPrefs(emailNotifs(true, true, true, true, true), smsNotifs(true, true, true), marketingPrefs(true, false))
+  )
+  
+  orders.order_001 = order("ORD-2025-00001", "TM20250001", "CUST-001-2024", "delivered", "2025-01-05T10:30:00Z", "2025-01-08T14:45:00Z",
+    payment("PAY-2025-00001", "PAY-CC-001", "credit_card", "visa", "4532", 3389.98, "USD", "completed", "TXN-20250105-103045", "AUTH-445566", "2025-01-05T10:30:45Z", paymentBreakdown(2969.99, 0.00, 267.00, 0.00, 3236.99)),
+    orderShipping(
+      shipAddr("ADDR-SHIP-001", true, "Home", "John Anderson", "456 Oak Street", "Apartment 3B", "San Francisco", "California", "94102", "United States", "+1-555-0123", null, coords(37.7749, -122.4194)),
+      shipMethodInfo("SHIP-OVERNIGHT", "Overnight Shipping", "FedEx", 1, 0.00, "FDX123456789012", "https://fedex.com/track?num=FDX123456789012"),
+      [shipStatus("pending", "2025-01-05T10:30:00Z", null, "Order received"), shipStatus("processing", "2025-01-05T11:00:00Z", "California Distribution Center", "Order being prepared"), shipStatus("shipped", "2025-01-05T15:30:00Z", "California Distribution Center", "Package handed to carrier"), shipStatus("in_transit", "2025-01-05T18:00:00Z", "Oakland, CA", "In transit to destination"), shipStatus("out_for_delivery", "2025-01-06T08:00:00Z", "San Francisco, CA", "Out for delivery"), shipStatus("delivered", "2025-01-06T14:30:00Z", "456 Oak Street, San Francisco, CA", "Delivered - Signature received")]
+    ),
+    [orderItem("ORDITEM-2025-00001", "PROD-LAPT-001", "LAPT-GAM-RTX4090-001", "UltraBook Pro Gaming Laptop 17\"", 1, 2969.99, 0.00, 267.00, "WH-US-WEST-001", extWarranty(36, 499.99, ["manufacturing defects", "hardware failures", "accidental damage", "liquid damage"], 149.00)), orderItem("ORDITEM-2025-00002", "PROD-ACC-COOL-001", "ACC-COOL-RGB-001", "CoolMaster RGB Laptop Cooling Pad", 1, 39.99, 0.00, 3.60, "WH-US-WEST-001", null), orderItem("ORDITEM-2025-00003", "PROD-ACC-MOUSE-001", "MOUSE-GAM-RGB-001", "ProGamer Elite Wireless Mouse", 1, 109.99, 0.00, 9.90, "WH-US-WEST-001", null)],
+    orderSummary(3, 3, 3119.97, 0.00, 280.50, 0.00, 3400.47),
+    orderNotes("Please deliver after 2 PM", "Premium customer - priority handling", null),
+    orderMetadata("192.168.1.100", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "https://google.com/search", "organic_search", "desktop")
+  )
+  
+  orders.order_002 = order("ORD-2025-00002", "TM20250002", "CUST-002-2024", "processing", "2025-01-10T14:15:00Z", "2025-01-10T15:30:00Z",
+    payment("PAY-2025-00002", "PAY-CC-003", "credit_card", "amex", "1005", 1264.98, "USD", "completed", "TXN-20250110-141530", "AUTH-778899", "2025-01-10T14:15:30Z", paymentBreakdown(1144.98, 5.99, 114.01, 0.00, 1264.98)),
+    orderShipping(
+      shipAddr("ADDR-SHIP-003", true, "Home", "Sarah Martinez", "123 Elm Avenue", null, "Austin", "Texas", "78701", "United States", "+1-555-0456", null, coords(30.2672, -97.7431)),
+      shipMethodInfo("SHIP-STANDARD", "Standard Shipping", "UPS", 5, 5.99, "1Z999AA10123456784", "https://ups.com/track?num=1Z999AA10123456784"),
+      [shipStatus("pending", "2025-01-10T14:15:00Z", null, "Order received"), shipStatus("processing", "2025-01-10T15:00:00Z", "California Distribution Center", "Order being prepared")]
+    ),
+    [orderItem("ORDITEM-2025-00004", "PROD-LAPT-002", "LAPT-BUS-I7-002", "ProWork Business Laptop 15.6\"", 1, 1104.99, 0.00, 99.45, "WH-US-WEST-001", null), orderItem("ORDITEM-2025-00005", "PROD-ACC-COOL-001", "ACC-COOL-RGB-001", "CoolMaster RGB Laptop Cooling Pad", 1, 39.99, 0.00, 3.60, "WH-US-WEST-001", null)],
+    orderSummary(2, 2, 1144.98, 5.99, 103.05, 0.00, 1254.02),
+    orderNotes(null, "Check stock before shipping", null),
+    orderMetadata("10.0.0.45", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", "https://techmart.global/products", "direct", "desktop")
+  )
+  
+  orders.order_003 = order("ORD-2025-00003", "TM20250003", "CUST-003-2024", "shipped", "2025-01-08T09:20:00Z", "2025-01-09T16:45:00Z",
+    payment("PAY-2025-00003", "PAY-PP-002", "paypal", null, null, 1379.98, "USD", "completed", "PAYPAL-20250108-092045", "PP-AUTH-112233", "2025-01-08T09:20:45Z", paymentBreakdown(1149.98, 12.99, 117.01, 0.00, 1279.98)),
+    orderShipping(
+      shipAddr("ADDR-SHIP-005", false, "Office", "Michael Chen", "1000 Tech Drive", "Floor 5", "Seattle", "Washington", "98109", "United States", "+1-555-0790", null, coords(47.6205, -122.3493)),
+      shipMethodInfo("SHIP-EXPEDITED", "Expedited Shipping", "FedEx", 3, 12.99, "FDX987654321098", "https://fedex.com/track?num=FDX987654321098"),
+      [shipStatus("pending", "2025-01-08T09:20:00Z", null, "Order received"), shipStatus("processing", "2025-01-08T10:00:00Z", "California Distribution Center", "Order being prepared"), shipStatus("shipped", "2025-01-08T16:30:00Z", "California Distribution Center", "Package handed to carrier"), shipStatus("in_transit", "2025-01-09T06:00:00Z", "Portland, OR", "In transit to destination")]
+    ),
+    [orderItem("ORDITEM-2025-00006", "PROD-MON-001", "MON-GAM-4K-240-001", "UltraVision 4K Gaming Monitor 32\"", 1, 1039.99, 0.00, 93.60, "WH-US-WEST-001", extWarranty(24, 199.99, ["manufacturing defects", "dead pixels (any)", "burn-in"], 0)), orderItem("ORDITEM-2025-00007", "PROD-ACC-MOUSE-001", "MOUSE-GAM-RGB-001", "ProGamer Elite Wireless Mouse", 1, 109.99, 0.00, 9.90, "WH-US-WEST-001", null)],
+    orderSummary(2, 2, 1149.98, 12.99, 103.50, 0.00, 1266.47),
+    orderNotes("Office delivery - reception desk", "Priority customer", null),
+    orderMetadata("172.16.0.88", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "https://techmart.global/monitors", "email_campaign", "desktop")
+  )product_reviews.review_001 = review("REV-2025-00001", "PROD-LAPT-001", "CUST-001-2024", "ORD-2025-00001", 5, "Exceptional Gaming Performance", "This laptop exceeds all expectations! The RTX 4090 handles every game at max settings with ease. The 240Hz display is incredibly smooth, and the build quality is top-notch. Battery life is decent for a gaming laptop. Highly recommended for serious gamers.", ["Excellent GPU performance", "Beautiful high refresh display", "Great cooling system", "Premium build quality"], ["Heavy to carry around", "Price is high", "Fans can be loud under load"], true, 45, 2, "2025-01-08T18:30:00Z", merchantResp("Thank you for the amazing review! We're thrilled you're enjoying your new gaming laptop. Happy gaming!", "TechMart Support Team", "2025-01-09T10:00:00Z"))
+  
+  product_reviews.review_002 = review("REV-2025-00002", "PROD-ACC-COOL-001", "CUST-002-2024", "ORD-2024-00156", 4, "Good cooling, great RGB", "The cooling pad works well and keeps my laptop temperatures down by about 10-15 degrees. The RGB lighting is vibrant and customizable. My only complaint is that it's a bit bulky to travel with.", ["Effective cooling", "Beautiful RGB effects", "Quiet operation", "Adjustable height"], ["Bulky size", "USB cable could be longer"], true, 28, 1, "2024-12-20T15:45:00Z", merchantResp("Thanks for your feedback! We're glad it's keeping your laptop cool. We'll pass along your cable length suggestion to our product team.", "TechMart Support Team", "2024-12-21T09:30:00Z"))
+  
+  product_reviews.review_003 = review("REV-2025-00003", "PROD-MON-001", "CUST-003-2024", "ORD-2025-00003", 5, "Best monitor I've ever owned", "Absolutely stunning display! The 4K resolution at 240Hz is a game changer. Colors are incredibly accurate, and the HDR1000 makes movies look amazing. G-Sync Ultimate works flawlessly. Worth every penny.", ["Incredible image quality", "Smooth 240Hz refresh", "HDR1000 is stunning", "Excellent build quality", "Great stand adjustability"], ["Expensive", "Takes up desk space"], true, 67, 3, "2025-01-10T20:15:00Z", null)
+  
+  analytics.sales_summary:
+    period = "2025-01",
+    total_revenue = 456789.50,
+    total_orders = 1523,
+    average_order_value = 299.86,
+    total_items_sold = 4892,
+    new_customers = 234,
+    returning_customers = 1289,
+    by_category = {
+      electronics = { revenue = 389456.20, orders = 987, items_sold = 2145 },
+      accessories = { revenue = 67333.30, orders = 536, items_sold = 2747 }
+    },
+    top_products = [
+      { product_id = "PROD-LAPT-001", name = "UltraBook Pro Gaming Laptop 17\"", units_sold = 145, revenue = 430498.55 },
+      { product_id = "PROD-ACC-MOUSE-001", name = "ProGamer Elite Wireless Mouse", units_sold = 892, revenue = 98108.08 },
+      { product_id = "PROD-MON-001", name = "UltraVision 4K Gaming Monitor 32\"", units_sold = 267, revenue = 277697.33 }
+    ]
+  
+  analytics.inventory_summary:
+    total_warehouses = 3,
+    total_sku_count = 4,
+    total_units_in_stock = 5765,
+    total_units_reserved = 1318,
+    total_units_available = 4447,
+    low_stock_items = 2,
+    out_of_stock_items = 0,
+    overstocked_items = 0
+  
+  promotions.promo_001:
+    promotion_id = "PROMO-NY-2025",
+    name = "New Year Sale 2025",
+    description = "Start the year with amazing deals on gaming laptops, monitors, and accessories",
+    type = "percentage",
+    discount_value = 15,
+    start_date = 2025-01-01T00:00:00Z,
+    end_date = 2025-01-31T23:59:59Z,
+    status = "active",
+    applicable_products = ["PROD-LAPT-001", "PROD-LAPT-002", "PROD-MON-001", "PROD-ACC-MOUSE-001"],
+    minimum_purchase_amount = 0.00,
+    maximum_discount_amount = 500.00,
+    usage_limit = { per_customer = 5, total = 10000 },
+    current_usage = { unique_customers = 1247, total_redemptions = 1523 },
+    conditions = {
+      customer_types = ["standard", "premium"],
+      excluded_categories = [],
+      stackable_with_other_promos = false,
+      requires_coupon_code = false
+    }
+  
+  promotions.promo_002:
+    promotion_id = "PROMO-FLASH-001",
+    name = "Flash Sale - Gaming Peripherals",
+    description = "24-hour flash sale on gaming mice and keyboards",
+    type = "fixed",
+    discount_value = 20.00,
+    start_date = 2025-01-15T00:00:00Z,
+    end_date = 2025-01-15T23:59:59Z,
+    status = "scheduled",
+    applicable_products = ["PROD-ACC-MOUSE-001"],
+    minimum_purchase_amount = 0.00,
+    maximum_discount_amount = 20.00,
+    usage_limit = { per_customer = 2, total = 5000 },
+    current_usage = { unique_customers = 0, total_redemptions = 0 },
+    conditions = {
+      customer_types = ["standard", "premium"],
+      excluded_categories = [],
+      stackable_with_other_promos = false,
+      requires_coupon_code = false
+    }
+  
+  coupons.coupon_001:
+    coupon_id = "COUP-WELCOME10",
+    code = "WELCOME10",
+    name = "New Customer Welcome",
+    description = "10% off first order",
+    type = "percentage",
+    discount_value = 10,
+    start_date = 2024-01-01T00:00:00Z,
+    end_date = 2025-12-31T23:59:59Z,
+    status = "active",
+    applicable_to = "all_products",
+    minimum_purchase_amount = 50.00,
+    maximum_discount_amount = 100.00,
+    usage_limit = { per_customer = 1, total = null },
+    current_usage = { unique_customers = 3421, total_redemptions = 3421 },
+    conditions = {
+      customer_types = ["new"],
+      excluded_products = [],
+      excluded_categories = [],
+      stackable = false
+    }
+  
+  coupons.coupon_002:
+    coupon_id = "COUP-FREESHIP",
+    code = "FREESHIP50",
+    name = "Free Shipping",
+    description = "Free shipping on orders over $50",
+    type = "free_shipping",
+    discount_value = 0,
+    start_date = 2025-01-01T00:00:00Z,
+    end_date = 2025-03-31T23:59:59Z,
+    status = "active",
+    applicable_to = "all_products",
+    minimum_purchase_amount = 50.00,
+    maximum_discount_amount = null,
+    usage_limit = { per_customer = null, total = null },
+    current_usage = { unique_customers = 892, total_redemptions = 1456 },
+    conditions = {
+      customer_types = ["standard", "premium"],
+      excluded_products = [],
+      excluded_categories = [],
+      stackable = true
+    }
+  
+  wishlists.wishlist_001:
+    wishlist_id = "WISH-CUST001-001",
+    customer_id = "CUST-001-2024",
+    name = "My Gaming Setup",
+    is_public = false,
+    created_at = 2024-11-20T10:00:00Z,
+    updated_at = 2025-01-09T14:30:00Z,
+    items = [
+      {
+        wishlist_item_id = "WISHITEM-001",
+        product_id = "PROD-MON-001",
+        added_at = 2024-11-20T10:15:00Z,
+        priority = "high",
+        notes = "Waiting for next sale",
+        price_at_addition = 1299.99,
+        current_price = 1039.99,
+        price_drop_alert = true
+      },
+      {
+        wishlist_item_id = "WISHITEM-002",
+        product_id = "PROD-ACC-MOUSE-001",
+        added_at = 2024-12-05T16:20:00Z,
+        priority = "medium",
+        notes = null,
+        price_at_addition = 129.99,
+        current_price = 109.99,
+        price_drop_alert = true
+      }
+    ],
+    total_items = 2,
+    estimated_total_value = 1149.98
+  
+  wishlists.wishlist_002:
+    wishlist_id = "WISH-CUST002-001",
+    customer_id = "CUST-002-2024",
+    name = "Office Upgrade",
+    is_public = false,
+    created_at = 2024-09-10T08:30:00Z,
+    updated_at = 2025-01-05T11:15:00Z,
+    items = [
+      {
+        wishlist_item_id = "WISHITEM-003",
+        product_id = "PROD-MON-001",
+        added_at = 2024-09-10T08:45:00Z,
+        priority = "high",
+        notes = "For work from home setup",
+        price_at_addition = 1399.99,
+        current_price = 1039.99,
+        price_drop_alert = true
+      }
+    ],
+    total_items = 1,
+    estimated_total_value = 1039.99
+  
+  support_tickets.ticket_001:
+    ticket_id = "TKT-2025-00001",
+    customer_id = "CUST-001-2024",
+    order_id = "ORD-2025-00001",
+    subject = "Question about warranty coverage",
+    category = "warranty",
+    priority = "medium",
+    status = "resolved",
+    created_at = 2025-01-07T09:30:00Z,
+    updated_at = 2025-01-07T14:45:00Z,
+    resolved_at = 2025-01-07T14:45:00Z,
+    assigned_to = "AGENT-003",
+    messages = [
+      {
+        message_id = "MSG-001",
+        sender_type = "customer",
+        sender_id = "CUST-001-2024",
+        message = "Hi, I purchased the extended warranty. Does it cover accidental damage from drops?",
+        timestamp = 2025-01-07T09:30:00Z,
+        attachments = []
+      },
+      {
+        message_id = "MSG-002",
+        sender_type = "agent",
+        sender_id = "AGENT-003",
+        message = "Hello John! Yes, the 36-month extended warranty you purchased includes coverage for accidental damage, including drops. There is a $149 deductible per incident. Is there anything else I can help you with?",
+        timestamp = 2025-01-07T10:15:00Z,
+        attachments = []
+      },
+      {
+        message_id = "MSG-003",
+        sender_type = "customer",
+        sender_id = "CUST-001-2024",
+        message = "Perfect, that's exactly what I needed to know. Thank you!",
+        timestamp = 2025-01-07T14:45:00Z,
+        attachments = []
+      }
+    ],
+    resolution = {
+      resolution_type = "information_provided",
+      resolution_notes = "Customer inquiry about warranty coverage - confirmed accidental damage coverage",
+      customer_satisfied = true,
+      satisfaction_rating = 5
+    }
+  
+  support_tickets.ticket_002:
+    ticket_id = "TKT-2025-00002",
+    customer_id = "CUST-002-2024",
+    order_id = "ORD-2025-00002",
+    subject = "Delivery delay concern",
+    category = "shipping",
+    priority = "high",
+    status = "open",
+    created_at = 2025-01-11T16:00:00Z,
+    updated_at = 2025-01-11T16:30:00Z,
+    resolved_at = null,
+    assigned_to = "AGENT-001",
+    messages = [
+      {
+        message_id = "MSG-004",
+        sender_type = "customer",
+        sender_id = "CUST-002-2024",
+        message = "I ordered my laptop on Jan 10th with standard shipping (5-7 days), but the tracking hasn't updated since yesterday. Can you help?",
+        timestamp = 2025-01-11T16:00:00Z,
+        attachments = []
+      },
+      {
+        message_id = "MSG-005",
+        sender_type = "agent",
+        sender_id = "AGENT-001",
+        message = "Hi Sarah! I'm looking into your order right now. Let me check with our shipping partner and I'll get back to you within the hour.",
+        timestamp = 2025-01-11T16:30:00Z,
+        attachments = []
+      }
+    ],
+    resolution = null
+  
+  loyalty_program:
+    program_name = "TechMart Rewards",
+    program_id = "LOYALTY-TECHMART",
+    tiers = {
+      bronze = {
+        tier_name = "Bronze",
+        tier_level = 1,
+        requirements = { min_annual_spend = 0.00, min_orders = 0 },
+        benefits = {
+          points_per_dollar = 1,
+          birthday_bonus_points = 100,
+          exclusive_sales_access = false,
+          free_shipping_threshold = 50.00,
+          priority_support = false
+        }
+      },
+      silver = {
+        tier_name = "Silver",
+        tier_level = 2,
+        requirements = { min_annual_spend = 1000.00, min_orders = 5 },
+        benefits = {
+          points_per_dollar = 1.5,
+          birthday_bonus_points = 250,
+          exclusive_sales_access = true,
+          free_shipping_threshold = 25.00,
+          priority_support = false
+        }
+      },
+      gold = {
+        tier_name = "Gold",
+        tier_level = 3,
+        requirements = { min_annual_spend = 5000.00, min_orders = 15 },
+        benefits = {
+          points_per_dollar = 2,
+          birthday_bonus_points = 500,
+          exclusive_sales_access = true,
+          free_shipping_threshold = 0.00,
+          priority_support = true
+        }
+      },
+      platinum = {
+        tier_name = "Platinum",
+        tier_level = 4,
+        requirements = { min_annual_spend = 15000.00, min_orders = 30 },
+        benefits = {
+          points_per_dollar = 3,
+          birthday_bonus_points = 1000,
+          exclusive_sales_access = true,
+          free_shipping_threshold = 0.00,
+          priority_support = true,
+          dedicated_account_manager = true,
+          early_access_new_products = true
+        }
+      }
+    },
+    points_redemption = {
+      points_per_dollar_value = 100,
+      minimum_redemption = 1000,
+      redemption_increments = 500,
+      expiration_months = 24
+    }
+  
+  site_settings.maintenance_mode:
+    enabled = false,
+    scheduled_maintenance = null,
+    maintenance_message = "We're currently updating our systems. Please check back soon!"
+  
+  site_settings.feature_flags:
+    enable_reviews = true,
+    enable_wishlists = true,
+    enable_loyalty_program = true,
+    enable_live_chat = true,
+    enable_product_recommendations = true,
+    enable_virtual_assistant = false,
+    enable_ar_product_preview = false
+  
+  site_settings.api_configuration:
+    rate_limiting = { enabled = true, requests_per_minute = 100, burst_limit = 150 },
+    webhook_endpoints = {
+      order_created = "https://webhooks.techmart.com/orders/created",
+      order_shipped = "https://webhooks.techmart.com/orders/shipped",
+      order_delivered = "https://webhooks.techmart.com/orders/delivered",
+      payment_completed = "https://webhooks.techmart.com/payments/completed",
+      customer_registered = "https://webhooks.techmart.com/customers/registered"
+    }
+  
+  site_settings.seo_configuration:
+    default_meta = seoMeta("TechMart Global - Premium Electronics & Tech Gear", "Shop the latest electronics, gaming laptops, monitors, and accessories at TechMart Global. Free shipping on orders over $50.", ["electronics", "gaming", "laptops", "monitors", "tech", "accessories"]),
+    social_media = {
+      facebook = "https://facebook.com/techmartglobal",
+      twitter = "https://twitter.com/techmartglobal",
+      instagram = "https://instagram.com/techmartglobal",
+      youtube = "https://youtube.com/techmartglobal",
+      linkedin = "https://linkedin.com/company/techmartglobal"
+    },
+    structured_data = {
+      organization = {
+        name = "TechMart Global",
+        url = "https://techmart.global",
+        logo = "https://cdn.techmart.com/logo.png",
+        same_as = [
+          "https://facebook.com/techmartglobal",
+          "https://twitter.com/techmartglobal",
+          "https://instagram.com/techmartglobal"
+        ]
+      }
+    }
+)

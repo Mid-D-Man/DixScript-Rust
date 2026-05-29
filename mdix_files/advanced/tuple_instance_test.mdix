@@ -1,0 +1,107 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "regular",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@QUICKFUNCS(
+    ~testTupleLength<int>() {
+        let mut tup = t:(10, "hello", true, 3.14);
+        let mut len<int> = tup.length();
+        return len;
+    }
+
+    ~testTupleGet<int>() {
+        let mut tup = t:(10, 20, 30, 40);
+        let elem0 = tup.get(0);
+        let elem2 = tup.get(2);
+        return elem0 + elem2;
+    }
+
+    ~testTupleAccessors<string>() {
+        let mut tup = t:("first", "second", "third", "fourth");
+        let first = tup.first();
+        let second = tup.second();
+        let third = tup.third();
+        let fourth = tup.fourth();
+        return first;
+    }
+
+    ~testTupleContains<bool>() {
+        let mut tup = t:(10, 20, 30, 40);
+        let has20 = tup.contains(20);
+        let has50 = tup.contains(50);
+        return has20;
+    }
+
+    ~testTupleToArray<array>() {
+        let mut tup = t:(1, 2, 3, 4);
+        let arr = tup.toArray();
+        return arr;
+    }
+
+    ~testTupleReverse<tuple>() {
+        let mut tup = t:(1, 2, 3, 4);
+        let reversed = tup.reverse();
+        return reversed;
+    }
+
+    ~testTupleSwap<tuple>() {
+        let mut tup = t:("a", "b", "c", "d");
+        let swapped = tup.swap(0, 3);
+        return swapped;
+    }
+
+    ~testTupleInControlFlow<string>(tup<tuple>) {
+        let mut myTup = tup;
+        let mut len<int> = myTup.length();
+        if: len == 4 {
+            return "full";
+        }
+        elif: len >= 2 {
+            return "partial";
+        }
+        else {
+            return "empty";
+        }
+    }
+
+    ~testTupleInChk<string>(operation<string>) {
+        let mut tup = t:(10, 20, 30, 40);
+        chk: operation {
+            -> "first" {
+                let val = tup.first();
+                return $"{val}";
+            }
+            -> "length" {
+                let mut len<int> = tup.length();
+                return $"{len}";
+            }
+            -> "reverse" {
+                let rev = tup.reverse();
+                return "reversed";
+            }
+            -> miss {
+                return "unknown";
+            }
+        }
+    }
+)
+
+@DATA(
+    test_length = testTupleLength(),
+    test_get = testTupleGet(),
+    test_accessors = testTupleAccessors(),
+    test_contains = testTupleContains(),
+    test_to_array = testTupleToArray(),
+    test_reverse = testTupleReverse(),
+    test_swap = testTupleSwap(),
+    test_control_full = testTupleInControlFlow(t:(1, 2, 3, 4)),
+    test_control_partial = testTupleInControlFlow(t:(1, 2)),
+    test_chk_first = testTupleInChk("first"),
+    test_chk_length = testTupleInChk("length"),
+    test_chk_reverse = testTupleInChk("reverse"),
+    test_chk_miss = testTupleInChk("unknown")
+)

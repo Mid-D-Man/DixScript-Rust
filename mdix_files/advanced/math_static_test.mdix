@@ -1,0 +1,100 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "off",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@QUICKFUNCS(
+    ~testMathBasic<double>() {
+        let maxVal = Math.max(10.5, 20.3);
+        let minVal = Math.min(10.5, 20.3);
+        let absVal = Math.abs(-42.7);
+        return maxVal + minVal + absVal;
+    }
+
+    ~testMathAdvanced<double>() {
+        let sqrtVal = Math.sqrt(16.0);
+        let powVal = Math.pow(2.0, 8.0);
+        let floorVal = Math.floor(9.8);
+        let ceilVal = Math.ceil(9.2);
+        let roundVal = Math.round(9.5);
+        return sqrtVal + powVal + floorVal + ceilVal + roundVal;
+    }
+
+    ~testMathTrig<double>() {
+        let piVal = Math.pi();
+        let sinVal = Math.sin(piVal / 2.0);
+        let cosVal = Math.cos(piVal);
+        let tanVal = Math.tan(piVal / 4.0);
+        return sinVal + cosVal + tanVal;
+    }
+
+    ~testMathLog<double>() {
+        let logVal = Math.log(10.0);
+        let log10Val = Math.log10(100.0);
+        let expVal = Math.exp(2.0);
+        return logVal + log10Val + expVal;
+    }
+
+    ~testMathUtils<double>() {
+        let signVal<int> = Math.sign(-15.7);
+        let clampVal = Math.clamp(150.0, 0.0, 100.0);
+        let truncVal<int> = Math.truncate(9.9);
+        let remainderVal = Math.remainder(17.0, 5.0);
+        return signVal + clampVal + truncVal + remainderVal;
+    }
+
+    ~testMathConversion<double>() {
+        let radVal = Math.radians(180.0);
+        let degVal = Math.degrees(3.14159);
+        let eVal = Math.e();
+        return radVal + degVal + eVal;
+    }
+
+    ~testMathInControlFlow<string>(value<double>) {
+        if: Math.abs(value) > 10.0 {
+            return "large";
+        }
+        elif: Math.abs(value) > 5.0 {
+            return "medium";
+        }
+        else {
+            return "small";
+        }
+    }
+
+    ~testMathInChk<int>(operation<string>) {
+        chk: operation {
+            -> "max" {
+                return Math.round(Math.max(15.7, 23.2));
+            }
+            -> "min" {
+                return Math.round(Math.min(15.7, 23.2));
+            }
+            -> "sqrt" {
+                return Math.round(Math.sqrt(144.0));
+            }
+            -> miss {
+                return 0;
+            }
+        }
+    }
+)
+
+@DATA(
+    test_basic = testMathBasic(),
+    test_advanced = testMathAdvanced(),
+    test_trig = testMathTrig(),
+    test_log = testMathLog(),
+    test_utils = testMathUtils(),
+    test_conversion = testMathConversion(),
+    test_control_large = testMathInControlFlow(25.5),
+    test_control_medium = testMathInControlFlow(7.3),
+    test_control_small = testMathInControlFlow(2.1),
+    test_chk_max = testMathInChk("max"),
+    test_chk_min = testMathInChk("min"),
+    test_chk_sqrt = testMathInChk("sqrt"),
+    test_chk_miss = testMathInChk("unknown")
+)

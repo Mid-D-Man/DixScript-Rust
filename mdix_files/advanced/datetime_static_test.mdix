@@ -1,0 +1,106 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "regular",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@QUICKFUNCS(
+    ~testDateTimeCreation<string>() {
+        let now = DateTime.now();
+        let today = DateTime.today();
+        let utcNow = DateTime.utcNow();
+        let created = DateTime.create(2025, 1, 15);
+        let withTime = DateTime.createTime(2025, 1, 15, 10, 30, 45);
+        return DateTime.format(created, "yyyy-MM-dd");
+    }
+
+    ~testDateTimeParsing<string>() {
+        let parsed = DateTime.parse("2025-12-31");
+        let exactParsed = DateTime.parseExact("2025-12-31", "yyyy-MM-dd");
+        return DateTime.format(parsed, "yyyy-MM-dd");
+    }
+
+    ~testDateTimeUnix<double>() {
+        let unixTime = DateTime.toUnixTime(DateTime.now());
+        let fromUnix = DateTime.fromUnixTime(1704067200);
+        return unixTime;
+    }
+
+    ~testDateTimeLeapYear<bool>() {
+        let is2024Leap = DateTime.isLeapYear(2024);
+        let is2025Leap = DateTime.isLeapYear(2025);
+        let daysInFeb2024 = DateTime.daysInMonth(2024, 2);
+        let daysInFeb2025 = DateTime.daysInMonth(2025, 2);
+        return is2024Leap;
+    }
+
+    ~testDateTimeAdditions<string>() {
+        let baseDate = DateTime.create(2025, 1, 15);
+        let plusDays = DateTime.addDays(baseDate, 10);
+        let plusMonths = DateTime.addMonths(baseDate, 2);
+        let plusYears = DateTime.addYears(baseDate, 1);
+        return DateTime.format(plusDays, "yyyy-MM-dd");
+    }
+
+    ~testDateTimeComponents<int>() {
+        let myDate = DateTime.create(2025, 3, 15);
+        let yearVal = DateTime.year(myDate);
+        let monthVal = DateTime.month(myDate);
+        let dayVal = DateTime.day(myDate);
+        let dayOfWeekVal = DateTime.dayOfWeek(myDate);
+        let dayOfYearVal = DateTime.dayOfYear(myDate);
+        return yearVal + monthVal + dayVal;
+    }
+
+    ~testDateTimeComparison<int>(firstDate<date>, secondDate<date>) {
+        let compareResult = DateTime.compare(firstDate, secondDate);
+        if: compareResult > 0 {
+            return 1;
+        }
+        elif: compareResult < 0 {
+            return -1;
+        }
+        else {
+            return 0;
+        }
+    }
+
+    ~testDateTimeInChk<string>(operation<string>) {
+        let baseDate = DateTime.create(2025, 1, 15);
+        chk: operation {
+            -> "add_days" {
+                let mut result = DateTime.addDays(baseDate, 5);
+                return DateTime.format(result, "yyyy-MM-dd");
+            }
+            -> "add_months" {
+                 result = DateTime.addMonths(baseDate, 3);
+                return DateTime.format(result, "yyyy-MM-dd");
+            }
+            -> "year" {
+                let yearVal = DateTime.year(baseDate);
+                return $"{yearVal}";
+            }
+            -> miss {
+                return "unknown";
+            }
+        }
+    }
+)
+
+@DATA(
+    test_creation = testDateTimeCreation(),
+    test_parsing = testDateTimeParsing(),
+    test_unix = testDateTimeUnix(),
+    test_leap_year = testDateTimeLeapYear(),
+    test_additions = testDateTimeAdditions(),
+    test_components = testDateTimeComponents(),
+    test_compare_equal = testDateTimeComparison(2025-01-15, 2025-01-15),
+    test_compare_greater = testDateTimeComparison(2025-12-31, 2025-01-15),
+    test_compare_less = testDateTimeComparison(2025-01-15, 2025-12-31),
+    test_chk_add_days = testDateTimeInChk("add_days"),
+    test_chk_add_months = testDateTimeInChk("add_months"),
+    test_chk_year = testDateTimeInChk("year"),
+    test_chk_miss = testDateTimeInChk("unknown")
+)

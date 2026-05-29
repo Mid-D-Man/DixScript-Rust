@@ -1,0 +1,63 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "UTF-8",
+    author -> "DixScript_Builtin_Test",
+    features -> "advanced",
+    created -> "2024-01-15T20:00:00Z",
+    debug_mode -> "regular",
+    error_handling -> "halt"
+)
+
+@DLM(
+    DCompressor.gzip,
+    DAuditor.diy
+)
+
+@ENUMS(
+    MathOperation { ADD = 1, SUBTRACT = 2, MULTIPLY = 3, DIVIDE = 4 }
+)
+
+@QUICKFUNCS(
+    ~testMathBuiltins<int> => global (a<int>, b<int>) {
+       let max_val = Math.max(a, b);
+       let min_val = Math.min(a, b);
+       let sum = Math.abs(a) + Math.abs(b);
+        return sum;
+    }
+    
+    ~testDateTimeBuiltins<string> => global () {
+       let current = DateTime.now();
+       let formatted = current.format("yyyy-MM-dd");
+        return formatted;
+    }
+    
+    ~testArrayBuiltins<int> => global (start<int>, end<int>) {
+       let range_array = Array.range(start, end);
+       let length = range_array.length();
+        return length;
+    }
+    
+    ~testStringMethods<string> => global (text<string>) {
+       let upper = text.toUpper();
+       let lower = text.toLower();
+      let  trimmed = text.trim();
+        return upper;
+    }
+)
+
+@DATA(
+    test.math:
+        value_a<int> = 42,
+        value_b<int> = 17,
+        result<int> = testMathBuiltins(value_a, value_b)
+        
+    test.datetime:
+        current_time<string> = testDateTimeBuiltins()
+        
+    test.arrays:
+        array_length<int> = testArrayBuiltins(1, 10)
+        
+    test.strings:
+        sample_text = "  Hello World  ",
+        processed<string> = testStringMethods(sample_text)
+)

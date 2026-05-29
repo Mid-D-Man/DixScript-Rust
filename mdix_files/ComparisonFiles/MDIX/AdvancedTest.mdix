@@ -1,0 +1,250 @@
+@CONFIG(
+  version -> "1.0.0",
+  author -> "GameStudio",
+  features -> "advanced",
+  error_handling -> "halt"
+)
+
+@ENUMS(
+  Difficulty { EASY, NORMAL, HARD, EXTREME, NIGHTMARE }
+  Rarity { COMMON, UNCOMMON, RARE, EPIC, LEGENDARY }
+  ShopType { WEAPONS_AND_ARMOR, POTIONS, GENERAL, MAGIC_ITEMS }
+  PlayerClass { WARRIOR, MAGE, ROGUE, HEALER }
+)
+//can use comments but they increase file size so keep em mnimal
+@QUICKFUNCS(
+  // Calculate actual spawn count
+  ~calculateSpawns<int> (base<int>, difficulty<enum>) {
+   let multiplier = difficulty == Difficulty.EASY ? 0.5 :
+                            difficulty == Difficulty.NORMAL ? 1.0 :
+                            difficulty == Difficulty.HARD ? 1.5 :
+                            difficulty == Difficulty.EXTREME ? 2.0 : 3.0;
+    return Math.round(base * multiplier);
+    
+  }
+  
+  // Create enemy spawn entry
+  ~createSpawn<object> (id<string>, level<int>, chance<float>, count<int>, respawn<int>) {
+    return {
+      enemyId = id,
+      level = level,
+      spawnChance = chance,
+      maxCount = count,
+      respawnTime = respawn
+    };
+  }
+  
+  // Create loot drop entry
+  ~createLoot<object> (id<string>, chance<float>, minQty<int>, maxQty<int>) {
+    return {
+      itemId = id,
+      dropChance = chance,
+      minQuantity = minQty,
+      maxQuantity = maxQty
+    };
+  }
+  
+  // Create crafting recipe
+  ~createRecipe<object> (id<string>, result<string>, qty<int>, level<int>, gold<int>, time<int>) {
+    return {
+      recipeId = id,
+      resultItem = result,
+      resultQuantity = qty,
+      requiredLevel = level,
+      requiredGold = gold,
+      craftingTime = time
+    };
+  }
+  
+  // Create shop item
+  ~createShopItem<object> (id<string>, price<int>, stock<int>, restock<int>) {
+    return {
+      itemId = id,
+      price = price,
+      stock = stock,
+      restockTime = restock
+    };
+  }
+  
+  // Create skill entry
+  ~createSkill<object> (id<string>, name<string>, maxLvl<int>, baseDmg<int>, dmgPerLvl<int>, mana<int>, cd<int>, reqLvl<int>) {
+    return {
+      skillId = id,
+      name = name,
+      maxLevel = maxLvl,
+      baseDamage = baseDmg,
+      damagePerLevel = dmgPerLvl,
+      manaCost = mana,
+      cooldown = cd,
+      requiredLevel = reqLvl
+    };
+  }
+)
+
+@DATA(
+  // FLAT PROPERTIES FIRST (Tier 1)
+  game_world_name = "Aetheria",
+  game_world_seed = 982374619,
+  game_world_difficulty<enum> = Difficulty.HARD,
+  game_world_pvp_enabled = true
+  
+  enemySpawns.zone_1_forest::
+    createSpawn("wolf", 1, 0.8, 5, 60),
+    createSpawn("bear", 3, 0.3, 2, 120),
+    createSpawn("goblin_scout", 2, 0.5, 3, 90)
+  
+  enemySpawns.zone_2_cave::
+    createSpawn("bat", 4, 0.9, 10, 45),
+    createSpawn("spider", 5, 0.6, 4, 80),
+    createSpawn("cave_troll", 8, 0.2, 1, 300)
+  
+  enemySpawns.zone_3_mountain::
+    createSpawn("harpy", 10, 0.5, 3, 120),
+    createSpawn("rock_golem", 12, 0.3, 2, 200),
+    createSpawn("frost_giant", 15, 0.1, 1, 400)
+  
+  enemySpawns.zone_4_desert::
+    createSpawn("scorpion", 6, 0.7, 5, 70),
+    createSpawn("sand_worm", 9, 0.4, 2, 150),
+    createSpawn("desert_bandit", 7, 0.5, 4, 100)
+  
+  enemySpawns.zone_5_swamp::
+    createSpawn("slime", 3, 0.8, 8, 50),
+    createSpawn("alligator", 8, 0.4, 3, 120),
+    createSpawn("swamp_witch", 11, 0.2, 1, 250)
+  
+  lootTables.common_drops::
+    createLoot("health_potion_small", 0.5, 1, 3),
+    createLoot("mana_potion_small", 0.4, 1, 2),
+    createLoot("gold_coins", 0.9, 5, 20),
+    createLoot("iron_ore", 0.3, 1, 5)
+  
+  lootTables.uncommon_drops::
+    createLoot("health_potion_medium", 0.3, 1, 2),
+    createLoot("mana_potion_medium", 0.25, 1, 2),
+    createLoot("silver_ore", 0.2, 1, 3),
+    createLoot("enchanted_fabric", 0.15, 1, 2)
+  
+  lootTables.rare_drops::
+    createLoot("health_potion_large", 0.1, 1, 1),
+    createLoot("mana_potion_large", 0.1, 1, 1),
+    createLoot("gold_ore", 0.08, 1, 2),
+    createLoot("rare_gem", 0.05, 1, 1)
+  
+  lootTables.epic_drops::
+    createLoot("legendary_weapon_fragment", 0.02, 1, 1),
+    createLoot("dragon_scale", 0.03, 1, 2),
+    createLoot("epic_armor_piece", 0.04, 1, 1)
+  
+  craftingRecipes.weapons::
+    createRecipe("iron_sword", "iron_sword", 1, 5, 50, 120),
+    createRecipe("steel_sword", "steel_sword", 1, 15, 200, 300),
+    createRecipe("mithril_sword", "mithril_sword", 1, 30, 1000, 600),
+    createRecipe("iron_axe", "iron_axe", 1, 6, 60, 130),
+    createRecipe("steel_axe", "steel_axe", 1, 16, 220, 320),
+    createRecipe("iron_dagger", "iron_dagger", 1, 3, 30, 80),
+    createRecipe("steel_dagger", "steel_dagger", 1, 12, 150, 200)
+  
+  craftingRecipes.armor::
+    createRecipe("leather_helmet", "leather_helmet", 1, 3, 25, 60),
+    createRecipe("leather_chest", "leather_chest", 1, 5, 80, 150),
+    createRecipe("leather_legs", "leather_legs", 1, 4, 60, 120),
+    createRecipe("leather_boots", "leather_boots", 1, 2, 40, 90),
+    createRecipe("iron_helmet", "iron_helmet", 1, 8, 100, 180),
+    createRecipe("iron_chest", "iron_chest", 1, 10, 200, 300),
+    createRecipe("iron_legs", "iron_legs", 1, 9, 150, 240),
+    createRecipe("iron_boots", "iron_boots", 1, 7, 80, 150)
+  
+  craftingRecipes.potions::
+    createRecipe("health_potion_small", "health_potion_small", 3, 1, 10, 30),
+    createRecipe("health_potion_medium", "health_potion_medium", 2, 10, 40, 60),
+    createRecipe("health_potion_large", "health_potion_large", 1, 25, 150, 120),
+    createRecipe("mana_potion_small", "mana_potion_small", 3, 2, 15, 35),
+    createRecipe("mana_potion_medium", "mana_potion_medium", 2, 11, 50, 70),
+    createRecipe("mana_potion_large", "mana_potion_large", 1, 26, 180, 140),
+    createRecipe("stamina_potion", "stamina_potion", 2, 5, 30, 50),
+    createRecipe("antidote", "antidote", 3, 4, 20, 40)
+  
+  npcShops.blacksmith_shop:
+  npcName = "Thorin Ironforge",
+  location = "Village Square",
+  shopType<enum> = ShopType.WEAPONS_AND_ARMOR
+  
+  npcShops.blacksmith_shop.inventory::
+    createShopItem("iron_sword", 100, 5, 3600),
+    createShopItem("iron_axe", 120, 3, 3600),
+    createShopItem("iron_helmet", 80, 5, 3600),
+    createShopItem("iron_chest", 150, 4, 3600),
+    createShopItem("steel_sword", 500, 2, 7200),
+    createShopItem("steel_shield", 400, 2, 7200),
+    createShopItem("steel_axe", 550, 2, 7200),
+    createShopItem("mithril_dagger", 1200, 1, 14400)
+  
+  npcShops.potion_shop:
+  npcName = "Elara Moonwhisper",
+  location = "Market District",
+  shopType<enum> = ShopType.POTIONS
+  
+  npcShops.potion_shop.inventory::
+    createShopItem("health_potion_small", 20, 20, 1800),
+    createShopItem("mana_potion_small", 25, 15, 1800),
+    createShopItem("health_potion_medium", 80, 10, 3600),
+    createShopItem("mana_potion_medium", 100, 8, 3600),
+    createShopItem("antidote", 50, 12, 2400),
+    createShopItem("stamina_potion", 60, 10, 2400),
+    createShopItem("strength_potion", 150, 5, 5400),
+    createShopItem("defense_potion", 150, 5, 5400)
+   
+  npcShops.general_store:
+  npcName = "Marcus Goldleaf",
+  location = "Town Center",
+  shopType<enum> = ShopType.GENERAL
+  
+  npcShops.general_store.inventory::
+    createShopItem("torch", 5, 50, 900),
+    createShopItem("rope", 10, 30, 1800),
+    createShopItem("lockpick", 15, 20, 2400),
+    createShopItem("backpack_upgrade", 500, 3, 14400),
+    createShopItem("map", 100, 10, 7200),
+    createShopItem("compass", 75, 15, 5400)
+  
+  skillTrees.warrior: className = "Warrior"
+  
+  skillTrees.warrior.skills::
+    createSkill("heavy_strike", "Heavy Strike", 5, 50, 10, 15, 5, 1),
+    createSkill("shield_bash", "Shield Bash", 5, 30, 8, 20, 8, 5),
+    createSkill("whirlwind", "Whirlwind", 5, 40, 12, 35, 15, 10),
+    createSkill("berserk", "Berserk", 3, 0, 0, 50, 60, 20),
+    createSkill("war_cry", "War Cry", 3, 0, 0, 30, 45, 15),
+    createSkill("charge", "Charge", 4, 35, 9, 25, 12, 8)
+  
+  skillTrees.mage: className = "Mage"
+  
+  skillTrees.mage.skills::
+    createSkill("fireball", "Fireball", 5, 60, 15, 25, 4, 1),
+    createSkill("ice_shard", "Ice Shard", 5, 45, 12, 20, 3, 5),
+    createSkill("lightning_bolt", "Lightning Bolt", 5, 80, 20, 40, 10, 15),
+    createSkill("meteor", "Meteor", 3, 200, 50, 100, 45, 30),
+    createSkill("frost_nova", "Frost Nova", 4, 50, 13, 35, 18, 12),
+    createSkill("arcane_missiles", "Arcane Missiles", 5, 35, 10, 18, 2, 3)
+  
+  skillTrees.rogue: className = "Rogue"
+  
+  skillTrees.rogue.skills::
+    createSkill("backstab", "Backstab", 5, 70, 18, 20, 6, 1),
+    createSkill("poison_blade", "Poison Blade", 5, 35, 10, 25, 8, 8),
+    createSkill("shadow_step", "Shadow Step", 3, 0, 0, 30, 12, 15),
+    createSkill("assassinate", "Assassinate", 3, 300, 100, 80, 60, 25),
+    createSkill("smoke_bomb", "Smoke Bomb", 4, 0, 0, 40, 30, 10),
+    createSkill("dual_strike", "Dual Strike", 5, 45, 11, 22, 5, 6)
+  
+  skillTrees.healer: className = "Healer"
+  
+  skillTrees.healer.skills::
+    createSkill("heal", "Heal", 5, 50, 12, 20, 3, 1),
+    createSkill("group_heal", "Group Heal", 5, 30, 8, 50, 10, 10),
+    createSkill("resurrection", "Resurrection", 1, 0, 0, 100, 300, 30),
+    createSkill("holy_shield", "Holy Shield", 4, 0, 0, 35, 20, 8),
+    createSkill("cleanse", "Cleanse", 3, 0, 0, 25, 15, 5),
+    createSkill("divine_light", "Divine Light", 5, 40, 10, 30, 8, 12)
+)

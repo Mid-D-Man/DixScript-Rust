@@ -55,17 +55,11 @@
         return and_result || or_result;
     }
 
-    ~testArrayOperations<int> => global(arr<array>) {
+    ~testArrayOperations<int> => global(arr<array<int>>) {
         let len = arr.length();
         let first = arr.first();
         let last = arr.last();
 
-        let myin = {
-        tuka = 12,
-        izak =14,
-        vibo = 99
-        }
-        let idi = myin.vibo
         return len + first + last;
     }
 
@@ -136,6 +130,8 @@
     double_scientific_negative<double> = -4.56e-5,
     double_scientific_positive_exp<double> = 7.89e+12,
 
+    bigTuple<tuple<tuple,int>> = t:(t:(12,2),234)
+    bigarray<array<bool>> = [true,false,false,true]
     // Scientific notation with float suffix
     sci_float<float> = 1.5e3f,
     sci_float_negative<float> = -2.5e-2f,

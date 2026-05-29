@@ -1,0 +1,190 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "regular",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@QUICKFUNCS(
+    ~testArrayLength<int>() {
+        let mut arr = [1, 2, 3, 4, 5];
+        let mut len<int> = arr.length();
+        return len;
+    }
+
+    ~testArrayContains<bool>() {
+        let mut arr = [10, 20, 30, 40];
+        let has30 = arr.contains(30);
+        let has50 = arr.contains(50);
+        return has30;
+    }
+
+    ~testArrayIndexing<int>() {
+        let mut arr = [10, 20, 30, 20, 40];
+        let idx1<int> = arr.indexOf(20);
+        let idx2<int> = arr.lastIndexOf(20);
+        return idx1 + idx2;
+    }
+
+    ~testArrayGetSet<array>() {
+        let mut arr = [1, 2, 3, 4, 5];
+        let elem = arr.get(2);
+        let newArr = arr.set(2, 99);
+        return newArr;
+    }
+
+    ~testArrayPushPop<array>() {
+        let mut arr = [1, 2, 3];
+        let pushed = arr.push(4);
+        let popped = pushed.pop();
+        return popped;
+    }
+
+    ~testArrayShiftUnshift<array>() {
+        let mut arr = [2, 3, 4];
+        let shifted = arr.shift();
+        let unshifted = shifted.unshift(1);
+        return unshifted;
+    }
+
+    ~testArraySlice<array>() {
+        let mut arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let sliced = arr.slice(2, 7);
+        return sliced;
+    }
+
+    ~testArrayJoin<string>() {
+        let mut arr = ["apple", "banana", "cherry"];
+        let joined = arr.join(", ");
+        return joined;
+    }
+
+    ~testArrayReverse<array>() {
+        let mut arr = [1, 2, 3, 4, 5];
+        let reversed = arr.reverse();
+        return reversed;
+    }
+
+    ~testArraySort<array>() {
+        let mut arr = [5, 2, 8, 1, 9];
+        let sorted = arr.sort();
+        return sorted;
+    }
+
+    ~testArrayConcat<array>() {
+        let mut arr1 = [1, 2, 3];
+        let arr2 = [4, 5, 6];
+        let combined = arr1.concat(arr2);
+        return combined;
+    }
+
+    ~testArrayFilter<array>() {
+        let mut arr = [1, 2, 0, 3, 0, 4];
+        let filtered = arr.filter(0);
+        return filtered;
+    }
+
+    ~testArrayFlatten<array>() {
+        let mut nested = [[1, 2], [3, 4], [5, 6]];
+        let flattened = nested.flatten();
+        return flattened;
+    }
+
+    ~testArrayChecks<bool>() {
+        let mut empty = [];
+        let mut full = [1, 2, 3];
+        let isEmpty1 = empty.isEmpty();
+        let isEmpty2 = full.isEmpty();
+        return isEmpty1;
+    }
+
+    ~testArrayFirstLast<int>() {
+        let mut arr = [10, 20, 30, 40, 50];
+        let firstElem = arr.first();
+        let lastElem = arr.last();
+        return firstElem + lastElem;
+    }
+
+    ~testArrayDistinct<array>() {
+        let mut arr = [1, 2, 2, 3, 3, 3, 4];
+        let unique = arr.distinct();
+        return unique;
+    }
+
+    ~testArrayCount<int>() {
+        let mut arr = [1, 2, 3, 2, 4, 2, 5];
+        let count<int> = arr.count(2);
+        return count;
+    }
+
+    ~testArrayAggregation<double>() {
+        let mut arr = [10, 20, 30, 40, 50];
+        let maxVal = arr.max();
+        let minVal = arr.min();
+        let sumVal = arr.sum();
+        let avgVal = arr.average();
+        return maxVal + minVal + sumVal + avgVal;
+    }
+
+    ~testArrayInControlFlow<string>(arr<array>) {
+        let mut myArr = arr;
+        let mut len<int> = myArr.length();
+        if: len > 5 {
+            return "large";
+        }
+        elif: len > 2 {
+            return "medium";
+        }
+        else {
+            return "small";
+        }
+    }
+
+    ~testArrayInChk<array>(operation<string>) {
+        let mut arr = [5, 3, 8, 1, 9, 2];
+        chk: operation {
+            -> "sort" {
+                return arr.sort();
+            }
+            -> "reverse" {
+                return arr.reverse();
+            }
+            -> "distinct" {
+                let dup = [1, 1, 2, 2, 3];
+                return dup.distinct();
+            }
+            -> miss {
+                return [];
+            }
+        }
+    }
+)
+
+@DATA(
+    test_length = testArrayLength(),
+    test_contains = testArrayContains(),
+    test_indexing = testArrayIndexing(),
+    test_get_set = testArrayGetSet(),
+    test_push_pop = testArrayPushPop(),
+    test_shift_unshift = testArrayShiftUnshift(),
+    test_slice = testArraySlice(),
+    test_join = testArrayJoin(),
+    test_reverse = testArrayReverse(),
+    test_sort = testArraySort(),
+    test_concat = testArrayConcat(),
+    test_filter = testArrayFilter(),
+    test_flatten = testArrayFlatten(),
+    test_checks = testArrayChecks(),
+    test_first_last = testArrayFirstLast(),
+    test_distinct = testArrayDistinct(),
+    test_count = testArrayCount(),
+    test_aggregation = testArrayAggregation(),
+    test_control_large = testArrayInControlFlow([1, 2, 3, 4, 5, 6, 7]),
+    test_control_medium = testArrayInControlFlow([1, 2, 3, 4]),
+    test_control_small = testArrayInControlFlow([1, 2]),
+    test_chk_sort = testArrayInChk("sort"),
+    test_chk_reverse = testArrayInChk("reverse"),
+    test_chk_distinct = testArrayInChk("distinct"),
+    test_chk_miss = testArrayInChk("unknown")
+)

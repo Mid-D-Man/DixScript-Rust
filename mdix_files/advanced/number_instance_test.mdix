@@ -1,0 +1,140 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "regular",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@QUICKFUNCS(
+    ~testIntMethods<string>() {
+        let mut num<int> = -42;
+        let absVal<int> = num.abs();
+        let strVal = num.toString();
+        let fltVal = num.toFloat();
+        let dblVal = num.toDouble();
+        let signVal<int> = num.sign();
+        return strVal;
+    }
+
+    ~testIntChecks<bool>() {
+        let mut even<int> = 42;
+        let mut odd<int> = 43;
+        let mut pos<int> = 10;
+        let mut neg<int> = -10;
+        let isEven1 = even.isEven();
+        let isOdd1 = odd.isOdd();
+        let isPos = pos.isPositive();
+        let isNeg = neg.isNegative();
+        return isEven1;
+    }
+
+    ~testFloatMethods<string>() {
+        let mut num<float> = -3.14f;
+        let absVal = num.abs();
+        let strVal = num.toString();
+        let intVal<int> = num.toInt();
+        let dblVal = num.toDouble();
+        let signVal<int> = num.sign();
+        return strVal;
+    }
+
+    ~testFloatRounding<int>() {
+        let mut num<float> = 9.7f;
+        let rounded = num.round(1);
+        let floorVal<int> = num.floor();
+        let ceilVal<int> = num.ceil();
+        return floorVal + ceilVal;
+    }
+
+    ~testFloatChecks<bool>() {
+        let mut normal<float> = 3.14f;
+        let isNaN1 = normal.isNaN();
+        let isInf = normal.isInfinity();
+        let isFinite = normal.isFinite();
+        return isFinite;
+    }
+
+    ~testDoubleMethods<string>() {
+        let mut num = -42.5;
+        let absVal = num.abs();
+        let strVal = num.toString();
+        let intVal<int> = num.toInt();
+        let fltVal = num.toFloat();
+        let dblVal = num.toDouble();
+        let signVal<int> = num.sign();
+        return strVal;
+    }
+
+    ~testDoubleRounding<int>() {
+        let mut num = 9.7;
+        let rounded = num.round(2);
+        let floorVal<int> = num.floor();
+        let ceilVal<int> = num.ceil();
+        return floorVal + ceilVal;
+    }
+
+    ~testDoubleChecks<bool>() {
+        let mut normal = 3.14159;
+        let isNaN1 = normal.isNaN();
+        let isInf = normal.isInfinity();
+        let isFinite = normal.isFinite();
+        return isFinite;
+    }
+
+    ~testNumbersInControlFlow<string>(value<int>) {
+        let mut num<int> = value;
+        let mut absVal<int> = num.abs();
+        if: num.isEven() {
+            return "even";
+        }
+        elif: num.isOdd() {
+            return "odd";
+        }
+        else {
+            return "unknown";
+        }
+    }
+
+    ~testNumbersInChk<string>(operation<string>) {
+        let mut intVal<int> = 42;
+        let mut fltVal<float> = 3.14f;
+        let mut dblVal = 2.718;
+        let mut result = 0;
+        chk: operation {
+            -> "int_abs" {
+                let mut neg<int> = -42;
+                 result = neg.abs();
+                return $"{result}";
+            }
+            -> "float_round" {
+                 result = fltVal.round(1);
+                return $"{result}";
+            }
+            -> "double_floor" {
+                 result = dblVal.floor();
+                return $"{result}";
+            }
+            -> miss {
+                return "unknown";
+            }
+        }
+    }
+)
+
+@DATA(
+    test_int_methods = testIntMethods(),
+    test_int_checks = testIntChecks(),
+    test_float_methods = testFloatMethods(),
+    test_float_rounding = testFloatRounding(),
+    test_float_checks = testFloatChecks(),
+    test_double_methods = testDoubleMethods(),
+    test_double_rounding = testDoubleRounding(),
+    test_double_checks = testDoubleChecks(),
+    test_control_even = testNumbersInControlFlow(42),
+    test_control_odd = testNumbersInControlFlow(43),
+    test_chk_int_abs = testNumbersInChk("int_abs"),
+    test_chk_float_round = testNumbersInChk("float_round"),
+    test_chk_double_floor = testNumbersInChk("double_floor"),
+    test_chk_miss = testNumbersInChk("unknown")
+)

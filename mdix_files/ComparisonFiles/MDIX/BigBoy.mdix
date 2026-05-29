@@ -1,0 +1,216 @@
+@CONFIG(
+  version -> "1.0.0",
+  features -> "advanced"
+)
+
+@ENUMS(
+  CamoRarity { BASIC, RARE, EPIC, LEGENDARY }
+  CamoType { SPRITE, SPRITE_AND_MATERIAL, MATERIAL }
+  ItemClass { BASIC_SMG, TACTICAL_SMG, ASSAULT_RIFLE, SNIPER }
+)
+
+@QUICKFUNCS(
+  ~createCamo<object> (id<string>, idx<int>, season<string>, rarity<enum>, sprite<string>, name<string>, type<enum>) {
+    return {
+      CamoId = id,
+      CamoIndex = idx,
+      CamoAvailableInSeason = season,
+      CamoRarity = rarity,
+      CamoAtlasSpriteName = sprite,
+      CamoInGameName = name,
+      CamoType = type,
+      MaterialAddress = "Null"
+    };
+  }
+  
+  ~createCamoWithAttainment<object> => global(id<string>, idx<int>, season<string>, rarity<enum>, sprite<string>, name<string>, type<enum>, attType<string>) {
+    return {
+      CamoId = id,
+      CamoIndex = idx,
+      CamoAttainmentType = attType,
+      CamoAvailableInSeason = season,
+      CamoRarity = rarity,
+      CamoAtlasSpriteName = sprite,
+      CamoInGameName = name,
+      CamoType = type,
+      MaterialAddress = "Null"
+    };
+  }
+  
+  ~createCamoWithCurrency<object> => global(id<string>, idx<int>, season<string>, rarity<enum>, sprite<string>, name<string>, type<enum>, attType<string>, curr<string>, amt<int>) {
+    return {
+      CamoId = id,
+      CamoIndex = idx,
+      CamoAttainmentType = attType,
+      CamoAttainmentCurrency = curr,
+      CamoAttainmentCurrencyAmount = amt,
+      CamoAvailableInSeason = season,
+      CamoRarity = rarity,
+      CamoAtlasSpriteName = sprite,
+      CamoInGameName = name,
+      CamoType = type,
+      MaterialAddress = "Null"
+    };
+  }
+)
+
+@DATA(
+  EquipableItemCamoClassId = "ALL_SMG_CAMOS_CONFIG"
+  
+  InventoryItemCamos::
+    {
+      MainItemId = "ALIYAHOO419",
+      MainItemClass = "BASIC_SMG",
+      CamoRaritySubClass = [
+        {
+          RaritySubClassId = "Aliyahoo419_Basic_Camos",
+          MainItemCamos = [
+            createCamo("ALIYAHOO419", 0, "1", CamoRarity.BASIC, "Aliyahoo419(Clone)", "Aliyahoo419", CamoType.SPRITE)
+          ]
+        },
+        {
+          RaritySubClassId = "Aliyahoo419_Epic_Camos",
+          MainItemCamos = [
+            createCamo("ALIYAHOO419_HORIZON", 0, "1", CamoRarity.RARE, "Aliyahoo419_Horizon(Clone)", "Aliyahoo419-Horizon", CamoType.SPRITE),
+            createCamo("ALIYAHOO419_ROSE", 1, "1", CamoRarity.EPIC, "Aliyahoo419_Rose(Clone)", "Aliyahoo419-Rose", CamoType.SPRITE),
+            createCamo("ALIYAHOO419_UNDERCAMO", 2, "1", CamoRarity.EPIC, "Aliyahoo419_UnderCamo(Clone)", "Aliyahoo419-UnderCamo", CamoType.SPRITE),
+            createCamo("ALIYAHOO419_DARKNIGHTSKY", 3, "1", CamoRarity.EPIC, "Aliyahoo419_DarkNightSky(Clone)", "Aliyahoo419-DarkNightSky", CamoType.SPRITE_AND_MATERIAL),
+            createCamo("ALIYAHOO419_GOLDENLINE", 4, "1", CamoRarity.EPIC, "Aliyahoo419_GoldenLine(Clone)", "Aliyahoo419-GoldenLine", CamoType.SPRITE)
+          ]
+        }
+      ]
+    },
+    {
+      MainItemId = "BEATLE",
+      MainItemClass = "BASIC_SMG",
+      CamoRaritySubClass = [
+        {
+          RaritySubClassId = "Beatle_Basic_Camos",
+          MainItemCamos = [
+            createCamo("BEATLE", 0, "1", CamoRarity.BASIC, "Beatle(Clone)", "Beatle", CamoType.SPRITE)
+          ]
+        },
+        {
+          RaritySubClassId = "Beatle_Rare_Camos",
+          MainItemCamos = [
+            createCamo("BEATLE_BLOODYCHESS", 0, "1", CamoRarity.RARE, "Beatle_BloodyChess(Clone)", "Beatle-BloodyChess", CamoType.SPRITE)
+          ]
+        },
+        {
+          RaritySubClassId = "Beatle_Epic_Camos",
+          MainItemCamos = [
+            createCamo("BEATLE_ZAWOOD", 0, "1", CamoRarity.EPIC, "Beatle_ZaWood(Clone)", "Beatle-ZaWood", CamoType.SPRITE),
+            createCamo("BEATLE_UNDERCAMO", 1, "1", CamoRarity.EPIC, "Beatle_UnderCamo(Clone)", "Beatle-UnderCamo", CamoType.SPRITE),
+            createCamo("BEATLE_CRYSTALISED", 2, "1", CamoRarity.EPIC, "Beatle_Crystalised(Clone)", "Beatle-Crystalised", CamoType.SPRITE),
+            createCamo("BEATLE_WAVYDRIP", 3, "1", CamoRarity.EPIC, "Beatle_WavyDrip(Clone)", "Beatle-WavyDrip", CamoType.SPRITE),
+            createCamo("BEATLE_DARKNIGHTSKY", 4, "1", CamoRarity.EPIC, "Beatle_DarkNightSky(Clone)", "Beatle-DarkNightSky", CamoType.SPRITE_AND_MATERIAL),
+            createCamo("BEATLE_GOLDENLINE", 5, "1", CamoRarity.EPIC, "Beatle_GoldenLine(Clone)", "Beatle-GoldenLine", CamoType.SPRITE)
+          ]
+        }
+      ]
+    },
+    {
+      MainItemId = "HOODGUN",
+      MainItemClass = "BASIC_SMG",
+      CamoRaritySubClass = [
+        {
+          RaritySubClassId = "HoodGun_Basic_Camos",
+          MainItemCamos = [
+            createCamo("HOODGUN", 0, "1", CamoRarity.BASIC, "HoodGun(Clone)", "HoodGun", CamoType.SPRITE)
+          ]
+        },
+        {
+          RaritySubClassId = "HoodGun_Epic_Camos",
+          MainItemCamos = [
+            createCamo("HOODGUN_UNDERCAMO", 3, "1", CamoRarity.EPIC, "HoodGun_UnderCamo(Clone)", "HoodGun-UnderCamo", CamoType.SPRITE),
+            createCamo("HOODGUN_CRYSTALISED", 4, "1", CamoRarity.EPIC, "HoodGun_Crystalised(Clone)", "HoodGun-Crystalised", CamoType.SPRITE),
+            createCamo("HOODGUN_WAVYDRIP", 5, "1", CamoRarity.EPIC, "HoodGun_WavyDrip(Clone)", "HoodGun-WavyDrip", CamoType.SPRITE),
+            createCamo("HOODGUN_DARKNIGHTSKY", 6, "1", CamoRarity.EPIC, "HoodGun_DarkNightSky(Clone)", "HoodGun-DarkNightSky", CamoType.SPRITE),
+            createCamoWithCurrency("HOODGUN_GOLDENLINE", 7, "1", CamoRarity.EPIC, "HoodGun_GoldenLine(Clone)", "HoodGun-GoldenLine", CamoType.SPRITE, "Mission", "Null", 0)
+          ]
+        }
+      ]
+    },
+    {
+      MainItemId = "KIG88",
+      MainItemClass = "BASIC_SMG",
+      CamoRaritySubClass = [
+        {
+          RaritySubClassId = "KiG88_Basic_Camos",
+          MainItemCamos = [
+            createCamo("KIG88", 0, "1", CamoRarity.BASIC, "KiG88(Clone)", "KiG88", CamoType.SPRITE)
+          ]
+        },
+        {
+          RaritySubClassId = "KiG88_Epic_Camos",
+          MainItemCamos = [
+            createCamo("KIG88_POLYCHROMATIC", 1, "1", CamoRarity.EPIC, "KiG88_Polychromatic(Clone)", "KiG88-PolyChromatic", CamoType.SPRITE),
+            createCamo("KIG88_JAPANISESUNSET", 2, "1", CamoRarity.EPIC, "KiG88_JapanesseSunset(Clone)", "KiG88-JpSunset", CamoType.SPRITE),
+            createCamo("KIG88_DOUBLESUN", 3, "1", CamoRarity.EPIC, "KiG88_DoubleSun(Clone)", "KiG88-DoubleSun", CamoType.SPRITE),
+            createCamo("KIG88_DARKGOLD", 4, "1", CamoRarity.EPIC, "KiG88_DarkGold(Clone)", "KiG88-DarkGold", CamoType.SPRITE),
+            createCamo("KIG88_DIAMODMARBLES", 5, "1", CamoRarity.EPIC, "KiG88_DiamondMarbles(Clone)", "KiG88-DiamodMarbles", CamoType.SPRITE),
+            createCamo("KIG88_CRYSTALISED", 6, "1", CamoRarity.EPIC, "KiG88_Crystalised(Clone)", "KiG88-Crystalised", CamoType.SPRITE),
+            createCamo("KIG88_WAVYDRIP", 7, "1", CamoRarity.EPIC, "KiG88_WavyDrip(Clone)", "KiG88-WavyDrip", CamoType.SPRITE),
+            createCamoWithAttainment("KIG88_DARKNIGHTSKY", 8, "1", CamoRarity.EPIC, "KiG88_DarkNightSky(Clone)", "KiG88-DarkNightSky", CamoType.SPRITE, "DarkNightSky_Codex"),
+            createCamo("KIG88_GOLDENLINE", 9, "1", CamoRarity.EPIC, "KiG88_GoldenLine(Clone)", "KiG88-GoldenLine", CamoType.SPRITE)
+          ]
+        }
+      ]
+    },
+    {
+      MainItemId = "STINGERA27",
+      MainItemClass = "BASIC_SMG",
+      CamoRaritySubClass = [
+        {
+          RaritySubClassId = "StingerA27_Basic_Camos",
+          MainItemCamos = [
+            createCamo("STINGERA27", 0, "1", CamoRarity.BASIC, "StingerA27(Clone)", "StingerA27", CamoType.SPRITE)
+          ]
+        },
+        {
+          RaritySubClassId = "Stinger_Rare_Camos",
+          MainItemCamos = [
+            createCamo("STINGERA27_SPLASH", 1, "1", CamoRarity.RARE, "StingerA27_Splash(Clone)", "StingerA27-Splash", CamoType.SPRITE)
+          ]
+        },
+        {
+          RaritySubClassId = "Stinger_Epic_Camos",
+          MainItemCamos = [
+            createCamo("STINGERA27_COLDART", 2, "1", CamoRarity.EPIC, "StingerA27_ColdArt(Clone)", "StingerA27-ColdArt", CamoType.SPRITE),
+            createCamo("STINGERA27_ARCANE", 3, "1", CamoRarity.EPIC, "StingerA27_Arcane(Clone)", "StingerA27-Arcane", CamoType.SPRITE),
+            createCamo("STINGERA27_ROSE", 4, "1", CamoRarity.EPIC, "StingerA27_Rose(Clone)", "StingerA27-Rose", CamoType.SPRITE),
+            createCamo("STINGERA27_JASMINE", 5, "1", CamoRarity.EPIC, "StingerA27_Jasmine(Clone)", "StingerA27-Jasmine", CamoType.SPRITE),
+            createCamo("STINGERA27_UNDERCAMO", 6, "1", CamoRarity.EPIC, "StingerA27_UnderCamo(Clone)", "StingerA27-UnderCamo", CamoType.SPRITE),
+            createCamo("STINGERA27_DARKNIGHTSKY", 7, "1", CamoRarity.EPIC, "StingerA27_DarkNightSky(Clone)", "StingerA27-DarkNightSky", CamoType.SPRITE),
+            createCamo("STINGERA27_GOLDENLINE", 8, "1", CamoRarity.EPIC, "StingerA27_GoldenLine(Clone)", "StingerA27-GoldenLine", CamoType.SPRITE)
+          ]
+        }
+      ]
+    },
+    {
+      MainItemId = "X39XX",
+      MainItemClass = "BASIC_SMG",
+      CamoRaritySubClass = [
+        {
+          RaritySubClassId = "X39xx_Basic_Camos",
+          MainItemCamos = [
+            createCamo("X39XX", 0, "1", CamoRarity.BASIC, "X39xx(Clone)", "X39xx", CamoType.SPRITE)
+          ]
+        },
+        {
+          RaritySubClassId = "X39xx_Rare_Camos",
+          MainItemCamos = [
+            createCamo("X39XX_ZABURNER", 1, "1", CamoRarity.RARE, "X39xx_ZaBurner(Clone)", "X39xx-ZaBurner", CamoType.SPRITE)
+          ]
+        },
+        {
+          RaritySubClassId = "X39xx_Epic_Camos",
+          MainItemCamos = [
+            createCamo("X39XX_UNDERCAMO", 2, "1", CamoRarity.EPIC, "X39xx_UnderCamo(Clone)", "X39xx-UnderCamo", CamoType.SPRITE),
+            createCamo("X39XX_DARKNIGHTSKY", 3, "1", CamoRarity.EPIC, "X39xx_DrakNightSky(Clone)", "X39xx-DarkNightSky", CamoType.SPRITE),
+            createCamo("X39XX_GOLDENLINE", 4, "1", CamoRarity.EPIC, "X39xx_GoldenLine(Clone)", "X39xx-GoldenLine", CamoType.SPRITE)
+          ]
+        }
+      ]
+    }
+)

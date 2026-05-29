@@ -1,0 +1,145 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "regular",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@ENUMS(
+    Status { ACTIVE = 1, INACTIVE = 0, PENDING = 2 }
+    LogLevel { DEBUG = 1, INFO = 2, WARN = 3, ERROR = 4 }
+    Priority { LOW = 1, MEDIUM = 5, HIGH = 10, CRITICAL = 20 }
+)
+
+@QUICKFUNCS(
+    ~testEnumGetValues<array>() {
+        let statusValues = Enum.getValues("Status");
+        let logValues = Enum.getValues("LogLevel");
+        return statusValues;
+    }
+
+    ~testEnumGetName<string>() {
+        let name1 = Enum.getName("Status", 1);
+        let name2 = Enum.getName("LogLevel", 3);
+        let name3 = Enum.getName("Priority", 20);
+        return name1;
+    }
+
+    ~testEnumGetValue<int>() {
+        let val1<int> = Enum.getValue("Status", "ACTIVE");
+        let val2<int> = Enum.getValue("LogLevel", "ERROR");
+        let val3<int> = Enum.getValue("Priority", "CRITICAL");
+        return val1 + val2 + val3;
+    }
+
+    ~testEnumHasValue<bool>() {
+        let has1 = Enum.hasValue("Status", "ACTIVE");
+        let has2 = Enum.hasValue("Status", "UNKNOWN");
+        let has3 = Enum.hasValue("LogLevel", "DEBUG");
+        return has1;
+    }
+
+    ~testEnumCount<int>() {
+        let count1<int> = Enum.count("Status");
+        let count2<int> = Enum.count("LogLevel");
+        let count3<int> = Enum.count("Priority");
+        return count1 + count2 + count3;
+    }
+
+    ~testEnumExists<bool>() {
+        let exists1 = Enum.exists("Status");
+        let exists2 = Enum.exists("NonExistent");
+        let exists3 = Enum.exists("LogLevel");
+        return exists1;
+    }
+
+    ~testEnumList<array>() {
+        let allEnums = Enum.list();
+        return allEnums;
+    }
+
+    ~testEnumMinMax<int>() {
+        let minVal<int> = Enum.min("Priority");
+        let maxVal<int> = Enum.max("Priority");
+        return minVal + maxVal;
+    }
+
+    ~testEnumRandom<string>() {
+        let randomStatus = Enum.random("Status");
+        let randomLevel = Enum.random("LogLevel");
+        return randomStatus;
+    }
+
+    ~testEnumContains<bool>() {
+        let contains1 = Enum.contains("Status", 1);
+        let contains2 = Enum.contains("Status", 99);
+        let contains3 = Enum.contains("LogLevel", 4);
+        return contains1;
+    }
+
+    ~testEnumToArray<array>() {
+        let statusArr = Enum.toArray("Status");
+        let levelArr = Enum.toArray("LogLevel");
+        return statusArr;
+    }
+
+    ~testEnumInControlFlow<string>(enumName<string>) {
+        if: Enum.exists(enumName) {
+            let count<int> = Enum.count(enumName);
+            if: count > 3 {
+                return "large-enum";
+            }
+            else {
+                return "small-enum";
+            }
+        }
+        else {
+            return "not-found";
+        }
+    }
+
+    ~testEnumInChk<string>(operation<string>) {
+        chk: operation {
+            -> "get_value" {
+                let val<int> = Enum.getValue("Status", "ACTIVE");
+                return $"{val}";
+            }
+            -> "get_name" {
+                return Enum.getName("LogLevel", 2);
+            }
+            -> "count" {
+                let cnt<int> = Enum.count("Priority");
+                return $"{cnt}";
+            }
+            -> "exists" {
+                let ex = Enum.exists("Status");
+                return $"{ex}";
+            }
+            -> miss {
+                return "unknown";
+            }
+        }
+    }
+)
+
+@DATA(
+    test_get_values = testEnumGetValues(),
+    test_get_name = testEnumGetName(),
+    test_get_value = testEnumGetValue(),
+    test_has_value = testEnumHasValue(),
+    test_count = testEnumCount(),
+    test_exists = testEnumExists(),
+    test_list = testEnumList(),
+    test_min_max = testEnumMinMax(),
+    test_random = testEnumRandom(),
+    test_contains = testEnumContains(),
+    test_to_array = testEnumToArray(),
+    test_control_exists = testEnumInControlFlow("Status"),
+    test_control_not_found = testEnumInControlFlow("Unknown"),
+    test_chk_get_value = testEnumInChk("get_value"),
+    test_chk_get_name = testEnumInChk("get_name"),
+    test_chk_count = testEnumInChk("count"),
+    test_chk_exists = testEnumInChk("exists"),
+    test_chk_miss = testEnumInChk("unknown")
+)

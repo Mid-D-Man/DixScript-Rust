@@ -15,7 +15,7 @@
   port<int>   = 8443
   active<bool> = true
   score<double> = 9.87654321
-
+  testAddition<string> = "we Added this"
   server: host = "dlm.test.internal", ssl = true, timeout<int> = 30
 
   endpoints::

@@ -1,0 +1,147 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "utf-8",
+    debug_mode -> "regular",
+    error_handling -> "halt",
+    features -> "advanced"
+)
+
+@QUICKFUNCS(
+    ~testUniversalToString<string>() {
+        let mut intVal<int> = 42;
+        let mut strVal = "hello";
+        let mut boolVal = true;
+        let str1 = intVal.toString();
+        let str2 = strVal.toString();
+        let str3 = boolVal.toString();
+        return str1;
+    }
+
+    ~testUniversalType<string>() {
+        let mut intVal<int> = 42;
+        let mut strVal = "hello";
+        let mut arrVal = [1, 2, 3];
+        let type1 = intVal.type();
+        let type2 = strVal.type();
+        let type3 = arrVal.type();
+        return type1;
+    }
+
+    ~testUniversalNullChecks<bool>() {
+        let mut val<int> = 42;
+        let isNull1 = val.isNull();
+        let isNotNull1 = val.isNotNull();
+        return isNotNull1;
+    }
+
+    ~testUniversalEquals<bool>() {
+        let mut val1<int> = 42;
+        let val2<int> = 42;
+        let val3<int> = 43;
+        let eq1 = val1.equals(val2);
+        let eq2 = val1.equals(val3);
+        let neq1 = val1.notEquals(val3);
+        return eq1;
+    }
+
+    ~testUniversalHashCode<int>() {
+        let mut val<int> = 42;
+        let hash<int> = val.hashCode();
+        return hash;
+    }
+
+    ~testUniversalClone<int>() {
+        let mut original<int> = 42;
+        let cloned = original.clone();
+        return cloned;
+    }
+
+    ~testUniversalToBytes<array>() {
+        let mut val<int> = 42;
+        let bytes = val.toBytes();
+        return bytes;
+    }
+
+    ~testUniversalSize<int>() {
+        let mut val = "hello world";
+        let mut size<int> = val.size();
+        return size;
+    }
+
+    ~testUniversalEmpty<bool>() {
+        let mut empty = "";
+        let mut full = "text";
+        let isEmpty1 = empty.isEmpty();
+        let isEmpty2 = full.isEmpty();
+        let isNotEmpty = full.isNotEmpty();
+        return isEmpty1;
+    }
+
+    ~testUniversalDefault<int>() {
+        let mut val<int> = 42;
+        let result = val.defaultIfEmpty(100);
+        return result;
+    }
+
+    ~testUniversalDebug<string>() {
+        let mut val<int> = 42;
+        let debug = val.debug();
+        return debug;
+    }
+
+    ~testUniversalJson<string>() {
+        let mut val = [1, 2, 3];
+        let json = val.json();
+        return json;
+    }
+
+    ~testUniversalInControlFlow<string>(val<int>) {
+        let mut myVal<int> = val;
+        if: myVal.isNotNull() {
+            let mut typeStr = myVal.type();
+            return typeStr;
+        }
+        else {
+            return "null";
+        }
+    }
+
+    ~testUniversalInChk<string>(operation<string>) {
+        let mut val<int> = 42;
+        chk: operation {
+            -> "toString" {
+                return val.toString();
+            }
+            -> "type" {
+                return val.type();
+            }
+            -> "hashCode" {
+                let hash<int> = val.hashCode();
+                return $"{hash}";
+            }
+            -> miss {
+                return "unknown";
+            }
+        }
+    }
+)
+
+@DATA(
+    test_to_string = testUniversalToString(),
+    test_type = testUniversalType(),
+    test_null_checks = testUniversalNullChecks(),
+    test_equals = testUniversalEquals(),
+    test_hash_code = testUniversalHashCode(),
+    test_clone = testUniversalClone(),
+    test_to_bytes = testUniversalToBytes(),
+    test_size = testUniversalSize(),
+    test_empty = testUniversalEmpty(),
+    test_default = testUniversalDefault(),
+    test_debug = testUniversalDebug(),
+    test_json = testUniversalJson(),
+    test_control = testUniversalInControlFlow(42),
+    test_chk_toString = testUniversalInChk("toString"),
+    test_chk_type = testUniversalInChk("type"),
+    test_chk_hashCode = testUniversalInChk("hashCode"),
+    test_chk_miss = testUniversalInChk("unknown")
+)

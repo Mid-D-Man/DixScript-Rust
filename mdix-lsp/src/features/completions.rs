@@ -477,7 +477,6 @@ fn resolve_paren_close_dix_type(
     let mut i = close_idx;
 
     loop {
-        // Use boolean flags to avoid holding borrows across the arm body.
         let is_close = matches!(&tokens[i].token_type, TokenType::Symbol(')'));
         let is_open  = matches!(&tokens[i].token_type, TokenType::Symbol('('));
 
@@ -487,17 +486,31 @@ fn resolve_paren_close_dix_type(
             depth -= 1;
             if depth == 0 {
                 if i == 0 { return None; }
-                let pre = i - 1;
-                // Clone the token type at `pre` to avoid borrow-checker issues
-                // when later accessing other indices into `tokens`.
+                let pre    = i - 1;
                 let pre_tt = tokens[pre].token_type.clone();
 
                 return match pre_tt {
                     TokenType::Identifier(name) => {
-                        // ── Prefix constructor: t:(...), b:(...), r:(...) ───
+                        // Instance or static method: receiver.method(...)
+                        if pre >= 2 {
+                            if matches!(&tokens[pre - 1].token_type, TokenType::Symbol('.')) {
+                                return resolve_dot_call_type(tokens, pre - 2, &name, doc);
+                            }
+                        }
+                        // Direct function call
+                        resolve_direct_call_return(&name, doc)
+                    }
+
+                    // ── Prefix constructor: t:(...), b:(...), r:(...) ─────────
+                    // Token sequence is Identifier → ':' → '('
+                    // When we find '(', the token before it is ':', so pre_tt = Symbol(':').
+                    // Look one more step back for the prefix letter.
+                    TokenType::Symbol(':') => {
                         if pre >= 1 {
-                            if matches!(&tokens[pre - 1].token_type, TokenType::Symbol(':')) {
-                                return match name.as_str() {
+                            if let TokenType::Identifier(prefix) =
+                                tokens[pre - 1].token_type.clone()
+                            {
+                                return match prefix.as_str() {
                                     "t" => Some(DixType::Tuple),
                                     "b" => Some(DixType::Blob),
                                     "r" => Some(DixType::Regex),
@@ -505,19 +518,10 @@ fn resolve_paren_close_dix_type(
                                 };
                             }
                         }
-
-                        // ── Instance or static method: receiver.method(...) ─
-                        if pre >= 2 {
-                            if matches!(&tokens[pre - 1].token_type, TokenType::Symbol('.')) {
-                                return resolve_dot_call_type(tokens, pre - 2, &name, doc);
-                            }
-                        }
-
-                        // ── Direct function call ────────────────────────────
-                        resolve_direct_call_return(&name, doc)
+                        None
                     }
 
-                    // Another `)` → chained: something()(...)
+                    // Chained call: something()(...)
                     TokenType::Symbol(')') => {
                         resolve_paren_close_dix_type(tokens, pre, doc)
                     }

@@ -1615,7 +1615,25 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                     position: tok_pos,
                 }
             }
+            // FIX: scientific notation (1.0e-9, 6.02e23, etc.) was falling to _ => Null
+            TokenType::ScientificNotation(sn) => {
+                let val = *sn;
+                self.advance();
+                Expression::Value {
+                    value: Value::ScientificNotation { value: val, position: tok_pos },
+                    position: tok_pos,
+                }
+            }
             TokenType::String(s) => {
+                let val = s.clone();
+                self.advance();
+                Expression::Value {
+                    value: Value::String { value: val, position: tok_pos },
+                    position: tok_pos,
+                }
+            }
+            // FIX: single-quoted strings were also unhandled
+            TokenType::StringSingle(s) => {
                 let val = s.clone();
                 self.advance();
                 Expression::Value {
@@ -1648,6 +1666,31 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 self.advance();
                 Expression::Value {
                     value: Value::Null { position: tok_pos },
+                    position: tok_pos,
+                }
+            }
+            // FIX: hex colors, dates, timestamps were all falling to _ => Null
+            TokenType::HexColor(hc) => {
+                let val = hc.clone();
+                self.advance();
+                Expression::Value {
+                    value: Value::HexColor { value: val, position: tok_pos },
+                    position: tok_pos,
+                }
+            }
+            TokenType::Date(d) => {
+                let val = d.clone();
+                self.advance();
+                Expression::Value {
+                    value: Value::Date { value: val, position: tok_pos },
+                    position: tok_pos,
+                }
+            }
+            TokenType::Timestamp(ts) => {
+                let val = ts.clone();
+                self.advance();
+                Expression::Value {
+                    value: Value::Timestamp { value: val, position: tok_pos },
                     position: tok_pos,
                 }
             }
@@ -1727,12 +1770,48 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         let val_pos = Position::from_token(&token);
 
         match &token.token_type {
-            TokenType::Integer(i)  => { let v = *i; self.advance(); Value::Integer { value: v, position: val_pos } }
-            TokenType::Long(i)  => { let v = *i; self.advance(); Value::Long { value: v, position: val_pos } }
-            TokenType::Float(f)    => { let v = *f; self.advance(); Value::Float   { value: v, position: val_pos } }
-            TokenType::Double(d)   => { let v = *d; self.advance(); Value::Double  { value: v, position: val_pos } }
-            TokenType::String(s)   => { let v = s.clone(); self.advance(); Value::String  { value: v, position: val_pos } }
-            TokenType::Bool(b)     => { let v = *b; self.advance(); Value::Boolean { value: v, position: val_pos } }
+            TokenType::Integer(i) => {
+                let v = *i;
+                self.advance();
+                Value::Integer { value: v, position: val_pos }
+            }
+            TokenType::Long(i) => {
+                let v = *i;
+                self.advance();
+                Value::Long { value: v, position: val_pos }
+            }
+            TokenType::Float(f) => {
+                let v = *f;
+                self.advance();
+                Value::Float { value: v, position: val_pos }
+            }
+            TokenType::Double(d) => {
+                let v = *d;
+                self.advance();
+                Value::Double { value: v, position: val_pos }
+            }
+            // FIX: scientific notation was falling to _ => treated as Identifier string
+            TokenType::ScientificNotation(sn) => {
+                let v = *sn;
+                self.advance();
+                Value::ScientificNotation { value: v, position: val_pos }
+            }
+            TokenType::String(s) => {
+                let v = s.clone();
+                self.advance();
+                Value::String { value: v, position: val_pos }
+            }
+            // FIX: single-quoted strings were also unhandled
+            TokenType::StringSingle(s) => {
+                let v = s.clone();
+                self.advance();
+                Value::String { value: v, position: val_pos }
+            }
+            TokenType::Bool(b) => {
+                let v = *b;
+                self.advance();
+                Value::Boolean { value: v, position: val_pos }
+            }
             // Keyword is &&'static str — compare directly with *kw
             TokenType::Keyword(kw) if *kw == "null" => {
                 self.advance();
@@ -1746,15 +1825,18 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             TokenType::Symbol('[') => self.parse_array_literal(),
             TokenType::Symbol('{') => self.parse_object_literal(),
             TokenType::HexColor(hc) => {
-                let v = hc.clone(); self.advance();
+                let v = hc.clone();
+                self.advance();
                 Value::HexColor { value: v, position: val_pos }
             }
             TokenType::Date(d) => {
-                let v = d.clone(); self.advance();
+                let v = d.clone();
+                self.advance();
                 Value::Date { value: v, position: val_pos }
             }
             TokenType::Timestamp(t) => {
-                let v = t.clone(); self.advance();
+                let v = t.clone();
+                self.advance();
                 Value::Timestamp { value: v, position: val_pos }
             }
             TokenType::InterpolatedString(template) => {
@@ -1770,7 +1852,6 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             }
         }
     }
-
     fn parse_array_literal(&mut self) -> Value {
         let arr_pos = Position::from_token(self.current());
 

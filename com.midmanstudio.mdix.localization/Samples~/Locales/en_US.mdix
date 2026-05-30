@@ -1,0 +1,61 @@
+// com.midmanstudio.mdix.localization/Samples~/Locales/en_US.mdix
+// ─────────────────────────────────────────────────────────────────────────
+// English (United States) locale file.
+// Key format: category.key or category: key1 = "val1", key2 = "val2"
+// Variable substitution: {0}, {1}, {2} → String.Format style
+// Plural arrays: [0]=zero, [1]=one, [2]=few/many (extend per language)
+// ─────────────────────────────────────────────────────────────────────────
+
+@CONFIG(
+  version  -> "1.0.0"
+  locale   -> "en_US"
+  fallback -> "en_US"
+)
+
+@ENUMS(
+  PluralCategory { ZERO, ONE, OTHER }
+)
+
+@DATA(
+  // ── Meta ──────────────────────────────────────────────────────────────
+  locale_display_name<string> = "English (US)"
+
+  // ── UI ─────────────────────────────────────────────────────────────────
+  ui: play = "Play", settings = "Settings", quit = "Quit", back = "Back"
+  ui: resume = "Resume", loading = "Loading...", ok = "OK", cancel = "Cancel"
+
+  // ── Main Menu ─────────────────────────────────────────────────────────
+  menu: new_game = "New Game", load_game = "Load Game", credits = "Credits"
+
+  // ── Gameplay ───────────────────────────────────────────────────────────
+  gameplay: score = "Score: {0}", level = "Level {0}", lives = "Lives: {0}"
+  gameplay: wave = "Wave {0}", time = "Time: {0}"
+
+  // ── Notifications ──────────────────────────────────────────────────────
+  notify: level_up = "Level Up!"
+  notify: game_over = "Game Over"
+  notify: new_record = "New Record: {0}!"
+
+  // ── Items ──────────────────────────────────────────────────────────────
+  items: sword = "Iron Sword", potion = "Health Potion", shield = "Wooden Shield"
+  items: gold = "Gold Coin", gem = "Ruby Gem"
+
+  // ── Tutorial ───────────────────────────────────────────────────────────
+  tutorial: hint_move = "Use WASD or arrow keys to move"
+  tutorial: hint_attack = "Press Space to attack"
+  tutorial: hint_dodge = "Double-tap a direction to dodge"
+
+  // ── Enemies ────────────────────────────────────────────────────────────
+  enemies: goblin = "Goblin", orc = "Orc", dragon = "Dragon"
+
+  // ── Plural forms (indexed by plural category) ──────────────────────────
+  // English rule: 0 → "0 enemies", 1 → "1 enemy", 2+ → "{0} enemies"
+  plural_enemies::  "No enemies", "1 enemy", "{0} enemies"
+  plural_coins::    "No coins",   "1 coin",  "{0} coins"
+  plural_items::    "No items",   "1 item",  "{0} items"
+
+  // ── Error / system messages ────────────────────────────────────────────
+  errors: save_failed = "Failed to save: {0}"
+  errors: load_failed = "Failed to load save file"
+  errors: network_err = "Network error. Check your connection."
+)

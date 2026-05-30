@@ -959,7 +959,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
 
         // Support single-line `if: cond then stmt`
         let is_single_line = if let TokenType::Keyword(kw) = &self.current().token_type {
-            *kw == "then" // &&'static str comparison — no .as_str() needed
+            *kw == "then"
         } else {
             false
         };
@@ -998,7 +998,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             self.skip_whitespace();
 
             let is_elif = if let TokenType::Keyword(kw) = &self.current().token_type {
-                *kw == "elif" // &&'static str — direct comparison
+                *kw == "elif"
             } else {
                 false
             };
@@ -1047,7 +1047,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         let mut final_else: Option<Vec<QuickFuncStatement>> = None;
 
         let is_else = if let TokenType::Keyword(kw) = &self.current().token_type {
-            *kw == "else" // &&'static str — direct comparison
+            *kw == "else"
         } else {
             false
         };
@@ -1057,17 +1057,15 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             self.skip_whitespace();
 
             if self.check_symbol('{') {
+                // Multi-line else: else { ... }
                 final_else = Some(self.parse_statement_block());
             } else {
-                let cur = self.current().clone();
-                self.error_manager.add_parse_error(
-                    ParseErrorType::MissingToken,
-                    "Expected '{' after 'else'".to_string(),
-                    cur.line,
-                    cur.column,
-                    None,
-                    self.get_source_line(&cur),
-                );
+                // --- KEY FIX: single-line else without braces ---
+                // e.g.  else return -1;
+                //       else result = -10;
+                if let Some(stmt) = self.parse_statement() {
+                    final_else = Some(vec![stmt]);
+                }
             }
         }
 
@@ -1464,7 +1462,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                         TokenType::Keyword(kw)
                         if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
                             {
-                                let name = kw.to_string(); // &&'static str -> String
+                                let name = kw.to_string();
                                 self.advance();
                                 Some(name)
                             }
@@ -1524,15 +1522,43 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                     };
                 }
 
+                // --- KEY FIX: was `return`, now `continue` so the chain keeps going ---
                 TokenType::Symbol('(') if !parts.is_empty() => {
-                    // A call on a chain: Math.round(x) → QualifiedIdentifier with args
+                    // Dotted chain call: obj.method() or Math.round() or input.trim()
+                    // Flush parts into a QualifiedIdentifier, then continue the loop
+                    // so subsequent `.method()` calls are parsed as InstanceMethodCalls.
                     let pos = expr.position();
                     let args = self.parse_function_arguments();
-                    return Expression::QualifiedIdentifier {
-                        parts,
+                    expr = Expression::QualifiedIdentifier {
+                        parts: std::mem::take(&mut parts),
                         arguments: Some(args),
                         position: pos,
                     };
+                    // parts is now empty; the next '.' will enter the PropertyAccess branch
+                }
+
+                // --- NEW ARM: handles '(' when parts is empty (chained call after first) ---
+                TokenType::Symbol('(') => {
+                    // parts.is_empty() — this is a call directly following a PropertyAccess,
+                    // i.e. the `.split(" ")` portion of `input.trim().split(" ").join("-")`
+                    let tmp = expr;
+                    match tmp {
+                        Expression::PropertyAccess { object, property, position: prop_pos } => {
+                            let args = self.parse_function_arguments();
+                            expr = Expression::InstanceMethodCall {
+                                instance: object,
+                                method_name: property,
+                                arguments: args,
+                                position: prop_pos,
+                            };
+                            // Continue the loop — further chaining may follow
+                        }
+                        other => {
+                            // Not a property access; we cannot call it as a method here.
+                            expr = other;
+                            break;
+                        }
+                    }
                 }
 
                 _ => break,
@@ -1790,7 +1816,6 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 self.advance();
                 Value::Double { value: v, position: val_pos }
             }
-            // FIX: scientific notation was falling to _ => treated as Identifier string
             TokenType::ScientificNotation(sn) => {
                 let v = *sn;
                 self.advance();
@@ -1801,7 +1826,6 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 self.advance();
                 Value::String { value: v, position: val_pos }
             }
-            // FIX: single-quoted strings were also unhandled
             TokenType::StringSingle(s) => {
                 let v = s.clone();
                 self.advance();
@@ -1812,15 +1836,41 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 self.advance();
                 Value::Boolean { value: v, position: val_pos }
             }
-            // Keyword is &&'static str — compare directly with *kw
             TokenType::Keyword(kw) if *kw == "null" => {
                 self.advance();
                 Value::Null { position: val_pos }
             }
+            // --- KEY FIX: read the full dotted path so `Priority.Low` becomes
+            //     Identifier("Priority.Low"), which the resolver then converts to
+            //     EnumValue { enum_name: "Priority", value: "Low" }. ---
             TokenType::Identifier(id) => {
-                let v = id.clone();
+                let first = id.clone();
                 self.advance();
-                Value::Identifier { value: v, position: val_pos }
+
+                if self.check_symbol('.') {
+                    // Dotted qualified identifier — collect all segments
+                    let mut segments = vec![first];
+                    while self.check_symbol('.') {
+                        self.advance(); // consume '.'
+                        match self.current().token_type.clone() {
+                            TokenType::Identifier(next) => {
+                                segments.push(next);
+                                self.advance();
+                            }
+                            TokenType::Keyword(kw)
+                            if Keywords::can_be_identifier_in_context(&kw, "QUICKFUNCS") =>
+                                {
+                                    segments.push(kw.to_string());
+                                    self.advance();
+                                }
+                            _ => break,
+                        }
+                    }
+                    // Store as a dotted string; the resolver splits it into EnumValue
+                    Value::Identifier { value: segments.join("."), position: val_pos }
+                } else {
+                    Value::Identifier { value: first, position: val_pos }
+                }
             }
             TokenType::Symbol('[') => self.parse_array_literal(),
             TokenType::Symbol('{') => self.parse_object_literal(),

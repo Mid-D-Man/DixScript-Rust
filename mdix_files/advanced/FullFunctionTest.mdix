@@ -237,7 +237,7 @@
 
     ~singleLineIfElseReturn<int> => global(x<int>) {
         if: x > 0 then return 1;
-        else return -1;
+        else  return -1;
     }
 
     ~singleLineIfElseAssign<int> => global(x<int>) {
@@ -1451,13 +1451,286 @@
 )
 
 @DATA(
-    test_name = "Complete QuickFuncs Test Suite",
+    test_name = "FullFunctionTest Compilation Suite",
     version = "1.0.0",
-    total_functions = 150
+    total_functions = 100,
+    compile_target = "All QuickFuncs"
 
+    // ── Basic return types ──────────────────────────────────────────────────
+    test.basic:
+        constant        = getConstant(),
+        doubled         = doubletest(5),
+        sum             = add(10, 20),
+        formatted       = formatData(1, "Alice", true),
+        greeting        = greet("World", "Hi"),
+        arr_count       = processArray([1, 2, 3, 4, 5]),
+        obj_status      = processObject({ id = 1, name = "test" }),
+        float_sum       = calculateFloat(3.14, 2.72),
+        is_positive     = isPositive(42)
+
+    // ── Scope declarations ──────────────────────────────────────────────────
+    test.scope:
+        global_val      = globalFunction(),
+        user_val        = userOperation(5),
+        shared_val      = sharedCalculation(100.0),
+        deep_val        = deepScopeFunction(15)
+
+    // ── Arithmetic operators ────────────────────────────────────────────────
+    test.arithmetic:
+        added           = testAdd(10, 5),
+        subtracted      = testSubtract(10, 5),
+        multiplied      = testMultiply(10, 5),
+        divided         = testDivide(10.0, 4.0),
+        modded          = testModulo(10, 3),
+        powered         = testPower(2, 8),
+        precedence      = testPrecedence(5, 3, 2),
+        chained         = testChained(5)
+
+    // ── Comparison operators ────────────────────────────────────────────────
+    test.comparison:
+        greater         = testGreater(10, 5),
+        less            = testLess(5, 10),
+        greater_eq      = testGreaterEqual(5, 5),
+        less_eq         = testLessEqual(5, 5),
+        equal           = testEqual(5, 5),
+        not_equal       = testNotEqual(5, 10),
+        complex_cmp     = testComplexComparison(1, 2, 3)
+
+    // ── Logical operators ───────────────────────────────────────────────────
+    test.logic:
+        and_result      = testAnd(true, true),
+        or_result       = testOr(false, true),
+        and_word        = testAndWord(true, true),
+        or_word         = testOrWord(false, true),
+        not_result      = testNot(false),
+        not_word        = testNotWord(false),
+        complex_logic   = testComplexLogic(true, false, true),
+        short_circuit   = testShortCircuit(5, 50)
+
+    // ── Unary operators ─────────────────────────────────────────────────────
+    test.unary:
+        unary_minus     = testUnaryMinus(10),
+        unary_plus      = testUnaryPlus(5),
+        double_unary    = testDoubleUnary(5),
+        unary_expr      = testUnaryExpr(3, 4),
+        not_cmp         = testNotComparison(5)
+
+    // ── Single-line if (Fix 2 exercises these) ──────────────────────────────
+    test.singleif:
+        if_ret          = singleLineIfReturn(5),
+        if_assign       = singleLineIfAssign(15),
+        if_else_ret     = singleLineIfElseReturn(5),
+        if_else_assign  = singleLineIfElseAssign(5),
+        multi_if        = multipleSingleLineIf(85),
+        if_complex      = singleLineIfComplex(3, 4),
+        if_arith        = singleLineIfArithmetic(10),
+        if_log          = singleLineIfLog(5)
+
+    // ── Multi-line if ───────────────────────────────────────────────────────
+    test.multiif:
+        multi           = multiLineIf(5),
+        multi_else      = multiLineIfElse(5),
+        elif_chain      = ifElifElse(85),
+        multi_elif      = multipleElif(3),
+        multi_stmts     = ifMultipleStatements(5)
+
+    // ── Nested if ───────────────────────────────────────────────────────────
+    test.nestedif:
+        nested_l1       = nestedIfLevel1(5, 5),
+        nested_l2       = nestedIfLevel2(5, 5, 5),
+        nested_l3       = nestedIfLevel3(5, 5, 5, 5),
+        nested_elif     = nestedIfElif(5, 8),
+        mixed_style     = mixedIfStyle(5, 5)
+
+    // ── Single-line switch ──────────────────────────────────────────────────
+    test.singleswitch:
+        sw_then         = singleLineSwitchThenReturn(1),
+        sw_arrow        = singleLineSwitchArrowReturn(2),
+        sw_assign       = singleLineSwitchThenAssign("active"),
+        sw_arr_assign   = singleLineSwitchArrowAssign("pending"),
+        sw_arith        = singleLineSwitchArithmetic("add"),
+        sw_log          = singleLineSwitchLog(2),
+        sw_mixed        = singleLineSwitchMixed(3)
+
+    // ── Multi-line switch ───────────────────────────────────────────────────
+    test.multiswitch:
+        multi_sw        = multiLineSwitch(2),
+        sw_string       = switchString("start"),
+        sw_enum         = switchEnum(2)
+
+    // ── Nested switch ───────────────────────────────────────────────────────
+    test.nestedswitch:
+        nested_sw1      = nestedSwitchLevel1("number", 1),
+        nested_sw2      = nestedSwitchLevel2("A", "X", 1),
+        mixed_sw        = mixedSwitchStyle(1, 10)
+
+    // ── Mixed control flow ──────────────────────────────────────────────────
+    test.mixedcontrol:
+        if_in_sw        = ifInsideSwitch("numbers", 150),
+        sw_in_if        = switchInsideIf(true, "ready"),
+        complex1        = complexNesting1(true, "test", 5),
+        complex2        = complexNesting2(1, true, "a")
+
+    // ── Variables ───────────────────────────────────────────────────────────
+    test.variables:
+        simple          = simpleAssignment(42),
+        expr_assign     = assignmentExpression(5, 3),
+        multi           = multipleAssignments(5),
+        reassign        = reassignment(5),
+        ctrl_assign     = assignmentInControl(true)
+
+    // ── Arithmetic assignment ───────────────────────────────────────────────
+    test.arithassign:
+        add_asgn        = addAssign(5),
+        sub_asgn        = subtractAssign(20),
+        mul_asgn        = multiplyAssign(4),
+        div_asgn        = divideAssign(4.0),
+        mod_asgn        = moduloAssign(7),
+        chain_asgn      = chainedArithAssign(0)
+
+    // ── Object creation ─────────────────────────────────────────────────────
+    test.objects:
+        simple_obj      = createSimpleObject(),
+        complex_obj     = createComplexObject(1, true),
+        nested_obj      = createNestedObject(),
+        obj_arrays      = objectWithArrays(),
+        empty_obj       = emptyObject()
+
+    // ── Array literals ──────────────────────────────────────────────────────
+    test.arrays:
+        simple_arr      = simpleArray(),
+        mixed_arr       = mixedArray(),
+        expr_arr        = arrayWithExpressions(5),
+        nested_arrs     = nestedArrays(),
+        empty_arr       = emptyArray()
+
+    // ── Object literals ─────────────────────────────────────────────────────
+    test.objliterals:
+        ret_obj         = returnObjectLiteral(),
+        all_types       = objectAllTypes(),
+        obj_nested      = objectNested(),
+        obj_exprs       = objectWithExpressions(3, 4)
+
+    // ── Prefixed constructors ───────────────────────────────────────────────
+    test.constructors:
+        tup2            = tuple2(1, 2),
+        tup3            = tuple3(1, 2, 3),
+        tup4            = tuple4(1, 2, 3, 4),
+        tup_mixed       = tupleMixed(),
+        tup_exprs       = tupleExpressions(3, 4),
+        blob_val        = blobCreate("raw_data"),
+        regex_val       = regexCreate("[a-z]+")
+
+    // ── Parenthesized expressions ───────────────────────────────────────────
+    test.parens:
+        simple_p        = simpleParens(3, 4),
+        nested_p        = nestedParens(3, 4, 5),
+        prec_p          = precedenceParens(5),
+        complex_p       = complexParens(2, 3, 4, 5)
+
+    // ── Log statements ──────────────────────────────────────────────────────
+    test.logs:
+        log_val         = simpleLog(42),
+        log_expr        = logExpression(5, 3),
+        log_str         = logString(),
+        multi_log       = multipleLogs(10),
+        log_ctrl        = logInControl(true)
+
+    // ── Ternary ─────────────────────────────────────────────────────────────
+    test.ternary:
+        simple_tern     = simpleTernary(5),
+        tern_exprs      = ternaryExpressions(10, 5),
+        nested_tern     = nestedTernary(85),
+        tern_assign     = ternaryAssignment(true),
+        complex_tern    = complexTernary(5, 3, 4)
+
+    // ── String interpolation ────────────────────────────────────────────────
+    test.interpolation:
+        simple_interp   = simpleInterpolation("World"),
+        multi_interp    = multipleInterpolations("John", "Doe"),
+        interp_exprs    = interpolationExpressions(10, 5),
+        interp_methods  = interpolationMethods("Hello"),
+        complex_interp  = complexInterpolation("Alice", 30, true)
+
+    // ── Static object methods ───────────────────────────────────────────────
+    test.staticmethods:
+        math_result     = mathMethods(10, 5),
+        arr_static      = arrayStaticMethods(),
+        rand_int        = randomMethods()
+
+    // ── Instance methods ────────────────────────────────────────────────────
+    test.instancemethods:
+        str_methods     = stringInstanceMethods("  Hello World  "),
+        arr_methods     = arrayInstanceMethods([1, 2, 3, 4, 5]),
+        num_methods     = numericInstanceMethods(3.7)
+
+    // ── Method chains (Fix 1 exercises these) ───────────────────────────────
+    test.chains:
+        str_chain       = stringChaining("  hello world  "),
+        arr_chain       = arrayChaining([5, 4, 3, 2, 1]),
+        complex_chain   = complexChaining("hello world"),
+        dt_chain        = dateTimeChaining()
+
+    // ── Lambdas ─────────────────────────────────────────────────────────────
+    test.lambdas:
+        simple_lam      = simpleLambda(),
+        lam_single      = lambdaSingleParam(5),
+        lam_multi       = lambdaMultiParams(3, 4),
+        lam_typed       = lambdaTypedParams(3, 4),
+        lam_block       = lambdaBlockBody(5),
+        lam_in_var      = lambdaInVariable(5),
+        lam_as_expr     = lambdaAsExpression(5),
+        lam_cond        = lambdaWithConditional(-5),
+        lam_obj         = lambdaReturnObject(1, "Alice"),
+        lam_arr         = lambdaReturnArray(5)
+
+    // ── Nested lambdas ──────────────────────────────────────────────────────
+    test.nestedlambdas:
+        nested_lam1     = nestedLambda1(10),
+        nested_lam2     = nestedLambda2(5),
+        nested_lam3     = nestedLambda3(3),
+        nested_closure  = nestedLambdaClosure(2),
+        nested_cond     = nestedLambdaConditional(5),
+        nested_complex  = nestedLambdaComplex(10, 5),
+        nested_ctrl     = nestedLambdaInControl(true, 8)
+
+    // ── Lambda + method chains ──────────────────────────────────────────────
+    test.lambdachains:
+        lam_str_chain   = lambdaStringChaining("  Hello  "),
+        lam_arr_chain   = lambdaArrayChaining([5, 4, 3, 2, 1]),
+        lam_cx_chain    = lambdaComplexChaining("hello world")
+
+    // ── Lambdas in collections ──────────────────────────────────────────────
+    test.lambdacollections:
+        lam_array       = lambdaArray(5),
+        lam_obj_test    = lambdaInObject(5)
+
+    // ── Property and array access ───────────────────────────────────────────
+    test.access:
+        obj_prop        = objectPropertyAccess(),
+        nested_prop     = nestedPropertyAccess(),
+        arr_elem        = arrayElementAccess(),
+        arr_obj         = arrayObjectAccess(),
+        complex_acc     = complexAccessChain()
+
+    // ── Enum access ─────────────────────────────────────────────────────────
+    test.enumaccess:
+        enum_val        = simpleEnumAccess(),
+        enum_cmp        = enumInComparison(1),
+        enum_switch     = enumInSwitch(3),
+        multi_enum      = multipleEnumUsage()
+
+    // ── Comprehensive ───────────────────────────────────────────────────────
+    test.comprehensive:
+        all_ops         = allOperatorsCombined(5, 3, 2),
+        complex_bool    = complexBooleanLogic(1, 2, 3),
+        mixed_ctrl_expr = mixedControlAndExpression(10, 5),
+        kitchen_sink    = kitchenSink(15, true)
+
+    // ── Results tracking ────────────────────────────────────────────────────
     test.results:
-        passed = 0,
-        failed = 0,
+        passed  = 0,
+        failed  = 0,
         skipped = 0
 
     test.categories::
@@ -1465,5 +1738,7 @@
         "Control Flow",
         "Operators",
         "Lambdas",
-        "Method Chaining"
+        "Method Chaining",
+        "Enums",
+        "Comprehensive"
 )

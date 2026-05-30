@@ -1,3 +1,4 @@
+// mdix-csharp/src/MidManStudio.Mdix.Core/MdixSerializer.cs
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -9,14 +10,9 @@ using System.Text.Json;
 namespace MidManStudio.Mdix.Core
 {
     // ══════════════════════════════════════════════════════════════════════════
-    // Public attributes — decorate user types with these
+    // Public attributes
     // ══════════════════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Declares the root path prefix for a class or struct when deserializing
-    /// from or serializing to a DixScript database.
-    /// A prefix passed directly to <see cref="MdixDatabase.Deserialize{T}"/> overrides this.
-    /// </summary>
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct)]
     public sealed class MdixObjectAttribute : Attribute
     {
@@ -24,10 +20,6 @@ namespace MidManStudio.Mdix.Core
         public MdixObjectAttribute(string? prefix = null) => Prefix = prefix;
     }
 
-    /// <summary>
-    /// Maps a property or constructor parameter to an explicit DixScript path.
-    /// Without this attribute the property name is converted to snake_case automatically.
-    /// </summary>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Parameter)]
     public sealed class MdixPropertyAttribute : Attribute
     {
@@ -35,10 +27,6 @@ namespace MidManStudio.Mdix.Core
         public MdixPropertyAttribute(string path) => Path = path;
     }
 
-    /// <summary>
-    /// Provides one or more fallback paths tried in order after the primary path fails.
-    /// Useful for backward-compatible renames. May be applied multiple times.
-    /// </summary>
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
     public sealed class MdixAliasAttribute : Attribute
     {
@@ -46,21 +34,12 @@ namespace MidManStudio.Mdix.Core
         public MdixAliasAttribute(string aliasPath) => AliasPath = aliasPath;
     }
 
-    /// <summary>Skips this property during both deserialization and serialization.</summary>
     [AttributeUsage(AttributeTargets.Property)]
     public sealed class MdixIgnoreAttribute : Attribute { }
 
-    /// <summary>
-    /// Marks a property or constructor parameter as required.
-    /// Deserialization fails with a descriptive error if the path is absent.
-    /// </summary>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Parameter)]
     public sealed class MdixRequiredAttribute : Attribute { }
 
-    /// <summary>
-    /// Provides a compile-time constant fallback value when the path is absent.
-    /// The value must be assignable to the property type.
-    /// </summary>
     [AttributeUsage(AttributeTargets.Property)]
     public sealed class MdixDefaultValueAttribute : Attribute
     {
@@ -68,10 +47,6 @@ namespace MidManStudio.Mdix.Core
         public MdixDefaultValueAttribute(object? defaultValue) => DefaultValue = defaultValue;
     }
 
-    /// <summary>
-    /// Applies a static transformation method after the value is read from the database.
-    /// The method must be <c>public static object MethodName(object value)</c>.
-    /// </summary>
     [AttributeUsage(AttributeTargets.Property)]
     public sealed class MdixTransformAttribute : Attribute
     {
@@ -85,11 +60,6 @@ namespace MidManStudio.Mdix.Core
         }
     }
 
-    /// <summary>
-    /// Runs a static validation method after the value is read and transformed.
-    /// Deserialization fails if the method returns false.
-    /// The method must be <c>public static bool MethodName(object value)</c>.
-    /// </summary>
     [AttributeUsage(AttributeTargets.Property)]
     public sealed class MdixValidationAttribute : Attribute
     {
@@ -103,40 +73,25 @@ namespace MidManStudio.Mdix.Core
         }
     }
 
-    /// <summary>
-    /// Marks a specific constructor as the preferred one for deserialization.
-    /// Without this, the constructor with the most parameters is chosen automatically.
-    /// </summary>
     [AttributeUsage(AttributeTargets.Constructor)]
     public sealed class MdixConstructorAttribute : Attribute { }
 
-    /// <summary>Controls how type conversion is attempted during deserialization.</summary>
-    public enum MdixConversionMode
-    {
-        /// <summary>Exact type match only. Fails on any type mismatch.</summary>
-        Strict,
-        /// <summary>Attempts <see cref="Convert.ChangeType"/> on mismatch. Default.</summary>
-        Safe,
-        /// <summary>Attempts all conversion strategies including string parsing.</summary>
-        Forced,
-    }
+    public enum MdixConversionMode { Strict, Safe, Forced }
 
-    /// <summary>Overrides the default conversion mode for a single property.</summary>
     [AttributeUsage(AttributeTargets.Property)]
     public sealed class MdixConvertAttribute : Attribute
     {
         public MdixConversionMode Mode { get; }
-        public MdixConvertAttribute(MdixConversionMode mode = MdixConversionMode.Safe) => Mode = mode;
+        public MdixConvertAttribute(MdixConversionMode mode = MdixConversionMode.Safe) =>
+            Mode = mode;
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Serializer — internal, called via MdixDatabase.Deserialize<T> and
-    //              MdixBuilder.Serialize<T>
+    // Serializer
     // ══════════════════════════════════════════════════════════════════════════
 
     internal sealed class MdixSerializer
     {
-        // Reflection method handle for nested POCO deserialization — cached once per AppDomain.
         private static readonly MethodInfo _deserializeMethod =
             typeof(MdixSerializer)
                 .GetMethods(BindingFlags.Instance | BindingFlags.NonPublic)
@@ -151,7 +106,7 @@ namespace MidManStudio.Mdix.Core
         {
             try
             {
-                var typeInfo = GetOrBuildTypeInfo(typeof(T));
+                var typeInfo        = GetOrBuildTypeInfo(typeof(T));
                 var effectivePrefix = prefix ?? typeInfo.ClassPrefix ?? string.Empty;
 
                 if (typeInfo.PrimaryConstructor != null)
@@ -160,7 +115,7 @@ namespace MidManStudio.Mdix.Core
                 if (!typeof(T).IsValueType && !HasParameterlessCtor(typeof(T)))
                     return MdixError.NativeError(
                         $"'{typeof(T).Name}' needs a parameterless constructor or a constructor " +
-                        $"whose parameters are mappable via [MdixProperty].");
+                        "whose parameters are mappable via [MdixProperty].");
 
                 var instance = Activator.CreateInstance<T>();
                 object boxed = instance!;
@@ -177,13 +132,11 @@ namespace MidManStudio.Mdix.Core
         }
 
         private MdixResult<T> DeserializeViaCtor<T>(
-            MdixDatabase db,
-            TypeSerializationInfo typeInfo,
-            string prefix)
+            MdixDatabase db, TypeSerializationInfo typeInfo, string prefix)
         {
-            var ctor = typeInfo.PrimaryConstructor!;
+            var ctor       = typeInfo.PrimaryConstructor!;
             var parameters = ctor.GetParameters();
-            var values = new object?[parameters.Length];
+            var values     = new object?[parameters.Length];
 
             for (int i = 0; i < parameters.Length; i++)
             {
@@ -214,17 +167,13 @@ namespace MidManStudio.Mdix.Core
             }
 
             T instance;
-            try
-            {
-                instance = (T)ctor.Invoke(values);
-            }
+            try   { instance = (T)ctor.Invoke(values); }
             catch (Exception ex)
             {
                 return MdixError.NativeError(
                     $"Constructor invocation failed for '{typeof(T).Name}': {ex.Message}");
             }
 
-            // Fill any settable properties not already covered by the constructor.
             var ctorNames = new HashSet<string>(
                 typeInfo.CtorParams.Select(p => p.Param.Name ?? string.Empty),
                 StringComparer.OrdinalIgnoreCase);
@@ -237,11 +186,11 @@ namespace MidManStudio.Mdix.Core
         }
 
         private MdixError? FillProperties(
-            MdixDatabase db,
+            MdixDatabase          db,
             TypeSerializationInfo typeInfo,
-            string prefix,
-            ref object boxed,
-            HashSet<string>? skipNames)
+            string                prefix,
+            ref object            boxed,
+            HashSet<string>?      skipNames)
         {
             foreach (var prop in typeInfo.Properties)
             {
@@ -279,10 +228,7 @@ namespace MidManStudio.Mdix.Core
         // ── Path resolution ───────────────────────────────────────────────────
 
         private (bool found, object? value) TryResolvePaths(
-            MdixDatabase db,
-            Type targetType,
-            List<string> paths,
-            string prefix)
+            MdixDatabase db, Type targetType, List<string> paths, string prefix)
         {
             foreach (var rawPath in paths)
             {
@@ -295,13 +241,9 @@ namespace MidManStudio.Mdix.Core
                     continue;
                 }
 
-                // 1. Try direct lookup via typed getters.
                 var (success, val) = DirectGet(db, targetType, fullPath);
                 if (success) return (true, val);
 
-                // 2. Fallback: for dotted paths, DixScript may store values in a nested
-                //    object hierarchy rather than as flat dotted keys. Walk up the path
-                //    and retrieve the parent as JSON, then navigate into it.
                 if (fullPath.Contains('.'))
                 {
                     var (success2, val2) = TryGetViaParentJson(db, targetType, fullPath);
@@ -312,12 +254,10 @@ namespace MidManStudio.Mdix.Core
             return (false, null);
         }
 
-        // ── Direct typed getter (no reflection, no silent catch) ──────────────
+        // ── Direct typed getter ───────────────────────────────────────────────
 
         private static (bool success, object? value) DirectGet(
-            MdixDatabase db,
-            Type targetType,
-            string path)
+            MdixDatabase db, Type targetType, string path)
         {
             try
             {
@@ -329,6 +269,12 @@ namespace MidManStudio.Mdix.Core
                 if (targetType == typeof(int))
                 {
                     var r = db.GetInt(path);
+                    return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
+                }
+                // FIX: use GetLong instead of GetInt+cast — avoids truncation of 64-bit values.
+                if (targetType == typeof(long))
+                {
+                    var r = db.GetLong(path);
                     return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
                 }
                 if (targetType == typeof(float))
@@ -345,11 +291,6 @@ namespace MidManStudio.Mdix.Core
                 {
                     var r = db.GetBool(path);
                     return r.IsSuccess ? (true, (object)r.SuccessResult) : (false, null);
-                }
-                if (targetType == typeof(long))
-                {
-                    var r = db.GetInt(path);
-                    return r.IsSuccess ? (true, (object)(long)r.SuccessResult) : (false, null);
                 }
                 if (targetType == typeof(short))
                 {
@@ -412,32 +353,23 @@ namespace MidManStudio.Mdix.Core
 
         // ── Parent JSON traversal fallback ────────────────────────────────────
 
-        /// <summary>
-        /// For dotted paths that fail direct lookup (because DixScript stores them as
-        /// nested objects rather than flat keys), walk up the path to find a JSON-able
-        /// parent, then navigate into the JSON to reach the target field.
-        /// </summary>
         private static (bool success, object? value) TryGetViaParentJson(
-            MdixDatabase db,
-            Type targetType,
-            string path)
+            MdixDatabase db, Type targetType, string path)
         {
             try
             {
                 var segments = path.Split('.');
 
-                // Try progressively shorter parent paths (most specific first).
                 for (int parentLen = segments.Length - 1; parentLen >= 1; parentLen--)
                 {
                     var parentPath = string.Join(".", segments, 0, parentLen);
                     var jsonResult = db.GetJson(parentPath);
                     if (jsonResult.IsFailure) continue;
 
-                    // Navigate the remaining segments into the JSON document.
                     JsonElement cloned;
                     using (var doc = JsonDocument.Parse(jsonResult.SuccessResult))
                     {
-                        var el = doc.RootElement;
+                        var el    = doc.RootElement;
                         bool found = true;
 
                         for (int i = parentLen; i < segments.Length; i++)
@@ -451,8 +383,6 @@ namespace MidManStudio.Mdix.Core
                         }
 
                         if (!found) continue;
-
-                        // Clone before the document is disposed.
                         cloned = el.Clone();
                     }
 
@@ -467,10 +397,8 @@ namespace MidManStudio.Mdix.Core
             }
         }
 
-        /// <summary>Converts a <see cref="JsonElement"/> to the requested CLR type.</summary>
         private static (bool success, object? value) ParseJsonElementAsType(
-            JsonElement el,
-            Type targetType)
+            JsonElement el, Type targetType)
         {
             try
             {
@@ -481,22 +409,14 @@ namespace MidManStudio.Mdix.Core
                         : el.GetRawText();
                     return (s != null, (object?)s);
                 }
-                if (targetType == typeof(int))
-                    return (true, (object)el.GetInt32());
-                if (targetType == typeof(long))
-                    return (true, (object)el.GetInt64());
-                if (targetType == typeof(short))
-                    return (true, (object)(short)el.GetInt32());
-                if (targetType == typeof(byte))
-                    return (true, (object)(byte)el.GetInt32());
-                if (targetType == typeof(float))
-                    return (true, (object)(float)el.GetDouble());
-                if (targetType == typeof(double))
-                    return (true, (object)el.GetDouble());
-                if (targetType == typeof(decimal))
-                    return (true, (object)el.GetDecimal());
-                if (targetType == typeof(bool))
-                    return (true, (object)el.GetBoolean());
+                if (targetType == typeof(int))     return (true, (object)el.GetInt32());
+                if (targetType == typeof(long))    return (true, (object)el.GetInt64());
+                if (targetType == typeof(short))   return (true, (object)(short)el.GetInt32());
+                if (targetType == typeof(byte))    return (true, (object)(byte)el.GetInt32());
+                if (targetType == typeof(float))   return (true, (object)(float)el.GetDouble());
+                if (targetType == typeof(double))  return (true, (object)el.GetDouble());
+                if (targetType == typeof(decimal)) return (true, (object)el.GetDecimal());
+                if (targetType == typeof(bool))    return (true, (object)el.GetBoolean());
                 if (targetType == typeof(DateTime))
                 {
                     var raw = el.ValueKind == JsonValueKind.String ? el.GetString() : el.GetRawText();
@@ -525,7 +445,7 @@ namespace MidManStudio.Mdix.Core
             if (result == null) return null;
 
             var resultType = result.GetType();
-            var isSuccess = (bool)resultType.GetProperty("IsSuccess")!.GetValue(result)!;
+            var isSuccess  = (bool)resultType.GetProperty("IsSuccess")!.GetValue(result)!;
             if (!isSuccess) return null;
 
             return resultType.GetProperty("SuccessResult")!.GetValue(result);
@@ -534,22 +454,19 @@ namespace MidManStudio.Mdix.Core
         // ── Serialization ─────────────────────────────────────────────────────
 
         internal MdixResult<Unit> Serialize<T>(
-            T obj,
-            MdixDataSectionBuilder data,
-            string? prefix = null)
+            T obj, MdixDataSectionBuilder data, string? prefix = null)
         {
             if (obj == null)
                 return MdixError.NativeError("Cannot serialize a null object.");
 
             try
             {
-                var typeInfo = GetOrBuildTypeInfo(typeof(T));
+                var typeInfo        = GetOrBuildTypeInfo(typeof(T));
                 var effectivePrefix = prefix ?? typeInfo.ClassPrefix ?? string.Empty;
 
                 var pairs = new List<(string path, object? value)>();
                 CollectPairs(obj, typeInfo, effectivePrefix, pairs);
 
-                // Two-tier ordering: no-dot paths (flat) first, then grouped by table path.
                 var flat    = pairs.Where(p => !p.path.Contains('.')).ToList();
                 var grouped = pairs.Where(p =>  p.path.Contains('.'))
                                    .GroupBy(p => p.path.Substring(0, p.path.LastIndexOf('.')))
@@ -580,9 +497,7 @@ namespace MidManStudio.Mdix.Core
         }
 
         private void CollectPairs(
-            object obj,
-            TypeSerializationInfo typeInfo,
-            string prefix,
+            object obj, TypeSerializationInfo typeInfo, string prefix,
             List<(string, object?)> pairs)
         {
             foreach (var prop in typeInfo.Properties)
@@ -610,10 +525,11 @@ namespace MidManStudio.Mdix.Core
             {
                 case string  s:  data.WithString(path, s);    break;
                 case int     i:  data.WithInt(path, i);       break;
+                // FIX: use WithLong to preserve 64-bit precision (was WithInt+(int)l).
+                case long    l:  data.WithLong(path, l);      break;
                 case float   f:  data.WithFloat(path, f);     break;
                 case double  d:  data.WithDouble(path, d);    break;
                 case bool    b:  data.WithBool(path, b);      break;
-                case long    l:  data.WithInt(path, (int)l);  break;
                 case short   s:  data.WithInt(path, s);       break;
                 case byte    by: data.WithInt(path, by);      break;
                 case decimal dc: data.WithDouble(path, (double)dc); break;
@@ -623,7 +539,7 @@ namespace MidManStudio.Mdix.Core
                     else
                         data.WithTimestamp(path, dt);
                     break;
-                case null: break; // omit nulls
+                case null: break;
                 default:   data.WithString(path, value.ToString() ?? string.Empty); break;
             }
         }
@@ -634,10 +550,11 @@ namespace MidManStudio.Mdix.Core
             {
                 case string  s:  t.WithString(name, s);    break;
                 case int     i:  t.WithInt(name, i);       break;
+                // FIX: use WithLong to preserve 64-bit precision (was WithInt+(int)l).
+                case long    l:  t.WithLong(name, l);      break;
                 case float   f:  t.WithFloat(name, f);     break;
                 case double  d:  t.WithDouble(name, d);    break;
                 case bool    b:  t.WithBool(name, b);      break;
-                case long    l:  t.WithInt(name, (int)l);  break;
                 case short   s:  t.WithInt(name, s);       break;
                 case byte    by: t.WithInt(name, by);      break;
                 case decimal dc: t.WithDouble(name, (double)dc); break;
@@ -658,9 +575,7 @@ namespace MidManStudio.Mdix.Core
         {
             lock (_cacheLock)
             {
-                if (_cache.TryGetValue(type, out var cached))
-                    return cached;
-
+                if (_cache.TryGetValue(type, out var cached)) return cached;
                 var info = BuildTypeInfo(type);
                 _cache[type] = info;
                 return info;
@@ -691,7 +606,6 @@ namespace MidManStudio.Mdix.Core
                 });
             }
 
-            // Constructor selection: explicit [MdixConstructor] > most-params > none.
             var ctors      = type.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
             var nonDefault = ctors.Where(c => c.GetParameters().Length > 0).ToArray();
 
@@ -727,12 +641,10 @@ namespace MidManStudio.Mdix.Core
         }
 
         private static List<string> BuildCtorParamPaths(
-            ParameterInfo param,
-            List<PropertySerializationInfo> props)
+            ParameterInfo param, List<PropertySerializationInfo> props)
         {
             var attr = param.GetCustomAttribute<MdixPropertyAttribute>();
-            if (attr != null)
-                return new List<string> { attr.Path };
+            if (attr != null) return new List<string> { attr.Path };
 
             var match = props.FirstOrDefault(p =>
                 string.Equals(p.PropInfo.Name, param.Name, StringComparison.OrdinalIgnoreCase));
@@ -757,14 +669,12 @@ namespace MidManStudio.Mdix.Core
             var sb = new StringBuilder(name.Length + 4);
             for (int i = 0; i < name.Length; i++)
             {
-                if (i > 0 && char.IsUpper(name[i]))
-                    sb.Append('_');
+                if (i > 0 && char.IsUpper(name[i])) sb.Append('_');
                 sb.Append(char.ToLowerInvariant(name[i]));
             }
             return sb.ToString();
         }
 
-        // Types that are scalar/terminal — do NOT recurse into these.
         private static readonly HashSet<Type> _simpleTypes = new HashSet<Type>
         {
             typeof(string),
@@ -799,13 +709,9 @@ namespace MidManStudio.Mdix.Core
         private static object? DefaultOf(Type t) =>
             t.IsValueType ? Activator.CreateInstance(t) : null;
 
-        /// <summary>
-        /// Clears the reflection cache. Call after hot-reload or dynamic assembly loading.
-        /// </summary>
         public static void ClearCache()
         {
-            lock (_cacheLock)
-                _cache.Clear();
+            lock (_cacheLock) _cache.Clear();
         }
     }
 
@@ -815,11 +721,11 @@ namespace MidManStudio.Mdix.Core
 
     internal sealed class TypeSerializationInfo
     {
-        internal Type                         Type              { get; set; } = null!;
-        internal string?                      ClassPrefix       { get; set; }
-        internal List<PropertySerializationInfo> Properties     { get; set; } = new();
-        internal ConstructorInfo?             PrimaryConstructor{ get; set; }
-        internal List<CtorParamInfo>          CtorParams        { get; set; } = new();
+        internal Type                            Type               { get; set; } = null!;
+        internal string?                         ClassPrefix        { get; set; }
+        internal List<PropertySerializationInfo> Properties         { get; set; } = new();
+        internal ConstructorInfo?                PrimaryConstructor { get; set; }
+        internal List<CtorParamInfo>             CtorParams         { get; set; } = new();
     }
 
     internal sealed class PropertySerializationInfo

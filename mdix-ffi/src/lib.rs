@@ -23,27 +23,28 @@ use string_utils::{
 // =============================================================================
 
 /// Type discriminants returned by mdix_get_type().
-/// Values are stable — C# enums on the other side must match exactly.
+/// Values are stable — C# MdixValueType enum MUST match exactly.
+/// Long is placed at 3 (directly after Int) for logical grouping.
+/// All numeric types are contiguous: Int=2, Long=3, Float=4, Double=5.
 #[repr(i32)]
 pub enum MdixType {
     Unknown   = -1,
     Null      =  0,
     Bool      =  1,
     Int       =  2,
-    Float     =  3,
-    Double    =  4,
-    String    =  5,
-    Date      =  6,
-    Timestamp =  7,
-    HexColor  =  8,
-    Blob      =  9,
-    Regex     = 10,
-    Array     = 11,
-    Object    = 12,
-    Tuple     = 13,
-    Enum      = 14,
-    /// 64-bit integer. Use mdix_get_long() to read the value.
-    Long      = 15,
+    Long      =  3,   // 64-bit integer — directly after Int
+    Float     =  4,
+    Double    =  5,
+    String    =  6,
+    Date      =  7,
+    Timestamp =  8,
+    HexColor  =  9,
+    Blob      = 10,
+    Regex     = 11,
+    Array     = 12,
+    Object    = 13,
+    Tuple     = 14,
+    Enum      = 15,
 }
 
 /// Controls output format for mdix_to_mdix() and mdix_format_source().
@@ -80,12 +81,11 @@ unsafe fn as_builder_mut<'a>(ptr: *mut c_void) -> Option<&'a mut MdixBuilderHand
 }
 
 // =============================================================================
-// Helper: strip indexed array keys from a hashmap
+// Helper: strip indexed array keys from a hashmap before export
 //
-// DixData.to_hashmap() adds both the parent array key ("enemies") AND every
-// indexed item ("enemies[0]", "enemies[0].name", etc.) for fast runtime lookup.
-// When round-tripping through from_hashmap → to_json/to_toml/to_mdix the
-// indexed keys produce duplicate / malformed output.  Strip them here.
+// DixData.to_hashmap() stores both the parent "enemies" array AND every indexed
+// item ("enemies[0]", "enemies[0].name", etc.) for fast runtime access.
+// Round-tripping through from_hashmap produces duplicate/malformed output.
 // =============================================================================
 
 fn strip_indexed_keys(raw: HashMap<String, DixValue>) -> HashMap<String, DixValue> {
@@ -98,8 +98,6 @@ fn strip_indexed_keys(raw: HashMap<String, DixValue>) -> HashMap<String, DixValu
 // Metadata
 // =============================================================================
 
-/// Return the library version as a static null-terminated C string.
-/// Do NOT free this pointer.
 #[no_mangle]
 pub extern "C" fn mdix_version() -> *const c_char {
     static VERSION_PTR: OnceLock<CString> = OnceLock::new();
@@ -239,7 +237,6 @@ pub extern "C" fn mdix_load_encrypted_bytes(
     }
 }
 
-/// Free a handle returned by any mdix_load* function. Passing null is safe.
 #[no_mangle]
 pub extern "C" fn mdix_free(handle: *mut c_void) {
     unsafe { MdixHandle::free(handle as *mut MdixHandle) };
@@ -310,8 +307,6 @@ pub extern "C" fn mdix_get_all_keys(
 // Type inspection
 // =============================================================================
 
-/// Return the MdixType discriminant for the value at path.
-/// Returns MdixType::Unknown (-1) if path not found or handle is null.
 #[no_mangle]
 pub extern "C" fn mdix_get_type(handle: *const c_void, path: *const c_char) -> MdixType {
     let h = match unsafe { as_handle(handle) } {
@@ -363,7 +358,6 @@ pub extern "C" fn mdix_get_array_length(handle: *const c_void, path: *const c_ch
 // Data access — typed getters
 // =============================================================================
 
-/// Get a string value. Free with mdix_free_string(). Returns null on failure.
 #[no_mangle]
 pub extern "C" fn mdix_get_string(handle: *const c_void, path: *const c_char) -> *mut c_char {
     clear_last_error();
@@ -380,8 +374,6 @@ pub extern "C" fn mdix_get_string(handle: *const c_void, path: *const c_char) ->
     }
 }
 
-/// Get an integer (i32). Returns 0 on failure. Use mdix_exists() to distinguish from stored 0.
-/// NOTE: for Long values, use mdix_get_long() to avoid truncation.
 #[no_mangle]
 pub extern "C" fn mdix_get_int(handle: *const c_void, path: *const c_char) -> i32 {
     clear_last_error();
@@ -398,8 +390,8 @@ pub extern "C" fn mdix_get_int(handle: *const c_void, path: *const c_char) -> i3
     }
 }
 
-/// Get a 64-bit integer (i64). Works for both Long and Int values (Int is widened without loss).
-/// Returns 0 on failure. Use mdix_get_type() to check whether the value is Long or Int.
+/// Get a 64-bit integer. Works for Long (native 64-bit) and Int (widened without loss).
+/// Returns 0 on failure; use mdix_get_type() to distinguish Long from Int if needed.
 #[no_mangle]
 pub extern "C" fn mdix_get_long(handle: *const c_void, path: *const c_char) -> i64 {
     clear_last_error();
@@ -416,7 +408,6 @@ pub extern "C" fn mdix_get_long(handle: *const c_void, path: *const c_char) -> i
     }
 }
 
-/// Get a float (f32). Returns 0.0 on failure.
 #[no_mangle]
 pub extern "C" fn mdix_get_float(handle: *const c_void, path: *const c_char) -> f32 {
     clear_last_error();
@@ -433,7 +424,6 @@ pub extern "C" fn mdix_get_float(handle: *const c_void, path: *const c_char) -> 
     }
 }
 
-/// Get a double (f64). Returns 0.0 on failure.
 #[no_mangle]
 pub extern "C" fn mdix_get_double(handle: *const c_void, path: *const c_char) -> f64 {
     clear_last_error();
@@ -450,7 +440,6 @@ pub extern "C" fn mdix_get_double(handle: *const c_void, path: *const c_char) ->
     }
 }
 
-/// Get a boolean. Returns false on failure.
 #[no_mangle]
 pub extern "C" fn mdix_get_bool(handle: *const c_void, path: *const c_char) -> bool {
     clear_last_error();
@@ -582,13 +571,11 @@ pub extern "C" fn mdix_get_keys(
 // Memory management
 // =============================================================================
 
-/// Free a string returned by any mdix getter. Passing null is safe.
 #[no_mangle]
 pub extern "C" fn mdix_free_string(s: *mut c_char) {
     unsafe { free_c_char(s) };
 }
 
-/// Free a string array returned by mdix_get_keys or mdix_get_all_keys.
 #[no_mangle]
 pub extern "C" fn mdix_free_string_array(arr: *mut *mut c_char, count: i32) {
     unsafe { free_c_char_array(arr, count) };
@@ -598,7 +585,6 @@ pub extern "C" fn mdix_free_string_array(arr: *mut *mut c_char, count: i32) {
 // Error reporting
 // =============================================================================
 
-/// Return the last error message, or null if none. Pointer is valid until the next FFI call.
 #[no_mangle]
 pub extern "C" fn mdix_get_last_error() -> *const c_char { get_last_error_ptr() }
 
@@ -608,15 +594,10 @@ pub extern "C" fn mdix_clear_error() { clear_last_error(); }
 // =============================================================================
 // Conversion — database export
 //
-// FIX: mdix_to_json previously used serde_json::to_string(&map) on a
-// HashMap<String, DixValue>, which serializes DixValue::Enum as a JSON object
-// {"enum_name":"...","field_name":"...","value":3} instead of just 3.
-// Now uses converter.to_json() which correctly emits enum integer values.
-//
-// FIX: All three export functions now strip indexed array keys (e.g. "enemies[0]")
-// before converting via from_hashmap.  Those keys exist in the flattened store
-// for fast runtime access but produce duplicate/malformed output when round-tripped
-// through the AST converter.
+// FIX 1: mdix_to_json now uses converter.to_json() so enum values are emitted
+//         as integers (not as {"enum_name":"...","value":3} objects).
+// FIX 2: All export functions strip indexed array keys ("enemies[0]" etc.)
+//         before round-tripping through from_hashmap to avoid duplicate output.
 // =============================================================================
 
 #[no_mangle]
@@ -638,7 +619,6 @@ pub extern "C" fn mdix_to_json(handle: *const c_void, indented: bool) -> *mut c_
             return std::ptr::null_mut();
         }
     };
-    // Use converter.to_json so enum values are emitted as integers, not objects.
     match converter.to_json(&ast, indented) {
         Ok(s)  => str_to_c_char(s),
         Err(e) => {
@@ -783,7 +763,6 @@ pub extern "C" fn mdix_builder_set_int(
     true
 }
 
-/// Set a 64-bit integer value. Use when the value exceeds i32 range.
 #[no_mangle]
 pub extern "C" fn mdix_builder_set_long(
     builder: *mut c_void, path: *const c_char, value: i64,
@@ -912,8 +891,6 @@ pub extern "C" fn mdix_builder_get_int(builder: *const c_void, path: *const c_ch
     }
 }
 
-/// Get a 64-bit integer from the builder. Returns 0 on failure.
-/// Also accepts Int values (widens without loss).
 #[no_mangle]
 pub extern "C" fn mdix_builder_get_long(builder: *const c_void, path: *const c_char) -> i64 {
     clear_last_error();
@@ -1032,8 +1009,6 @@ pub extern "C" fn mdix_builder_save(builder: *const c_void, path: *const c_char)
             return false;
         }
     };
-    // Builder entries are programmatically inserted so they won't have indexed
-    // array keys, but filter defensively.
     let entries   = strip_indexed_keys(b.entries.clone());
     let converter = DixConverter::new();
     let ast       = match converter.from_hashmap(entries) {
@@ -1251,4 +1226,4 @@ fn format_mode_to_options(mode: MdixFormatMode) -> DixFormatOptions {
         MdixFormatMode::Compact  => DixFormatOptions::compact(),
         MdixFormatMode::Minified => DixFormatOptions::minified(),
     }
-    }
+}

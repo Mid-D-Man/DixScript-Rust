@@ -1,3 +1,4 @@
+// mdix-csharp/src/MidManStudio.Mdix.Core/MdixDatabase.cs
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -30,6 +31,12 @@ namespace MidManStudio.Mdix.Core
         Object    = 12,
         Tuple     = 13,
         Enum      = 14,
+        /// <summary>
+        /// 64-bit integer. Use <see cref="MdixDatabase.GetLong"/> to read the value.
+        /// Produced by DixScript Long literals (e.g. <c>9_000_000_000L</c>) or
+        /// plain integer literals that overflow i32.
+        /// </summary>
+        Long      = 15,
     }
 
     #endregion
@@ -323,6 +330,29 @@ namespace MidManStudio.Mdix.Core
             finally { _safeHandle.DangerousRelease(); }
         }
 
+        /// <summary>
+        /// Get a 64-bit integer value. Use this for values whose type is
+        /// <see cref="MdixValueType.Long"/> (DixScript <c>L</c>-suffixed literals or
+        /// plain integers that overflow i32). Also works for <see cref="MdixValueType.Int"/>
+        /// values, widening without loss.
+        /// </summary>
+        public MdixResult<long> GetLong(string path)
+        {
+            if (!TryGetRawHandleForPath(path, out var h, out var err)) return err;
+            try
+            {
+                fixed (byte* pathPtr = MdixStringCache.GetUtf8Bytes(path))
+                {
+                    MdixNative.mdix_clear_error();
+                    long value = MdixNative.mdix_get_long(h, pathPtr);
+                    var nativeErr = ReadLastError();
+                    if (nativeErr != null) return MdixError.NativeError(nativeErr);
+                    return MdixResult<long>.Ok(value);
+                }
+            }
+            finally { _safeHandle.DangerousRelease(); }
+        }
+
         public MdixResult<float> GetFloat(string path)
         {
             if (!TryGetRawHandleForPath(path, out var h, out var err)) return err;
@@ -507,16 +537,9 @@ namespace MidManStudio.Mdix.Core
 
         /// <summary>
         /// Deserializes all items in the array at <paramref name="path"/> into a typed list.
-        /// Works for scalar types (string, int, float, double, bool and the Mdix special types)
-        /// and for POCO types via the reflection serializer.
+        /// Works for scalar types (string, int, long, float, double, bool and the Mdix special
+        /// types) and for POCO types via the reflection serializer.
         /// </summary>
-        /// <example>
-        /// <code>
-        /// var enemies = db.GetArray&lt;EnemyConfig&gt;("enemies").OrThrow();
-        /// var tags    = db.GetArray&lt;string&gt;("tags").OrThrow();
-        /// var ids     = db.GetArray&lt;int&gt;("ids").OrThrow();
-        /// </code>
-        /// </example>
         public MdixResult<List<T>> GetArray<T>(string path)
         {
             ThrowIfDisposed();
@@ -553,18 +576,8 @@ namespace MidManStudio.Mdix.Core
         /// <summary>
         /// Gets all direct children under <paramref name="prefix"/> deserialized as
         /// <typeparamref name="T"/>. If the value at <paramref name="prefix"/> is an array,
-        /// this delegates to <see cref="GetArray{T}"/>. Pass null or empty to enumerate all
-        /// top-level keys.
+        /// delegates to <see cref="GetArray{T}"/>.
         /// </summary>
-        /// <example>
-        /// <code>
-        /// // Named table entries: primary: host=..., replica: host=...
-        /// var servers = db.GetAll&lt;ServerConfig&gt;("servers").OrThrow();
-        ///
-        /// // Array path — same as GetArray
-        /// var enemies = db.GetAll&lt;EnemyConfig&gt;("enemies").OrThrow();
-        /// </code>
-        /// </example>
         public MdixResult<List<T>> GetAll<T>(string? prefix = null)
         {
             ThrowIfDisposed();
@@ -624,10 +637,15 @@ namespace MidManStudio.Mdix.Core
 
         #region Generic accessor
 
+        /// <summary>
+        /// Type-dispatched generic getter. Supports all scalar and Mdix special types.
+        /// For <c>long</c>, use <c>Get&lt;long&gt;</c> or call <see cref="GetLong"/> directly.
+        /// </summary>
         public MdixResult<T> Get<T>(string path)
         {
             if (typeof(T) == typeof(string))        return CastResult<string,        T>(GetString(path));
             if (typeof(T) == typeof(int))           return CastResult<int,           T>(GetInt(path));
+            if (typeof(T) == typeof(long))          return CastResult<long,          T>(GetLong(path));
             if (typeof(T) == typeof(float))         return CastResult<float,         T>(GetFloat(path));
             if (typeof(T) == typeof(double))        return CastResult<double,        T>(GetDouble(path));
             if (typeof(T) == typeof(bool))          return CastResult<bool,          T>(GetBool(path));
@@ -830,10 +848,6 @@ namespace MidManStudio.Mdix.Core
 
         #region Private helpers — typed collection internals
 
-        /// <summary>
-        /// Gets one item at <paramref name="itemPath"/> as <typeparamref name="T"/>.
-        /// Uses the direct typed getter for scalar types and the POCO serializer for complex types.
-        /// </summary>
         private MdixResult<T> GetSingleItem<T>(MdixSerializer serializer, string itemPath)
         {
             if (IsDirectlyGettable(typeof(T)))
@@ -848,6 +862,7 @@ namespace MidManStudio.Mdix.Core
         private static bool IsDirectlyGettable(Type t) =>
             t == typeof(string)       ||
             t == typeof(int)          ||
+            t == typeof(long)         ||   // ← Long support
             t == typeof(float)        ||
             t == typeof(double)       ||
             t == typeof(bool)         ||
@@ -896,6 +911,7 @@ namespace MidManStudio.Mdix.Core
                 object? value;
                 if      (typeof(T) == typeof(string))  value = element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
                 else if (typeof(T) == typeof(int))     value = element.GetInt32();
+                else if (typeof(T) == typeof(long))    value = element.GetInt64();
                 else if (typeof(T) == typeof(float))   value = (float)element.GetDouble();
                 else if (typeof(T) == typeof(double))  value = element.GetDouble();
                 else if (typeof(T) == typeof(bool))    value = element.GetBoolean();

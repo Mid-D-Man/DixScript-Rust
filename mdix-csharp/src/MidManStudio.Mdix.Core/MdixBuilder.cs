@@ -1,3 +1,4 @@
+// mdix-csharp/src/MidManStudio.Mdix.Core/MdixBuilder.cs
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -25,22 +26,6 @@ namespace MidManStudio.Mdix.Core
     // MdixBuilder — top-level fluent builder
     // ══════════════════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Fluent builder for creating .mdix config files programmatically.
-    /// <code>
-    /// using var builder = MdixBuilder.Create()
-    ///     .Config(c => c.WithVersion("1.0.0").WithAuthor("Mid-D-Man"))
-    ///     .Enums(e => e.WithEnum("AIType", "PASSIVE", "AGGRESSIVE", "BOSS"))
-    ///     .Data(d => d
-    ///         .WithString("app_name", "MyGame")
-    ///         .WithInt("version", 1)
-    ///         .WithTableProperties("server", t => t
-    ///             .WithString("host", "localhost")
-    ///             .WithInt("port", 8080)));
-    ///
-    /// builder.Save("config.mdix").OrThrow();
-    /// </code>
-    /// </summary>
     public sealed class MdixBuilder : IDisposable
     {
         #region Fields
@@ -57,12 +42,11 @@ namespace MidManStudio.Mdix.Core
 
         private MdixBuilder() { }
 
-        /// <summary>Creates a new empty builder.</summary>
         public static MdixBuilder Create() => new MdixBuilder();
 
         /// <summary>
-        /// Creates a builder pre-populated with flat DATA entries copied from a loaded database.
-        /// Only DATA values are copied — @CONFIG and @ENUMS start empty.
+        /// Creates a builder pre-populated with entries copied from a loaded database.
+        /// Long values are preserved without truncation.
         /// </summary>
         public static MdixResult<MdixBuilder> FromDatabase(MdixDatabase db)
         {
@@ -82,7 +66,6 @@ namespace MidManStudio.Mdix.Core
 
         #region IDisposable
 
-        /// <summary>Marks the builder as disposed. Safe to call multiple times.</summary>
         public void Dispose() => Interlocked.Exchange(ref _disposed, 1);
 
         private void ThrowIfDisposed()
@@ -95,7 +78,6 @@ namespace MidManStudio.Mdix.Core
 
         #region Section configuration
 
-        /// <summary>Configures the <c>@CONFIG</c> section.</summary>
         public MdixBuilder Config(Action<MdixConfigBuilder> configure)
         {
             ThrowIfDisposed();
@@ -103,7 +85,6 @@ namespace MidManStudio.Mdix.Core
             return this;
         }
 
-        /// <summary>Configures the <c>@ENUMS</c> section.</summary>
         public MdixBuilder Enums(Action<MdixEnumsBuilder> configure)
         {
             ThrowIfDisposed();
@@ -111,10 +92,6 @@ namespace MidManStudio.Mdix.Core
             return this;
         }
 
-        /// <summary>
-        /// Configures the <c>@DATA</c> section.
-        /// Flat properties must be added before any table properties or group arrays.
-        /// </summary>
         public MdixBuilder Data(Action<MdixDataSectionBuilder> configure)
         {
             ThrowIfDisposed();
@@ -126,15 +103,6 @@ namespace MidManStudio.Mdix.Core
 
         #region POCO serialization
 
-        /// <summary>
-        /// Serializes a POCO object into this builder's DATA section.
-        /// Call before any explicit <see cref="Data"/> calls that add table properties
-        /// to respect the two-tier ordering constraint.
-        /// </summary>
-        /// <param name="obj">The object to serialize.</param>
-        /// <param name="prefix">
-        /// Root path prefix. Overrides any <see cref="MdixObjectAttribute"/> on the type.
-        /// </param>
         public MdixResult<Unit> Serialize<T>(T obj, string? prefix = null)
         {
             ThrowIfDisposed();
@@ -143,11 +111,6 @@ namespace MidManStudio.Mdix.Core
             return serializer.Serialize(obj, _data, prefix);
         }
 
-        /// <summary>
-        /// Serializes all builder contents to a .mdix string and loads it into a new
-        /// <see cref="MdixDatabase"/>. Useful for round-trip testing and in-memory use.
-        /// The caller is responsible for disposing the returned database.
-        /// </summary>
         public MdixResult<MdixDatabase> ToDatabase()
         {
             ThrowIfDisposed();
@@ -160,7 +123,6 @@ namespace MidManStudio.Mdix.Core
 
         #region Serialization and persistence
 
-        /// <summary>Serializes all sections to a .mdix format string.</summary>
         public MdixResult<string> Serialize()
         {
             ThrowIfDisposed();
@@ -175,11 +137,6 @@ namespace MidManStudio.Mdix.Core
             }
         }
 
-        /// <summary>
-        /// Saves the builder contents to a .mdix file on disk.
-        /// Creates intermediate directories automatically.
-        /// Appends .mdix extension if not already present.
-        /// </summary>
         public MdixResult<Unit> Save(string path)
         {
             ThrowIfDisposed();
@@ -207,13 +164,10 @@ namespace MidManStudio.Mdix.Core
             }
         }
 
-        /// <summary>Saves to disk on a background thread.</summary>
         public Task<MdixResult<Unit>> SaveAsync(
-            string            path,
-            CancellationToken ct = default) =>
+            string path, CancellationToken ct = default) =>
             Task.Run(() => Save(path), ct);
 
-        /// <summary>Saves to a directory with a specific filename (extension added automatically).</summary>
         public MdixResult<Unit> SaveToDirectory(string directory, string fileName)
         {
             if (string.IsNullOrEmpty(directory)) return MdixError.InvalidPath(directory);
@@ -253,6 +207,13 @@ namespace MidManStudio.Mdix.Core
                         var r = db.GetInt(key);
                         if (r.IsFailure) return r.Error;
                         data.WithInt(key, r.SuccessResult);
+                        break;
+                    }
+                    case MdixValueType.Long:
+                    {
+                        var r = db.GetLong(key);
+                        if (r.IsFailure) return r.Error;
+                        data.WithLong(key, r.SuccessResult);
                         break;
                     }
                     case MdixValueType.Float:
@@ -311,18 +272,17 @@ namespace MidManStudio.Mdix.Core
     {
         internal readonly Dictionary<string, object> _entries = new Dictionary<string, object>();
 
-        public MdixConfigBuilder WithVersion(string version)        => Set("version",            version);
-        public MdixConfigBuilder WithAuthor(string author)          => Set("author",              author);
-        public MdixConfigBuilder WithEncoding(string encoding)      => Set("encoding",            encoding);
-        public MdixConfigBuilder WithFeatures(string features)      => Set("features",            features);
-        public MdixConfigBuilder WithDebugMode(string debugMode)    => Set("debug_mode",          debugMode);
-        public MdixConfigBuilder WithErrorHandling(string eh)       => Set("error_handling",      eh);
-        public MdixConfigBuilder WithCompatibilityMode(string mode) => Set("compatibility_mode",  mode);
+        public MdixConfigBuilder WithVersion(string version)        => Set("version",           version);
+        public MdixConfigBuilder WithAuthor(string author)          => Set("author",             author);
+        public MdixConfigBuilder WithEncoding(string encoding)      => Set("encoding",           encoding);
+        public MdixConfigBuilder WithFeatures(string features)      => Set("features",           features);
+        public MdixConfigBuilder WithDebugMode(string debugMode)    => Set("debug_mode",         debugMode);
+        public MdixConfigBuilder WithErrorHandling(string eh)       => Set("error_handling",     eh);
+        public MdixConfigBuilder WithCompatibilityMode(string mode) => Set("compatibility_mode", mode);
 
         public MdixConfigBuilder WithCreated(DateTime created) =>
             Set("created", created.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
 
-        /// <summary>Adds a custom config entry not covered by the typed helpers.</summary>
         public MdixConfigBuilder WithCustom(string key, string value) => Set(key, value);
 
         private MdixConfigBuilder Set(string key, object value)
@@ -341,16 +301,11 @@ namespace MidManStudio.Mdix.Core
         internal readonly List<(string Name, List<(string Field, int? Value)> Fields)> _enums
             = new List<(string, List<(string, int?)>)>();
 
-        // Non-params overload exists only to resolve compiler ambiguity — always throws.
         public MdixEnumsBuilder WithEnum(string enumName)
         {
             throw new ArgumentException("Enum must have at least one field.", nameof(enumName));
         }
 
-        /// <summary>
-        /// Adds an enum with auto-incrementing values starting at 0.
-        /// <code>e.WithEnum("AIType", "PASSIVE", "NEUTRAL", "AGGRESSIVE", "BOSS")</code>
-        /// </summary>
         public MdixEnumsBuilder WithEnum(string enumName, params string[] fieldNames)
         {
             if (string.IsNullOrEmpty(enumName))
@@ -363,10 +318,6 @@ namespace MidManStudio.Mdix.Core
             return this;
         }
 
-        /// <summary>
-        /// Adds an enum with explicit integer values.
-        /// <code>e.WithEnum("HttpStatus", ("OK", 200), ("NOT_FOUND", 404))</code>
-        /// </summary>
         public MdixEnumsBuilder WithEnum(string enumName, params (string Field, int Value)[] fields)
         {
             if (string.IsNullOrEmpty(enumName))
@@ -397,6 +348,7 @@ namespace MidManStudio.Mdix.Core
         // ── Flat properties ───────────────────────────────────────────────────
 
         public MdixDataSectionBuilder WithInt(string name, int value)       => AddFlat(name, value);
+        public MdixDataSectionBuilder WithLong(string name, long value)      => AddFlat(name, value);
         public MdixDataSectionBuilder WithFloat(string name, float value)   => AddFlat(name, value);
         public MdixDataSectionBuilder WithDouble(string name, double value) => AddFlat(name, value);
         public MdixDataSectionBuilder WithString(string name, string value) => AddFlat(name, value);
@@ -443,11 +395,9 @@ namespace MidManStudio.Mdix.Core
             return AddFlat(name, new DixRegexEntry(pattern));
         }
 
-        /// <summary>Adds a homogeneous array. All items must be the same type.</summary>
         public MdixDataSectionBuilder WithArray<T>(string name, IEnumerable<T> items) =>
             AddFlat(name, items.Cast<object>().ToList());
 
-        /// <summary>Adds a tuple (max 6 elements, mixed types allowed).</summary>
         public MdixDataSectionBuilder WithTuple(string name, params object[] values)
         {
             if (values.Length > 6)
@@ -455,7 +405,6 @@ namespace MidManStudio.Mdix.Core
             return AddFlat(name, new DixTupleEntry(values.ToList()));
         }
 
-        /// <summary>Adds a nested object literal as a flat property.</summary>
         public MdixDataSectionBuilder WithObject(string name, Action<MdixObjectBuilder> configure)
         {
             var builder = new MdixObjectBuilder();
@@ -465,10 +414,6 @@ namespace MidManStudio.Mdix.Core
 
         // ── Grouped data ──────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Adds a table property block (single-colon syntax).
-        /// Serializes as: <c>server: host = "localhost", port = 8080</c>
-        /// </summary>
         public MdixDataSectionBuilder WithTableProperties(
             string path, Action<MdixTablePropertiesBuilder> configure)
         {
@@ -479,10 +424,6 @@ namespace MidManStudio.Mdix.Core
             return this;
         }
 
-        /// <summary>
-        /// Adds a group array (double-colon syntax) from a typed collection.
-        /// Serializes as: <c>tags:: "alpha", "beta"</c>
-        /// </summary>
         public MdixDataSectionBuilder WithGroupArray<T>(string path, IEnumerable<T> items)
         {
             _hasSeenGroupedData = true;
@@ -490,9 +431,6 @@ namespace MidManStudio.Mdix.Core
             return this;
         }
 
-        /// <summary>
-        /// Adds a group array (double-colon syntax) using a builder for complex items.
-        /// </summary>
         public MdixDataSectionBuilder WithGroupArray(
             string path, Action<MdixGroupArrayBuilder> configure)
         {
@@ -527,6 +465,7 @@ namespace MidManStudio.Mdix.Core
             = new List<KeyValuePair<string, object>>();
 
         public MdixTablePropertiesBuilder WithInt(string name, int value)       => Add(name, value);
+        public MdixTablePropertiesBuilder WithLong(string name, long value)      => Add(name, value);
         public MdixTablePropertiesBuilder WithFloat(string name, float value)   => Add(name, value);
         public MdixTablePropertiesBuilder WithDouble(string name, double value) => Add(name, value);
         public MdixTablePropertiesBuilder WithString(string name, string value) => Add(name, value);
@@ -568,6 +507,7 @@ namespace MidManStudio.Mdix.Core
 
         public MdixGroupArrayBuilder AddString(string value) { _items.Add(value); return this; }
         public MdixGroupArrayBuilder AddInt(int value)       { _items.Add(value); return this; }
+        public MdixGroupArrayBuilder AddLong(long value)      { _items.Add(value); return this; }
         public MdixGroupArrayBuilder AddFloat(float value)   { _items.Add(value); return this; }
         public MdixGroupArrayBuilder AddDouble(double value) { _items.Add(value); return this; }
         public MdixGroupArrayBuilder AddBool(bool value)     { _items.Add(value); return this; }
@@ -578,7 +518,6 @@ namespace MidManStudio.Mdix.Core
             return this;
         }
 
-        /// <summary>Adds an object literal item.</summary>
         public MdixGroupArrayBuilder AddObject(Action<MdixObjectBuilder> configure)
         {
             var builder = new MdixObjectBuilder();
@@ -587,7 +526,6 @@ namespace MidManStudio.Mdix.Core
             return this;
         }
 
-        /// <summary>Adds a pre-built raw value.</summary>
         public MdixGroupArrayBuilder AddValue(object value) { _items.Add(value); return this; }
     }
 
@@ -601,6 +539,7 @@ namespace MidManStudio.Mdix.Core
             new Dictionary<string, object>();
 
         public MdixObjectBuilder WithInt(string name, int value)       { _properties[name] = value; return this; }
+        public MdixObjectBuilder WithLong(string name, long value)      { _properties[name] = value; return this; }
         public MdixObjectBuilder WithFloat(string name, float value)   { _properties[name] = value; return this; }
         public MdixObjectBuilder WithDouble(string name, double value) { _properties[name] = value; return this; }
         public MdixObjectBuilder WithString(string name, string value) { _properties[name] = value; return this; }
@@ -696,6 +635,7 @@ namespace MidManStudio.Mdix.Core
         {
             string s => $"\"{Escape(s)}\"",
             int    i => i.ToString(),
+            long   l => l.ToString(CultureInfo.InvariantCulture) + "L",
             bool   b => b ? "true" : "false",
             _        => $"\"{Escape(value?.ToString() ?? "")}\"",
         };
@@ -768,11 +708,12 @@ namespace MidManStudio.Mdix.Core
 
         // ── Value formatter ───────────────────────────────────────────────────
 
-        private static string FormatValue(object value) => value switch
+        internal static string FormatValue(object value) => value switch
         {
             null                           => "null",
             bool b                         => b ? "true" : "false",
             int i                          => i.ToString(),
+            long l                         => l.ToString(CultureInfo.InvariantCulture) + "L",
             float f                        => f.ToString("G", CultureInfo.InvariantCulture) + "f",
             double d                       => d.ToString("G", CultureInfo.InvariantCulture),
             string s                       => $"\"{Escape(s)}\"",

@@ -98,6 +98,47 @@ pub fn run_minify(ast: &DixScript, source_path: Option<&Path>) -> CommandResult 
     }
 }
 
+// ── Sanitise resolved .mdix output ───────────────────────────────────────────
+//
+// The `DataSection` Display implementation unconditionally appends a `,` after
+// every entry — simple properties, table properties, and group-array items —
+// including the very last one in each block.  When the resolved file is
+// re-compiled or analysed by the LSP the strict parser rejects these trailing
+// commas ("found comma before next data entry").
+//
+// This function strips the trailing entry-separator comma from every data-entry
+// line.  It is safe because, in the one-entry-per-line resolved format, all
+// commas that are *internal* to a value (inside `{…}`, `t:(…)`, `[…]`) always
+// appear before the last character on the line — the line-final `,` is always
+// the inter-entry separator added by the Display impl.
+//
+// Lines that are section delimiters (`@DATA(`, `)`) or comment lines are left
+// untouched.
+
+fn sanitize_resolved_mdix(raw: &str) -> String {
+    let mut result = String::with_capacity(raw.len());
+
+    for line in raw.lines() {
+        let trimmed = line.trim_end();
+
+        // Structural lines: section header, closing paren, blank, comment.
+        let is_structural = trimmed.is_empty()
+            || trimmed.trim_start().starts_with("//")
+            || trimmed.trim_start().starts_with('@')
+            || trimmed.trim_start() == ")";
+
+        if !is_structural && trimmed.ends_with(',') {
+            // Drop the trailing entry-separator comma.
+            result.push_str(&trimmed[..trimmed.len() - 1]);
+        } else {
+            result.push_str(trimmed);
+        }
+        result.push('\n');
+    }
+
+    result
+}
+
 // ── Create Resolved ───────────────────────────────────────────────────────────
 //
 // Outputs ONLY the @DATA section of the fully-resolved AST.
@@ -112,7 +153,12 @@ pub fn run_create_resolved(ast: &DixScript, source_path: Option<&Path>) -> Comma
         None    => return CommandResult::err("⊞ No @DATA section found in the resolved AST."),
     };
 
-    let output = format!("{}", data_section);
+    // Generate the raw Display output then strip the trailing commas that the
+    // DataSection Display implementation appends after every entry (including
+    // the last).  Without this step the resolved file fails to re-compile with
+    // "TRAILING COMMA: Found comma before next data entry."
+    let raw    = format!("{}", data_section);
+    let output = sanitize_resolved_mdix(&raw);
 
     if let Some(path) = source_path {
         let stem = path.file_stem().unwrap_or_default().to_string_lossy();
@@ -186,9 +232,9 @@ pub fn run_compile(source_path: Option<&Path>, ast: Option<&DixScript>) -> Comma
     match mdix_bin {
         None => CommandResult::err(format!(
             concat!(
-                "⚙ 'mdix' binary not found on PATH. ",
-                "Build with `cargo build -p mdix-cli --release` and add to PATH.",
-                "{}",
+            "⚙ 'mdix' binary not found on PATH. ",
+            "Build with `cargo build -p mdix-cli --release` and add to PATH.",
+            "{}",
             ),
             dlm_notice
         )),
@@ -232,9 +278,9 @@ pub fn run_show_ast(ast: &DixScript) -> CommandResult {
         ast.data.as_ref().map(|_| "@DATA"),
         ast.security.as_ref().map(|_| "@SECURITY"),
     ]
-    .iter()
-    .filter_map(|o| o.as_ref().map(|s| s.to_string()))
-    .collect();
+        .iter()
+        .filter_map(|o| o.as_ref().map(|s| s.to_string()))
+        .collect();
 
     let func_count   = ast.quick_functions.as_ref().map(|qf| qf.functions.len()).unwrap_or(0);
     let enum_count   = ast.enums.as_ref().map(|e| e.enums.len()).unwrap_or(0);
@@ -254,4 +300,4 @@ pub fn run_show_ast(ast: &DixScript) -> CommandResult {
         "AST: sections=[{}]  QuickFuncs={}  Enums={}  DataEntries={}{}",
         sections.join(", "), func_count, enum_count, data_entries, dlm_summary,
     ))
-                }
+}

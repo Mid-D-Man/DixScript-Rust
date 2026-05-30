@@ -13,30 +13,32 @@ namespace MidManStudio.Mdix.Core
 {
     #region MdixValueType
 
+    /// <summary>
+    /// Type discriminants for DixScript values.
+    /// Values MUST match the Rust <c>MdixType</c> repr(i32) enum in mdix-ffi/src/lib.rs
+    /// exactly — they cross the FFI boundary as raw integers.
+    ///
+    /// Numeric types are contiguous: Int=2, Long=3, Float=4, Double=5.
+    /// </summary>
     public enum MdixValueType
     {
         Unknown   = -1,
         Null      =  0,
         Bool      =  1,
         Int       =  2,
-        Float     =  3,
-        Double    =  4,
-        String    =  5,
-        Date      =  6,
-        Timestamp =  7,
-        HexColor  =  8,
-        Blob      =  9,
-        Regex     = 10,
-        Array     = 11,
-        Object    = 12,
-        Tuple     = 13,
-        Enum      = 14,
-        /// <summary>
-        /// 64-bit integer. Use <see cref="MdixDatabase.GetLong"/> to read the value.
-        /// Produced by DixScript Long literals (e.g. <c>9_000_000_000L</c>) or
-        /// plain integer literals that overflow i32.
-        /// </summary>
-        Long      = 15,
+        Long      =  3,   // 64-bit integer — directly under Int
+        Float     =  4,
+        Double    =  5,
+        String    =  6,
+        Date      =  7,
+        Timestamp =  8,
+        HexColor  =  9,
+        Blob      = 10,
+        Regex     = 11,
+        Array     = 12,
+        Object    = 13,
+        Tuple     = 14,
+        Enum      = 15,
     }
 
     #endregion
@@ -156,7 +158,6 @@ namespace MidManStudio.Mdix.Core
             fixed (byte* encPtr = MdixStringCache.GetUtf8Bytes(encPath))
             {
                 void* handle;
-
                 if (keyPath != null)
                 {
                     fixed (byte* keyPtr = MdixStringCache.GetUtf8Bytes(keyPath))
@@ -206,7 +207,6 @@ namespace MidManStudio.Mdix.Core
             fixed (byte* keyPtr  = MdixStringCache.GetUtf8Bytes(keyContent))
             {
                 void* handle;
-
                 if (password != null)
                 {
                     fixed (byte* pwdPtr = MdixStringCache.EncodeTemporary(password))
@@ -235,32 +235,23 @@ namespace MidManStudio.Mdix.Core
         #region Async factories
 
         public static Task<MdixResult<MdixDatabase>> LoadAsync(
-            string            path,
-            CancellationToken ct = default) =>
+            string path, CancellationToken ct = default) =>
             Task.Run(() => Load(path), ct);
 
         public static Task<MdixResult<MdixDatabase>> LoadStrAsync(
-            string            source,
-            CancellationToken ct = default) =>
+            string source, CancellationToken ct = default) =>
             Task.Run(() => LoadStr(source), ct);
 
         public static Task<MdixResult<MdixDatabase>> LoadEncryptedAsync(
-            string            encPath,
-            string?           keyPath = null,
-            CancellationToken ct      = default) =>
+            string encPath, string? keyPath = null, CancellationToken ct = default) =>
             Task.Run(() => LoadEncrypted(encPath, keyPath), ct);
 
         public static Task<MdixResult<MdixDatabase>> LoadEncryptedPasswordAsync(
-            string            encPath,
-            string            password,
-            CancellationToken ct = default) =>
+            string encPath, string password, CancellationToken ct = default) =>
             Task.Run(() => LoadEncryptedPassword(encPath, password), ct);
 
         public static Task<MdixResult<MdixDatabase>> LoadEncryptedBytesAsync(
-            byte[]            data,
-            string            keyContent,
-            string?           password = null,
-            CancellationToken ct       = default) =>
+            byte[] data, string keyContent, string? password = null, CancellationToken ct = default) =>
             Task.Run(() => LoadEncryptedBytes(data, keyContent, password), ct);
 
         #endregion
@@ -331,10 +322,9 @@ namespace MidManStudio.Mdix.Core
         }
 
         /// <summary>
-        /// Get a 64-bit integer value. Use this for values whose type is
-        /// <see cref="MdixValueType.Long"/> (DixScript <c>L</c>-suffixed literals or
-        /// plain integers that overflow i32). Also works for <see cref="MdixValueType.Int"/>
-        /// values, widening without loss.
+        /// Get a 64-bit integer. Use this for <see cref="MdixValueType.Long"/> values
+        /// (DixScript <c>L</c>-suffixed literals or integers that overflow i32).
+        /// Also accepts <see cref="MdixValueType.Int"/> values, widening without loss.
         /// </summary>
         public MdixResult<long> GetLong(string path)
         {
@@ -535,11 +525,6 @@ namespace MidManStudio.Mdix.Core
 
         #region Data access — typed collections
 
-        /// <summary>
-        /// Deserializes all items in the array at <paramref name="path"/> into a typed list.
-        /// Works for scalar types (string, int, long, float, double, bool and the Mdix special
-        /// types) and for POCO types via the reflection serializer.
-        /// </summary>
         public MdixResult<List<T>> GetArray<T>(string path)
         {
             ThrowIfDisposed();
@@ -563,7 +548,7 @@ namespace MidManStudio.Mdix.Core
 
             for (int i = 0; i < count; i++)
             {
-                var itemPath = $"{path}[{i}]";
+                var itemPath   = $"{path}[{i}]";
                 var itemResult = GetSingleItem<T>(serializer, itemPath);
                 if (itemResult.IsFailure)
                     return MdixResult<List<T>>.Err(itemResult.Error);
@@ -573,11 +558,6 @@ namespace MidManStudio.Mdix.Core
             return MdixResult<List<T>>.Ok(list);
         }
 
-        /// <summary>
-        /// Gets all direct children under <paramref name="prefix"/> deserialized as
-        /// <typeparamref name="T"/>. If the value at <paramref name="prefix"/> is an array,
-        /// delegates to <see cref="GetArray{T}"/>.
-        /// </summary>
         public MdixResult<List<T>> GetAll<T>(string? prefix = null)
         {
             ThrowIfDisposed();
@@ -597,12 +577,12 @@ namespace MidManStudio.Mdix.Core
             if (keys.Length == 0)
                 return MdixResult<List<T>>.Ok(new List<T>());
 
-            var list = new List<T>(keys.Length);
+            var list       = new List<T>(keys.Length);
             var serializer = new MdixSerializer();
 
             foreach (var key in keys)
             {
-                var fullPath = string.IsNullOrEmpty(prefix) ? key : $"{prefix}.{key}";
+                var fullPath   = string.IsNullOrEmpty(prefix) ? key : $"{prefix}.{key}";
                 var itemResult = GetSingleItem<T>(serializer, fullPath);
                 if (itemResult.IsFailure)
                     return MdixResult<List<T>>.Err(itemResult.Error);
@@ -616,15 +596,15 @@ namespace MidManStudio.Mdix.Core
 
         #region Data access — tuples
 
-        public MdixResult<string> GetTupleRaw(string path) => GetJson(path);
+        public MdixResult<string>             GetTupleRaw(string path) => GetJson(path);
 
-        public MdixResult<(T1, T2)> GetTuple<T1, T2>(string path) =>
+        public MdixResult<(T1, T2)>           GetTuple<T1, T2>(string path) =>
             GetJson(path).AndThen(json => ParseTuple<T1, T2>(json, path));
 
-        public MdixResult<(T1, T2, T3)> GetTuple<T1, T2, T3>(string path) =>
+        public MdixResult<(T1, T2, T3)>       GetTuple<T1, T2, T3>(string path) =>
             GetJson(path).AndThen(json => ParseTuple<T1, T2, T3>(json, path));
 
-        public MdixResult<(T1, T2, T3, T4)> GetTuple<T1, T2, T3, T4>(string path) =>
+        public MdixResult<(T1, T2, T3, T4)>   GetTuple<T1, T2, T3, T4>(string path) =>
             GetJson(path).AndThen(json => ParseTuple<T1, T2, T3, T4>(json, path));
 
         public MdixResult<(T1, T2, T3, T4, T5)> GetTuple<T1, T2, T3, T4, T5>(string path) =>
@@ -637,10 +617,6 @@ namespace MidManStudio.Mdix.Core
 
         #region Generic accessor
 
-        /// <summary>
-        /// Type-dispatched generic getter. Supports all scalar and Mdix special types.
-        /// For <c>long</c>, use <c>Get&lt;long&gt;</c> or call <see cref="GetLong"/> directly.
-        /// </summary>
         public MdixResult<T> Get<T>(string path)
         {
             if (typeof(T) == typeof(string))        return CastResult<string,        T>(GetString(path));
@@ -772,7 +748,6 @@ namespace MidManStudio.Mdix.Core
         internal bool TryGetRawHandleInternal(out void* rawHandle)
         {
             rawHandle = null;
-
             if (_disposed == 1) return false;
 
             bool acquired = false;
@@ -788,10 +763,8 @@ namespace MidManStudio.Mdix.Core
             return true;
         }
 
-        internal void ReleaseRawHandleInternal()
-        {
+        internal void ReleaseRawHandleInternal() =>
             _safeHandle.DangerousRelease();
-        }
 
         #endregion
 
@@ -856,13 +829,10 @@ namespace MidManStudio.Mdix.Core
             return serializer.Deserialize<T>(this, itemPath);
         }
 
-        /// <summary>
-        /// Returns true for types that <see cref="Get{T}"/> can resolve without the serializer.
-        /// </summary>
         private static bool IsDirectlyGettable(Type t) =>
             t == typeof(string)       ||
             t == typeof(int)          ||
-            t == typeof(long)         ||   // ← Long support
+            t == typeof(long)         ||
             t == typeof(float)        ||
             t == typeof(double)       ||
             t == typeof(bool)         ||
@@ -921,11 +891,13 @@ namespace MidManStudio.Mdix.Core
             }
             catch (Exception ex)
             {
-                return MdixError.ParseError($"Failed to deserialize tuple element at '{path}': {ex.Message}");
+                return MdixError.ParseError(
+                    $"Failed to deserialize tuple element at '{path}': {ex.Message}");
             }
         }
 
-        private static MdixResult<JsonElement[]> ParseJsonArray(string json, string path, int expectedLength)
+        private static MdixResult<JsonElement[]> ParseJsonArray(
+            string json, string path, int expectedLength)
         {
             try
             {
@@ -933,7 +905,8 @@ namespace MidManStudio.Mdix.Core
                 var root = doc.RootElement;
 
                 if (root.ValueKind != JsonValueKind.Array)
-                    return MdixError.TypeMismatch(path, $"tuple[{expectedLength}]", root.ValueKind.ToString());
+                    return MdixError.TypeMismatch(
+                        path, $"tuple[{expectedLength}]", root.ValueKind.ToString());
 
                 if (root.GetArrayLength() < expectedLength)
                     return MdixError.TypeMismatch(

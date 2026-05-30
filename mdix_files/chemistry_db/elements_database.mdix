@@ -4,7 +4,7 @@
   created -> 2025-01-09T00:00:00Z,
   encoding -> "UTF-8",
   features -> "advanced",
-  debug_mode -> "regular",
+  debug_mode -> "verbose",
   error_handling -> "halt"
 )
 

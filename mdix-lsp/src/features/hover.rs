@@ -2227,9 +2227,9 @@ static STATIC_SIGS: &[(&str, &str, &str, &str, &str)] = &[
         "Join",
         "Dix.Join(sep, ...vals) → string",
         "Join values with separator.",
-        "Dix.Join(",
-        ", \"a\", \"b\", \"c\")",
-    ), // Enum
+        "Dix.Join(\",\", \"a\", \"b\", \"c\")",
+    ),
+    // Enum
     (
         "Enum",
         "getValues",

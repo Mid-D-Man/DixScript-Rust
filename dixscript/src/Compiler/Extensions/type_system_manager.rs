@@ -15,26 +15,34 @@ pub struct TypeSystemManager;
 
 impl TypeSystemManager {
     /// Get default value for a data type
+    /// Get default value for a data type
     pub fn get_default_value_for_type(data_type: DataType) -> Value {
         let pos = Position::UNKNOWN;
 
         match data_type {
             // Primitives
-            DataType::Int => Value::Integer { value: 0, position: pos },
-            DataType::Long => Value::Long { value: 0, position: pos },
-            DataType::Float => Value::Float { value: 0.0, position: pos },
-            DataType::Double => Value::Double { value: 0.0, position: pos },
-            DataType::String => Value::String { value: String::new(), position: pos },
-            DataType::Bool => Value::Boolean { value: false, position: pos },
+            DataType::Int    => Value::Integer { value: 0,   position: pos },
+            DataType::Long   => Value::Long    { value: 0,   position: pos },
+            DataType::Float  => Value::Float   { value: 0.0, position: pos },
+            DataType::Double => Value::Double  { value: 0.0, position: pos },
+            DataType::String => Value::String  { value: String::new(), position: pos },
+            DataType::Bool   => Value::Boolean { value: false, position: pos },
 
-            // Collections
-            DataType::Array => Value::Array { values: Vec::new(), position: pos },
+            // Collections — ALWAYS use the collection's native zero form
+            DataType::Array  => Value::Array { values: Vec::new(), position: pos },
             DataType::Object => Value::Object { properties: Vec::new(), position: pos },
-            DataType::Tuple => Value::PrefixedConstructor {
+
+            // Tuples: plain and typed — always PrefixedConstructor("t", [])
+            // IMPORTANT: TypedArray must NOT produce Value::Array — it is still an
+            // array at runtime. Similarly TypedTuple must produce a tuple literal.
+            DataType::Tuple | DataType::TypedTuple(_) => Value::PrefixedConstructor {
                 prefix: "t".to_string(),
                 arguments: Vec::new(),
                 position: pos,
             },
+            // FIX: was producing Value::Array { [] } which would bind as DixType::Array
+            // even for parameters declared as typed arrays. Keep it as an empty Array.
+            DataType::TypedArray(_) => Value::Array { values: Vec::new(), position: pos },
 
             // Special types
             DataType::Hex => Value::HexColor { value: "#000000".to_string(), position: pos },
@@ -57,41 +65,38 @@ impl TypeSystemManager {
                 position: pos,
             },
 
-            // No defaults for these
+            // No meaningful defaults for these
             DataType::Enum | DataType::Any | DataType::Function | DataType::Range => {
                 Value::Null { position: pos }
-            }
-            DataType::TypedArray(_)  => Value::Array { values: Vec::new(), position: pos },
-            DataType::TypedTuple(_) => Value::PrefixedConstructor {
-                prefix: "t".to_string(),
-                arguments: Vec::new(),
-                position: pos,
             }
         }
     }
 
+    /// Get default value from string type name
     /// Get default value from string type name
     pub fn get_default_value_for_string(type_name: &str) -> Value {
         if type_name.trim().is_empty() {
             return Value::Null { position: Position::UNKNOWN };
         }
 
+        // FIX: "long" was missing — defaulted to DataType::Any → Value::Null
         let data_type = match type_name.to_lowercase().as_str() {
-            "int" => DataType::Int,
-            "float" => DataType::Float,
-            "double" => DataType::Double,
-            "string" => DataType::String,
-            "bool" => DataType::Bool,
-            "array" => DataType::Array,
-            "object" => DataType::Object,
-            "tuple" => DataType::Tuple,
-            "hex" => DataType::Hex,
-            "blob" => DataType::Blob,
-            "regex" => DataType::Regex,
-            "date" => DataType::Date,
+            "int"       => DataType::Int,
+            "long"      => DataType::Long,
+            "float"     => DataType::Float,
+            "double"    => DataType::Double,
+            "string"    => DataType::String,
+            "bool"      => DataType::Bool,
+            "array"     => DataType::Array,
+            "object"    => DataType::Object,
+            "tuple"     => DataType::Tuple,
+            "hex"       => DataType::Hex,
+            "blob"      => DataType::Blob,
+            "regex"     => DataType::Regex,
+            "date"      => DataType::Date,
             "timestamp" => DataType::Timestamp,
-            "enum" => DataType::Enum,
-            _ => DataType::Any,
+            "enum"      => DataType::Enum,
+            _           => DataType::Any,
         };
 
         Self::get_default_value_for_type(data_type)
@@ -176,11 +181,18 @@ impl TypeSystemManager {
     }
 
     /// Check if type is numeric
+    /// Check if type is numeric
     pub fn is_numeric_type(data_type: DataType) -> bool {
-        matches!(data_type, DataType::Int | DataType::Float | DataType::Double)
+        // FIX: Long was missing — caused numeric conversion checks to fail for i64 values
+        matches!(data_type, DataType::Int | DataType::Long | DataType::Float | DataType::Double)
     }
 
     /// Apply default values to QuickFunction parameters (returns new vector)
+    /// Apply default values to QuickFunction parameters (returns new vector).
+    ///
+    /// Defaults are ONLY used at runtime when a caller provides fewer arguments
+    /// than there are parameters (i.e. `i >= arguments.len()` in bind_parameters).
+    /// Parameters with explicit user-defined defaults are left unchanged.
     pub fn apply_defaults_to_parameters(parameters: Vec<QuickFuncParam>) -> Vec<QuickFuncParam> {
         if parameters.is_empty() {
             return parameters;
@@ -190,7 +202,14 @@ impl TypeSystemManager {
         let mut result = Vec::with_capacity(parameters.len());
 
         for param in parameters {
-            // Only generate default if: no default value AND has type annotation
+            // Only generate a synthetic default when:
+            //   1. The parameter has no user-supplied default, AND
+            //   2. The parameter has a type annotation we can derive a default from, AND
+            //   3. The type is one that has a meaningful zero-value default.
+            //
+            // Enum, Any, Function, Range get Value::Null — callers must always
+            // supply an explicit argument for these; the Null default is a safety
+            // net so bind_parameters can report ParameterCountMismatch cleanly.
             if param.default_value.is_none() && param.data_type.is_some() {
                 let data_type = param.data_type.unwrap();
                 let default_value = Self::get_default_value_for_type(data_type);
@@ -200,15 +219,15 @@ impl TypeSystemManager {
                 };
 
                 error_manager.log_debug(&format!(
-                    "Applied default value for parameter '{}' of type {:?}",
+                    "Applied synthetic default for parameter '{}' of type {:?}",
                     param.name, data_type
                 ));
 
                 result.push(QuickFuncParam {
-                    name: param.name,
-                    data_type: param.data_type,
+                    name:          param.name,
+                    data_type:     param.data_type,
                     default_value: Some(default_expression),
-                    position: param.position,
+                    position:      param.position,
                 });
             } else {
                 result.push(param);

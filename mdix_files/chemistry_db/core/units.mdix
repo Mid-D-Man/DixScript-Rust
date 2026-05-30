@@ -12,7 +12,7 @@
 
 @QUICKFUNCS(
 
-  ~createValueWithUnit<tuple<float,enum>>(value<float>, unit<enum>) {
+  ~createValueWithUnit<tuple>(value<float>, unit<enum>) {
     return t:(value, unit)
   }
 
@@ -20,7 +20,7 @@
     return t:(value, unit, uncertainty)
   }
 
-  ~convertLength<tuple<float,enum>>(value_with_unit<tuple<float,enum>>, target_unit<enum>) {
+  ~convertLength<tuple>(value_with_unit<tuple>, target_unit<enum>) {
     let value<float>        = value_with_unit.first()
     let current_unit<enum>  = value_with_unit.second()
 

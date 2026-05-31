@@ -4,8 +4,8 @@
 
 use crate::Builtins::Core::{DixType, DixValue, IBuiltinMethod};
 use crate::Builtins::Instance::{
-    array_methods, blob_methods, number_methods, regex_methods,
-    string_methods, tuple_methods, universal_methods,
+    array_methods, blob_methods, number_methods, object_methods,
+    regex_methods, string_methods, tuple_methods, universal_methods,
 };
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -14,7 +14,6 @@ use std::sync::OnceLock;
 static REGISTRY: OnceLock<InstanceMethodRegistry> = OnceLock::new();
 
 /// All DixTypes that can carry instance methods (used in universal-method loop).
-/// Long is now included so it receives the same universal set as Int/Float/Double.
 const ALL_INSTANCE_TYPES: &[DixType] = &[
     DixType::Int,
     DixType::Long,
@@ -51,7 +50,10 @@ impl InstanceMethodRegistry {
         registry
     }
 
-    /// Register all instance methods
+    /// Register all instance methods.
+    /// Order matters: type-specific registrations must come BEFORE
+    /// register_universal_methods so that type-specific methods take
+    /// precedence over any same-named universal method.
     fn initialize_methods(&mut self) {
         self.register_string_methods();
         self.register_number_methods();
@@ -60,6 +62,7 @@ impl InstanceMethodRegistry {
         self.register_blob_methods();
         self.register_regex_methods();
         self.register_datetime_methods();
+        self.register_object_methods();      // ← must be before universals
         self.register_universal_methods();
     }
 
@@ -72,7 +75,7 @@ impl InstanceMethodRegistry {
         self.type_methods
             .insert(DixType::Int,    number_methods::get_int_methods());
         self.type_methods
-            .insert(DixType::Long,   number_methods::get_long_methods());   // ← was missing
+            .insert(DixType::Long,   number_methods::get_long_methods());
         self.type_methods
             .insert(DixType::Float,  number_methods::get_float_methods());
         self.type_methods
@@ -98,25 +101,37 @@ impl InstanceMethodRegistry {
         self.type_methods
             .insert(DixType::Regex, regex_methods::get_methods());
     }
+
     /// Register instance methods for Timestamp and Date.
     ///
     /// Must be called BEFORE register_universal_methods so that the universal
-    /// methods are merged into the existing maps rather than creating new empty ones.
+    /// methods are merged into the existing maps rather than creating new ones.
     fn register_datetime_methods(&mut self) {
         use crate::Builtins::Instance::datetime_instance_methods;
 
-        // Timestamp: insert dedicated methods first, universals are merged in later
         self.type_methods
             .entry(DixType::Timestamp)
             .or_insert_with(HashMap::new)
             .extend(datetime_instance_methods::get_timestamp_methods());
 
-        // Date: same pattern
         self.type_methods
             .entry(DixType::Date)
             .or_insert_with(HashMap::new)
             .extend(datetime_instance_methods::get_date_methods());
     }
+
+    /// Register instance methods for the Object type.
+    ///
+    /// Must be called BEFORE register_universal_methods so that type-specific
+    /// methods (add, get, has, remove, keys, values, …) take precedence over
+    /// any same-named universal counterpart.
+    fn register_object_methods(&mut self) {
+        self.type_methods
+            .entry(DixType::Object)
+            .or_insert_with(HashMap::new)
+            .extend(object_methods::get_methods());
+    }
+
     /// Register universal methods and attach them to every type.
     ///
     /// Universal methods are NOT added when a type already has a same-named
@@ -165,7 +180,7 @@ pub fn call_instance_method(
     method_name: &str,
     args:        &[DixValue],
 ) -> Result<DixValue, String> {
-    let registry = InstanceMethodRegistry::get();
+    let registry      = InstanceMethodRegistry::get();
     let instance_type = instance.get_type();
 
     let methods = registry
@@ -184,12 +199,7 @@ pub fn call_instance_method(
     // Fallback for Array → Tuple: when a value that was logically created as a
     // tuple t:(a, b) ends up typed as DixType::Array after flowing through the
     // value resolution pipeline, positional methods like .second(), .third()
-    // etc. (which only exist on Tuple) would otherwise fail.  Array.first()
-    // works because Array has its own first() with no type guard, masking the
-    // mis-typing; it is .second() that surfaces the problem.
-    //
-    // The fix: if the method doesn't exist on Array, try Tuple methods and
-    // re-wrap the underlying data as a Tuple so require_tuple() passes.
+    // etc. (which only exist on Tuple) would otherwise fail.
     if instance_type == DixType::Array {
         if let Some(tuple_method_map) = registry.type_methods.get(&DixType::Tuple) {
             if let Some(method) = tuple_method_map.get(method_name) {
@@ -249,14 +259,14 @@ pub fn validate_instance_call(
 
     let methods = match registry.type_methods.get(&instance_type) {
         Some(m) => m,
-        None => return ValidationResult::error(
+        None    => return ValidationResult::error(
             &format!("Type {:?} has no methods", instance_type)
         ),
     };
 
     let method = match methods.get(method_name) {
         Some(m) => m,
-        None => return ValidationResult::error(
+        None    => return ValidationResult::error(
             &format!("Type {:?} has no method: {}", instance_type, method_name)
         ),
     };
@@ -406,6 +416,6 @@ impl ValidationResult {
         ValidationResult { is_valid: false, error_message: Some(message.to_string()) }
     }
 
-    pub fn is_valid(&self)        -> bool            { self.is_valid }
-    pub fn error_message(&self)   -> Option<&str>    { self.error_message.as_deref() }
-}
+    pub fn is_valid(&self)      -> bool         { self.is_valid }
+    pub fn error_message(&self) -> Option<&str> { self.error_message.as_deref() }
+    }

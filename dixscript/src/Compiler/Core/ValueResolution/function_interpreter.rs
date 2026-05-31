@@ -608,7 +608,7 @@ impl<'a> FunctionInterpreter<'a> {
         Ok(return_value)
     }
 
-    fn execute_assignment(
+fn execute_assignment(
         &mut self,
         variable: &str,
         value: &Expression,
@@ -620,44 +620,46 @@ impl<'a> FunctionInterpreter<'a> {
         let val =
             self.evaluate_expression(value, context, scope_context, namespace)?;
 
+        // Register lambdas (both expression and block bodies) in the lambda registry.
         if let Expression::Value {
-            value: Value::Lambda { parameters, body, .. },
+            value: Value::Lambda { parameters, body, statements, .. },
             ..
         } = value
         {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!(
-                    "[Lambda] Registered lambda for variable: {}",
-                    variable
+                    "[Lambda] Registered lambda for variable: {}  (block={})",
+                    variable,
+                    !statements.is_empty()
                 ));
-            }
-            self.lambda_registry.insert(
-                variable.to_string(),
-                LambdaAst {
-                    params: parameters.clone(),
-                    body: *body.clone(),
-                },
-            );
-        }
-
-        if context.has_variable(variable) {
-            context
-                .set_variable(variable, val.clone())
-                .map_err(|e| InterpreterError::InvalidOperation {
-                    message: e.to_string(),
-                    position,
-                })?;
-        } else {
-            context
-                .define_variable(variable, val.clone())
-                .map_err(|e| InterpreterError::InvalidOperation {
-                    message: e.to_string(),
-                    position,
-                })?;
-        }
-
-        Ok(val)
+            }self.lambda_registry.insert(
+            variable.to_string(),
+            LambdaAst {
+                params:     parameters.clone(),
+                body:       *body.clone(),
+                statements: statements.clone(),
+            },
+        );
     }
+
+    if context.has_variable(variable) {
+        context
+            .set_variable(variable, val.clone())
+            .map_err(|e| InterpreterError::InvalidOperation {
+                message:  e.to_string(),
+                position,
+            })?;
+    } else {
+        context
+            .define_variable(variable, val.clone())
+            .map_err(|e| InterpreterError::InvalidOperation {
+                message:  e.to_string(),
+                position,
+            })?;
+    }
+
+    Ok(val)
+}
 
     fn execute_variable_declaration(
         &mut self,

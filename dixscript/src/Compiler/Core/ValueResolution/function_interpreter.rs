@@ -2258,8 +2258,7 @@ fn evaluate_enum_access(
             _                  => Value::String    { value: dix.as_string(), position },
         }
     }
-
-    fn invoke_lambda(
+fn invoke_lambda(
         &mut self,
         lambda: &LambdaAst,
         arguments: &[Expression],
@@ -2271,7 +2270,7 @@ fn evaluate_enum_access(
         if lambda.params.len() != arguments.len() {
             return Err(InterpreterError::LambdaParamMismatch {
                 expected: lambda.params.len(),
-                got: arguments.len(),
+                got:      arguments.len(),
                 position,
             });
         }
@@ -2279,16 +2278,31 @@ fn evaluate_enum_access(
         let mut lambda_context = ExecutionContext::new("<lambda>", None);
 
         for (i, param_name) in lambda.params.iter().enumerate() {
-            let arg_value =
-                self.evaluate_expression(&arguments[i], context, scope_context, namespace)?;
+            let arg_value = self
+                .evaluate_expression(&arguments[i], context, scope_context, namespace)?;
             lambda_context
                 .define_variable(param_name, arg_value)
                 .map_err(|e| InterpreterError::InvalidOperation {
-                    message: e.to_string(),
+                    message:  e.to_string(),
                     position,
                 })?;
         }
 
+        // ── CRITICAL FIX: execute block-body lambdas statement by statement ──
+        if !lambda.statements.is_empty() {
+            let mut last_result = DixValue::null();
+            for stmt in &lambda.statements {
+                last_result = self.execute_statement(
+                    stmt, &mut lambda_context, scope_context, namespace,
+                )?;
+                if matches!(stmt, QuickFuncStatement::Return { .. }) {
+                    return Ok(last_result);
+                }
+            }
+            return Ok(last_result);
+        }
+
+        // Single-expression body
         self.evaluate_expression(
             &lambda.body,
             &mut lambda_context,

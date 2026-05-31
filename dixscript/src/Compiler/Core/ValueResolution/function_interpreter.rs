@@ -1538,7 +1538,7 @@ fn evaluate_expression(
         }
     }
 
-    fn evaluate_unary_op(
+fn evaluate_unary_op(
         &mut self,
         operator: &str,
         operand: &Expression,
@@ -1551,6 +1551,20 @@ fn evaluate_expression(
             self.evaluate_expression(operand, context, scope_context, namespace)?;
 
         match operator {
+            // ── CRITICAL FIX: unary `+` is the identity for numeric types ──────
+            "+" => {
+                if !operand_val.is_numeric() {
+                    return Err(InterpreterError::InvalidOperation {
+                        message: format!(
+                            "Unary '+' requires a numeric type, got {:?}",
+                            operand_val.get_type()
+                        ),
+                        position,
+                    });
+                }
+                Ok(operand_val)
+            }
+
             "-" => {
                 if !operand_val.is_numeric() {
                     return Err(InterpreterError::InvalidOperation {
@@ -1558,7 +1572,6 @@ fn evaluate_expression(
                         position,
                     });
                 }
-                // Preserve integer types when negating; only fall to double for floats
                 Ok(match operand_val.get_type() {
                     DixType::Long   => DixValue::from_long(-operand_val.as_long()),
                     DixType::Int    => DixValue::from_int(-operand_val.as_int()),
@@ -1596,7 +1609,6 @@ fn evaluate_expression(
                 })
             }
             "~?" => {
-                // Bitwise NOT — use Long when operand is Long to avoid truncation
                 if !operand_val.is_numeric() {
                     return Err(InterpreterError::InvalidOperation {
                         message: "Bitwise NOT requires numeric operand".to_string(),

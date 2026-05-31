@@ -1143,8 +1143,138 @@ fn evaluate_expression(
                 self.evaluate_expression(expression, context, scope_context, namespace)
             }
 
+            // ── CRITICAL FIX: runtime fallback for QualifiedIdentifiers that  ──
+            // ── were not resolved by the AST enhancement phase.               ──
+            // ── This should be rare — the enhancer handles the common cases.  ──
+            Expression::QualifiedIdentifier { parts, arguments, position } => {
+                if parts.is_empty() {
+                    return Ok(DixValue::null());
+                }
+
+                if let Some(ref args) = arguments {
+                    // ── Call form: a.b(args) or StaticObj.method(args) ────────
+                    if parts.len() == 2 {
+                        let first  = &parts[0];
+                        let second = &parts[1];
+
+                        // Static object check first
+                        if builtin_call_resolver::has_static_object(first) {
+                            let mut arg_vals = Vec::with_capacity(args.len());
+                            for a in args.iter() {
+                                arg_vals.push(self.evaluate_expression(
+                                    a, context, scope_context, namespace,
+                                )?);
+                            }
+                            return builtin_call_resolver::resolve_static_call(
+                                first, second, &arg_vals,
+                            )
+                            .map_err(|e| InterpreterError::BuiltinCallFailed {
+                                object:   first.clone(),
+                                method:   second.clone(),
+                                message:  e,
+                                position: *position,
+                            });
+                        }
+
+                        // Instance method on a local variable
+                        let instance_expr = Expression::Identifier {
+                            name:     first.clone(),
+                            position: *position,
+                        };
+                        return self.evaluate_instance_method_call(
+                            &instance_expr, second, args, *position,
+                            context, scope_context, namespace,
+                        );
+                    }
+
+                    if parts.len() > 2 {
+                        // Chained: a.b.c(args) — evaluate a.b as property
+                        // chain, then dispatch .c(args) as instance call.
+                        let method_name   = parts.last().unwrap().clone();
+                        let instance_segs = &parts[..parts.len() - 1];
+
+                        let mut val = self.resolve_identifier(
+                            &instance_segs[0], *position, context, scope_context,
+                        )?;
+                        for seg in &instance_segs[1..] {
+                            if val.get_type() == DixType::Object {
+                                val = val
+                                    .as_object()
+                                    .get(seg.as_str())
+                                    .cloned()
+                                    .ok_or_else(|| InterpreterError::PropertyNotFound {
+                                        property: seg.clone(),
+                                        position: *position,
+                                    })?;
+                            } else {
+                                return Err(InterpreterError::InvalidOperation {
+                                    message: format!(
+                                        "Cannot access '{}' on {:?}",
+                                        seg,
+                                        val.get_type()
+                                    ),
+                                    position: *position,
+                                });
+                            }
+                        }
+
+                        let mut arg_vals = Vec::with_capacity(args.len());
+                        for a in args.iter() {
+                            arg_vals.push(self.evaluate_expression(
+                                a, context, scope_context, namespace,
+                            )?);
+                        }
+
+                        return builtin_call_resolver::resolve_instance_call(
+                            &val, &method_name, &arg_vals,
+                        )
+                        .map_err(|e| InterpreterError::BuiltinCallFailed {
+                            object:   format!("{:?}", val.get_type()),
+                            method:   method_name.clone(),
+                            message:  e,
+                            position: *position,
+                        });
+                    }
+
+                    // Single part with args — treat as QuickFuncCall
+                    return self.evaluate_quick_func_call(
+                        &parts[0], args, *position, context, scope_context, namespace,
+                    );
+                }
+
+                // ── Property-access form: a.b.c (no call) ────────────────────
+                let mut result = self.resolve_identifier(
+                    &parts[0], *position, context, scope_context,
+                )?;
+                for part in &parts[1..] {
+                    match result.get_type() {
+                        DixType::Object => {
+                            result = result
+                                .as_object()
+                                .get(part.as_str())
+                                .cloned()
+                                .ok_or_else(|| InterpreterError::PropertyNotFound {
+                                    property: part.clone(),
+                                    position: *position,
+                                })?;
+                        }
+                        _ => {
+                            return Err(InterpreterError::InvalidOperation {
+                                message: format!(
+                                    "Cannot access property '{}' on {:?}",
+                                    part,
+                                    result.get_type()
+                                ),
+                                position: *position,
+                            });
+                        }
+                    }
+                }
+                Ok(result)
+            }
+
             other => Err(InterpreterError::UnsupportedExpression {
-                variant: expr_variant_name(other).to_string(),
+                variant:  expr_variant_name(other).to_string(),
                 position: other.position(),
             }),
         }

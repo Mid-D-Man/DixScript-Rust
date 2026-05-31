@@ -181,10 +181,16 @@ impl std::fmt::Display for InterpreterError {
 
 impl std::error::Error for InterpreterError {}
 
+// ── LambdaAst ─────────────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]
 pub struct LambdaAst {
     pub params: Vec<String>,
+    /// Expression body for single-expression lambdas `(x) => expr`.
+    /// Ignored when `statements` is non-empty.
     pub body: Expression,
+    /// Statement body for block lambdas `(x) => { ... }`.
+    /// When non-empty the interpreter drives execution through these statements.
+    pub statements: Vec<QuickFuncStatement>,
 }
 
 pub struct FunctionInterpreter<'a> {

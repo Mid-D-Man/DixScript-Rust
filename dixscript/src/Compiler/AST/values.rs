@@ -2,7 +2,7 @@
 use super::position::Position;
 use super::expressions::Expression;
 use crate::Compiler::VersionControl::CompatibilityResult;
-
+use super::statements::QuickFuncStatement;
 /// Value types in DixScript
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -117,13 +117,17 @@ pub enum Value {
         position: Position,
     },
 
-    // Lambda/closure
+    
+// Lambda/closure
     Lambda {
         parameters: Vec<String>,
         body: Box<Expression>,
+        /// Non-empty for block-body lambdas `(x) => { ... }`.
+        /// The interpreter executes these statements; `body` holds the
+        /// extracted return expression (or Null for pure-block lambdas).
+        statements: Vec<QuickFuncStatement>,
         position: Position,
     },
-
     // Error types
     ParseError {
         message: String,

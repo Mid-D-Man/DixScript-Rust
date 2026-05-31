@@ -680,22 +680,25 @@ fn execute_assignment(
         let val =
             self.evaluate_expression(value, context, scope_context, namespace)?;
 
+        // Register lambdas (both expression and block bodies) in the lambda registry.
         if let Expression::Value {
-            value: Value::Lambda { parameters, body, .. },
+            value: Value::Lambda { parameters, body, statements, .. },
             ..
         } = value
         {
             if self.debug_config.is_enabled {
                 self.error_manager.log_debug(&format!(
-                    "[Lambda] Registered lambda for variable: {}",
-                    variable_name
+                    "[Lambda] Registered lambda for variable: {}  (block={})",
+                    variable_name,
+                    !statements.is_empty()
                 ));
             }
             self.lambda_registry.insert(
                 variable_name.to_string(),
                 LambdaAst {
-                    params: parameters.clone(),
-                    body: *body.clone(),
+                    params:     parameters.clone(),
+                    body:       *body.clone(),
+                    statements: statements.clone(),
                 },
             );
         }
@@ -703,7 +706,7 @@ fn execute_assignment(
         context
             .define_variable(variable_name, val.clone())
             .map_err(|e| InterpreterError::InvalidOperation {
-                message: e.to_string(),
+                message:  e.to_string(),
                 position,
             })?;
 

@@ -2095,17 +2095,26 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         }
     }
 
-    fn parse_blob_constructor(&mut self) -> Expression {
+fn parse_blob_constructor(&mut self) -> Expression {
         let pos = Position::from_token(self.current());
-        self.advance();
+        self.advance(); // consume BlobConstructor token
         self.skip_whitespace();
 
         if !self.expect_symbol('(') {
             return Expression::Value { value: Value::Null { position: pos }, position: pos };
         }
 
-        let _data = self.parse_expression(0);
         self.skip_whitespace();
+
+        // Parse the actual data expression instead of hard-coding a placeholder.
+        let data_expr = if self.check_symbol(')') {
+            // Empty blob
+            Value::String { value: String::new(), position: pos }
+        } else {
+            let expr = self.parse_expression(0);
+            self.skip_whitespace();
+            self.convert_expression_to_value(expr)
+        };
 
         if !self.expect_symbol(')') {
             return Expression::Value { value: Value::Null { position: pos }, position: pos };
@@ -2114,7 +2123,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         Expression::Value {
             value: Value::PrefixedConstructor {
                 prefix: "b".to_string(),
-                arguments: vec![Value::String { value: "blob_data".to_string(), position: pos }],
+                arguments: vec![data_expr],
                 position: pos,
             },
             position: pos,

@@ -409,8 +409,7 @@ impl QualifiedIdentifierResolver {
     }
 
     // ==================== VALUE RESOLUTION ====================
-
-    fn resolve_value(&self, value: &Value) -> Value {
+fn resolve_value(&self, value: &Value) -> Value {
         match value {
             Value::Array { values, position } => Value::Array {
                 values: values.iter().map(|v| self.resolve_value(v)).collect(),
@@ -453,6 +452,14 @@ impl QualifiedIdentifierResolver {
             Value::Identifier { value: id_value, position } => {
                 self.resolve_identifier_value(id_value, *position)
             }
+
+            // ── CRITICAL FIX: resolve QualifiedIdentifiers inside lambda bodies ──
+            Value::Lambda { parameters, body, statements, position } => Value::Lambda {
+                parameters: parameters.clone(),
+                body: Box::new(self.resolve_expression(body)),
+                statements: statements.iter().map(|s| self.resolve_statement(s)).collect(),
+                position: *position,
+            },
 
             _ => value.clone(),
         }

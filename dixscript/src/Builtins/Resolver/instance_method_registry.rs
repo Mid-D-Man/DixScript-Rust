@@ -59,6 +59,7 @@ impl InstanceMethodRegistry {
         self.register_tuple_methods();
         self.register_blob_methods();
         self.register_regex_methods();
+        self.register_datetime_methods();
         self.register_universal_methods();
     }
 
@@ -97,7 +98,25 @@ impl InstanceMethodRegistry {
         self.type_methods
             .insert(DixType::Regex, regex_methods::get_methods());
     }
+    /// Register instance methods for Timestamp and Date.
+    ///
+    /// Must be called BEFORE register_universal_methods so that the universal
+    /// methods are merged into the existing maps rather than creating new empty ones.
+    fn register_datetime_methods(&mut self) {
+        use crate::Builtins::Instance::datetime_instance_methods;
 
+        // Timestamp: insert dedicated methods first, universals are merged in later
+        self.type_methods
+            .entry(DixType::Timestamp)
+            .or_insert_with(HashMap::new)
+            .extend(datetime_instance_methods::get_timestamp_methods());
+
+        // Date: same pattern
+        self.type_methods
+            .entry(DixType::Date)
+            .or_insert_with(HashMap::new)
+            .extend(datetime_instance_methods::get_date_methods());
+    }
     /// Register universal methods and attach them to every type.
     ///
     /// Universal methods are NOT added when a type already has a same-named

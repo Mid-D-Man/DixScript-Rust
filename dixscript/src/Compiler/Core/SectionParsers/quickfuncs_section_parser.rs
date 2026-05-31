@@ -1407,14 +1407,36 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
         let token = self.current().clone();
         let unary_pos = Position::from_token(&token);
 
-        // Detect unary operator — replace Vec contains check with direct matches!
+        // ── Handle '++' and '--' as double unary BEFORE the single-char check ──
+        // '--x' → -(-(x))     '++x' → +(+(x))
+        if let TokenType::ArithmeticOp(op) = &token.token_type {
+            if *op == "--" || *op == "++" {
+                let single: &str = if *op == "--" { "-" } else { "+" };
+                self.advance();
+                self.skip_whitespace();
+                let inner = self.parse_primary_base();
+                let inner_unary = Expression::UnaryOp {
+                    operator: single.to_string(),
+                    operand:  Box::new(inner),
+                    position: unary_pos,
+                };
+                let outer_unary = Expression::UnaryOp {
+                    operator: single.to_string(),
+                    operand:  Box::new(inner_unary),
+                    position: unary_pos,
+                };
+                return self.apply_postfix_operations(outer_unary);
+            }
+        }
+
+        // ── Standard single-char unary detection ──────────────────────────────
         let unary_op: Option<String> = match &token.token_type {
-            TokenType::Symbol('!') => Some("!".to_string()),
-            TokenType::Symbol('-') => Some("-".to_string()),
-            TokenType::Symbol('+') => Some("+".to_string()),
+            TokenType::Symbol('!')                                => Some("!".to_string()),
+            TokenType::Symbol('-')                               => Some("-".to_string()),
+            TokenType::Symbol('+')                               => Some("+".to_string()),
             TokenType::ArithmeticOp(op) if *op == "+" || *op == "-" => Some(op.to_string()),
-            TokenType::Keyword(kw) if *kw == "not" => Some("not".to_string()),
-            TokenType::BitwiseOp(op) if *op == "~?" => Some("~?".to_string()),
+            TokenType::Keyword(kw) if *kw == "not"               => Some("not".to_string()),
+            TokenType::BitwiseOp(op) if *op == "~?"              => Some("~?".to_string()),
             _ => None,
         };
 
@@ -1424,7 +1446,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             let operand = self.parse_primary_base();
             let unary_expr = Expression::UnaryOp {
                 operator: op,
-                operand: Box::new(operand),
+                operand:  Box::new(operand),
                 position: unary_pos,
             };
             return self.apply_postfix_operations(unary_expr);
@@ -2129,25 +2151,38 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
     // Interpolated string
     // =============================================================================
 
+    // ── Inside impl QuickFuncsSectionParser ─────────────────────────────────────
+
     fn parse_interpolated_string_content(
         &self,
         raw: &str,
         position: Position,
     ) -> (String, Vec<Expression>) {
         let mut expressions = Vec::new();
-        let mut template = String::new();
-        let mut idx = 0;
-        let mut last_end = 0;
+        let mut template    = String::new();
+        let mut idx         = 0usize;
+        let mut last_end    = 0usize;
 
         for cap in INTERP_PLACEHOLDER_RE.captures_iter(raw) {
-            let m0 = cap.get(0).unwrap();
+            let m0        = cap.get(0).unwrap();
             let expr_text = cap.get(1).unwrap().as_str();
 
             template.push_str(&raw[last_end..m0.start()]);
-            expressions.push(self.parse_interpolated_expression(expr_text, position));
+
+            // ── KEY FIX: use the full tokenizer + parser instead of simple regex ──
+            // Old code: `self.parse_interpolated_expression(expr_text, position)`
+            // which treated `{x + y}` as a single identifier "x + y".
+            let expr = parse_interpolated_sub_expr(
+                expr_text,
+                self.operational_settings,
+                self.error_manager.clone(),
+                position,
+            );
+            expressions.push(expr);
+
             template.push_str(&format!("{{{}}}", idx));
-            idx += 1;
-            last_end = m0.end();
+            idx       += 1;
+            last_end   = m0.end();
         }
 
         template.push_str(&raw[last_end..]);
@@ -3063,4 +3098,52 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
         }
         if source.is_empty() { None } else { Some(source) }
     }
+}
+// ── Free function (outside impl block) ─────────────────────────────────────
+//
+// Re-tokenises a single interpolated-string placeholder and parses it as a
+// full expression. This replaces the old regex-based approach which could not
+// handle multi-token placeholders like `{x + y}` or `{x * y}`.
+//
+// Using a free function (rather than a method) avoids Rust lifetime conflicts
+// between the local token Vec and the outer parser's 'a lifetime.
+fn parse_interpolated_sub_expr(
+    text:                 &str,
+    operational_settings: &OperationalSettings,
+    error_manager:        ErrorManager,
+    position:             Position,
+) -> Expression {
+    use crate::Compiler::Core::Tokenizer::Tokenizer;
+
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Expression::Value { value: Value::Null { position }, position };
+    }
+
+    // Re-tokenise the placeholder content with the same compiler settings so
+    // keywords, operators, and identifiers are all recognised correctly.
+    let tokens = Tokenizer::new_with_error_manager(
+        trimmed,
+        operational_settings,
+        error_manager.clone(),
+    ).tokenize().tokens;
+
+    // Only EOF produced → treat as a bare identifier
+    if tokens.len() <= 1 {
+        return Expression::Identifier { name: trimmed.to_string(), position };
+    }
+
+    // `tokens` is a locally owned Vec<Token>.  The sub-parser borrows it, but
+    // `parse_expression(0)` returns an owned Expression, so both the sub-parser
+    // and the Vec are dropped at the end of this function.  Lifetime 'a of the
+    // sub-parser is inferred as the local scope — Rust coerces
+    // `&'outer OperationalSettings` to `&'local OperationalSettings` (since
+    // outer: local).
+    let mut sub_parser = QuickFuncsSectionParser::new_with_error_manager(
+        &tokens,
+        operational_settings,
+        error_manager,
+    );
+
+    sub_parser.parse_expression(0)
 }

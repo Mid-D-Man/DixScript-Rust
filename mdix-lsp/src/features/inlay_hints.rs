@@ -86,7 +86,7 @@ fn build_typed_dt(expr: &Expression, ctx: &InferCtx<'_>) -> Option<DataType> {
         }
 
         Expression::ImportedFunctionCall { namespace_name, function_name, .. } => {
-            ctx.symbol_table
+            ctx.symbol_table.as_ref()
                 .and_then(|st| st.get_namespaced_function(namespace_name, function_name))
                 .and_then(|i| i.signature.return_type)
         }
@@ -276,7 +276,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                         }
                         Some(_) => continue,
                         None => {
-                            type_index
+                            type_index.as_ref()
                                 .and_then(|idx| idx.get(name.as_str()))
                                 .map(|dt| format_data_type_as_hint(*dt, collection_len(value)))
                                 .or_else(|| infer_value(value, &base_ctx))
@@ -524,7 +524,7 @@ fn tuple_label(arguments: &[Value], ctx: &InferCtx<'_>) -> String {
         .collect();
 
     if types.is_empty() { return "<tuple>".to_string(); }
-    if types.iter().all(|t| t == "?") { return format!("<tuple:{}>", types.len()); }
+    if types.iter().all(|t| *t == "?") { return format!("<tuple:{}>", types.len()); }
     format!("<tuple({})>", types.join(","))
 }
 
@@ -830,7 +830,7 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
         }
 
         Expression::ImportedFunctionCall { namespace_name, function_name, .. } => {
-            ctx.symbol_table
+            ctx.symbol_table.as_ref()
                 .and_then(|st| st.get_namespaced_function(namespace_name, function_name))
                 .and_then(|info| info.signature.return_type)
                 .map(|dt| format_data_type_as_hint(dt, None))

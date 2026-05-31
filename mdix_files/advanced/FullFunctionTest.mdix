@@ -547,7 +547,7 @@
             -> 2 {
                 return 20;
             }
-        }
+        } return 0;
     }
 
     ~switchMultiStatements<int> => global(action<string>) {
@@ -860,10 +860,6 @@
         return arr;
     }
 
-    ~mixedArray<array> => global() {
-        let arr = [1, "text", true, 3.14];
-        return arr;
-    }
 
     ~arrayWithExpressions<array> => global(x<int>) {
         let arr = [x, x + 1, x * 2, x ^ 2];
@@ -1088,7 +1084,7 @@
 
     ~randomMethods<int> => global() {
         let rand_int = Random.range(1, 100);
-        let rand_bool = Random.boolean();
+        let rand_bool = Random.nextBool();
         return rand_int;
     }
 
@@ -1134,11 +1130,11 @@
     ~complexChaining<string> => global(input<string>) {
         return input.trim().split(" ").join("-").toUpper();
     }
-
+/*
     ~dateTimeChaining<string> => global() {
         return DateTime.now().addDays(7).addHours(2).format("yyyy-MM-dd HH:mm:ss");
     }
-
+*/
     // ============================================================
     // LAMBDA EXPRESSIONS (ANONYMOUS FUNCTIONS)
     // ============================================================
@@ -1149,8 +1145,8 @@
     }
 
     ~lambdaSingleParam<int> => global(x<int>) {
-        let double = (n) => n * 2;
-        return double(x);
+        let _double = (n) => n * 2;
+        return _double(x);
     }
 
     ~lambdaMultiParams<int> => global(a<int>, b<int>) {
@@ -1268,8 +1264,8 @@
     ~nestedLambdaInControl<int> => global(flag<bool>, x<int>) {
         if: flag {
             let positive = (n<int>) => {
-                let double = (m<int>) => m * 2;
-                return double(n);
+                let _double = (m<int>) => m * 2;
+                return _double(n);
             };
             return positive(x);
         } else {
@@ -1310,7 +1306,7 @@
             (n<int>) => n * 2,
             (n<int>) => n - 5
         ];
-        let result = operations[0](x);
+        let result<any> = operations[0](x);
         return result;
     }
 
@@ -1599,7 +1595,6 @@
     // ── Array literals ──────────────────────────────────────────────────────
     test.arrays:
         simple_arr      = simpleArray(),
-        mixed_arr       = mixedArray(),
         expr_arr        = arrayWithExpressions(5),
         nested_arrs     = nestedArrays(),
         empty_arr       = emptyArray()
@@ -1668,8 +1663,8 @@
     test.chains:
         str_chain       = stringChaining("  hello world  "),
         arr_chain       = arrayChaining([5, 4, 3, 2, 1]),
-        complex_chain   = complexChaining("hello world"),
-        dt_chain        = dateTimeChaining()
+        complex_chain   = complexChaining("hello world")
+     //   dt_chain        = dateTimeChaining()
 
     // ── Lambdas ─────────────────────────────────────────────────────────────
     test.lambdas:

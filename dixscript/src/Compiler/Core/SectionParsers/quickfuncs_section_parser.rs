@@ -2375,12 +2375,12 @@ fn parse_blob_constructor(&mut self) -> Expression {
         false
     }
 
-    fn parse_lambda_expression(&mut self) -> Expression {
+ fn parse_lambda_expression(&mut self) -> Expression {
         let lambda_pos = Position::from_token(self.current());
         let parameters = self.parse_lambda_parameters();
         self.skip_whitespace();
 
-        // Consume `=>` (Arrow token) or `=` `>` two-symbol fallback
+        // Consume `=>` (Arrow token) or the two-symbol `=` `>` fallback.
         if matches!(self.current().token_type, TokenType::Arrow) {
             self.advance();
         } else if self.check_symbol('=') {
@@ -2390,34 +2390,48 @@ fn parse_blob_constructor(&mut self) -> Expression {
                 self.error_manager.add_parse_error(
                     ParseErrorType::MissingToken,
                     "Expected '=>' after lambda parameters".to_string(),
-                    cur.line, cur.column, None,
+                    cur.line,
+                    cur.column,
+                    None,
                     self.get_source_line(&cur),
                 );
-                return Expression::Value { value: Value::Null { position: lambda_pos }, position: lambda_pos };
+                return Expression::Value {
+                    value: Value::Null { position: lambda_pos },
+                    position: lambda_pos,
+                };
             }
         } else {
             let cur = self.current().clone();
             self.error_manager.add_parse_error(
                 ParseErrorType::MissingToken,
                 "Expected '=>' after lambda parameters".to_string(),
-                cur.line, cur.column, None,
+                cur.line,
+                cur.column,
+                None,
                 self.get_source_line(&cur),
             );
-            return Expression::Value { value: Value::Null { position: lambda_pos }, position: lambda_pos };
+            return Expression::Value {
+                value: Value::Null { position: lambda_pos },
+                position: lambda_pos,
+            };
         }
 
         self.skip_whitespace();
-        let body = if self.check_symbol('{') {
+
+        // Block body → (statements, Null);  expression body → ([], expr).
+        let (block_statements, body) = if self.check_symbol('{') {
             self.parse_lambda_block_body()
         } else {
-            self.parse_expression(0)
+            (Vec::new(), self.parse_expression(0))
         };
 
         let param_count = parameters.len();
+
         let result = Expression::Value {
             value: Value::Lambda {
                 parameters,
                 body: Box::new(body),
+                statements: block_statements,
                 position: lambda_pos,
             },
             position: lambda_pos,
@@ -2501,42 +2515,59 @@ fn parse_blob_constructor(&mut self) -> Expression {
         params
     }
 
-    fn parse_lambda_block_body(&mut self) -> Expression {
+  /// Parse a block-body lambda `{ stmt* }` and return
+    /// `(statements, null_body_expr)`.  The caller packages
+    /// these into `Value::Lambda { statements, body: Null }`.
+    fn parse_lambda_block_body(&mut self) -> (Vec<QuickFuncStatement>, Expression) {
         let pos = Position::from_token(self.current());
 
         if !self.expect_symbol('{') {
-            return Expression::Value { value: Value::Null { position: pos }, position: pos };
+            return (
+                vec![],
+                Expression::Value { value: Value::Null { position: pos }, position: pos },
+            );
         }
 
-        let mut stmt_count = 0usize;
+        let mut statements: Vec<QuickFuncStatement> = Vec::new();
 
         while !self.is_at_end() && !self.check_symbol('}') {
             self.skip_whitespace();
-            if self.check_symbol('}') { break; }
-            if self.parse_statement().is_some() {
-                stmt_count += 1;
+            if self.check_symbol('}') {
+                break;
             }
+
+            if let Some(stmt) = self.parse_statement() {
+                statements.push(stmt);
+            } else if self.operational_settings.error_handling_strategy
+                == ErrorHandlingStrategy::Halt
+            {
+                break;
+            }
+
             self.skip_whitespace();
         }
 
-        if !self.expect_symbol('}') {
+        // Consume closing '}'
+        if self.check_symbol('}') {
+            self.advance();
+        } else {
             let cur = self.current().clone();
             self.error_manager.add_parse_error(
                 ParseErrorType::MissingToken,
                 "Expected '}' to close lambda block".to_string(),
-                cur.line, cur.column, None,
+                cur.line,
+                cur.column,
+                None,
                 self.get_source_line(&cur),
             );
         }
 
-        // Represent the block as an opaque identifier value — the AST enhancer owns resolution.
-        Expression::Value {
-            value: Value::Identifier {
-                value: format!("<lambda_block:{}_stmts>", stmt_count),
-                position: pos,
-            },
-            position: pos,
-        }
+        // body is always Null for block lambdas; the interpreter drives
+        // execution through `statements`.
+        let null_body =
+            Expression::Value { value: Value::Null { position: pos }, position: pos };
+
+        (statements, null_body)
     }
 
     // =============================================================================

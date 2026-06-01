@@ -215,27 +215,28 @@ pub fn get_float_methods() -> HashMap<String, Box<dyn IBuiltinMethod>> {
         |args| args[0].get_type() == DixType::Float,
     )));
 
-    // FIX: validator now accepts Int OR Long for the decimal-places argument.
-    // Literal integers are sometimes inferred as Long in the evaluation pipeline.
+    // FIX: decimal-places arg is now optional (default 0 = round to nearest integer).
+    // Accepts: value.round()  OR  value.round(n)  where n is Int or Long.
     methods.insert("round".to_string(), Box::new(BuiltinMethod::new_with_validator(
         "round".to_string(),
         2,
         DixType::Float,
         |args| {
             let value    = args[0].as_float();
-            let decimals = args[1].as_int(); // as_int() coerces Long → i32
+            let decimals = if args.len() >= 2 { args[1].as_int() } else { 0 };
             if decimals < 0 {
                 return Err("Decimal places cannot be negative".to_string());
             }
             let multiplier = 10_f32.powi(decimals);
             Ok(DixValue::from_float((value * multiplier).round() / multiplier))
         },
-        "Rounds the float to the specified number of decimal places".to_string(),
+        "Rounds the float to the specified decimal places (default 0 = nearest integer)".to_string(),
         |args| {
             args[0].get_type() == DixType::Float
-                && args.len() >= 2
+                && (args.len() == 1
+                || (args.len() >= 2
                 && (args[1].get_type() == DixType::Int
-                    || args[1].get_type() == DixType::Long)
+                || args[1].get_type() == DixType::Long)))
         },
     )));
 
@@ -333,27 +334,28 @@ pub fn get_double_methods() -> HashMap<String, Box<dyn IBuiltinMethod>> {
         |args| args[0].get_type() == DixType::Double,
     )));
 
-    // FIX: validator now accepts Int OR Long for the decimal-places argument.
-    // Literal integers are sometimes inferred as Long in the evaluation pipeline.
+    // FIX: decimal-places arg is now optional (default 0 = round to nearest integer).
+    // Accepts: value.round()  OR  value.round(n)  where n is Int or Long.
     methods.insert("round".to_string(), Box::new(BuiltinMethod::new_with_validator(
         "round".to_string(),
         2,
         DixType::Double,
         |args| {
             let value    = args[0].as_double();
-            let decimals = args[1].as_int(); // as_int() coerces Long → i32
+            let decimals = if args.len() >= 2 { args[1].as_int() } else { 0 };
             if decimals < 0 {
                 return Err("Decimal places cannot be negative".to_string());
             }
             let multiplier = 10_f64.powi(decimals);
             Ok(DixValue::from_double((value * multiplier).round() / multiplier))
         },
-        "Rounds the double to the specified number of decimal places".to_string(),
+        "Rounds the double to the specified decimal places (default 0 = nearest integer)".to_string(),
         |args| {
             args[0].get_type() == DixType::Double
-                && args.len() >= 2
+                && (args.len() == 1
+                || (args.len() >= 2
                 && (args[1].get_type() == DixType::Int
-                    || args[1].get_type() == DixType::Long)
+                || args[1].get_type() == DixType::Long)))
         },
     )));
 
@@ -404,7 +406,6 @@ pub fn get_double_methods() -> HashMap<String, Box<dyn IBuiltinMethod>> {
 
     methods
 }
-
 // ── Unit tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

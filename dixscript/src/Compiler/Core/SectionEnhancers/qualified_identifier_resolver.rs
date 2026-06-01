@@ -9,7 +9,7 @@ use crate::Compiler::Core::SectionEnhancers::{
 use crate::ErrorManager::{DebugConfig, ErrorManager};
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
-
+use crate::Builtins::Resolver::builtin_call_resolver;
 pub struct QualifiedIdentifierResolver {
     resolutions: FxHashMap<QualifiedIdentifierKey, QualifiedIdentifierResolution>,
     error_manager: ErrorManager,
@@ -291,21 +291,36 @@ impl QualifiedIdentifierResolver {
             ));
         }
 
-        // Fallback: no resolution recorded — make a best-effort transform.
-        if arguments.is_some() {
+        // Fallback: no resolution was recorded by the semantic analyser (common for
+        // qualified identifiers inside lambda bodies, which the analyser does not visit).
+        // Use structural heuristics to generate the correct expression node.
+        if let Some(args) = arguments {
+            if parts.len() == 2 {
+                if builtin_call_resolver::has_static_object(&parts[0]) {
+                    // e.g.  Array.range(1, n)  or  Math.max(a, b)  inside a lambda
+                    return Expression::StaticMethodCall {
+                        object_name: parts[0].clone(),
+                        method_name: parts[1].clone(),
+                        arguments:   self.resolve_expressions(args),
+                        position:    *position,
+                    };
+                }
+                // e.g.  s.trim()  or  arr.reverse()  where the first part is a
+                // variable / lambda parameter — generate an InstanceMethodCall.
+                // build_instance_method_call calls resolve_expressions internally.
+                return self.build_instance_method_call(parts, args, *position);
+            }
+
+            // Multi-part chain or single identifier with args — best-effort QuickFuncCall.
             Expression::QuickFuncCall {
-                name: parts.join("."),
-                arguments: arguments
-                    .as_ref()
-                    .map(|a| self.resolve_expressions(a))
-                    .unwrap_or_default(),
-                position: *position,
+                name:      parts.join("."),
+                arguments: self.resolve_expressions(args),
+                position:  *position,
             }
         } else {
             self.build_property_access_chain(parts, *position)
         }
     }
-
     fn apply_resolution(
         &self,
         parts: &[String],

@@ -184,25 +184,28 @@ impl std::error::Error for InterpreterError {}
 // ── LambdaAst ─────────────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]
 pub struct LambdaAst {
-    pub params: Vec<String>,
-    /// Expression body for single-expression lambdas `(x) => expr`.
-    /// Ignored when `statements` is non-empty.
-    pub body: Expression,
-    /// Statement body for block lambdas `(x) => { ... }`.
-    /// When non-empty the interpreter drives execution through these statements.
-    pub statements: Vec<QuickFuncStatement>,
+    pub params:       Vec<String>,
+    pub body:         Expression,
+    pub statements:   Vec<QuickFuncStatement>,
+    /// Variables captured from the enclosing scope at lambda-definition time.
+    /// `None` when the lambda was defined in an empty / global context.
+    pub captured_env: Option<FxHashMap<String, DixValue>>,
 }
 
 pub struct FunctionInterpreter<'a> {
-    symbol_table: &'a SymbolTable,
-    quick_functions: Vec<QuickFunction>,
-    data_context: Rc<RefCell<FxHashMap<String, DixValue>>>,
-    debug_config: DebugConfig,
-    recursion_depth: u32,
-    current_recursion_limit: u32,
-    lambda_registry: FxHashMap<String, LambdaAst>,
-    log_statements: Vec<String>,
-    error_manager: ErrorManager,
+    symbol_table:             &'a SymbolTable,
+    quick_functions:          Vec<QuickFunction>,
+    data_context:             Rc<RefCell<FxHashMap<String, DixValue>>>,
+    debug_config:             DebugConfig,
+    recursion_depth:          u32,
+    current_recursion_limit:  u32,
+    lambda_registry:          FxHashMap<String, LambdaAst>,
+    /// Monotonically-increasing counter used to generate unique lambda reference
+    /// keys of the form `"__lam_N"`.  These keys are stored as DixValue strings
+    /// and allow lambdas to be passed as first-class values.
+    lambda_counter:           u64,
+    log_statements:           Vec<String>,
+    error_manager:            ErrorManager,
 }
 
 impl<'a> FunctionInterpreter<'a> {
@@ -216,13 +219,12 @@ impl<'a> FunctionInterpreter<'a> {
        Self::new_with_error_manager(symbol_table,quick_functions,data_context,debug_mode,error_manager)
     }
     pub fn new_with_error_manager(
-        symbol_table: &'a SymbolTable,
+        symbol_table:  &'a SymbolTable,
         quick_functions: Vec<QuickFunction>,
-        data_context: Rc<RefCell<FxHashMap<String, DixValue>>>,
-        debug_mode: DebugMode,
-        error_manager:ErrorManager
+        data_context:  Rc<RefCell<FxHashMap<String, DixValue>>>,
+        debug_mode:    DebugMode,
+        error_manager: ErrorManager,
     ) -> Self {
-
         let func_count = quick_functions.len();
 
         FunctionInterpreter {
@@ -236,6 +238,7 @@ impl<'a> FunctionInterpreter<'a> {
                 func_count.max(4),
                 Default::default(),
             ),
+            lambda_counter: 0,
             log_statements: Vec::with_capacity(4),
             error_manager,
         }
@@ -608,67 +611,60 @@ impl<'a> FunctionInterpreter<'a> {
         Ok(return_value)
     }
 
-fn execute_assignment(
+    fn execute_assignment(
         &mut self,
-        variable: &str,
-        value: &Expression,
-        position: Position,
-        context: &mut ExecutionContext,
+        variable:      &str,
+        value:         &Expression,
+        position:      Position,
+        context:       &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
-        namespace: Option<&ImportedNamespace>,
+        namespace:     Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        let val =
-            self.evaluate_expression(value, context, scope_context, namespace)?;
+        let val = self.evaluate_expression(value, context, scope_context, namespace)?;
 
-        // Register lambdas (both expression and block bodies) in the lambda registry.
-        if let Expression::Value {
-            value: Value::Lambda { parameters, body, statements, .. },
-            ..
-        } = value
-        {
-            if self.debug_config.is_enabled {
-                self.error_manager.log_debug(&format!(
-                    "[Lambda] Registered lambda for variable: {}  (block={})",
-                    variable,
-                    !statements.is_empty()
-                ));
-            }self.lambda_registry.insert(
-            variable.to_string(),
-            LambdaAst {
-                params:     parameters.clone(),
-                body:       *body.clone(),
-                statements: statements.clone(),
-            },
-        );
+        // Keep the lambda registry entry for this variable name in sync whenever a
+        // variable is reassigned to a different lambda (e.g. after a re-assignment
+        // inside a loop or after receiving a lambda from a higher-order function).
+        let val_str = val.as_string();
+        if val_str.starts_with("__lam_") {
+            if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
+                if self.debug_config.is_enabled {
+                    self.error_manager.log_debug(&format!(
+                        "[Lambda] Updated registry for '{}' via key {}",
+                        variable, val_str
+                    ));
+                }
+                self.lambda_registry.insert(variable.to_string(), lambda);
+            }
+        }
+
+        if context.has_variable(variable) {
+            context
+                .set_variable(variable, val.clone())
+                .map_err(|e| InterpreterError::InvalidOperation {
+                    message:  e.to_string(),
+                    position,
+                })?;
+        } else {
+            context
+                .define_variable(variable, val.clone())
+                .map_err(|e| InterpreterError::InvalidOperation {
+                    message:  e.to_string(),
+                    position,
+                })?;
+        }
+
+        Ok(val)
     }
-
-    if context.has_variable(variable) {
-        context
-            .set_variable(variable, val.clone())
-            .map_err(|e| InterpreterError::InvalidOperation {
-                message:  e.to_string(),
-                position,
-            })?;
-    } else {
-        context
-            .define_variable(variable, val.clone())
-            .map_err(|e| InterpreterError::InvalidOperation {
-                message:  e.to_string(),
-                position,
-            })?;
-    }
-
-    Ok(val)
-}
 
     fn execute_variable_declaration(
         &mut self,
         variable_name: &str,
-        value: &Expression,
-        position: Position,
-        context: &mut ExecutionContext,
+        value:         &Expression,
+        position:      Position,
+        context:       &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
-        namespace: Option<&ImportedNamespace>,
+        namespace:     Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
@@ -677,30 +673,24 @@ fn execute_assignment(
             ));
         }
 
-        let val =
-            self.evaluate_expression(value, context, scope_context, namespace)?;
+        let val = self.evaluate_expression(value, context, scope_context, namespace)?;
 
-        // Register lambdas (both expression and block bodies) in the lambda registry.
-        if let Expression::Value {
-            value: Value::Lambda { parameters, body, statements, .. },
-            ..
-        } = value
-        {
-            if self.debug_config.is_enabled {
-                self.error_manager.log_debug(&format!(
-                    "[Lambda] Registered lambda for variable: {}  (block={})",
-                    variable_name,
-                    !statements.is_empty()
-                ));
+        // If the result is a lambda reference key ("__lam_N"), also register the
+        // LambdaAst under the variable name so that direct calls like
+        // `variable_name(args)` resolve via the lambda registry name lookup.
+        // This handles both literal lambda assignments AND lambdas returned from
+        // higher-order functions (e.g. `let addFive = outer(5)`).
+        let val_str = val.as_string();
+        if val_str.starts_with("__lam_") {
+            if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
+                if self.debug_config.is_enabled {
+                    self.error_manager.log_debug(&format!(
+                        "[Lambda] Registered '{}' via key {}",
+                        variable_name, val_str
+                    ));
+                }
+                self.lambda_registry.insert(variable_name.to_string(), lambda);
             }
-            self.lambda_registry.insert(
-                variable_name.to_string(),
-                LambdaAst {
-                    params:     parameters.clone(),
-                    body:       *body.clone(),
-                    statements: statements.clone(),
-                },
-            );
         }
 
         context
@@ -2038,35 +2028,51 @@ fn evaluate_enum_access(
 
     fn evaluate_quick_func_call(
         &mut self,
-        name: &str,
-        arguments: &[Expression],
-        position: Position,
-        context: &mut ExecutionContext,
+        name:          &str,
+        arguments:     &[Expression],
+        position:      Position,
+        context:       &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
-        namespace: Option<&ImportedNamespace>,
+        namespace:     Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
-        // Lambda registry takes priority.
+        // 1. Lambda registry by name (covers direct declarations and re-registered
+        //    lambdas from higher-order functions via execute_variable_declaration).
         if let Some(lambda) = self.lambda_registry.get(name).cloned() {
             if self.debug_config.is_enabled {
-                self.error_manager
-                    .log_debug(&format!("[Lambda] Invoking: {}", name));
+                self.error_manager.log_debug(&format!("[Lambda] Invoking '{}' from registry", name));
             }
-            return self.invoke_lambda(
-                &lambda, arguments, position, context, scope_context, namespace,
-            );
+            return self.invoke_lambda(&lambda, arguments, position, context, scope_context, namespace);
         }
 
-        // FIX: evaluate all arguments in the CALLER's context before constructing
-        // the callee's context. This prevents parameter names from the callee's
-        // own signature (e.g. "rarity", "baseValue") from being looked up in an
-        // empty execution context during bind_parameters.
+        // 2. Check whether `name` is a local variable holding a lambda reference key.
+        //    This handles lambdas received as function parameters (e.g. the `fn`
+        //    parameter of `let apply = (n, fn) => fn(n)`) and lambdas that were
+        //    returned from other functions but not re-registered under their new name
+        //    in any prior assignment path.
+        if let Ok(context_val) = context.get_variable(name) {
+            let val_str = context_val.as_string();
+            if val_str.starts_with("__lam_") {
+                if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
+                    if self.debug_config.is_enabled {
+                        self.error_manager.log_debug(&format!(
+                            "[Lambda] Invoking '{}' via context reference key {}",
+                            name, val_str
+                        ));
+                    }
+                    return self.invoke_lambda(
+                        &lambda, arguments, position, context, scope_context, namespace,
+                    );
+                }
+            }
+        }
+
+        // Evaluate all arguments in the CALLER's context before constructing the
+        // callee's context so parameter names from the callee's signature are never
+        // looked up in an empty execution context during bind_parameters.
         let evaluated_args = self.evaluate_arguments_in_caller_context(
             arguments, position, context, scope_context, namespace,
         )?;
 
-        // Wrap each resolved DixValue as a literal Expression::Value so that
-        // bind_parameters can call evaluate_expression on them safely — they
-        // will simply return the wrapped value immediately.
         let literal_args: Vec<Expression> = evaluated_args
             .iter()
             .map(|dv| Expression::Value {
@@ -2075,7 +2081,7 @@ fn evaluate_enum_access(
             })
             .collect();
 
-        // Check current namespace functions first.
+        // 3. Current namespace functions.
         if let Some(ns) = namespace {
             if let Some(func_info) = ns.functions.get(name) {
                 if self.debug_config.is_enabled {
@@ -2096,14 +2102,14 @@ fn evaluate_enum_access(
             }
         }
 
-        // Clone to release immutable borrow before execute() takes mutable borrow.
+        // 4. Global quick-functions registry.
         let function = self
             .quick_functions
             .iter()
             .find(|f| f.name == name)
             .cloned()
             .ok_or_else(|| InterpreterError::UndefinedFunction {
-                name: name.to_string(),
+                name:     name.to_string(),
                 position,
             })?;
 
@@ -2263,14 +2269,14 @@ fn evaluate_enum_access(
             _                  => Value::String    { value: dix.as_string(), position },
         }
     }
-fn invoke_lambda(
+    fn invoke_lambda(
         &mut self,
-        lambda: &LambdaAst,
-        arguments: &[Expression],
-        position: Position,
-        context: &mut ExecutionContext,
+        lambda:        &LambdaAst,
+        arguments:     &[Expression],
+        position:      Position,
+        context:       &mut ExecutionContext,
         scope_context: &FxHashMap<String, String>,
-        namespace: Option<&ImportedNamespace>,
+        namespace:     Option<&ImportedNamespace>,
     ) -> Result<DixValue, InterpreterError> {
         if lambda.params.len() != arguments.len() {
             return Err(InterpreterError::LambdaParamMismatch {
@@ -2282,18 +2288,51 @@ fn invoke_lambda(
 
         let mut lambda_context = ExecutionContext::new("<lambda>", None);
 
-        for (i, param_name) in lambda.params.iter().enumerate() {
-            let arg_value = self
-                .evaluate_expression(&arguments[i], context, scope_context, namespace)?;
-            lambda_context
-                .define_variable(param_name, arg_value)
-                .map_err(|e| InterpreterError::InvalidOperation {
-                    message:  e.to_string(),
-                    position,
-                })?;
+        // Restore the closure-captured environment first so that variables from
+        // outer scopes (e.g. `x` and `multiplier` in a nested lambda) are visible
+        // inside the lambda body.  Parameters are bound below and override any
+        // captured variable that shares the same name.
+        if let Some(ref captured) = lambda.captured_env {
+            for (var_name, val) in captured {
+                // A fresh context has no variables yet, so define_variable will not
+                // fail here.  The let-binding suppresses the unused-result warning.
+                let _ = lambda_context.define_variable(var_name, val.clone());
+            }
         }
 
-        // ── CRITICAL FIX: execute block-body lambdas statement by statement ──
+        // Evaluate each argument in the CALLER's context (not lambda_context) so
+        // that identifier resolution uses the scope where the call was made.
+        for (i, param_name) in lambda.params.iter().enumerate() {
+            let arg_value = self
+                .evaluate_expression(&arguments[i], context, scope_context, namespace)
+                .map_err(|e| InterpreterError::ParameterEvalFailed {
+                    index:      i,
+                    param_name: param_name.clone(),
+                    inner:      Box::new(e),
+                    position,
+                })?;
+
+            // If the parameter name was already populated from the captured env,
+            // update (set) it rather than re-defining to avoid a duplicate error.
+            if lambda_context.has_variable(param_name) {
+                lambda_context
+                    .set_variable(param_name, arg_value)
+                    .map_err(|e| InterpreterError::InvalidOperation {
+                        message:  e.to_string(),
+                        position,
+                    })?;
+            } else {
+                lambda_context
+                    .define_variable(param_name, arg_value)
+                    .map_err(|e| InterpreterError::InvalidOperation {
+                        message:  e.to_string(),
+                        position,
+                    })?;
+            }
+        }
+
+        // Block-body lambda: drive execution through statements and honour explicit
+        // return statements.
         if !lambda.statements.is_empty() {
             let mut last_result = DixValue::null();
             for stmt in &lambda.statements {
@@ -2307,7 +2346,7 @@ fn invoke_lambda(
             return Ok(last_result);
         }
 
-        // Single-expression body
+        // Single-expression body.
         self.evaluate_expression(
             &lambda.body,
             &mut lambda_context,
@@ -2370,10 +2409,36 @@ fn invoke_lambda(
                 )
             }
 
-            Value::Lambda { parameters, .. } => Ok(DixValue::from_string(format!(
-                "<lambda:{}_params>",
-                parameters.len()
-            ))),
+            // FIX: lambdas are now first-class values.
+            // Each lambda definition gets a unique reference key ("__lam_N") that is
+            // stored as the DixValue.  The actual AST, together with a snapshot of the
+            // current execution context (for closure support), is stored in the lambda
+            // registry under that key.  The key is also registered under the variable
+            // name by execute_variable_declaration / execute_assignment so that direct
+            // calls like `myLambda(args)` still work via the registry name lookup.
+            Value::Lambda { parameters, body, statements, .. } => {
+                // Capture the current environment for closure semantics.
+                let captured = context.get_all_variables();
+
+                let key = format!("__lam_{}", self.lambda_counter);
+                self.lambda_counter += 1;
+
+                self.lambda_registry.insert(key.clone(), LambdaAst {
+                    params:       parameters.clone(),
+                    body:         *body.clone(),
+                    statements:   statements.clone(),
+                    captured_env: if captured.is_empty() { None } else { Some(captured) },
+                });
+
+                if self.debug_config.is_verbose {
+                    self.error_manager.log_debug(&format!(
+                        "[Lambda] Registered under key {} (params: {:?})",
+                        key, parameters
+                    ));
+                }
+
+                Ok(DixValue::from_string(key))
+            }
 
             Value::QuickFuncCall { function_name, arguments, position } => {
                 self.evaluate_quick_func_call(

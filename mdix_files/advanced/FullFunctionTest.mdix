@@ -1078,7 +1078,7 @@
 
     ~arrayStaticMethods<array> => global() {
         let range = Array.range(1, 10);
-        let filled = Array.fill(5, "test");
+        let filled = Array.fill("test", 5);
         return range;
     }
 
@@ -1108,7 +1108,8 @@
     }
 
     ~numericInstanceMethods<int> => global(value<float>) {
-        let rounded = value.round();
+        let rounded = value.round(0);
+
         let floored = value.floor();
         let ceiled = value.ceil();
         let absolute = value.abs();
@@ -1130,11 +1131,11 @@
     ~complexChaining<string> => global(input<string>) {
         return input.trim().split(" ").join("-").toUpper();
     }
-/*
+
     ~dateTimeChaining<string> => global() {
         return DateTime.now().addDays(7).addHours(2).format("yyyy-MM-dd HH:mm:ss");
     }
-*/
+
     // ============================================================
     // LAMBDA EXPRESSIONS (ANONYMOUS FUNCTIONS)
     // ============================================================
@@ -1613,7 +1614,7 @@
         tup4            = tuple4(1, 2, 3, 4),
         tup_mixed       = tupleMixed(),
         tup_exprs       = tupleExpressions(3, 4),
-        blob_val        = blobCreate("raw_data"),
+        blob_val        = blobCreate("SGVsbG8="),
         regex_val       = regexCreate("[a-z]+")
 
     // ── Parenthesized expressions ───────────────────────────────────────────
@@ -1657,14 +1658,14 @@
     test.instancemethods:
         str_methods     = stringInstanceMethods("  Hello World  "),
         arr_methods     = arrayInstanceMethods([1, 2, 3, 4, 5]),
-        num_methods     = numericInstanceMethods(3.7)
+        num_methods     = numericInstanceMethods(3.7f)
 
     // ── Method chains (Fix 1 exercises these) ───────────────────────────────
     test.chains:
         str_chain       = stringChaining("  hello world  "),
         arr_chain       = arrayChaining([5, 4, 3, 2, 1]),
         complex_chain   = complexChaining("hello world")
-     //   dt_chain        = dateTimeChaining()
+      dt_chain        = dateTimeChaining()
 
     // ── Lambdas ─────────────────────────────────────────────────────────────
     test.lambdas:

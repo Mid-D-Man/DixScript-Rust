@@ -1,0 +1,1202 @@
+atomic_mass_unit_kg = 0.0000000000000000000000000016605390666
+avogadro_number = 602214076000000000000000.0
+bohr_radius_m = 0.0000000000529177210903
+boltzmann_constant_j_k = 0.00000000000000000000001380649
+database_name = "Periodic Table Database - First 5 Elements"
+database_version = "1.0.0"
+electron_mass_kg = 0.00000000000000000000000000000091093837015
+elementary_charge_c = 0.0000000000000000001602176634
+format_type = "DixScript Physics Simulation Ready"
+gas_constant_j_mol_k = 8.314462618
+last_updated = "2025-01-09T00:00:00Z"
+neutron_mass_kg = 0.00000000000000000000000000167492749804
+planck_constant_j_s = 0.000000000000000000000000000000000662607015
+properties_per_element = 126
+proton_mass_kg = 0.00000000000000000000000000167262192369
+rydberg_constant = 10973731.56816
+simulation_ready = true
+speed_of_light_m_s = 299792458.0
+total_elements = 5
+vacuum_permeability = 0.00000125663706212
+vacuum_permittivity = 0.0000000000088541878128
+
+[elements.beryllium]
+ionization_energies_kj_mol = [
+    899.5,
+    1757.1,
+    14848.7,
+    21006.6,
+]
+oxidation_states = [2]
+
+[elements.beryllium.abundance.distribution]
+earths_crust_ppm = 2.8
+human_body_ppm = 0.00004
+ocean_ppm = 0.0006
+universe_ppm = 0.73
+
+[elements.beryllium.crystal]
+space_group = "P63/mmc"
+symmetry = [
+    [
+    1.0,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    1.0,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    1.0,
+],
+]
+
+[elements.beryllium.crystal.lattice]
+angles_degrees = [
+    90.0,
+    90.0,
+    120.0,
+]
+constants_abc_angstrom = [
+    2.29,
+    2.29,
+    3.58,
+]
+lattice_system = 4
+
+[elements.beryllium.discovery.info]
+country_of_discovery = "France"
+discovered_by = "Louis Vauquelin"
+discovery_year = 1798
+name_etymology = "Greek beryllos (beryl)"
+
+[elements.beryllium.electrical]
+type = "conductor"
+
+[elements.beryllium.electrical.props]
+band_gap_ev = 0.0
+electrical_conductivity_s_m = 25000000.0
+electrical_resistivity_ohm_m = 0.00000004
+
+[elements.beryllium.electronic.configuration]
+binding_energy_ev = 9.323
+electron_affinity_kj_mol = 0.0
+ground_state_configuration = "[He] 2s2"
+valence_electrons = 2
+work_function_ev = 4.98
+
+[elements.beryllium.electronic.electronegativity]
+allen = 1.99
+allred_rochow = 1.47
+average = 1.766
+mulliken = 1.99
+pauling = 1.57
+sanderson = 1.81
+
+[elements.beryllium.electronic.quantum]
+azimuthal_l = 0
+magnetic_ml = 0
+principal_n = 2
+spin_ms = 0.5
+
+[elements.beryllium.geometry]
+molar_volume_cm3 = 4.85
+
+[elements.beryllium.geometry.radii]
+atomic_pm = 112.0
+covalent_pm = 96.0
+van_der_waals_pm = 153.0
+
+[elements.beryllium.identity]
+cas_registry = "7440-41-7"
+
+[elements.beryllium.identity.core]
+_atomic_number = 4
+_atomic_weight = 9.0122
+_block = 1
+_category = 3
+_group = 3
+_name = "Beryllium"
+_period = 2
+_standard_state = 1
+_symbol = "Be"
+
+[elements.beryllium.interaction]
+polarizability_angstrom3 = 5.6
+polarizability_tensor = [
+    [
+    5.6,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    5.6,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    5.6,
+],
+]
+
+[elements.beryllium.interaction.lennard_jones]
+epsilon_well_depth_k = 0.0
+lj_parameters = [
+    0.0,
+    0.0,
+]
+sigma_collision_diameter_angstrom = 0.0
+
+[elements.beryllium.interaction.surface]
+adsorption_energy_ev = 0.0
+surface_energy_j_m2 = 1.0
+work_function_ev = 4.98
+
+[[elements.beryllium.ionic_radii]]
+coordination_number = 6
+oxidation_state = 2
+radius_pm = 45.0
+
+[[elements.beryllium.isotopes]]
+decay_energy_mev = 0.0
+decay_mode = 0
+half_life_seconds = 0.0
+is_stable = true
+mass_number = 9
+natural_abundance_percent = 100.0
+neutron_cross_section_barns = 0.0076
+
+[elements.beryllium.magnetic.props]
+curie_temperature_k = 0.0
+magnetic_ordering = 1
+magnetic_susceptibility_volume = -0.00000001
+
+[elements.beryllium.mechanical.bulk]
+bulk_moduli_gpa = [
+    287.0,
+    132.0,
+    130.0,
+]
+density_g_cm3 = 1.85
+mohs_hardness = 5.5
+poisson_ratio = 0.032
+speed_of_sound_m_s = 13000.0
+
+[elements.beryllium.nuclear.properties]
+magnetic_moment_nuclear_magnetons = -1.1776
+neutrons_stable = 5
+nuclear_spin = 1.5
+protons = 4
+quadrupole_moment_barns = 0.0529
+
+[elements.beryllium.optical]
+color = "steel-gray"
+refractive_index = 0.0
+
+[elements.beryllium.thermodynamics.phases]
+boiling_point_c = 2468.85
+boiling_point_k = 2742.0
+critical_point = [
+    5205.0,
+    0.0,
+]
+melting_point_c = 1286.85
+melting_point_k = 1560.0
+triple_point = [
+    0.0,
+    0.0,
+]
+
+[elements.beryllium.thermodynamics.thermal]
+debye_temperature_k = 1440.0
+heat_of_fusion_kj_mol = 7.95
+heat_of_vaporization_kj_mol = 297.0
+specific_heat_j_kg_k = 16443.0
+thermal_conductivity_w_m_k = 200.0
+thermal_expansion_k_minus1 = 0.0000113
+
+[elements.boron]
+ionization_energies_kj_mol = [
+    800.6,
+    2427.1,
+    3659.7,
+    25026.0,
+    32826.0,
+]
+oxidation_states = [
+    1,
+    2,
+    3,
+]
+
+[elements.boron.abundance.distribution]
+earths_crust_ppm = 10.0
+human_body_ppm = 0.00069
+ocean_ppm = 4.4
+universe_ppm = 0.001
+
+[elements.boron.crystal]
+space_group = "R-3m"
+symmetry = [
+    [
+    1.0,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    1.0,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    1.0,
+],
+]
+
+[elements.boron.crystal.lattice]
+angles_degrees = [
+    58.06,
+    58.06,
+    58.06,
+]
+constants_abc_angstrom = [
+    5.06,
+    5.06,
+    5.06,
+]
+lattice_system = 9
+
+[elements.boron.discovery.info]
+country_of_discovery = "France"
+discovered_by = "Joseph Gay-Lussac"
+discovery_year = 1808
+name_etymology = "Arabic buraq (borax)"
+
+[elements.boron.electrical]
+type = "semiconductor"
+
+[elements.boron.electrical.props]
+band_gap_ev = 1.56
+electrical_conductivity_s_m = 0.0001
+electrical_resistivity_ohm_m = 10000.0
+
+[elements.boron.electronic.configuration]
+binding_energy_ev = 8.298
+electron_affinity_kj_mol = 26.7
+ground_state_configuration = "[He] 2s2 2p1"
+valence_electrons = 3
+work_function_ev = 4.45
+
+[elements.boron.electronic.electronegativity]
+allen = 2.05
+allred_rochow = 2.01
+average = 2.13
+mulliken = 2.28
+pauling = 2.04
+sanderson = 2.27
+
+[elements.boron.electronic.quantum]
+azimuthal_l = 1
+magnetic_ml = 0
+principal_n = 2
+spin_ms = 0.5
+
+[elements.boron.geometry]
+molar_volume_cm3 = 4.39
+
+[elements.boron.geometry.radii]
+atomic_pm = 87.0
+covalent_pm = 84.0
+van_der_waals_pm = 192.0
+
+[elements.boron.identity]
+cas_registry = "7440-42-8"
+
+[elements.boron.identity.core]
+_atomic_number = 5
+_atomic_weight = 10.81
+_block = 2
+_category = 6
+_group = 6
+_name = "Boron"
+_period = 2
+_standard_state = 1
+_symbol = "B"
+
+[elements.boron.interaction]
+polarizability_angstrom3 = 3.03
+polarizability_tensor = [
+    [
+    3.03,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    3.03,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    3.03,
+],
+]
+
+[elements.boron.interaction.lennard_jones]
+epsilon_well_depth_k = 0.0
+lj_parameters = [
+    0.0,
+    0.0,
+]
+sigma_collision_diameter_angstrom = 0.0
+
+[elements.boron.interaction.surface]
+adsorption_energy_ev = 0.0
+surface_energy_j_m2 = 0.0
+work_function_ev = 4.45
+
+[[elements.boron.ionic_radii]]
+coordination_number = 6
+oxidation_state = 3
+radius_pm = 27.0
+
+[[elements.boron.isotopes]]
+decay_energy_mev = 0.0
+decay_mode = 0
+half_life_seconds = 0.0
+is_stable = true
+mass_number = 10
+natural_abundance_percent = 19.9
+neutron_cross_section_barns = 0.5
+
+[[elements.boron.isotopes]]
+decay_energy_mev = 0.0
+decay_mode = 0
+half_life_seconds = 0.0
+is_stable = true
+mass_number = 11
+natural_abundance_percent = 80.1
+neutron_cross_section_barns = 0.0055
+
+[elements.boron.magnetic.props]
+curie_temperature_k = 0.0
+magnetic_ordering = 1
+magnetic_susceptibility_volume = -0.0000000067
+
+[elements.boron.mechanical.bulk]
+bulk_moduli_gpa = [
+    0.0,
+    0.0,
+    320.0,
+]
+density_g_cm3 = 2.37
+mohs_hardness = 9.3
+poisson_ratio = 0.0
+speed_of_sound_m_s = 16200.0
+
+[elements.boron.nuclear.properties]
+magnetic_moment_nuclear_magnetons = 2.6886
+neutrons_stable = 6
+nuclear_spin = 1.5
+protons = 5
+quadrupole_moment_barns = 0.0407
+
+[elements.boron.optical]
+color = "black-brown"
+refractive_index = 0.0
+
+[elements.boron.physics_calculated]
+reactivity_index = 0.005271998966274713
+
+[elements.boron.thermodynamics.phases]
+boiling_point_c = 3926.85
+boiling_point_k = 4200.0
+critical_point = [
+    0.0,
+    0.0,
+]
+melting_point_c = 2075.85
+melting_point_k = 2349.0
+triple_point = [
+    0.0,
+    0.0,
+]
+
+[elements.boron.thermodynamics.thermal]
+debye_temperature_k = 1250.0
+heat_of_fusion_kj_mol = 50.2
+heat_of_vaporization_kj_mol = 508.0
+specific_heat_j_kg_k = 11087.0
+thermal_conductivity_w_m_k = 27.0
+thermal_expansion_k_minus1 = 0.0000083
+
+[elements.helium]
+ionization_energies_kj_mol = [
+    2372.3,
+    5250.5,
+]
+oxidation_states = [0]
+
+[elements.helium.abundance.distribution]
+earths_crust_ppm = 0.008
+human_body_ppm = 0.0
+ocean_ppm = 0.0072
+universe_ppm = 23000.0
+
+[elements.helium.crystal]
+space_group = "P63/mmc"
+symmetry = [
+    [
+    1.0,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    1.0,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    1.0,
+],
+]
+
+[elements.helium.crystal.lattice]
+angles_degrees = [
+    90.0,
+    90.0,
+    120.0,
+]
+constants_abc_angstrom = [
+    3.57,
+    3.57,
+    5.83,
+]
+lattice_system = 4
+
+[elements.helium.discovery.info]
+country_of_discovery = "France"
+discovered_by = "Pierre Janssen"
+discovery_year = 1868
+name_etymology = "Greek helios (sun)"
+
+[elements.helium.electrical]
+type = "insulator"
+
+[elements.helium.electrical.props]
+band_gap_ev = 24.6
+electrical_conductivity_s_m = 0.0
+electrical_resistivity_ohm_m = 1000000000000000.0
+
+[elements.helium.electronic.configuration]
+binding_energy_ev = 24.587
+electron_affinity_kj_mol = 0.0
+ground_state_configuration = "1s2"
+valence_electrons = 2
+work_function_ev = 0.0
+
+[elements.helium.electronic.electronegativity]
+allen = 0.0
+allred_rochow = 0.0
+average = 0.0
+mulliken = 0.0
+pauling = 0.0
+sanderson = 0.0
+
+[elements.helium.electronic.quantum]
+azimuthal_l = 0
+magnetic_ml = 0
+principal_n = 1
+spin_ms = 0.5
+
+[elements.helium.geometry]
+molar_volume_cm3 = 27.2
+
+[elements.helium.geometry.radii]
+atomic_pm = 31.0
+covalent_pm = 28.0
+van_der_waals_pm = 140.0
+
+[elements.helium.identity]
+cas_registry = "7440-59-7"
+
+[elements.helium.identity.core]
+_atomic_number = 2
+_atomic_weight = 4.0026
+_block = 1
+_category = 8
+_group = 8
+_name = "Helium"
+_period = 1
+_standard_state = 3
+_symbol = "He"
+
+[elements.helium.interaction]
+polarizability_angstrom3 = 0.205
+polarizability_tensor = [
+    [
+    0.205,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    0.205,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    0.205,
+],
+]
+
+[elements.helium.interaction.lennard_jones]
+epsilon_well_depth_k = 10.22
+lj_parameters = [
+    10.22,
+    2.551,
+]
+sigma_collision_diameter_angstrom = 2.551
+
+[elements.helium.interaction.surface]
+adsorption_energy_ev = 0.0
+surface_energy_j_m2 = 0.0
+work_function_ev = 0.0
+
+[[elements.helium.isotopes]]
+decay_energy_mev = 0.0
+decay_mode = 0
+half_life_seconds = 0.0
+is_stable = true
+mass_number = 3
+natural_abundance_percent = 0.000137
+neutron_cross_section_barns = 0.0
+
+[[elements.helium.isotopes]]
+decay_energy_mev = 0.0
+decay_mode = 0
+half_life_seconds = 0.0
+is_stable = true
+mass_number = 4
+natural_abundance_percent = 99.999863
+neutron_cross_section_barns = 0.0
+
+[elements.helium.magnetic.props]
+curie_temperature_k = 0.0
+magnetic_ordering = 1
+magnetic_susceptibility_volume = -0.0000000105
+
+[elements.helium.mechanical.bulk]
+bulk_moduli_gpa = [
+    0.0,
+    0.0,
+    0.0,
+]
+density_g_cm3 = 0.0001785
+mohs_hardness = 0.0
+poisson_ratio = 0.0
+speed_of_sound_m_s = 970.0
+
+[elements.helium.nuclear.properties]
+magnetic_moment_nuclear_magnetons = 0.0
+neutrons_stable = 2
+nuclear_spin = 0.0
+protons = 2
+quadrupole_moment_barns = 0.0
+
+[elements.helium.optical]
+color = "colorless"
+refractive_index = 1.000035
+
+[elements.helium.thermodynamics]
+boiling_point_celsius = [
+    -268.92999999999995,
+    2,
+]
+boiling_point_kelvin = [
+    4.22,
+    1,
+]
+
+[elements.helium.thermodynamics.phases]
+boiling_point_c = -268.92999999999995
+boiling_point_k = 4.22
+critical_point = [
+    5.19,
+    227600.0,
+]
+melting_point_c = -272.2
+melting_point_k = 0.95
+triple_point = [
+    2.177,
+    5043.0,
+]
+
+[elements.helium.thermodynamics.thermal]
+debye_temperature_k = 0.0
+heat_of_fusion_kj_mol = 0.0138
+heat_of_vaporization_kj_mol = 0.0829
+specific_heat_j_kg_k = 5193.0
+thermal_conductivity_w_m_k = 0.1513
+thermal_expansion_k_minus1 = 0.0
+
+[elements.hydrogen]
+ionization_energies_kj_mol = [1312.0]
+oxidation_states = [
+    -1,
+    0,
+    1,
+]
+
+[elements.hydrogen.abundance.distribution]
+earths_crust_ppm = 1400.0
+human_body_ppm = 100000.0
+ocean_ppm = 108000.0
+universe_ppm = 739000.0
+
+[elements.hydrogen.crystal]
+space_group = "P63/mmc"
+symmetry = [
+    [
+    1.0,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    1.0,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    1.0,
+],
+]
+
+[elements.hydrogen.crystal.lattice]
+angles_degrees = [
+    90.0,
+    90.0,
+    120.0,
+]
+constants_abc_angstrom = [
+    3.75,
+    3.75,
+    6.12,
+]
+lattice_system = 10
+
+[elements.hydrogen.discovery.info]
+country_of_discovery = "England"
+discovered_by = "Henry Cavendish"
+discovery_year = 1766
+name_etymology = "Greek hydro + genes"
+
+[elements.hydrogen.electrical]
+band_gap = [
+    13.6,
+    4,
+]
+band_gap_joules = [
+    0.0000000000000000021789602222399996,
+    1,
+]
+type = "insulator"
+
+[elements.hydrogen.electrical.props]
+band_gap_ev = 13.6
+electrical_conductivity_s_m = 0.0
+electrical_resistivity_ohm_m = 10000000000.0
+
+[elements.hydrogen.electronic.configuration]
+binding_energy_ev = 13.598
+electron_affinity_kj_mol = 72.8
+ground_state_configuration = "1s1"
+valence_electrons = 1
+work_function_ev = 4.5
+
+[elements.hydrogen.electronic.electronegativity]
+allen = 2.3
+allred_rochow = 2.2
+average = 2.242
+mulliken = 2.2
+pauling = 2.2
+sanderson = 2.31
+
+[elements.hydrogen.electronic.quantum]
+azimuthal_l = 0
+magnetic_ml = 0
+principal_n = 1
+spin_ms = 0.5
+
+[elements.hydrogen.geometry]
+atomic_radius_with_unit = [
+    53.0,
+    7,
+]
+covalent_radius_angstrom = [
+    0.30999999999999994,
+    6,
+]
+molar_volume_cm3 = 11.42
+
+[elements.hydrogen.geometry.radii]
+atomic_pm = 53.0
+covalent_pm = 31.0
+van_der_waals_pm = 120.0
+
+[elements.hydrogen.identity]
+cas_registry = "1333-74-0"
+
+[elements.hydrogen.identity.core]
+_atomic_number = 1
+_atomic_weight = 1.008
+_block = 1
+_category = 1
+_group = 1
+_name = "Hydrogen"
+_period = 1
+_standard_state = 3
+_symbol = "H"
+
+[elements.hydrogen.interaction]
+lj_epsilon = [
+    37.0,
+    1,
+]
+lj_sigma = [
+    2.928,
+    6,
+]
+polarizability_angstrom3 = 0.667
+polarizability_tensor = [
+    [
+    0.667,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    0.667,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    0.667,
+],
+]
+
+[elements.hydrogen.interaction.lennard_jones]
+epsilon_well_depth_k = 37.0
+lj_parameters = [
+    37.0,
+    2.928,
+]
+sigma_collision_diameter_angstrom = 2.928
+
+[elements.hydrogen.interaction.surface]
+adsorption_energy_ev = 0.45
+surface_energy_j_m2 = 0.0723
+work_function_ev = 4.5
+
+[[elements.hydrogen.ionic_radii]]
+coordination_number = 6
+oxidation_state = -1
+radius_pm = 208.0
+
+[[elements.hydrogen.ionic_radii]]
+coordination_number = 1
+oxidation_state = 1
+radius_pm = 0.0
+
+[[elements.hydrogen.isotopes]]
+decay_energy_mev = 0.0
+decay_mode = 0
+half_life_seconds = 0.0
+is_stable = true
+mass_number = 1
+natural_abundance_percent = 99.9885
+neutron_cross_section_barns = 0.3326
+
+[[elements.hydrogen.isotopes]]
+decay_energy_mev = 0.0
+decay_mode = 0
+half_life_seconds = 0.0
+is_stable = true
+mass_number = 2
+natural_abundance_percent = 0.0115
+neutron_cross_section_barns = 0.000519
+
+[[elements.hydrogen.isotopes]]
+decay_energy_mev = 0.0186
+decay_mode = 1
+half_life_seconds = 388800000.0
+is_stable = false
+mass_number = 3
+natural_abundance_percent = 0.0
+neutron_cross_section_barns = 0.0
+
+[elements.hydrogen.magnetic.props]
+curie_temperature_k = 0.0
+magnetic_ordering = 1
+magnetic_susceptibility_volume = -0.0000000022
+
+[elements.hydrogen.mechanical.bulk]
+bulk_moduli_gpa = [
+    0.0,
+    0.0,
+    0.0,
+]
+density_g_cm3 = 0.00008988
+mohs_hardness = 0.0
+poisson_ratio = 0.0
+speed_of_sound_m_s = 1310.0
+
+[elements.hydrogen.nuclear.properties]
+magnetic_moment_nuclear_magnetons = 2.79285
+neutrons_stable = 0
+nuclear_spin = 0.5
+protons = 1
+quadrupole_moment_barns = 0.0
+
+[elements.hydrogen.optical]
+color = "colorless"
+refractive_index = 1.000132
+
+[elements.hydrogen.photon_interactions.cross_sections]
+compton_scattering_barns = 0.209
+pair_production_barns = 0.0
+photoelectric_barns = 0.0
+total_barns = 0.209
+
+[elements.hydrogen.physics_calculated]
+lj_force_at_2a = 12889.623384144317
+reactivity_index = 0.0035506778566817302
+
+[elements.hydrogen.quantum]
+hyperfine_splitting = [
+    1420.405751768,
+    6,
+    0.0001,
+]
+ionization_energy = [
+    13.598,
+    4,
+]
+ionization_energy_kj_mol = [
+    0.0000000000000000000021786397869132,
+    2,
+]
+
+[elements.hydrogen.quantum.hyperfine]
+g_factor = 5.585694702
+hyperfine_splitting_mhz = 1420.405751768
+quadrupole_coupling_constant_mhz = 0.0
+
+[[elements.hydrogen.spectral_lines]]
+energy_ev = 1.889139006551882
+frequency_hz = 456791799481944.25
+intensity_relative = 100.0
+spectral_series = 2
+transition = "H-alpha"
+wavelength_nm = 656.3
+
+[[elements.hydrogen.spectral_lines]]
+energy_ev = 2.5505902694918743
+frequency_hz = 616730010285949.3
+intensity_relative = 50.0
+spectral_series = 2
+transition = "H-beta"
+wavelength_nm = 486.1
+
+[[elements.hydrogen.spectral_lines]]
+energy_ev = 10.196068503289474
+frequency_hz = 2465398503289473.5
+intensity_relative = 100.0
+spectral_series = 1
+transition = "Lyman-alpha"
+wavelength_nm = 121.6
+
+[elements.hydrogen.thermodynamics]
+boiling_point = [
+    20.28,
+    1,
+]
+melting_point = [
+    14.01,
+    1,
+]
+melting_point_celsius = [
+    -259.14,
+    2,
+]
+triple_point_pressure = [
+    7041.0,
+    1,
+]
+triple_point_pressure_atm = [
+    0.06948926720947446,
+    4,
+]
+triple_point_temp = [
+    13.8033,
+    1,
+]
+
+[elements.hydrogen.thermodynamics.phases]
+boiling_point_c = -252.86999999999998
+boiling_point_k = 20.28
+critical_point = [
+    32.97,
+    1293000.0,
+]
+melting_point_c = -259.14
+melting_point_k = 14.01
+triple_point = [
+    13.8033,
+    7041.0,
+]
+
+[elements.hydrogen.thermodynamics.thermal]
+debye_temperature_k = 110.0
+heat_of_fusion_kj_mol = 0.117
+heat_of_vaporization_kj_mol = 0.904
+specific_heat_j_kg_k = 14304.0
+thermal_conductivity_w_m_k = 0.1805
+thermal_expansion_k_minus1 = 0.0
+
+[elements.lithium]
+ionization_energies_kj_mol = [
+    520.2,
+    7298.1,
+    11815.0,
+]
+oxidation_states = [1]
+
+[elements.lithium.abundance.distribution]
+earths_crust_ppm = 20.0
+human_body_ppm = 0.00003
+ocean_ppm = 0.18
+universe_ppm = 6.0
+
+[elements.lithium.crystal]
+space_group = "Im-3m"
+symmetry = [
+    [
+    1.0,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    1.0,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    1.0,
+],
+]
+
+[elements.lithium.crystal.lattice]
+angles_degrees = [
+    90.0,
+    90.0,
+    90.0,
+]
+constants_abc_angstrom = [
+    3.51,
+    3.51,
+    3.51,
+]
+lattice_system = 3
+
+[elements.lithium.discovery.info]
+country_of_discovery = "Sweden"
+discovered_by = "Johan Arfwedson"
+discovery_year = 1817
+name_etymology = "Greek lithos (stone)"
+
+[elements.lithium.electrical]
+type = "conductor"
+
+[elements.lithium.electrical.props]
+band_gap_ev = 0.0
+electrical_conductivity_s_m = 10800000.0
+electrical_resistivity_ohm_m = 0.0000000928
+
+[elements.lithium.electronic.configuration]
+binding_energy_ev = 5.392
+electron_affinity_kj_mol = 59.6
+ground_state_configuration = "[He] 2s1"
+valence_electrons = 1
+work_function_ev = 2.9
+
+[elements.lithium.electronic.electronegativity]
+allen = 0.91
+allred_rochow = 0.97
+average = 1.0059999999999998
+mulliken = 1.28
+pauling = 0.98
+sanderson = 0.89
+
+[elements.lithium.electronic.quantum]
+azimuthal_l = 0
+magnetic_ml = 0
+principal_n = 2
+spin_ms = 0.5
+
+[elements.lithium.geometry]
+molar_volume_cm3 = 13.02
+
+[elements.lithium.geometry.radii]
+atomic_pm = 167.0
+covalent_pm = 128.0
+van_der_waals_pm = 182.0
+
+[elements.lithium.identity]
+cas_registry = "7439-93-2"
+
+[elements.lithium.identity.core]
+_atomic_number = 3
+_atomic_weight = 6.94
+_block = 1
+_category = 2
+_group = 2
+_name = "Lithium"
+_period = 1
+_standard_state = 1
+_symbol = "Li"
+
+[elements.lithium.interaction]
+polarizability_angstrom3 = 24.3
+polarizability_tensor = [
+    [
+    24.3,
+    0.0,
+    0.0,
+],
+    [
+    0.0,
+    24.3,
+    0.0,
+],
+    [
+    0.0,
+    0.0,
+    24.3,
+],
+]
+
+[elements.lithium.interaction.lennard_jones]
+epsilon_well_depth_k = 183.0
+lj_parameters = [
+    183.0,
+    2.451,
+]
+sigma_collision_diameter_angstrom = 2.451
+
+[elements.lithium.interaction.surface]
+adsorption_energy_ev = 1.67
+surface_energy_j_m2 = 0.398
+work_function_ev = 2.9
+
+[[elements.lithium.ionic_radii]]
+coordination_number = 6
+oxidation_state = 1
+radius_pm = 76.0
+
+[[elements.lithium.isotopes]]
+decay_energy_mev = 0.0
+decay_mode = 0
+half_life_seconds = 0.0
+is_stable = true
+mass_number = 6
+natural_abundance_percent = 7.59
+neutron_cross_section_barns = 0.94
+
+[[elements.lithium.isotopes]]
+decay_energy_mev = 0.0
+decay_mode = 0
+half_life_seconds = 0.0
+is_stable = true
+mass_number = 7
+natural_abundance_percent = 92.41
+neutron_cross_section_barns = 0.045
+
+[elements.lithium.magnetic.props]
+curie_temperature_k = 0.0
+magnetic_ordering = 2
+magnetic_susceptibility_volume = 0.000000014
+
+[elements.lithium.mechanical.bulk]
+bulk_moduli_gpa = [
+    4.9,
+    4.2,
+    11.0,
+]
+density_g_cm3 = 0.534
+mohs_hardness = 0.6
+poisson_ratio = 0.36
+speed_of_sound_m_s = 6000.0
+
+[elements.lithium.nuclear.properties]
+magnetic_moment_nuclear_magnetons = 3.2564
+neutrons_stable = 4
+nuclear_spin = 1.5
+protons = 3
+quadrupole_moment_barns = -0.0008
+
+[elements.lithium.optical]
+color = "silvery-white"
+refractive_index = 0.0
+
+[elements.lithium.physics_calculated]
+reactivity_index = 0.00425531914893617
+
+[elements.lithium.thermodynamics]
+melting_point = [
+    453.65,
+    1,
+]
+melting_point_celsius = [
+    180.5,
+    2,
+]
+
+[elements.lithium.thermodynamics.phases]
+boiling_point_c = 1329.85
+boiling_point_k = 1603.0
+critical_point = [
+    3220.0,
+    67000000.0,
+]
+melting_point_c = 180.5
+melting_point_k = 453.65
+triple_point = [
+    0.0,
+    0.0,
+]
+
+[elements.lithium.thermodynamics.thermal]
+debye_temperature_k = 344.0
+heat_of_fusion_kj_mol = 3.0
+heat_of_vaporization_kj_mol = 136.0
+specific_heat_j_kg_k = 24860.0
+thermal_conductivity_w_m_k = 84.8
+thermal_expansion_k_minus1 = 0.000046

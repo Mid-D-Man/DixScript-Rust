@@ -1,23 +1,23 @@
 // mdix-lsp/src/features/semantic_tokens.rs
 //!
-//! ## Approach B — real @CONFIG tokens
-//! @CONFIG tokens are now in the full token stream with SectionId::Config and
-//! accurate positions. No synthetic token emission needed. The classifier
-//! already handles SectionId::Config identifiers as TT_PROPERTY, SectionConfig
-//! as TT_KEYWORD, SwitchCase as TT_OPERATOR, and all value types naturally.
+//! ## Token coloring scheme
+//! - `TT_NAMESPACE`   — static object receivers (Math, DateTime, …) + table/group-array paths
+//! - `TT_FUNCTION`    — QuickFunc calls and static method calls (MOD_STATIC modifier)
+//! - `TT_METHOD`      — instance method calls (.toUpper(), .length(), .get(k) …)
+//! - `TT_PROPERTY`    — property access after dot (non-call), CONFIG keys, SECURITY keys
+//! - `TT_MACRO`       — DLM module names (DCompressor, DEncryptor, DAuditor)
+//! - `TT_DECORATOR`   — DLM subtype names (gzip, aes256, …)
 //!
-//! ## Function call coloring
-//! Any Identifier immediately followed by `(` (optionally with a `<type>`
-//! annotation between them) is classified as TT_FUNCTION regardless of section.
-//! Symbol-table registered functions are always TT_FUNCTION even without
-//! lookahead.
+//! ## Approach B — real @CONFIG tokens
+//! @CONFIG tokens are in the full token stream with SectionId::Config and
+//! accurate positions. No synthetic token emission needed.
 //!
 //! ## Long token
 //! `TokenType::Long(_)` → TT_NUMBER (same as Integer).
 //!
-//! ## DLM coloring
-//! Single `dlm_dot_seen` flag distinguishes module name (TT_MACRO) from
-//! subtype (TT_DECORATOR).
+//! ## Control-flow keyword colouring
+//! Any Identifier in @QUICKFUNCS immediately followed by ControlFlowColon
+//! (`log:`, `if:`, `chk:`, `elif:`) is classified as TT_KEYWORD.
 
 use std::collections::HashSet;
 use std::panic;
@@ -31,9 +31,16 @@ use crate::capabilities::{
     TT_KEYWORD, TT_STRING, TT_NUMBER, TT_OPERATOR, TT_VARIABLE,
     TT_FUNCTION, TT_TYPE, TT_ENUM_MEMBER, TT_COMMENT, TT_NAMESPACE,
     TT_PROPERTY, TT_PARAMETER, TT_MACRO, TT_DECORATOR,
-    TT_REGEXP, TT_EVENT,
-    MOD_DECLARATION, MOD_READONLY,
+    TT_REGEXP, TT_EVENT, TT_METHOD,
+    MOD_DECLARATION, MOD_READONLY, MOD_STATIC,
 };
+
+// ── Known built-in static objects (colour receiver as TT_NAMESPACE) ───────────
+// DLM modules (DCompressor/DEncryptor/DAuditor) are intentionally excluded here;
+// they are handled by the dedicated DLM section logic (TT_MACRO / TT_DECORATOR).
+const STATIC_OBJECT_NAMES: &[&str] = &[
+    "Math", "DateTime", "Array", "Random", "Guid", "IpAddress", "Enum", "Dix",
+];
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -76,23 +83,37 @@ fn provide_inner(doc: Option<&Document>) -> Option<SemanticTokensResult> {
 // ── Stateful classifier ───────────────────────────────────────────────────────
 
 struct ClassifierState<'a> {
+    // ── Enum body tracking ────────────────────────────────────────────────────
     in_enum_body:      bool,
     enum_brace_depth:  i32,
     seen_enum_name:    bool,
 
+    // ── QuickFunc declaration tracking ────────────────────────────────────────
     next_is_func_name: bool,
     in_param_list:     bool,
     param_paren_depth: i32,
 
+    // ── Import alias tracking ─────────────────────────────────────────────────
     next_is_alias:     bool,
 
+    // ── DLM dot tracking ──────────────────────────────────────────────────────
     dlm_dot_seen:      bool,
 
+    // ── Call-site detection ───────────────────────────────────────────────────
     is_call_site:      bool,
 
+    // ── Enum access dot tracking ──────────────────────────────────────────────
     next_is_enum_type:  bool,
     next_is_enum_dot:   bool,
     prev_was_enum_dot:  bool,
+
+    // ── Static / instance dot tracking (NEW) ──────────────────────────────────
+    /// Set when current identifier is a known static object name (Math, DateTime …).
+    next_is_static_obj:  bool,
+    /// Set when the preceding `.` followed a static object receiver.
+    after_static_dot:    bool,
+    /// Set when the preceding `.` followed a non-static, non-enum identifier.
+    after_instance_dot:  bool,
 
     enum_names: &'a HashSet<String>,
     func_names: &'a HashSet<String>,
@@ -113,34 +134,71 @@ impl<'a> ClassifierState<'a> {
             next_is_enum_type:   false,
             next_is_enum_dot:    false,
             prev_was_enum_dot:   false,
+            next_is_static_obj:  false,
+            after_static_dot:    false,
+            after_instance_dot:  false,
             enum_names,
             func_names,
         }
     }
 
     fn advance(&mut self, token: &Token, tokens: &[Token], index: usize) {
+        // Reset per-token flags.
         self.is_call_site      = false;
         self.next_is_enum_type = false;
 
+        // Reset enum-dot state for non-identifier, non-dot tokens so that
+        // `prev_was_enum_dot` doesn't linger across unrelated tokens.
         match &token.token_type {
             TokenType::Identifier(_) | TokenType::Symbol('.') => {}
             _ => {
-                self.next_is_enum_dot  = false;
-                self.prev_was_enum_dot = false;
+                // Preserve dot context across type-annotation tokens (<type>)
+                // but clear it for everything else.
+                match &token.token_type {
+                    TokenType::Symbol('<') | TokenType::Symbol('>')
+                    | TokenType::DataType(_) => {}
+                    _ => {
+                        // Clear after_static/instance dot on structural tokens
+                        // (arithmetic ops, commas, newlines, etc.) so stale
+                        // state from a previous line cannot bleed forward.
+                        match &token.token_type {
+                            TokenType::ArithmeticOp(_)
+                            | TokenType::ComparisonOp(_)
+                            | TokenType::LogicalOp(_)
+                            | TokenType::BitwiseOp(_)
+                            | TokenType::ArithmeticAssignOp(_)
+                            | TokenType::Arrow
+                            | TokenType::SwitchCase
+                            | TokenType::DoubleColon
+                            | TokenType::ControlFlowColon
+                            | TokenType::Symbol(';') => {
+                                self.after_static_dot   = false;
+                                self.after_instance_dot = false;
+                                self.next_is_static_obj = false;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
         }
 
+        // ── Identifier handling ───────────────────────────────────────────────
         if let TokenType::Identifier(name) = &token.token_type {
-            let in_symbol_table = self.func_names.contains(name.as_str());
+            // Track whether this identifier is a known static-object receiver.
+            self.next_is_static_obj = STATIC_OBJECT_NAMES.contains(&name.as_str());
 
+            // Call-site detection: is this identifier being called with `(`?
+            let in_symbol_table = self.func_names.contains(name.as_str());
             let lookahead_paren = if in_symbol_table {
                 true
             } else {
                 is_followed_by_paren(tokens, index + 1)
             };
-
+            // Never mark a function DECLARATION (after ~) as a call site.
             self.is_call_site = lookahead_paren && !self.next_is_func_name;
 
+            // Enum type detection.
             if self.enum_names.contains(name.as_str()) {
                 let has_dot = tokens.iter()
                     .skip(index + 1)
@@ -157,14 +215,29 @@ impl<'a> ClassifierState<'a> {
             }
         }
 
-        if let TokenType::Symbol('.') = &token.token_type {
-            if self.next_is_enum_dot {
-                self.prev_was_enum_dot = true;
-                self.next_is_enum_dot  = false;
-            }
-        }
-
+        // ── Structural token state transitions ────────────────────────────────
         match &token.token_type {
+
+            // ── Dot (.) — classify what follows as static/instance/enum method ─
+            TokenType::Symbol('.') => {
+                if self.next_is_enum_dot {
+                    // Enum field access: Status.ACTIVE
+                    self.prev_was_enum_dot  = true;
+                    self.next_is_enum_dot   = false;
+                    self.after_static_dot   = false;
+                    self.after_instance_dot = false;
+                } else {
+                    self.prev_was_enum_dot  = false;
+                    self.after_static_dot   = self.next_is_static_obj;
+                    self.after_instance_dot = !self.next_is_static_obj;
+                }
+                // Consumed — reset so the next identifier doesn't carry it.
+                self.next_is_static_obj = false;
+                // DLM subtype tracking.
+                self.dlm_dot_seen = true;
+            }
+
+            // ── @ENUMS brace tracking ─────────────────────────────────────────
             TokenType::SectionEnums => {
                 self.seen_enum_name = false;
             }
@@ -179,14 +252,14 @@ impl<'a> ClassifierState<'a> {
                     self.seen_enum_name = false;
                 }
             }
+
+            // ── QuickFunc declaration (~) ────────────────────────────────────
             TokenType::Symbol('~') => {
                 self.next_is_func_name = true;
                 self.in_param_list     = false;
                 self.param_paren_depth = 0;
             }
-            TokenType::Symbol('(')
-                if token.section == SectionId::QuickFuncs =>
-            {
+            TokenType::Symbol('(') if token.section == SectionId::QuickFuncs => {
                 if self.next_is_func_name {
                     self.in_param_list     = true;
                     self.param_paren_depth = 1;
@@ -194,9 +267,7 @@ impl<'a> ClassifierState<'a> {
                     self.param_paren_depth += 1;
                 }
             }
-            TokenType::Symbol(')')
-                if token.section == SectionId::QuickFuncs =>
-            {
+            TokenType::Symbol(')') if token.section == SectionId::QuickFuncs => {
                 if self.in_param_list {
                     self.param_paren_depth -= 1;
                     if self.param_paren_depth <= 0 {
@@ -205,6 +276,8 @@ impl<'a> ClassifierState<'a> {
                     }
                 }
             }
+
+            // ── Import alias ──────────────────────────────────────────────────
             TokenType::SectionImports => {
                 self.next_is_alias = true;
             }
@@ -218,37 +291,118 @@ impl<'a> ClassifierState<'a> {
             {
                 self.next_is_alias = true;
             }
+
+            // ── DLM section reset ─────────────────────────────────────────────
             TokenType::SectionDLM => {
                 self.dlm_dot_seen = false;
-            }
-            TokenType::Symbol('.') => {
-                self.dlm_dot_seen = true;
             }
             TokenType::Symbol(',') if token.section == SectionId::Dlm => {
                 self.dlm_dot_seen = false;
             }
+
             _ => {}
         }
     }
 
-    fn classify_identifier(&mut self, token: &Token) -> (u32, u32) {
+    /// Classify an `Identifier` token, consuming relevant state flags.
+    ///
+    /// Priority order:
+    ///  0. DLM section (absolute override for module/subtype colouring)
+    ///  1. Static-object receiver with lookahead dot  → TT_NAMESPACE
+    ///  2. Control-flow keyword with lookahead colon  → TT_KEYWORD
+    ///  3. Enum member after dot                      → TT_ENUM_MEMBER
+    ///  4. Enum type name                             → TT_TYPE
+    ///  5. After static dot                           → TT_FUNCTION+MOD_STATIC or TT_PROPERTY
+    ///  6. After instance dot                         → TT_METHOD or TT_PROPERTY
+    ///  7. Regular QuickFunc call site                → TT_FUNCTION
+    ///  8. Section-specific                           → various
+    fn classify_identifier(&mut self, token: &Token, tokens: &[Token], index: usize) -> (u32, u32) {
+
+        // ── 0. DLM section — absolute priority ────────────────────────────────
+        if token.section == SectionId::Dlm {
+            let result = if self.dlm_dot_seen {
+                (TT_DECORATOR, 0)
+            } else {
+                (TT_MACRO, MOD_DECLARATION)
+            };
+            self.dlm_dot_seen       = false;
+            self.after_static_dot   = false;
+            self.after_instance_dot = false;
+            return result;
+        }
+
+        // ── 1. Static-object receiver (lookahead for '.') ─────────────────────
+        if let TokenType::Identifier(name) = &token.token_type {
+            if STATIC_OBJECT_NAMES.contains(&name.as_str()) {
+                let next_is_dot = tokens.get(index + 1)
+                    .map(|t| matches!(t.token_type, TokenType::Symbol('.')))
+                    .unwrap_or(false);
+                if next_is_dot {
+                    return (TT_NAMESPACE, 0);
+                }
+            }
+        }
+
+        // ── 2. Control-flow keyword detection in QuickFuncs ───────────────────
+        // Handles `log:`, `if:`, `chk:`, `elif:` when tokenised as Identifier + ControlFlowColon.
+        if token.section == SectionId::QuickFuncs {
+            let next_is_colon = tokens.get(index + 1)
+                .map(|t| matches!(t.token_type, TokenType::ControlFlowColon))
+                .unwrap_or(false);
+            if next_is_colon {
+                return (TT_KEYWORD, 0);
+            }
+        }
+
+        // ── 3. Enum member after dot (Status.ACTIVE) ──────────────────────────
         if self.prev_was_enum_dot {
-            self.prev_was_enum_dot = false;
+            self.prev_was_enum_dot  = false;
+            self.after_instance_dot = false;
+            self.after_static_dot   = false;
             return (TT_ENUM_MEMBER, 0);
         }
 
+        // ── 4. Enum type name (Status in Status.ACTIVE) ───────────────────────
         if self.next_is_enum_type {
+            // next_is_enum_type was reset to false at start of advance(); it is
+            // re-set within advance() for enum-name identifiers and consumed here.
             return (TT_TYPE, 0);
         }
 
+        // ── 5. After static-object dot (Math.sqrt, DateTime.now) ─────────────
+        if self.after_static_dot {
+            let result = if self.is_call_site {
+                (TT_FUNCTION, MOD_STATIC)
+            } else {
+                (TT_PROPERTY, MOD_STATIC)
+            };
+            self.after_static_dot   = false;
+            self.after_instance_dot = false;
+            return result;
+        }
+
+        // ── 6. After instance dot (myStr.toUpper, arr.length) ────────────────
+        if self.after_instance_dot {
+            let result = if self.is_call_site {
+                (TT_METHOD, 0)
+            } else {
+                (TT_PROPERTY, 0)
+            };
+            self.after_instance_dot = false;
+            return result;
+        }
+
+        // ── 7. Regular call site (direct QuickFunc call) ──────────────────────
         if self.is_call_site {
             return (TT_FUNCTION, 0);
         }
 
+        // ── 8. Section-specific classification ───────────────────────────────
         match token.section {
-            // @CONFIG keys — real tokens now, classified as properties.
+            // @CONFIG keys: real tokens with SectionId::Config, colour as properties.
             SectionId::Config => (TT_PROPERTY, 0),
 
+            // @ENUMS: enum type declaration names and field values.
             SectionId::Enums => {
                 if self.in_enum_body {
                     (TT_ENUM_MEMBER, MOD_DECLARATION)
@@ -260,6 +414,7 @@ impl<'a> ClassifierState<'a> {
                 }
             }
 
+            // @QUICKFUNCS: function names, parameters, local variables.
             SectionId::QuickFuncs => {
                 if self.next_is_func_name {
                     self.next_is_func_name = false;
@@ -271,6 +426,7 @@ impl<'a> ClassifierState<'a> {
                 }
             }
 
+            // @IMPORTS: alias declarations and path tokens.
             SectionId::Imports => {
                 if self.next_is_alias {
                     self.next_is_alias = false;
@@ -280,19 +436,13 @@ impl<'a> ClassifierState<'a> {
                 }
             }
 
-            SectionId::Dlm => {
-                let result = if self.dlm_dot_seen {
-                    (TT_DECORATOR, 0)
-                } else {
-                    (TT_MACRO, MOD_DECLARATION)
-                };
-                self.dlm_dot_seen = false;
-                result
-            }
+            // @DATA: data variable identifiers.
+            SectionId::Data => (TT_VARIABLE, 0),
 
-            SectionId::Data     => (TT_VARIABLE, 0),
+            // @SECURITY: security block keys.
             SectionId::Security => (TT_PROPERTY, 0),
 
+            // No section (document-level or unknown).
             _ => {
                 if self.dlm_dot_seen {
                     self.dlm_dot_seen = false;
@@ -316,6 +466,7 @@ fn is_followed_by_paren(tokens: &[Token], start: usize) -> bool {
             TokenType::Symbol('>') => { angle_depth -= 1; i += 1; }
             _ if angle_depth > 0  => { i += 1; }
             TokenType::Symbol('(') => return true,
+            // scope arrow before param list: ~funcName => ScopeA, ScopeB(params)
             TokenType::Arrow => {
                 i += 1;
                 while i < tokens.len() {
@@ -346,8 +497,6 @@ fn encode_tokens(
     let mut prev_col:  u32 = 0;
     let mut state = ClassifierState::new(enum_names, func_names);
 
-    // doc.tokens is the full stream including @CONFIG tokens with real positions.
-    // No synthetic emission needed — the loop below handles everything.
     for (index, token) in doc.tokens.iter().enumerate() {
         state.advance(token, &doc.tokens, index);
 
@@ -356,7 +505,7 @@ fn encode_tokens(
             continue;
         }
 
-        let (token_type, modifiers) = match classify(token, &mut state) {
+        let (token_type, modifiers) = match classify(token, &mut state, &doc.tokens, index) {
             Some(t) => t,
             None    => continue,
         };
@@ -460,8 +609,14 @@ fn push_raw(
 
 // ── Per-token classification ──────────────────────────────────────────────────
 
-fn classify(token: &Token, state: &mut ClassifierState<'_>) -> Option<(u32, u32)> {
+fn classify(
+    token: &Token,
+    state: &mut ClassifierState<'_>,
+    tokens: &[Token],
+    index: usize,
+) -> Option<(u32, u32)> {
     match &token.token_type {
+        // ── Section keywords ──────────────────────────────────────────────────
         TokenType::SectionConfig
         | TokenType::SectionImports
         | TokenType::SectionDLM
@@ -470,17 +625,21 @@ fn classify(token: &Token, state: &mut ClassifierState<'_>) -> Option<(u32, u32)
         | TokenType::SectionData
         | TokenType::SectionSecurity     => Some((TT_KEYWORD, MOD_READONLY)),
 
+        // ── Language keywords ─────────────────────────────────────────────────
         TokenType::Keyword(_)            => Some((TT_KEYWORD, 0)),
         TokenType::Bool(_)               => Some((TT_KEYWORD, MOD_READONLY)),
         TokenType::DataType(_)           => Some((TT_TYPE, 0)),
 
+        // ── String literals ───────────────────────────────────────────────────
         TokenType::String(_)
         | TokenType::StringSingle(_)     => Some((TT_STRING, 0)),
         TokenType::InterpolatedString(_) => Some((TT_STRING, 0)),
 
+        // ── Temporal values ───────────────────────────────────────────────────
         TokenType::Date(_)
         | TokenType::Timestamp(_)        => Some((TT_EVENT, 0)),
 
+        // ── Numeric literals ──────────────────────────────────────────────────
         TokenType::Integer(_)
         | TokenType::Long(_)
         | TokenType::Float(_)
@@ -489,6 +648,7 @@ fn classify(token: &Token, state: &mut ClassifierState<'_>) -> Option<(u32, u32)
         TokenType::HexLiteral(_)           => Some((TT_NUMBER, 0)),
         TokenType::HexColor(_)             => Some((TT_NUMBER, MOD_READONLY)),
 
+        // ── Operators ─────────────────────────────────────────────────────────
         TokenType::ArithmeticOp(_)
         | TokenType::ArithmeticAssignOp(_)
         | TokenType::ComparisonOp(_)
@@ -503,23 +663,36 @@ fn classify(token: &Token, state: &mut ClassifierState<'_>) -> Option<(u32, u32)
 
         TokenType::Symbol('~')           => Some((TT_OPERATOR, 0)),
 
+        // ── Comments ──────────────────────────────────────────────────────────
         TokenType::Comment(_)            => Some((TT_COMMENT, 0)),
 
+        // ── Enum access (pre-analysed by tokeniser) ───────────────────────────
         TokenType::EnumAccess { .. }     => Some((TT_ENUM_MEMBER, 0)),
 
-        TokenType::TablePath(_)          => Some((TT_PROPERTY, 0)),
+        // ── Table/group-array paths — colour as NAMESPACE, not plain property ─
+        // This gives `server:` and `enemies::` paths a distinct teal/purple tone
+        // that visually separates them from regular identifiers and properties.
+        TokenType::TablePath(_)          => Some((TT_NAMESPACE, MOD_DECLARATION)),
 
+        // ── Pre-analysed static/builtin calls ─────────────────────────────────
+        // StaticFunction tokens: Dix.Log, Math.sqrt emitted by tokeniser.
         TokenType::StaticFunction { .. } if token.section == SectionId::Dlm
                                          => Some((TT_MACRO, 0)),
-        TokenType::StaticFunction { .. } => Some((TT_FUNCTION, 0)),
-        TokenType::DixFunction(_)        => Some((TT_FUNCTION, 0)),
-        TokenType::BuiltinMethod(_)      => Some((TT_FUNCTION, 0)),
+        TokenType::StaticFunction { .. } => Some((TT_FUNCTION, MOD_STATIC)),  // was plain FUNCTION
 
+        // Dix.Something — always static.
+        TokenType::DixFunction(_)        => Some((TT_FUNCTION, MOD_STATIC)),   // was plain FUNCTION
+
+        // Built-in instance methods (e.g. .length, .contains) emitted pre-analysed.
+        TokenType::BuiltinMethod(_)      => Some((TT_METHOD, 0)),              // was plain FUNCTION
+
+        // ── Prefixed constructors ─────────────────────────────────────────────
         TokenType::RegexConstructor(_)   => Some((TT_REGEXP, 0)),
         TokenType::BlobConstructor(_)
         | TokenType::TupleConstructor(_)
         | TokenType::PrefixedConstructor { .. } => Some((TT_KEYWORD, 0)),
 
+        // ── Object / config access paths ──────────────────────────────────────
         TokenType::ObjectAccess(_) => {
             if token.section == SectionId::Dlm {
                 Some((TT_MACRO, 0))
@@ -528,10 +701,16 @@ fn classify(token: &Token, state: &mut ClassifierState<'_>) -> Option<(u32, u32)
             }
         }
 
-        TokenType::Identifier(_)       => Some(state.classify_identifier(token)),
+        // ── Plain identifiers — full stateful classification ───────────────────
+        TokenType::Identifier(_) => Some(state.classify_identifier(token, tokens, index)),
+
+        // ── Scope declarations (@QUICKFUNCS => ScopeA, ScopeB) ───────────────
         TokenType::ScopeDeclaration(_) => Some((TT_TYPE, 0)),
+
+        // ── Config access paths ────────────────────────────────────────────────
         TokenType::ConfigAccess(_)     => Some((TT_PROPERTY, 0)),
 
+        // ── Ignored / structural ───────────────────────────────────────────────
         TokenType::ParseContext(_)
         | TokenType::Symbol(_)
         | TokenType::EndOfFile
@@ -572,4 +751,4 @@ fn token_length(token: &Token) -> usize {
             if v.is_empty() { 1 } else { v.len() }
         }
     }
-}
+            }

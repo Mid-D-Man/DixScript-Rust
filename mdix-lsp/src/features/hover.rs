@@ -181,11 +181,36 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
 }
 
 // ── Instance / static / imported-namespace method hover ───────────────────────
+// mdix-lsp/src/features/hover.rs — add this helper function (put before hover_after_dot)
+
+/// Look up a builtin instance method in the typed signature table.
+/// Returns a fully-formatted hover string with parameter types and an example.
+fn hover_instance_method_from_sigs(type_name: &str, method_name: &str) -> Option<String> {
+    INSTANCE_METHOD_SIGS.iter()
+        .find(|(t, m, _, _, _)| *t == type_name && *m == method_name)
+        .map(|(_, method, params, ret, example)| {
+            let sig = if params.is_empty() {
+                format!("{}() → {}", method, ret)
+            } else {
+                format!("{}({}) → {}", method, params, ret)
+            };
+            format!(
+                "**`{sig}`** — `<{type_}>` instance method\n\n**Returns:** `<{ret}>`\n\n```mdix\n// Example:\n{example}\n```",
+                sig    = sig,
+                type_  = type_name,
+                ret    = ret,
+                example = example,
+            )
+        })
+}
+
+
+// mdix-lsp/src/features/hover.rs — replace hover_after_dot function in full
 
 fn hover_after_dot(
-    doc: &Document,
+    doc:         &Document,
     method_name: &str,
-    section: SectionId,
+    section:     SectionId,
     token_index: usize,
 ) -> Option<String> {
     if token_index < 2 {
@@ -199,26 +224,28 @@ fn hover_after_dot(
 
     let receiver = doc.tokens.get(token_index - 2)?;
 
-    // ── Imported namespace member (highest priority) ───────────────────────────
+    // ── Priority 1: imported namespace member ─────────────────────────────────
     if let TokenType::Identifier(recv_name) = &receiver.token_type {
         if let Some(content) = hover_imported_namespace_member(doc, recv_name, method_name) {
             return Some(content);
         }
     }
 
-    // ── Static object method ───────────────────────────────────────────────────
+    // ── Priority 2: static object method ─────────────────────────────────────
     if let TokenType::Identifier(recv_name) = &receiver.token_type {
         static_object_registry::initialize_static_registry();
         if static_object_registry::has_static_object(recv_name) {
+            // Try the detailed static sig table first
             if let Some(content) = hover_static_method(recv_name, method_name) {
                 return Some(content);
             }
+            // Fall back to registry info with param count
             if let Some(info) = static_object_registry::get_method_info(recv_name, method_name) {
-                let param_count = info.parameter_count.max(0) as usize;
-                let params_str = if param_count == 0 {
+                let pc = info.parameter_count.max(0) as usize;
+                let params_str = if pc == 0 {
                     String::new()
                 } else {
-                    (1..=param_count).map(|i| format!("arg{}", i)).collect::<Vec<_>>().join(", ")
+                    (1..=pc).map(|i| format!("arg{}", i)).collect::<Vec<_>>().join(", ")
                 };
                 return Some(format!(
                     "**`{obj}.{method}({params})`** — static method\n\n{desc}\n\n**Returns:** `<{ret}>`",
@@ -233,21 +260,28 @@ fn hover_after_dot(
         }
     }
 
-    // ── Instance method ────────────────────────────────────────────────────────
+    // ── Priority 3: instance method ───────────────────────────────────────────
     let receiver_type = infer_receiver_dix_type(doc, receiver, section)?;
+    let type_name = receiver_type.get_type_name();
 
+    // Try typed signature table first (shows param names and types)
+    if let Some(content) = hover_instance_method_from_sigs(type_name, method_name) {
+        return Some(content);
+    }
+
+    // Fall back to registry-based hover
     instance_method_registry::initialize();
     let method = instance_method_registry::get_instance_method(receiver_type, method_name)?;
 
-    let type_name = receiver_type.get_type_name();
-    let param_count = (method.parameter_count() as i32 - 1).max(0) as usize;
-    let params_str = if param_count == 0 {
+    // Build parameter string (count-based fallback)
+    let pc = (method.parameter_count() as i32 - 1).max(0) as usize;
+    let params_str = if pc == 0 {
         String::new()
     } else {
-        (1..=param_count).map(|i| format!("arg{}", i)).collect::<Vec<_>>().join(", ")
+        (1..=pc).map(|i| format!("arg{}", i)).collect::<Vec<_>>().join(", ")
     };
 
-    // For element-returning methods on typed collections, try to get element type
+    // Determine return type string (enhanced for typed collections)
     let ret_type_str = {
         let recv_full_dt = if let TokenType::Identifier(recv_name) = &receiver.token_type {
             infer_identifier_full_data_type(doc, recv_name, section)
@@ -259,14 +293,12 @@ fn hover_after_dot(
 
         match recv_full_dt {
             Some(DataType::TypedArray(elem))
-                if matches!(method_ret, DixType::Any)
-                    && ARRAY_ELEMENT_METHODS.contains(&method_name) =>
+                if matches!(method_ret, DixType::Any) && ARRAY_ELEMENT_METHODS.contains(&method_name) =>
             {
                 format!("{} *(element type)*", elem)
             }
             Some(DataType::TypedTuple(slots))
-                if matches!(method_ret, DixType::Any)
-                    && TUPLE_ELEMENT_METHODS.contains(&method_name) =>
+                if matches!(method_ret, DixType::Any) && TUPLE_ELEMENT_METHODS.contains(&method_name) =>
             {
                 let types: Vec<String> =
                     slots.iter().filter_map(|&s| s).map(|e| format!("{}", e)).collect();
@@ -281,14 +313,14 @@ fn hover_after_dot(
     };
 
     Some(format!(
-        "**`{method}({params})`** — `{type_}` instance method\n\n{desc}\n\n**Returns:** `<{ret}>`",
+        "**`{method}({params})`** — `<{type_}>` instance method\n\n{desc}\n\n**Returns:** `<{ret}>`",
         method = method_name,
         params = params_str,
-        type_ = type_name,
-        desc = method.description(),
-        ret = ret_type_str,
+        type_  = type_name,
+        desc   = method.description(),
+        ret    = ret_type_str,
     ))
-}
+                    }
 
 /// Methods that return the element type of an array.
 const ARRAY_ELEMENT_METHODS: &[&str] = &["first", "last", "get", "at", "pop", "random"];

@@ -7,11 +7,11 @@ pub const TT_STRING:      u32 = 1;
 pub const TT_NUMBER:      u32 = 2;
 pub const TT_OPERATOR:    u32 = 3;
 pub const TT_VARIABLE:    u32 = 4;
-pub const TT_FUNCTION:    u32 = 5;
+pub const TT_FUNCTION:    u32 = 5;  // QuickFunc calls & static method calls
 pub const TT_TYPE:        u32 = 6;
 pub const TT_ENUM_MEMBER: u32 = 7;
 pub const TT_COMMENT:     u32 = 8;
-pub const TT_NAMESPACE:   u32 = 9;
+pub const TT_NAMESPACE:   u32 = 9;  // static object receivers (Math, DateTime) + table paths
 pub const TT_PROPERTY:    u32 = 10;
 pub const TT_PARAMETER:   u32 = 11;
 pub const TT_MACRO:       u32 = 12;
@@ -19,34 +19,39 @@ pub const TT_DECORATOR:   u32 = 13;
 // index 14 = STRUCT reserved for legend stability
 pub const TT_REGEXP:      u32 = 15;
 pub const TT_EVENT:       u32 = 16;
+pub const TT_METHOD:      u32 = 17;  // ← NEW: instance method calls (.toUpper(), .push() etc.)
 
 pub const MOD_DECLARATION: u32 = 1 << 0;
 pub const MOD_READONLY:    u32 = 1 << 1;
+pub const MOD_DEPRECATED:  u32 = 1 << 2;
+pub const MOD_STATIC:      u32 = 1 << 3;  // ← NEW: static method calls (Math.sqrt, DateTime.now)
 
 pub const TOKEN_TYPES: &[SemanticTokenType] = &[
-    SemanticTokenType::KEYWORD,
-    SemanticTokenType::STRING,
-    SemanticTokenType::NUMBER,
-    SemanticTokenType::OPERATOR,
-    SemanticTokenType::VARIABLE,
-    SemanticTokenType::FUNCTION,
-    SemanticTokenType::TYPE,
-    SemanticTokenType::ENUM_MEMBER,
-    SemanticTokenType::COMMENT,
-    SemanticTokenType::NAMESPACE,
-    SemanticTokenType::PROPERTY,
-    SemanticTokenType::PARAMETER,
-    SemanticTokenType::MACRO,
-    SemanticTokenType::DECORATOR,
-    SemanticTokenType::STRUCT,   // index 14 — legend stability
-    SemanticTokenType::REGEXP,
-    SemanticTokenType::EVENT,
+    SemanticTokenType::KEYWORD,     // 0
+    SemanticTokenType::STRING,      // 1
+    SemanticTokenType::NUMBER,      // 2
+    SemanticTokenType::OPERATOR,    // 3
+    SemanticTokenType::VARIABLE,    // 4
+    SemanticTokenType::FUNCTION,    // 5
+    SemanticTokenType::TYPE,        // 6
+    SemanticTokenType::ENUM_MEMBER, // 7
+    SemanticTokenType::COMMENT,     // 8
+    SemanticTokenType::NAMESPACE,   // 9
+    SemanticTokenType::PROPERTY,    // 10
+    SemanticTokenType::PARAMETER,   // 11
+    SemanticTokenType::MACRO,       // 12
+    SemanticTokenType::DECORATOR,   // 13
+    SemanticTokenType::STRUCT,      // 14 — reserved for legend stability
+    SemanticTokenType::REGEXP,      // 15
+    SemanticTokenType::EVENT,       // 16
+    SemanticTokenType::METHOD,      // 17 ← NEW: instance methods
 ];
 
 pub const TOKEN_MODIFIERS: &[SemanticTokenModifier] = &[
-    SemanticTokenModifier::DECLARATION,
-    SemanticTokenModifier::READONLY,
-    SemanticTokenModifier::DEPRECATED,
+    SemanticTokenModifier::DECLARATION, // 0 = 1<<0
+    SemanticTokenModifier::READONLY,    // 1 = 1<<1
+    SemanticTokenModifier::DEPRECATED,  // 2 = 1<<2
+    SemanticTokenModifier::STATIC,      // 3 = 1<<3  ← NEW
 ];
 
 pub fn semantic_token_legend() -> SemanticTokensLegend {
@@ -58,7 +63,6 @@ pub fn semantic_token_legend() -> SemanticTokensLegend {
 
 pub fn server_capabilities() -> ServerCapabilities {
     ServerCapabilities {
-        // ── Document sync ─────────────────────────────────────────────────────
         text_document_sync: Some(TextDocumentSyncCapability::Options(
             TextDocumentSyncOptions {
                 open_close: Some(true),
@@ -70,7 +74,6 @@ pub fn server_capabilities() -> ServerCapabilities {
             },
         )),
 
-        // ── Language intelligence ─────────────────────────────────────────────
         completion_provider: Some(CompletionOptions {
             resolve_provider:   Some(false),
             trigger_characters: Some(vec![
@@ -78,7 +81,6 @@ pub fn server_capabilities() -> ServerCapabilities {
                 ".".to_string(),
                 "<".to_string(),
                 "~".to_string(),
-                // Bracket auto-close triggers
                 "{".to_string(),
                 "(".to_string(),
                 "[".to_string(),
@@ -97,12 +99,10 @@ pub fn server_capabilities() -> ServerCapabilities {
         hover_provider:      Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
 
-        // ── Symbol navigation ─────────────────────────────────────────────────
         references_provider:         Some(OneOf::Left(true)),
         document_highlight_provider: Some(OneOf::Left(true)),
         document_symbol_provider:    Some(OneOf::Left(true)),
 
-        // ── Editing ───────────────────────────────────────────────────────────
         rename_provider: Some(OneOf::Right(RenameOptions {
             prepare_provider: Some(true),
             work_done_progress_options: WorkDoneProgressOptions {
@@ -112,16 +112,13 @@ pub fn server_capabilities() -> ServerCapabilities {
 
         code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
 
-        // ── Formatting ────────────────────────────────────────────────────────
         document_formatting_provider: Some(OneOf::Left(true)),
 
-        // ── On-type formatting: add closing brace after '{' + Enter ───────────
         document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
             first_trigger_character: "\n".to_string(),
             more_trigger_character:  None,
         }),
 
-        // ── Play button / commands ────────────────────────────────────────────
         code_lens_provider: Some(CodeLensOptions {
             resolve_provider: Some(false),
         }),
@@ -133,7 +130,6 @@ pub fn server_capabilities() -> ServerCapabilities {
             },
         }),
 
-        // ── Visual enrichment ─────────────────────────────────────────────────
         semantic_tokens_provider: Some(
             SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
                 legend: semantic_token_legend(),
@@ -151,4 +147,4 @@ pub fn server_capabilities() -> ServerCapabilities {
 
         ..Default::default()
     }
-}
+    }

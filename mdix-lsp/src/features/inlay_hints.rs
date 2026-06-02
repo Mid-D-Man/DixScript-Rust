@@ -609,7 +609,37 @@ fn sniff_blob_category(b: &[u8]) -> &'static str {
     }
     "data"
 }
+// mdix-lsp/src/features/inlay_hints.rs — add this new helper function
+// (place near collect_qf_var_hints)
 
+/// Walk an object literal expression and register each property's type in `running`
+/// as `"varname.property"` so that subsequent `obj.prop` PropertyAccess expressions
+/// in the same scope can get type hints.
+fn populate_object_property_types(
+    variable_name: &str,
+    value_expr:    &Expression,
+    ctx:           &InferCtx<'_>,
+    running:       &mut HashMap<String, Option<DataType>>,
+) {
+    // We only handle direct object literals: `let x = { key = val, ... }`
+    let obj_value = match value_expr {
+        Expression::Value { value, .. } => value,
+        _ => return,
+    };
+
+    let properties = match obj_value {
+        Value::Object { properties, .. } => properties,
+        _ => return,
+    };
+
+    for prop in properties {
+        // Build a fresh context for this property so it sees previously-set props
+        let prop_ctx = InferCtx::new(ctx.qf_return_types, running, ctx.symbol_table);
+        let prop_dt  = build_typed_dt_from_value(&prop.value, &prop_ctx);
+        // Register as "varname.property" → type
+        running.insert(format!("{}.{}", variable_name, prop.key), prop_dt);
+    }
+        }
 // ── QuickFunc variable-declaration hints — accumulating context ───────────────
 //
 // KEY FIX: unlike the old version that took a fixed `&InferCtx`, this version
@@ -637,52 +667,66 @@ fn collect_qf_var_hints(
         let ctx = InferCtx::new(qf_return_types, &running, symbol_table);
 
         match stmt {
-            QuickFuncStatement::VariableDeclaration {
-                variable_name,
-                data_type,
-                value,
-                position,
-                ..
-            } => {
-                if data_type.is_none() {
-                    // --- Infer the full typed DataType ---
-                    let typed_dt = build_typed_dt(value, &ctx);
+            // mdix-lsp/src/features/inlay_hints.rs
+// Replace the VariableDeclaration arm inside collect_qf_var_hints with this:
 
-                    // --- Choose the hint label ---
-                    let label = match &typed_dt {
-                        Some(dt) => format_data_type_as_hint(*dt, collection_elem_count(value)),
-                        None     => infer_expr(value, &ctx)
-                            .unwrap_or_else(|| "<any>".to_string()),
-                    };
+QuickFuncStatement::VariableDeclaration {
+    variable_name,
+    data_type,
+    value,
+    position,
+    ..
+} => {
+    if data_type.is_none() {
+        // Build ctx from current running map
+        let ctx = InferCtx::new(qf_return_types, &running, symbol_table);
 
-                    // --- Emit the hint ---
-                    if position.is_valid() {
-                        let target_line = position.line;
-                        let hint_line   = target_line.saturating_sub(1) as u32;
+        // Infer the full typed DataType (TypedTuple / TypedArray aware)
+        let typed_dt = build_typed_dt(value, &ctx);
 
-                        let col = tokens
-                            .iter()
-                            .filter(|t| t.line == target_line)
-                            .find(|t| {
-                                matches!(&t.token_type,
-                                    TokenType::Identifier(id)
-                                        if id.as_str() == variable_name.as_str())
-                            })
-                            .map(|tok| (tok.column.saturating_sub(1) + variable_name.len()) as u32)
-                            .unwrap_or_else(|| {
-                                (position.column.saturating_sub(1) + 4 + variable_name.len()) as u32
-                            });
+        // Choose the hint label
+        let label = match &typed_dt {
+            Some(dt) => format_data_type_as_hint(*dt, collection_elem_count(value)),
+            None     => infer_expr(value, &ctx).unwrap_or_else(|| "<any>".to_string()),
+        };
 
-                        hints.push(make_hint(hint_line, col, label));
-                    }
+        // Emit the inlay hint
+        if position.is_valid() {
+            let target_line = position.line;
+            let hint_line   = target_line.saturating_sub(1) as u32;
 
-                    // --- Store inferred type in running context ---
-                    running.insert(variable_name.clone(), typed_dt);
-                } else {
-                    // Annotated — no hint, but DO update context with the declared type
-                    running.insert(variable_name.clone(), *data_type);
-                }
-            }
+            let col = tokens
+                .iter()
+                .filter(|t| t.line == target_line)
+                .find(|t| {
+                    matches!(&t.token_type,
+                        TokenType::Identifier(id) if id.as_str() == variable_name.as_str())
+                })
+                .map(|tok| (tok.column.saturating_sub(1) + variable_name.len()) as u32)
+                .unwrap_or_else(|| {
+                    (position.column.saturating_sub(1) + 4 + variable_name.len()) as u32
+                });
+
+            hints.push(make_hint(hint_line, col, label));
+        }
+
+        // Store inferred type in running context for subsequent statements
+        running.insert(variable_name.clone(), typed_dt);
+
+        // NEW: populate object property types so `player.hp` etc. get hints
+        // Rebuild ctx with the latest running (now includes the variable itself)
+        let ctx2 = InferCtx::new(qf_return_types, &running, symbol_table);
+        populate_object_property_types(variable_name, value, &ctx2, &mut running);
+
+    } else {
+        // Annotated — no hint needed, but still update context
+        running.insert(variable_name.clone(), *data_type);
+
+        // Also propagate object property types for annotated object variables
+        let ctx = InferCtx::new(qf_return_types, &running, symbol_table);
+        populate_object_property_types(variable_name, value, &ctx, &mut running);
+    }
+}
 
             // For branching statements, recurse with a CLONE of the current
             // running context so variables declared inside a branch don't leak
@@ -860,13 +904,38 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
             instance_return(recv.as_deref(), method)
         }
 
-        Expression::PropertyAccess { object, property, .. } => {
-            // visitor fast-path (precise_dt) handles symbol-table paths and
-            // typed-collection element access.  If that returned nothing, try
-            // registry instance method lookup as a fallback.
-            let recv = infer_expr(object, ctx);
-            instance_return(recv.as_deref(), property)
+        // mdix-lsp/src/features/inlay_hints.rs
+// Replace ONLY the PropertyAccess arm inside the infer_expr match:
+
+Expression::PropertyAccess { object, property, .. } => {
+    // ── Fast path: TypeInferenceVisitor (handles typed collections, symbol table) ──
+    if let Some(dt) = precise_dt(expr, ctx) {
+        return match dt {
+            // Object and Any are too vague — fall through to property lookup
+            DataType::Object | DataType::Any => None,
+            dt => Some(format_data_type_as_hint(dt, None)),
+        };
+    }
+
+    // ── Object property path lookup ───────────────────────────────────────────
+    // After populate_object_property_types runs, `running` contains entries like
+    // "player.hp" → Some(Int), so we can resolve `player.hp` here.
+    if let Expression::Identifier { name, .. } = object.as_ref() {
+        let path = format!("{}.{}", name, property);
+        if let Some(&Some(dt)) = ctx.param_types.get(path.as_str()) {
+            return Some(format_data_type_as_hint(dt, None));
         }
+        // Also try nested: "a.b.c" where "a.b" is in param_types as an object
+        // (one level of auto-chaining for common cases)
+        if let Some(&Some(DataType::Object)) = ctx.param_types.get(name.as_str()) {
+            // We have the parent as Object but don't know property types — skip
+        }
+    }
+
+    // ── Fall back: instance method lookup (e.g. arr.length, str.toUpper) ──────
+    let recv = infer_expr(object, ctx);
+    instance_return(recv.as_deref(), property)
+}
 
         Expression::IndexAccess { .. } => None,
 

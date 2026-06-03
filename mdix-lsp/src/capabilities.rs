@@ -7,11 +7,11 @@ pub const TT_STRING:      u32 = 1;
 pub const TT_NUMBER:      u32 = 2;
 pub const TT_OPERATOR:    u32 = 3;
 pub const TT_VARIABLE:    u32 = 4;
-pub const TT_FUNCTION:    u32 = 5;  // QuickFunc calls & static method calls
+pub const TT_FUNCTION:    u32 = 5;  // QuickFunc calls, static method calls, table/group-array paths
 pub const TT_TYPE:        u32 = 6;
 pub const TT_ENUM_MEMBER: u32 = 7;
 pub const TT_COMMENT:     u32 = 8;
-pub const TT_NAMESPACE:   u32 = 9;  // static object receivers (Math, DateTime) + table paths
+pub const TT_NAMESPACE:   u32 = 9;  // static object receivers (Math, DateTime) & import aliases
 pub const TT_PROPERTY:    u32 = 10;
 pub const TT_PARAMETER:   u32 = 11;
 pub const TT_MACRO:       u32 = 12;
@@ -19,12 +19,12 @@ pub const TT_DECORATOR:   u32 = 13;
 // index 14 = STRUCT reserved for legend stability
 pub const TT_REGEXP:      u32 = 15;
 pub const TT_EVENT:       u32 = 16;
-pub const TT_METHOD:      u32 = 17;  // ← NEW: instance method calls (.toUpper(), .push() etc.)
+pub const TT_METHOD:      u32 = 17;  // instance method calls (.toUpper(), .push() etc.)
 
 pub const MOD_DECLARATION: u32 = 1 << 0;
 pub const MOD_READONLY:    u32 = 1 << 1;
 pub const MOD_DEPRECATED:  u32 = 1 << 2;
-pub const MOD_STATIC:      u32 = 1 << 3;  // ← NEW: static method calls (Math.sqrt, DateTime.now)
+pub const MOD_STATIC:      u32 = 1 << 3;
 
 pub const TOKEN_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::KEYWORD,     // 0
@@ -44,14 +44,14 @@ pub const TOKEN_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::STRUCT,      // 14 — reserved for legend stability
     SemanticTokenType::REGEXP,      // 15
     SemanticTokenType::EVENT,       // 16
-    SemanticTokenType::METHOD,      // 17 ← NEW: instance methods
+    SemanticTokenType::METHOD,      // 17
 ];
 
 pub const TOKEN_MODIFIERS: &[SemanticTokenModifier] = &[
     SemanticTokenModifier::DECLARATION, // 0 = 1<<0
     SemanticTokenModifier::READONLY,    // 1 = 1<<1
     SemanticTokenModifier::DEPRECATED,  // 2 = 1<<2
-    SemanticTokenModifier::STATIC,      // 3 = 1<<3  ← NEW
+    SemanticTokenModifier::STATIC,      // 3 = 1<<3
 ];
 
 pub fn semantic_token_legend() -> SemanticTokensLegend {

@@ -1,17 +1,17 @@
-// com.midmanstudio.mdix.localization/package.json
+
 {
-  "name": "com.midmanstudio.mdix.localization",
-  "version": "1.0.0",
-  "displayName": "MidMan Studio — Mdix Localization",
-  "description": "Lightweight localization system built on DixScript (.mdix). Typed locale files, plural forms, hot reload, optional encryption. No Addressables dependency.",
-  "unity": "2023.1",
-  "author": {
-    "name": "MidManStudio",
-    "url": "https://github.com/Mid-D-Man/DixScript-Rust"
-  },
-  "license": "MIT",
-  "keywords": ["localization", "i18n", "l10n", "dixscript", "mdix"],
-  "dependencies": {
-    "com.midmanstudio.mdix": "1.0.0"
-  }
+    "name": "com.midmanstudio.mdix.localization",
+    "version": "2.0.0",
+    "displayName": "MidMan Studio — Mdix Localization",
+    "description": "Localization system built on DixScript (.mdix). Self-describing locale files with @ENUMS and @QUICKFUNCS, named CLDR plural forms, translator CSV export/import, hot reload, baked ScriptableObjects for shipped builds. No Addressables dependency.",
+    "unity": "2023.1",
+    "author": {
+        "name": "MidManStudio",
+        "url": "https://github.com/Mid-D-Man/DixScript-Rust"
+    },
+    "license": "MIT",
+    "keywords": ["localization", "i18n", "l10n", "dixscript", "mdix", "plurals", "cldr"],
+    "dependencies": {
+        "com.midmanstudio.mdix": "2.0.0"
+    }
 }

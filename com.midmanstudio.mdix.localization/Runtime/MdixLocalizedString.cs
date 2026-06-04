@@ -1,4 +1,4 @@
-// com.midmanstudio.mdix.localization/Runtime/MdixLocalizedString.cs
+// com.midmanstudio.mdix.localization/Runtime/Components/MdixLocalizedString.cs
 using System;
 using TMPro;
 using UnityEngine;
@@ -7,41 +7,67 @@ using UnityEngine.UI;
 namespace MidManStudio.Mdix.Localization
 {
     /// <summary>
-    /// Component that automatically updates a text element when the locale changes.
+    /// Component that automatically updates a text element when the active
+    /// locale changes. Attach alongside TextMeshProUGUI, TextMeshPro, or
+    /// legacy UI Text.
     ///
-    /// Attach alongside a <see cref="TextMeshProUGUI"/>, <see cref="TextMeshPro"/>,
-    /// or legacy <see cref="Text"/> component. The key is resolved via
-    /// <see cref="MdixLocalizationManager.Get"/> each time the locale changes.
+    /// Standard mode (default):
+    ///   Resolves _key via MdixLocalizationManager.Get().
+    ///   Use _staticArguments or SetArguments() for {0}/{1} format slots.
+    ///   Example: key = "gameplay.score", arg = player.Score
+    ///              → "Score: 1250"
     ///
-    /// For dynamic values (scores, counts), set <see cref="Arguments"/> at
-    /// runtime and call <see cref="Refresh"/> to update the display.
+    /// Plural mode (_isPluralMode = true):
+    ///   Resolves _key via MdixLocalizationManager.GetPlural(key, count).
+    ///   CLDR form selection is driven by the active locale's PluralRule.
+    ///   Set count via Inspector _pluralCount or runtime SetCount().
+    ///   Example: key = "plural_enemies", count = 3
+    ///              → "3 enemies" (en_US) / "3 врага" (ru_RU, few form)
+    ///
+    /// Chaining API (returns this for fluent one-liners):
+    ///   label.SetArguments(score).Refresh();
+    ///   label.SetCount(enemyCount).Refresh();
     /// </summary>
+    [AddComponentMenu("MDIX/Localization/Mdix Localized String")]
     public sealed class MdixLocalizedString : MonoBehaviour
     {
         // ── Inspector ─────────────────────────────────────────────────────────
 
-        [Tooltip("Dotted key path into the locale file, e.g. 'gameplay.score' or 'ui.play'.")]
+        [Tooltip("Dotted key path into the locale file, e.g. 'ui.play' or 'plural_enemies'.")]
         [SerializeField] private string _key = string.Empty;
 
-        [Tooltip("Optional String.Format arguments for parameterised strings like 'Score: {0}'.")]
+        [Tooltip("Optional String.Format arguments for parameterised strings in standard mode. " +
+                 "Ignored when Plural Mode is enabled.")]
         [SerializeField] private string[] _staticArguments = Array.Empty<string>();
 
-        [Tooltip("When true, falls back to the key itself if the translation is missing.")]
+        [Tooltip("When enabled, calls GetPlural(key, count) instead of Get(key). " +
+                 "Use for any key backed by a p2/p4 plural helper or a plain :: array.")]
+        [SerializeField] private bool _isPluralMode;
+
+        [Tooltip("The plural count. Used as the Inspector / startup default. " +
+                 "Override at runtime with SetCount(). Ignored in standard mode.")]
+        [SerializeField] private int _pluralCount = 1;
+
+        [Tooltip("When true, the key string itself is displayed if no translation is found. " +
+                 "Set to false for optional UI elements that should stay blank when missing.")]
         [SerializeField] private bool _showKeyAsFallback = true;
 
         // ── Runtime state ─────────────────────────────────────────────────────
 
-        // Overrides for dynamic values (set via SetArguments / Refresh).
         private object[]? _runtimeArguments;
 
-        // Cached component references.
+        private int  _runtimeCount;
+        private bool _hasRuntimeCount;
+
         private TextMeshProUGUI? _tmpUgui;
         private TextMeshPro?     _tmp;
         private Text?            _legacyText;
 
         // ── Properties ────────────────────────────────────────────────────────
 
-        /// <summary>The localization key used to look up the string.</summary>
+        /// <summary>
+        /// The localization key. Assigning this property triggers an immediate Refresh.
+        /// </summary>
         public string Key
         {
             get => _key;
@@ -49,8 +75,18 @@ namespace MidManStudio.Mdix.Localization
         }
 
         /// <summary>
-        /// Override runtime arguments for parameterised strings.
-        /// Call <see cref="Refresh"/> after setting to update the displayed text.
+        /// Whether plural mode is active. Assigning this property triggers Refresh.
+        /// </summary>
+        public bool IsPluralMode
+        {
+            get => _isPluralMode;
+            set { _isPluralMode = value; Refresh(); }
+        }
+
+        /// <summary>
+        /// Runtime format arguments for standard mode {0}/{1} slots.
+        /// Assigning via this property does NOT trigger Refresh — call it explicitly.
+        /// Prefer SetArguments() for chaining.
         /// </summary>
         public object[]? Arguments
         {
@@ -89,8 +125,9 @@ namespace MidManStudio.Mdix.Localization
         // ── Public API ────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Set dynamic arguments and immediately refresh the displayed text.
-        /// Example: <c>label.SetArguments(player.Score).Refresh();</c>
+        /// Set runtime String.Format arguments for standard mode and return this.
+        /// Does NOT trigger Refresh — call it explicitly.
+        /// Example: scoreLabel.SetArguments(player.Score).Refresh();
         /// </summary>
         public MdixLocalizedString SetArguments(params object[] args)
         {
@@ -98,27 +135,67 @@ namespace MidManStudio.Mdix.Localization
             return this;
         }
 
-        /// <summary>Forces an immediate text update using the current key and arguments.</summary>
+        /// <summary>
+        /// Set the plural count for plural mode and return this.
+        /// Does NOT trigger Refresh — call it explicitly.
+        /// Example: enemyLabel.SetCount(spawnedCount).Refresh();
+        /// </summary>
+        public MdixLocalizedString SetCount(int count)
+        {
+            _runtimeCount    = count;
+            _hasRuntimeCount = true;
+            return this;
+        }
+
+        /// <summary>
+        /// Clear the runtime count override so _pluralCount from the Inspector
+        /// is used again. Does NOT trigger Refresh.
+        /// </summary>
+        public MdixLocalizedString ClearCount()
+        {
+            _hasRuntimeCount = false;
+            return this;
+        }
+
+        /// <summary>
+        /// Forces an immediate text update using the current key, arguments, and count.
+        /// Called automatically on OnEnable and when the locale changes.
+        /// </summary>
         public void Refresh()
         {
             if (string.IsNullOrEmpty(_key)) return;
 
-            var args = _runtimeArguments
-                ?? (_staticArguments.Length > 0 ? (object[])_staticArguments : null);
-
             string text;
-            if (args != null && args.Length > 0)
-                text = MdixLocalizationManager.Get(_key, args);
-            else
-                text = MdixLocalizationManager.Get(_key);
 
-            if (!_showKeyAsFallback && string.Equals(text, _key, StringComparison.Ordinal))
+            if (_isPluralMode)
+            {
+                // Plural mode: prefer the runtime count; fall back to Inspector default.
+                var count = _hasRuntimeCount ? _runtimeCount : _pluralCount;
+                text = MdixLocalizationManager.GetPlural(_key, count);
+            }
+            else
+            {
+                // Standard mode: prefer runtime args, then static args, then bare get.
+                var args = _runtimeArguments
+                    ?? (_staticArguments.Length > 0
+                        ? (object[])_staticArguments
+                        : null);
+
+                text = args != null && args.Length > 0
+                    ? MdixLocalizationManager.Get(_key, args)
+                    : MdixLocalizationManager.Get(_key);
+            }
+
+            // When key-as-fallback is disabled, leave the text unchanged if
+            // the manager returned the raw key (no translation found).
+            if (!_showKeyAsFallback &&
+                string.Equals(text, _key, StringComparison.Ordinal))
                 return;
 
             SetText(text);
         }
 
-        // ── Private helpers ───────────────────────────────────────────────────
+        // ── Private ───────────────────────────────────────────────────────────
 
         private void OnLocaleChanged(string _) => Refresh();
 

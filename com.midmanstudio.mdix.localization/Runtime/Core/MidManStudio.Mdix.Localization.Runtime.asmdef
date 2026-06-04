@@ -1,0 +1,20 @@
+// com.midmanstudio.mdix.localization/Runtime/MidManStudio.Mdix.Localization.Runtime.asmdef
+{
+    "name": "MidManStudio.Mdix.Localization.Runtime",
+    "rootNamespace": "MidManStudio.Mdix.Localization",
+    "references": [
+        "MidManStudio.Mdix.Runtime",
+        "Unity.TextMeshPro"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "MidManStudio.Mdix.Core.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

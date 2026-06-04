@@ -1,0 +1,22 @@
+// com.midmanstudio.mdix.localization/Editor/MidManStudio.Mdix.Localization.Editor.asmdef
+{
+    "name": "MidManStudio.Mdix.Localization.Editor",
+    "rootNamespace": "MidManStudio.Mdix.Localization.Editor",
+    "references": [
+        "MidManStudio.Mdix.Localization.Runtime",
+        "MidManStudio.Mdix.Runtime",
+        "MidManStudio.Mdix.Editor",
+        "Unity.TextMeshPro"
+    ],
+    "includePlatforms": ["Editor"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "MidManStudio.Mdix.Core.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

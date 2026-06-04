@@ -1,4 +1,5 @@
 // mdix-lsp/src/server.rs
+
 use dashmap::DashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -100,7 +101,7 @@ impl Backend {
 // ── Value-resolution helper used by JSON / TOML / Minify commands ────────────
 //
 // These commands use the stored LSP document state (sufficient for single-file
-// projects).  The "Create Resolved" command uses a fresh DixLoader compile
+// projects). The "Create Resolved" command uses a fresh DixLoader compile
 // instead so that imports are always properly resolved.
 
 fn resolve_ast_owned(
@@ -333,8 +334,9 @@ impl LanguageServer for Backend {
         params: CodeActionParams,
     ) -> LspResult<Option<CodeActionResponse>> {
         let uri   = &params.text_document.uri;
+        let range = params.range;
         let diags = &params.context.diagnostics;
-        Ok(features::code_actions::provide(self.documents.get(uri).as_deref(), diags))
+        Ok(features::code_actions::provide(self.documents.get(uri).as_deref(), range, diags))
     }
 
     async fn folding_range(
@@ -524,44 +526,41 @@ impl LanguageServer for Backend {
             //   1. Imported functions (builders, physics, units) are properly loaded.
             //   2. Value resolution runs with the complete symbol table.
             //   3. Only the @DATA section is written to the .resolved.mdix file.
-            // mdix-lsp/src/server.rs — CMD_CREATE_RESOLVED arm only (replace existing arm)
-// Double-wrapped in catch_unwind to prevent LSP crash on any panic inside DixLoader
-
-CMD_CREATE_RESOLVED => {
-    let path_clone = source_path.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        // Inner catch_unwind prevents a panic in compile_to_resolved_ast
-        // (e.g. from complex import chains or Display panics) from killing the server.
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            match path_clone {
-                Some(ref path) if path.exists() => {
-                    let loader = DixLoader::new();
-                    match loader.compile_to_resolved_ast(path.to_str().unwrap_or("")) {
-                        Ok(resolved_ast) => run_create_resolved(&resolved_ast, Some(path)),
-                        Err(e) => CommandResult::err(format!("⊞ Resolution failed: {}", e)),
-                    }
-                }
-                Some(ref path) => {
-                    CommandResult::err(format!("⊞ File not found: {}", path.display()))
-                }
-                None => CommandResult::err("⊞ Save the file before resolving."),
+            // Double-wrapped in catch_unwind to prevent LSP crash on any panic inside DixLoader
+            CMD_CREATE_RESOLVED => {
+                let path_clone = source_path.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        match path_clone {
+                            Some(ref path) if path.exists() => {
+                                let loader = DixLoader::new();
+                                match loader.compile_to_resolved_ast(path.to_str().unwrap_or("")) {
+                                    Ok(resolved_ast) => run_create_resolved(&resolved_ast, Some(path)),
+                                    Err(e) => CommandResult::err(format!("⊞ Resolution failed: {}", e)),
+                                }
+                            }
+                            Some(ref path) => {
+                                CommandResult::err(format!("⊞ File not found: {}", path.display()))
+                            }
+                            None => CommandResult::err("⊞ Save the file before resolving."),
+                        }
+                    }))
+                    .unwrap_or_else(|payload| {
+                        let msg = payload.downcast_ref::<String>().cloned()
+                            .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                            .unwrap_or_else(|| "unknown panic in resolver".to_string());
+                        tracing::error!("CMD_CREATE_RESOLVED inner panic: {}", msg);
+                        CommandResult::err(format!("⊞ Resolve panicked: {}", msg))
+                    })
+                })
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::error!("CMD_CREATE_RESOLVED spawn_blocking failed: {:?}", e);
+                    CommandResult::err("⊞ Resolve task panicked unexpectedly.")
+                });
+                self.show_message(result.success, &result.message).await;
             }
-        }))
-        .unwrap_or_else(|payload| {
-            let msg = payload.downcast_ref::<String>().cloned()
-                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                .unwrap_or_else(|| "unknown panic in resolver".to_string());
-            tracing::error!("CMD_CREATE_RESOLVED inner panic: {}", msg);
-            CommandResult::err(format!("⊞ Resolve panicked: {}", msg))
-        })
-    })
-    .await
-    .unwrap_or_else(|e| {
-        tracing::error!("CMD_CREATE_RESOLVED spawn_blocking failed: {:?}", e);
-        CommandResult::err("⊞ Resolve task panicked unexpectedly.")
-    });
-    self.show_message(result.success, &result.message).await;
-}
+
             // ── Compile ───────────────────────────────────────────────────────
             CMD_COMPILE => {
                 let ast_clone = {
@@ -603,4 +602,4 @@ CMD_CREATE_RESOLVED => {
 
         Ok(None)
     }
-                    }
+}

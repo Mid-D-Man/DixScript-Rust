@@ -22,28 +22,28 @@
 
   // ── UI ─────────────────────────────────────────────────────────────────
   ui: play = "Play", settings = "Settings", quit = "Quit", back = "Back"
-  ui: resume = "Resume", loading = "Loading...", ok = "OK", cancel = "Cancel"
+   resume = "Resume", loading = "Loading...", ok = "OK", cancel = "Cancel"
 
   // ── Main Menu ─────────────────────────────────────────────────────────
   menu: new_game = "New Game", load_game = "Load Game", credits = "Credits"
 
   // ── Gameplay ───────────────────────────────────────────────────────────
   gameplay: score = "Score: {0}", level = "Level {0}", lives = "Lives: {0}"
-  gameplay: wave = "Wave {0}", time = "Time: {0}"
+   wave = "Wave {0}", time = "Time: {0}"
 
   // ── Notifications ──────────────────────────────────────────────────────
   notify: level_up = "Level Up!"
-  notify: game_over = "Game Over"
-  notify: new_record = "New Record: {0}!"
+  game_over = "Game Over"
+   new_record = "New Record: {0}!"
 
   // ── Items ──────────────────────────────────────────────────────────────
   items: sword = "Iron Sword", potion = "Health Potion", shield = "Wooden Shield"
-  items: gold = "Gold Coin", gem = "Ruby Gem"
+   gold = "Gold Coin", gem = "Ruby Gem"
 
   // ── Tutorial ───────────────────────────────────────────────────────────
   tutorial: hint_move = "Use WASD or arrow keys to move"
-  tutorial: hint_attack = "Press Space to attack"
-  tutorial: hint_dodge = "Double-tap a direction to dodge"
+   hint_attack = "Press Space to attack"
+   hint_dodge = "Double-tap a direction to dodge"
 
   // ── Enemies ────────────────────────────────────────────────────────────
   enemies: goblin = "Goblin", orc = "Orc", dragon = "Dragon"
@@ -56,6 +56,6 @@
 
   // ── Error / system messages ────────────────────────────────────────────
   errors: save_failed = "Failed to save: {0}"
-  errors: load_failed = "Failed to load save file"
-  errors: network_err = "Network error. Check your connection."
+   load_failed = "Failed to load save file"
+   network_err = "Network error. Check your connection."
 )

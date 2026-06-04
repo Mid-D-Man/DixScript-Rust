@@ -200,8 +200,8 @@
     };
   }
 
-  ~shipStatus<object>(status<string>, timestamp<string>, location<string>, notes<string>) {
-    return { status = status, timestamp = timestamp, location = location, notes = notes };
+  ~shipStatus<object>(status<string>, _timestamp<string>, location<string>, notes<string>) {
+    return { status = status, timestamp_ = _timestamp, location = location, notes = notes };
   }
 
   ~review<object>(rev_id<string>, prod_id<string>, cust_id<string>, ord_id<string>, rating<int>, title<string>, text<string>, pros<array>, cons<array>, verified<bool>, helpful<int>, not_help<int>, created<string>, merchant_resp<object>) {
@@ -1047,7 +1047,7 @@
     created_at = 2024-08-15T11:30:00Z,
     updated_at = 2025-01-07T09:15:00Z
   
-  customers.customer_001 = customer("CUST-001-2024", "active", "premium", "2024-03-15T14:30:00Z", "2025-01-10T18:45:00Z", 
+  customers:customer_001 = customer("CUST-001-2024", "active", "premium", "2024-03-15T14:30:00Z", "2025-01-10T18:45:00Z",
     personalInfo("John", "Anderson", "john.anderson@email.com", phoneInfo("+1-555-0123", "+1-555-0124", true), "1985-06-20", "male", "en", true),
     custAddresses(
       shipAddr("ADDR-BILL-001", true, "Home", "John Anderson", "456 Oak Street", "Apartment 3B", "San Francisco", "California", "94102", "United States", "+1-555-0123", "Leave at door", coords(37.7749, -122.4194)),
@@ -1057,8 +1057,7 @@
     custStats(15, 18450.85, 1230.06, 18450.85, 18451, 3, 8, 12),
     custPrefs(emailNotifs(true, true, true, true, true), smsNotifs(true, true, false), marketingPrefs(true, false))
   )
-  
-  customers.customer_002 = customer("CUST-002-2024", "active", "standard", "2024-05-22T09:15:00Z", "2025-01-09T12:20:00Z",
+  customer_002 = customer("CUST-002-2024", "active", "standard", "2024-05-22T09:15:00Z", "2025-01-09T12:20:00Z",
     personalInfo("Sarah", "Martinez", "sarah.martinez@email.com", phoneInfo("+1-555-0456", null, true), "1992-11-08", "female", "en", true),
     custAddresses(
       shipAddr("ADDR-BILL-002", true, "Home", "Sarah Martinez", "123 Elm Avenue", null, "Austin", "Texas", "78701", "United States", "+1-555-0456", "Ring doorbell", coords(30.2672, -97.7431)),
@@ -1068,8 +1067,7 @@
     custStats(7, 3890.45, 555.78, 3890.45, 3890, 1, 3, 8),
     custPrefs(emailNotifs(true, false, true, true, true), smsNotifs(true, true, false), marketingPrefs(true, false))
   )
-  
-  customers.customer_003 = customer("CUST-003-2024", "active", "premium", "2024-02-10T16:45:00Z", "2025-01-11T08:30:00Z",
+  customer_003 = customer("CUST-003-2024", "active", "premium", "2024-02-10T16:45:00Z", "2025-01-11T08:30:00Z",
     personalInfo("Michael", "Chen", "michael.chen@email.com", phoneInfo("+1-555-0789", "+1-555-0790", true), "1988-03-25", "male", "en", true),
     custAddresses(
       shipAddr("ADDR-BILL-003", true, "Home", "Michael Chen", "789 Pine Road", "Unit 12", "Seattle", "Washington", "98101", "United States", "+1-555-0789", "Leave with concierge", coords(47.6062, -122.3321)),
@@ -1080,7 +1078,7 @@
     custPrefs(emailNotifs(true, true, true, true, true), smsNotifs(true, true, true), marketingPrefs(true, false))
   )
   
-  orders.order_001 = order("ORD-2025-00001", "TM20250001", "CUST-001-2024", "delivered", "2025-01-05T10:30:00Z", "2025-01-08T14:45:00Z",
+  orders:order_001 = order("ORD-2025-00001", "TM20250001", "CUST-001-2024", "delivered", "2025-01-05T10:30:00Z", "2025-01-08T14:45:00Z",
     payment("PAY-2025-00001", "PAY-CC-001", "credit_card", "visa", "4532", 3389.98, "USD", "completed", "TXN-20250105-103045", "AUTH-445566", "2025-01-05T10:30:45Z", paymentBreakdown(2969.99, 0.00, 267.00, 0.00, 3236.99)),
     orderShipping(
       shipAddr("ADDR-SHIP-001", true, "Home", "John Anderson", "456 Oak Street", "Apartment 3B", "San Francisco", "California", "94102", "United States", "+1-555-0123", null, coords(37.7749, -122.4194)),
@@ -1092,8 +1090,7 @@
     orderNotes("Please deliver after 2 PM", "Premium customer - priority handling", null),
     orderMetadata("192.168.1.100", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "https://google.com/search", "organic_search", "desktop")
   )
-  
-  orders.order_002 = order("ORD-2025-00002", "TM20250002", "CUST-002-2024", "processing", "2025-01-10T14:15:00Z", "2025-01-10T15:30:00Z",
+  order_002 = order("ORD-2025-00002", "TM20250002", "CUST-002-2024", "processing", "2025-01-10T14:15:00Z", "2025-01-10T15:30:00Z",
     payment("PAY-2025-00002", "PAY-CC-003", "credit_card", "amex", "1005", 1264.98, "USD", "completed", "TXN-20250110-141530", "AUTH-778899", "2025-01-10T14:15:30Z", paymentBreakdown(1144.98, 5.99, 114.01, 0.00, 1264.98)),
     orderShipping(
       shipAddr("ADDR-SHIP-003", true, "Home", "Sarah Martinez", "123 Elm Avenue", null, "Austin", "Texas", "78701", "United States", "+1-555-0456", null, coords(30.2672, -97.7431)),
@@ -1105,8 +1102,7 @@
     orderNotes(null, "Check stock before shipping", null),
     orderMetadata("10.0.0.45", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", "https://techmart.global/products", "direct", "desktop")
   )
-  
-  orders.order_003 = order("ORD-2025-00003", "TM20250003", "CUST-003-2024", "shipped", "2025-01-08T09:20:00Z", "2025-01-09T16:45:00Z",
+  order_003 = order("ORD-2025-00003", "TM20250003", "CUST-003-2024", "shipped", "2025-01-08T09:20:00Z", "2025-01-09T16:45:00Z",
     payment("PAY-2025-00003", "PAY-PP-002", "paypal", null, null, 1379.98, "USD", "completed", "PAYPAL-20250108-092045", "PP-AUTH-112233", "2025-01-08T09:20:45Z", paymentBreakdown(1149.98, 12.99, 117.01, 0.00, 1279.98)),
     orderShipping(
       shipAddr("ADDR-SHIP-005", false, "Office", "Michael Chen", "1000 Tech Drive", "Floor 5", "Seattle", "Washington", "98109", "United States", "+1-555-0790", null, coords(47.6205, -122.3493)),
@@ -1117,11 +1113,11 @@
     orderSummary(2, 2, 1149.98, 12.99, 103.50, 0.00, 1266.47),
     orderNotes("Office delivery - reception desk", "Priority customer", null),
     orderMetadata("172.16.0.88", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "https://techmart.global/monitors", "email_campaign", "desktop")
-  )product_reviews.review_001 = review("REV-2025-00001", "PROD-LAPT-001", "CUST-001-2024", "ORD-2025-00001", 5, "Exceptional Gaming Performance", "This laptop exceeds all expectations! The RTX 4090 handles every game at max settings with ease. The 240Hz display is incredibly smooth, and the build quality is top-notch. Battery life is decent for a gaming laptop. Highly recommended for serious gamers.", ["Excellent GPU performance", "Beautiful high refresh display", "Great cooling system", "Premium build quality"], ["Heavy to carry around", "Price is high", "Fans can be loud under load"], true, 45, 2, "2025-01-08T18:30:00Z", merchantResp("Thank you for the amazing review! We're thrilled you're enjoying your new gaming laptop. Happy gaming!", "TechMart Support Team", "2025-01-09T10:00:00Z"))
+  ) product_reviews:review_001 = review("REV-2025-00001", "PROD-LAPT-001", "CUST-001-2024", "ORD-2025-00001", 5, "Exceptional Gaming Performance", "This laptop exceeds all expectations! The RTX 4090 handles every game at max settings with ease. The 240Hz display is incredibly smooth, and the build quality is top-notch. Battery life is decent for a gaming laptop. Highly recommended for serious gamers.", ["Excellent GPU performance", "Beautiful high refresh display", "Great cooling system", "Premium build quality"], ["Heavy to carry around", "Price is high", "Fans can be loud under load"], true, 45, 2, "2025-01-08T18:30:00Z", merchantResp("Thank you for the amazing review! We're thrilled you're enjoying your new gaming laptop. Happy gaming!", "TechMart Support Team", "2025-01-09T10:00:00Z"))
   
-  product_reviews.review_002 = review("REV-2025-00002", "PROD-ACC-COOL-001", "CUST-002-2024", "ORD-2024-00156", 4, "Good cooling, great RGB", "The cooling pad works well and keeps my laptop temperatures down by about 10-15 degrees. The RGB lighting is vibrant and customizable. My only complaint is that it's a bit bulky to travel with.", ["Effective cooling", "Beautiful RGB effects", "Quiet operation", "Adjustable height"], ["Bulky size", "USB cable could be longer"], true, 28, 1, "2024-12-20T15:45:00Z", merchantResp("Thanks for your feedback! We're glad it's keeping your laptop cool. We'll pass along your cable length suggestion to our product team.", "TechMart Support Team", "2024-12-21T09:30:00Z"))
+ review_002 = review("REV-2025-00002", "PROD-ACC-COOL-001", "CUST-002-2024", "ORD-2024-00156", 4, "Good cooling, great RGB", "The cooling pad works well and keeps my laptop temperatures down by about 10-15 degrees. The RGB lighting is vibrant and customizable. My only complaint is that it's a bit bulky to travel with.", ["Effective cooling", "Beautiful RGB effects", "Quiet operation", "Adjustable height"], ["Bulky size", "USB cable could be longer"], true, 28, 1, "2024-12-20T15:45:00Z", merchantResp("Thanks for your feedback! We're glad it's keeping your laptop cool. We'll pass along your cable length suggestion to our product team.", "TechMart Support Team", "2024-12-21T09:30:00Z"))
   
-  product_reviews.review_003 = review("REV-2025-00003", "PROD-MON-001", "CUST-003-2024", "ORD-2025-00003", 5, "Best monitor I've ever owned", "Absolutely stunning display! The 4K resolution at 240Hz is a game changer. Colors are incredibly accurate, and the HDR1000 makes movies look amazing. G-Sync Ultimate works flawlessly. Worth every penny.", ["Incredible image quality", "Smooth 240Hz refresh", "HDR1000 is stunning", "Excellent build quality", "Great stand adjustability"], ["Expensive", "Takes up desk space"], true, 67, 3, "2025-01-10T20:15:00Z", null)
+ review_003 = review("REV-2025-00003", "PROD-MON-001", "CUST-003-2024", "ORD-2025-00003", 5, "Best monitor I've ever owned", "Absolutely stunning display! The 4K resolution at 240Hz is a game changer. Colors are incredibly accurate, and the HDR1000 makes movies look amazing. G-Sync Ultimate works flawlessly. Worth every penny.", ["Incredible image quality", "Smooth 240Hz refresh", "HDR1000 is stunning", "Excellent build quality", "Great stand adjustability"], ["Expensive", "Takes up desk space"], true, 67, 3, "2025-01-10T20:15:00Z", null)
   
   analytics.sales_summary:
     period = "2025-01",

@@ -820,8 +820,14 @@
             id = userId,
             name = "User",
             active = active,
-            score = 95.5
+            score = 95.5,
+            suka = {
+             diablo =419,
+             in = false
+             }
         };
+        let sss = user.suka.in;
+        user.add("suz", sss);
         return user;
     }
 

@@ -42,6 +42,7 @@
     ~testDoubleOperations<double> => global(d1<double>, d2<double>) {
         let sum = d1 + d2;
         let average = sum / 2.0;
+
         return average;
     }
 
@@ -52,6 +53,7 @@
     ~testBoolOperations<bool> => global(b1<bool>, b2<bool>) {
         let and_result = b1 && b2;
         let or_result = b1 || b2;
+
         return and_result || or_result;
     }
 
@@ -162,13 +164,13 @@
     color_with_alpha<hex> = #80FFFFFF,
 
     // Date types
-    date_standard<date> = 2025-01-15,
+    date_standard<date> = 2026-01-15,
     date_leap_year<date> = 2024-02-29,
     date_year_end<date> = 2025-12-31,
     date_year_start<date> = 2025-01-01,
 
     // Timestamp types - all variations
-    timestamp_basic<timestamp> = 2025-01-15T10:30:00Z,
+    timestamp_basic<timestamp> = 2025-02-15T10:30:00Z,
     timestamp_with_millis<timestamp> = 2025-01-15T10:30:00.123Z,
     timestamp_with_timezone<timestamp> = 2025-01-15T10:30:00+05:30,
     timestamp_utc<timestamp> = 2025-01-15T10:30:00.999Z,

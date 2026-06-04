@@ -400,7 +400,7 @@ fn apply_date_delta(y: i32, m: u32, d: u32, dd: i32, dm: i32, dy: i32) -> String
     let mut month = m as i32 + dm;
     while month < 1  { month += 12; year -= 1; }
     while month > 12 { month -= 12; year += 1; }
-    let month = month as u32;
+    let mut month = month as u32;
     // Clamp day to the month's actual length
     let max_day = days_in_month(year, month);
     let mut day = d.min(max_day);

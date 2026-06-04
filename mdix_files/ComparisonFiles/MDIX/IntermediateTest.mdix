@@ -1,16 +1,16 @@
-@CONFIG(
+@config(
   version -> "1.0.0",
   features -> "advanced",
    error_handling -> "halt"
 )
 
-@ENUMS(
+@enums(
   Difficulty { EASY, NORMAL, HARD, EXTREME  }
   PlayerClass { WARRIOR, MAGE, ROGUE, HEALER }
   Rarity { COMMON , UNCOMMON , RARE , EPIC , LEGENDARY  }
 )
 
-@DATA(
+@data(
   gameConfig:
   title = "Space Explorer",
   version = "1.0.0",

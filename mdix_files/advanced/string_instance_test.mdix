@@ -1,9 +1,10 @@
-@CONFIG(
+
+      @CONFIG(
     version -> "1.0.0",
     encoding -> "utf-8",
     debug_mode -> "regular",
     error_handling -> "halt",
-    features -> "advanced"
+     features -> "advanced"
 )
 
 @QUICKFUNCS(

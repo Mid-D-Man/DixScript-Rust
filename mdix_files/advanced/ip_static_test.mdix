@@ -69,7 +69,7 @@
 
     ~testIpConstants<string>() {
         let local = IpAddress.localhost();
-        let _any = IpAddress.any();
+        let _any = IpAddress.anyAddress();
         let broadcast = IpAddress.broadcast();
         return local;
     }

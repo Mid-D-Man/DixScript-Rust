@@ -15,17 +15,17 @@
     }
 
     ~testRandomFloats<double>() {
-        let flt1 = Random.float();
-        let flt2 = Random.double();
+        let flt1 = Random.nextFloat();
+        let flt2 = Random.nextDouble();
         let flt3 = Random.floatRange(10.0f, 20.0f);
         let flt4 = Random.doubleRange(10.0, 20.0);
         return flt2 + flt4;
     }
 
     ~testRandomBoolean<bool>() {
-        let bool1 = Random.boolean();
-        let bool2 = Random.boolean();
-        let bool3 = Random.boolean();
+        let bool1 = Random.nextBool();
+        let bool2 = Random.nextBool();
+        let bool3 = Random.nextBool();
         return bool1;
     }
 
@@ -55,7 +55,7 @@
 
     ~testRandomString<string>() {
         let alphaNum = Random.alphanumeric(10);
-        let customCharset = Random.string(8, "ABC123");
+        let customCharset = Random.randomString(8, "ABC123");
         return alphaNum;
     }
 
@@ -94,7 +94,7 @@
                 return $"{val}";
             }
             -> "bool" {
-                 val = Random.boolean();
+                 val = Random.nextBool();
                 return $"{val}";
             }
             -> "string" {

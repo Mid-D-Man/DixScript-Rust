@@ -255,8 +255,10 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     let col  = (position.column.saturating_sub(1) + name.len()) as u32;
                     hints.push(make_hint(line, col, label));
 
-                    // Bonus: parameter name hints for QuickFunc calls
+                    // Parameter name hints for QuickFunc / imported function calls
                     emit_qf_param_name_hints(value, doc, &mut hints);
+                    // Nested property hints for object-valued properties
+                    emit_data_nested_value_hints(value, &base_ctx, &mut hints);
                 }
 
                 DataEntry::TableProperty { properties, .. } => {
@@ -280,7 +282,10 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                         let col  = (prop.position.column.saturating_sub(1) + prop.name.len()) as u32;
                         hints.push(make_hint(line, col, label));
 
+                        // Parameter hints for function calls in this property
                         emit_qf_param_name_hints(&prop.value, doc, &mut hints);
+                        // Nested property hints for object-valued properties
+                        emit_data_nested_value_hints(&prop.value, &base_ctx, &mut hints);
                     }
                 }
 
@@ -291,6 +296,14 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     let line     = position.line.saturating_sub(1) as u32;
                     let col      = (position.column.saturating_sub(1) + path_str.len()) as u32;
                     hints.push(make_hint(line, col, label));
+
+                    // Emit hints for each individual item in the group array
+                    for item in items {
+                        // Parameter hints for function call items
+                        emit_qf_param_name_hints(item, doc, &mut hints);
+                        // Nested property hints for object items
+                        emit_data_nested_value_hints(item, &base_ctx, &mut hints);
+                    }
                 }
 
                 DataEntry::ObjectProperty { name, data_type, object, position } => {
@@ -300,6 +313,11 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     let line = position.line.saturating_sub(1) as u32;
                     let col  = (position.column.saturating_sub(1) + name.len()) as u32;
                     hints.push(make_hint(line, col, label));
+
+                    // Parameter hints if the object is actually a function call
+                    emit_qf_param_name_hints(object, doc, &mut hints);
+                    // Nested property hints for the object's own properties
+                    emit_data_nested_value_hints(object, &base_ctx, &mut hints);
                 }
             }
         }
@@ -323,13 +341,14 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                 hints.push(make_hint(line, col, "<any>".to_string()));
             }
 
-            // Process body with accumulating context (returns updated context, discarded here)
+            // Process body with accumulating context
             let _ = collect_qf_var_hints(
                 &func.body,
                 &doc.tokens,
                 &qf_return_types,
                 initial_types,
                 symbol_table,
+                doc,
                 &mut hints,
             );
         }
@@ -573,53 +592,114 @@ fn sniff_blob_category(b: &[u8]) -> &'static str {
     "data"
 }
 
-// ── Parameter name hints for QuickFunc calls in @DATA ─────────────────────────
+// ── Parameter name hints ───────────────────────────────────────────────────────
+//
+// emit_qf_param_name_hints: entry point for Value (DATA section, group array items)
+// emit_expr_param_hints:    entry point for Expression (QF body variable declarations)
+// emit_param_hints_for_local:    looks up a local QuickFunc by name
+// emit_param_hints_for_imported: looks up an imported namespace function
+// emit_arg_hints:                emits the actual InlayHint objects for arguments
 
-/// Emits `paramName:` hints before each argument in a QuickFunc call.
-/// Only activates for calls with 2+ parameters to avoid noise on trivial calls.
-fn emit_qf_param_name_hints(value: &Value, doc: &Document, hints: &mut Vec<InlayHint>) {
-    let (function_name, arguments) = match value {
-        Value::QuickFuncCall { function_name, arguments, .. } => {
-            (function_name.as_str(), arguments.as_slice())
+/// Emit parameter name hints for function calls in a Value.
+/// Called for DATA section property values and group array items.
+pub fn emit_qf_param_name_hints(value: &Value, doc: &Document, hints: &mut Vec<InlayHint>) {
+    match value {
+        Value::QuickFuncCall { function_name, arguments, .. } if arguments.len() > 1 => {
+            emit_param_hints_for_local(function_name, arguments, doc, hints);
         }
-        Value::Expression { expr, .. } => match expr.as_ref() {
-            Expression::QuickFuncCall { name, arguments, .. } => {
-                (name.as_str(), arguments.as_slice())
-            }
-            _ => return,
-        },
-        _ => return,
-    };
+        Value::Expression { expr, .. } => {
+            emit_expr_param_hints(expr, doc, hints);
+        }
+        _ => {}
+    }
+}
 
-    if arguments.is_empty() { return; }
+/// Emit parameter name hints for function calls in an Expression.
+/// Called for QF body variable declaration values.
+fn emit_expr_param_hints(expr: &Expression, doc: &Document, hints: &mut Vec<InlayHint>) {
+    match expr {
+        Expression::QuickFuncCall { name, arguments, .. } if arguments.len() > 1 => {
+            emit_param_hints_for_local(name, arguments, doc, hints);
+        }
+        Expression::ImportedFunctionCall { namespace_name, function_name, arguments, .. }
+            if arguments.len() > 1 =>
+        {
+            emit_param_hints_for_imported(namespace_name, function_name, arguments, doc, hints);
+        }
+        // QualifiedIdentifier call like Utils.calc(arg1, arg2)
+        Expression::QualifiedIdentifier { parts, arguments: Some(args), .. }
+            if parts.len() == 2 && args.len() > 1 =>
+        {
+            emit_param_hints_for_imported(&parts[0], &parts[1], args, doc, hints);
+        }
+        _ => {}
+    }
+}
 
+/// Look up a locally-defined QuickFunc and emit param hints for its arguments.
+fn emit_param_hints_for_local(
+    func_name: &str,
+    arguments: &[Expression],
+    doc:       &Document,
+    hints:     &mut Vec<InlayHint>,
+) {
     let qf = match doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
         Some(q) => q,
         None    => return,
     };
-    let func = match qf.functions.iter().find(|f| f.name == function_name) {
+    let func = match qf.functions.iter().find(|f| f.name == func_name) {
         Some(f) => f,
         None    => return,
     };
-
     // Skip single-param calls — not worth the visual noise
     if func.parameters.len() <= 1 { return; }
+    let param_names: Vec<&str> = func.parameters.iter().map(|p| p.name.as_str()).collect();
+    emit_arg_hints(arguments, &param_names, hints);
+}
 
+/// Look up an imported namespace function and emit param hints for its arguments.
+fn emit_param_hints_for_imported(
+    namespace: &str,
+    func_name: &str,
+    arguments: &[Expression],
+    doc:       &Document,
+    hints:     &mut Vec<InlayHint>,
+) {
+    let st = match doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref()) {
+        Some(st) => st,
+        None     => return,
+    };
+    let func_info = match st.get_namespaced_function(namespace, func_name) {
+        Some(fi) => fi,
+        None     => return,
+    };
+    // Skip single-param calls — not worth the visual noise
+    if func_info.signature.parameters.len() <= 1 { return; }
+    let param_names: Vec<&str> = func_info.signature.parameters
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    emit_arg_hints(arguments, &param_names, hints);
+}
+
+/// Emit the actual `paramName:` inlay hints at each argument position.
+fn emit_arg_hints(
+    arguments:   &[Expression],
+    param_names: &[&str],
+    hints:       &mut Vec<InlayHint>,
+) {
     for (i, arg) in arguments.iter().enumerate() {
-        let param = match func.parameters.get(i) {
-            Some(p) => p,
+        let param_name = match param_names.get(i) {
+            Some(n) => n,
             None    => break,
         };
-
         let pos = arg.position();
         if !pos.is_valid() { continue; }
-
         let line = pos.line.saturating_sub(1) as u32;
         let col  = pos.column.saturating_sub(1) as u32;
-
         hints.push(InlayHint {
             position:      Position::new(line, col),
-            label:         InlayHintLabel::String(format!("{}:", param.name)),
+            label:         InlayHintLabel::String(format!("{}:", param_name)),
             kind:          Some(InlayHintKind::PARAMETER),
             text_edits:    None,
             tooltip:       None,
@@ -632,13 +712,11 @@ fn emit_qf_param_name_hints(value: &Value, doc: &Document, hints: &mut Vec<Inlay
 
 // ── QuickFunc variable-declaration hints — accumulating context ───────────────
 //
-// Takes `running` by value and returns the updated map.
-// Branching statements (if/switch) CLONE running before recursing so variables
-// declared inside branches don't leak into siblings or the outer sequential scope.
-//
-// KEY BORROW FIX: we never hold an InferCtx (which borrows &running) alive across
-// a running.insert() call.  Every ctx is created inside a scoped block { } so the
-// borrow ends before we mutate running.
+// KEY CHANGES vs original:
+//   1. `doc` parameter added so we can call emit_expr_param_hints for QF body calls.
+//   2. Label now prefers `infer_expr` result (consistent <type[N]> format with DATA section),
+//      falling back to format_data_type_as_hint only when infer_expr is generic or None.
+//   3. populate_object_property_types is now recursive (handles nested objects).
 
 fn collect_qf_var_hints(
     stmts:           &[QuickFuncStatement],
@@ -646,12 +724,10 @@ fn collect_qf_var_hints(
     qf_return_types: &HashMap<String, DataType>,
     mut running:     HashMap<String, Option<DataType>>,
     symbol_table:    Option<&SymbolTable>,
+    doc:             &Document,
     hints:           &mut Vec<InlayHint>,
 ) -> HashMap<String, Option<DataType>> {
     for stmt in stmts {
-        // DO NOT create InferCtx here — it would borrow `running` for the whole match.
-        // Instead, create it in scoped blocks inside each arm.
-
         match stmt {
             QuickFuncStatement::VariableDeclaration {
                 variable_name,
@@ -668,18 +744,36 @@ fn collect_qf_var_hints(
                         // ctx + its &running borrow dropped here
                     };
 
-                    // ── Step 2: build label string (scoped borrow) ────────────
+                    // ── Step 2: build label string
+                    // Prefer infer_expr (gives <type[N]> format matching DATA section).
+                    // Fall back to format_data_type_as_hint for cases infer_expr can't
+                    // handle well (returns generic "<array>", "<any>", etc.).
                     let label = {
                         let ctx = InferCtx::new(qf_return_types, &running, symbol_table);
-                        match &typed_dt {
-                            Some(dt) => format_data_type_as_hint(*dt, collection_elem_count(value)),
-                            None     => infer_expr(value, &ctx)
-                                            .unwrap_or_else(|| "<any>".to_string()),
+                        let from_infer = infer_expr(value, &ctx);
+
+                        // Helper: is this label too generic to prefer over a typed one?
+                        let is_generic = |s: &str| {
+                            matches!(s, "<any>" | "<array>" | "<tuple>" | "<object>")
+                        };
+
+                        match (&from_infer, &typed_dt) {
+                            // infer_expr gave something specific — use it
+                            (Some(s), _) if !is_generic(s) => s.clone(),
+                            // infer_expr gave generic but typed_dt is more specific
+                            (Some(s), Some(dt)) => {
+                                let formatted = format_data_type_as_hint(*dt, collection_elem_count(value));
+                                if !is_generic(&formatted) { formatted } else { s.clone() }
+                            }
+                            // infer_expr returned None, use typed_dt if available
+                            (None, Some(dt)) => format_data_type_as_hint(*dt, collection_elem_count(value)),
+                            (None, None)     => "<any>".to_string(),
+                            (Some(s), None)  => s.clone(),
                         }
                         // ctx dropped here
                     };
 
-                    // ── Step 3: emit hint (no borrows) ────────────────────────
+                    // ── Step 3: emit type hint (no borrows) ────────────────────
                     if position.is_valid() {
                         let target_line = position.line;
                         let hint_line   = target_line.saturating_sub(1) as u32;
@@ -695,20 +789,19 @@ fn collect_qf_var_hints(
                             })
                             .map(|tok| (tok.column.saturating_sub(1) + variable_name.len()) as u32)
                             .unwrap_or_else(|| {
-                                // Fallback: past `let ` prefix
                                 (position.column.saturating_sub(1) + 4 + variable_name.len()) as u32
                             });
 
                         hints.push(make_hint(hint_line, col, label));
                     }
 
-                    // ── Step 4: store inferred type — running is now free ──────
+                    // ── Step 4: emit param name hints for function calls ────────
+                    emit_expr_param_hints(value, doc, hints);
+
+                    // ── Step 5: store inferred type — running is now free ──────
                     running.insert(variable_name.clone(), typed_dt);
 
-                    // ── Step 5: propagate object property types ────────────────
-                    // We need to read from running (for the ctx) AND write to running.
-                    // Fix: clone running as a snapshot so ctx borrows the clone
-                    // while we mutate the original.
+                    // ── Step 6: propagate object property types (recursive) ────
                     let snapshot = running.clone();
                     populate_object_property_types(
                         variable_name,
@@ -720,10 +813,12 @@ fn collect_qf_var_hints(
                     );
 
                 } else {
-                    // Annotated declaration — no hint, but update context
+                    // Annotated declaration — no type hint, but update context
                     running.insert(variable_name.clone(), *data_type);
 
-                    // Still propagate object props for annotated object vars
+                    // Still emit param hints and propagate object props
+                    emit_expr_param_hints(value, doc, hints);
+
                     let snapshot = running.clone();
                     populate_object_property_types(
                         variable_name,
@@ -740,12 +835,12 @@ fn collect_qf_var_hints(
             QuickFuncStatement::If { then_branch, else_branch, .. } => {
                 let _ = collect_qf_var_hints(
                     then_branch, tokens, qf_return_types,
-                    running.clone(), symbol_table, hints,
+                    running.clone(), symbol_table, doc, hints,
                 );
                 if let Some(eb) = else_branch {
                     let _ = collect_qf_var_hints(
                         eb, tokens, qf_return_types,
-                        running.clone(), symbol_table, hints,
+                        running.clone(), symbol_table, doc, hints,
                     );
                 }
             }
@@ -754,13 +849,13 @@ fn collect_qf_var_hints(
                 for case in cases {
                     let _ = collect_qf_var_hints(
                         &case.statements, tokens, qf_return_types,
-                        running.clone(), symbol_table, hints,
+                        running.clone(), symbol_table, doc, hints,
                     );
                 }
                 if let Some(dc) = default_case {
                     let _ = collect_qf_var_hints(
                         &dc.statements, tokens, qf_return_types,
-                        running.clone(), symbol_table, hints,
+                        running.clone(), symbol_table, doc, hints,
                     );
                 }
             }
@@ -773,17 +868,11 @@ fn collect_qf_var_hints(
 }
 
 // ── Object property type propagation ─────────────────────────────────────────
+//
+// Walks an object literal and registers every property's inferred type into
+// `running` as "varname.propname" entries, then recurses into nested objects
+// so that "player.stats.hp" is also registered when player.stats is an object.
 
-/// Walk an object literal expression and register each property's inferred type
-/// into `running` as `"varname.propname"` entries.
-///
-/// This allows subsequent statements like `let x = player.hp` to resolve the
-/// type of `player.hp` through our custom path lookup in `infer_expr`.
-///
-/// Takes `param_types_snapshot` — a clone of `running` made by the caller —
-/// so this function can borrow it immutably while also mutating `running`.
-/// This avoids the simultaneous immutable+mutable borrow that would occur if
-/// we passed `&InferCtx` that internally holds `&running`.
 fn populate_object_property_types(
     variable_name:        &str,
     value_expr:           &Expression,
@@ -792,29 +881,99 @@ fn populate_object_property_types(
     symbol_table:         Option<&SymbolTable>,
     running:              &mut HashMap<String, Option<DataType>>,
 ) {
-    // Only handle direct object literal: let player = { hp = 100, name = "x" }
     let obj_value = match value_expr {
         Expression::Value { value, .. } => value,
         _ => return,
     };
+    populate_object_property_types_for_value(
+        variable_name,
+        obj_value,
+        qf_return_types,
+        param_types_snapshot,
+        symbol_table,
+        running,
+        0,
+    );
+}
+
+/// Recursive inner implementation. Registers `prefix.propname` → inferred type
+/// for each property of obj_value, then descends into nested objects.
+/// `depth` guards against pathological deeply-nested structures.
+fn populate_object_property_types_for_value(
+    prefix:          &str,
+    obj_value:       &Value,
+    qf_return_types: &HashMap<String, DataType>,
+    snapshot:        &HashMap<String, Option<DataType>>,
+    symbol_table:    Option<&SymbolTable>,
+    running:         &mut HashMap<String, Option<DataType>>,
+    depth:           usize,
+) {
+    if depth > 4 { return; }
 
     let properties = match obj_value {
         Value::Object { properties, .. } => properties,
         _ => return,
     };
 
-    // Use the snapshot (does not conflict with &mut running)
-    let ctx = InferCtx::new(qf_return_types, param_types_snapshot, symbol_table);
+    // Use snapshot (does not conflict with &mut running)
+    let ctx = InferCtx::new(qf_return_types, snapshot, symbol_table);
 
     for prop in properties {
-        // Wrap each property inference in catch_unwind so one bad prop
-        // doesn't prevent the rest from being registered
         let prop_dt = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             build_typed_dt_from_value(&prop.value, &ctx)
         }))
         .unwrap_or(None);
 
-        running.insert(format!("{}.{}", variable_name, prop.key), prop_dt);
+        let key = format!("{}.{}", prefix, prop.key);
+        running.insert(key.clone(), prop_dt);
+
+        // Recurse into nested objects
+        if matches!(prop.value, Value::Object { .. }) {
+            let new_snapshot = running.clone();
+            populate_object_property_types_for_value(
+                &key,
+                &prop.value,
+                qf_return_types,
+                &new_snapshot,
+                symbol_table,
+                running,
+                depth + 1,
+            );
+        }
+    }
+}
+
+// ── DATA section nested value hints ──────────────────────────────────────────
+//
+// Emits type hints for properties inside object literals that appear as values
+// in @DATA entries. Works for directly nested objects and recurses further.
+
+fn emit_data_nested_value_hints(
+    value: &Value,
+    ctx:   &InferCtx<'_>,
+    hints: &mut Vec<InlayHint>,
+) {
+    emit_data_nested_value_hints_depth(value, ctx, hints, 0);
+}
+
+fn emit_data_nested_value_hints_depth(
+    value: &Value,
+    ctx:   &InferCtx<'_>,
+    hints: &mut Vec<InlayHint>,
+    depth: usize,
+) {
+    if depth > 4 { return; }
+    if let Value::Object { properties, .. } = value {
+        for prop in properties {
+            if !prop.position.is_valid() { continue; }
+            let label = infer_value(&prop.value, ctx)
+                .unwrap_or_else(|| "<any>".to_string());
+            let line = prop.position.line.saturating_sub(1) as u32;
+            let col  = (prop.position.column.saturating_sub(1) + prop.key.len()) as u32;
+            hints.push(make_hint(line, col, label));
+            // Recurse for nested objects
+            emit_data_nested_value_hints_depth(&prop.value, ctx, hints, depth + 1);
+        }
     }
 }
 
@@ -849,7 +1008,6 @@ fn infer_value(value: &Value, ctx: &InferCtx<'_>) -> Option<String> {
         Value::Timestamp { .. }                      => Some("<timestamp>".to_string()),
         Value::EnumValue { .. }                      => Some("<enum>".to_string()),
         Value::Object { properties, .. }             => {
-            // Show property count for objects
             Some(format!("<object:{}>", properties.len()))
         }
 
@@ -963,15 +1121,14 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
             // ── Fast path: TypeInferenceVisitor (symbol table / typed collections)
             if let Some(dt) = precise_dt(expr, ctx) {
                 return match dt {
-                    // Object/Any too vague — fall through to path lookup
                     DataType::Object | DataType::Any => None,
                     dt => Some(format_data_type_as_hint(dt, None)),
                 };
             }
 
-            // ── Registered object property path lookup ─────────────────────────
-            // After populate_object_property_types, running contains entries like
-            // "player.hp" → Some(Int).  Both single-level and nested paths work.
+            // ── Registered object property path lookup (handles nested paths) ──
+            // populate_object_property_types_for_value pre-populates "player.stats.hp"
+            // entries in running so nested access chains get accurate type hints.
             if let Some(full_path) = build_property_path(expr) {
                 if let Some(&Some(dt)) = ctx.param_types.get(full_path.as_str()) {
                     return Some(format_data_type_as_hint(dt, None));
@@ -1198,4 +1355,4 @@ fn make_hint(line: u32, col: u32, label: String) -> InlayHint {
         padding_right: Some(true),
         data:          None,
     }
-}
+            }

@@ -2,32 +2,35 @@
 //!
 //! ## Token coloring scheme
 //! - `TT_NAMESPACE`   — static object receivers (Math, DateTime, …) & import aliases
-//! - `TT_FUNCTION`    — QuickFunc calls, static method calls (MOD_STATIC), table/group-array paths
+//! - `TT_FUNCTION`    — QuickFunc calls, static method calls (MOD_STATIC)
 //! - `TT_METHOD`      — instance method calls (.toUpper(), .push() etc.)
 //! - `TT_PROPERTY`    — property access after dot (non-call), CONFIG keys, SECURITY keys
 //! - `TT_MACRO`       — DLM module names (DCompressor, DEncryptor, DAuditor)
-//! - `TT_DECORATOR`   — DLM subtype names (gzip, aes256, …)
+//! - `TT_DECORATOR`   — DLM subtype names (gzip, aes256, …) AND @DATA table/group-array paths
 //!
-//! ## Table / group-array path coloring (symbol-table / AST driven)
-//! Instead of token-level heuristics, we build a set of (line, col) positions
-//! directly from `DataEntry::TableProperty` and `DataEntry::GroupArray` nodes in
-//! the resolved AST.  Every Identifier at one of those positions — as well as
-//! every subsequent token while `in_table_path_chain` is true — is coloured
-//! TT_FUNCTION (yellow), matching the TablePath token color so the whole dotted
-//! path appears uniformly yellow.
+//! ## Table / group-array path coloring (token-stream driven)
+//! We scan the raw lexer token stream for the pattern:
+//!   `Identifier (Symbol('.') Identifier)* (Symbol(':') | DoubleColon)`
+//! in the @DATA section. Every first Identifier of such a pattern is inserted into
+//! `table_path_start_positions`. When `classify_identifier` sees a match it sets
+//! `in_table_path_chain = true` so subsequent dot-separated segments are also colored
+//! TT_DECORATOR. The chain is cleared when `Symbol(':')` or `DoubleColon` is processed
+//! in `advance()`.
 //!
-//! ## Conservative dot coloring in @DATA
-//! `after_instance_dot` is only set when `prev_token_has_known_type` is true,
-//! i.e. the receiver immediately before the dot is a literal, a call result `()`,
-//! an array result `[]`, or an identifier present in the semantic `type_index`.
-//! Unknown identifiers (table-path first segments, enum names without symbol-table
-//! entry, etc.) do NOT trigger spurious property/method coloring.
+//! The lexer emits `:` as `Symbol(':')` (not `ControlFlowColon`) and `::` as `DoubleColon`,
+//! so the structural-clearer in `advance()` handles `Symbol(':')` explicitly.
+//!
+//! ## Instance method / property coloring after dots
+//! `after_instance_dot` is set to `true` for every non-static, non-enum, non-table-path dot.
+//! `classify_identifier` then uses `is_call_site` to choose TT_METHOD (call) vs TT_PROPERTY
+//! (access). The old `prev_token_has_known_type`-gate is removed because most @DATA variables
+//! are not in the semantic type index, causing instance-method colors to be suppressed.
 
 use std::collections::{HashMap, HashSet};
 use std::panic;
 
 use tower_lsp::lsp_types::{SemanticToken, SemanticTokens, SemanticTokensResult};
-use dixscript::Compiler::AST::{DataEntry, DataType};
+use dixscript::Compiler::AST::DataType;
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
 use crate::document::Document;
@@ -45,33 +48,79 @@ const STATIC_OBJECT_NAMES: &[&str] = &[
     "Math", "DateTime", "Array", "Random", "Guid", "IpAddress", "Enum", "Dix",
 ];
 
-// ── AST-driven table-path position extraction ─────────────────────────────────
+// ── Token-stream table-path position extraction ───────────────────────────────
 
-/// Builds the set of `(1-based line, 1-based column)` positions that are the
-/// **first identifier** of a `@DATA` table-property or group-array path.
+/// Scans the raw lexer token stream to find every @DATA table-property and
+/// group-array path start position.
 ///
-/// Examples
-///   `player.config: speed = 5`  →  position of `player`
-///   `enemies:: item1, item2`    →  position of `enemies`
+/// **Detection pattern**:
+/// - Table property : `Identifier (Symbol('.') Identifier)* Symbol(':')`
+/// - Group array    : `Identifier DoubleColon`
 ///
-/// We use these positions to colour those identifiers TT_FUNCTION (yellow) and
-/// to start `in_table_path_chain` so subsequent dotted segments are also yellow.
-fn build_table_path_positions(doc: &Document) -> HashSet<(usize, usize)> {
-    let mut positions = HashSet::new();
-    let data = match doc.ast.as_ref().and_then(|a| a.data.as_ref()) {
-        Some(d) => d,
-        None    => return positions,
-    };
-    for entry in &data.entries {
-        let pos = match entry {
-            DataEntry::TableProperty { position, .. }
-            | DataEntry::GroupArray  { position, .. } => *position,
-            _ => continue,
-        };
-        if pos.is_valid() {
-            positions.insert((pos.line, pos.column));
+/// The lexer emits `:` as `Symbol(':')` (not `ControlFlowColon`) and `::` as
+/// `DoubleColon`, so we match against those exact token types.
+///
+/// Returns a set of 1-based `(line, column)` pairs for the FIRST identifier
+/// of each detected path.  Priority in `classify_identifier` ensures that static
+/// objects (`Math`, …) and enum types that happen to match are still classified
+/// correctly via higher-priority rules.
+fn build_table_path_positions(tokens: &[Token]) -> HashSet<(usize, usize)> {
+    let mut positions: HashSet<(usize, usize)> = HashSet::new();
+    let n = tokens.len();
+    let mut i = 0;
+
+    while i < n {
+        let t = &tokens[i];
+
+        // Only consider @DATA section tokens.
+        if t.section != SectionId::Data {
+            i += 1;
+            continue;
         }
+
+        // Must start with an Identifier.
+        if let TokenType::Identifier(_) = &t.token_type {
+            let start_pos = (t.line, t.column);
+            let mut j = i + 1;
+            let mut is_path = false;
+            // Two-state scanner: either expecting a DOT/terminator or an Identifier after DOT.
+            let mut expect_ident = false;
+
+            while j < n && (j - i) < 24 {
+                match (&tokens[j].token_type, expect_ident) {
+                    // DOT while not expecting identifier → expect one next
+                    (TokenType::Symbol('.'), false) => {
+                        expect_ident = true;
+                        j += 1;
+                    }
+                    // Identifier after a DOT → path segment consumed, keep scanning
+                    (TokenType::Identifier(_), true) => {
+                        expect_ident = false;
+                        j += 1;
+                    }
+                    // ':' while not expecting identifier → table-property path terminator
+                    (TokenType::Symbol(':'), false) => {
+                        is_path = true;
+                        break;
+                    }
+                    // '::' while not expecting identifier → group-array path terminator
+                    (TokenType::DoubleColon, false) => {
+                        is_path = true;
+                        break;
+                    }
+                    // Anything else (or wrong state) → not a table/group-array path
+                    _ => break,
+                }
+            }
+
+            if is_path {
+                positions.insert(start_pos);
+            }
+        }
+
+        i += 1;
     }
+
     positions
 }
 
@@ -107,12 +156,10 @@ fn provide_inner(doc: Option<&Document>) -> Option<SemanticTokensResult> {
         .map(|st| st.functions.keys().cloned().collect())
         .unwrap_or_default();
 
-    // ── Semantic annotations from AST ─────────────────────────────────────────
-    let table_path_positions = build_table_path_positions(doc);
+    // ── Table-path positions: token-stream driven ─────────────────────────────
+    let table_path_positions = build_table_path_positions(&doc.tokens);
 
     // ── Type index from semantic analysis ─────────────────────────────────────
-    // Maps identifier names → DataType.  Used to decide whether the token
-    // before a `.` has a known type, which gates instance-method coloring.
     let empty_type_index: HashMap<String, DataType> = HashMap::new();
     let type_index: &HashMap<String, DataType> = doc
         .semantic_result.as_ref()
@@ -158,33 +205,33 @@ struct ClassifierState<'a> {
     next_is_static_obj: bool,
     /// True when the preceding `.` followed a static object receiver.
     after_static_dot: bool,
-    /// True when the preceding `.` was eligible for instance-method coloring:
-    ///   - receiver had a known type (from type_index or is a literal/call result)
-    ///   - and the pattern was not a table-path separator or enum access
+    /// True when the preceding `.` is eligible for instance method/property coloring:
+    ///   - Not a table-path dot (in_table_path_chain)
+    ///   - Not a static-object dot (after_static_dot)
+    ///   - Not an enum dot (prev_was_enum_dot)
+    /// Set unconditionally for any remaining dot to ensure method/property colors appear
+    /// even when the receiver variable is not in the semantic type index.
     after_instance_dot: bool,
 
-    // ── Table-path chain (AST-driven) ─────────────────────────────────────────
-    /// Set when classify_identifier returns TT_FUNCTION for a position that is
-    /// in `table_path_start_positions`.  Cleared by ControlFlowColon (`:`),
-    /// DoubleColon (`::`), or a section-keyword token.  While set, every
-    /// Identifier token in @DATA is also coloured TT_FUNCTION (yellow).
+    // ── Table-path chain (token-stream driven) ────────────────────────────────
+    /// Set when classify_identifier returns TT_DECORATOR for a token whose position
+    /// is in `table_path_start_positions`. Cleared by `Symbol(':')`, `DoubleColon`,
+    /// or a section-keyword token. While set, every @DATA Identifier is also colored
+    /// TT_DECORATOR so all path segments have the same color.
     in_table_path_chain: bool,
 
-    // ── Type-aware dot gating ─────────────────────────────────────────────────
-    /// Updated at the END of every advance() call to reflect whether the
-    /// token just processed has a known type (literal, call result `()`,
-    /// array result `[]`, or identifier present in `type_index`).
-    /// Read by the `Symbol('.')` handler to decide `after_instance_dot`.
+    // ── Type-aware receiver tracking (retained, currently informational) ──────
+    /// Updated at the END of every advance() call. Reflects whether the most recently
+    /// processed token has a statically-known type (literal, call result, static object,
+    /// enum type name, or identifier in the semantic type index). Kept for potential
+    /// future use; no longer gates after_instance_dot.
     prev_token_has_known_type: bool,
 
     // ── Semantic context ──────────────────────────────────────────────────────
     /// (1-based line, 1-based col) of every @DATA table/group-array path start.
-    /// Built from the resolved AST, not from token lookahead.
     table_path_start_positions: &'a HashSet<(usize, usize)>,
 
-    /// Identifier name → DataType from SemanticAnalysisResult::type_index.
     type_index: &'a HashMap<String, DataType>,
-
     enum_names: &'a HashSet<String>,
     func_names: &'a HashSet<String>,
 }
@@ -226,8 +273,7 @@ impl<'a> ClassifierState<'a> {
         self.is_call_site      = false;
         self.next_is_enum_type = false;
 
-        // Clear in_table_path_chain at section-keyword boundaries so it can
-        // never bleed across section transitions.
+        // ── 2. Clear all chain/dot state at section-keyword boundaries ────────
         if matches!(&token.token_type,
             TokenType::SectionConfig | TokenType::SectionImports | TokenType::SectionDLM
             | TokenType::SectionEnums | TokenType::SectionQuickFuncs
@@ -239,40 +285,51 @@ impl<'a> ClassifierState<'a> {
             self.prev_token_has_known_type = false;
         }
 
-        // ── 2. Clear dot/chain state on structural operator tokens ─────────────
+        // ── 3. Structural token dot/chain-state management ────────────────────
+        //
+        // Identifiers and dots carry all dot-tracking state forward unchanged.
+        // Type-annotation brackets do not reset dot state.
+        // Symbol(':') only terminates the table-path chain — it does NOT reset
+        //   after_static_dot or after_instance_dot so that method calls following
+        //   ':' in @QUICKFUNCS (e.g. after 'if:', 'chk:') still get colored.
+        // All other structural operators fully reset dot-tracking state.
         match &token.token_type {
-            // Identifiers and dots are allowed to "carry" dot state forward.
-            TokenType::Identifier(_) | TokenType::Symbol('.') => {}
-            _ => {
-                // Type-annotation tokens don't break dot state.
-                match &token.token_type {
-                    TokenType::Symbol('<') | TokenType::Symbol('>')
-                    | TokenType::DataType(_) => {}
-                    _ => {
-                        match &token.token_type {
-                            TokenType::ArithmeticOp(_)
-                            | TokenType::ComparisonOp(_)
-                            | TokenType::LogicalOp(_)
-                            | TokenType::BitwiseOp(_)
-                            | TokenType::ArithmeticAssignOp(_)
-                            | TokenType::Arrow
-                            | TokenType::SwitchCase
-                            | TokenType::DoubleColon       // also ends a group-array path
-                            | TokenType::ControlFlowColon  // also ends a table-property path
-                            | TokenType::Symbol(';') => {
-                                self.after_static_dot        = false;
-                                self.after_instance_dot      = false;
-                                self.next_is_static_obj      = false;
-                                self.in_table_path_chain     = false; // ← clear table-path chain
-                            }
-                            _ => {}
-                        }
-                    }
-                }
+            TokenType::Identifier(_) | TokenType::Symbol('.') => {
+                // Carry dot-tracking state forward — no action.
             }
+
+            TokenType::Symbol('<') | TokenType::Symbol('>') | TokenType::DataType(_) => {
+                // Type-annotation tokens — do not break dot state.
+            }
+
+            // Table-property separator (lexer emits ':' as Symbol(':'), not ControlFlowColon).
+            // Only clears the table-path chain; preserves dot-tracking so instance/static
+            // method calls in @QUICKFUNCS after ':' (if:, chk:, etc.) remain colored.
+            TokenType::Symbol(':') => {
+                self.in_table_path_chain = false;
+            }
+
+            // These operators fully reset all dot-tracking and chain state.
+            TokenType::ArithmeticOp(_)
+            | TokenType::ComparisonOp(_)
+            | TokenType::LogicalOp(_)
+            | TokenType::BitwiseOp(_)
+            | TokenType::ArithmeticAssignOp(_)
+            | TokenType::Arrow
+            | TokenType::SwitchCase
+            | TokenType::DoubleColon
+            | TokenType::ControlFlowColon
+            | TokenType::Symbol(';') => {
+                self.after_static_dot    = false;
+                self.after_instance_dot  = false;
+                self.next_is_static_obj  = false;
+                self.in_table_path_chain = false;
+            }
+
+            _ => {}
         }
 
-        // ── 3. Identifier-specific flag setup ─────────────────────────────────
+        // ── 4. Identifier-specific flag setup ─────────────────────────────────
         if let TokenType::Identifier(name) = &token.token_type {
             self.next_is_static_obj = STATIC_OBJECT_NAMES.contains(&name.as_str());
 
@@ -284,7 +341,7 @@ impl<'a> ClassifierState<'a> {
             };
             self.is_call_site = lookahead_paren && !self.next_is_func_name;
 
-            // Enum type detection: name is an enum AND next token is `.`
+            // Enum-type detection: name is an enum AND the next token is '.'
             if self.enum_names.contains(name.as_str()) {
                 let has_dot = tokens.iter()
                     .skip(index + 1)
@@ -301,14 +358,14 @@ impl<'a> ClassifierState<'a> {
             }
         }
 
-        // ── 4. Structural token state transitions ─────────────────────────────
+        // ── 5. Structural token state transitions ─────────────────────────────
         match &token.token_type {
 
             // ── Dot (.) ───────────────────────────────────────────────────────
             TokenType::Symbol('.') => {
                 if self.in_table_path_chain {
-                    // This dot is a table-path separator.  Never set instance/static
-                    // method coloring — the token after it is the next path segment.
+                    // This dot is a table-path separator — never set instance/static
+                    // method coloring; the token after it is the next path segment.
                     self.after_static_dot   = false;
                     self.after_instance_dot = false;
 
@@ -324,19 +381,20 @@ impl<'a> ClassifierState<'a> {
                     self.after_static_dot  = self.next_is_static_obj;
 
                     if self.next_is_static_obj {
-                        // Static receiver: Math.sqrt — after-dot is a static method.
+                        // Static receiver (Math.sqrt, DateTime.now): after-dot is a static method.
                         self.after_instance_dot = false;
                     } else {
                         // Instance method / property access.
-                        // Only colour after the dot when the receiver has a *known type*
-                        // (literal, call result, or identifier present in the type index).
-                        // This prevents table-path segments, unresolved enum names, and
-                        // other unknown identifiers from triggering false method coloring.
-                        self.after_instance_dot = self.prev_token_has_known_type;
+                        // Always enable coloring — the priority system in classify_identifier
+                        // distinguishes method calls (TT_METHOD) from property accesses
+                        // (TT_PROPERTY) via the is_call_site check.
+                        // Previously gated on prev_token_has_known_type, which suppressed
+                        // colors for receivers not in the semantic type index.
+                        self.after_instance_dot = true;
                     }
                 }
 
-                // Always consume after reading.
+                // Consume static-object flag after the dot handler reads it.
                 self.next_is_static_obj = false;
                 self.dlm_dot_seen       = true;
             }
@@ -407,65 +465,48 @@ impl<'a> ClassifierState<'a> {
             _ => {}
         }
 
-        // ── 5. Update prev_token_has_known_type for the *next* dot's use ──────
+        // ── 6. Update prev_token_has_known_type for informational use ─────────
         //
-        // This is set at the END so the dot handler above reads the value from
-        // the *previous* token's advance(), not the current token's.
-        //
-        // A token "has a known type" when:
-        //   • It is a literal whose type is statically obvious (string, int, …)
-        //   • It is a closing `)` (function / expression result) or `]` (array)
-        //   • It is an identifier present in the semantic type_index
-        //   • It is a known static-object name (Math, DateTime, …)
-        //   • It is a known enum-type name (so `EnumName.FIELD` is not gated out)
+        // Retained for potential future use. No longer gates after_instance_dot
+        // (that is now always set true for non-static, non-enum, non-chain dots).
         self.prev_token_has_known_type = match &token.token_type {
-            // String literals
             TokenType::String(_)
             | TokenType::StringSingle(_)
             | TokenType::InterpolatedString(_) => true,
-            // Colour literals
-            TokenType::HexColor(_) => true,
-            // Temporal literals
+            TokenType::HexColor(_)  => true,
             TokenType::Date(_) | TokenType::Timestamp(_) => true,
-            // Boolean literal
-            TokenType::Bool(_) => true,
-            // Numeric literals
+            TokenType::Bool(_)      => true,
             TokenType::Integer(_)
             | TokenType::Long(_)
             | TokenType::Float(_)
             | TokenType::Double(_)
             | TokenType::ScientificNotation(_)
             | TokenType::HexLiteral(_) => true,
-            // Constructor results
             TokenType::TupleConstructor(_)
             | TokenType::BlobConstructor(_)
             | TokenType::RegexConstructor(_)
             | TokenType::PrefixedConstructor { .. } => true,
-            // Closing brackets — result of a call or array literal
             TokenType::Symbol(']') | TokenType::Symbol(')') => true,
-            // Identifiers — known only when present in the semantic type_index,
-            // or when they are statically known (static objects, enum type names).
             TokenType::Identifier(name) => {
                 self.type_index.contains_key(name.as_str())
                     || STATIC_OBJECT_NAMES.contains(&name.as_str())
                     || self.enum_names.contains(name.as_str())
             }
-            // Everything else (operators, section keywords, dots, …) → unknown
             _ => false,
         };
     }
 
-    /// Classify an `Identifier` token, consuming relevant state flags.
+    /// Classify an `Identifier` token using priority-ordered rules.
     ///
     /// Priority order:
-    ///  0. DLM section (absolute override for module/subtype colouring)
+    ///  0. DLM section (absolute override for module/subtype coloring)
     ///  1. Static-object receiver with lookahead dot  → TT_NAMESPACE
     ///  2. Control-flow keyword with lookahead colon  → TT_KEYWORD
     ///  3. Enum member after dot                      → TT_ENUM_MEMBER
     ///  4. Enum type name                             → TT_TYPE
-    ///  5. After static dot                           → TT_FUNCTION+MOD_STATIC or TT_PROPERTY
-    ///  6. After instance dot (type-gated)            → TT_METHOD or TT_PROPERTY
-    ///  7. Regular QuickFunc call site                → TT_FUNCTION
+    ///  5. After static dot                           → TT_FUNCTION+MOD_STATIC or TT_PROPERTY+MOD_STATIC
+    ///  6. After instance dot                         → TT_METHOD or TT_PROPERTY
+    ///  7. Regular QuickFunc / function call site     → TT_FUNCTION
     ///  8. Section-specific fallback                  → various
     fn classify_identifier(&mut self, token: &Token, tokens: &[Token], index: usize) -> (u32, u32) {
 
@@ -497,7 +538,7 @@ impl<'a> ClassifierState<'a> {
         // ── 2. Control-flow keyword detection in QuickFuncs ───────────────────
         if token.section == SectionId::QuickFuncs {
             let next_is_colon = tokens.get(index + 1)
-                .map(|t| matches!(t.token_type, TokenType::ControlFlowColon))
+                .map(|t| matches!(t.token_type, TokenType::ControlFlowColon | TokenType::Symbol(':')))
                 .unwrap_or(false);
             if next_is_colon {
                 return (TT_KEYWORD, 0);
@@ -529,11 +570,9 @@ impl<'a> ClassifierState<'a> {
             return result;
         }
 
-        // ── 6. After instance dot (type-gated) ────────────────────────────────
-        // Only fires when `prev_token_has_known_type` was true at the dot.
-        // This ensures `arr.get(0)` is coloured as a method call, while
-        // `player.config:` (table path) and `AIType.FIELD` (enum, if not in
-        // the symbol table) are NOT spuriously coloured.
+        // ── 6. After instance dot ─────────────────────────────────────────────
+        // Fires for any non-static, non-enum, non-table-path dot.
+        // is_call_site selects TT_METHOD (call) vs TT_PROPERTY (field access).
         if self.after_instance_dot {
             let result = if self.is_call_site {
                 (TT_METHOD, 0)
@@ -588,24 +627,20 @@ impl<'a> ClassifierState<'a> {
                 }
             }
 
-            // @DATA: use AST-derived position set for table/group-array paths.
+            // @DATA: table-property and group-array paths colored as TT_DECORATOR.
             //
-            // If this identifier's (line, col) is in `table_path_start_positions`
-            // (populated from DataEntry::TableProperty / GroupArray in the AST),
-            // colour it yellow and start the chain so subsequent dotted segments
-            // are also yellow.  If we are already inside such a chain, also yellow.
+            // If this token's (line, col) is in `table_path_start_positions` (built from
+            // the raw token stream), color it TT_DECORATOR and start the chain so
+            // subsequent dot-separated segments are also colored TT_DECORATOR.
+            // If already inside a chain, color as TT_DECORATOR directly.
             SectionId::Data => {
                 if self.in_table_path_chain {
-                    // Subsequent segment of a table path (e.g. `config` in `player.config:`
-                    // when the tokenizer emits it as a separate Identifier token).
-                    return (TT_FUNCTION, 0);
+                    return (TT_DECORATOR, 0);
                 }
                 let pos = (token.line, token.column);
                 if self.table_path_start_positions.contains(&pos) {
-                    // First segment of a table/group-array path.  Start the chain so
-                    // the dot handler and subsequent segments inherit the yellow color.
                     self.in_table_path_chain = true;
-                    return (TT_FUNCTION, 0);
+                    return (TT_DECORATOR, 0);
                 }
                 (TT_VARIABLE, 0)
             }
@@ -841,16 +876,12 @@ fn classify(
         TokenType::Comment(_)            => Some((TT_COMMENT, 0)),
 
         // ── Enum access (pre-analysed by tokeniser) ───────────────────────────
-        // EnumAccess covers the FULL `EnumName.FIELD` span.  Column is at the
-        // start of the enum-type name, length covers name + '.' + field.
         TokenType::EnumAccess { .. }     => Some((TT_ENUM_MEMBER, 0)),
 
-        // ── Table / group-array path segments (TablePath tokens) ─────────────
-        // These tokens are emitted for the NON-FIRST segments of a dotted path,
-        // e.g. `config` in `player.config:` or `name.d` in `player.name.d:`.
-        // They are coloured yellow (TT_FUNCTION) to match the first-segment
-        // Identifier which is coloured via the AST-based position set above.
-        TokenType::TablePath(_)          => Some((TT_FUNCTION, 0)),
+        // ── Table / group-array path tokens (if emitted by a post-processing pass) ──
+        // The lexer itself does not produce TablePath tokens; if a later pass does,
+        // color them consistently with our identifier-level table-path coloring.
+        TokenType::TablePath(_)          => Some((TT_DECORATOR, 0)),
 
         // ── Pre-analysed static/builtin calls ─────────────────────────────────
         TokenType::StaticFunction { .. } if token.section == SectionId::Dlm
@@ -924,4 +955,4 @@ fn token_length(token: &Token) -> usize {
             if v.is_empty() { 1 } else { v.len() }
         }
     }
-    }
+}

@@ -1,5 +1,12 @@
 // mdix-lsp/src/analyzer.rs
 //! Pipeline runner — Approach B (tokenizer-first).
+//!
+//! Cloud import handling:
+//!   - If ALL cloud imports are already cached locally → proceed with full
+//!     import resolution (fast, no network I/O — just filesystem reads).
+//!   - If ANY cloud import is NOT cached → disable import resolution and
+//!     emit a single Info diagnostic directing the developer to run
+//!     `mdix compile` once to populate the cache.
 
 use std::collections::HashMap;
 use std::panic;
@@ -14,6 +21,7 @@ use dixscript::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
 use dixscript::Compiler::Core::Tokenizer::TokenType;
 use dixscript::Compiler::Core::ValueResolution::ValueResolver;
 use dixscript::Compiler::AST::data_types::{DLMModuleType, DLMModuleSubtype};
+use dixscript::Compiler::ImportsResolution::CloudFileCache;
 use dixscript::ErrorManager::{
     DixError, ErrorManager, ErrorSeverity,
     SemanticError, SemanticErrorType,
@@ -31,8 +39,7 @@ pub fn run_pipeline(doc: &mut Document) -> Vec<DixError> {
         Ok(errors) => errors,
         Err(payload) => {
             let msg = payload
-                .downcast_ref::<String>()
-                .cloned()
+                .downcast_ref::<String>().cloned()
                 .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
                 .unwrap_or_else(|| "unknown panic".to_string());
             tracing::error!("Pipeline panicked for {}: {}", doc.uri, msg);
@@ -47,15 +54,9 @@ pub fn get_resolved_ast(doc: &Document) -> Option<DixScript> {
     let ast = doc.ast.as_ref()?;
     let semantic_result = doc.semantic_result.as_ref()?;
 
-    let has_local_fns = ast
-        .quick_functions
-        .as_ref()
-        .map(|q| !q.functions.is_empty())
-        .unwrap_or(false);
-
-    let has_imported_fns = semantic_result
-        .symbol_table
-        .as_ref()
+    let has_local_fns = ast.quick_functions.as_ref()
+        .map(|q| !q.functions.is_empty()).unwrap_or(false);
+    let has_imported_fns = semantic_result.symbol_table.as_ref()
         .map(|st| st.namespaces.values().any(|ns| !ns.functions.is_empty()))
         .unwrap_or(false);
 
@@ -95,15 +96,61 @@ pub fn get_resolved_ast(doc: &Document) -> Option<DixScript> {
             Some(ast.clone())
         }
         Err(payload) => {
-            let msg = payload
-                .downcast_ref::<String>()
-                .cloned()
+            let msg = payload.downcast_ref::<String>().cloned()
                 .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
                 .unwrap_or_else(|| "unknown panic".to_string());
             tracing::error!("Value resolution panicked for command: {}", msg);
             Some(ast.clone())
         }
     }
+}
+
+// ── Cloud import cache check ──────────────────────────────────────────────────
+
+/// Returns `true` when every cloud import in `ast` has a cached copy on disk.
+/// This is a pure filesystem check — no network I/O.
+fn cloud_imports_all_cached(ast: &DixScript) -> bool {
+    let imports = match ast.imports.as_ref() {
+        Some(i) => i,
+        None    => return true,
+    };
+
+    // Quick exit: no cloud imports at all
+    let cloud_count = imports.imports.iter().filter(|i| i.is_cloud_import).count();
+    if cloud_count == 0 {
+        return true;
+    }
+
+    let cache = CloudFileCache::new(ErrorManager::new_isolated());
+
+    imports.imports.iter()
+        .filter(|imp| imp.is_cloud_import)
+        .all(|imp| {
+            // Strip query params — the cache stores URLs without them
+            let url = imp.path.find('?')
+                .map(|pos| &imp.path[..pos])
+                .unwrap_or(&imp.path);
+            cache.is_cached(url)
+        })
+}
+
+/// Count uncached cloud imports (for the diagnostic message).
+fn uncached_cloud_import_aliases(ast: &DixScript) -> Vec<String> {
+    let imports = match ast.imports.as_ref() {
+        Some(i) => i,
+        None    => return vec![],
+    };
+    let cache = CloudFileCache::new(ErrorManager::new_isolated());
+    imports.imports.iter()
+        .filter(|imp| {
+            if !imp.is_cloud_import { return false; }
+            let url = imp.path.find('?')
+                .map(|pos| &imp.path[..pos])
+                .unwrap_or(&imp.path);
+            !cache.is_cached(url)
+        })
+        .map(|imp| imp.alias.clone())
+        .collect()
 }
 
 // ── Inner pipeline ────────────────────────────────────────────────────────────
@@ -120,9 +167,7 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     };
 
     let tokenizer = Tokenizer::new_with_error_manager(
-        &doc.source,
-        &tokenizer_settings,
-        em.clone(),
+        &doc.source, &tokenizer_settings, em.clone(),
     );
     let token_result = tokenizer.tokenize();
     let all_tokens   = token_result.tokens;
@@ -161,8 +206,6 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         }
     }
 
-    // Store the full token stream NOW so all feature providers can use it,
-    // including the security check below.
     doc.tokens = all_tokens;
 
     // ── Stage 3: parse ────────────────────────────────────────────────────────
@@ -189,22 +232,40 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
 
     tracing::debug!("Parse complete");
 
-    let has_cloud_imports = ast
-        .imports
-        .as_ref()
+    // ── Cloud import handling ─────────────────────────────────────────────────
+    //
+    // Check the local cache BEFORE deciding whether to run import resolution:
+    //   • All cached   → let the resolver use cached files (no network I/O)
+    //   • Any missing  → skip resolution + emit Info diagnostic
+    //
+    // This way the LSP works fully offline once `mdix compile` has been run once
+    // to populate the cache, matching the behaviour of Deno LSP / TypeScript
+    // path-aliases: cache aggressively, serve offline.
+
+    let has_cloud_imports = ast.imports.as_ref()
         .map(|imp| imp.imports.iter().any(|i| i.is_cloud_import))
         .unwrap_or(false);
 
+    let mut cloud_not_cached_aliases: Vec<String> = vec![];
+
     if has_cloud_imports {
-        tracing::debug!("Cloud imports present — disabling import resolution");
-        operational_settings.skip_imports_resolution = true;
+        if cloud_imports_all_cached(&ast) {
+            tracing::debug!(
+                "Cloud imports present — all cached, proceeding with import resolution"
+            );
+        } else {
+            cloud_not_cached_aliases = uncached_cloud_import_aliases(&ast);
+            tracing::debug!(
+                "Cloud imports not cached ({:?}) — disabling import resolution",
+                cloud_not_cached_aliases
+            );
+            operational_settings.skip_imports_resolution = true;
+        }
     }
 
     // ── Stage 4: semantic analysis ────────────────────────────────────────────
     let analyzer = GeneralSemanticAnalyzer::new_for_lsp(
-        &ast,
-        &operational_settings,
-        em.clone(),
+        &ast, &operational_settings, em.clone(),
     );
     let semantic_result = analyzer.analyze();
 
@@ -217,8 +278,7 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
 
     // ── Stage 5: AST enhancement ──────────────────────────────────────────────
     let enhancer = GeneralAstEnhancer::new_with_error_manager(
-        &operational_settings,
-        em.clone(),
+        &operational_settings, em.clone(),
     );
     let enhancement_result = enhancer.enhance(&ast, Some(&semantic_result));
 
@@ -227,19 +287,43 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
         enhancement_result.total_enhancements
     );
 
-    // ── Stage 6: build the diagnostic list ────────────────────────────────────
+    // ── Stage 6: build diagnostic list ───────────────────────────────────────
     let mut all_errors = em.get_all_errors_flat();
 
-    // Remove any security-missing diagnostics the core emitted so we can
-    // re-emit exactly one per encryptor at the correct token position.
+    // Remove auto-generated security-missing diagnostics so we can re-emit
+    // them at the correct token position below.
     all_errors.retain(|e| !is_security_missing_error(e));
 
+    // ── Cloud import info diagnostic (emitted after all_errors is built) ──────
+    if !cloud_not_cached_aliases.is_empty() {
+        let (imp_line, imp_col) =
+            find_section_token_pos(&doc.tokens, TokenType::SectionImports)
+                .unwrap_or((1, 1));
+
+        let alias_list = cloud_not_cached_aliases.join(", ");
+        all_errors.push(DixError::Semantic(SemanticError {
+            error_id:    "CLOUD001".to_string(),
+            error_type:  SemanticErrorType::InvalidConfiguration,
+            message:     format!(
+                "Cloud import(s) not cached locally — import resolution disabled in LSP: {}. \
+                 Run `mdix compile` once to download and cache remote imports.",
+                alias_list
+            ),
+            line:        imp_line as i32,
+            column:      imp_col  as i32,
+            section_name: Some("IMPORTS".to_string()),
+            suggestion:   Some(
+                "Run `mdix compile <your-file.mdix>` to fetch remote imports. \
+                 The LSP will use the cache automatically on subsequent edits."
+                    .to_string(),
+            ),
+            severity:    ErrorSeverity::Info,
+            quick_fixes: Vec::new(),
+            metadata:    HashMap::new(),
+        }));
+    }
+
     // ── Security validation ───────────────────────────────────────────────────
-    //
-    // IMPORTANT: We check the TOKEN STREAM for @SECURITY, not ast.security.
-    // The semantic pipeline may auto-generate a default SecuritySection in the
-    // AST even when the user hasn't written @SECURITY. The token stream is the
-    // ground truth for what the user actually typed.
     let user_has_security_token = doc.tokens
         .iter()
         .any(|t| matches!(t.token_type, TokenType::SectionSecurity));
@@ -248,8 +332,7 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
 
     tracing::debug!(
         "Security check: encryptors={:?}, user_has_security_token={}",
-        dlm_encryptors,
-        user_has_security_token
+        dlm_encryptors, user_has_security_token
     );
 
     if !dlm_encryptors.is_empty() && !user_has_security_token {
@@ -257,35 +340,29 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
             find_section_token_pos(&doc.tokens, TokenType::SectionDLM)
                 .unwrap_or((1, 1));
 
-        tracing::debug!(
-            "Emitting SEC001 at {}:{} for encryptors: {:?}",
-            diag_line, diag_col, dlm_encryptors
-        );
-
         for algorithm in &dlm_encryptors {
             all_errors.push(DixError::Semantic(SemanticError {
-                error_id:     "SEC001".to_string(),
-                error_type:   SemanticErrorType::InvalidConfiguration,
-                message:      format!(
+                error_id:    "SEC001".to_string(),
+                error_type:  SemanticErrorType::InvalidConfiguration,
+                message:     format!(
                     "@SECURITY section required: DEncryptor.{} is present in @DLM but no @SECURITY block was found.",
                     algorithm
                 ),
-                line:         diag_line as i32,
-                column:       diag_col  as i32,
+                line:        diag_line as i32,
+                column:      diag_col  as i32,
                 section_name: Some("DLM".to_string()),
                 suggestion:   Some(
                     "Add an @SECURITY section, e.g.: \
-                     @SECURITY( encryption -> { mode = \"keyfile\", algorithm = \"...\", key_length = 32 } )"
+                     @SECURITY( encryption -> { mode = \"keyfile\", algorithm = \"...\" } )"
                         .to_string(),
                 ),
-                severity:     ErrorSeverity::Error,
-                quick_fixes:  Vec::new(),
-                metadata:     HashMap::new(),
+                severity:    ErrorSeverity::Error,
+                quick_fixes: Vec::new(),
+                metadata:    HashMap::new(),
             }));
         }
     }
 
-    // DAuditor: informational only — no error emitted.
     if let Some(dlm) = &ast.dlm {
         for m in &dlm.modules {
             if matches!(m.module_type, DLMModuleType::DAuditor) {
@@ -299,12 +376,9 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
 
     // ── Convert semantic_result errors / warnings ─────────────────────────────
     for err in &semantic_result.errors {
-        if is_security_missing_str(&err.message) {
-            continue;
-        }
+        if is_security_missing_str(&err.message) { continue; }
 
-        let (line, col) = err
-            .position
+        let (line, col) = err.position
             .map(|p| (p.line as i32, p.column as i32))
             .unwrap_or((0, 0));
 
@@ -314,16 +388,8 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
             message:     err.message.clone(),
             line,
             column:      col,
-            section_name: if err.section_name.is_empty() {
-                None
-            } else {
-                Some(err.section_name.clone())
-            },
-            suggestion: if err.suggestion.is_empty() {
-                None
-            } else {
-                Some(err.suggestion.clone())
-            },
+            section_name: if err.section_name.is_empty() { None } else { Some(err.section_name.clone()) },
+            suggestion:   if err.suggestion.is_empty()   { None } else { Some(err.suggestion.clone())   },
             severity:    ErrorSeverity::Error,
             quick_fixes: Vec::new(),
             metadata:    HashMap::new(),
@@ -331,12 +397,9 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
     }
 
     for warn in &semantic_result.warnings {
-        if is_security_missing_str(&warn.message) {
-            continue;
-        }
+        if is_security_missing_str(&warn.message) { continue; }
 
-        let (line, col) = warn
-            .position
+        let (line, col) = warn.position
             .map(|p| (p.line as i32, p.column as i32))
             .unwrap_or((0, 0));
 
@@ -346,12 +409,8 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
             message:     warn.message.clone(),
             line,
             column:      col,
-            section_name: if warn.section_name.is_empty() {
-                None
-            } else {
-                Some(warn.section_name.clone())
-            },
-            suggestion:  None,
+            section_name: if warn.section_name.is_empty() { None } else { Some(warn.section_name.clone()) },
+            suggestion:   None,
             severity:    ErrorSeverity::Warning,
             quick_fixes: Vec::new(),
             metadata:    HashMap::new(),
@@ -360,8 +419,8 @@ fn run_pipeline_inner(doc: &mut Document) -> Vec<DixError> {
 
     // ── Store state ───────────────────────────────────────────────────────────
     let enhanced_ast = enhancement_result.enhanced_ast.clone();
-    doc.ast               = Some(enhanced_ast);
-    doc.semantic_result   = Some(semantic_result);
+    doc.ast                = Some(enhanced_ast);
+    doc.semantic_result    = Some(semantic_result);
     doc.enhancement_result = Some(enhancement_result);
 
     tracing::debug!("Pipeline complete: {} total diagnostics", all_errors.len());
@@ -376,7 +435,6 @@ fn is_security_missing_error(e: &DixError) -> bool {
 
 fn is_security_missing_str(msg: &str) -> bool {
     let lower = msg.to_lowercase();
-    // Match any phrasing the core or LSP might use
     (lower.contains("security") && lower.contains("missing"))
         || (lower.contains("security") && lower.contains("required"))
         || lower.contains("encryptor requires")
@@ -384,12 +442,8 @@ fn is_security_missing_str(msg: &str) -> bool {
 }
 
 fn collect_encryptors(ast: &DixScript) -> Vec<String> {
-    let dlm = match &ast.dlm {
-        Some(d) => d,
-        None    => return vec![],
-    };
-    dlm.modules
-        .iter()
+    let dlm = match &ast.dlm { Some(d) => d, None => return vec![] };
+    dlm.modules.iter()
         .filter(|m| matches!(m.module_type, DLMModuleType::DEncryptor))
         .map(|m| match m.subtype {
             Some(DLMModuleSubtype::Aes128)   => "aes128".to_string(),
@@ -417,9 +471,7 @@ fn find_section_token_pos(
             | (TokenType::SectionSecurity,   TokenType::SectionSecurity)
         )
     };
-
-    tokens
-        .iter()
+    tokens.iter()
         .find(|t| is_match(&t.token_type))
         .map(|t| (t.line, t.column))
-                               }
+        }

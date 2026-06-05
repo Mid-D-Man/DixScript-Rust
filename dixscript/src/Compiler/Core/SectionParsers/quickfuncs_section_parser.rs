@@ -2323,14 +2323,24 @@ fn parse_blob_constructor(&mut self) -> Expression {
         args
     }
 
+    // In quickfuncs_section_parser.rs
+    // impl QuickFuncsSectionParser — near the bottom of the file
+
     fn convert_expression_to_value(&self, expr: Expression) -> Value {
         let pos = expr.position();
         match expr {
             Expression::Value { value, .. } => value,
             Expression::Identifier { name, .. } => Value::Identifier { value: name, position: pos },
-            Expression::QualifiedIdentifier { parts, .. } => {
+            // Non-call qualified identifiers only (bare property access or enum ref like Role.USER)
+            // are stored as a dotted identifier string for downstream enum resolution.
+            // Method/function calls (arguments: Some(_)) must NOT go through this path or
+            // resolve_identifier_value will misidentify "obj.count" as EnumValue { "obj", "count" }.
+            Expression::QualifiedIdentifier { parts, arguments: None, .. } => {
                 Value::Identifier { value: parts.join("."), position: pos }
             }
+            // All other expressions — including qualified calls like obj.count(), obj.keys(),
+            // arithmetic, comparisons, etc. — are preserved as a full expression so the AST
+            // enhancer can resolve them (to InstanceMethodCall) and the interpreter executes them.
             other => Value::Expression { expr: Box::new(other), position: pos },
         }
     }

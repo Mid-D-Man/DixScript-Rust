@@ -298,14 +298,6 @@ impl LanguageServer for Backend {
         Ok(features::document_symbols::provide(self.documents.get(uri).as_deref()))
     }
 
-    // ── NEW: Workspace-wide symbol search (Cmd+T / Ctrl+T) ───────────────────
-    //
-    // Searches all currently-indexed documents for symbols matching `params.query`
-    // using case-insensitive substring matching. Returns up to 256 results.
-    //
-    // Note: tower-lsp v0.20 maps `workspace/symbol` to the trait method `symbol`.
-    // If your version maps it differently the method name here may need adjusting.
-
     async fn symbol(
         &self,
         params: WorkspaceSymbolParams,
@@ -313,15 +305,16 @@ impl LanguageServer for Backend {
         Ok(features::workspace_symbols::provide(&self.documents, &params.query))
     }
 
-    // ── NEW: Call hierarchy ───────────────────────────────────────────────────
+    // ── Call hierarchy ────────────────────────────────────────────────────────
     //
-    // prepare          → identify the QuickFunc under the cursor
-    // incoming_calls   → which functions/sections call this QuickFunc
-    // outgoing_calls   → which QuickFuncs this function calls internally
+    // tower-lsp trait names:
+    //   prepare_call_hierarchy  → textDocument/prepareCallHierarchy
+    //   incoming_calls          → callHierarchy/incomingCalls
+    //   outgoing_calls          → callHierarchy/outgoingCalls
 
-    async fn call_hierarchy_prepare(
-        &self,
-        params: CallHierarchyPrepareParams,
+    async fn prepare_call_hierarchy(          // ← was call_hierarchy_prepare
+                                              &self,
+                                              params: CallHierarchyPrepareParams,
     ) -> LspResult<Option<Vec<CallHierarchyItem>>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
@@ -330,20 +323,19 @@ impl LanguageServer for Backend {
         ))
     }
 
-    async fn call_hierarchy_incoming_calls(
-        &self,
-        params: CallHierarchyIncomingCallsParams,
+    async fn incoming_calls(                  // ← was call_hierarchy_incoming_calls
+                                              &self,
+                                              params: CallHierarchyIncomingCallsParams,
     ) -> LspResult<Option<Vec<CallHierarchyIncomingCall>>> {
-        // The item's URI tells us which document contains the function definition
         let uri = &params.item.uri;
         Ok(features::call_hierarchy::incoming_calls(
             self.documents.get(uri).as_deref(), &params,
         ))
     }
 
-    async fn call_hierarchy_outgoing_calls(
-        &self,
-        params: CallHierarchyOutgoingCallsParams,
+    async fn outgoing_calls(                  // ← was call_hierarchy_outgoing_calls
+                                              &self,
+                                              params: CallHierarchyOutgoingCallsParams,
     ) -> LspResult<Option<Vec<CallHierarchyOutgoingCall>>> {
         let uri = &params.item.uri;
         Ok(features::call_hierarchy::outgoing_calls(
@@ -528,8 +520,8 @@ impl LanguageServer for Backend {
                         None      => CommandResult::err("File has not been parsed yet."),
                     }
                 })
-                .await
-                .unwrap_or_else(|_| CommandResult::err("JSON conversion task panicked."));
+                    .await
+                    .unwrap_or_else(|_| CommandResult::err("JSON conversion task panicked."));
                 self.show_message(result.success, &result.message).await;
             }
 
@@ -548,8 +540,8 @@ impl LanguageServer for Backend {
                         None      => CommandResult::err("File has not been parsed yet."),
                     }
                 })
-                .await
-                .unwrap_or_else(|_| CommandResult::err("TOML conversion task panicked."));
+                    .await
+                    .unwrap_or_else(|_| CommandResult::err("TOML conversion task panicked."));
                 self.show_message(result.success, &result.message).await;
             }
 
@@ -568,8 +560,8 @@ impl LanguageServer for Backend {
                         None      => CommandResult::err("File has not been parsed yet."),
                     }
                 })
-                .await
-                .unwrap_or_else(|_| CommandResult::err("Minify task panicked."));
+                    .await
+                    .unwrap_or_else(|_| CommandResult::err("Minify task panicked."));
                 self.show_message(result.success, &result.message).await;
             }
 
@@ -591,19 +583,19 @@ impl LanguageServer for Backend {
                             None => CommandResult::err("⊞ Save the file before resolving."),
                         }
                     }))
-                    .unwrap_or_else(|payload| {
-                        let msg = payload.downcast_ref::<String>().cloned()
-                            .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                            .unwrap_or_else(|| "unknown panic in resolver".to_string());
-                        tracing::error!("CMD_CREATE_RESOLVED inner panic: {}", msg);
-                        CommandResult::err(format!("⊞ Resolve panicked: {}", msg))
-                    })
+                        .unwrap_or_else(|payload| {
+                            let msg = payload.downcast_ref::<String>().cloned()
+                                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                                .unwrap_or_else(|| "unknown panic in resolver".to_string());
+                            tracing::error!("CMD_CREATE_RESOLVED inner panic: {}", msg);
+                            CommandResult::err(format!("⊞ Resolve panicked: {}", msg))
+                        })
                 })
-                .await
-                .unwrap_or_else(|e| {
-                    tracing::error!("CMD_CREATE_RESOLVED spawn_blocking failed: {:?}", e);
-                    CommandResult::err("⊞ Resolve task panicked unexpectedly.")
-                });
+                    .await
+                    .unwrap_or_else(|e| {
+                        tracing::error!("CMD_CREATE_RESOLVED spawn_blocking failed: {:?}", e);
+                        CommandResult::err("⊞ Resolve task panicked unexpectedly.")
+                    });
                 self.show_message(result.success, &result.message).await;
             }
 
@@ -616,8 +608,8 @@ impl LanguageServer for Backend {
                 let result = tokio::task::spawn_blocking(move || {
                     run_compile(path_clone.as_deref(), ast_clone.as_ref())
                 })
-                .await
-                .unwrap_or_else(|_| CommandResult::err("Compile task panicked."));
+                    .await
+                    .unwrap_or_else(|_| CommandResult::err("Compile task panicked."));
                 self.show_message(result.success, &result.message).await;
             }
 
@@ -644,4 +636,4 @@ impl LanguageServer for Backend {
 
         Ok(None)
     }
-    }
+}

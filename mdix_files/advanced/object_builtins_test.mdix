@@ -1,6 +1,13 @@
 // mdix-lsp/tests/fixtures/object_builtins_test.mdix
 // Exercises all Object instance methods — hover/inlay/completion smoke test
-
+@CONFIG(
+  version -> "1.0.0"
+  author -> "name"
+  debug_mode -> "verbose"
+  error_handling -> "halt"
+  compatibility_mode -> "strict"
+  features -> "advanced"
+)
 @ENUMS(
   Role   { ADMIN = 0, USER = 1, GUEST = 2 }
   Status { ACTIVE = 0, INACTIVE = 1, PENDING = 2 }
@@ -138,10 +145,10 @@
   // ── Nested objects ────────────────────────────────────────────────────────
 
   playerData = {
-    name  = "Hero"
-    hp    = 100
-    mp    = 50
-    stats = { str = 10, dex = 14, int = 12, agi = 9 }
+    name  = "Hero",
+    hp    = 100,
+    mp    = 50,
+    stats = { str = 10, dex = 14, int = 12, agi = 9 },
     loot  = { gold = 500, gems = 3 }
   }
 
@@ -158,11 +165,4 @@
   server: host = "api.example.com", port = 443, ssl = true, timeout = 30
   cache:  host = "redis.internal",  port = 6379, ttl = 3600
 
-  // ── Status map ────────────────────────────────────────────────────────────
-
-  statusLabels = {
-    active   = "Online"
-    inactive = "Offline"
-    pending  = "Awaiting Approval"
-  }
 )

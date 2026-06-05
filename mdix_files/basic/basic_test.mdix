@@ -1,5 +1,5 @@
 @ENUMS(
-    TestEnum { FIRST = 1, SECOND = 2, THIRD = 3 }
+  TestEnum { FIRST = 1, SECOND = 2, THIRD = 3 }
 
 )
 @QUICKFUNCS(
@@ -9,24 +9,21 @@
   }
 )
 @DATA(
-    somethingBig<tuple<tuple<int,bool>>> = t:(12,t:(100_200_300,false))
- 
-    matrix = t:(t:(01,02,03),t:(04,05,06),t:(07,08,09),
-                                         t:(01,02,03),t:(04,05,06),t:(07,08,09))
-      // Date types
-    date_standard<date> = 2025-01-15,
+  somethingBig<tuple<tuple<int,bool>>> = t:(12,t:(100_200_300,false))
 
+  matrix = t:(t:(01,02,03),t:(04,05,06),t:(07,08,09),
+  t:(01,02,03),t:(04,05,06),t:(07,08,09))
+  // Date types
+  date_standard<date> = 2025-01-15,
 
+  date_leap_year<date> = 2024-02-29,
+  date_year_end<date> = 2025-12-31,
+  date_year_start<date> = 2025-01-01,
 
-    date_leap_year<date> = 2024-02-29,
-    date_year_end<date> = 2025-12-31,
-    date_year_start<date> = 2025-01-01,
-
-    // Timestamp types - all variations
-    timestamp_basic<timestamp> = 2025-01-15T10:30:00Z,
-    timestamp_with_millis<timestamp> = 2025-01-15T10:30:00.123Z,
-    timestamp_with_timezone<timestamp> = 2025-01-15T10:30:00+05:30,
-    timestamp_utc<timestamp> = 2025-01-15T10:30:00.999Z
-
+  // Timestamp types - all variations
+  timestamp_basic<timestamp> = 2025-01-15T10:30:00Z,
+  timestamp_with_millis<timestamp> = 2025-01-15T10:30:00.123Z,
+  timestamp_with_timezone<timestamp> = 2025-01-15T10:30:00+05:30,
+  timestamp_utc<timestamp> = 2025-01-15T10:30:00.999Z
 
 )

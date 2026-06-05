@@ -1,0 +1,168 @@
+// mdix-lsp/tests/fixtures/object_builtins_test.mdix
+// Exercises all Object instance methods — hover/inlay/completion smoke test
+
+@ENUMS(
+  Role   { ADMIN = 0, USER = 1, GUEST = 2 }
+  Status { ACTIVE = 0, INACTIVE = 1, PENDING = 2 }
+)
+
+@QUICKFUNCS(
+
+  // ── Basic construction ─────────────────────────────────────────────────────
+
+  ~makeUser<object>(name, age<int>, role<enum>) {
+    return {
+      name   = name
+      age    = age
+      role   = role
+      active = true
+    }
+  }
+
+  // ── Mutation methods (return new objects) ──────────────────────────────────
+
+  ~testMutations<object>(seed) {
+    let base = { x = 1, y = 2, z = 3 }
+
+    let added   = base.add("w", 4)           // add new key
+    let setted  = base.set("x", 100)         // overwrite existing
+    let removed = base.remove("z")           // drop key
+    let other   = { a = 10, b = 20, x = 999 }
+    let merged  = base.merge(other)          // other wins on clash
+
+    return {
+      added   = added
+      setted  = setted
+      removed = removed
+      merged  = merged
+    }
+  }
+
+  // ── Read-only queries ──────────────────────────────────────────────────────
+
+  ~testQueries<object>(obj) {
+    let count    = obj.count()
+    let hasX     = obj.has("x")
+    let hasQ     = obj.has("q")
+    let xVal     = obj.get("x")
+    let missing  = obj.get("nonexistent")    // → null
+    let hasOne   = obj.containsValue(1)
+    let hasNine  = obj.containsValue(999)
+
+    return {
+      count   = count
+      hasX    = hasX
+      hasQ    = hasQ
+      xVal    = xVal
+      missing = missing
+      hasOne  = hasOne
+      hasNine = hasNine
+    }
+  }
+
+  // ── Iteration / conversion ─────────────────────────────────────────────────
+
+  ~testIteration<object>(obj) {
+    let keys    = obj.keys()      // → array<string>
+    let values  = obj.values()    // → array<any>
+    let entries = obj.entries()   // → array of t:(key, value) tuples
+    let asArr   = obj.toArray()   // alias for entries()
+
+    return {
+      keyCount   = obj.count()
+      keys       = keys
+      values     = values
+      entryCount = entries.length()
+    }
+  }
+
+  // ── Method chaining ────────────────────────────────────────────────────────
+
+  ~chainTest<object>(name, score<int>) {
+    // Each method returns a new object, so calls can be chained
+    let result = { name = name, score = score, bonus = 0 }
+      .set("bonus", 50)
+      .add("total", score + 50)
+      .remove("bonus")
+
+    return result
+  }
+
+  // ── Nested object testing ──────────────────────────────────────────────────
+
+  ~buildConfig<object>(host, port<int>, ssl<bool>) {
+    let cfg = {
+      host    = host
+      port    = port
+      ssl     = ssl
+      timeout = 30
+      retry   = 3
+    }
+
+    // Test queries on constructed object
+    let hasHost   = cfg.has("host")
+    let hostVal   = cfg.get("host")
+    let keyCount  = cfg.count()
+    let cfgKeys   = cfg.keys()
+
+    return {
+      config   = cfg
+      hasHost  = hasHost
+      hostVal  = hostVal
+      keyCount = keyCount
+      cfgKeys  = cfgKeys
+    }
+  }
+)
+
+@DATA(
+  // ── Direct inline object method calls ────────────────────────────────────
+  // Hover any of these identifiers in your IDE to see type hints
+
+  obj1 = { a = 1, b = 2, c = 3 }
+  obj2 = { name = "Alice", age = 30, active = true }
+  obj3 = { x = 10, y = 20 }
+
+  // ── QuickFunc call results ─────────────────────────────────────────────────
+
+  user        = makeUser("Bob", 25, Role.USER)
+  adminUser   = makeUser("Alice", 32, Role.ADMIN)
+
+  mutations   = testMutations("seed")
+  queries     = testQueries({ x = 1, y = 2, z = 3 })
+  iteration   = testIteration({ p = "hello", q = "world", r = "!" })
+  chained     = chainTest("Charlie", 95)
+  appConfig   = buildConfig("api.example.com", 443, true)
+  devConfig   = buildConfig("localhost", 8080, false)
+
+  // ── Nested objects ────────────────────────────────────────────────────────
+
+  playerData = {
+    name  = "Hero"
+    hp    = 100
+    mp    = 50
+    stats = { str = 10, dex = 14, int = 12, agi = 9 }
+    loot  = { gold = 500, gems = 3 }
+  }
+
+  // ── Array of objects (group array) ────────────────────────────────────────
+
+  enemies::
+    { name = "Goblin",  hp = 50,  level = 1, drops = { gold = 10, xp = 5 }  },
+    { name = "Orc",     hp = 100, level = 5, drops = { gold = 25, xp = 15 } },
+    { name = "Troll",   hp = 250, level = 10, drops = { gold = 80, xp = 50 } },
+    { name = "Boss",    hp = 999, level = 20, drops = { gold = 500, xp = 200 } }
+
+  // ── Config table ──────────────────────────────────────────────────────────
+
+  server: host = "api.example.com", port = 443, ssl = true, timeout = 30
+  cache:  host = "redis.internal",  port = 6379, ttl = 3600
+
+  // ── Status map ────────────────────────────────────────────────────────────
+
+  statusLabels = {
+    active   = "Online"
+    inactive = "Offline"
+    pending  = "Awaiting Approval"
+  }
+)

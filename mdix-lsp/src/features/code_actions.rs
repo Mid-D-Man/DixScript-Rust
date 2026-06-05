@@ -1,13 +1,22 @@
 // mdix-lsp/src/features/code_actions.rs
 //! Code action / quick-fix provider.
 //!
-//! ## Security quick-fix
-//! A "Insert @SECURITY section" code action fires when SEC001 is present.
+//! ## Actions provided
 //!
-//! ## Date / Timestamp picker actions
-//! When the cursor is on a Date or Timestamp token, increment/decrement
-//! actions are offered as a lightweight substitute for a native date picker
-//! (LSP has no date-picker protocol equivalent to documentColor).
+//! ### Diagnostics-driven
+//! - SEC001: "Insert @SECURITY section" when DEncryptor present without @SECURITY
+//! - Weak XOR: "Replace 'xor' with 'aes256' in @DLM"
+//! - Unknown enum: offer valid enum field replacements
+//!
+//! ### Context-driven (position-based)
+//! - ⬇ Spread inline object / table-property / group-array to multiple lines
+//! - ⟳ Reformat file — normalise spacing, indentation, operators (always available)
+//!
+//! ### Proactive
+//! - DEncryptor present but no @SECURITY (same fix as SEC001 but without a diagnostic)
+//!
+//! ### Date / Timestamp
+//! - Increment / decrement day, month, year via lightbulb on date/timestamp tokens
 
 use std::panic;
 use std::collections::HashMap;
@@ -18,7 +27,10 @@ use tower_lsp::lsp_types::{
 };
 use dixscript::Compiler::AST::data_types::{DLMModuleType, DLMModuleSubtype};
 use dixscript::Compiler::Core::Tokenizer::TokenType;
+use dixscript::Compiler::Core::Tokenizer::token::SectionId;
+
 use crate::document::Document;
+use crate::features::formatting::format_source;
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -100,8 +112,16 @@ fn provide_inner(
         }
     }
 
-    // ── 3. Date / Timestamp picker actions ────────────────────────────────────
+    // ── 3. Spread inline properties to multiple lines ─────────────────────────
+    actions.extend(provide_spread_actions(doc, range));
+
+    // ── 4. Date / Timestamp picker actions ────────────────────────────────────
     actions.extend(date_time_actions(doc, range));
+
+    // ── 5. Reformat file (always offered if changes would be made) ────────────
+    if let Some(action) = provide_reformat_action(doc) {
+        actions.push(CodeActionOrCommand::CodeAction(action));
+    }
 
     if actions.is_empty() { None } else { Some(actions) }
 }
@@ -257,6 +277,371 @@ fn fix_unknown_enum(doc: &Document, diag: &Diagnostic) -> Vec<CodeActionOrComman
     actions
 }
 
+// ── Spread helpers — shared utilities ────────────────────────────────────────
+
+/// Return the leading whitespace of `line` as an owned string.
+fn get_indent(line: &str) -> String {
+    let stripped_len = line.trim_start().len();
+    line[..line.len() - stripped_len].to_string()
+}
+
+/// Split `text` by `separator` while respecting:
+///   - nested brackets `() [] {}`
+///   - single- and double-quoted strings (with `\` escape sequences)
+///
+/// Returns `None` when fewer than 2 parts are produced (nothing to spread).
+fn split_respecting_nesting(text: &str, separator: char) -> Option<Vec<String>> {
+    let mut parts:   Vec<String> = Vec::new();
+    let mut current: String      = String::new();
+    let mut depth:   i32         = 0;
+    let mut in_str:  bool        = false;
+    let mut str_ch:  char        = '"';
+    let mut escaped: bool        = false;
+
+    for ch in text.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && in_str {
+            escaped = true;
+            current.push(ch);
+            continue;
+        }
+        if in_str {
+            current.push(ch);
+            if ch == str_ch { in_str = false; }
+            continue;
+        }
+        match ch {
+            '"' | '\'' => { in_str = true; str_ch = ch; current.push(ch); }
+            '(' | '[' | '{' => { depth += 1; current.push(ch); }
+            ')' | ']' | '}' => { depth = (depth - 1).max(0); current.push(ch); }
+            c if c == separator && depth == 0 => {
+                let part = current.trim().to_string();
+                if !part.is_empty() { parts.push(part); }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    let last = current.trim().to_string();
+    if !last.is_empty() { parts.push(last); }
+
+    if parts.len() >= 2 { Some(parts) } else { None }
+}
+
+/// Find the byte index of a table-property colon (`path:`) in `text`.
+///
+/// Skips:
+/// - `::` (group-array operator)
+/// - colons inside string literals
+/// - digit`:` digit sequences (timestamp / time components like `10:30:00`)
+fn find_table_colon(text: &str) -> Option<usize> {
+    let mut in_str:  bool        = false;
+    let mut str_ch:  char        = '"';
+    let mut escaped: bool        = false;
+    let chars: Vec<char>         = text.chars().collect();
+
+    for (i, &ch) in chars.iter().enumerate() {
+        if escaped            { escaped = false; continue; }
+        if ch == '\\' && in_str { escaped = true; continue; }
+        if in_str {
+            if ch == str_ch { in_str = false; }
+            continue;
+        }
+        match ch {
+            '"' | '\'' => { in_str = true; str_ch = ch; }
+            ':' => {
+                // Reject ::
+                if chars.get(i + 1) == Some(&':') { continue; }
+                // Reject timestamp-style digit:digit
+                let prev_is_digit = i > 0 && chars[i - 1].is_ascii_digit();
+                let next_is_digit = chars.get(i + 1).map(|c| c.is_ascii_digit()).unwrap_or(false);
+                if prev_is_digit && next_is_digit { continue; }
+                return Some(i);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Find the byte index of `{` that looks like an inline object literal:
+///   - must have a matching `}` later on the same text slice
+///   - the content between `{` and `}` must contain `=` (property assignments)
+fn find_object_open(text: &str) -> Option<usize> {
+    for (i, ch) in text.char_indices() {
+        if ch != '{' { continue; }
+        let after = &text[i + 1..];
+        if let Some(close_rel) = after.rfind('}') {
+            let inside = &after[..close_rel];
+            if inside.contains('=') {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+/// Return the `SectionId` of the first token on `line_idx` (0-based LSP line).
+fn line_section_id(doc: &Document, line_idx: usize) -> SectionId {
+    let target_1based = line_idx + 1;
+    doc.tokens
+        .iter()
+        .find(|t| t.line == target_1based && t.section != SectionId::None)
+        .map(|t| t.section)
+        .unwrap_or(SectionId::None)
+}
+
+// ── Spread: table property ────────────────────────────────────────────────────
+//
+// Before:  player.config: speed = 5, jump_height = 3, ai_type<enum> = AIType.AGGRESSIVE
+// After:   player.config:
+//            speed = 5,
+//            jump_height = 3,
+//            ai_type<enum> = AIType.AGGRESSIVE
+
+fn try_spread_table_property(
+    doc:       &Document,
+    line_idx:  usize,
+    line_text: &str,
+) -> Option<CodeAction> {
+    if line_section_id(doc, line_idx) != SectionId::Data { return None; }
+
+    let trimmed = line_text.trim();
+    let colon_pos = find_table_colon(trimmed)?;
+
+    let path_part  = trimmed[..colon_pos].trim();
+    let props_part = trimmed[colon_pos + 1..].trim();
+
+    if props_part.is_empty() { return None; }
+
+    let props = split_respecting_nesting(props_part, ',')?;
+
+    let indent       = get_indent(line_text);
+    let inner_indent = format!("{}  ", indent);
+
+    let mut lines = vec![format!("{}{}:", indent, path_part)];
+    for (i, prop) in props.iter().enumerate() {
+        let p = prop.trim();
+        if i < props.len() - 1 {
+            lines.push(format!("{}{},", inner_indent, p));
+        } else {
+            lines.push(format!("{}{}", inner_indent, p));
+        }
+    }
+
+    let edit = TextEdit {
+        range:    Range::new(
+            Position::new(line_idx as u32, 0),
+            Position::new(line_idx as u32, line_text.len() as u32),
+        ),
+        new_text: lines.join("\n"),
+    };
+
+    Some(make_action(
+        "⬇ Spread table properties to multiple lines",
+        CodeActionKind::REFACTOR_REWRITE,
+        doc.uri.clone(),
+        vec![edit],
+        false,
+    ))
+}
+
+// ── Spread: group array ────────────────────────────────────────────────────────
+//
+// Before:  tags:: "alpha", "beta", "v1"
+// After:   tags::
+//            "alpha",
+//            "beta",
+//            "v1"
+
+fn try_spread_group_array(
+    doc:       &Document,
+    line_idx:  usize,
+    line_text: &str,
+) -> Option<CodeAction> {
+    if line_section_id(doc, line_idx) != SectionId::Data { return None; }
+
+    let trimmed = line_text.trim();
+    if !trimmed.contains("::") { return None; }
+
+    let dc_pos     = trimmed.find("::")?;
+    let path_part  = trimmed[..dc_pos].trim();
+    let items_part = trimmed[dc_pos + 2..].trim();
+
+    if items_part.is_empty() { return None; }
+
+    let items = split_respecting_nesting(items_part, ',')?;
+
+    let indent       = get_indent(line_text);
+    let inner_indent = format!("{}  ", indent);
+
+    let mut lines = vec![format!("{}{}::", indent, path_part)];
+    for (i, item) in items.iter().enumerate() {
+        let it = item.trim();
+        if i < items.len() - 1 {
+            lines.push(format!("{}{},", inner_indent, it));
+        } else {
+            lines.push(format!("{}{}", inner_indent, it));
+        }
+    }
+
+    let edit = TextEdit {
+        range:    Range::new(
+            Position::new(line_idx as u32, 0),
+            Position::new(line_idx as u32, line_text.len() as u32),
+        ),
+        new_text: lines.join("\n"),
+    };
+
+    Some(make_action(
+        "⬇ Spread group array to multiple lines",
+        CodeActionKind::REFACTOR_REWRITE,
+        doc.uri.clone(),
+        vec![edit],
+        false,
+    ))
+}
+
+// ── Spread: object literal ────────────────────────────────────────────────────
+//
+// Before:  result = { name = name, hp = hp, armor = armor }
+// After:   result = {
+//            name = name,
+//            hp = hp,
+//            armor = armor
+//          }
+//
+// Also handles:  return { ... }  inside @QUICKFUNCS bodies.
+
+fn try_spread_object_literal(
+    doc:       &Document,
+    line_idx:  usize,
+    line_text: &str,
+) -> Option<CodeAction> {
+    let trimmed = line_text.trim();
+
+    let open_pos = find_object_open(trimmed)?;
+    let after_open = &trimmed[open_pos + 1..];
+
+    // Use rfind so we get the matching close (handles any trailing `,` before `}`)
+    let close_rel = after_open.rfind('}')?;
+    let close_pos = open_pos + 1 + close_rel;
+
+    // Need at least one char inside
+    if close_pos <= open_pos + 1 { return None; }
+
+    let before = trimmed[..open_pos].trim_end();
+    let inside = trimmed[open_pos + 1..close_pos].trim();
+    // Anything after the closing `}` on the same line (e.g. `,`)
+    let suffix = trimmed[close_pos + 1..].trim();
+
+    if !inside.contains(',') { return None; }
+
+    let props = split_respecting_nesting(inside, ',')?;
+
+    let indent       = get_indent(line_text);
+    let inner_indent = format!("{}  ", indent);
+
+    let opening_line = if before.is_empty() {
+        format!("{} {{", indent)
+    } else {
+        format!("{}{} {{", indent, before)
+    };
+
+    let mut lines = vec![opening_line];
+    for (i, prop) in props.iter().enumerate() {
+        let p = prop.trim();
+        if i < props.len() - 1 {
+            lines.push(format!("{}{},", inner_indent, p));
+        } else {
+            lines.push(format!("{}{}", inner_indent, p));
+        }
+    }
+
+    let closing_line = if suffix.is_empty() {
+        format!("{}}}", indent)
+    } else {
+        // e.g. `}` followed by `,`
+        format!("{}}}{}", indent, suffix)
+    };
+    lines.push(closing_line);
+
+    let edit = TextEdit {
+        range:    Range::new(
+            Position::new(line_idx as u32, 0),
+            Position::new(line_idx as u32, line_text.len() as u32),
+        ),
+        new_text: lines.join("\n"),
+    };
+
+    Some(make_action(
+        "⬇ Spread object properties to multiple lines",
+        CodeActionKind::REFACTOR_REWRITE,
+        doc.uri.clone(),
+        vec![edit],
+        false,
+    ))
+}
+
+// ── Spread dispatcher ─────────────────────────────────────────────────────────
+
+fn provide_spread_actions(doc: &Document, range: Range) -> Vec<CodeActionOrCommand> {
+    let line_idx  = range.start.line as usize;
+    let line_text = match doc.source.lines().nth(line_idx) {
+        Some(l) => l,
+        None    => return Vec::new(),
+    };
+
+    // Skip obviously too-short lines
+    if line_text.trim().len() < 10 { return Vec::new(); }
+
+    let mut actions = Vec::new();
+
+    // Each detector returns at most one action; they are mutually exclusive in
+    // practice (a line is one of: table property, group array, object literal)
+    // but we check all three anyway and let the user pick.
+    if let Some(a) = try_spread_table_property(doc, line_idx, line_text) {
+        actions.push(CodeActionOrCommand::CodeAction(a));
+    }
+    if let Some(a) = try_spread_group_array(doc, line_idx, line_text) {
+        actions.push(CodeActionOrCommand::CodeAction(a));
+    }
+    if let Some(a) = try_spread_object_literal(doc, line_idx, line_text) {
+        actions.push(CodeActionOrCommand::CodeAction(a));
+    }
+
+    actions
+}
+
+// ── Reformat file ──────────────────────────────────────────────────────────────
+
+fn provide_reformat_action(doc: &Document) -> Option<CodeAction> {
+    let formatted = format_source(&doc.source, 2);
+    // Only offer the action when the formatter would actually change something
+    if formatted == doc.source { return None; }
+
+    let line_count = doc.source.lines().count() as u32;
+    let last_col   = doc.source.lines().last().map(|l| l.len() as u32).unwrap_or(0);
+
+    let edit = TextEdit {
+        range:    Range::new(Position::new(0, 0), Position::new(line_count, last_col)),
+        new_text: formatted,
+    };
+
+    Some(make_action(
+        "⟳ Reformat file",
+        CodeActionKind::SOURCE,
+        doc.uri.clone(),
+        vec![edit],
+        false,
+    ))
+}
+
 // ── Date / Timestamp picker actions ──────────────────────────────────────────
 //
 // LSP has no native "date picker" protocol (unlike documentColor which gives
@@ -284,9 +669,9 @@ fn date_time_actions(doc: &Document, range: Range) -> Vec<CodeActionOrCommand> {
 }
 
 fn make_date_actions(
-    doc:    &Document,
-    line1:  usize,
-    col1:   usize,
+    doc:      &Document,
+    line1:    usize,
+    col1:     usize,
     date_str: &str,
 ) -> Vec<CodeActionOrCommand> {
     let (y, m, d) = match parse_date(date_str) { Some(v) => v, None => return vec![] };
@@ -321,7 +706,6 @@ fn make_timestamp_actions(
     col1:   usize,
     ts_str: &str,
 ) -> Vec<CodeActionOrCommand> {
-    // Parse date portion and keep the time suffix intact
     let (date_part, time_suffix) = split_timestamp(ts_str);
     let (y, m, d) = match parse_date(date_part) { Some(v) => v, None => return vec![] };
 
@@ -353,7 +737,6 @@ fn make_timestamp_actions(
 
 // ── Date arithmetic helpers ───────────────────────────────────────────────────
 
-/// Parse a `YYYY-MM-DD` string into (year, month, day).
 fn parse_date(s: &str) -> Option<(i32, u32, u32)> {
     let s = s.trim();
     if s.len() < 10 { return None; }
@@ -366,7 +749,6 @@ fn parse_date(s: &str) -> Option<(i32, u32, u32)> {
     Some((y, m, d))
 }
 
-/// Split a timestamp into its date portion and everything after (T…).
 fn split_timestamp(ts: &str) -> (&str, &str) {
     if let Some(t_pos) = ts.find('T').or_else(|| ts.find('t')) {
         (&ts[..t_pos], &ts[t_pos..])
@@ -392,49 +774,41 @@ fn format_date(y: i32, m: u32, d: u32) -> String {
     format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
-/// Apply day / month / year deltas with correct calendar overflow/underflow.
 fn apply_date_delta(y: i32, m: u32, d: u32, dd: i32, dm: i32, dy: i32) -> String {
-    // Apply year delta
     let mut year  = y + dy;
-    // Apply month delta with year carry
     let mut month = m as i32 + dm;
     while month < 1  { month += 12; year -= 1; }
     while month > 12 { month -= 12; year += 1; }
-    let mut month = month as u32;
-    // Clamp day to the month's actual length
+    let month = month as u32;
     let max_day = days_in_month(year, month);
-    let mut day = d.min(max_day);
-    // Apply day delta
+    let day = d.min(max_day);
     let mut day_i = day as i32 + dd;
-    loop {
-        if day_i < 1 {
-            // Underflow: go to previous month
-            let prev_month = if month == 1 { 12 } else { month - 1 };
-            let prev_year  = if month == 1 { year - 1 } else { year };
-            day_i += days_in_month(prev_year, prev_month) as i32;
-            // We just need the final day, not recursing months here
-            // For simplicity handle only one-step underflow (±1 day)
-            if day_i < 1 { day_i = 1; } // clamp to sane value
-            break;
-        } else if day_i > max_day as i32 {
-            day_i -= max_day as i32;
-            // Advance month
-            month = if month == 12 { 1 } else { month + 1 };
-            if month == 1 { year += 1; }
-            // For simplicity break after one advance
-            if day_i > days_in_month(year, month) as i32 {
-                day_i = days_in_month(year, month) as i32;
-            }
-            break;
-        } else {
-            break;
+    let final_month;
+    let final_year;
+    if day_i < 1 {
+        let prev_month = if month == 1 { 12 } else { month - 1 };
+        let prev_year  = if month == 1 { year - 1 } else { year };
+        day_i += days_in_month(prev_year, prev_month) as i32;
+        if day_i < 1 { day_i = 1; }
+        final_month = prev_month;
+        final_year  = prev_year;
+    } else if day_i > max_day as i32 {
+        day_i -= max_day as i32;
+        let next_month = if month == 12 { 1 } else { month + 1 };
+        let next_year  = if month == 12 { year + 1 } else { year };
+        if day_i > days_in_month(next_year, next_month) as i32 {
+            day_i = days_in_month(next_year, next_month) as i32;
         }
+        final_month = next_month;
+        final_year  = next_year;
+    } else {
+        final_month = month;
+        final_year  = year;
     }
-    day = day_i.max(1) as u32;
-    format_date(year, month, day)
+    format_date(final_year, final_month, day_i.max(1) as u32)
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Shared action constructor ─────────────────────────────────────────────────
 
 fn make_action(
     title:        &str,
@@ -457,6 +831,8 @@ fn make_action(
     }
 }
 
+// ── Text parsing utilities ────────────────────────────────────────────────────
+
 fn extract_quoted_word(s: &str, n: usize) -> Option<String> {
     let mut count = 0;
     let mut start = None;
@@ -473,4 +849,4 @@ fn extract_quoted_word(s: &str, n: usize) -> Option<String> {
         }
     }
     None
-                }
+            }

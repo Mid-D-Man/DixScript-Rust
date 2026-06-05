@@ -98,11 +98,7 @@ impl Backend {
     }
 }
 
-// ── Value-resolution helper used by JSON / TOML / Minify commands ────────────
-//
-// These commands use the stored LSP document state (sufficient for single-file
-// projects). The "Create Resolved" command uses a fresh DixLoader compile
-// instead so that imports are always properly resolved.
+// ── Value-resolution helper used by conversion commands ──────────────────────
 
 fn resolve_ast_owned(
     ast:             Option<DixScript>,
@@ -157,6 +153,8 @@ fn resolve_ast_owned(
     }
 }
 
+// ── LanguageServer implementation ─────────────────────────────────────────────
+
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, _params: InitializeParams) -> LspResult<InitializeResult> {
@@ -185,7 +183,7 @@ impl LanguageServer for Backend {
                 for h in handles {
                     h.abort();
                     let _ = tokio::time::timeout(
-                        std::time::Duration::from_millis(50), h
+                        std::time::Duration::from_millis(50), h,
                     ).await;
                 }
             });
@@ -214,6 +212,8 @@ impl LanguageServer for Backend {
         self.pending_versions.remove(&uri);
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
+
+    // ── Text document features ────────────────────────────────────────────────
 
     async fn completion(
         &self,
@@ -298,6 +298,61 @@ impl LanguageServer for Backend {
         Ok(features::document_symbols::provide(self.documents.get(uri).as_deref()))
     }
 
+    // ── NEW: Workspace-wide symbol search (Cmd+T / Ctrl+T) ───────────────────
+    //
+    // Searches all currently-indexed documents for symbols matching `params.query`
+    // using case-insensitive substring matching. Returns up to 256 results.
+    //
+    // Note: tower-lsp v0.20 maps `workspace/symbol` to the trait method `symbol`.
+    // If your version maps it differently the method name here may need adjusting.
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> LspResult<Option<Vec<SymbolInformation>>> {
+        Ok(features::workspace_symbols::provide(&self.documents, &params.query))
+    }
+
+    // ── NEW: Call hierarchy ───────────────────────────────────────────────────
+    //
+    // prepare          → identify the QuickFunc under the cursor
+    // incoming_calls   → which functions/sections call this QuickFunc
+    // outgoing_calls   → which QuickFuncs this function calls internally
+
+    async fn call_hierarchy_prepare(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> LspResult<Option<Vec<CallHierarchyItem>>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        Ok(features::call_hierarchy::prepare(
+            self.documents.get(uri).as_deref(), pos,
+        ))
+    }
+
+    async fn call_hierarchy_incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> LspResult<Option<Vec<CallHierarchyIncomingCall>>> {
+        // The item's URI tells us which document contains the function definition
+        let uri = &params.item.uri;
+        Ok(features::call_hierarchy::incoming_calls(
+            self.documents.get(uri).as_deref(), &params,
+        ))
+    }
+
+    async fn call_hierarchy_outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> LspResult<Option<Vec<CallHierarchyOutgoingCall>>> {
+        let uri = &params.item.uri;
+        Ok(features::call_hierarchy::outgoing_calls(
+            self.documents.get(uri).as_deref(), &params,
+        ))
+    }
+
+    // ── Token / semantic features ─────────────────────────────────────────────
+
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
@@ -329,6 +384,8 @@ impl LanguageServer for Backend {
         Ok(features::inlay_hints::provide(self.documents.get(uri).as_deref()))
     }
 
+    // ── Code actions / lens ───────────────────────────────────────────────────
+
     async fn code_action(
         &self,
         params: CodeActionParams,
@@ -338,6 +395,16 @@ impl LanguageServer for Backend {
         let diags = &params.context.diagnostics;
         Ok(features::code_actions::provide(self.documents.get(uri).as_deref(), range, diags))
     }
+
+    async fn code_lens(
+        &self,
+        params: CodeLensParams,
+    ) -> LspResult<Option<Vec<CodeLens>>> {
+        let uri = &params.text_document.uri;
+        Ok(features::code_lens::provide(self.documents.get(uri).as_deref()))
+    }
+
+    // ── Folding / formatting ──────────────────────────────────────────────────
 
     async fn folding_range(
         &self,
@@ -410,20 +477,15 @@ impl LanguageServer for Backend {
         let mut edits: Vec<TextEdit> = Vec::new();
         if next_line_has_close {
             edits.push(TextEdit {
-                range: Range::new(
+                range:    Range::new(
                     Position::new(pos.line, 0),
                     Position::new(pos.line, cur_line_text.len() as u32),
                 ),
-                new_text: format!(
-                    "{}{}{}",
-                    indent,
-                    inner_indent,
-                    cur_line_text.trim_start()
-                ),
+                new_text: format!("{}{}{}", indent, inner_indent, cur_line_text.trim_start()),
             });
         } else {
             edits.push(TextEdit {
-                range: Range::new(
+                range:    Range::new(
                     Position::new(pos.line, 0),
                     Position::new(pos.line, cur_line_text.len() as u32),
                 ),
@@ -434,13 +496,7 @@ impl LanguageServer for Backend {
         if edits.is_empty() { Ok(None) } else { Ok(Some(edits)) }
     }
 
-    async fn code_lens(
-        &self,
-        params: CodeLensParams,
-    ) -> LspResult<Option<Vec<CodeLens>>> {
-        let uri = &params.text_document.uri;
-        Ok(features::code_lens::provide(self.documents.get(uri).as_deref()))
-    }
+    // ── Execute command ───────────────────────────────────────────────────────
 
     async fn execute_command(
         &self,
@@ -457,7 +513,6 @@ impl LanguageServer for Backend {
 
         match command {
 
-            // ── JSON ──────────────────────────────────────────────────────────
             CMD_TO_JSON => {
                 let (ast_opt, semantic_opt) = {
                     let doc = uri.as_ref().and_then(|u| self.documents.get(u));
@@ -478,7 +533,6 @@ impl LanguageServer for Backend {
                 self.show_message(result.success, &result.message).await;
             }
 
-            // ── TOML ──────────────────────────────────────────────────────────
             CMD_TO_TOML => {
                 let (ast_opt, semantic_opt) = {
                     let doc = uri.as_ref().and_then(|u| self.documents.get(u));
@@ -499,7 +553,6 @@ impl LanguageServer for Backend {
                 self.show_message(result.success, &result.message).await;
             }
 
-            // ── Minify ────────────────────────────────────────────────────────
             CMD_MINIFY => {
                 let (ast_opt, semantic_opt) = {
                     let doc = uri.as_ref().and_then(|u| self.documents.get(u));
@@ -520,13 +573,6 @@ impl LanguageServer for Backend {
                 self.show_message(result.success, &result.message).await;
             }
 
-            // ── Create Resolved ───────────────────────────────────────────────
-            //
-            // Uses a FRESH DixLoader compile so that:
-            //   1. Imported functions (builders, physics, units) are properly loaded.
-            //   2. Value resolution runs with the complete symbol table.
-            //   3. Only the @DATA section is written to the .resolved.mdix file.
-            // Double-wrapped in catch_unwind to prevent LSP crash on any panic inside DixLoader
             CMD_CREATE_RESOLVED => {
                 let path_clone = source_path.clone();
                 let result = tokio::task::spawn_blocking(move || {
@@ -561,7 +607,6 @@ impl LanguageServer for Backend {
                 self.show_message(result.success, &result.message).await;
             }
 
-            // ── Compile ───────────────────────────────────────────────────────
             CMD_COMPILE => {
                 let ast_clone = {
                     let doc = uri.as_ref().and_then(|u| self.documents.get(u));
@@ -576,7 +621,6 @@ impl LanguageServer for Backend {
                 self.show_message(result.success, &result.message).await;
             }
 
-            // ── Show AST ──────────────────────────────────────────────────────
             CMD_SHOW_AST => {
                 let ast_clone = {
                     let doc = uri.as_ref().and_then(|u| self.documents.get(u));
@@ -591,15 +635,13 @@ impl LanguageServer for Backend {
 
             other => {
                 tracing::warn!("Unknown command: {}", other);
-                self.client
-                    .show_message(
-                        MessageType::WARNING,
-                        &format!("Unknown command: {}", other),
-                    )
-                    .await;
+                self.client.show_message(
+                    MessageType::WARNING,
+                    &format!("Unknown command: {}", other),
+                ).await;
             }
         }
 
         Ok(None)
     }
-}
+    }

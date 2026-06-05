@@ -7,11 +7,11 @@ pub const TT_STRING:      u32 = 1;
 pub const TT_NUMBER:      u32 = 2;
 pub const TT_OPERATOR:    u32 = 3;
 pub const TT_VARIABLE:    u32 = 4;
-pub const TT_FUNCTION:    u32 = 5;  // QuickFunc calls, static method calls, table/group-array paths
+pub const TT_FUNCTION:    u32 = 5;
 pub const TT_TYPE:        u32 = 6;
 pub const TT_ENUM_MEMBER: u32 = 7;
 pub const TT_COMMENT:     u32 = 8;
-pub const TT_NAMESPACE:   u32 = 9;  // static object receivers (Math, DateTime) & import aliases
+pub const TT_NAMESPACE:   u32 = 9;
 pub const TT_PROPERTY:    u32 = 10;
 pub const TT_PARAMETER:   u32 = 11;
 pub const TT_MACRO:       u32 = 12;
@@ -19,7 +19,7 @@ pub const TT_DECORATOR:   u32 = 13;
 // index 14 = STRUCT reserved for legend stability
 pub const TT_REGEXP:      u32 = 15;
 pub const TT_EVENT:       u32 = 16;
-pub const TT_METHOD:      u32 = 17;  // instance method calls (.toUpper(), .push() etc.)
+pub const TT_METHOD:      u32 = 17;
 
 pub const MOD_DECLARATION: u32 = 1 << 0;
 pub const MOD_READONLY:    u32 = 1 << 1;
@@ -41,17 +41,17 @@ pub const TOKEN_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::PARAMETER,   // 11
     SemanticTokenType::MACRO,       // 12
     SemanticTokenType::DECORATOR,   // 13
-    SemanticTokenType::STRUCT,      // 14 — reserved for legend stability
+    SemanticTokenType::STRUCT,      // 14 — reserved
     SemanticTokenType::REGEXP,      // 15
     SemanticTokenType::EVENT,       // 16
     SemanticTokenType::METHOD,      // 17
 ];
 
 pub const TOKEN_MODIFIERS: &[SemanticTokenModifier] = &[
-    SemanticTokenModifier::DECLARATION, // 0 = 1<<0
-    SemanticTokenModifier::READONLY,    // 1 = 1<<1
-    SemanticTokenModifier::DEPRECATED,  // 2 = 1<<2
-    SemanticTokenModifier::STATIC,      // 3 = 1<<3
+    SemanticTokenModifier::DECLARATION,
+    SemanticTokenModifier::READONLY,
+    SemanticTokenModifier::DEPRECATED,
+    SemanticTokenModifier::STATIC,
 ];
 
 pub fn semantic_token_legend() -> SemanticTokensLegend {
@@ -77,13 +77,8 @@ pub fn server_capabilities() -> ServerCapabilities {
         completion_provider: Some(CompletionOptions {
             resolve_provider:   Some(false),
             trigger_characters: Some(vec![
-                "@".to_string(),
-                ".".to_string(),
-                "<".to_string(),
-                "~".to_string(),
-                "{".to_string(),
-                "(".to_string(),
-                "[".to_string(),
+                "@".to_string(), ".".to_string(), "<".to_string(),
+                "~".to_string(), "{".to_string(), "(".to_string(), "[".to_string(),
             ]),
             ..Default::default()
         }),
@@ -91,9 +86,7 @@ pub fn server_capabilities() -> ServerCapabilities {
         signature_help_provider: Some(SignatureHelpOptions {
             trigger_characters:   Some(vec!["(".to_string(), ",".to_string()]),
             retrigger_characters: Some(vec![",".to_string()]),
-            work_done_progress_options: WorkDoneProgressOptions {
-                work_done_progress: None,
-            },
+            work_done_progress_options: WorkDoneProgressOptions { work_done_progress: None },
         }),
 
         hover_provider:      Some(HoverProviderCapability::Simple(true)),
@@ -103,11 +96,15 @@ pub fn server_capabilities() -> ServerCapabilities {
         document_highlight_provider: Some(OneOf::Left(true)),
         document_symbol_provider:    Some(OneOf::Left(true)),
 
+        // ── NEW: workspace-wide symbol search (Cmd+T) ─────────────────────────
+        workspace_symbol_provider: Some(OneOf::Left(true)),
+
+        // ── NEW: call hierarchy for QuickFuncs ────────────────────────────────
+        call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
+
         rename_provider: Some(OneOf::Right(RenameOptions {
             prepare_provider: Some(true),
-            work_done_progress_options: WorkDoneProgressOptions {
-                work_done_progress: None,
-            },
+            work_done_progress_options: WorkDoneProgressOptions { work_done_progress: None },
         })),
 
         code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
@@ -125,18 +122,14 @@ pub fn server_capabilities() -> ServerCapabilities {
 
         execute_command_provider: Some(ExecuteCommandOptions {
             commands: ALL_COMMANDS.iter().map(|s| s.to_string()).collect(),
-            work_done_progress_options: WorkDoneProgressOptions {
-                work_done_progress: None,
-            },
+            work_done_progress_options: WorkDoneProgressOptions { work_done_progress: None },
         }),
 
         semantic_tokens_provider: Some(
             SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
                 legend: semantic_token_legend(),
                 full:   Some(SemanticTokensFullOptions::Bool(true)),
-                work_done_progress_options: WorkDoneProgressOptions {
-                    work_done_progress: None,
-                },
+                work_done_progress_options: WorkDoneProgressOptions { work_done_progress: None },
                 ..Default::default()
             }),
         ),
@@ -147,4 +140,4 @@ pub fn server_capabilities() -> ServerCapabilities {
 
         ..Default::default()
     }
-    }
+                                       }

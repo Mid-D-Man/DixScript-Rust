@@ -241,6 +241,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     hints.push(make_hint(line, col, label));
 
                     // Param hints for any function calls in this value
+                    // (includes function calls inside array literals via the Array arm)
                     emit_value_param_hints(value, doc, &mut hints);
                     // Nested property type hints for object literals
                     emit_data_nested_value_hints(value, &base_ctx, &mut hints);
@@ -280,7 +281,6 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<InlayHint>> {
                     let col      = (position.column.saturating_sub(1) + path_str.len()) as u32;
                     hints.push(make_hint(line, col, label));
 
-                    // Param + nested hints for each item
                     for item in items {
                         emit_value_param_hints(item, doc, &mut hints);
                         emit_data_nested_value_hints(item, &base_ctx, &mut hints);
@@ -499,8 +499,6 @@ fn sniff_blob_category(b: &[u8]) -> &'static str {
 // ═══════════════════════════════════════════════════════════════════════════════
 // PARAMETER HINT SYSTEM
 //
-// Unified approach: one function handles all lookup strategies in both sections.
-//
 // emit_value_param_hints   — entry for Value (DATA section, group array items)
 // emit_expr_param_hints    — entry for Expression (QF body statements)
 // emit_param_hints_for_name — unified local→namespace→symtable lookup
@@ -508,11 +506,14 @@ fn sniff_blob_category(b: &[u8]) -> &'static str {
 // emit_arg_hints           — emits the actual InlayHint objects
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Entry point for Value-based calls (DATA section property values, group array items).
-/// Handles ALL value types that can represent function calls.
+/// Entry point for Value-based calls (DATA section property values, group array
+/// items, and regular array literals).
+///
+/// Handles ALL value types that can represent or contain function calls,
+/// including inline arrays whose items may be function calls.
 pub fn emit_value_param_hints(value: &Value, doc: &Document, hints: &mut Vec<InlayHint>) {
     match value {
-        // Direct function call value (common in DATA section)
+        // Direct function call value (common in DATA section and group arrays)
         Value::QuickFuncCall { function_name, arguments, .. } => {
             if arguments.len() >= 2 {
                 emit_param_hints_for_name(function_name, arguments, doc, hints);
@@ -521,6 +522,14 @@ pub fn emit_value_param_hints(value: &Value, doc: &Document, hints: &mut Vec<Inl
         // Expression-wrapped call (imported calls, complex expressions)
         Value::Expression { expr, .. } => {
             emit_expr_param_hints(expr, doc, hints);
+        }
+        // Array literals: recurse into each item so function calls inside
+        // inline arrays (e.g. `enemies = [createEnemy("Goblin", 50, 10), ...]`)
+        // also receive parameter inlay hints.
+        Value::Array { values, .. } | Value::NestedArray { values, .. } => {
+            for item in values {
+                emit_value_param_hints(item, doc, hints);
+            }
         }
         _ => {}
     }
@@ -671,13 +680,6 @@ fn emit_arg_hints(
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // QUICKFUNC BODY VARIABLE HINTS
-//
-// Accumulates type context in `running` as it processes statements.
-// Emits type hints for variable declarations and param hints for any call.
-// Now also:
-//   - Emits nested object property hints (matches DATA section behavior)
-//   - Handles Assignment / ExpressionStatement / Log for param hints
-//   - Shows lambda parameter signatures
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn collect_qf_var_hints(
@@ -785,7 +787,7 @@ fn collect_qf_var_hints(
                 }
             }
 
-            // Non-declaration statements: emit param hints only, don't affect `running`
+            // Non-declaration statements: emit param hints only
             QuickFuncStatement::Assignment { value, .. }
             | QuickFuncStatement::ArithmeticAssignment { value, .. } => {
                 emit_expr_param_hints(value, doc, hints);
@@ -832,7 +834,6 @@ fn collect_qf_var_hints(
             }
 
             QuickFuncStatement::ObjectCreation { object, .. } => {
-                // object is a Value — emit nested hints for the object literal
                 let ctx = InferCtx::new(qf_return_types, &running, symbol_table);
                 emit_data_nested_value_hints(object, &ctx, hints);
             }
@@ -1000,7 +1001,6 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
         match dt {
             DataType::Array | DataType::Tuple | DataType::Any => {}
             DataType::Function => {
-                // For function types, try to get better info from the value
                 if let Expression::Value { value: Value::Lambda { parameters, .. }, .. } = expr {
                     return Some(format!("<function({})>", parameters.join(", ")));
                 }
@@ -1062,7 +1062,6 @@ fn infer_expr(expr: &Expression, ctx: &InferCtx<'_>) -> Option<String> {
                     dt => Some(format_data_type_as_hint(dt, None)),
                 };
             }
-            // Registered path lookup (handles player.stats.hp after propagation)
             if let Some(full_path) = build_property_path(expr) {
                 if let Some(&Some(dt)) = ctx.param_types.get(full_path.as_str()) {
                     return Some(format_data_type_as_hint(dt, None));
@@ -1282,4 +1281,4 @@ fn make_hint(line: u32, col: u32, label: String) -> InlayHint {
         padding_right: Some(true),
         data:          None,
     }
-                                          }
+    }

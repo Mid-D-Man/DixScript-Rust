@@ -1395,65 +1395,91 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
     // Unary / primary dispatch
     // =============================================================================
 
-    fn parse_unary_or_primary(&mut self) -> Expression {
-        self.skip_whitespace();
-        if self.is_at_end() {
-            return Expression::Value {
-                value: Value::Null { position: Position::UNKNOWN },
-                position: Position::UNKNOWN,
-            };
-        }
-
-        let token = self.current().clone();
-        let unary_pos = Position::from_token(&token);
-
-        // ── Handle '++' and '--' as double unary BEFORE the single-char check ──
-        // '--x' → -(-(x))     '++x' → +(+(x))
-        if let TokenType::ArithmeticOp(op) = &token.token_type {
-            if *op == "--" || *op == "++" {
-                let single: &str = if *op == "--" { "-" } else { "+" };
-                self.advance();
-                self.skip_whitespace();
-                let inner = self.parse_primary_base();
-                let inner_unary = Expression::UnaryOp {
-                    operator: single.to_string(),
-                    operand:  Box::new(inner),
-                    position: unary_pos,
-                };
-                let outer_unary = Expression::UnaryOp {
-                    operator: single.to_string(),
-                    operand:  Box::new(inner_unary),
-                    position: unary_pos,
-                };
-                return self.apply_postfix_operations(outer_unary);
-            }
-        }
-
-        // ── Standard single-char unary detection ──────────────────────────────
-        let unary_op: Option<String> = match &token.token_type {
-            TokenType::Symbol('!')                                => Some("!".to_string()),
-            TokenType::Symbol('-')                               => Some("-".to_string()),
-            TokenType::Symbol('+')                               => Some("+".to_string()),
-            TokenType::ArithmeticOp(op) if *op == "+" || *op == "-" => Some(op.to_string()),
-            TokenType::Keyword(kw) if *kw == "not"               => Some("not".to_string()),
-            TokenType::BitwiseOp(op) if *op == "~?"              => Some("~?".to_string()),
-            _ => None,
+  fn parse_unary_or_primary(&mut self) -> Expression {
+    self.skip_whitespace();
+    if self.is_at_end() {
+        return Expression::Value {
+            value: Value::Null { position: Position::UNKNOWN },
+            position: Position::UNKNOWN,
         };
+    }
 
-        if let Some(op) = unary_op {
+    let token = self.current().clone();
+    let unary_pos = Position::from_token(&token);
+
+    // ── Handle '++' and '--' as double unary ───────────────────────────────
+    // FIX: Recursively call parse_unary_or_primary() so that:
+    //   `++a.method()` → `++(a.method())`  not  `(++a).method()`
+    //   `--arr[0]`     → `--(arr[0])`      not  `(--arr)[0]`
+    // Old code called parse_primary_base() then apply_postfix_operations()
+    // on the outer UnaryOp, which was the root of all these bugs.
+    if let TokenType::ArithmeticOp(op) = &token.token_type {
+        if *op == "--" || *op == "++" {
+            let single: &str = if *op == "--" { "-" } else { "+" };
             self.advance();
             self.skip_whitespace();
-            let operand = self.parse_primary_base();
-            let unary_expr = Expression::UnaryOp {
-                operator: op,
-                operand:  Box::new(operand),
+            // Recursive — also handles `++++a`, `----a`, etc.
+            let inner = self.parse_unary_or_primary();
+            let inner_unary = Expression::UnaryOp {
+                operator: single.to_string(),
+                operand:  Box::new(inner),
                 position: unary_pos,
             };
-            return self.apply_postfix_operations(unary_expr);
+            // Do NOT call apply_postfix_operations on the UnaryOp result.
+            return Expression::UnaryOp {
+                operator: single.to_string(),
+                operand:  Box::new(inner_unary),
+                position: unary_pos,
+            };
         }
-
-        self.parse_primary_with_postfix()
     }
+
+    // ── Standard single-char unary detection ──────────────────────────────
+    let unary_op: Option<String> = match &token.token_type {
+        TokenType::Symbol('!')                                    => Some("!".to_string()),
+        TokenType::Symbol('-')                                    => Some("-".to_string()),
+        TokenType::Symbol('+')                                    => Some("+".to_string()),
+        TokenType::ArithmeticOp(op) if *op == "+" || *op == "-"  => Some(op.to_string()),
+        TokenType::Keyword(kw) if *kw == "not"                   => Some("not".to_string()),
+        TokenType::BitwiseOp(op) if *op == "~?"                  => Some("~?".to_string()),
+        _ => None,
+    };
+
+    if let Some(op) = unary_op {
+        self.advance();
+        self.skip_whitespace();
+
+        // FIX: Recursive call handles ALL of the following correctly:
+        //
+        //   !a.contains("x")   → UnaryOp("!", QualifiedIdentifier{a.contains, args})
+        //                         Was: InstanceMethodCall { instance: UnaryOp("!", a), "contains" }
+        //                         → "Logical NOT requires bool, got String"
+        //                         → "Type 'Bool' has no instance method 'contains'"
+        //
+        //   -a[0]              → UnaryOp("-", IndexAccess(a, 0))
+        //                         Was: IndexAccess(UnaryOp("-", a), 0)
+        //
+        //   not x.isEmpty()    → UnaryOp("not", QualifiedIdentifier{x.isEmpty, []})
+        //                         Was: InstanceMethodCall { instance: UnaryOp("not", x), "isEmpty" }
+        //
+        //   !!a.b()            → UnaryOp("!", UnaryOp("!", QualifiedIdentifier{a.b, []}))
+        //                         Was: broken (second ! consumed by parse_primary_base's _ arm)
+        //
+        // The recursive call either detects another unary op (and recurses again)
+        // or falls through to parse_primary_with_postfix() which correctly applies
+        // postfix operations to the primary before returning.
+        let operand = self.parse_unary_or_primary();
+        return Expression::UnaryOp {
+            operator: op,
+            operand:  Box::new(operand),
+            position: unary_pos,
+        };
+        // NOTE: The old `return self.apply_postfix_operations(unary_expr)` was the bug.
+        // Postfix operations must bind to the primary, not to the UnaryOp.
+    }
+
+    self.parse_primary_with_postfix()
+}
 
     // =============================================================================
     // Postfix: dot-access, index-access, building QualifiedIdentifier chains

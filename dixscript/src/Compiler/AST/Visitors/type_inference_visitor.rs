@@ -211,50 +211,90 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn infer_qualified_identifier_type(
-        &self,
-        parts: &[String],
-        arguments: Option<&Vec<Expression>>,
-    ) -> Option<DataType> {
-        if parts.len() < 2 { return None; }
+    &self,
+    parts: &[String],
+    arguments: Option<&Vec<Expression>>,
+) -> Option<DataType> {
+    if parts.len() < 2 { return None; }
 
-        let first_part  = &parts[0];
-        let second_part = &parts[1];
+    let first_part  = &parts[0];
+    let second_part = &parts[1];
 
-        if parts.len() == 2 && arguments.is_none() && self.symbol_table.has_enum(first_part) {
-            return Some(DataType::Enum);
-        }
+    // Local enum: Status.ACTIVE
+    if parts.len() == 2 && arguments.is_none() && self.symbol_table.has_enum(first_part) {
+        return Some(DataType::Enum);
+    }
 
-        if parts.len() == 3 && arguments.is_none()
-            && self.symbol_table.is_imported_namespace(first_part)
-            && self.symbol_table.get_namespaced_enum(first_part, second_part).is_some()
+    // Imported namespace enum: utils.Status.ACTIVE (3 parts, no call)
+    if parts.len() == 3 && arguments.is_none()
+        && self.symbol_table.is_imported_namespace(first_part)
+        && self.symbol_table.get_namespaced_enum(first_part, second_part).is_some()
+    {
+        return Some(DataType::Enum);
+    }
+
+    if arguments.is_some() {
+        // Static builtin call: Math.round(), DateTime.now()
+        if parts.len() == 2
+            && first_part.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
         {
-            return Some(DataType::Enum);
+            return self.infer_static_method_call_return_type(first_part, second_part);
         }
 
-        if arguments.is_some() {
-            if parts.len() == 2
-                && first_part.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+        // Imported namespace function call: utils.computeTax()
+        if parts.len() == 2 {
+            if let Some(func_info) =
+                self.symbol_table.get_namespaced_function(first_part, second_part)
             {
-                return self.infer_static_method_call_return_type(first_part, second_part);
+                return func_info.signature.return_type;
             }
-            if parts.len() == 2 {
-                if let Some(func_info) =
-                    self.symbol_table.get_namespaced_function(first_part, second_part)
-                {
-                    return func_info.signature.return_type;
+        }
+
+        // Instance method call on a local variable or parameter with a known type.
+        // e.g. `myStr.contains("x")` where myStr: String  → Bool
+        //      `items.length()`      where items: Array    → Int
+        //      `dt.addDays(7)`       where dt: Timestamp   → Timestamp
+        //
+        // This is the key fix that allows `!myStr.contains("x")` to be correctly
+        // inferred as UnaryOp("!", Bool) → valid, rather than triggering a cascade
+        // of false-positive type errors when the operand type is unknown (None).
+        if parts.len() == 2 {
+            if let Some(maybe_var_type) = self.local_variable_types.get(first_part.as_str()) {
+                if let Some(var_type) = maybe_var_type {
+                    // Strip TypedArray/TypedTuple wrappers for registry lookup
+                    let base_type = var_type.base_collection_type();
+                    if let Some(dix_type) = Self::convert_data_type_to_dix_type(base_type) {
+                        use crate::Builtins::Resolver::instance_method_registry;
+                        instance_method_registry::initialize();
+                        if let Some(method) = instance_method_registry::get_instance_method(
+                            dix_type,
+                            second_part.as_str(),
+                        ) {
+                            let ret = method.return_type();
+                            // Void/Null/Any cannot be usefully propagated
+                            if ret != DixType::Any
+                                && ret != DixType::Void
+                                && ret != DixType::Null
+                            {
+                                return Self::convert_dix_type_to_data_type(ret);
+                            }
+                        }
+                    }
                 }
             }
         }
-
-        if parts.len() == 2 && arguments.is_none() {
-            let path = format!("{}.{}", first_part, second_part);
-            if let Some(var) = self.symbol_table.try_get_data_variable(&path) {
-                return var.effective_type();
-            }
-        }
-
-        None
     }
+
+    // Property access (no call): data.server or server.host
+    if parts.len() == 2 && arguments.is_none() {
+        let path = format!("{}.{}", first_part, second_part);
+        if let Some(var) = self.symbol_table.try_get_data_variable(&path) {
+            return var.effective_type();
+        }
+    }
+
+    None
+}
 
     fn infer_imported_function_call_type(
         &self,

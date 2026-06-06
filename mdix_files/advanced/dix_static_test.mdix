@@ -13,7 +13,12 @@
         let msg3 = Dix.Format("{0} + {1} = {2}", 10, 20, 30);
         return msg1;
     }
-
+     ~testDixFormatMulti<tuple>() {
+            let msg1 = Dix.Format("Hello {0}!", "World");
+            let msg2 = Dix.Format("Count: {0}, Price: {1}", 42, 19.99);
+            let msg3 = Dix.Format("{0} + {1} = {2}", 10, 20, 30);
+            return t:(msg1,msg2,msg3);
+        }
     ~testDixJoin<string>() {
         let joined1 = Dix.Join(", ", "apple", "banana", "cherry");
         let joined2 = Dix.Join(" - ", "one", "two", "three");
@@ -101,5 +106,6 @@
     test_chk_join_complex = testDixInChk("join_complex"),
     test_chk_miss = testDixInChk("unknown"),
     test_interpolation = testDixInterpolation("Bob", 100),
-    test_multiple_formats = testDixMultipleFormats()
+    test_multiple_formats = testDixMultipleFormats(),
+    Wagama = testDixFormatMulti()
 )

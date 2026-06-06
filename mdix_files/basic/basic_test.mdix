@@ -4,6 +4,13 @@
 )
 @QUICKFUNCS(
   ~somethingBigger<tuple>() {
+
+  let somebool = "str";
+  if: not somebool.contains("p"){
+
+  }
+
+
     return t:("abstractor","yes");
 
   }

@@ -1,0 +1,1969 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "UTF-8",
+    author -> "DixScript_Complete_QuickFuncs_Data_Test",
+    features -> "advanced",
+    created -> "2025-10-21T14:30:00Z",
+    debug_mode -> "verbose",
+    error_handling -> "halt"
+)
+
+
+
+
+
+@DLM(
+    DCompressor.gzip,
+    DAuditor.enhanced
+)
+
+
+
+
+
+@ENUMS(
+    UserRole { GUEST = 0, USER = 1, MODERATOR = 5, ADMIN = 10, SUPER_ADMIN = 15 }
+    Difficulty { EASY = 1, NORMAL = 2, HARD = 3, EXTREME = 5, NIGHTMARE = 10 }
+    HttpStatus { OK = 200, CREATED = 201, BAD_REQUEST = 400, NOT_FOUND = 404, SERVER_ERROR = 500 }
+    TokenType { ERC20, ERC721, ERC1155 }
+    LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3, FATAL = 4 }
+    GameState { MENU, LOADING, PLAYING, PAUSED, GAME_OVER }
+    ItemRarity { COMMON = 1, UNCOMMON = 2, RARE = 3, EPIC = 4, LEGENDARY = 5 }
+)
+
+@QUICKFUNCS(
+    // ============================================================
+    // BASIC ARITHMETIC WITH BUILT-INS
+    // ============================================================
+    
+    ~calculateDamage<int> => global(base<int>, difficulty<enum>) {
+        multiplier = difficulty == Difficulty.EASY ? 0.5 :
+                     difficulty == Difficulty.NORMAL ? 1.0 :
+                     difficulty == Difficulty.HARD ? 1.5 :
+                     difficulty == Difficulty.EXTREME ? 2.0 : 3.0;
+        damage = base * multiplier;
+        return Math.round(damage);
+    }
+    
+    ~applyTaxAndDiscount<float> => global(price<float>, tax_rate<float>, discount<float>) {
+        taxed = price + (price * tax_rate);
+        final = taxed - (taxed * discount);
+        return Math.round(final * 100.0) / 100.0;
+    }
+    
+    ~calculateCompoundInterest<float> => global(principal<float>, rate<float>, years<int>) {
+        result = principal * Math.pow(1.0 + rate, years);
+        return Math.round(result * 100.0) / 100.0;
+    }
+    
+    ~clampHealth<int> => global(current<int>, min<int>, max<int>) {
+        return Math.clamp(current, min, max);
+    }
+    
+    ~calculateDistance<float> => global(x1<float>, y1<float>, x2<float>, y2<float>) {
+        dx = x2 - x1;
+        dy = y2 - y1;
+        distance_sq = (dx * dx) + (dy * dy);
+        return Math.sqrt(distance_sq);
+    }
+    
+    // ============================================================
+    // STRING OPERATIONS WITH COMPLEX CHAINING
+    // ============================================================
+    
+    ~formatUserDisplayName<string> => global(first<string>, last<string>, id<int>) {
+        full_name = first.trim().toUpper() + " " + last.trim().toUpper();
+        display = full_name + " #" + id;
+        return display;
+    }
+    
+    ~sanitizeAndFormat<string> => global(input<string>) {
+        cleaned = input.trim().toLower().replace("  ", " ");
+        return cleaned;
+    }
+    
+    ~validateEmail<bool> => global(email<string>) {
+        trimmed = email.trim().toLower();
+        has_at = trimmed.contains("@");
+        has_dot = trimmed.contains(".");
+        has_length = trimmed.length() > 5;
+        return has_at && has_dot && has_length;
+    }
+    
+~extractDomain<string> => global(email<string>) {
+    cleaned = email.trim().toLower();
+    at_pos = cleaned.indexOf("@");
+    
+    if: at_pos >= 0 {  // FIXED: Changed from > 0 to >= 0
+        domain_start = at_pos + 1;
+        domain_length = cleaned.length() - domain_start;
+        domain = cleaned.substring(domain_start, domain_length);
+        return domain;
+    }
+    
+    return "invalid";
+}
+    ~formatPhoneNumber<string> => global(digits<string>) {
+        cleaned = digits.replace("-", "").replace(" ", "").replace("(", "").replace(")", "");
+        if: cleaned.length() == 10 {
+            area = cleaned.substring(0, 3);
+            prefix = cleaned.substring(3, 3);
+            line = cleaned.substring(6, 4);
+            return "(" + area + ") " + prefix + "-" + line;
+        }
+        return cleaned;
+    }
+    
+    ~superComplexStringChain<string> => global(input<string>) {
+        step1 = input.trim().toLower().replace("_", "-");
+        step2 = step1.replace("  ", " ").substring(0, 100);
+        step3 = step2.toUpper().replace("-", " ").trim();
+        step4 = step3.padLeft(120, " ").padRight(150, " ");
+        final = step4.trim().substring(0, 50);
+        return final;
+    }
+    
+    // ============================================================
+    // ARRAY OPERATIONS WITH COMPLEX CHAINING
+    // ============================================================
+    
+    ~calculateTopThreeAverage<float> => global(scores<array>) {
+        sorted = scores.sort();
+        reversed = sorted.reverse();
+        top_three = reversed.slice(0, 3);
+        total = top_three.sum();
+        avg = total / 3.0;
+        return Math.round(avg * 100.0) / 100.0;
+    }
+    
+    ~processScores<array> => global(raw_scores<array>) {
+        filtered = raw_scores.filter(0);
+        unique = filtered.distinct();
+        sorted = unique.sort();
+        return sorted;
+    }
+    
+    ~getTopNScores<int> => global(scores<array>, n<int>) {
+        sorted = scores.sort().reverse();
+        top_n = sorted.slice(0, n);
+        total = top_n.sum();
+        return Math.round(total);
+    }
+    
+    ~analyzeArrayStats<tuple> => global(numbers<array>) {
+        min_val = numbers.min();
+        max_val = numbers.max();
+        avg_val = numbers.average();
+        total = numbers.sum();
+        return t:(Math.round(min_val), Math.round(max_val), Math.round(avg_val), Math.round(total));
+    }
+    
+    ~concatenateAndSort<array> => global(arr1<array>, arr2<array>) {
+        combined = arr1.concat(arr2);
+        unique = combined.distinct();
+        sorted = unique.sort();
+        return sorted;
+    }
+    
+    ~wildArrayChaining<array> => global(input<array>) {
+        step1 = input.distinct().sort().reverse();
+        step2 = step1.slice(0, 10).concat(step1.slice(10, 5));
+        step3 = step2.distinct().sort();
+        final = step3.reverse().slice(0, 8);
+        return final;
+    }
+    
+    // ============================================================
+    // DATETIME OPERATIONS
+    // ============================================================
+    
+    ~calculateDaysUntil<int> => global(target_date<date>) {
+        today = DateTime.today();
+        days_diff = DateTime.subtract(target_date, today);
+        return Math.round(days_diff);
+    }
+    
+    ~formatTimestamp<string> => global(ts<timestamp>) {
+        formatted = DateTime.format(ts, "yyyy-MM-dd HH:mm:ss");
+        return formatted;
+    }
+    
+    ~addBusinessDays<timestamp> => global(start_date<date>, days<int>) {
+        result = DateTime.addDays(start_date, days);
+        return result;
+    }
+    
+    ~isWeekend<bool> => global(check_date<date>) {
+        day_of_week = DateTime.dayOfWeek(check_date);
+        return day_of_week == 0 || day_of_week == 6;
+    }
+    
+    ~calculateAge<int> => global(birth_date<date>) {
+        today = DateTime.today();
+        years = DateTime.subtract(today, birth_date) / 365.25;
+        return Math.floor(years);
+    }
+    
+    // ============================================================
+    // RANDOM NUMBER GENERATION
+    // ============================================================
+    
+    ~rollDice<int> => global(sides<int>) {
+        return Random.range(1, sides);
+    }
+    
+    ~rollMultipleDice<int> => global(num_dice<int>, sides<int>) {
+        total = 0;
+        counter = 0;
+        if: num_dice > 0 {
+            total = Random.range(num_dice, num_dice * sides);
+        }
+        return total;
+    }
+    
+    ~generateRandomId<string> => global(length<int>) {
+        return Random.alphanumeric(length);
+    }
+    
+    ~selectRandomItem<string> => global(items<array>) {
+        return Random.choice(items);
+    }
+    
+    // ============================================================
+    // ENUM OPERATIONS
+    // ============================================================
+    
+    ~checkPermission<bool> => global(user_role<enum>, required_role<enum>) {
+        return user_role >= required_role;
+    }
+    
+    ~getNextDifficulty<enum> => global(current<enum>) {
+        if: current == Difficulty.EASY {
+            return Difficulty.NORMAL;
+        }
+        if: current == Difficulty.NORMAL {
+            return Difficulty.HARD;
+        }
+        if: current == Difficulty.HARD {
+            return Difficulty.EXTREME;
+        }
+        return Difficulty.NIGHTMARE;
+    }
+    
+    ~roleToString<string> => global(role<enum>) {
+        return role == UserRole.GUEST ? "Guest User" :
+               role == UserRole.USER ? "Standard User" :
+               role == UserRole.MODERATOR ? "Moderator" :
+               role == UserRole.ADMIN ? "Administrator" : "Super Administrator";
+    }
+    
+    // ============================================================
+    // NESTED IF-ELIF-ELSE STATEMENTS
+    // ============================================================
+    
+    ~classifyScore<string> => global(score<int>, difficulty<enum>) {
+        result = "";
+        
+        if: difficulty == Difficulty.EASY {
+            if: score >= 90 {
+                result = "Perfect Easy";
+            }
+            elif: score >= 70 {
+                result = "Good Easy";
+            }
+            elif: score >= 50 {
+                result = "Pass Easy";
+            }
+            else {
+                result = "Fail Easy";
+            }
+        }
+        elif: difficulty == Difficulty.NORMAL {
+            if: score >= 85 {
+                result = "Excellent Normal";
+            }
+            elif: score >= 65 {
+                result = "Good Normal";
+            }
+            elif: score >= 45 {
+                result = "Pass Normal";
+            }
+            else {
+                result = "Fail Normal";
+            }
+        }
+        elif: difficulty == Difficulty.HARD {
+            if: score >= 80 {
+                result = "Amazing Hard";
+            }
+            elif: score >= 60 {
+                result = "Great Hard";
+            }
+            elif: score >= 40 {
+                result = "Pass Hard";
+            }
+            else {
+                result = "Fail Hard";
+            }
+        }
+        else {
+            if: score >= 70 {
+                result = "Legendary";
+            }
+            elif: score >= 50 {
+                result = "Epic";
+            }
+            elif: score >= 30 {
+                result = "Rare";
+            }
+            else {
+                result = "Common";
+            }
+        }
+        
+        return result;
+    }
+    
+    ~complexNestedLogic<int> => global(a<int>, b<int>, c<int>) {
+        result = 0;
+        
+        if: a > 50 {
+            if: b > 50 {
+                if: c > 50 {
+                    result = a + b + c;
+                }
+                elif: c > 25 {
+                    result = a + b;
+                }
+                else {
+                    result = a;
+                }
+            }
+            elif: b > 25 {
+                if: c > 50 {
+                    result = a + c;
+                }
+                else {
+                    result = a - b;
+                }
+            }
+            else {
+                result = a * 2;
+            }
+        }
+        elif: a > 25 {
+            if: b > 50 {
+                result = b + c;
+            }
+            elif: b > 25 {
+                result = (a + b) / 2;
+            }
+            else {
+                result = c;
+            }
+        }
+        else {
+            if: b > 50 {
+                result = b * 2;
+            }
+            elif: c > 50 {
+                result = c * 2;
+            }
+            else {
+                result = (a + b + c) / 3;
+            }
+        }
+        
+        return Math.round(result);
+    }
+    
+    ~categorizePlayer<string> => global(level<int>, score<int>, playtime<int>) {
+        category = "";
+        
+        if: level >= 50 {
+            if: score >= 10000 {
+                if: playtime >= 1000 {
+                    category = "Elite Veteran";
+                }
+                elif: playtime >= 500 {
+                    category = "Elite Regular";
+                }
+                else {
+                    category = "Elite Casual";
+                }
+            }
+            elif: score >= 5000 {
+                if: playtime >= 800 {
+                    category = "Pro Veteran";
+                }
+                else {
+                    category = "Pro Player";
+                }
+            }
+            else {
+                category = "High Level";
+            }
+        }
+        elif: level >= 25 {
+            if: score >= 5000 {
+                category = "Advanced High Scorer";
+            }
+            elif: score >= 2500 {
+                category = "Advanced Player";
+            }
+            else {
+                category = "Mid Level";
+            }
+        }
+        elif: level >= 10 {
+            if: score >= 1000 {
+                category = "Intermediate Achiever";
+            }
+            else {
+                category = "Intermediate";
+            }
+        }
+        else {
+            if: playtime >= 100 {
+                category = "Dedicated Beginner";
+            }
+            elif: playtime >= 50 {
+                category = "Active Beginner";
+            }
+            else {
+                category = "New Player";
+            }
+        }
+        
+        return category;
+    }
+    
+    // ============================================================
+    // CONDITIONAL LOGIC WITH SWITCH
+    // ============================================================
+    
+    ~calculateBonus<int> => global(score<int>, difficulty<enum>) {
+        base_bonus = 0;
+        
+        chk: difficulty {
+            -> Difficulty.EASY {
+                base_bonus = score * 1;
+            }
+            -> Difficulty.NORMAL {
+                base_bonus = score * 2;
+            }
+            -> Difficulty.HARD {
+                base_bonus = score * 3;
+            }
+            -> Difficulty.EXTREME {
+                base_bonus = score * 5;
+            }
+            -> miss {
+                base_bonus = 0;
+            }
+        }
+        
+        return base_bonus;
+    }
+    
+    ~getHttpMessage<string> => global(status<enum>) {
+        chk: status {
+            -> HttpStatus.OK {
+                return "Success";
+            }
+            -> HttpStatus.CREATED {
+                return "Resource Created";
+            }
+            -> HttpStatus.BAD_REQUEST {
+                return "Invalid Request";
+            }
+            -> HttpStatus.NOT_FOUND {
+                return "Resource Not Found";
+            }
+            -> miss {
+                return "Unknown Status";
+            }
+        }
+    }
+    
+    ~processGameState<string> => global(state<enum>, score<int>) {
+        message = "";
+        
+        chk: state {
+            -> GameState.MENU {
+                message = "Welcome to the game!";
+            }
+            -> GameState.LOADING {
+                message = "Loading assets...";
+            }
+            -> GameState.PLAYING {
+                if: score > 1000 {
+                    message = "Doing great! Score: " + score;
+                }
+                elif: score > 500 {
+                    message = "Good progress! Score: " + score;
+                }
+                else {
+                    message = "Keep going! Score: " + score;
+                }
+            }
+            -> GameState.PAUSED {
+                message = "Game paused. Current score: " + score;
+            }
+            -> GameState.GAME_OVER {
+                if: score > 5000 {
+                    message = "Victory! Final score: " + score;
+                }
+                else {
+                    message = "Game Over. Final score: " + score;
+                }
+            }
+            -> miss {
+                message = "Unknown game state";
+            }
+        }
+        
+        return message;
+    }
+    
+    ~calculateItemValue<int> => global(rarity<enum>, level<int>) {
+        base_value = 0;
+        
+        chk: rarity {
+            -> ItemRarity.COMMON {
+                base_value = 10;
+            }
+            -> ItemRarity.UNCOMMON {
+                base_value = 50;
+            }
+            -> ItemRarity.RARE {
+                base_value = 200;
+            }
+            -> ItemRarity.EPIC {
+                base_value = 1000;
+            }
+            -> ItemRarity.LEGENDARY {
+                base_value = 5000;
+            }
+            -> miss {
+                base_value = 1;
+            }
+        }
+        
+        multiplier = 1.0 + (level * 0.1);
+        final_value = base_value * multiplier;
+        
+        return Math.round(final_value);
+    }
+    
+// ============================================================
+// DYNAMIC OBJECT CREATION (FIXED)
+// ============================================================
+
+~createPlayerProfile<object> => global(name<string>, level<int>, score<int>) {
+    // FIXED: Evaluate expressions into variables first
+    display_name_value = name.trim().toUpper();
+    
+    rank = level >= 50 ? "Master" :
+           level >= 30 ? "Expert" :
+           level >= 15 ? "Advanced" : "Beginner";
+    
+    status = score >= 10000 ? "Elite" :
+             score >= 5000 ? "Pro" :
+             score >= 1000 ? "Skilled" : "Learning";
+    
+    power_rating_calc = (level * 10) + (score / 100);
+    power_rating_value = Math.round(power_rating_calc);
+    
+    is_veteran_calc = level >= 30 && score >= 5000;
+    
+    profile = {
+        display_name = display_name_value,
+        player_level = level,
+        total_score = score,
+        rank_title = rank,
+        status_badge = status,
+        power_rating = power_rating_value,
+        is_veteran = is_veteran_calc
+    };
+    
+    return profile;
+}
+
+~createInventoryItem<object> => global(name<string>, rarity<enum>, quantity<int>, base_price<float>) {
+    rarity_multiplier = rarity == ItemRarity.COMMON ? 1.0 :
+                       rarity == ItemRarity.UNCOMMON ? 2.5 :
+                       rarity == ItemRarity.RARE ? 5.0 :
+                       rarity == ItemRarity.EPIC ? 10.0 : 25.0;
+    
+    final_price = base_price * rarity_multiplier;
+    total_value = final_price * quantity;
+    
+    rarity_text = rarity == ItemRarity.COMMON ? "Common" :
+                  rarity == ItemRarity.UNCOMMON ? "Uncommon" :
+                  rarity == ItemRarity.RARE ? "Rare" :
+                  rarity == ItemRarity.EPIC ? "Epic" : "Legendary";
+    
+    // FIXED: Calculate values before object creation
+    unit_price_rounded = Math.round(final_price * 100.0) / 100.0;
+    total_worth_rounded = Math.round(total_value * 100.0) / 100.0;
+    is_valuable_calc = total_value > 1000.0;
+    stack_size_calc = quantity > 99 ? 99 : quantity;
+    
+    item = {
+        item_name = name,
+        rarity_level = rarity,
+        rarity_display = rarity_text,
+        qty = quantity,
+        unit_price = unit_price_rounded,
+        total_worth = total_worth_rounded,
+        is_valuable = is_valuable_calc,
+        stack_size = stack_size_calc
+    };
+    
+    return item;
+}
+
+~buildOrderDetails<object> => global(order_id<int>, subtotal<float>, tax_rate<float>, discount<float>) {
+    tax_amount = subtotal * tax_rate;
+    discount_amount = subtotal * discount;
+    total_before_tax = subtotal - discount_amount;
+    final_total = total_before_tax + (total_before_tax * tax_rate);
+    
+    status = final_total > 1000.0 ? "Premium" :
+             final_total > 500.0 ? "Standard" : "Economy";
+    
+    shipping = final_total > 100.0 ? 0.0 :
+               final_total > 50.0 ? 5.0 : 10.0;
+    
+    grand_total = final_total + shipping;
+    
+    // FIXED: Calculate all values before object creation
+    subtotal_rounded = Math.round(subtotal * 100.0) / 100.0;
+    tax_rounded = Math.round(tax_amount * 100.0) / 100.0;
+    discount_rounded = Math.round(discount_amount * 100.0) / 100.0;
+    total_rounded = Math.round(grand_total * 100.0) / 100.0;
+    free_shipping_calc = shipping == 0.0;
+    is_bulk_calc = subtotal > 500.0;
+    
+    order = {
+        id = order_id,
+        order_subtotal = subtotal_rounded,
+        tax = tax_rounded,
+        discount = discount_rounded,
+        shipping_cost = shipping,
+        total = total_rounded,
+        order_status = status,
+        free_shipping = free_shipping_calc,
+        is_bulk_order = is_bulk_calc
+    };
+    
+    return order;
+}
+
+~createCharacterStats<object> => global(name<string>, class<string>, level<int>) {
+    base_health = 100;
+    base_mana = 50;
+    base_damage = 10;
+    
+    health_bonus = level * 15;
+    mana_bonus = level * 10;
+    damage_bonus = level * 2;
+    
+    class_health_mult = class == "warrior" ? 1.5 :
+                       class == "mage" ? 0.8 :
+                       class == "rogue" ? 1.0 : 1.2;
+    
+    class_mana_mult = class == "mage" ? 2.0 :
+                     class == "warrior" ? 0.5 :
+                     class == "rogue" ? 1.0 : 1.5;
+    
+    class_damage_mult = class == "rogue" ? 1.5 :
+                       class == "warrior" ? 1.3 :
+                       class == "mage" ? 1.0 : 1.1;
+    
+    final_health = Math.round((base_health + health_bonus) * class_health_mult);
+    final_mana = Math.round((base_mana + mana_bonus) * class_mana_mult);
+    final_damage = Math.round((base_damage + damage_bonus) * class_damage_mult);
+    
+    // FIXED: Calculate all values before object creation
+    character_name_value = name.trim().toUpper();
+    defense_calc = Math.round(level * 1.5);
+    speed_calc = Math.round(level * 0.8);
+    critical_calc = Math.min(level * 0.5, 50.0);
+    power_level_calc = Math.round((final_health + final_mana + final_damage) / 3);
+    
+    stats = {
+        character_name = character_name_value,
+        character_class = class,
+        character_level = level,
+        max_health = final_health,
+        max_mana = final_mana,
+        attack_damage = final_damage,
+        defense = defense_calc,
+        speed = speed_calc,
+        critical_chance = critical_calc,
+        power_level = power_level_calc
+    };
+    
+    return stats;
+}
+
+~generateLootTable<object> => global(enemy_level<int>, difficulty<enum>, luck<double>) {
+    base_gold = enemy_level * 10;
+    base_exp = enemy_level * 25;
+    
+    diff_mult = difficulty == Difficulty.EASY ? 0.5 :
+               difficulty == Difficulty.NORMAL ? 1.0 :
+               difficulty == Difficulty.HARD ? 1.5 :
+               difficulty == Difficulty.EXTREME ? 2.5 : 4.0;
+    
+    luck_mult = 1.0 + luck;
+    
+    final_gold = Math.round(base_gold * diff_mult * luck_mult);
+    final_exp = Math.round(base_exp * diff_mult);
+    
+    drop_chance = Math.min(50.0 + (luck * 100.0), 95.0);
+    rare_chance = Math.min(10.0 + (luck * 50.0), 50.0);
+    has_bonus_calc = luck > 0.5;
+    guaranteed_drop_calc = drop_chance >= 95.0;
+drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
+
+
+
+    rare_chance_rounded = Math.round(rare_chance * 100.0) / 100.0;
+    
+    loot = {
+        gold_amount = final_gold,
+        experience = final_exp,
+        item_drop_chance = drop_chance_rounded,
+        rare_drop_chance = rare_chance_rounded,
+        enemy_difficulty = difficulty,
+        has_bonus_loot = has_bonus_calc,
+        guaranteed_drop = guaranteed_drop_calc
+    };
+    
+    return loot;
+}
+    
+    // ============================================================
+    // COMPLEX NESTED LOGIC (MAX 3 LEVELS)
+    // ============================================================
+    
+    ~calculateFinalScore<int> => global(base<int>, multiplier<float>, bonus<int>) {
+        adjusted = Math.round(base * multiplier);
+        total = adjusted + bonus;
+        clamped = Math.clamp(total, 0, 1000);
+        return clamped;
+    }
+    
+    ~processUserData<tuple> => global(first<string>, last<string>, score<int>) {
+        full_name = first.trim().toUpper() + " " + last.trim().toUpper();
+        adjusted_score = Math.clamp(score, 0, 100);
+        grade = adjusted_score >= 90 ? "A" :
+                adjusted_score >= 80 ? "B" :
+                adjusted_score >= 70 ? "C" :
+                adjusted_score >= 60 ? "D" : "F";
+        return t:(full_name, adjusted_score, grade);
+    }
+    
+    ~complexCalculationChain<int> => global(a<int>, b<int>, c<int>, d<int>) {
+        step1 = Math.max(a, b);
+        step2 = Math.min(c, d);
+        step3 = Math.abs(step1 - step2);
+        step4 = Math.pow(step3, 2);
+        step5 = Math.sqrt(step4 + 100);
+        result = Math.round(step5 * 1.5);
+        return result;
+    }
+    
+    // ============================================================
+    // SCOPED FUNCTIONS FOR TABLE/GROUP TESTING
+    // ============================================================
+    
+    ~calculateOrderTotal<float> => orders(subtotal<float>, tax_rate<float>, shipping<float>) {
+        tax = subtotal * tax_rate;
+        total = subtotal + tax + shipping;
+        return Math.round(total * 100.0) / 100.0;
+        
+       
+    }
+    
+    ~validateOrderAmount<bool> => orders(subtotal<float>, min<float>, max<float>) {
+        return subtotal >= min && subtotal <= max;
+    }
+    
+    ~formatProductDisplay<string> => products(name<string>, price<float>, stock<int>) {
+        formatted_price = Math.round(price * 100.0) / 100.0;
+        // FIXED: Inline the role-to-string logic instead of calling roleToString()
+        display = name.toUpper() + " - $" + formatted_price + " (" + stock + " in stock)";
+        return display;
+    }
+    
+    ~calculateProductPrice<float> => products(base<float>, markup<float>, tax<float>) {
+        retail = base * markup;
+        final = retail + tax;
+        return Math.round(final * 100.0) / 100.0;
+    }
+    
+    ~formatUserProfile<string> => users(first<string>, last<string>, role<enum>) {
+        full = first.trim() + " " + last.trim();
+        // FIXED: Inline the enum-to-string conversion instead of calling roleToString()
+        role_str = role == UserRole.GUEST ? "Guest User" :
+                   role == UserRole.USER ? "Standard User" :
+                   role == UserRole.MODERATOR ? "Moderator" :
+                   role == UserRole.ADMIN ? "Administrator" : "Super Administrator";
+        return full + " - " + role_str;
+    }
+    
+    ~calculateUserScore<int> => users(base_score<int>, bonus<int>, level<int>) {
+        total = base_score + bonus + (level * 10);
+        return Math.clamp(total, 0, 9999);
+    }
+    
+    // ============================================================
+    // COMPLEX CHAINING EXAMPLES
+    // ============================================================
+    
+    ~chainedStringOperations<string> => global(input<string>) {
+        result = input.trim()
+                     .toLower()
+                     .replace("  ", " ")
+                     .replace("_", "-")
+                     .substring(0, 50);
+        return result;
+    }
+    
+    ~chainedArrayOperations<int> => global(numbers<array>) {
+        result = numbers.distinct()
+                       .sort()
+                       .reverse()
+                       .slice(0, 5)
+                       .sum();
+        return Math.round(result);
+    }
+    
+    ~chainedNumericOperations<float> => global(value<float>) {
+        result = value.abs()
+                     .round(2)
+                     .toDouble();
+        final = Math.sqrt(result);
+        return Math.round(final * 100.0) / 100.0;
+    }
+    
+    ~insaneArrayChaining<array> => global(input<array>) {
+        step1 = input.sort().reverse().distinct();
+        step2 = step1.slice(0, 10).concat(input.slice(5, 5));
+        step3 = step2.distinct().sort().reverse();
+        step4 = step3.slice(0, 15);
+        final = step4.sort();
+        return final;
+    }
+    
+    ~crazyStringChaining<string> => global(text<string>) {
+        step1 = text.trim().toLower();
+        step2 = step1.replace(" ", "_").replace("-", "_");
+        step3 = step2.toUpper().substring(0, 100);
+        step4 = step3.padLeft(120, "X").padRight(150, "Y");
+        step5 = step4.trim().replace("X", "").replace("Y", "");
+        final = step5.substring(0, 50).trim();
+        return final;
+    }
+    
+    // ============================================================
+    // EXPRESSION COMPLEXITY EXAMPLES
+    // ============================================================
+    
+    ~complexArithmetic<int> => global(a<int>, b<int>, c<int>, d<int>) {
+        result = ((a + b) * (c - d)) + (a * b) - (c / 2);
+        return Math.round(result);
+    }
+    
+    ~complexConditional<string> => global(score<int>, level<int>, bonus<int>) {
+        grade = score >= 90 && level > 5 ? "S-Rank" :
+                score >= 80 && level > 3 ? "A-Rank" :
+                score >= 70 && bonus > 100 ? "B-Rank" :
+                score >= 60 ? "C-Rank" : "D-Rank";
+        return grade;
+    }
+    
+    ~complexLogical<bool> => global(x<int>, y<int>, z<int>) {
+        condition1 = x > 10 && y < 20;
+        condition2 = z >= 5 || x == 0;
+        condition3 = (x + y) > z;
+        return (condition1 || condition2) && condition3;
+    }
+    
+    ~megaComplexExpression<int> => global(a<int>, b<int>, c<int>, d<int>, e<int>) {
+        part1 = (a + b) * c;
+        part2 = (d - e) / 2;
+        part3 = Math.pow(a, 2) + Math.pow(b, 2);
+        part4 = Math.sqrt(part3);
+        part5 = Math.abs(part1 - part2);
+        result = Math.round((part4 + part5) * 1.5);
+        return Math.clamp(result, 0, 10000);
+    }
+    
+    // ============================================================
+    // TERNARY NESTING (MAX 3 LEVELS)
+    // ============================================================
+    
+    ~nestedTernary<string> => global(value<int>) {
+        result = value > 100 ? "high" :
+                 value > 50 ? (value > 75 ? "medium-high" : "medium") :
+                 value > 25 ? "low-medium" : "low";
+        return result;
+    }
+    
+    ~deepNestedTernary<string> => global(score<int>, level<int>) {
+        result = score > 90 ? (level > 10 ? "Elite Master" : "Elite") :
+                 score > 70 ? (level > 10 ? (score > 80 ? "Pro Master" : "Pro Advanced") : "Pro") :
+                 score > 50 ? (level > 5 ? "Advanced" : "Intermediate") : "Beginner";
+        return result;
+    }
+    
+    ~tripleNestedTernary<int> => global(a<int>, b<int>, c<int>) {
+        result = a > b ? (b > c ? a : (a > c ? a : c)) :
+                 b > c ? (a > c ? b : (b > a ? b : a)) : c;
+        return result;
+    }
+    
+    // ============================================================
+    // WORKING WITH TUPLES
+    // ============================================================
+    
+    ~createCoordinates<tuple> => global(lat<float>, lon<float>, alt<float>) {
+        return t:(
+            Math.round(lat * 1000000.0) / 1000000.0,
+            Math.round(lon * 1000000.0) / 1000000.0,
+            Math.round(alt * 100.0) / 100.0
+        );
+    }
+    
+    ~createUserRecord<tuple> => global(name<string>, age<int>, score<float>) {
+        formatted_name = name.trim().toUpper();
+        clamped_age = Math.clamp(age, 0, 150);
+        rounded_score = Math.round(score * 100.0) / 100.0;
+        return t:(formatted_name, clamped_age, rounded_score);
+    }
+    
+    ~createGameStats<tuple> => global(kills<int>, deaths<int>, assists<int>, playtime<int>) {
+        kda = deaths > 0 ? (kills + assists) / deaths : kills + assists;
+        rounded_kda = Math.round(kda * 100.0) / 100.0;
+        avg_kills_per_hour = playtime > 0 ? (kills * 60.0) / playtime : 0.0;
+        return t:(kills, deaths, assists, rounded_kda);
+    }
+    
+    // ============================================================
+    // VARIABLE DECLARATION AND ASSIGNMENT PATTERNS
+    // ============================================================
+    
+    ~testVariableScopes<int> => global(input<int>) {
+        local1 = input * 2;
+        local2 = local1 + 10;
+        local3 = local2 - 5;
+        
+        if: local3 > 50 {
+            result = local3 * 2;
+            return result;
+        }
+        elif: local3 > 25 {
+            temp = local3 + 15;
+            result = temp * 1.5;
+            return Math.round(result);
+        }
+        else {
+            final = local3 - 10;
+            return Math.max(final, 0);
+        }
+    }
+    
+    ~arithmeticAssignments<int> => global(base<int>) {
+        counter = 0;
+        counter += base;
+        counter += 10;
+        counter *= 2;
+        counter -= 5;
+        counter /= 3;
+        return Math.round(counter);
+    }
+    
+    // ============================================================
+    // LOGGING AND DEBUGGING EXAMPLES
+    // ============================================================
+    
+    ~debugCalculation<int> => global(a<int>, b<int>) {
+        sum = a + b;
+        log: "Sum calculated: " + sum;
+        
+        product = a * b;
+        log: "Product calculated: " + product;
+        
+        if: sum > product {
+            log: "Sum is greater";
+            return sum;
+        }
+        else {
+            log: "Product is greater";
+            return product;
+        }
+    }
+)
+@DATA(
+    // ============================================================
+    // FLAT PROPERTIES - BASIC FUNCTION CALLS
+    // ============================================================
+    
+    base_damage<int> = 50,
+    player_level<int> = 5,
+    difficulty_setting<enum> = Difficulty.HARD,
+    
+    calculated_damage<int> = calculateDamage(50, Difficulty.EASY),
+    calculated_damage_normal<int> = calculateDamage(50, Difficulty.NORMAL),
+    calculated_damage_hard<int> = calculateDamage(base_damage, difficulty_setting),
+    
+    // Tax and discount calculations (FIXED: float accepts double literals)
+    product_price<float> = 99.99,
+    tax_rate<float> = 0.0825,
+    discount_rate<float> = 0.15,
+    
+    final_price<float> = applyTaxAndDiscount(product_price, tax_rate, discount_rate),
+    
+    // Compound interest
+    investment_principal<float> = 10000.0,
+    interest_rate<float> = 0.05,
+    years<int> = 10,
+    
+    future_value<float> = calculateCompoundInterest(investment_principal, interest_rate, years),
+    
+    // Health clamping
+    player_health<int> = 150,
+    min_health<int> = 0,
+    max_health<int> = 100,
+    
+    clamped_health<int> = clampHealth(player_health, min_health, max_health),
+    
+    // Distance calculation
+    point1_x<float> = 0.0,
+    point1_y<float> = 0.0,
+    point2_x<float> = 3.0,
+    point2_y<float> = 4.0,
+    
+    distance<float> = calculateDistance(point1_x, point1_y, point2_x, point2_y),
+    
+    // ============================================================
+    // STRING OPERATIONS
+    // ============================================================
+    
+    user_first<string> = "  john  ",
+    user_last<string> = "  DOE  ",
+    user_id<int> = 1001,
+    
+    display_name<string> = formatUserDisplayName(user_first, user_last, user_id),
+    
+    raw_input<string> = "  Hello    World  ",
+    sanitized_input<string> = sanitizeAndFormat(raw_input),
+    
+    test_email<string> = "  User@Example.COM  ",
+    is_valid_email<bool> = validateEmail(test_email),
+    email_domain<string> = extractDomain(test_email),
+    
+    phone_raw<string> = "1234567890",
+    formatted_phone<string> = formatPhoneNumber(phone_raw),
+    
+    complex_string_input<string> = "  TEST___STRING__WITH__MESS  ",
+    super_processed<string> = superComplexStringChain(complex_string_input),
+    
+    crazy_text<string> = "  hello-world_testing-data  ",
+    crazy_result<string> = crazyStringChaining(crazy_text),
+    
+    // ============================================================
+    // ARRAY OPERATIONS
+    // ============================================================
+    
+    scores_raw<array> = [85, 92, 78, 95, 88, 0, 92, 78],
+    processed_scores<array> = processScores(scores_raw),
+    top_three_avg<float> = calculateTopThreeAverage(scores_raw),
+    top_five_total<int> = getTopNScores(scores_raw, 5),
+    
+    numbers_list<array> = [10, 25, 15, 30, 20],
+    stats<tuple> = analyzeArrayStats(numbers_list),
+    
+    array1<array> = [1, 2, 3, 4],
+    array2<array> = [3, 4, 5, 6],
+    merged_array<array> = concatenateAndSort(array1, array2),
+    
+    wild_array_input<array> = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 5, 10, 15],
+    wild_result<array> = wildArrayChaining(wild_array_input),
+    
+    insane_array<array> = [100, 50, 75, 25, 90, 10, 80, 20, 70, 30, 60, 40],
+    insane_result<array> = insaneArrayChaining(insane_array),
+    
+    chained_nums<array> = [99, 88, 77, 66, 55, 44, 33, 22, 11, 100, 90, 80],
+    chained_total<int> = chainedArrayOperations(chained_nums),
+    
+    // ============================================================
+    // DATETIME OPERATIONS
+    // ============================================================
+    
+    target_date<date> = 2025-12-31,
+    days_until_target<int> = calculateDaysUntil(target_date),
+    
+    current_timestamp<timestamp> = 2025-10-21T14:30:00Z,
+    formatted_time<string> = formatTimestamp(current_timestamp),
+    
+    start_date<date> = 2025-10-21,
+    business_days<int> = 10,
+    future_date<timestamp> = addBusinessDays(start_date, business_days),
+    
+    check_date<date> = 2025-10-25,
+    is_weekend<bool> = isWeekend(check_date),
+    
+    birth_date<date> = 1990-05-15,
+    age<int> = calculateAge(birth_date),
+    
+    // ============================================================
+    // RANDOM OPERATIONS
+    // ============================================================
+    
+    dice_result<int> = rollDice(20),
+    multiple_dice<int> = rollMultipleDice(3, 6),
+    random_id<string> = generateRandomId(16),
+    
+    item_pool<array> = ["sword", "shield", "potion", "scroll", "ring"],
+    selected_item<string> = selectRandomItem(item_pool),
+    
+    // ============================================================
+    // ENUM OPERATIONS
+    // ============================================================
+    
+    current_role<enum> = UserRole.MODERATOR,
+    required_role<enum> = UserRole.USER,
+    has_permission<bool> = checkPermission(current_role, required_role),
+    
+    role_display<string> = roleToString(current_role),
+    
+    current_difficulty<enum> = Difficulty.NORMAL,
+    next_difficulty<enum> = getNextDifficulty(current_difficulty),
+    
+    // ============================================================
+    // NESTED IF-ELIF-ELSE RESULTS
+    // ============================================================
+    
+    test_score<int> = 85,
+    test_difficulty<enum> = Difficulty.HARD,
+    score_classification<string> = classifyScore(test_score, test_difficulty),
+    
+    logic_a<int> = 60,
+    logic_b<int> = 40,
+    logic_c<int> = 30,
+    nested_logic_result<int> = complexNestedLogic(logic_a, logic_b, logic_c),
+    
+    player_lvl<int> = 45,
+    player_pts<int> = 8500,
+    playtime_hrs<int> = 750,
+    player_category<string> = categorizePlayer(player_lvl, player_pts, playtime_hrs),
+    
+    // ============================================================
+    // SWITCH STATEMENT RESULTS
+    // ============================================================
+    
+    game_score<int> = 1000,
+    score_multiplier<float> = 1.5,
+    score_bonus<int> = 250,
+    
+    final_score<int> = calculateFinalScore(game_score, score_multiplier, score_bonus),
+    difficulty_bonus<int> = calculateBonus(game_score, Difficulty.EXTREME),
+    
+    http_status<enum> = HttpStatus.OK,
+    status_message<string> = getHttpMessage(http_status),
+    
+    game_state<enum> = GameState.PLAYING,
+    game_message<string> = processGameState(game_state, 1500),
+    
+    item_rarity<enum> = ItemRarity.EPIC,
+    item_level<int> = 50,
+    item_value<int> = calculateItemValue(item_rarity, item_level),
+    
+    // ============================================================
+    // DYNAMIC OBJECT CREATION RESULTS
+    // ============================================================
+    
+    player_name<string> = "DragonSlayer",
+    player_profile<object> = createPlayerProfile(player_name, 42, 7500),
+    
+    inventory_item<object> = createInventoryItem("Phoenix Sword", ItemRarity.LEGENDARY, 1, 500.0),
+    
+    order_details<object> = buildOrderDetails(1001, 450.0, 0.0825, 0.10),
+    
+    warrior_name<string> = "Thorin",
+    warrior_stats<object> = createCharacterStats(warrior_name, "warrior", 25),
+    
+    mage_name<string> = "Gandalf",
+    mage_stats<object> = createCharacterStats(mage_name, "mage", 30),
+    
+    boss_level<int> = 50,
+boss_difficulty<enum> = Difficulty.NIGHTMARE,
+player_luck<double> = 0.75,  // Change from <float> to <double>
+boss_loot<object> = generateLootTable(boss_level, boss_difficulty, player_luck),
+    // ============================================================
+    // COMPLEX CALCULATIONS
+    // ============================================================
+    
+    calc_val1<int> = 100,
+    calc_val2<int> = 50,
+    calc_val3<int> = 75,
+    calc_val4<int> = 25,
+    
+    arithmetic_result<int> = complexArithmetic(calc_val1, calc_val2, calc_val3, calc_val4),
+    
+    mega_calc_a<int> = 10,
+    mega_calc_b<int> = 20,
+    mega_calc_c<int> = 30,
+    mega_calc_d<int> = 40,
+    mega_calc_e<int> = 50,
+    mega_result<int> = megaComplexExpression(mega_calc_a, mega_calc_b, mega_calc_c, mega_calc_d, mega_calc_e),
+    
+    chain_calc<int> = complexCalculationChain(15, 25, 35, 45),
+    
+    logic_x<int> = 15,
+    logic_y<int> = 10,
+    logic_z<int> = 8,
+    logic_result<bool> = complexLogical(logic_x, logic_y, logic_z),
+    
+    grade_value<int> = 77,
+    grade_classification<string> = nestedTernary(grade_value),
+    
+    deep_ternary_score<int> = 85,
+    deep_ternary_level<int> = 12,
+    deep_result<string> = deepNestedTernary(deep_ternary_score, deep_ternary_level),
+    
+    ternary_a<int> = 50,
+    ternary_b<int> = 75,
+    ternary_c<int> = 60,
+    triple_ternary_result<int> = tripleNestedTernary(ternary_a, ternary_b, ternary_c),
+    
+    player_score_grade<int> = 88,
+    player_level_grade<int> = 7,
+    player_bonus_grade<int> = 120,
+    player_grade<string> = complexConditional(player_score_grade, player_level_grade, player_bonus_grade),
+    
+    // ============================================================
+    // NUMERIC CHAINING (FIXED: float accepts double literals)
+    // ============================================================
+    
+    raw_numeric_value<float> = -123.456789,
+    processed_numeric<float> = chainedNumericOperations(raw_numeric_value),
+    
+    // ============================================================
+    // TUPLE CREATION
+    // ============================================================
+    
+    latitude<float> = 40.712776,
+    longitude<float> = -74.005974,
+    altitude<float> = 10.5,
+    
+    coordinates<tuple> = createCoordinates(latitude, longitude, altitude),
+    
+    user_name<string> = "Alice Smith",
+    user_age<int> = 28,
+    user_score<float> = 95.75,
+    
+    user_record<tuple> = createUserRecord(user_name, user_age, user_score),
+    
+    match_kills<int> = 15,
+    match_deaths<int> = 3,
+    match_assists<int> = 8,
+    match_time<int> = 45,
+    
+    match_stats<tuple> = createGameStats(match_kills, match_deaths, match_assists, match_time),
+    
+    // ============================================================
+    // VARIABLE SCOPE TESTING
+    // ============================================================
+    
+    scope_input<int> = 30,
+    scope_result<int> = testVariableScopes(scope_input),
+    
+    arithmetic_base<int> = 100,
+    arithmetic_result_calc<int> = arithmeticAssignments(arithmetic_base),
+    
+    // ============================================================
+    // DEBUG CALCULATIONS
+    // ============================================================
+    
+    debug_a<int> = 25,
+    debug_b<int> = 35,
+    debug_result<int> = debugCalculation(debug_a, debug_b),
+    
+    // ============================================================
+    // TABLE PROPERTIES - SCOPED FUNCTION CALLS
+    // ============================================================
+    
+    orders.order_001:
+        subtotal<float> = 250.00,
+        tax_rate<float> = 0.0825,
+        shipping<float> = 15.00,
+        min_order<float> = 50.00,
+        max_order<float> = 5000.00,
+        
+        total<float> = calculateOrderTotal(subtotal, tax_rate, shipping),
+        is_valid<bool> = validateOrderAmount(subtotal, min_order, max_order)
+        
+    orders.order_002:
+        subtotal<float> = 1500.00,
+        tax_rate<float> = 0.10,
+        shipping<float> = 0.00,
+        min_order<float> = 100.00,
+        max_order<float> = 10000.00,
+        
+        total<float> = calculateOrderTotal(subtotal, tax_rate, shipping),
+        is_valid<bool> = validateOrderAmount(subtotal, min_order, max_order)
+        
+    orders.order_003:
+        subtotal<float> = 45.00,
+        tax_rate<float> = 0.06,
+        shipping<float> = 8.00,
+        min_order<float> = 50.00,
+        max_order<float> = 500.00,
+        
+        total<float> = calculateOrderTotal(subtotal, tax_rate, shipping),
+        is_valid<bool> = validateOrderAmount(subtotal, min_order, max_order)
+        
+    products.product_001:
+        name<string> = "gaming laptop",
+        base_price<float> = 800.00,
+        markup<float> = 1.4,
+        tax<float> = 75.00,
+        stock<int> = 15,
+        
+        retail_price<float> = calculateProductPrice(base_price, markup, tax),
+        display<string> = formatProductDisplay(name, retail_price, stock)
+        
+    products.product_002:
+        name<string> = "wireless mouse",
+        base_price<float> = 15.00,
+        markup<float> = 2.0,
+        tax<float> = 3.50,
+        stock<int> = 250,
+        
+        retail_price<float> = calculateProductPrice(base_price, markup, tax),
+        display<string> = formatProductDisplay(name, retail_price, stock)
+        
+    products.product_003:
+        name<string> = "mechanical keyboard",
+        base_price<float> = 60.00,
+        markup<float> = 1.8,
+        tax<float> = 12.00,
+        stock<int> = 75,
+        
+        retail_price<float> = calculateProductPrice(base_price, markup, tax),
+        display<string> = formatProductDisplay(name, retail_price, stock)
+        
+    users.user_001:
+        first<string> = "Alice",
+        last<string> = "Johnson",
+        role<enum> = UserRole.ADMIN,
+        base_score<int> = 500,
+        bonus<int> = 100,
+        level<int> = 8,
+        
+        profile_display<string> = formatUserProfile(first, last, role),
+        total_score<int> = calculateUserScore(base_score, bonus, level)
+        
+    users.user_002:
+        first<string> = "Bob",
+        last<string> = "Smith",
+        role<enum> = UserRole.MODERATOR,
+        base_score<int> = 350,
+        bonus<int> = 75,
+        level<int> = 5,
+        
+        profile_display<string> = formatUserProfile(first, last, role),
+        total_score<int> = calculateUserScore(base_score, bonus, level)
+        
+    users.user_003:
+        first<string> = "Charlie",
+        last<string> = "Davis",
+        role<enum> = UserRole.USER,
+        base_score<int> = 200,
+        bonus<int> = 50,
+        level<int> = 3,
+        
+        profile_display<string> = formatUserProfile(first, last, role),
+        total_score<int> = calculateUserScore(base_score, bonus, level)
+        
+    // ============================================================
+    // GROUP ARRAYS - FUNCTION CALLS WITHIN OBJECTS
+    // FIXED: Moved to products scope to match function scoping
+    // ============================================================
+    
+    products.inventory_items::
+        {
+            name<string> = "Health Potion",
+            base_cost<float> = 5.00,
+            markup<float> = 3.0,
+            tax<float> = 0.50,
+            quantity<int> = 100,
+            
+            retail_price<float> = calculateProductPrice(base_cost, markup, tax),
+            display<string> = formatProductDisplay(name, retail_price, quantity)
+        },
+        {
+            name<string> = "Mana Crystal",
+            base_cost<float> = 12.00,
+            markup<float> = 2.5,
+            tax<float> = 3.00,
+            quantity<int> = 50,
+            
+            retail_price<float> = calculateProductPrice(base_cost, markup, tax),
+            display<string> = formatProductDisplay(name, retail_price, quantity)
+        },
+        {
+            name<string> = "Phoenix Feather",
+            base_cost<float> = 100.00,
+            markup<float> = 5.0,
+            tax<float> = 50.00,
+            quantity<int> = 5,
+            
+            retail_price<float> = calculateProductPrice(base_cost, markup, tax),
+            display<string> = formatProductDisplay(name, retail_price, quantity)
+        },
+        {
+            name<string> = "Dragon Scale",
+            base_cost<float> = 250.00,
+            markup<float> = 4.0,
+            tax<float> = 100.00,
+            quantity<int> = 2,
+            
+            retail_price<float> = calculateProductPrice(base_cost, markup, tax),
+            display<string> = formatProductDisplay(name, retail_price, quantity)
+        }
+        
+    // FIXED: Moved to users scope to match function scoping
+    users.game_players::
+        {
+            first<string> = "Charlie",
+            last<string> = "Brown",
+            player_id<int> = 5001,
+            score<int> = 750,
+            level<int> = 10,
+            bonus<int> = 200,
+            role<enum> = UserRole.USER,
+            
+            display_name<string> = formatUserDisplayName(first, last, player_id),
+            profile_display<string> = formatUserProfile(first, last, role),
+            final_score<int> = calculateUserScore(score, bonus, level)
+        },
+        {
+            first<string> = "Diana",
+            last<string> = "Prince",
+            player_id<int> = 5002,
+            score<int> = 920,
+            level<int> = 12,
+            bonus<int> = 300,
+            role<enum> = UserRole.MODERATOR,
+            
+            display_name<string> = formatUserDisplayName(first, last, player_id),
+            profile_display<string> = formatUserProfile(first, last, role),
+            final_score<int> = calculateUserScore(score, bonus, level)
+        },
+        {
+            first<string> = "Eve",
+            last<string> = "Anderson",
+            player_id<int> = 5003,
+            score<int> = 1150,
+            level<int> = 15,
+            bonus<int> = 500,
+            role<enum> = UserRole.ADMIN,
+            
+            display_name<string> = formatUserDisplayName(first, last, player_id),
+            profile_display<string> = formatUserProfile(first, last, role),
+            final_score<int> = calculateUserScore(score, bonus, level)
+        }
+        
+    analytics.results::
+        {
+            dataset<array> = [45, 67, 89, 23, 56, 78, 90, 34, 67, 89],
+            top_n<int> = 3,
+            
+            top_sum<int> = getTopNScores(dataset, top_n),
+            avg_top<float> = calculateTopThreeAverage(dataset),
+            processed<array> = processScores(dataset),
+            stats<tuple> = analyzeArrayStats(dataset)
+        },
+        {
+            dataset<array> = [100, 95, 88, 92, 85, 78, 90, 93, 87, 82],
+            top_n<int> = 5,
+            
+            top_sum<int> = getTopNScores(dataset, top_n),
+            avg_top<float> = calculateTopThreeAverage(dataset),
+            processed<array> = processScores(dataset),
+            stats<tuple> = analyzeArrayStats(dataset)
+        },
+        {
+            dataset<array> = [50, 50, 60, 70, 80, 90, 100, 50, 60, 70],
+            top_n<int> = 4,
+            
+            top_sum<int> = getTopNScores(dataset, top_n),
+            avg_top<float> = calculateTopThreeAverage(dataset),
+            processed<array> = processScores(dataset),
+            stats<tuple> = analyzeArrayStats(dataset)
+        }
+        
+    characters.roster::
+        {
+            char_name<string> = "Aragorn",
+            char_class<string> = "warrior",
+            char_level<int> = 40,
+            
+            stats<object> = createCharacterStats(char_name, char_class, char_level),
+            profile<object> = createPlayerProfile(char_name, char_level, 5000)
+        },
+        {
+            char_name<string> = "Legolas",
+            char_class<string> = "rogue",
+            char_level<int> = 38,
+            
+            stats<object> = createCharacterStats(char_name, char_class, char_level),
+            profile<object> = createPlayerProfile(char_name, char_level, 4500)
+        },
+        {
+            char_name<string> = "Saruman",
+            char_class<string> = "mage",
+            char_level<int> = 50,
+            
+            stats<object> = createCharacterStats(char_name, char_class, char_level),
+            profile<object> = createPlayerProfile(char_name, char_level, 8000)
+        }
+        
+    // ============================================================
+    // NESTED FUNCTION CALLS (Level 1 - Functions within Functions)
+    // ============================================================
+    
+    nested_funcs.level1:
+        base_val<int> = 50,
+        difficulty_val<enum> = Difficulty.HARD,
+        
+        nested_damage<int> = calculateFinalScore(
+            calculateDamage(50, Difficulty.HARD),
+            1.5,
+            100
+        ),
+        
+        first_name<string> = "  alice  ",
+        last_name<string> = "  smith  ",
+        nested_string<string> = chainedStringOperations(
+            formatUserDisplayName(first_name, last_name, 1001)
+        ),
+        
+        raw_scores<array> = [85, 92, 78, 95, 88, 92, 78],
+        nested_array_calc<int> = chainedArrayOperations(
+            processScores(raw_scores)
+        )
+        
+    // ============================================================
+    // NESTED FUNCTION CALLS (Level 2 - Deeper Nesting)
+    // ============================================================
+    
+    nested_funcs.level2:
+        price_base<float> = 100.0,
+        tax<float> = 0.08,
+        discount<float> = 0.15,
+        
+        deeply_nested_price<float> = applyTaxAndDiscount(price_base, tax, discount),
+        
+        coord_x1<float> = 0.0,
+        coord_y1<float> = 0.0,
+        coord_x2<float> = 100.0,
+        coord_y2<float> = 100.0,
+        
+        distance_calc<float> = calculateDistance(coord_x1, coord_y1, coord_x2, coord_y2),
+        
+        numbers_set1<array> = [10, 20, 30, 40, 50],
+        numbers_set2<array> = [15, 25, 35, 45, 55],
+        
+        merged_and_processed<array> = processScores(
+            concatenateAndSort(numbers_set1, numbers_set2)
+        ),
+        
+        top_from_merged<int> = getTopNScores(
+            concatenateAndSort(numbers_set1, numbers_set2),
+            5
+        )
+        
+    // ============================================================
+    // NESTED FUNCTION CALLS (Level 3 - Maximum Allowed Nesting)
+    // ============================================================
+    
+    nested_funcs.level3_max:
+        player_base_dmg<int> = 75,
+        player_diff<enum> = Difficulty.EXTREME,
+        score_mult<float> = 2.0,
+        bonus_pts<int> = 500,
+        
+        triple_nested<int> = clampHealth(
+            calculateFinalScore(
+                calculateDamage(player_base_dmg, player_diff),
+                score_mult,
+                bonus_pts
+            ),
+            0,
+            1000
+        ),
+        
+        messy_text<string> = "  HELLO___WORLD  ",
+        triple_string<string> = sanitizeAndFormat(
+            chainedStringOperations(
+                superComplexStringChain(messy_text)
+            )
+        ),
+        
+        base_array<array> = [100, 50, 75, 25, 90, 10, 80, 20],
+        aux_array<array> = [5, 15, 35, 45],
+        
+        triple_array<int> = chainedArrayOperations(
+            wildArrayChaining(
+                concatenateAndSort(base_array, aux_array)
+            )
+        ),
+        
+        calc_a<int> = 10,
+        calc_b<int> = 20,
+        calc_c<int> = 30,
+        calc_d<int> = 40,
+        
+        mega_nested<int> = calculateFinalScore(
+            complexArithmetic(calc_a, calc_b, calc_c, calc_d),
+            1.5,
+            200
+        )
+        
+    // ============================================================
+    // MIXED NESTED CALLS WITH OBJECTS
+    // ============================================================
+    
+    nested_funcs.with_objects:
+        profile_first<string> = "john",
+        profile_last<string> = "doe",
+        profile_level<int> = 35,
+        profile_score<int> = 6500,
+        
+        player_obj<object> = createPlayerProfile(
+            formatUserDisplayName(profile_first, profile_last, 2001),
+            profile_level,
+            profile_score
+        ),
+        
+        warrior_obj<object> = createCharacterStats(
+            chainedStringOperations("  warrior_tank  "),
+            "warrior",
+            clampHealth(55, 1, 50)
+        ),
+        
+        order_subtotal<float> = 450.0,
+     order_tax<float> = 0.0825,
+        order_discount<float> = 0.12,
+        
+        complex_order<object> = buildOrderDetails(
+            3001,
+            applyTaxAndDiscount(order_subtotal, order_tax, order_discount),
+            order_tax,
+            0.05
+        ),
+        
+        boss_lvl<int> = 60,
+        boss_diff<enum> = Difficulty.NIGHTMARE,
+        
+        boss_rewards<object> = generateLootTable(
+            clampHealth(boss_lvl, 1, 100),
+            getNextDifficulty(Difficulty.EXTREME),
+            0.85
+        )
+        
+    // ============================================================
+    // ARRAY OF OBJECTS WITH NESTED FUNCTION CALLS
+    // ============================================================
+    
+    nested_funcs.array_objects::
+        {
+            id<int> = 1,
+            base_damage<int> = 50,
+            difficulty<enum> = Difficulty.NORMAL,
+            multiplier<float> = 1.5,
+            bonus<int> = 100,
+            
+            final_damage<int> = calculateFinalScore(
+                calculateDamage(base_damage, difficulty),
+                multiplier,
+                bonus
+            ),
+            
+            clamped_damage<int> = clampHealth(
+                calculateFinalScore(
+                    calculateDamage(base_damage, difficulty),
+                    multiplier,
+                    bonus
+                ),
+                0,
+                500
+            )
+        },
+        {
+            id<int> = 2,
+            items<array> = [45, 67, 89, 23, 56, 78, 90, 34],
+            aux_items<array> = [100, 95, 88],
+            top_count<int> = 5,
+            
+            merged_top<int> = getTopNScores(
+                concatenateAndSort(items, aux_items),
+                top_count
+            ),
+            
+            processed_result<int> = chainedArrayOperations(
+                wildArrayChaining(
+                    concatenateAndSort(items, aux_items)
+                )
+            )
+        },
+        {
+            id<int> = 3,
+            user_first<string> = "  MEGA  ",
+            user_last<string> = "  WARRIOR  ",
+            user_id<int> = 5555,
+            
+            display<string> = chainedStringOperations(
+                formatUserDisplayName(user_first, user_last, user_id)
+            ),
+            
+            super_display<string> = sanitizeAndFormat(
+                chainedStringOperations(
+                    formatUserDisplayName(user_first, user_last, user_id)
+                )
+            )
+        },
+        {
+            id<int> = 4,
+            char_name<string> = "  dragon_knight  ",
+            char_class<string> = "warrior",
+            char_level<int> = 45,
+            char_score<int> = 9000,
+            
+            character<object> = createCharacterStats(
+                chainedStringOperations(char_name),
+                char_class,
+                clampHealth(char_level, 1, 50)
+            ),
+            
+            profile<object> = createPlayerProfile(
+                sanitizeAndFormat(char_name),
+                char_level,
+                calculateFinalScore(char_score, 1.2, 500)
+            )
+        }
+        
+    // ============================================================
+    // EXTREME NESTING EXAMPLES (MAX COMPLEXITY)
+    // ============================================================
+    
+    extreme_nesting.calculations:
+        val1<int> = 100,
+        val2<int> = 50,
+        val3<int> = 75,
+        val4<int> = 25,
+        val5<int> = 60,
+        price_val<float> = 200.0,
+        tax_val<float> = 0.08,
+        disc_val<float> = 0.10,
+        
+        extreme_calc_1<int> = clampHealth(
+            calculateFinalScore(
+                complexArithmetic(val1, val2, val3, val4),
+                1.8,
+                200
+            ),
+            0,
+            2000
+        ),
+        
+        array_nums<array> = [88, 92, 75, 95, 85, 78, 90],
+        array_aux<array> = [100, 70, 80],
+        
+        extreme_array<int> = calculateFinalScore(
+            chainedArrayOperations(
+                wildArrayChaining(
+                    concatenateAndSort(array_nums, array_aux)
+                )
+            ),
+            1.5,
+            250
+        ),
+        
+        name_str<string> = "  test_player_name  ",
+        
+        extreme_string<string> = superComplexStringChain(
+            chainedStringOperations(
+                sanitizeAndFormat(name_str)
+            )
+        )
+        
+    extreme_nesting.object_generation:
+        player_name_raw<string> = "  ULTIMATE___HERO  ",
+        player_lvl_raw<int> = 65,
+        player_score_raw<int> = 15000,
+        player_damage_base<int> = 100,
+        player_difficulty<enum> = Difficulty.NIGHTMARE,
+        
+        ultimate_profile<object> = createPlayerProfile(
+            superComplexStringChain(
+                chainedStringOperations(player_name_raw)
+            ),
+            clampHealth(player_lvl_raw, 1, 50),
+            calculateFinalScore(
+                calculateDamage(player_damage_base, player_difficulty),
+                2.5,
+                1000
+            )
+        ),
+        
+        char_a_name<string> = "  berserker  ",
+        char_a_level<int> = 40,
+        
+        char_b_name<string> = "  archmage  ",
+        char_b_level<int> = 45,
+        
+        character_a<object> = createCharacterStats(
+            chainedStringOperations(char_a_name),
+            "warrior",
+            clampHealth(char_a_level, 10, 50)
+        ),
+        
+        character_b<object> = createCharacterStats(
+            chainedStringOperations(char_b_name),
+            "mage",
+            clampHealth(char_b_level, 10, 50)
+        ),
+        
+        item_name_raw<string> = "  legendary___dragon___sword  ",
+        item_rarity<enum> = ItemRarity.LEGENDARY,
+        item_quantity<int> = 1,
+        item_base_price<float> = 5000.0,
+        
+        legendary_item<object> = createInventoryItem(
+            superComplexStringChain(item_name_raw),
+            item_rarity,
+            item_quantity,
+            item_base_price
+        )
+        
+    // ============================================================
+    // PRACTICAL NESTED USE CASES
+    // ============================================================
+    
+    practical_nested.game_mechanics:
+        enemy_base_hp<int> = 500,
+        enemy_defense<int> = 50,
+        player_attack<int> = 120,
+        attack_multiplier<float> = 1.5,
+        difficulty_level<enum> = Difficulty.HARD,
+        
+        actual_damage<int> = clampHealth(
+            calculateFinalScore(
+                calculateDamage(player_attack, difficulty_level),
+                attack_multiplier,
+                enemy_defense
+            ),
+            1,
+            999
+        ),
+        
+        remaining_hp<int> = clampHealth(
+            actual_damage,
+            0,
+            enemy_base_hp
+        )
+        
+    practical_nested.ecommerce:
+        product_base_price<float> = 299.99,
+        product_tax_rate<float> = 0.0825,
+        member_discount<float> = 0.15,
+        shipping_base<float> = 25.0,
+        order_quantity<int> = 3,
+        
+        item_final_price<float> = applyTaxAndDiscount(
+            product_base_price,
+            product_tax_rate,
+            member_discount
+        ),
+        
+        subtotal<float> = 719.97,
+        
+        final_order<object> = buildOrderDetails(
+            4001,
+            subtotal,
+            product_tax_rate,
+            0.0
+        )
+        
+    practical_nested.player_progression:
+        current_level<int> = 35,
+        current_xp<int> = 25000,
+        quest_xp_base<int> = 1000,
+        quest_difficulty<enum> = Difficulty.EXTREME,
+        xp_multiplier<float> = 1.5,
+        
+        quest_xp_reward<int> = calculateFinalScore(
+            calculateBonus(quest_xp_base, quest_difficulty),
+            xp_multiplier,
+            500
+        ),
+        
+        new_total_xp<int> = 25000,
+        
+        new_level<int> = clampHealth(2, 1, 100)
+        
+    practical_nested.inventory_management:
+        common_items<array> = [1, 5, 3, 8, 2, 5, 1],
+        rare_items<array> = [10, 15, 12, 18],
+        epic_items<array> = [25, 30, 28],
+        
+        all_items<array> = concatenateAndSort(
+            concatenateAndSort(common_items, rare_items),
+            epic_items
+        ),
+        
+        top_10_items<int> = getTopNScores(all_items, 10),
+        
+        total_value<int> = chainedArrayOperations(
+            processScores(all_items)
+        ),
+        
+        inventory_stats<tuple> = analyzeArrayStats(all_items)
+        
+    // ============================================================
+    // EDGE CASES WITH NESTED CALLS
+    // ============================================================
+    
+    edge_cases.same_function_nested:
+        base_a<int> = 10,
+        base_b<int> = 20,
+        diff_a<enum> = Difficulty.EASY,
+        diff_b<enum> = Difficulty.HARD,
+        
+        dmg_a<int> = calculateDamage(base_a, diff_a),
+        dmg_b<int> = calculateDamage(base_b, diff_b),
+        dmg_sum<int> = 95,
+        
+        combined_damage<int> = calculateDamage(dmg_sum, Difficulty.NORMAL)
+        
+    edge_cases.all_function_types:
+        str_input<string> = "  test  ",
+        num_input<int> = 50,
+        arr_input<array> = [10, 20, 30],
+        
+        ultimate_result<int> = calculateFinalScore(
+            chainedArrayOperations(arr_input),
+            1.5,
+            num_input
+        )
+)

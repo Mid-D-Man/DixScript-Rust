@@ -56,7 +56,7 @@
 
 @DATA(
   EquipableItemCamoClassId = "ALL_SMG_CAMOS_CONFIG"
-  
+
   InventoryItemCamos::
     {
       MainItemId = "ALIYAHOO419",

@@ -1,0 +1,43 @@
+
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "UTF-8",
+    author -> "DixScript_ErrorHandling_Test",
+    features -> "basic",
+    created -> "2024-01-15T23:00:00Z",
+    debug_mode -> "verbose",
+    error_handling -> "recover",
+    compatibility_mode -> "best_effort"
+)
+
+
+@DLM(
+    DCompressor.gzip,
+    DAuditor.enhanced
+)
+
+
+@DATA(
+    error_config:
+        mode = "recove r",
+        retry_count<int> = 3,
+        timeout<int> = 5000
+        
+    test_cases:
+        valid_data = "correct",
+        boundary_value<int> = 2147483647,
+        min_boundary<int> = -2147483648
+        
+    recovery_settings:
+        auto_recover<bool> = true,
+        log_errors<bool> = true,
+        fallback_value = "default"
+        //this is having error
+    validation_rules = {
+        max_length<int> = 255,
+        min_length<int> = 1,
+        allow_null<bool> = false,
+        strict_mode<bool> = false
+    }
+)
+

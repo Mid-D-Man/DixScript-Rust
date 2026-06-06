@@ -1,0 +1,121 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "UTF-8",
+    author -> "DixScript_Complex_Data_Test",
+    features -> "intermediate",
+    created -> "2024-01-15T16:45:00Z",
+    debug_mode -> "regular",
+    error_handling -> "recover",
+    compatibility_mode -> "best_effort"
+)
+
+//ok no func calls within functions or maybe we should just make it so
+//but then we have to deal with so many extra stuff, ok i need some advice
+//yeah gonna have to learn how to prevent recursive calls and while we at it probably add
+//foreach statements
+//and increase param limit to 16 or 12
+@ENUMS(
+    ItemType { WEAPON = 1, ARMOR = 2, CONSUMABLE = 3, QUEST = 4, MATERIAL = 5 }
+    Rarity { COMMON = 1, UNCOMMON = 2, RARE = 3, EPIC = 4, LEGENDARY = 5 }
+    ElementType { FIRE = 1, WATER = 2, EARTH = 3, AIR = 4, DARK = 5, LIGHT = 6 }
+)
+
+@DATA(
+    world.settings:
+        name = "Fantasy Realm",
+        max_players<int> = 1000,
+        pvp_enabled<bool> = true,
+        difficulty_modifier<float> = 1.5
+        
+    game.items::
+        {
+            id<int> = 1001,
+            name = "Flaming Sword",
+            type = ItemType.WEAPON,
+            rarity = Rarity.EPIC,
+            element = ElementType.FIRE,
+            stats = {
+                damage<int> = 85,
+                durability<int> = 150,
+                critical_chance<float> = 0.15,
+                enchantments = ["fire_damage", "critical_strike"]
+            },
+            requirements = {
+                level<int> = 25,
+                strength<int> = 40,
+                class_restrictions = ["warrior", "paladin"]
+            }
+        },
+        {
+            id<int> = 2001,
+            name = "Mystic Robes",
+            type = ItemType.ARMOR,
+            rarity = Rarity.RARE,
+            element = ElementType.LIGHT,
+            stats = {
+                defense<int> = 45,
+                magic_resistance<int> = 80,
+                mana_bonus<int> = 200,
+                enchantments = ["mana_regeneration", "spell_power"]
+            },
+            requirements = {
+                level<int> = 20,
+                intelligence<int> = 35,
+                class_restrictions = ["mage", "cleric"]
+            }
+        },
+        {
+            id<int> = 3001,
+            name = "Health Elixir",
+            type = ItemType.CONSUMABLE,
+            rarity = Rarity.COMMON,
+            effects = {
+                healing<int> = 250,
+                duration<int> = 0,
+                cooldown<int> = 5000,
+                stackable<bool> = true,
+                max_stack<int> = 99
+            }
+        }
+        
+    world.npcs::
+        {
+            id<int> = 101,
+            name = "Village Elder",
+            location = "Town Square",
+            quests_available = [1, 3, 7],
+            shop_items = [3001, 3002, 3003],
+            dialogue_tree = {
+                greeting = "Welcome, traveler!",
+                quest_intro = "I have tasks for brave souls...",
+                farewell = "May the light guide you."
+            }
+        },
+        {
+            id<int> = 102,
+            name = "Weapons Master",
+            location = "Training Grounds",
+            quests_available = [2, 5],
+            shop_items = [1001, 1002, 1003, 1004],
+            specialization = ItemType.WEAPON,
+            preferred_element = ElementType.FIRE
+        }
+        
+    server.clusters::
+        {
+            id<int> = 1,
+            name = "US-East-1",
+            region = "us-east",
+            capacity<int> = 500,
+            current_load<int> = 342,
+            status = "active"
+        },
+        {
+            id<int> = 2,
+            name = "EU-West-1",
+            region = "eu-west",
+            capacity<int> = 500,
+            current_load<int> = 287,
+            status = "active"
+        }
+)

@@ -1,0 +1,92 @@
+
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "UTF-8",
+    author -> "DixScript_Advanced_Test",
+    features -> "advanced",
+    created -> "2024-01-15T18:30:00Z",
+    debug_mode -> "verbose",
+    error_handling -> "halt",
+    compatibility_mode -> "strict"
+)
+
+
+@DLM(
+    DCompressor.lzma,
+    DAuditor.enhanced,
+    DEncryptor.chacha20
+)
+
+
+@ENUMS(
+    BuildStatus { SUCCESS = 1, FAILED = 2, PENDING = 3, CANCELLED = 4 }
+    LogLevel { DEBUG = 1, INFO = 2, WARN = 3, ERROR = 4, FATAL = 5 }
+    UserRole { GUEST = 0, USER = 1, ADMIN = 5, SUPER_ADMIN = 10 }
+    GameDifficulty { EASY = 1, NORMAL = 2, HARD = 3, NIGHTMARE = 5, IMPOSSIBLE = 10 }
+)
+
+
+@QUICKFUNCS(
+    ~calculateBonus<int> => global (base<int>, multiplier<float>) {
+       let bonus = base * multiplier;
+       let floored = Math.floor(bonus);
+       let capped = Math.min(floored, 10000);
+        return  capped;
+    }
+    
+    ~getCurrentTimestamp<string> => global () {
+       let now = DateTime.now();
+       let formatted = DateTime.format(now, "yyyy-MM-dd HH:mm:ss");
+        return formatted;
+    }
+    
+    ~formatUserDisplay<string> => global (name<string>, role<int>) {
+      let  upper_name = name.toUpper();
+      let  role_text = role == 10 ? "SUPER_ADMIN" : (role == 5 ? "ADMIN" : "USER");
+      let  result = $"{upper_name}_{role_text}";
+        return result;
+    }
+    
+    ~validateServerConfig<bool> => server.config (host<string>, port<int>) {
+      let  host_len = host.length();
+       let host_valid = host_len > 0 && ! host.contains(" ");
+     let   port_valid = port > 1024 && port < 65536;
+     let   result = host_valid && port_valid;
+        return result;
+    }
+)
+
+
+@DATA(
+    app.info:
+        name = "Advanced Game System",
+        version = "2.0.0",
+        build_timestamp<string> = getCurrentTimestamp(),
+        status = BuildStatus.SUCCESS
+        
+    server.config:
+        host = "game.server.com",
+        port<int> = 8080,
+        timeout<int> = 30000,
+        max_connections<int> = 1000,
+        is_valid<bool> = validateServerConfig(host, port),
+        bonus_timeout<int> = calculateBonus(timeout, 1.5)
+        
+    users.admin_list::
+        {
+            id<int> = 1,
+            username = "gamemaster",
+            role = UserRole.SUPER_ADMIN,
+            display_name<string> = formatUserDisplay(username, role),
+            created<string> = getCurrentTimestamp()
+        },
+        {
+            id<int> = 2,
+            username = "moderator",
+            role = UserRole.ADMIN,
+            display_name<string> = formatUserDisplay(username, role),
+            created<string> = getCurrentTimestamp()
+        }
+)
+
+@SECURITY()

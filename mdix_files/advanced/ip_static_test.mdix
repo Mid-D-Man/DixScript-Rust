@@ -19,6 +19,7 @@
         let invalid = "999.999.999.999";
         let isValid1 = IpAddress.validate(valid);
         let isValid2 = IpAddress.validate(invalid);
+
         return isValid1;
     }
 

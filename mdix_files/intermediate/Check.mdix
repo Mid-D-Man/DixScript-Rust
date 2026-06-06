@@ -1,0 +1,64 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "UTF-8",
+    author -> "DixScript_Table_Test",
+    features -> "basic",
+    created -> "2024-01-16T00:00:00Z",
+    debug_mode -> "off",
+    error_handling -> "halt"
+)
+
+@DLM(
+    DCompressor.gzip,
+    DAuditor.enhanced
+)
+
+@DATA(
+    flat_property = "top_level",
+    another_flat<int> = 20
+    
+    app.settings:
+        name = "Table Syntax Test",
+        version = "1.0.0",
+        enabled<bool> = true
+        
+    database.primary:
+        host = "db1.example.com",
+        port<int> = 5432,
+        name = "main_db"
+        
+    database.replica:
+        host = "db2.example.com",
+        port<int> = 5432,
+        name = "replica_db"
+        
+    server.web:
+        host = "0.0.0.0",
+        port<int> = 8080,
+        ssl<bool> = true
+        
+    server.api:
+        host = "api.example.com",
+        port<int> = 443,
+        ssl<bool> = true
+        
+    cache.redis:
+        host = "cache.example.com",
+        port<int> = 6379,
+        ttl<int> = 3600
+        
+    features.flags::
+        "new_ui",
+        "beta_access",
+        "advanced_mode"
+        
+    users.admins::
+        "admin1",
+        "admin2",
+        "superuser"
+        
+    config.endpoints::
+        "/api/v1",
+        "/api/v2",
+        "/webhooks"
+)

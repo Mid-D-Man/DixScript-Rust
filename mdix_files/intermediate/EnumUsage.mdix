@@ -1,0 +1,90 @@
+
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "UTF-8",
+    author -> "DixScript_Enum_Test",
+    features -> "intermediate",
+    created -> "2024-01-15T14:30:00Z",
+    debug_mode -> "off",
+    error_handling -> "halt"
+)
+
+
+@DLM(
+    DCompressor.bzip2,
+    DAuditor.diy
+)
+
+
+@ENUMS(
+    UserRole { GUEST = 0, MEMBER = 1, MODERATOR = 5, ADMIN = 10, SUPER_ADMIN = 99 }
+    Status { ACTIVE = 1, INACTIVE = 0, SUSPENDED = -1, PENDING = 2 }
+    Priority { LOW = 1, MEDIUM = 2, HIGH = 3, CRITICAL = 4, URGENT = 5 }
+) 
+   
+
+@DATA(
+permissions_matrix = {
+        guest_permissions = [UserRole.GUEST],
+        member_permissions = [UserRole.GUEST, UserRole.MEMBER],
+        mod_permissions = [UserRole.GUEST, UserRole.MEMBER, UserRole.MODERATOR],
+        admin_permissions = [UserRole.GUEST, UserRole.MEMBER, UserRole.MODERATOR, UserRole.ADMIN],
+        super_permissions = [UserRole.GUEST, UserRole.MEMBER, UserRole.MODERATOR, UserRole.ADMIN, UserRole.SUPER_ADMIN],
+        tuple_test = t:(UserRole.MEMBER,14,Status.PENDING,"Might be 419 person yahoo ai ai")
+    }
+    users.admins::
+        {
+            username = "system_admin",
+            role = UserRole.SUPER_ADMIN,
+            status = Status.ACTIVE,
+            priority = Priority.CRITICAL
+        },
+        {
+            username = "site_admin",
+            role = UserRole.ADMIN,
+            status = Status.ACTIVE,
+            priority = Priority.HIGH
+        },
+        {
+            username = "moderator_1",
+            role = UserRole.MODERATOR,
+            status = Status.ACTIVE,
+            priority = Priority.MEDIUM
+        }
+        
+    tasks.system::
+        {
+            id<int> = 1,
+            name = "Database Backup",
+            priority = Priority.CRITICAL,
+            status = Status.ACTIVE,
+            assigned_role = UserRole.ADMIN
+        },
+        {
+            id<int> = 2,
+            name = "Update Documentation",
+            priority = Priority.LOW,
+            status = Status.PENDING,
+            assigned_role = UserRole.MODERATOR
+        },
+        {
+            id<int> = 3,
+            name = "Security Audit",
+            priority = Priority.URGENT,
+            status = Status.ACTIVE,
+            assigned_role = UserRole.SUPER_ADMIN
+        }
+        
+    system.settings:
+        default_user_role = UserRole.GUEST,
+        max_admin_role = UserRole.SUPER_ADMIN,
+        system_status = Status.ACTIVE,
+        maintenance_priority = Priority.HIGH,
+        permissions_matrix = {
+        guest_permissions = [UserRole.GUEST],
+        member_permissions = [UserRole.GUEST, UserRole.MEMBER],
+        mod_permissions = [UserRole.GUEST, UserRole.MEMBER, UserRole.MODERATOR],
+        admin_permissions = [UserRole.GUEST, UserRole.MEMBER, UserRole.MODERATOR, UserRole.ADMIN],
+        super_permissions = [UserRole.GUEST, UserRole.MEMBER, UserRole.MODERATOR, UserRole.ADMIN, UserRole.SUPER_ADMIN]
+    }
+)

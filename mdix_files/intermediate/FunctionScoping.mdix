@@ -1,0 +1,67 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "UTF-8",
+    author -> "DixScript_Scoping_Test",
+    features -> "advanced",
+    created -> "2024-01-15T21:00:00Z",
+    debug_mode -> "regular",
+    error_handling -> "halt"
+)
+
+@DLM(
+    DCompressor.gzip,
+    DAuditor.diy
+)
+
+@QUICKFUNCS(
+    ~globalCalculate<int> => global (x<int>, y<int>) {
+        result = x * y + 10;
+        return result;
+    }
+    
+    ~globalFormat<string> => global (name<string>, id<int>) {
+        formatted = $"{name}_{id}";
+        return formatted;
+    }
+    
+    ~scopedUserValidation<bool> => user.data (username<string>, age<int>) {
+        name_valid = username.length() > 3;
+        age_valid = age >= 18 && age <= 120;
+        return name_valid && age_valid;
+    }
+  
+    ~scopedServerCheck<bool> => server.config (port<int>, timeout<int>) {
+        port_ok = port > 1024 && port < 65535;
+        timeout_ok = timeout > 0 && timeout < 60000;
+        return port_ok && timeout_ok;
+    }
+    
+    ~scopedDatabaseInit<string> => database.settings (host<string>, db_name<string>) {
+        connection_string = $"{host}/{db_name}";
+        return connection_string;
+    }
+)
+
+@DATA(
+    globalized.values:
+        base_value<int> = 5,
+        multiplier<int> = 3,
+        calculated<int> = globalCalculate(base_value, multiplier)
+        
+    user.data:
+        username = "testuser",
+        age<int> = 25,
+        is_valid<bool> = scopedUserValidation(username, age),
+        display<string> = globalFormat(username, 1001)
+        
+    server.config:
+        port<int> = 8080,
+        timeout<int> = 30000,
+        config_valid<bool> = scopedServerCheck(port, timeout)
+        
+    database.settings:
+        host = "localhost",
+        db_name = "appdb",
+        connection<string> = scopedDatabaseInit(host, db_name)
+)
+

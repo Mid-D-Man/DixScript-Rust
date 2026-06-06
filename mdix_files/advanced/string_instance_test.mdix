@@ -1,140 +1,140 @@
 
-      @CONFIG(
-    version -> "1.0.0",
-    encoding -> "utf-8",
-    debug_mode -> "regular",
-    error_handling -> "halt",
-     features -> "advanced"
+@CONFIG(
+  version -> "1.0.0",
+  encoding -> "utf-8",
+  debug_mode -> "regular",
+  error_handling -> "halt",
+  features -> "advanced"
 )
 
 @QUICKFUNCS(
-    ~testStringCase<string>() {
-        let mut str = "Hello World";
-        let upper = str.toUpper();
-        let lower = str.toLower();
-        return upper;
-    }
+  ~testStringCase<string>() {
+    let mut str = "Hello World";
+    let upper = str.toUpper();
+    let lower = str.toLower();
+    return upper;
+  }
 
-    ~testStringTrim<string>() {
-        let mut str = "  spaces  ";
-        let trimmed = str.trim();
-        let mut len<int> = trimmed.length();
-        return trimmed;
-    }
+  ~testStringTrim<string>() {
+    let mut str = "  spaces  ";
+    let trimmed = str.trim();
+    let mut len<int> = trimmed.length();
+    return trimmed;
+  }
 
-    ~testStringSubstring<string>() {
-        let mut str = "Hello World";
-        let sub1 = str.substring(0, 5);
-        let sub2 = str.substring(6, 5);
-        return sub1;
-    }
+  ~testStringSubstring<string>() {
+    let mut str = "Hello World";
+    let sub1 = str.substring(0, 5);
+    let sub2 = str.substring(6, 5);
+    return sub1;
+  }
 
-    ~testStringChecks<bool>() {
-        let mut str = "Hello World";
-        let contains1 = str.contains("World");
-        let starts = str.startsWith("Hello");
-        let ends = str.endsWith("World");
-        let isEmpty = str.isEmpty();
-        return contains1;
-    }
+  ~testStringChecks<bool>() {
+    let mut str = "Hello World";
+    let contains1 = str.contains("World");
+    let starts = str.startsWith("Hello");
+    let ends = str.endsWith("World");
+    let isEmpty = str.isEmpty();
+    return contains1;
+  }
 
-    ~testStringReplace<string>() {
-        let mut str = "Hello World World";
-        let replaced = str.replace("World", "Universe");
-        return replaced;
-    }
+  ~testStringReplace<string>() {
+    let mut str = "Hello World World";
+    let replaced = str.replace("World", "Universe");
+    return replaced;
+  }
 
-    ~testStringSplit<array>() {
-        let mut str = "apple,banana,cherry";
-        let parts = str.split(",");
-        return parts;
-    }
+  ~testStringSplit<array>() {
+    let mut str = "apple,banana,cherry";
+    let parts = str.split(",");
+    return parts;
+  }
 
-    ~testStringIndexing<int>() {
-        let mut str = "Hello World";
-        let idx1<int> = str.indexOf("o");
-        let idx2<int> = str.lastIndexOf("o");
-        return idx1 + idx2;
-    }
+  ~testStringIndexing<int>() {
+    let mut str = "Hello World";
+    let idx1<int> = str.indexOf("o");
+    let idx2<int> = str.lastIndexOf("o");
+    return idx1 + idx2;
+  }
 
-    ~testStringCharAt<string>() {
-        let mut str = "Hello";
-        let char1 = str.charAt(0);
-        let char2 = str.charAt(4);
-        return char1;
-    }
+  ~testStringCharAt<string>() {
+    let mut str = "Hello";
+    let char1 = str.charAt(0);
+    let char2 = str.charAt(4);
+    return char1;
+  }
 
-    ~testStringPadding<string>() {
-        let mut str = "test";
-        let padLeft = str.padLeft(10, "0");
-        let padRight = str.padRight(10, "x");
-        return padLeft;
-    }
+  ~testStringPadding<string>() {
+    let mut str = "test";
+    let padLeft = str.padLeft(10, "0");
+    let padRight = str.padRight(10, "x");
+    return padLeft;
+  }
 
-    ~testStringBlank<bool>() {
-        let mut empty = "";
-        let mut whitespace = "   ";
-        let mut normal = "text";
-        let isEmpty1 = empty.isEmpty();
-        let isBlank1 = whitespace.isBlank();
-        let isBlank2 = normal.isBlank();
-        return isEmpty1;
-    }
+  ~testStringBlank<bool>() {
+    let mut empty = "";
+    let mut whitespace = "   ";
+    let mut normal = "text";
+    let isEmpty1 = empty.isEmpty();
+    let isBlank1 = whitespace.isBlank();
+    let isBlank2 = normal.isBlank();
+    return isEmpty1;
+  }
 
-    ~testStringInControlFlow<string>(text<string>) {
-        let mut str = text;
-        let mut len<int> = str.length();
-        if: len > 10 {
-            return str.substring(0, 10);
-        }
-        elif: len > 5 {
-            return str.toUpper();
-        }
-        else {
-            return str.toLower();
-        }
+  ~testStringInControlFlow<string>(text<string>) {
+    let mut str = text;
+    let mut len<int> = str.length();
+    if: len > 10 {
+      return str.substring(0, 10);
     }
+  elif: len > 5 {
+    return str.toUpper();
+  }
+  else {
+    return str.toLower();
+  }
+  }
 
-    ~testStringInChk<string>(operation<string>, text<string>) {
-        let mut str = text;
-        chk: operation {
-            -> "upper" {
-                return str.toUpper();
-            }
-            -> "lower" {
-                return str.toLower();
-            }
-            -> "trim" {
-                return str.trim();
-            }
-            -> "length" {
-                let mut len<int> = str.length();
-                return $"{len}";
-            }
-            -> miss {
-                return "unknown";
-            }
-        }
+  ~testStringInChk<string>(operation<string>, text<string>) {
+    let mut str = text;
+    chk: operation {
+       -> "upper" {
+        return str.toUpper();
+      }
+     -> "lower" {
+      return str.toLower();
     }
+   -> "trim" {
+    return str.trim();
+  }
+   -> "length" {
+    let mut len<int> = str.length();
+    return $"{len}";
+  }
+   -> miss {
+    return "unknown";
+  }
+  }
+  }
 )
 
 @DATA(
-    test_case = testStringCase(),
-    test_trim = testStringTrim(),
-    test_substring = testStringSubstring(),
-    test_checks = testStringChecks(),
-    test_replace = testStringReplace(),
-    test_split = testStringSplit(),
-    test_indexing = testStringIndexing(),
-    test_char_at = testStringCharAt(),
-    test_padding = testStringPadding(),
-    test_blank = testStringBlank(),
-    test_control_long = testStringInControlFlow("This is a very long text"),
-    test_control_medium = testStringInControlFlow("Medium"),
-    test_control_short = testStringInControlFlow("Hi"),
-    test_chk_upper = testStringInChk("upper", "hello world"),
-    test_chk_lower = testStringInChk("lower", "HELLO WORLD"),
-    test_chk_trim = testStringInChk("trim", "  spaces  "),
-    test_chk_length = testStringInChk("length", "test"),
-    test_chk_miss = testStringInChk("unknown", "test")
+  test_case = testStringCase(),
+  test_trim = testStringTrim(),
+  test_substring = testStringSubstring(),
+  test_checks = testStringChecks(),
+  test_replace = testStringReplace(),
+  test_split = testStringSplit(),
+  test_indexing = testStringIndexing(),
+  test_char_at = testStringCharAt(),
+  test_padding = testStringPadding(),
+  test_blank = testStringBlank(),
+  test_control_long = testStringInControlFlow("This is a very long text"),
+  test_control_medium = testStringInControlFlow("Medium"),
+  test_control_short = testStringInControlFlow("Hi"),
+  test_chk_upper = testStringInChk("upper", "hello world"),
+  test_chk_lower = testStringInChk("lower", "HELLO WORLD"),
+  test_chk_trim = testStringInChk("trim", "  spaces  "),
+  test_chk_length = testStringInChk("length", "test"),
+  test_chk_miss = testStringInChk("unknown", "test")
 )

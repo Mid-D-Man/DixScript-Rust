@@ -1,0 +1,63 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "UTF-8",
+    author -> "DixScript_Intermediate_Test",
+    features -> "intermediate",
+    created -> "2024-01-15T12:00:00Z",
+    debug_mode -> "regular",
+    error_handling -> "continue"
+)
+
+@DLM(
+  
+    DAuditor.enhanced
+)
+
+@ENUMS(
+    Environment { DEVELOPMENT = 1, STAGING = 2, PRODUCTION = 3 }
+    LogLevel { DEBUG = 1, INFO = 2, WARN = 3, ERROR = 4 }
+    DatabaseType { MYSQL = 1, POSTGRESQL = 2, SQLITE = 3 }
+)
+
+@DATA(
+    app.config:
+        name = "Multi-Environment App",
+        version = "2.1.0",
+        environment = Environment.STAGING,
+        log_level = LogLevel.INFO
+        
+    database.development:
+        type = DatabaseType.SQLITE,
+        host = "localhost",
+        port<int> = 0,
+        name = "dev.db",
+        ssl_enabled<bool> = false
+        
+    database.staging:
+        type = DatabaseType.MYSQL,
+        host = "staging-db.example.com",
+        port<int> = 3306,
+        name = "staging_app",
+        ssl_enabled<bool> = true
+        
+    database.production:
+        type = DatabaseType.POSTGRESQL,
+        host = "prod-db.example.com",
+        port<int> = 5432,
+        name = "production_app",
+        ssl_enabled<bool> = true
+        
+    services.api:
+        base_url = "https://api.example.com",
+        timeout<int> = 30000,
+        retries<int> = 3,
+        auth_required<bool> = true
+        
+    services.cache:
+        provider = "redis",
+        host = "cache.example.com",
+        port<int> = 6379,
+        ttl<int> = 3600
+        //rememner cant have flat values ones tables and groups start
+        //and that includes pure objects
+)

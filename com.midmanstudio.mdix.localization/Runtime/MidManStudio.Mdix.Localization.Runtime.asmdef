@@ -1,5 +1,4 @@
-// com.midmanstudio.mdix.localization/Runtime/MidManStudio.Mdix.Localization.Runtime.asmdef
-// (Save as .asmdef JSON)
+
 {
     "name": "MidManStudio.Mdix.Localization.Runtime",
     "rootNamespace": "MidManStudio.Mdix.Localization",

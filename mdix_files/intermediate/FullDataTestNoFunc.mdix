@@ -1,0 +1,600 @@
+@CONFIG(
+    version -> "1.0.0",
+    encoding -> "UTF-8",
+    author -> "DixScript_Comprehensive_Data_Test",
+    features -> "basic",
+    created -> "2024-01-20T15:00:00Z",
+    debug_mode -> "regular",
+    error_handling -> "halt"
+)
+
+@DLM(
+    DCompressor.gzip,
+    DAuditor.diy
+)
+
+@DATA(
+    // ============================================================
+    // PRIMITIVE TYPES
+    // ============================================================
+    
+    // Integers
+    int_positive<int> = 42,
+    int_negative<int> = -999,
+    int_zero<int> = 0,
+    int_large<int> = 2147483647,
+    int_small<int> = -2147483648,
+    
+    // Floats
+    float_simple<float> = 3.14,
+    float_negative<float> = -2.5,
+    float_tiny<float> = 0.001,
+    float_zero<float> = 0.0,
+    
+    // Doubles
+    double_precise<double> = 123.456789012345,
+    double_scientific<double> = 1.23e10,
+    double_negative_sci<double> = -4.56e-5,
+    double_large<double> = 9.99e308,
+    
+    // Strings
+    string_simple = "Hello World",
+    string_empty = "",
+    string_single_quote = 'Single quotes work',
+    string_with_escape = "Line1\nLine2\tTabbed",
+    string_with_quotes = "He said \"Hello\"",
+    string_unicode = "Hello 世界 🌍",
+    
+    // Booleans
+    bool_true<bool> = true,
+    bool_false<bool> = false,
+    
+    // Null
+    null_value = null,
+    
+    // ============================================================
+    // HEX COLORS
+    // ============================================================
+    
+    hex_rgb = #F00,
+    hex_rgb_full = #FF0000,
+    hex_rgba = #F00A,
+    hex_rgba_full = #FF0000AA,
+    hex_color_blue = #3498DB,
+    hex_color_green = #2ECC71,
+    hex_color_transparent = #00000000,
+    hex_color_opaque = #FFFFFFFF,
+    
+    // Hex literals (numbers)
+    hex_number = 0xDEADBEEF,
+    hex_small = 0xFF,
+    hex_large = 0xFFFFFFFF,
+    
+    // ============================================================
+    // DATES AND TIMESTAMPS
+    // ============================================================
+    
+    date_birth = 1990-05-15,
+    date_launch = 2024-01-01,
+    date_future = 2030-12-31,
+    
+    timestamp_basic = 2024-01-15T10:30:00Z,
+    timestamp_milliseconds = 2024-01-15T14:45:30.500Z,
+    timestamp_timezone = 2024-01-15T08:00:00+05:30,
+    timestamp_negative_tz = 2024-01-15T12:00:00-08:00,
+    
+    // ============================================================
+    // PREFIXED CONSTRUCTORS
+    // ============================================================
+    
+    // Blobs (binary data)
+    blob_simple = b:("SGVsbG8gV29ybGQ="),
+    blob_large = b:("VGhpcyBpcyBhIGxvbmdlciBiYXNlNjQgZW5jb2RlZCBzdHJpbmc="),
+    
+    // Tuples (max 4 elements, mixed types)
+    tuple_pair = t:(100, "status"),
+    tuple_triple = t:(1, "test", true),
+    tuple_quad = t:(42, "answer", 3.14, false),
+    tuple_single = t:(999),
+    
+    // Regex patterns
+    regex_email = r:("^[a-zA-Z0-9+_.-]+@[a-zA-Z0-9.-]+$"),
+    regex_alphanumeric = r:("^[a-zA-Z0-9]+$"),
+    regex_phone = r:("^\+?[1-9]\d{1,14}$"),
+    
+    // ============================================================
+    // HOMOGENEOUS ARRAYS (SAME TYPE)
+    // ============================================================
+    
+    // Integer arrays
+    array_int_simple = [1, 2, 3, 4, 5],
+    array_int_negative = [-5, -4, -3, -2, -1],
+    array_int_mixed_sign = [-2, -1, 0, 1, 2],
+    array_int_empty = [],
+    
+    // Float arrays
+    array_float_simple = [1.1, 2.2, 3.3, 4.4],
+    array_float_negative = [-1.5, -2.5, -3.5],
+    array_float_zero = [0.0, 0.0, 0.0],
+    
+    // String arrays
+    array_string_names = ["Alice", "Bob", "Charlie"],
+    array_string_words = ["hello", "world", "test"],
+    array_string_empty_strings = ["", "", ""],
+    array_string_single = ["only_one"],
+    
+    // Boolean arrays
+    array_bool_mixed = [true, false, true, true, false],
+    array_bool_all_true = [true, true, true],
+    array_bool_all_false = [false, false, false],
+    
+    // Hex color arrays
+    array_hex_colors = [#FF0000, #00FF00, #0000FF],
+    array_hex_rgba = [#FF0000AA, #00FF00BB, #0000FFCC],
+    
+    // Date arrays
+    array_dates = [1990-01-01, 2000-06-15, 2024-12-31],
+    
+    // ============================================================
+    // NESTED ARRAYS (DEPTH 2)
+    // ============================================================
+    
+    // Array of integer arrays
+    array_2d_int = [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+    array_2d_int_irregular = [[1], [2, 3], [4, 5, 6]],
+    array_2d_int_empty = [[], [], []],
+    
+    // Array of string arrays
+    array_2d_string = [["a", "b"], ["c", "d"], ["e", "f"]],
+    array_2d_string_words = [["hello", "world"], ["foo", "bar"]],
+    
+    // Array of boolean arrays
+    array_2d_bool = [[true, false], [false, true], [true, true]],
+    
+    // ============================================================
+    // NESTED ARRAYS (DEPTH 3)
+    // ============================================================
+    
+    array_3d_int = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]],
+    array_3d_string = [[["a", "b"], ["c", "d"]], [["e", "f"], ["g", "h"]]],
+    array_3d_mixed_sizes = [[[1]], [[2, 3]], [[4, 5, 6]]],
+    
+    // ============================================================
+    // NESTED ARRAYS (DEPTH 4)
+    // ============================================================
+    
+    array_4d_int = [[[[1, 2]], [[3, 4]]], [[[5, 6]], [[7, 8]]]],
+    array_4d_single = [[[[42]]]],
+    
+    // ============================================================
+    // NESTED ARRAYS (DEPTH 5 - MAXIMUM)
+    // ============================================================
+    
+    array_5d_max = [[[[[1, 2, 3]]]]],
+    array_5d_single = [[[[[999]]]]],
+    
+    // ============================================================
+    // ARRAYS OF TUPLES
+    // ============================================================
+    
+    array_of_tuples_pairs = [t:(1, "a"), t:(2, "b"), t:(3, "c")],
+    array_of_tuples_triples = [t:(1, "x", true), t:(2, "y", false)],
+    array_of_tuples_quads = [t:(1, "a", 1.1, true), t:(2, "b", 2.2, false)],
+    
+    // ============================================================
+    // TUPLES OF ARRAYS
+    // ============================================================
+    
+    tuple_of_int_arrays = t:([1, 2, 3], [4, 5, 6]),
+    tuple_of_string_arrays = t:(["a", "b"], ["c", "d"]),
+    tuple_of_mixed_arrays = t:([1, 2], ["x", "y"], [true, false]),
+    
+    // ============================================================
+    // COMPLEX NESTED STRUCTURES
+    // ============================================================
+    
+    // Arrays of arrays of tuples (Depth 3)
+    complex_array_tuple = [[t:(1, "a"), t:(2, "b")], [t:(3, "c"), t:(4, "d")]],
+    
+    // Tuples of tuples (Depth 2)
+    complex_tuple_tuple = t:(t:(1, 2), t:(3, 4)),
+    
+    // Arrays of tuples of arrays (Depth 3)
+    complex_array_tuple_array = [t:([1, 2], [3, 4]), t:([5, 6], [7, 8])],
+    
+    // Tuples with nested arrays (Depth 3)
+    complex_tuple_nested = t:([[1, 2], [3, 4]], [[5, 6], [7, 8]]),
+    
+    // ============================================================
+    // SIMPLE OBJECTS
+    // ============================================================
+    
+    obj_simple = {
+        name = "Test",
+        value<int> = 100,
+        active<bool> = true
+    },
+    
+    obj_database = {
+        host = "localhost",
+        port<int> = 3306,
+        username = "admin",
+        password = "secret",
+        ssl_enabled<bool> = true
+    },
+    
+    obj_empty = {},
+    
+    obj_all_types = {
+        str_field = "text",
+        int_field<int> = 42,
+        float_field<float> = 3.14,
+        bool_field<bool> = true,
+        null_field = null,
+        hex_field = #FF0000
+    },
+    
+    // ============================================================
+    // NESTED OBJECTS (DEPTH 2)
+    // ============================================================
+    
+    obj_nested_2 = {
+        level1 = "top",
+        child = {
+            level2 = "nested",
+            value<int> = 42
+        }
+    },
+    
+    obj_multiple_children = {
+        database = {
+            host = "db.local",
+            port<int> = 5432
+        },
+        cache = {
+            host = "cache.local",
+            port<int> = 6379
+        }
+    },
+    
+    // ============================================================
+    // NESTED OBJECTS (DEPTH 3)
+    // ============================================================
+    
+    obj_nested_3 = {
+        level1 = {
+            level2 = {
+                level3 = "deep",
+                value<int> = 999
+            }
+        }
+    },
+    
+    obj_tree_structure = {
+        root = {
+            left = {
+                value<int> = 1
+            },
+            right = {
+                value<int> = 2
+            }
+        }
+    },
+    
+    // ============================================================
+    // NESTED OBJECTS (DEPTH 4)
+    // ============================================================
+    
+    obj_nested_4 = {
+        a = {
+            b = {
+                c = {
+                    d = "very deep",
+                    final<int> = 12345
+                }
+            }
+        }
+    },
+    
+    // ============================================================
+    // NESTED OBJECTS (DEPTH 5 - MAXIMUM)
+    // ============================================================
+    
+    obj_nested_5_max = {
+        level1 = {
+            level2 = {
+                level3 = {
+                    level4 = {
+                        level5 = "maximum depth",
+                        deepest<int> = 55555
+                    }
+                }
+            }
+        }
+    },
+    
+    // ============================================================
+    // OBJECTS WITH ARRAYS
+    // ============================================================
+    
+    obj_with_arrays = {
+        numbers = [1, 2, 3, 4, 5],
+        strings = ["a", "b", "c"],
+        booleans = [true, false, true],
+        mixed_depth = [[1, 2], [3, 4]]
+    },
+    
+    obj_with_nested_arrays = {
+        matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+        deep_array = [[[1, 2]], [[3, 4]]]
+    },
+    
+    // ============================================================
+    // OBJECTS WITH TUPLES
+    // ============================================================
+    
+    obj_with_tuples = {
+        pair = t:(1, "a"),
+        triple = t:(1, "x", true),
+        quad = t:(42, "answer", 3.14, false)
+    },
+    
+    obj_with_tuple_array = {
+        items = [t:(1, "a"), t:(2, "b"), t:(3, "c")]
+    },
+    
+    // ============================================================
+    // ARRAYS OF OBJECTS
+    // ============================================================
+    
+    array_of_objects_simple = [
+        { name = "Item1", value<int> = 10 },
+        { name = "Item2", value<int> = 20 },
+        { name = "Item3", value<int> = 30 }
+    ],
+    
+    array_of_objects_complex = [
+        {
+            id<int> = 1,
+            name = "Product A",
+            price<float> = 19.99,
+            in_stock<bool> = true,
+            tags = ["electronics", "gadget"]
+        },
+        {
+            id<int> = 2,
+            name = "Product B",
+            price<float> = 29.99,
+            in_stock<bool> = false,
+            tags = ["clothing", "apparel"]
+        }
+    ],
+    
+    // ============================================================
+    // COMPLEX MIXED STRUCTURES
+    // ============================================================
+    
+    // Object with array of objects with arrays (Depth 4)
+    complex_obj_array = {
+        items = [
+            {
+                id<int> = 1,
+                data = [1, 2, 3]
+            },
+            {
+                id<int> = 2,
+                data = [4, 5, 6]
+            }
+        ]
+    },
+    
+    // Array of objects with nested objects (Depth 3)
+    complex_array_obj = [
+        {
+            outer = {
+                inner = "nested",
+                value<int> = 1
+            }
+        },
+        {
+            outer = {
+                inner = "nested2",
+                value<int> = 2
+            }
+        }
+    ],
+    
+    // Object with tuples and arrays mixed
+    complex_mixed = {
+        tuple_data = t:(1, "test", true),
+        array_data = [10, 20, 30],
+        nested = {
+            inner_tuple = t:("x", "y"),
+            inner_array = ["a", "b", "c"]
+        }
+    },
+    
+    // Maximum complexity within depth 5
+    complex_max_depth = {
+        level1 = {
+            level2 = {
+                level3 = [
+                    [
+                       // { value<int> = 1 }
+                    ]
+                ]
+            }
+        }
+    },
+    
+    // ============================================================
+    // TABLE SYNTAX (FLAT PROPERTIES)
+    // ============================================================
+    
+    simple_table_value = 999,
+    another_flat<int> = 12345
+    
+    // ============================================================
+    // TABLE PROPERTIES (SINGLE LINE)
+    // ============================================================
+    
+    server.web: host = "0.0.0.0", port<int> = 8080, ssl<bool> = true
+    
+    database.primary: host = "db1.example.com", port<int> = 5432, name = "main_db"
+    
+    cache.redis: host = "cache.local", port<int> = 6379, ttl<int> = 3600
+    
+    // ============================================================
+    // TABLE PROPERTIES (MULTI-LINE)
+    // ============================================================
+    
+    server.api:
+        host = "api.example.com",
+        port<int> = 443,
+        ssl<bool> = true,
+        timeout<int> = 30000,
+        max_connections<int> = 1000
+        
+    database.replica:
+        host = "db2.example.com",
+        port<int> = 5432,
+        name = "replica_db",
+        read_only<bool> = true,
+        lag_threshold<int> = 100
+        
+    payment.stripe:
+        api_key = "sk_test_xxxxx",
+        webhook_secret = "whsec_xxxxx",
+        enabled<bool> = true,
+        test_mode<bool> = true
+        
+    // ============================================================
+    // TABLE PROPERTIES WITH COMPLEX VALUES
+    // ============================================================
+    
+    app.settings:
+        name = "Full Data Test",
+        version = "1.0.0",
+        supported_formats = ["json", "xml", "yaml"],
+        color_scheme = #3498DB,
+        launch_date = 2024-01-01,
+        config = {
+            debug<bool> = false,
+            max_threads<int> = 8
+        }
+        
+    // ============================================================
+    // GROUP ARRAYS (SIMPLE VALUES)
+    // ============================================================
+    
+    tags.production:: "critical", "monitored", "live", "prod-ready"
+    
+    permissions.admin:: "read", "write", "delete", "admin", "super"
+    
+    ports.exposed:: 80, 443, 8080, 8443, 9000
+    
+    colors.palette:: #FF0000, #00FF00, #0000FF, #FFFF00, #FF00FF
+    
+    // ============================================================
+    // GROUP ARRAYS (OBJECTS)
+    // ============================================================
+    
+    users.list::
+        { id<int> = 1, username = "alice", role = "admin" },
+        { id<int> = 2, username = "bob", role = "user" },
+        { id<int> = 3, username = "charlie", role = "moderator" }
+        
+    products.catalog::
+        {
+            id<int> = 101,
+            name = "Laptop",
+            price<float> = 999.99,
+            in_stock<bool> = true,
+            tags = ["electronics", "computers"]
+        },
+        {
+            id<int> = 102,
+            name = "Mouse",
+            price<float> = 29.99,
+            in_stock<bool> = true,
+            tags = ["electronics", "accessories"]
+        },
+        {
+            id<int> = 103,
+            name = "Keyboard",
+            price<float> = 79.99,
+            in_stock<bool> = false,
+            tags = ["electronics", "peripherals"]
+        }
+        
+    locations.stores::
+        {
+            id<int> = 1,
+            name = "Downtown",
+            address = "123 Main St",
+            coordinates = t:(40.7128, -74.0060),
+            open_hours = [9, 10, 11, 12, 13, 14, 15, 16, 17]
+        },
+        {
+            id<int> = 2,
+            name = "Westside",
+            address = "456 West Ave",
+            coordinates = t:(34.0522, -118.2437),
+            open_hours = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+        }
+        
+    // ============================================================
+    // GROUP ARRAYS WITH NESTED STRUCTURES
+    // ============================================================
+    
+    teams.engineering::
+        {
+            name = "Backend",
+            members = ["Alice", "Bob", "Charlie"],
+            projects = [
+                { name = "API Gateway", priority<int> = 1 },
+                { name = "Database Optimization", priority<int> = 2 }
+            ]
+        },
+        {
+            name = "Frontend",
+            members = ["David", "Eve"],
+            projects = [
+                { name = "UI Redesign", priority<int> = 1 },
+                { name = "Mobile App", priority<int> = 3 }
+            ]
+        }
+        
+    // ============================================================
+    // EDGE CASES AND SPECIAL VALUES
+    // ============================================================
+    
+    edge.empty_collections:
+        empty_array = [],
+        empty_object = {},
+        array_of_empty_arrays = [[], [], []],
+        object_with_empty = {
+            nothing = {}
+        }
+        
+    edge.extreme_values:
+        max_int<int> = 2147483647,
+        min_int<int> = -2147483648,
+        tiny_float<float> = 0.000001,
+        huge_double<double> = 9.99e307,
+        all_nulls = [null, null, null]
+        
+    edge.special_strings:
+        with_newlines = "Line1\nLine2\nLine3",
+        with_tabs = "Col1\tCol2\tCol3",
+        with_quotes = "He said \"Hello\" today",
+        with_backslash = "Path\\To\\File",
+        empty_string = "",
+        whitespace_only = "   "
+        
+    edge.unicode_data:
+        emoji = "🚀🌟💻🔥",
+        chinese = "你好世界",
+        arabic = "مرحبا بالعالم",
+        mixed = "Hello 世界 🌍 مرحبا"
+)

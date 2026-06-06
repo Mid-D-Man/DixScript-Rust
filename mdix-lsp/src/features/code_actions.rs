@@ -9,7 +9,7 @@
 //! - Unknown enum: offer valid enum field replacements
 //!
 //! ### Context-driven (position-based)
-//! - ⬇ Spread inline object / table-property / group-array to multiple lines
+//! - ⬇ Spread inline object / table-property / group-array / array to multiple lines
 //! - ⟳ Reformat file — normalise spacing, indentation, operators (always available)
 //!
 //! ### Proactive
@@ -566,7 +566,6 @@ fn try_spread_object_literal(
     let closing_line = if suffix.is_empty() {
         format!("{}}}", indent)
     } else {
-        // e.g. `}` followed by `,`
         format!("{}}}{}", indent, suffix)
     };
     lines.push(closing_line);
@@ -581,6 +580,87 @@ fn try_spread_object_literal(
 
     Some(make_action(
         "⬇ Spread object properties to multiple lines",
+        CodeActionKind::REFACTOR_REWRITE,
+        doc.uri.clone(),
+        vec![edit],
+        false,
+    ))
+}
+
+// ── Spread: array literal ──────────────────────────────────────────────────────
+//
+// Before:  enemies = [createEnemy("Goblin", 50, 10), createEnemy("Orc", 100, 20)]
+// After:   enemies = [
+//            createEnemy("Goblin", 50, 10),
+//            createEnemy("Orc", 100, 20)
+//          ]
+//
+// Also works for plain value arrays:  tags = ["alpha", "beta", "v1"]
+
+fn try_spread_array_literal(
+    doc:       &Document,
+    line_idx:  usize,
+    line_text: &str,
+) -> Option<CodeAction> {
+    let trimmed = line_text.trim();
+
+    // Must have an opening bracket somewhere on the line
+    let bracket_pos = trimmed.find('[')?;
+
+    // Find the last matching `]` on the same line
+    let after_open = &trimmed[bracket_pos + 1..];
+    let close_rel  = after_open.rfind(']')?;
+    let close_pos  = bracket_pos + 1 + close_rel;
+
+    // Nothing inside
+    if close_pos <= bracket_pos + 1 { return None; }
+
+    let before = trimmed[..bracket_pos].trim_end();
+    let inside  = trimmed[bracket_pos + 1..close_pos].trim();
+    // Anything after `]` on the same line (e.g. a trailing `,`)
+    let suffix  = trimmed[close_pos + 1..].trim();
+
+    // Only spread when there are at least two items
+    if !inside.contains(',') { return None; }
+
+    let items = split_respecting_nesting(inside, ',')?;
+
+    let indent       = get_indent(line_text);
+    let inner_indent = format!("{}  ", indent);
+
+    let opening_line = if before.is_empty() {
+        format!("{}[", indent)
+    } else {
+        format!("{}{}[", indent, before)
+    };
+
+    let mut lines = vec![opening_line];
+    for (i, item) in items.iter().enumerate() {
+        let it = item.trim();
+        if i < items.len() - 1 {
+            lines.push(format!("{}{},", inner_indent, it));
+        } else {
+            lines.push(format!("{}{}", inner_indent, it));
+        }
+    }
+
+    let closing_line = if suffix.is_empty() {
+        format!("{}]", indent)
+    } else {
+        format!("{}]{}", indent, suffix)
+    };
+    lines.push(closing_line);
+
+    let edit = TextEdit {
+        range:    Range::new(
+            Position::new(line_idx as u32, 0),
+            Position::new(line_idx as u32, line_text.len() as u32),
+        ),
+        new_text: lines.join("\n"),
+    };
+
+    Some(make_action(
+        "⬇ Spread array items to multiple lines",
         CodeActionKind::REFACTOR_REWRITE,
         doc.uri.clone(),
         vec![edit],
@@ -603,8 +683,7 @@ fn provide_spread_actions(doc: &Document, range: Range) -> Vec<CodeActionOrComma
     let mut actions = Vec::new();
 
     // Each detector returns at most one action; they are mutually exclusive in
-    // practice (a line is one of: table property, group array, object literal)
-    // but we check all three anyway and let the user pick.
+    // practice but we check all and let the user pick.
     if let Some(a) = try_spread_table_property(doc, line_idx, line_text) {
         actions.push(CodeActionOrCommand::CodeAction(a));
     }
@@ -612,6 +691,9 @@ fn provide_spread_actions(doc: &Document, range: Range) -> Vec<CodeActionOrComma
         actions.push(CodeActionOrCommand::CodeAction(a));
     }
     if let Some(a) = try_spread_object_literal(doc, line_idx, line_text) {
+        actions.push(CodeActionOrCommand::CodeAction(a));
+    }
+    if let Some(a) = try_spread_array_literal(doc, line_idx, line_text) {
         actions.push(CodeActionOrCommand::CodeAction(a));
     }
 
@@ -849,4 +931,4 @@ fn extract_quoted_word(s: &str, n: usize) -> Option<String> {
         }
     }
     None
-            }
+    }

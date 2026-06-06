@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Sat Jun  6 10:30:39 UTC 2026
+Generated: Sat Jun  6 10:57:52 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: fb844d8ae109f0cecc480b0067886e1d523edb1e
+Commit: 86647cdc6688d6716d66e50b45f9f8994aa19e08
 Branch: master
 ==================================
 
@@ -374,6 +374,16 @@ DixScript Sample Files (.mdix):
   mdix_files/chemistry_db/core/physics.mdix
   mdix_files/chemistry_db/core/units.mdix
   mdix_files/chemistry_db/elements_database.mdix
+  mdix_files/intermediate/Check.mdix
+  mdix_files/intermediate/CompleteFeature.mdix
+  mdix_files/intermediate/ComplexData.mdix
+  mdix_files/intermediate/ComplexFull.mdix
+  mdix_files/intermediate/Configuration.mdix
+  mdix_files/intermediate/EnumUsage.mdix
+  mdix_files/intermediate/ErrorHandling.mdix
+  mdix_files/intermediate/FullDataTestNoFunc.mdix
+  mdix_files/intermediate/FullDataTestWithFunc.mdix
+  mdix_files/intermediate/FunctionScoping.mdix
   mdix_files/tests/cli/01_basic.mdix
   mdix_files/tests/cli/02_enums.mdix
   mdix_files/tests/cli/03_quickfuncs.mdix

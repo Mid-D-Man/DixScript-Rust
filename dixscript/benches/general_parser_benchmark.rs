@@ -1,11 +1,16 @@
 // benches/general_parser_benchmark.rs
-//! General Parser Benchmark — DixScript v1.0.0
+//! General Parser Benchmark — DixScript v1.0.0 (token-based pipeline)
+//!
+//! Pipeline order (mirroring DixLoader::compile_source):
+//!   Stage 1: Tokenizer::new(source).tokenize()
+//!   Stage 2: split_config_tokens(tokens)
+//!   Stage 3: ConfigSectionHandler::process_config_tokens(&config_tokens)
+//!   Stage 4: GeneralParser::new(rest_tokens, config_section, settings).parse()
 //!
 //! Three benchmark groups:
-//!
-//! 1. `section_parsers`   — each section in isolation (speed + throughput).
-//! 2. `combined_sections` — all sections together via GeneralParser (small / medium / large).
-//! 3. `pipeline_e2e`      — full front-end: ConfigHandler → Tokenizer → GeneralParser.
+//!   1. section_parsers   — each section parser in isolation.
+//!   2. combined_sections — all sections together via GeneralParser.
+//!   3. pipeline_e2e      — full front-end with incremental stage breakdown.
 
 use criterion::{
     black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
@@ -17,7 +22,7 @@ use dixscript::Compiler::Core::SectionParsers::{
     DataSectionParser, DlmSectionParser, EnumsSectionParser, ImportsSectionParser,
     QuickFuncsSectionParser, SecuritySectionParser,
 };
-use dixscript::Compiler::Core::Tokenizer::{Token, TokenType, Tokenizer};
+use dixscript::Compiler::Core::Tokenizer::{split_config_tokens, Token, TokenType, Tokenizer};
 use std::time::Duration;
 
 // =============================================================================
@@ -207,25 +212,28 @@ fn build_combined_input(data_props: usize) -> String {
     features       -> "advanced",
     error_handling -> "halt"
 )
-{ENUMS_LARGE}
-{QUICKFUNCS_COMPLEX}
+{ENUMS_BODY}
+{QF_BODY}
 {data_section}
 "#,
-        ENUMS_LARGE = &ENUMS_LARGE[..ENUMS_LARGE.rfind("@DATA").unwrap_or(ENUMS_LARGE.len())],
-        QUICKFUNCS_COMPLEX = &QUICKFUNCS_COMPLEX
+        ENUMS_BODY = &ENUMS_LARGE[..ENUMS_LARGE.rfind("@DATA").unwrap_or(ENUMS_LARGE.len())],
+        QF_BODY    = &QUICKFUNCS_COMPLEX
             [..QUICKFUNCS_COMPLEX.rfind("@DATA").unwrap_or(QUICKFUNCS_COMPLEX.len())],
         data_section = data_section,
     )
 }
 
 // =============================================================================
-// Helpers
+// Pipeline helpers
 // =============================================================================
 
+/// Tokenise `input` with default settings.
+/// Used to build token slices for section-parser isolation benchmarks.
 fn tokenize_input(input: &str, settings: &OperationalSettings) -> Vec<Token> {
     Tokenizer::new(input, settings).tokenize().tokens
 }
 
+/// Extract tokens belonging to one named section from a full token stream.
 fn extract_section_tokens(all_tokens: &[Token], section_name: &str) -> Vec<Token> {
     let kw_pos = all_tokens
         .iter()
@@ -242,7 +250,7 @@ fn extract_section_tokens(all_tokens: &[Token], section_name: &str) -> Vec<Token
         .position(|t| matches!(t.token_type, TokenType::Symbol('(')))
         .map(|rel| kw_pos + rel)
         .unwrap_or(kw_pos + 1)
-        .min(all_tokens.len() - 1);
+        .min(all_tokens.len().saturating_sub(1));
 
     let mut depth = 0i32;
     let mut close_pos = all_tokens.len().saturating_sub(1);
@@ -262,22 +270,29 @@ fn extract_section_tokens(all_tokens: &[Token], section_name: &str) -> Vec<Token
 
     let mut section_tokens = all_tokens[open_pos..=close_pos].to_vec();
     let last_line = section_tokens.last().map(|t| t.line).unwrap_or(1);
-    let last_col = section_tokens.last().map(|t| t.column + 1).unwrap_or(1);
+    let last_col  = section_tokens.last().map(|t| t.column + 1).unwrap_or(1);
     section_tokens.push(Token::eof(last_line, last_col));
     section_tokens
 }
 
-fn run_config_handler(input: &str) -> (ConfigSection, String, OperationalSettings) {
+/// Run the full config-extraction pipeline (stages 1-3) and return:
+///   (ConfigSection, rest_tokens ready for GeneralParser, OperationalSettings)
+///
+/// Mirrors the flow in DixLoader::compile_source.
+fn run_config_handler(input: &str) -> (ConfigSection, Vec<Token>, OperationalSettings) {
+    let initial   = OperationalSettings::default();
+    let tok_result = Tokenizer::new(input, &initial).tokenize();
+    let split     = split_config_tokens(tok_result.tokens);
     let mut handler = ConfigSectionHandler::new(None);
-    let r = handler.process_config_section(input);
-    (r.config_section, r.cleaned_input_string, r.operational_settings)
+    let cfg = handler.process_config_tokens(&split.config_tokens);
+    (cfg.config_section, split.rest_tokens, cfg.operational_settings)
 }
 
 // =============================================================================
 // Benchmark 1 — individual section parsers
 //
 // Tokens are pre-built once outside the timed loop.
-// Section parsers receive &[Token] slices so zero allocation in the hot path.
+// Section parsers receive &[Token] slices; zero allocation in hot path.
 // =============================================================================
 
 fn bench_section_parsers(c: &mut Criterion) {
@@ -288,12 +303,16 @@ fn bench_section_parsers(c: &mut Criterion) {
     let settings = OperationalSettings::default();
 
     // ── @CONFIG ──────────────────────────────────────────────────────────────
+    // These also include the tokenize + split stage to be realistic.
     for (label, input) in &[("full_7keys", CONFIG_FULL), ("partial_2keys", CONFIG_PARTIAL)] {
         group.throughput(Throughput::Bytes(input.len() as u64));
         group.bench_with_input(BenchmarkId::new("config", label), input, |b, s| {
             b.iter(|| {
-                let mut h = ConfigSectionHandler::new(None);
-                black_box(h.process_config_section(black_box(s)))
+                let initial = OperationalSettings::default();
+                let tok     = Tokenizer::new(black_box(s), &initial).tokenize();
+                let split   = split_config_tokens(tok.tokens);
+                let mut h   = ConfigSectionHandler::new(None);
+                black_box(h.process_config_tokens(black_box(&split.config_tokens)))
             });
         });
     }
@@ -344,7 +363,7 @@ fn bench_section_parsers(c: &mut Criterion) {
 
     // ── @DATA (small / medium / large) ───────────────────────────────────────
     for (label, n_props) in &[("small_30", 30usize), ("medium_150", 150), ("large_500", 500)] {
-        let data_src = generate_data_section(*n_props);
+        let data_src  = generate_data_section(*n_props);
         let data_toks = extract_section_tokens(&tokenize_input(&data_src, &settings), "DATA");
         let byte_count = data_src.len() as u64;
 
@@ -399,9 +418,9 @@ fn bench_section_parsers(c: &mut Criterion) {
 // =============================================================================
 // Benchmark 2 — all sections together via GeneralParser
 //
-// GeneralParser owns Vec<Token> and comment-filters it in new().
-// Use iter_batched so the clone happens in the (unmeasured) setup phase,
-// not inside the timed routine.  This isolates pure parse cost.
+// run_config_handler returns (ConfigSection, rest_tokens, settings).
+// rest_tokens are fed directly into GeneralParser — no re-tokenisation needed.
+// iter_batched clones rest_tokens in the (unmeasured) setup phase.
 // =============================================================================
 
 fn bench_combined_sections(c: &mut Criterion) {
@@ -409,16 +428,13 @@ fn bench_combined_sections(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(10));
     group.sample_size(80);
 
-    let settings = OperationalSettings::default();
-
-    // ── Small (CONFIG + 2 ENUMS + 2 QF + small DATA) ─────────────────────────
+    // ── Small: CONFIG + 2 ENUMS + 2 QF + tiny DATA ───────────────────────────
     {
-        let (cfg, cleaned, _) = run_config_handler(COMBINED_SMALL);
-        let toks = tokenize_input(&cleaned, &settings);
+        let (cfg, rest_toks, settings) = run_config_handler(COMBINED_SMALL);
         group.throughput(Throughput::Bytes(COMBINED_SMALL.len() as u64));
         group.bench_function("all_sections_small", |b| {
             b.iter_batched(
-                || toks.clone(),
+                || rest_toks.clone(),
                 |t| {
                     let p = GeneralParser::new(black_box(t), black_box(&cfg), &settings)
                         .expect("parser init");
@@ -429,15 +445,14 @@ fn bench_combined_sections(c: &mut Criterion) {
         });
     }
 
-    // ── Medium (all sections, 150-prop DATA) ──────────────────────────────────
+    // ── Medium: all sections, 150-prop DATA ───────────────────────────────────
     {
         let medium_src = build_combined_input(150);
-        let (cfg, cleaned, _) = run_config_handler(&medium_src);
-        let toks = tokenize_input(&cleaned, &settings);
+        let (cfg, rest_toks, settings) = run_config_handler(&medium_src);
         group.throughput(Throughput::Bytes(medium_src.len() as u64));
         group.bench_function("all_sections_medium_150props", |b| {
             b.iter_batched(
-                || toks.clone(),
+                || rest_toks.clone(),
                 |t| {
                     let p = GeneralParser::new(black_box(t), black_box(&cfg), &settings)
                         .expect("parser init");
@@ -448,15 +463,14 @@ fn bench_combined_sections(c: &mut Criterion) {
         });
     }
 
-    // ── Large (all sections, 500-prop DATA) ───────────────────────────────────
+    // ── Large: all sections, 500-prop DATA ────────────────────────────────────
     {
         let large_src = build_combined_input(500);
-        let (cfg, cleaned, _) = run_config_handler(&large_src);
-        let toks = tokenize_input(&cleaned, &settings);
+        let (cfg, rest_toks, settings) = run_config_handler(&large_src);
         group.throughput(Throughput::Bytes(large_src.len() as u64));
         group.bench_function("all_sections_large_500props", |b| {
             b.iter_batched(
-                || toks.clone(),
+                || rest_toks.clone(),
                 |t| {
                     let p = GeneralParser::new(black_box(t), black_box(&cfg), &settings)
                         .expect("parser init");
@@ -471,16 +485,12 @@ fn bench_combined_sections(c: &mut Criterion) {
 }
 
 // =============================================================================
-// Benchmark 3 — full end-to-end pipeline
+// Benchmark 3 — full end-to-end pipeline with stage breakdown
 //
-// Measures the complete front-end cost a caller sees:
-//   ConfigSectionHandler  (extract + validate @CONFIG)
-//   → Tokenizer           (lex remaining source)
-//   → GeneralParser       (parse all sections)
-//
-// The pipeline allocates fresh strings and vecs on every call, so b.iter
-// is correct here — there is nothing to hoist out of the loop.
-// The tokenize-only sub-benchmarks use b.iter for the same reason.
+// Incremental stages let you derive:
+//   split_cost          = stage1_2 - stage1
+//   config_cost         = stage1_2_3 - stage1_2
+//   parse_cost          = full_pipeline - stage1_2_3
 // =============================================================================
 
 fn bench_pipeline_e2e(c: &mut Criterion) {
@@ -488,90 +498,111 @@ fn bench_pipeline_e2e(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(10));
     group.sample_size(80);
 
-    let settings = OperationalSettings::default();
+    let initial = OperationalSettings::default();
 
-    // ── Tokenize-only baselines ───────────────────────────────────────────────
-    for (label, src) in &[("small", COMBINED_SMALL), ("medium", QUICKFUNCS_COMPLEX)] {
-        group.throughput(Throughput::Bytes(src.len() as u64));
-        group.bench_with_input(
-            BenchmarkId::new("phase_tokenize_only", label),
-            src,
-            |b, s| {
-                b.iter(|| black_box(Tokenizer::new(black_box(s), &settings).tokenize()));
-            },
-        );
-    }
+    // ── Stage breakdown on COMBINED_SMALL ────────────────────────────────────
+
+    group.throughput(Throughput::Bytes(COMBINED_SMALL.len() as u64));
+
+    group.bench_function("stage1_tokenize_only/small", |b| {
+        b.iter(|| {
+            black_box(Tokenizer::new(black_box(COMBINED_SMALL), &initial).tokenize())
+        });
+    });
+
+    group.bench_function("stage1_2_tokenize_and_split/small", |b| {
+        b.iter(|| {
+            let tok = Tokenizer::new(black_box(COMBINED_SMALL), &initial).tokenize();
+            black_box(split_config_tokens(tok.tokens))
+        });
+    });
+
+    group.bench_function("stage1_2_3_plus_config/small", |b| {
+        b.iter(|| {
+            let tok   = Tokenizer::new(black_box(COMBINED_SMALL), &initial).tokenize();
+            let split = split_config_tokens(tok.tokens);
+            let mut h = ConfigSectionHandler::new(None);
+            black_box(h.process_config_tokens(&split.config_tokens))
+        });
+    });
 
     // ── Full pipeline: small source ───────────────────────────────────────────
-    group.throughput(Throughput::Bytes(COMBINED_SMALL.len() as u64));
+
     group.bench_function("full_pipeline_small", |b| {
         b.iter(|| {
-            let mut handler = ConfigSectionHandler::new(None);
-            let cfg_result = handler.process_config_section(black_box(COMBINED_SMALL));
-
-            let s_local = cfg_result.operational_settings.clone();
-            let tok_result =
-                Tokenizer::new(&cfg_result.cleaned_input_string, &s_local).tokenize();
-
-            let parser = GeneralParser::new(
-                tok_result.tokens,
-                &cfg_result.config_section,
-                &s_local,
-            )
-            .expect("parser init");
+            let tok   = Tokenizer::new(black_box(COMBINED_SMALL), &initial).tokenize();
+            let split = split_config_tokens(tok.tokens);
+            let mut h = ConfigSectionHandler::new(None);
+            let cfg   = h.process_config_tokens(&split.config_tokens);
+            let s     = cfg.operational_settings.clone();
+            let parser = GeneralParser::new(split.rest_tokens, &cfg.config_section, &s)
+                .expect("parser init");
             black_box(parser.parse())
         });
     });
 
-    // ── Full pipeline: medium source (150-prop DATA) ───────────────────────────
+    // ── Full pipeline: medium source (150-prop DATA) ──────────────────────────
+
     {
         let medium_src = build_combined_input(150);
         group.throughput(Throughput::Bytes(medium_src.len() as u64));
+
+        group.bench_function("stage1_tokenize_only/medium", |b| {
+            b.iter(|| {
+                black_box(Tokenizer::new(black_box(&medium_src), &initial).tokenize())
+            });
+        });
+
+        group.bench_function("stage1_2_tokenize_and_split/medium", |b| {
+            b.iter(|| {
+                let tok = Tokenizer::new(black_box(&medium_src), &initial).tokenize();
+                black_box(split_config_tokens(tok.tokens))
+            });
+        });
+
         group.bench_function("full_pipeline_medium", |b| {
             b.iter(|| {
-                let mut handler = ConfigSectionHandler::new(None);
-                let cfg_result = handler.process_config_section(black_box(&medium_src));
-
-                let s_local = cfg_result.operational_settings.clone();
-                let tok_result =
-                    Tokenizer::new(&cfg_result.cleaned_input_string, &s_local).tokenize();
-
-                let parser = GeneralParser::new(
-                    tok_result.tokens,
-                    &cfg_result.config_section,
-                    &s_local,
-                )
-                .expect("parser init");
+                let tok   = Tokenizer::new(black_box(&medium_src), &initial).tokenize();
+                let split = split_config_tokens(tok.tokens);
+                let mut h = ConfigSectionHandler::new(None);
+                let cfg   = h.process_config_tokens(&split.config_tokens);
+                let s     = cfg.operational_settings.clone();
+                let parser = GeneralParser::new(split.rest_tokens, &cfg.config_section, &s)
+                    .expect("parser init");
                 black_box(parser.parse())
             });
         });
     }
 
-    // ── Real .dixscript file (from disk) ───────────────────────────────────────────
+    // ── Real .dixscript file (from disk, optional) ────────────────────────────
+
     if let Ok(real_src) =
         std::fs::read_to_string("../../mdix_files/advanced/all_datatypes_test.dixscript")
     {
         group.throughput(Throughput::Bytes(real_src.len() as u64));
 
         group.bench_function("real_file_tokenize_only", |b| {
-            b.iter(|| black_box(Tokenizer::new(black_box(&real_src), &settings).tokenize()));
+            b.iter(|| {
+                black_box(Tokenizer::new(black_box(&real_src), &initial).tokenize())
+            });
+        });
+
+        group.bench_function("real_file_tokenize_and_split", |b| {
+            b.iter(|| {
+                let tok = Tokenizer::new(black_box(&real_src), &initial).tokenize();
+                black_box(split_config_tokens(tok.tokens))
+            });
         });
 
         group.bench_function("real_file_full_pipeline", |b| {
             b.iter(|| {
-                let mut handler = ConfigSectionHandler::new(None);
-                let cfg_result = handler.process_config_section(black_box(&real_src));
-
-                let s_local = cfg_result.operational_settings.clone();
-                let tok_result =
-                    Tokenizer::new(&cfg_result.cleaned_input_string, &s_local).tokenize();
-
-                let parser = GeneralParser::new(
-                    tok_result.tokens,
-                    &cfg_result.config_section,
-                    &s_local,
-                )
-                .expect("parser init");
+                let tok   = Tokenizer::new(black_box(&real_src), &initial).tokenize();
+                let split = split_config_tokens(tok.tokens);
+                let mut h = ConfigSectionHandler::new(None);
+                let cfg   = h.process_config_tokens(&split.config_tokens);
+                let s     = cfg.operational_settings.clone();
+                let parser = GeneralParser::new(split.rest_tokens, &cfg.config_section, &s)
+                    .expect("parser init");
                 black_box(parser.parse())
             });
         });

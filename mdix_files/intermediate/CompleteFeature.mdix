@@ -11,12 +11,6 @@
 )
 
 
-@DLM(
-    DCompressor.lzma,
-    DAuditor.enhanced,
-    DEncryptor.chacha20
-)
-
 
 @ENUMS(
     BuildStatus { SUCCESS = 1, FAILED = 2, PENDING = 3, CANCELLED = 4 }
@@ -88,5 +82,3 @@
             created<string> = getCurrentTimestamp()
         }
 )
-
-@SECURITY()

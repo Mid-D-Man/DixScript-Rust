@@ -1,628 +1,628 @@
 @CONFIG(
-    version -> "1.0.0",
-    encoding -> "UTF-8",
-    author -> "RealComplexTest",
-    features -> "advanced",
-    created -> 2025-01-15T10:00:00Z,
-    debug_mode -> "verbose",
-    error_handling -> "halt"
+  version -> "1.0.0",
+  encoding -> "UTF-8",
+  author -> "RealComplexTest",
+  features -> "advanced",
+  created -> 2025-01-15T10:00:00Z,
+  debug_mode -> "verbose",
+  error_handling -> "halt"
 )
 
 @ENUMS(
-    ProcessMode { QUICK = 1, STANDARD = 2, DEEP = 3, ULTRA = 5 }
-    Quality { DRAFT = 1, GOOD = 2, EXCELLENT = 3, PERFECT = 4 }
-    Access { READ = 1, WRITE = 2, EXECUTE = 4, ADMIN = 7 }
-    Priority { LOW, MEDIUM, HIGH, CRITICAL }
+  ProcessMode { QUICK = 1, STANDARD = 2, DEEP = 3, ULTRA = 5 }
+  Quality { DRAFT = 1, GOOD = 2, EXCELLENT = 3, PERFECT = 4 }
+  Access { READ = 1, WRITE = 2, EXECUTE = 4, ADMIN = 7 }
+  Priority { LOW, MEDIUM, HIGH, CRITICAL }
 )
 
 @QUICKFUNCS(
-    ~processArrayWithBuiltins<string> => global(items<array>, separator<string>, mode<enum>) {
-        log: "Starting array processing with built-in methods";
-        
-       let length = items.length();
-        log: $"Array length: {length}";
-        
-        if: items.isEmpty() {
-            log: "Array is empty - returning default";
-            return "empty";
-        }
-        
-        sorted = items.sort();
-        log: "Array sorted";
-        
-        reversed = sorted.reverse();
-        log: "Array reversed";
-        
-        first_element = reversed.first();
-        last_element = reversed.last();
-        log: $"First: {first_element}, Last: {last_element}";
-        
-        slice_result = reversed.slice(0, 3);
-        log: "Sliced first 3 elements";
-        
-        joined = slice_result.join(separator);
-        log: $"Joined result: {joined}";
-        
-        chk: mode {
-            -> ProcessMode.QUICK {
-                log: "QUICK mode - basic processing";
-                result = joined.toUpper();
-            }
-            -> ProcessMode.STANDARD {
-                log: "STANDARD mode - standard processing";
-                result = joined.toLower();
-            }
-            -> ProcessMode.DEEP {
-                log: "DEEP mode - detailed processing";
-                trimmed = joined.trim();
-                result = trimmed.toUpper();
-            }
-            -> ProcessMode.ULTRA {
-                log: "ULTRA mode - maximum processing";
-                trimmed = joined.trim();
-                upper = trimmed.toUpper();
-                result = upper.substring(0, Math.min(20, upper.length()));
-            }
-            -> miss {
-                log: "Unknown mode";
-                result = joined;
-            }
-        }
-        
-        log: $"Final result: {result}";
-        return result;
+  ~processArrayWithBuiltins<string> => global(items<array>, separator<string>, mode<enum>) {
+    log: "Starting array processing with built-in methods";
+
+    let length = items.length();
+    log: $"Array length: {length}";
+
+    if: items.isEmpty() {
+      log: "Array is empty - returning default";
+      return "empty";
     }
-    
-    ~analyzeStringWithMethods<int> => global(text<string>, pattern<string>, quality<enum>) {
-        log: "Analyzing string with built-in methods";
-        log: $"Text length: {text.length()}";
-        
-        if: text.isEmpty() {
-            log: "Empty text - score 0";
-            return 0;
-        }
-        
-        trimmed = text.trim();
-        upper_text = trimmed.toUpper();
-        lower_text = trimmed.toLower();
-        
-        log: $"Upper: {upper_text}";
-        log: $"Lower: {lower_text}";
-        
-        contains_pattern = upper_text.contains(pattern.toUpper());
-        starts_with_pattern = upper_text.startsWith(pattern.toUpper());
-        
-        base_score = 0;
-        
-        if: contains_pattern {
-            log: "Pattern found in text";
-            base_score += 50;
-            
-            if: starts_with_pattern {
-                log: "Pattern at start - bonus points";
-                base_score += 25;
-            }
-        }
-        
-        length_bonus = trimmed.length() * 2;
-        base_score += length_bonus;
-        
-        chk: quality {
-            -> Quality.DRAFT {
-                log: "DRAFT quality - minimal multiplier";
-                final_score = base_score;
-            }
-            -> Quality.GOOD {
-                log: "GOOD quality - standard multiplier";
-                final_score = base_score * 2;
-            }
-            -> Quality.EXCELLENT {
-                log: "EXCELLENT quality - high multiplier";
-                final_score = base_score * 3;
-            }
-            -> Quality.PERFECT {
-                log: "PERFECT quality - maximum multiplier";
-                final_score = base_score * 5;
-            }
-            -> miss {
-                log: "Unknown quality";
-                final_score = base_score;
-            }
-        }
-        
-        log: $"Calculated score: {final_score}";
-        return final_score;
+
+  let   sorted = items.sort();
+  log: "Array sorted";
+
+  let  reversed = sorted.reverse();
+  log: "Array reversed";
+
+  let   first_element = reversed.first();
+  let  last_element = reversed.last();
+  log: $"First: {first_element}, Last: {last_element}";
+
+  let   slice_result = reversed.slice(0, 3);
+  log: "Sliced first 3 elements";
+
+  let  joined = slice_result.join(separator);
+  log: $"Joined result: {joined}";
+  let mut result = "";
+  chk: mode {
+     -> ProcessMode.QUICK {
+      log: "QUICK mode - basic processing";
+      result = joined.toUpper();
     }
-    
-    ~processNestedArrays<float> => global(matrix<array>, threshold<int>, access<enum>) {
-        log: "Processing nested array structure";
-        
-        outer_length = matrix.length();
-        log: $"Matrix has {outer_length} rows";
-        
-        if: outer_length == 0 {
-            log: "Empty matrix";
-            return 0.0;
-        }
-        
-        access_multiplier = 1.0;
-        
-        chk: access {
-            -> Access.READ {
-                log: "READ access - limited processing";
-                access_multiplier = 1.0;
-            }
-            -> Access.WRITE {
-                log: "WRITE access - standard processing";
-                access_multiplier = 2.0;
-            }
-            -> Access.EXECUTE {
-                log: "EXECUTE access - enhanced processing";
-                access_multiplier = 4.0;
-            }
-            -> Access.ADMIN {
-                log: "ADMIN access - full processing";
-                access_multiplier = 7.0;
-            }
-            -> miss {
-                log: "Unknown access level";
-                access_multiplier = 1.0;
-            }
-        }
-        
-        flattened = matrix.flatten();
-        log: "Matrix flattened";
-        
-        sorted_flat = flattened.sort();
-        log: "Sorted flattened array";
-        
-        unique_values = sorted_flat.distinct();
-        log: "Removed duplicates";
-        
-        unique_count = unique_values.length();
-        log: $"Unique values: {unique_count}";
-        
-        if: unique_count > threshold {
-            log: "Above threshold - calculating statistics";
-            
-            max_value = unique_values.max();
-            min_value = unique_values.min();
-            avg_value = unique_values.average();
-            sum_value = unique_values.sum();
-            
-            log: $"Max: {max_value}, Min: {min_value}";
-            log: $"Average: {avg_value}, Sum: {sum_value}";
-            
-            result = (avg_value * access_multiplier) + (unique_count * 10.0);
-        } elif: unique_count > 5 {
-            log: "Medium size - basic statistics";
-            avg_value = unique_values.average();
-            result = avg_value * access_multiplier;
-        } else {
-            log: "Small size - simple calculation";
-            sum_value = unique_values.sum();
-            result = sum_value * access_multiplier;
-        }
-        
-        final = Math.round(result * 100.0) / 100.0;
-        log: $"Final calculated value: {final}";
-        return final;
+   -> ProcessMode.STANDARD {
+    log: "STANDARD mode - standard processing";
+    result = joined.toLower();
+  }
+   -> ProcessMode.DEEP {
+    log: "DEEP mode - detailed processing";
+    trimmed = joined.trim();
+    result = trimmed.toUpper();
+  }
+   -> ProcessMode.ULTRA {
+    log: "ULTRA mode - maximum processing";
+    trimmed = joined.trim();
+    upper = trimmed.toUpper();
+    result = upper.substring(0, Math.min(20, upper.length()));
+  }
+   -> miss {
+    log: "Unknown mode";
+    result = joined;
+  }
+  }
+
+  log: $"Final result: {result}";
+  return result;
+  }
+
+  ~analyzeStringWithMethods<int> => global(text<string>, pattern<string>, quality<enum>) {
+    log: "Analyzing string with built-in methods";
+    log: $"Text length: {text.length()}";
+
+    if: text.isEmpty() {
+      log: "Empty text - score 0";
+      return 0;
     }
-    
-    ~stringManipulationIntensive<string> => global(
-        input<string>,
-        prefix<string>,
-        suffix<string>,
-        priority<enum>
-    ) {
-        log: "Intensive string manipulation";
-        log: $"Input length: {input.length()}";
-        
-        if: input.isBlank() {
-            log: "Input is blank";
-            return "empty_input";
-        }
-        
-        trimmed = input.trim();
-        log: "Trimmed whitespace";
-        
-        lower = trimmed.toLower();
-        upper = trimmed.toUpper();
-        
-        log: $"Lowercase: {lower}";
-        log: $"Uppercase: {upper}";
-        
-        contains_space = lower.contains(" ");
-        
-        if: contains_space {
-            log: "Contains spaces - splitting";
-            split_result = lower.split(" ");
-            first_word = split_result.first();
-            last_word = split_result.last();
-            joined = split_result.join("-");
-            log: $"Joined with hyphens: {joined}";
-            base_text = joined;
-        } else {
-            log: "No spaces - using as-is";
-            base_text = lower;
-        }
-        
-        prefixed = $"{prefix}{base_text}";
-        suffixed = $"{prefixed}{suffix}";
-        
-        log: $"After prefix/suffix: {suffixed}";
-        
-        final_length = suffixed.length();
-        
-        chk: priority {
-            -> Priority.LOW {
-                log: "LOW priority - minimal processing";
-                if: final_length > 50 {
-                    result = suffixed.substring(0, 50);
-                } else {
-                    result = suffixed;
-                }
-            }
-            -> Priority.MEDIUM {
-                log: "MEDIUM priority - standard processing";
-                if: final_length > 30 {
-                    result = suffixed.substring(0, 30);
-                } else {
-                    result = suffixed.toUpper();
-                }
-            }
-            -> Priority.HIGH {
-                log: "HIGH priority - enhanced processing";
-                result = suffixed.toUpper();
-                
-                if: result.length() > 20 {
-                    padded = result.substring(0, 20);
-                    result = padded;
-                }
-            }
-            -> Priority.CRITICAL {
-                log: "CRITICAL priority - maximum processing";
-                upper = suffixed.toUpper();
-                replaced = upper.replace("-", "_");
-                result = replaced;
-            }
-            -> miss {
-                log: "Unknown priority";
-                result = suffixed;
-            }
-        }
-        
-        log: $"Final result: {result}";
-        return result;
+
+ let trimmed = text.trim();
+ let upper_text = trimmed.toUpper();
+ let lower_text = trimmed.toLower();
+
+  log: $"Upper: {upper_text}";
+  log: $"Lower: {lower_text}";
+
+ let contains_pattern = upper_text.contains(pattern.toUpper());
+ let starts_with_pattern = upper_text.startsWith(pattern.toUpper());
+
+ let mut base_score = 0;
+
+  if: contains_pattern {
+    log: "Pattern found in text";
+    base_score + = 50;
+
+    if: starts_with_pattern {
+      log: "Pattern at start - bonus points";
+      base_score + = 25;
     }
-    
-    ~mathIntensiveCalculation<int> => global(
-        base<int>,
-        multiplier<float>,
-        power<int>,
-        mode<enum>
-    ) {
-        log: "Starting math-intensive calculation";
-        log: $"Base: {base}, Multiplier: {multiplier}, Power: {power}";
-        
-        abs_base = Math.abs(base);
-        log: $"Absolute base: {abs_base}";
-        
-        powered = Math.pow(abs_base, power);
-        log: $"After power operation: {powered}";
-        
-        multiplied = powered * multiplier;
-        log: $"After multiplication: {multiplied}";
-        
-        chk: mode {
-            -> ProcessMode.QUICK {
-                log: "QUICK mode - floor result";
-                result = Math.floor(multiplied);
-            }
-            -> ProcessMode.STANDARD {
-                log: "STANDARD mode - round result";
-                result = Math.round(multiplied);
-            }
-            -> ProcessMode.DEEP {
-                log: "DEEP mode - ceiling result";
-                result = Math.ceil(multiplied);
-            }
-            -> ProcessMode.ULTRA {
-                log: "ULTRA mode - advanced calculation";
-                rounded = Math.round(multiplied);
-                sqrt_val = Math.sqrt(rounded);
-                result = Math.floor(sqrt_val * 100);
-            }
-            -> miss {
-                log: "Unknown mode - default round";
-                result = Math.round(multiplied);
-            }
-        }
-        
-        clamped = Math.clamp(result, 0, 10000);
-        log: $"Clamped result: {clamped}";
-        
-        sign_val = Math.sign(clamped);
-        log: $"Sign: {sign_val}";
-        
-        final = clamped * sign_val;
-        log: $"Final value: {final}";
-        
-        return final;
+  }
+
+ let length_bonus = trimmed.length() * 2;
+  base_score + = length_bonus;
+  let mut final_score = 0;
+  chk: quality {
+     -> Quality.DRAFT {
+      log: "DRAFT quality - minimal multiplier";
+      final_score = base_score;
     }
-    
-    ~dateTimeOperations<string> => global(days_offset<int>, hours_offset<int>) {
-        log: "Performing DateTime operations";
-        
-        now = DateTime.now();
-        log: "Got current timestamp";
-        
-        today = DateTime.today();
-        log: "Got today's date";
-        
-        future_date = DateTime.addDays(today, days_offset);
-        log: $"Added {days_offset} days";
-        
-        future_timestamp = DateTime.addHours(now, hours_offset);
-        log: $"Added {hours_offset} hours";
-        
-        year = DateTime.year(future_date);
-        month = DateTime.month(future_date);
-        day = DateTime.day(future_date);
-        
-        log: $"Future date: {year}-{month}-{day}";
-        
-        formatted = DateTime.format(future_timestamp, "yyyy-MM-dd HH:mm:ss");
-        log: $"Formatted timestamp: {formatted}";
-        
-        day_of_week = DateTime.dayOfWeek(future_date);
-        day_of_year = DateTime.dayOfYear(future_date);
-        
-        log: $"Day of week: {day_of_week}, Day of year: {day_of_year}";
-        
-        if: day_of_week == 0 || day_of_week == 6 {
-            log: "Weekend day detected";
-            result = $"{formatted}_WEEKEND";
-        } else {
-            log: "Weekday detected";
-            result = $"{formatted}_WEEKDAY";
-        }
-        
-        return result;
+   -> Quality.GOOD {
+    log: "GOOD quality - standard multiplier";
+    final_score = base_score * 2;
+  }
+   -> Quality.EXCELLENT {
+    log: "EXCELLENT quality - high multiplier";
+    final_score = base_score * 3;
+  }
+   -> Quality.PERFECT {
+    log: "PERFECT quality - maximum multiplier";
+    final_score = base_score * 5;
+  }
+   -> miss {
+    log: "Unknown quality";
+    final_score = base_score;
+  }
+  }
+
+  log: $"Calculated score: {final_score}";
+  return final_score;
+  }
+
+  ~processNestedArrays<float> => global(matrix<array>, threshold<int>, access<enum>) {
+    log: "Processing nested array structure";
+
+  let  outer_length = matrix.length();
+    log: $"Matrix has {outer_length} rows";
+
+    if: outer_length == 0 {
+      log: "Empty matrix";
+      return 0.0;
     }
-    
-    ~arrayStatisticsComplex<object> => global(numbers<array>, min_threshold<int>) {
-        log: "Computing complex array statistics";
-        
-        if: numbers.isEmpty() {
-            log: "Empty array provided";
-            return {
-                error = "empty_array",
-                count = 0
-            };
-        }
-        
-        sorted = numbers.sort();
-        unique = sorted.distinct();
-        
-        count = numbers.length();
-        unique_count = unique.length();
-        
-        log: $"Total: {count}, Unique: {unique_count}";
-        
-        sum = numbers.sum();
-        avg = numbers.average();
-        max_val = numbers.max();
-        min_val = numbers.min();
-        
-        log: $"Sum: {sum}, Avg: {avg}";
-        log: $"Max: {max_val}, Min: {min_val}";
-        
-        range = max_val - min_val;
-        
-        if: unique_count < min_threshold {
-            log: "Below threshold - low diversity";
-            diversity = "low";
-        } elif: unique_count < (count * 0.5) {
-            log: "Medium diversity";
-            diversity = "medium";
-        } else {
-            log: "High diversity";
-            diversity = "high";
-        }
-        
-        first_val = numbers.first();
-        last_val = numbers.last();
-        
-        return {
-            count = count,
-            unique_count = unique_count,
-            sum = Math.round(sum),
-            average = Math.round(avg * 100.0) / 100.0,
-            maximum = max_val,
-            minimum = min_val,
-            range = range,
-            diversity = diversity,
-            first = first_val,
-            last = last_val
-        };
+
+ let mut access_multiplier = 1.0;
+
+  chk: access {
+     -> Access.READ {
+      log: "READ access - limited processing";
+      access_multiplier = 1.0;
     }
-    
-    ~complexObjectBuilder<object> => global(
-        name<string>,
-        values<array>,
-        metadata<tuple>,
-        quality<enum>
-    ) {
-        log: "Building complex object structure";
-        
-        name_upper = name.toUpper();
-        name_trimmed = name_upper.trim();
-        
-        log: $"Processed name: {name_trimmed}";
-        
-        values_count = values.length();
-        values_sum = values.sum();
-        values_avg = values.average();
-        
-        log: $"Values stats - Count: {values_count}, Sum: {values_sum}, Avg: {values_avg}";
-        
-        quality_score = 0;
-        quality_name = "";
-        
-        chk: quality {
-            -> Quality.DRAFT {
-                quality_score = 1;
-                quality_name = "DRAFT";
-            }
-            -> Quality.GOOD {
-                quality_score = 2;
-                quality_name = "GOOD";
-            }
-            -> Quality.EXCELLENT {
-                quality_score = 3;
-                quality_name = "EXCELLENT";
-            }
-            -> Quality.PERFECT {
-                quality_score = 4;
-                quality_name = "PERFECT";
-            }
-            -> miss {
-                quality_score = 0;
-                quality_name = "UNKNOWN";
-            }
-        }
-        
-        log: $"Quality: {quality_name} (score: {quality_score})";
-        
-        now = DateTime.now();
-        formatted_time = DateTime.format(now, "yyyy-MM-dd HH:mm:ss");
-        
-        sorted_values = values.sort();
-        top_three = sorted_values.reverse().slice(0, 3);
-        
-        result_obj = {
-            identifier = name_trimmed,
-            quality_level = quality_name,
-            quality_score = quality_score,
-            data = {
-                count = values_count,
-                sum = Math.round(values_sum),
-                average = Math.round(values_avg * 100.0) / 100.0,
-                top_values = top_three
-            },
-            timestamp = formatted_time,
-            metadata_provided = true
-        };
-        
-        log: "Complex object built successfully";
-        return result_obj;
+   -> Access.WRITE {
+    log: "WRITE access - standard processing";
+    access_multiplier = 2.0;
+  }
+   -> Access.EXECUTE {
+    log: "EXECUTE access - enhanced processing";
+    access_multiplier = 4.0;
+  }
+   -> Access.ADMIN {
+    log: "ADMIN access - full processing";
+    access_multiplier = 7.0;
+  }
+   -> miss {
+    log: "Unknown access level";
+    access_multiplier = 1.0;
+  }
+  }
+
+  let flattened = matrix.flatten();
+  log: "Matrix flattened";
+
+ let sorted_flat = flattened.sort();
+  log: "Sorted flattened array";
+
+ let unique_values = sorted_flat.distinct();
+  log: "Removed duplicates";
+
+ let unique_count = unique_values.length();
+  log: $"Unique values: {unique_count}";
+
+  if: unique_count > threshold {
+    log: "Above threshold - calculating statistics";
+
+  let mut  max_value = unique_values.max();
+    min_value = unique_values.min();
+    avg_value = unique_values.average();
+    sum_value = unique_values.sum();
+
+    log: $"Max: {max_value}, Min: {min_value}";
+    log: $"Average: {avg_value}, Sum: {sum_value}";
+
+    result = (avg_value * access_multiplier) + (unique_count * 10.0);
+  } elif: unique_count > 5 {
+  log: "Medium size - basic statistics";
+  avg_value = unique_values.average();
+  result = avg_value * access_multiplier;
+  } else {
+  log: "Small size - simple calculation";
+  sum_value = unique_values.sum();
+  result = sum_value * access_multiplier;
+  }
+
+  final = Math.round(result * 100.0) / 100.0;
+  log: $"Final calculated value: {final}";
+  return final;
+  }
+
+  ~stringManipulationIntensive<string> = > global(
+  input<string>,
+  prefix<string>,
+  suffix<string>,
+  priority<enum>
+) {
+  log: "Intensive string manipulation";
+  log: $"Input length: {input.length()}";
+
+  if: input.isBlank() {
+    log: "Input is blank";
+    return "empty_input";
+  }
+
+trimmed = input.trim();
+log: "Trimmed whitespace";
+
+lower = trimmed.toLower();
+upper = trimmed.toUpper();
+
+log: $"Lowercase: {lower}";
+log: $"Uppercase: {upper}";
+
+contains_space = lower.contains(" ");
+
+if: contains_space {
+  log: "Contains spaces - splitting";
+  split_result = lower.split(" ");
+  first_word = split_result.first();
+  last_word = split_result.last();
+  joined = split_result.join("-");
+  log: $"Joined with hyphens: {joined}";
+  base_text = joined;
+} else {
+log: "No spaces - using as-is";
+base_text = lower;
+}
+
+prefixed = $"{prefix}{base_text}";
+suffixed = $"{prefixed}{suffix}";
+
+log: $"After prefix/suffix: {suffixed}";
+
+final_length = suffixed.length();
+
+chk: priority {
+   -> Priority.LOW {
+    log: "LOW priority - minimal processing";
+    if: final_length > 50 {
+      result = suffixed.substring(0, 50);
+    } else {
+    result = suffixed;
+  }
+}
+ -> Priority.MEDIUM {
+  log: "MEDIUM priority - standard processing";
+  if: final_length > 30 {
+    result = suffixed.substring(0, 30);
+  } else {
+  result = suffixed.toUpper();
+}
+}
+ -> Priority.HIGH {
+  log: "HIGH priority - enhanced processing";
+  result = suffixed.toUpper();
+
+  if: result.length() > 20 {
+    padded = result.substring(0, 20);
+    result = padded;
+  }
+}
+ -> Priority.CRITICAL {
+  log: "CRITICAL priority - maximum processing";
+  upper = suffixed.toUpper();
+  replaced = upper.replace("-", "_");
+  result = replaced;
+}
+ -> miss {
+  log: "Unknown priority";
+  result = suffixed;
+}
+}
+
+log: $"Final result: {result}";
+return result;
+}
+
+~mathIntensiveCalculation<int> = > global(
+base<int>,
+multiplier<float>,
+power<int>,
+mode<enum>
+) {
+  log: "Starting math-intensive calculation";
+  log: $"Base: {base}, Multiplier: {multiplier}, Power: {power}";
+
+  abs_base = Math.abs(base);
+  log: $"Absolute base: {abs_base}";
+
+  powered = Math.pow(abs_base, power);
+  log: $"After power operation: {powered}";
+
+  multiplied = powered * multiplier;
+  log: $"After multiplication: {multiplied}";
+
+  chk: mode {
+     -> ProcessMode.QUICK {
+      log: "QUICK mode - floor result";
+      result = Math.floor(multiplied);
     }
+   -> ProcessMode.STANDARD {
+    log: "STANDARD mode - round result";
+    result = Math.round(multiplied);
+  }
+ -> ProcessMode.DEEP {
+  log: "DEEP mode - ceiling result";
+  result = Math.ceil(multiplied);
+}
+ -> ProcessMode.ULTRA {
+  log: "ULTRA mode - advanced calculation";
+  rounded = Math.round(multiplied);
+  sqrt_val = Math.sqrt(rounded);
+  result = Math.floor(sqrt_val * 100);
+}
+ -> miss {
+  log: "Unknown mode - default round";
+  result = Math.round(multiplied);
+}
+}
+
+clamped = Math.clamp(result, 0, 10000);
+log: $"Clamped result: {clamped}";
+
+sign_val = Math.sign(clamped);
+log: $"Sign: {sign_val}";
+
+final = clamped * sign_val;
+log: $"Final value: {final}";
+
+return final;
+}
+
+~dateTimeOperations<string> = > global(days_offset<int>, hours_offset<int>) {
+  log: "Performing DateTime operations";
+
+  now = DateTime.now();
+  log: "Got current timestamp";
+
+  today = DateTime.today();
+  log: "Got today's date";
+
+  future_date = DateTime.addDays(today, days_offset);
+  log: $"Added {days_offset} days";
+
+  future_timestamp = DateTime.addHours(now, hours_offset);
+  log: $"Added {hours_offset} hours";
+
+  year = DateTime.year(future_date);
+  month = DateTime.month(future_date);
+  day = DateTime.day(future_date);
+
+  log: $"Future date: {year}-{month}-{day}";
+
+  formatted = DateTime.format(future_timestamp, "yyyy-MM-dd HH:mm:ss");
+  log: $"Formatted timestamp: {formatted}";
+
+  day_of_week = DateTime.dayOfWeek(future_date);
+  day_of_year = DateTime.dayOfYear(future_date);
+
+  log: $"Day of week: {day_of_week}, Day of year: {day_of_year}";
+
+  if: day_of_week == 0 || day_of_week == 6 {
+    log: "Weekend day detected";
+    result = $"{formatted}_WEEKEND";
+  } else {
+  log: "Weekday detected";
+  result = $"{formatted}_WEEKDAY";
+}
+
+return result;
+}
+
+~arrayStatisticsComplex<object> = > global(numbers<array>, min_threshold<int>) {
+  log: "Computing complex array statistics";
+
+  if: numbers.isEmpty() {
+    log: "Empty array provided";
+    return {
+      error = "empty_array",
+      count = 0
+    };
+}
+
+sorted = numbers.sort();
+unique = sorted.distinct();
+
+count = numbers.length();
+unique_count = unique.length();
+
+log: $"Total: {count}, Unique: {unique_count}";
+
+sum = numbers.sum();
+avg = numbers.average();
+max_val = numbers.max();
+min_val = numbers.min();
+
+log: $"Sum: {sum}, Avg: {avg}";
+log: $"Max: {max_val}, Min: {min_val}";
+
+range = max_val - min_val;
+
+if: unique_count < min_threshold {
+  log: "Below threshold - low diversity";
+  diversity = "low";
+} elif: unique_count < (count * 0.5) {
+log: "Medium diversity";
+diversity = "medium";
+} else {
+log: "High diversity";
+diversity = "high";
+}
+
+first_val = numbers.first();
+last_val = numbers.last();
+
+return {
+  count = count,
+  unique_count = unique_count,
+  sum = Math.round(sum),
+  average = Math.round(avg * 100.0) / 100.0,
+  maximum = max_val,
+  minimum = min_val,
+  range = range,
+  diversity = diversity,
+  first = first_val,
+  last = last_val
+};
+}
+
+~complexObjectBuilder<object> = > global(
+name<string>,
+values<array>,
+metadata<tuple>,
+quality<enum>
+) {
+  log: "Building complex object structure";
+
+  name_upper = name.toUpper();
+  name_trimmed = name_upper.trim();
+
+  log: $"Processed name: {name_trimmed}";
+
+  values_count = values.length();
+  values_sum = values.sum();
+  values_avg = values.average();
+
+  log: $"Values stats - Count: {values_count}, Sum: {values_sum}, Avg: {values_avg}";
+
+  quality_score = 0;
+  quality_name = "";
+
+  chk: quality {
+     -> Quality.DRAFT {
+      quality_score = 1;
+      quality_name = "DRAFT";
+    }
+   -> Quality.GOOD {
+    quality_score = 2;
+    quality_name = "GOOD";
+  }
+ -> Quality.EXCELLENT {
+  quality_score = 3;
+  quality_name = "EXCELLENT";
+}
+ -> Quality.PERFECT {
+  quality_score = 4;
+  quality_name = "PERFECT";
+}
+ -> miss {
+  quality_score = 0;
+  quality_name = "UNKNOWN";
+}
+}
+
+log: $"Quality: {quality_name} (score: {quality_score})";
+
+now = DateTime.now();
+formatted_time = DateTime.format(now, "yyyy-MM-dd HH:mm:ss");
+
+sorted_values = values.sort();
+top_three = sorted_values.reverse().slice(0, 3);
+
+result_obj = {
+  identifier = name_trimmed,
+  quality_level = quality_name,
+  quality_score = quality_score,
+  data = {
+    count = values_count,
+    sum = Math.round(values_sum),
+    average = Math.round(values_avg * 100.0) / 100.0,
+    top_values = top_three
+  },
+timestamp = formatted_time,
+metadata_provided = true
+};
+
+log: "Complex object built successfully";
+return result_obj;
+}
 )
 
 @DATA(
-    app_name = "ComplexBuiltinTest",
-    version = "3.0.1",
-    
-    test_numbers<array> = [45, 12, 78, 23, 56, 89, 34, 67, 91, 5, 38, 72, 15, 61, 29],
-    test_strings<array> = ["hello", "world", "testing", "complex", "system"],
-    test_matrix<array> = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]],
-    
-    test_input_text = "  This is a Complex TEST String with SPACES  ",
-    test_pattern = "COMPLEX",
-    test_separator = " | ",
-    
-    simple_tuple<tuple> = t:(100, "metadata", true, 99.5),
-    data_tuple<tuple> = t:("config", 42, false, 3.14),
-    
-    test_blob<blob> = b:("VGhpcyBpcyBhIHRlc3QgYmxvYiBmb3IgY29tcGxleCB0ZXN0aW5n"),
-    test_regex<regex> = r:("^[A-Za-z0-9]+$"),
-    
-    nested_data<object> = {
-        level1 = {
-            items = [1, 2, 3, 4, 5],
-            name = "nested_structure",
-            active = true
-        },
-        level2 = {
-            values = [10, 20, 30],
-            config = {
-                enabled = true,
-                timeout = 5000
-            }
-        }
+  app_name = "ComplexBuiltinTest",
+  version = "3.0.1",
+
+  test_numbers<array> = [45, 12, 78, 23, 56, 89, 34, 67, 91, 5, 38, 72, 15, 61, 29],
+  test_strings<array> = ["hello", "world", "testing", "complex", "system"],
+  test_matrix<array> = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]],
+
+  test_input_text = "  This is a Complex TEST String with SPACES  ",
+  test_pattern = "COMPLEX",
+  test_separator = " | ",
+
+  simple_tuple<tuple> = t:(100, "metadata", true, 99.5),
+  data_tuple<tuple> = t:("config", 42, false, 3.14),
+
+  test_blob<blob> = b:("VGhpcyBpcyBhIHRlc3QgYmxvYiBmb3IgY29tcGxleCB0ZXN0aW5n"),
+  test_regex<regex> = r:("^[A-Za-z0-9]+$"),
+
+  nested_data<object> = {
+    level1 = {
+      items = [1, 2, 3, 4, 5],
+      name = "nested_structure",
+      active = true
     },
-    
-    array_with_tuples<array> = [
-        t:(1, "first", true, 1.5),
-        t:(2, "second", false, 2.5),
-        t:(3, "third", true, 3.5)
-    ],
-    
-    object_with_complex_types<object> = {
-        description = "Container",
-        numbers = [100, 200, 300, 400],
-        tuple_field = t:(999, "embedded", false, 88.8),
-        blob_field = b:("RW1iZWRkZWQgYmxvYiBkYXRh"),
-        regex_field = r:("\\d{3}-\\d{3}-\\d{4}"),
-        nested_array = [[1, 2], [3, 4], [5, 6]]
+  level2 = {
+    values = [10, 20, 30],
+    config = {
+      enabled = true,
+      timeout = 5000
     }
-    
-    results.array_processing:
-        result1 = processArrayWithBuiltins(test_strings, test_separator, ProcessMode.ULTRA),
-        result2 = processArrayWithBuiltins(test_numbers, ", ", ProcessMode.DEEP)
-    
-    results.string_analysis:
-        score1 = analyzeStringWithMethods(test_input_text, test_pattern, Quality.EXCELLENT),
-        score2 = analyzeStringWithMethods("simple test", "test", Quality.GOOD)
-    
-    results.matrix_processing:
-        matrix_result = processNestedArrays(test_matrix, 5, Access.ADMIN)
-    
-    results.string_manipulation:
-        manip1 = stringManipulationIntensive(test_input_text, "PREFIX_", "_SUFFIX", Priority.CRITICAL),
-        manip2 = stringManipulationIntensive("another test case", "START_", "_END", Priority.HIGH)
-    
-    results.math_calculations:
-        calc1 = mathIntensiveCalculation(42, 2.5, 3, ProcessMode.ULTRA),
-        calc2 = mathIntensiveCalculation(-15, 1.8, 2, ProcessMode.STANDARD)
-    
-    results.datetime_operations:
-        date1 = dateTimeOperations(30, 48),
-        date2 = dateTimeOperations(-7, -12)
-    
-    results.statistics:
-        stats1 = arrayStatisticsComplex(test_numbers, 5),
-        stats2 = arrayStatisticsComplex([5, 5, 5, 10, 10, 10, 15], 3)
-    
-    results.object_building:
-        obj1 = complexObjectBuilder("TestObject", test_numbers, simple_tuple, Quality.PERFECT),
-        obj2 = complexObjectBuilder("AnotherObject", [1, 2, 3, 4, 5], data_tuple, Quality.EXCELLENT)
-    
-    config.processing:
-        mode<enum> = ProcessMode.ULTRA,
-        quality<enum> = Quality.PERFECT,
-        access<enum> = Access.ADMIN,
-        priority<enum> = Priority.CRITICAL
-    
-    data.collections::
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        ["alpha", "beta", "gamma", "delta"],
-        [true, false, true, true, false]
-    
-    data.mixed_types::
-        {
-            id = 1,
-            array_data = [10, 20, 30],
-            tuple_data = t:(1, "test", true, 1.1),
-            blob_data = b:("VGVzdCBkYXRh"),
-            string_data = "example"
-        },
-        {
-            id = 2,
-            array_data = [40, 50, 60],
-            tuple_data = t:(2, "demo", false, 2.2),
-            blob_data = b:("RGVtbyBkYXRh"),
-            string_data = "sample"
-        }
+  }
+  },
+
+  array_with_tuples<array> = [
+  t:(1, "first", true, 1.5),
+  t:(2, "second", false, 2.5),
+  t:(3, "third", true, 3.5)
+  ],
+
+  object_with_complex_types<object> = {
+    description = "Container",
+    numbers = [100, 200, 300, 400],
+    tuple_field = t:(999, "embedded", false, 88.8),
+    blob_field = b:("RW1iZWRkZWQgYmxvYiBkYXRh"),
+    regex_field = r:("\\d{3}-\\d{3}-\\d{4}"),
+    nested_array = [[1, 2], [3, 4], [5, 6]]
+  }
+
+  results.array_processing:
+  result1 = processArrayWithBuiltins(test_strings, test_separator, ProcessMode.ULTRA),
+  result2 = processArrayWithBuiltins(test_numbers, ", ", ProcessMode.DEEP)
+
+  results.string_analysis:
+  score1 = analyzeStringWithMethods(test_input_text, test_pattern, Quality.EXCELLENT),
+  score2 = analyzeStringWithMethods("simple test", "test", Quality.GOOD)
+
+  results.matrix_processing:
+  matrix_result = processNestedArrays(test_matrix, 5, Access.ADMIN)
+
+  results.string_manipulation:
+  manip1 = stringManipulationIntensive(test_input_text, "PREFIX_", "_SUFFIX", Priority.CRITICAL),
+  manip2 = stringManipulationIntensive("another test case", "START_", "_END", Priority.HIGH)
+
+  results.math_calculations:
+  calc1 = mathIntensiveCalculation(42, 2.5, 3, ProcessMode.ULTRA),
+  calc2 = mathIntensiveCalculation(-15, 1.8, 2, ProcessMode.STANDARD)
+
+  results.datetime_operations:
+  date1 = dateTimeOperations(30, 48),
+  date2 = dateTimeOperations(-7, -12)
+
+  results.statistics:
+  stats1 = arrayStatisticsComplex(test_numbers, 5),
+  stats2 = arrayStatisticsComplex([5, 5, 5, 10, 10, 10, 15], 3)
+
+  results.object_building:
+  obj1 = complexObjectBuilder("TestObject", test_numbers, simple_tuple, Quality.PERFECT),
+  obj2 = complexObjectBuilder("AnotherObject", [1, 2, 3, 4, 5], data_tuple, Quality.EXCELLENT)
+
+  config.processing:
+  mode<enum> = ProcessMode.ULTRA,
+  quality<enum> = Quality.PERFECT,
+  access<enum> = Access.ADMIN,
+  priority<enum> = Priority.CRITICAL
+
+  data.collections::
+  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  ["alpha", "beta", "gamma", "delta"],
+  [true, false, true, true, false]
+
+  data.mixed_types::
+  {
+    id = 1,
+    array_data = [10, 20, 30],
+    tuple_data = t:(1, "test", true, 1.1),
+    blob_data = b:("VGVzdCBkYXRh"),
+    string_data = "example"
+  },
+  {
+    id = 2,
+    array_data = [40, 50, 60],
+    tuple_data = t:(2, "demo", false, 2.2),
+    blob_data = b:("RGVtbyBkYXRh"),
+    string_data = "sample"
+  }
 )

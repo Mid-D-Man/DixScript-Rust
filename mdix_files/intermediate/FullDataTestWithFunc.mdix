@@ -37,22 +37,22 @@
     // ============================================================
     
     ~calculateDamage<int> => global(base<int>, difficulty<enum>) {
-        multiplier = difficulty == Difficulty.EASY ? 0.5 :
+       let multiplier = difficulty == Difficulty.EASY ? 0.5 :
                      difficulty == Difficulty.NORMAL ? 1.0 :
                      difficulty == Difficulty.HARD ? 1.5 :
                      difficulty == Difficulty.EXTREME ? 2.0 : 3.0;
-        damage = base * multiplier;
+       let damage = base * multiplier;
         return Math.round(damage);
     }
     
     ~applyTaxAndDiscount<float> => global(price<float>, tax_rate<float>, discount<float>) {
-        taxed = price + (price * tax_rate);
-        final = taxed - (taxed * discount);
+      let  taxed = price + (price * tax_rate);
+      let  final = taxed - (taxed * discount);
         return Math.round(final * 100.0) / 100.0;
     }
     
     ~calculateCompoundInterest<float> => global(principal<float>, rate<float>, years<int>) {
-        result = principal * Math.pow(1.0 + rate, years);
+       let result = principal * Math.pow(1.0 + rate, years);
         return Math.round(result * 100.0) / 100.0;
     }
     
@@ -61,9 +61,9 @@
     }
     
     ~calculateDistance<float> => global(x1<float>, y1<float>, x2<float>, y2<float>) {
-        dx = x2 - x1;
-        dy = y2 - y1;
-        distance_sq = (dx * dx) + (dy * dy);
+      let  dx = x2 - x1;
+      let  dy = y2 - y1;
+      let  distance_sq = (dx * dx) + (dy * dy);
         return Math.sqrt(distance_sq);
     }
     
@@ -72,54 +72,54 @@
     // ============================================================
     
     ~formatUserDisplayName<string> => global(first<string>, last<string>, id<int>) {
-        full_name = first.trim().toUpper() + " " + last.trim().toUpper();
-        display = full_name + " #" + id;
+     let   full_name = first.trim().toUpper() + " " + last.trim().toUpper();
+     let   display = full_name + " #" + id.toString();
         return display;
     }
     
     ~sanitizeAndFormat<string> => global(input<string>) {
-        cleaned = input.trim().toLower().replace("  ", " ");
+      let  cleaned = input.trim().toLower().replace("  ", " ");
         return cleaned;
     }
     
     ~validateEmail<bool> => global(email<string>) {
-        trimmed = email.trim().toLower();
-        has_at = trimmed.contains("@");
-        has_dot = trimmed.contains(".");
-        has_length = trimmed.length() > 5;
+      let  trimmed = email.trim().toLower();
+      let  has_at = trimmed.contains("@");
+      let  has_dot = trimmed.contains(".");
+      let  has_length = trimmed.length() > 5;
         return has_at && has_dot && has_length;
     }
     
 ~extractDomain<string> => global(email<string>) {
-    cleaned = email.trim().toLower();
-    at_pos = cleaned.indexOf("@");
+ let   cleaned = email.trim().toLower();
+  let  at_pos = cleaned.indexOf("@");
     
     if: at_pos >= 0 {  // FIXED: Changed from > 0 to >= 0
-        domain_start = at_pos + 1;
-        domain_length = cleaned.length() - domain_start;
-        domain = cleaned.substring(domain_start, domain_length);
+   let     domain_start = at_pos + 1;
+    let    domain_length = cleaned.length() - domain_start;
+    let    domain = cleaned.substring(domain_start, domain_length);
         return domain;
     }
     
     return "invalid";
 }
     ~formatPhoneNumber<string> => global(digits<string>) {
-        cleaned = digits.replace("-", "").replace(" ", "").replace("(", "").replace(")", "");
+      let  cleaned = digits.replace("-", "").replace(" ", "").replace("(", "").replace(")", "");
         if: cleaned.length() == 10 {
-            area = cleaned.substring(0, 3);
-            prefix = cleaned.substring(3, 3);
-            line = cleaned.substring(6, 4);
+      let      area = cleaned.substring(0, 3);
+      let      prefix = cleaned.substring(3, 3);
+       let     line = cleaned.substring(6, 4);
             return "(" + area + ") " + prefix + "-" + line;
         }
         return cleaned;
     }
     
     ~superComplexStringChain<string> => global(input<string>) {
-        step1 = input.trim().toLower().replace("_", "-");
-        step2 = step1.replace("  ", " ").substring(0, 100);
-        step3 = step2.toUpper().replace("-", " ").trim();
-        step4 = step3.padLeft(120, " ").padRight(150, " ");
-        final = step4.trim().substring(0, 50);
+     let   step1 = input.trim().toLower().replace("_", "-");
+     let   step2 = step1.replace("  ", " ").substring(0, 100);
+     let   step3 = step2.toUpper().replace("-", " ").trim();
+     let   step4 = step3.padLeft(120, " ").padRight(150, " ");
+     let   final = step4.trim().substring(0, 50);
         return final;
     }
     
@@ -128,48 +128,48 @@
     // ============================================================
     
     ~calculateTopThreeAverage<float> => global(scores<array>) {
-        sorted = scores.sort();
-        reversed = sorted.reverse();
-        top_three = reversed.slice(0, 3);
-        total = top_three.sum();
-        avg = total / 3.0;
+     let   sorted = scores.sort();
+     let   reversed = sorted.reverse();
+     let   top_three = reversed.slice(0, 3);
+     let   total = top_three.sum();
+     let   avg = total / 3.0;
         return Math.round(avg * 100.0) / 100.0;
     }
     
     ~processScores<array> => global(raw_scores<array>) {
-        filtered = raw_scores.filter(0);
-        unique = filtered.distinct();
-        sorted = unique.sort();
+    let    filtered = raw_scores.filter(0);
+    let    unique = filtered.distinct();
+    let    sorted = unique.sort();
         return sorted;
     }
     
     ~getTopNScores<int> => global(scores<array>, n<int>) {
-        sorted = scores.sort().reverse();
-        top_n = sorted.slice(0, n);
-        total = top_n.sum();
+    let    sorted = scores.sort().reverse();
+    let    top_n = sorted.slice(0, n);
+    let    total = top_n.sum();
         return Math.round(total);
     }
     
     ~analyzeArrayStats<tuple> => global(numbers<array>) {
-        min_val = numbers.min();
-        max_val = numbers.max();
-        avg_val = numbers.average();
-        total = numbers.sum();
+    let    min_val = numbers.min();
+    let    max_val = numbers.max();
+    let    avg_val = numbers.average();
+    let    total = numbers.sum();
         return t:(Math.round(min_val), Math.round(max_val), Math.round(avg_val), Math.round(total));
     }
     
     ~concatenateAndSort<array> => global(arr1<array>, arr2<array>) {
-        combined = arr1.concat(arr2);
-        unique = combined.distinct();
-        sorted = unique.sort();
+    let    combined = arr1.concat(arr2);
+    let    unique = combined.distinct();
+    let    sorted = unique.sort();
         return sorted;
     }
     
     ~wildArrayChaining<array> => global(input<array>) {
-        step1 = input.distinct().sort().reverse();
-        step2 = step1.slice(0, 10).concat(step1.slice(10, 5));
-        step3 = step2.distinct().sort();
-        final = step3.reverse().slice(0, 8);
+    let    step1 = input.distinct().sort().reverse();
+    let    step2 = step1.slice(0, 10).concat(step1.slice(10, 5));
+    let    step3 = step2.distinct().sort();
+    let    final = step3.reverse().slice(0, 8);
         return final;
     }
     
@@ -178,29 +178,29 @@
     // ============================================================
     
     ~calculateDaysUntil<int> => global(target_date<date>) {
-        today = DateTime.today();
-        days_diff = DateTime.subtract(target_date, today);
+    let    today = DateTime.today();
+    let    days_diff = DateTime.subtract(target_date, today);
         return Math.round(days_diff);
     }
     
     ~formatTimestamp<string> => global(ts<timestamp>) {
-        formatted = DateTime.format(ts, "yyyy-MM-dd HH:mm:ss");
+    let    formatted = DateTime.format(ts, "yyyy-MM-dd HH:mm:ss");
         return formatted;
     }
     
     ~addBusinessDays<timestamp> => global(start_date<date>, days<int>) {
-        result = DateTime.addDays(start_date, days);
+    let    result = DateTime.addDays(start_date, days);
         return result;
     }
     
     ~isWeekend<bool> => global(check_date<date>) {
-        day_of_week = DateTime.dayOfWeek(check_date);
+    let    day_of_week = DateTime.dayOfWeek(check_date);
         return day_of_week == 0 || day_of_week == 6;
     }
     
     ~calculateAge<int> => global(birth_date<date>) {
-        today = DateTime.today();
-        years = DateTime.subtract(today, birth_date) / 365.25;
+     let   today = DateTime.today();
+     let   years = DateTime.subtract(today, birth_date) / 365.25;
         return Math.floor(years);
     }
     
@@ -213,8 +213,8 @@
     }
     
     ~rollMultipleDice<int> => global(num_dice<int>, sides<int>) {
-        total = 0;
-        counter = 0;
+     let mut   total = 0;
+     let   counter = 0;
         if: num_dice > 0 {
             total = Random.range(num_dice, num_dice * sides);
         }
@@ -262,7 +262,7 @@
     // ============================================================
     
     ~classifyScore<string> => global(score<int>, difficulty<enum>) {
-        result = "";
+     let mut   result = "";
         
         if: difficulty == Difficulty.EASY {
             if: score >= 90 {
@@ -325,7 +325,7 @@
     }
     
     ~complexNestedLogic<int> => global(a<int>, b<int>, c<int>) {
-        result = 0;
+     let mut   result = 0;
         
         if: a > 50 {
             if: b > 50 {
@@ -378,7 +378,7 @@
     }
     
     ~categorizePlayer<string> => global(level<int>, score<int>, playtime<int>) {
-        category = "";
+     let mut   category = "";
         
         if: level >= 50 {
             if: score >= 10000 {
@@ -443,7 +443,7 @@
     // ============================================================
     
     ~calculateBonus<int> => global(score<int>, difficulty<enum>) {
-        base_bonus = 0;
+       let mut  base_bonus = 0;
         
         chk: difficulty {
             -> Difficulty.EASY {
@@ -487,7 +487,7 @@
     }
     
     ~processGameState<string> => global(state<enum>, score<int>) {
-        message = "";
+     let mut   message = "";
         
         chk: state {
             -> GameState.MENU {
@@ -527,7 +527,7 @@
     }
     
     ~calculateItemValue<int> => global(rarity<enum>, level<int>) {
-        base_value = 0;
+     let mut   base_value = 0;
         
         chk: rarity {
             -> ItemRarity.COMMON {
@@ -550,8 +550,8 @@
             }
         }
         
-        multiplier = 1.0 + (level * 0.1);
-        final_value = base_value * multiplier;
+      let  multiplier = 1.0 + (level * 0.1);
+      let  final_value = base_value * multiplier;
         
         return Math.round(final_value);
     }
@@ -562,22 +562,22 @@
 
 ~createPlayerProfile<object> => global(name<string>, level<int>, score<int>) {
     // FIXED: Evaluate expressions into variables first
-    display_name_value = name.trim().toUpper();
+  let  display_name_value = name.trim().toUpper();
     
-    rank = level >= 50 ? "Master" :
+  let  rank = level >= 50 ? "Master" :
            level >= 30 ? "Expert" :
            level >= 15 ? "Advanced" : "Beginner";
     
-    status = score >= 10000 ? "Elite" :
+  let  status = score >= 10000 ? "Elite" :
              score >= 5000 ? "Pro" :
              score >= 1000 ? "Skilled" : "Learning";
     
-    power_rating_calc = (level * 10) + (score / 100);
-    power_rating_value = Math.round(power_rating_calc);
+  let  power_rating_calc = (level * 10) + (score / 100);
+  let  power_rating_value = Math.round(power_rating_calc);
     
-    is_veteran_calc = level >= 30 && score >= 5000;
+  let  is_veteran_calc = level >= 30 && score >= 5000;
     
-    profile = {
+  let  profile = {
         display_name = display_name_value,
         player_level = level,
         total_score = score,
@@ -591,26 +591,26 @@
 }
 
 ~createInventoryItem<object> => global(name<string>, rarity<enum>, quantity<int>, base_price<float>) {
-    rarity_multiplier = rarity == ItemRarity.COMMON ? 1.0 :
+  let  rarity_multiplier = rarity == ItemRarity.COMMON ? 1.0 :
                        rarity == ItemRarity.UNCOMMON ? 2.5 :
                        rarity == ItemRarity.RARE ? 5.0 :
                        rarity == ItemRarity.EPIC ? 10.0 : 25.0;
     
-    final_price = base_price * rarity_multiplier;
-    total_value = final_price * quantity;
+   let final_price = base_price * rarity_multiplier;
+  let  total_value = final_price * quantity;
     
-    rarity_text = rarity == ItemRarity.COMMON ? "Common" :
+  let  rarity_text = rarity == ItemRarity.COMMON ? "Common" :
                   rarity == ItemRarity.UNCOMMON ? "Uncommon" :
                   rarity == ItemRarity.RARE ? "Rare" :
                   rarity == ItemRarity.EPIC ? "Epic" : "Legendary";
     
     // FIXED: Calculate values before object creation
-    unit_price_rounded = Math.round(final_price * 100.0) / 100.0;
-    total_worth_rounded = Math.round(total_value * 100.0) / 100.0;
-    is_valuable_calc = total_value > 1000.0;
-    stack_size_calc = quantity > 99 ? 99 : quantity;
+ let   unit_price_rounded = Math.round(final_price * 100.0) / 100.0;
+ let   total_worth_rounded = Math.round(total_value * 100.0) / 100.0;
+ let   is_valuable_calc = total_value > 1000.0;
+ let   stack_size_calc = quantity > 99 ? 99 : quantity;
     
-    item = {
+ let   item = {
         item_name = name,
         rarity_level = rarity,
         rarity_display = rarity_text,
@@ -625,28 +625,28 @@
 }
 
 ~buildOrderDetails<object> => global(order_id<int>, subtotal<float>, tax_rate<float>, discount<float>) {
-    tax_amount = subtotal * tax_rate;
-    discount_amount = subtotal * discount;
-    total_before_tax = subtotal - discount_amount;
-    final_total = total_before_tax + (total_before_tax * tax_rate);
+ let   tax_amount = subtotal * tax_rate;
+ let   discount_amount = subtotal * discount;
+ let   total_before_tax = subtotal - discount_amount;
+ let   final_total = total_before_tax + (total_before_tax * tax_rate);
     
-    status = final_total > 1000.0 ? "Premium" :
+ let   status = final_total > 1000.0 ? "Premium" :
              final_total > 500.0 ? "Standard" : "Economy";
     
-    shipping = final_total > 100.0 ? 0.0 :
+  let  shipping = final_total > 100.0 ? 0.0 :
                final_total > 50.0 ? 5.0 : 10.0;
     
-    grand_total = final_total + shipping;
+  let  grand_total = final_total + shipping;
     
     // FIXED: Calculate all values before object creation
-    subtotal_rounded = Math.round(subtotal * 100.0) / 100.0;
-    tax_rounded = Math.round(tax_amount * 100.0) / 100.0;
-    discount_rounded = Math.round(discount_amount * 100.0) / 100.0;
-    total_rounded = Math.round(grand_total * 100.0) / 100.0;
-    free_shipping_calc = shipping == 0.0;
-    is_bulk_calc = subtotal > 500.0;
+  let  subtotal_rounded = Math.round(subtotal * 100.0) / 100.0;
+  let  tax_rounded = Math.round(tax_amount * 100.0) / 100.0;
+   let discount_rounded = Math.round(discount_amount * 100.0) / 100.0;
+   let total_rounded = Math.round(grand_total * 100.0) / 100.0;
+  let  free_shipping_calc = shipping == 0.0;
+  let  is_bulk_calc = subtotal > 500.0;
     
-    order = {
+  let  order = {
         id = order_id,
         order_subtotal = subtotal_rounded,
         tax = tax_rounded,
@@ -662,38 +662,38 @@
 }
 
 ~createCharacterStats<object> => global(name<string>, class<string>, level<int>) {
-    base_health = 100;
-    base_mana = 50;
-    base_damage = 10;
+ let   base_health = 100;
+ let   base_mana = 50;
+  let  base_damage = 10;
     
-    health_bonus = level * 15;
-    mana_bonus = level * 10;
-    damage_bonus = level * 2;
+  let  health_bonus = level * 15;
+  let  mana_bonus = level * 10;
+  let  damage_bonus = level * 2;
     
-    class_health_mult = class == "warrior" ? 1.5 :
+  let  class_health_mult = class == "warrior" ? 1.5 :
                        class == "mage" ? 0.8 :
                        class == "rogue" ? 1.0 : 1.2;
     
-    class_mana_mult = class == "mage" ? 2.0 :
+  let  class_mana_mult = class == "mage" ? 2.0 :
                      class == "warrior" ? 0.5 :
                      class == "rogue" ? 1.0 : 1.5;
     
-    class_damage_mult = class == "rogue" ? 1.5 :
+  let  class_damage_mult = class == "rogue" ? 1.5 :
                        class == "warrior" ? 1.3 :
                        class == "mage" ? 1.0 : 1.1;
     
-    final_health = Math.round((base_health + health_bonus) * class_health_mult);
-    final_mana = Math.round((base_mana + mana_bonus) * class_mana_mult);
-    final_damage = Math.round((base_damage + damage_bonus) * class_damage_mult);
+  let  final_health = Math.round((base_health + health_bonus) * class_health_mult);
+  let  final_mana = Math.round((base_mana + mana_bonus) * class_mana_mult);
+  let  final_damage = Math.round((base_damage + damage_bonus) * class_damage_mult);
     
     // FIXED: Calculate all values before object creation
-    character_name_value = name.trim().toUpper();
-    defense_calc = Math.round(level * 1.5);
-    speed_calc = Math.round(level * 0.8);
-    critical_calc = Math.min(level * 0.5, 50.0);
-    power_level_calc = Math.round((final_health + final_mana + final_damage) / 3);
+ let   character_name_value = name.trim().toUpper();
+  let  defense_calc = Math.round(level * 1.5);
+  let  speed_calc = Math.round(level * 0.8);
+  let  critical_calc = Math.min(level * 0.5, 50.0);
+  let  power_level_calc = Math.round((final_health + final_mana + final_damage) / 3);
     
-    stats = {
+ let   stats = {
         character_name = character_name_value,
         character_class = class,
         character_level = level,
@@ -710,30 +710,30 @@
 }
 
 ~generateLootTable<object> => global(enemy_level<int>, difficulty<enum>, luck<double>) {
-    base_gold = enemy_level * 10;
-    base_exp = enemy_level * 25;
+  let  base_gold = enemy_level * 10;
+  let  base_exp = enemy_level * 25;
     
-    diff_mult = difficulty == Difficulty.EASY ? 0.5 :
+  let  diff_mult = difficulty == Difficulty.EASY ? 0.5 :
                difficulty == Difficulty.NORMAL ? 1.0 :
                difficulty == Difficulty.HARD ? 1.5 :
                difficulty == Difficulty.EXTREME ? 2.5 : 4.0;
     
-    luck_mult = 1.0 + luck;
+  let  luck_mult = 1.0 + luck;
     
-    final_gold = Math.round(base_gold * diff_mult * luck_mult);
-    final_exp = Math.round(base_exp * diff_mult);
+ let   final_gold = Math.round(base_gold * diff_mult * luck_mult);
+ let   final_exp = Math.round(base_exp * diff_mult);
     
-    drop_chance = Math.min(50.0 + (luck * 100.0), 95.0);
-    rare_chance = Math.min(10.0 + (luck * 50.0), 50.0);
-    has_bonus_calc = luck > 0.5;
-    guaranteed_drop_calc = drop_chance >= 95.0;
-drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
+  let  drop_chance = Math.min(50.0 + (luck * 100.0), 95.0);
+  let  rare_chance = Math.min(10.0 + (luck * 50.0), 50.0);
+  let  has_bonus_calc = luck > 0.5;
+ let   guaranteed_drop_calc = drop_chance >= 95.0;
+let drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
 
 
 
-    rare_chance_rounded = Math.round(rare_chance * 100.0) / 100.0;
+  let  rare_chance_rounded = Math.round(rare_chance * 100.0) / 100.0;
     
-    loot = {
+  let  loot = {
         gold_amount = final_gold,
         experience = final_exp,
         item_drop_chance = drop_chance_rounded,
@@ -751,16 +751,16 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     // ============================================================
     
     ~calculateFinalScore<int> => global(base<int>, multiplier<float>, bonus<int>) {
-        adjusted = Math.round(base * multiplier);
-        total = adjusted + bonus;
-        clamped = Math.clamp(total, 0, 1000);
+    let    adjusted = Math.round(base * multiplier);
+    let    total = adjusted + bonus;
+     let   clamped = Math.clamp(total, 0, 1000);
         return clamped;
     }
     
     ~processUserData<tuple> => global(first<string>, last<string>, score<int>) {
-        full_name = first.trim().toUpper() + " " + last.trim().toUpper();
-        adjusted_score = Math.clamp(score, 0, 100);
-        grade = adjusted_score >= 90 ? "A" :
+     let   full_name = first.trim().toUpper() + " " + last.trim().toUpper();
+     let   adjusted_score = Math.clamp(score, 0, 100);
+      let  grade = adjusted_score >= 90 ? "A" :
                 adjusted_score >= 80 ? "B" :
                 adjusted_score >= 70 ? "C" :
                 adjusted_score >= 60 ? "D" : "F";
@@ -768,12 +768,12 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     }
     
     ~complexCalculationChain<int> => global(a<int>, b<int>, c<int>, d<int>) {
-        step1 = Math.max(a, b);
-        step2 = Math.min(c, d);
-        step3 = Math.abs(step1 - step2);
-        step4 = Math.pow(step3, 2);
-        step5 = Math.sqrt(step4 + 100);
-        result = Math.round(step5 * 1.5);
+     let   step1 = Math.max(a, b);
+       let step2 = Math.min(c, d);
+      let  step3 = Math.abs(step1 - step2);
+       let step4 = Math.pow(step3, 2);
+       let step5 = Math.sqrt(step4 + 100);
+       let result = Math.round(step5 * 1.5);
         return result;
     }
     
@@ -782,8 +782,8 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     // ============================================================
     
     ~calculateOrderTotal<float> => orders(subtotal<float>, tax_rate<float>, shipping<float>) {
-        tax = subtotal * tax_rate;
-        total = subtotal + tax + shipping;
+      let  tax = subtotal * tax_rate;
+      let  total = subtotal + tax + shipping;
         return Math.round(total * 100.0) / 100.0;
         
        
@@ -794,22 +794,22 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     }
     
     ~formatProductDisplay<string> => products(name<string>, price<float>, stock<int>) {
-        formatted_price = Math.round(price * 100.0) / 100.0;
+      let  formatted_price = Math.round(price * 100.0) / 100.0;
         // FIXED: Inline the role-to-string logic instead of calling roleToString()
-        display = name.toUpper() + " - $" + formatted_price + " (" + stock + " in stock)";
+      let  display = name.toUpper() + " - $" + formatted_price.toString() + " (" + stock.toString() + " in stock)";
         return display;
     }
     
     ~calculateProductPrice<float> => products(base<float>, markup<float>, tax<float>) {
-        retail = base * markup;
-        final = retail + tax;
+      let  retail = base * markup;
+       let final = retail + tax;
         return Math.round(final * 100.0) / 100.0;
     }
     
     ~formatUserProfile<string> => users(first<string>, last<string>, role<enum>) {
-        full = first.trim() + " " + last.trim();
+      let  full = first.trim() + " " + last.trim();
         // FIXED: Inline the enum-to-string conversion instead of calling roleToString()
-        role_str = role == UserRole.GUEST ? "Guest User" :
+      let  role_str = role == UserRole.GUEST ? "Guest User" :
                    role == UserRole.USER ? "Standard User" :
                    role == UserRole.MODERATOR ? "Moderator" :
                    role == UserRole.ADMIN ? "Administrator" : "Super Administrator";
@@ -817,7 +817,7 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     }
     
     ~calculateUserScore<int> => users(base_score<int>, bonus<int>, level<int>) {
-        total = base_score + bonus + (level * 10);
+       let total = base_score + bonus + (level * 10);
         return Math.clamp(total, 0, 9999);
     }
     
@@ -826,7 +826,7 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     // ============================================================
     
     ~chainedStringOperations<string> => global(input<string>) {
-        result = input.trim()
+      let  result = input.trim()
                      .toLower()
                      .replace("  ", " ")
                      .replace("_", "-")
@@ -835,7 +835,7 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     }
     
     ~chainedArrayOperations<int> => global(numbers<array>) {
-        result = numbers.distinct()
+       let result = numbers.distinct()
                        .sort()
                        .reverse()
                        .slice(0, 5)
@@ -844,29 +844,29 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     }
     
     ~chainedNumericOperations<float> => global(value<float>) {
-        result = value.abs()
+      let  result = value.abs()
                      .round(2)
                      .toDouble();
-        final = Math.sqrt(result);
+      let  final = Math.sqrt(result);
         return Math.round(final * 100.0) / 100.0;
     }
     
     ~insaneArrayChaining<array> => global(input<array>) {
-        step1 = input.sort().reverse().distinct();
-        step2 = step1.slice(0, 10).concat(input.slice(5, 5));
-        step3 = step2.distinct().sort().reverse();
-        step4 = step3.slice(0, 15);
-        final = step4.sort();
+      let  step1 = input.sort().reverse().distinct();
+      let  step2 = step1.slice(0, 10).concat(input.slice(5, 5));
+      let  step3 = step2.distinct().sort().reverse();
+      let  step4 = step3.slice(0, 15);
+      let  final = step4.sort();
         return final;
     }
     
     ~crazyStringChaining<string> => global(text<string>) {
-        step1 = text.trim().toLower();
-        step2 = step1.replace(" ", "_").replace("-", "_");
-        step3 = step2.toUpper().substring(0, 100);
-        step4 = step3.padLeft(120, "X").padRight(150, "Y");
-        step5 = step4.trim().replace("X", "").replace("Y", "");
-        final = step5.substring(0, 50).trim();
+      let  step1 = text.trim().toLower();
+      let  step2 = step1.replace(" ", "_").replace("-", "_");
+      let  step3 = step2.toUpper().substring(0, 100);
+      let  step4 = step3.padLeft(120, "X").padRight(150, "Y");
+      let  step5 = step4.trim().replace("X", "").replace("Y", "");
+       let final = step5.substring(0, 50).trim();
         return final;
     }
     
@@ -875,12 +875,12 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     // ============================================================
     
     ~complexArithmetic<int> => global(a<int>, b<int>, c<int>, d<int>) {
-        result = ((a + b) * (c - d)) + (a * b) - (c / 2);
+       let result = ((a + b) * (c - d)) + (a * b) - (c / 2);
         return Math.round(result);
     }
     
     ~complexConditional<string> => global(score<int>, level<int>, bonus<int>) {
-        grade = score >= 90 && level > 5 ? "S-Rank" :
+      let  grade = score >= 90 && level > 5 ? "S-Rank" :
                 score >= 80 && level > 3 ? "A-Rank" :
                 score >= 70 && bonus > 100 ? "B-Rank" :
                 score >= 60 ? "C-Rank" : "D-Rank";
@@ -888,19 +888,19 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     }
     
     ~complexLogical<bool> => global(x<int>, y<int>, z<int>) {
-        condition1 = x > 10 && y < 20;
-        condition2 = z >= 5 || x == 0;
-        condition3 = (x + y) > z;
+      let  condition1 = x > 10 && y < 20;
+      let  condition2 = z >= 5 || x == 0;
+       let condition3 = (x + y) > z;
         return (condition1 || condition2) && condition3;
     }
     
     ~megaComplexExpression<int> => global(a<int>, b<int>, c<int>, d<int>, e<int>) {
-        part1 = (a + b) * c;
-        part2 = (d - e) / 2;
-        part3 = Math.pow(a, 2) + Math.pow(b, 2);
-        part4 = Math.sqrt(part3);
-        part5 = Math.abs(part1 - part2);
-        result = Math.round((part4 + part5) * 1.5);
+      let  part1 = (a + b) * c;
+      let  part2 = (d - e) / 2;
+      let  part3 = Math.pow(a, 2) + Math.pow(b, 2);
+       let part4 = Math.sqrt(part3);
+       let part5 = Math.abs(part1 - part2);
+       let result = Math.round((part4 + part5) * 1.5);
         return Math.clamp(result, 0, 10000);
     }
     
@@ -909,21 +909,21 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     // ============================================================
     
     ~nestedTernary<string> => global(value<int>) {
-        result = value > 100 ? "high" :
+      let  result = value > 100 ? "high" :
                  value > 50 ? (value > 75 ? "medium-high" : "medium") :
                  value > 25 ? "low-medium" : "low";
         return result;
     }
     
     ~deepNestedTernary<string> => global(score<int>, level<int>) {
-        result = score > 90 ? (level > 10 ? "Elite Master" : "Elite") :
+      let  result = score > 90 ? (level > 10 ? "Elite Master" : "Elite") :
                  score > 70 ? (level > 10 ? (score > 80 ? "Pro Master" : "Pro Advanced") : "Pro") :
                  score > 50 ? (level > 5 ? "Advanced" : "Intermediate") : "Beginner";
         return result;
     }
     
     ~tripleNestedTernary<int> => global(a<int>, b<int>, c<int>) {
-        result = a > b ? (b > c ? a : (a > c ? a : c)) :
+      let  result = a > b ? (b > c ? a : (a > c ? a : c)) :
                  b > c ? (a > c ? b : (b > a ? b : a)) : c;
         return result;
     }
@@ -941,16 +941,16 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     }
     
     ~createUserRecord<tuple> => global(name<string>, age<int>, score<float>) {
-        formatted_name = name.trim().toUpper();
-        clamped_age = Math.clamp(age, 0, 150);
-        rounded_score = Math.round(score * 100.0) / 100.0;
+      let  formatted_name = name.trim().toUpper();
+     let   clamped_age = Math.clamp(age, 0, 150);
+      let  rounded_score = Math.round(score * 100.0) / 100.0;
         return t:(formatted_name, clamped_age, rounded_score);
     }
     
     ~createGameStats<tuple> => global(kills<int>, deaths<int>, assists<int>, playtime<int>) {
-        kda = deaths > 0 ? (kills + assists) / deaths : kills + assists;
-        rounded_kda = Math.round(kda * 100.0) / 100.0;
-        avg_kills_per_hour = playtime > 0 ? (kills * 60.0) / playtime : 0.0;
+      let  kda = deaths > 0 ? (kills + assists) / deaths : kills + assists;
+      let  rounded_kda = Math.round(kda * 100.0) / 100.0;
+      let  avg_kills_per_hour = playtime > 0 ? (kills * 60.0) / playtime : 0.0;
         return t:(kills, deaths, assists, rounded_kda);
     }
     
@@ -959,27 +959,27 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     // ============================================================
     
     ~testVariableScopes<int> => global(input<int>) {
-        local1 = input * 2;
-        local2 = local1 + 10;
-        local3 = local2 - 5;
-        
+      let  local1 = input * 2;
+      let  local2 = local1 + 10;
+      let  local3 = local2 - 5;
+        let mut result = 0;
         if: local3 > 50 {
             result = local3 * 2;
             return result;
         }
         elif: local3 > 25 {
-            temp = local3 + 15;
+       let     temp = local3 + 15;
             result = temp * 1.5;
             return Math.round(result);
         }
         else {
-            final = local3 - 10;
+         let   final = local3 - 10;
             return Math.max(final, 0);
         }
     }
     
     ~arithmeticAssignments<int> => global(base<int>) {
-        counter = 0;
+     let mut   counter = 0;
         counter += base;
         counter += 10;
         counter *= 2;
@@ -993,11 +993,11 @@ drop_chance_rounded = Math.round(drop_chance * 100.0) / 100.0;
     // ============================================================
     
     ~debugCalculation<int> => global(a<int>, b<int>) {
-        sum = a + b;
-        log: "Sum calculated: " + sum;
+       let sum = a + b;
+        log: "Sum calculated: " + sum.toString();
         
-        product = a * b;
-        log: "Product calculated: " + product;
+      let  product = a * b;
+        log: "Product calculated: " + product.toString();
         
         if: sum > product {
             log: "Sum is greater";

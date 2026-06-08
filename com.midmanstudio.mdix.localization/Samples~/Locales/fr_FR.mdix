@@ -1,40 +1,45 @@
-// com.midmanstudio.mdix.localization/Samples~/Locales/fr_FR.mdix
+// com.midmanstudio.mdix.localization/Samples~/fr_FR.mdix
+
 @CONFIG(
-  version  -> "1.0.0"
-  locale   -> "fr_FR"
-  fallback -> "en_US"
+  version -> "2.0.0"
+  author  -> "MidMan Studio"
+)
+
+@IMPORTS(
+  loc from "localization_helpers.mdix"
 )
 
 @DATA(
+  // ── Locale identity ──────────────────────────────────────────────────────────
+
   locale_display_name<string> = "Français (France)"
+  locale_bcp47<string>        = "fr-FR"
+  locale_plural_rule<enum>    = loc.PluralRule.ONE_OTHER
+  locale_script_dir<enum>     = loc.ScriptDir.LTR
+  locale_gender_sys<enum>     = loc.GenderSystem.MASC_FEM
 
-  ui: play = "Jouer", settings = "Paramètres", quit = "Quitter", back = "Retour"
-  ui: resume = "Reprendre", loading = "Chargement...", ok = "OK", cancel = "Annuler"
+  // ── Plural keys ───────────────────────────────────────────────────────────────
 
-  menu: new_game = "Nouvelle Partie", load_game = "Charger", credits = "Crédits"
+  plural_enemies = loc.p2("1 ennemi",  "{0} ennemis")
+  plural_coins   = loc.p2("1 pièce",   "{0} pièces")
+  plural_items   = loc.p2("1 objet",   "{0} objets")
+  plural_lives   = loc.p2("1 vie",     "{0} vies")
 
-  gameplay: score = "Score : {0}", level = "Niveau {0}", lives = "Vies : {0}"
-  gameplay: wave = "Vague {0}", time = "Temps : {0}"
+  // ── Annotated keys ────────────────────────────────────────────────────────────
 
-  notify: level_up = "Niveau Supérieur !"
-  notify: game_over = "Partie Terminée"
-  notify: new_record = "Nouveau Record : {0} !"
+  hud_score   = loc.key("Score : {0}",    "HUD compteur de score — {0} est la valeur",       20)
+  hud_health  = loc.key("PV : {0}",       "HUD points de vie — {0} est la valeur actuelle",  12)
+  hud_level   = loc.key("Niveau {0}",     "HUD indicateur de niveau — {0} est le numéro",    14)
+  ui_new_game = loc.key("Nouvelle partie", "Menu principal — démarrer une nouvelle partie",  20)
+  ui_resume   = loc.key("Reprendre",       "Menu pause — reprendre la partie en cours",       16)
+  ui_quit     = loc.key("Quitter",         "Quitter le jeu entièrement",                      12)
 
-  items: sword = "Épée en Fer", potion = "Potion de Soin", shield = "Bouclier en Bois"
-  items: gold = "Pièce d'Or", gem = "Gemme de Rubis"
+  // ── Grouped string tables ─────────────────────────────────────────────────────
 
-  tutorial: hint_move = "Utilisez ZQSD ou les flèches pour vous déplacer"
-  tutorial: hint_attack = "Appuyez sur Espace pour attaquer"
-  tutorial: hint_dodge = "Double appui pour esquiver"
-
-  enemies: goblin = "Gobelin", orc = "Orque", dragon = "Dragon"
-
-  // French plural: 0 and 1 use singular form in some cases
-  plural_enemies::  "Aucun ennemi", "1 ennemi", "{0} ennemis"
-  plural_coins::    "Aucune pièce", "1 pièce",  "{0} pièces"
-  plural_items::    "Aucun objet",  "1 objet",  "{0} objets"
-
-  errors: save_failed = "Échec de la sauvegarde : {0}"
-  errors: load_failed = "Impossible de charger la sauvegarde"
-  errors: network_err = "Erreur réseau. Vérifiez votre connexion."
+  fmt:      decimal_sep = ",",  thousands_sep = " ",  date_pattern = "DD/MM/YYYY"
+  ui:       play = "Jouer",  settings = "Paramètres",  back = "Retour",  confirm = "Confirmer",  cancel = "Annuler"
+  menu:     start = "Nouvelle partie",  options = "Options",  credits = "Crédits",  exit = "Quitter"
+  gameplay: paused = "En pause",  game_over = "Fin de partie",  victory = "Victoire !",  loading = "Chargement…"
+  errors:   load_failed = "Échec du chargement",  network = "Erreur réseau",  save_failed = "Échec de la sauvegarde"
+  prompts:  are_you_sure = "Êtes-vous sûr ?",  yes = "Oui",  no = "Non"
 )

@@ -7,15 +7,14 @@ use std::{env, fs, path::Path};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use dixscript::Compiler::Core::{
-    BinarySerialization::BinaryPacker, Config::ConfigSectionHandler,
+    BinarySerialization::BinaryPacker,
+    Config::{ConfigSectionHandler, OperationalSettings},
     GeneralAstEnhancer, GeneralParser, GeneralSemanticAnalyzer,
-    Tokenizer::Tokenizer,
+    Tokenizer::{split_config_tokens, Tokenizer},
 };
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    // serialize_target.mdix lives in the dlm fixtures directory — there is no
-    // separate "binary" fixtures directory in this workspace.
     let input_path = args
         .get(1)
         .map(String::as_str)
@@ -25,19 +24,26 @@ fn main() {
     let source = fs::read_to_string(input_path)
         .unwrap_or_else(|e| panic!("cannot read {}: {}", input_path, e));
 
+    // Stage 1: tokenize full source with minimal initial settings
+    let initial    = OperationalSettings::default();
+    let tok_result = Tokenizer::new(&source, &initial).tokenize();
+
+    // Stage 2: split @CONFIG tokens from the rest of the stream
+    let split = split_config_tokens(tok_result.tokens);
+
+    // Stage 3: process @CONFIG to derive operational settings
     let mut config_handler = ConfigSectionHandler::new(None);
-    let config_result = config_handler.process_config_section(&source);
+    let config_result      = config_handler.process_config_tokens(&split.config_tokens);
+
     let mut settings = config_result.operational_settings;
     settings.source_file_path = Some(input_path.to_string());
 
-    let tokenizer = Tokenizer::new(&config_result.cleaned_input_string, &settings);
-    let tok_result = tokenizer.tokenize();
-
-    let parser =
-        GeneralParser::new(tok_result.tokens, &config_result.config_section, &settings)
-            .unwrap_or_else(|e| panic!("parser init: {}", e.message()));
+    // Stage 4: parse the rest of the token stream
+    let parser = GeneralParser::new(split.rest_tokens, &config_result.config_section, &settings)
+        .unwrap_or_else(|e| panic!("parser init: {}", e.message()));
     let ast = parser.parse().unwrap_or_else(|e| panic!("parse: {}", e.message()));
 
+    // Stage 5: semantic analysis
     let sem_result = GeneralSemanticAnalyzer::new(&ast, &settings).analyze();
     if !sem_result.is_success {
         eprintln!(
@@ -46,11 +52,12 @@ fn main() {
         );
     }
 
-    let enh_result =
-        GeneralAstEnhancer::new(&settings).enhance(&ast, Some(&sem_result));
+    // Stage 6: AST enhancement
+    let enh_result = GeneralAstEnhancer::new(&settings).enhance(&ast, Some(&sem_result));
 
-    let mut packer = BinaryPacker::new();
-    let pack_result = packer.pack(&enh_result.enhanced_ast);
+    // Stage 7: binary pack
+    let mut packer    = BinaryPacker::new();
+    let pack_result   = packer.pack(&enh_result.enhanced_ast);
 
     if !pack_result.is_success {
         eprintln!("pack errors: {:?}", pack_result.errors);
@@ -76,9 +83,9 @@ fn main() {
     let meta = format!(
         r#"{{"input":"{input_path}","size_bytes":{size},"sections":{sections},"compression_ratio":{ratio:.4}}}"#,
         input_path = input_path,
-        size = binary.len(),
-        sections = pack_result.statistics.total_sections,
-        ratio = pack_result.compression_ratio,
+        size       = binary.len(),
+        sections   = pack_result.statistics.total_sections,
+        ratio      = pack_result.compression_ratio,
     );
     fs::write(format!("{}/{}.json", output_dir, stem), &meta).unwrap();
 
@@ -101,25 +108,17 @@ fn build_hex_dump(data: &[u8]) -> String {
     for (i, chunk) in data.chunks(16).enumerate() {
         out.push_str(&format!("{:08x}  ", i * 16));
         for (j, byte) in chunk.iter().enumerate() {
-            if j == 8 {
-                out.push(' ');
-            }
+            if j == 8 { out.push(' '); }
             out.push_str(&format!("{:02x} ", byte));
         }
         let pad = 16 - chunk.len();
         for j in 0..pad {
-            if chunk.len() + j == 8 {
-                out.push(' ');
-            }
+            if chunk.len() + j == 8 { out.push(' '); }
             out.push_str("   ");
         }
         out.push_str(" |");
         for byte in chunk {
-            out.push(if *byte >= 0x20 && *byte < 0x7f {
-                *byte as char
-            } else {
-                '.'
-            });
+            out.push(if *byte >= 0x20 && *byte < 0x7f { *byte as char } else { '.' });
         }
         out.push_str("|\n");
     }

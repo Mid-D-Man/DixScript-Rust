@@ -1,0 +1,68 @@
+// com.midmanstudio.mdix.localization/Samples~/localization_helpers.mdix
+
+@CONFIG(
+  version  -> "2.0.0"
+  author   -> "MidMan Studio"
+  features -> "advanced"
+)
+
+@ENUMS(
+  PluralRule   { ONE_OTHER, ZERO_ONE_OTHER, SLAVIC, ARABIC, NONE }
+  ScriptDir    { LTR, RTL }
+  GenderSystem { NONE, MASC_FEM, FULL }
+)
+
+@QUICKFUNCS(
+
+  // Two-form plural — ONE_OTHER locales (English, German, Spanish, French …)
+  // Produces: key.one, key.other
+  ~p2<object>(one<string>, other<string>) {
+    return {
+      one   = one
+      other = other
+    }
+  }
+
+  // Four-form plural — SLAVIC locales (Russian, Polish, Ukrainian, Czech …)
+  // Produces: key.zero, key.one, key.few, key.many
+  ~p4<object>(zero<string>, one<string>, few<string>, many<string>) {
+    return {
+      zero = zero
+      one  = one
+      few  = few
+      many = many
+    }
+  }
+
+  // Annotated string — bakes note, char-limit, and over-limit flag at parse time.
+  // Produces: key.value, key.note, key.max_chars, key.valid, key.warning
+  ~key<object>(value<string>, note<string>, max_chars<int>) {
+    let over = value.length() > max_chars
+    return {
+      value     = value
+      note      = note
+      max_chars = max_chars
+      valid     = !over
+      warning   = over ? $"OVER: {value.length()} > {max_chars} chars" : ""
+    }
+  }
+
+  // Gender pair — masculine / feminine forms for fully inflected locales.
+  // Produces: key.masc, key.fem
+  ~g<object>(masc<string>, fem<string>) {
+    return {
+      masc = masc
+      fem  = fem
+    }
+  }
+
+  // UI display / screen-reader accessibility pair.
+  // Produces: key.display, key.a11y
+  ~ui<object>(display<string>, a11y<string>) {
+    return {
+      display = display
+      a11y    = a11y
+    }
+  }
+
+)

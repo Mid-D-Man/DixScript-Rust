@@ -1,61 +1,45 @@
-// com.midmanstudio.mdix.localization/Samples~/Locales/en_US.mdix
-// ─────────────────────────────────────────────────────────────────────────
-// English (United States) locale file.
-// Key format: category.key or category: key1 = "val1", key2 = "val2"
-// Variable substitution: {0}, {1}, {2} → String.Format style
-// Plural arrays: [0]=zero, [1]=one, [2]=few/many (extend per language)
-// ─────────────────────────────────────────────────────────────────────────
+// com.midmanstudio.mdix.localization/Samples~/en_US.mdix
 
 @CONFIG(
-  version  -> "1.0.0"
-  locale   -> "en_US"
-  fallback -> "en_US"
+  version -> "2.0.0"
+  author  -> "MidMan Studio"
 )
 
-@ENUMS(
-  PluralCategory { ZERO, ONE, OTHER }
+@IMPORTS(
+  loc from "localization_helpers.mdix"
 )
 
 @DATA(
-  // ── Meta ──────────────────────────────────────────────────────────────
+  // ── Locale identity (flat SimpleProperty, must precede all grouped entries) ──
+
   locale_display_name<string> = "English (US)"
+  locale_bcp47<string>        = "en-US"
+  locale_plural_rule<enum>    = loc.PluralRule.ONE_OTHER
+  locale_script_dir<enum>     = loc.ScriptDir.LTR
+  locale_gender_sys<enum>     = loc.GenderSystem.NONE
 
-  // ── UI ─────────────────────────────────────────────────────────────────
-  ui: play = "Play", settings = "Settings", quit = "Quit", back = "Back"
-   resume = "Resume", loading = "Loading...", ok = "OK", cancel = "Cancel"
+  // ── Plural keys — p2 produces .one and .other sub-keys ──────────────────────
 
-  // ── Main Menu ─────────────────────────────────────────────────────────
-  menu: new_game = "New Game", load_game = "Load Game", credits = "Credits"
+  plural_enemies = loc.p2("1 enemy",  "{0} enemies")
+  plural_coins   = loc.p2("1 coin",   "{0} coins")
+  plural_items   = loc.p2("1 item",   "{0} items")
+  plural_lives   = loc.p2("1 life",   "{0} lives")
 
-  // ── Gameplay ───────────────────────────────────────────────────────────
-  gameplay: score = "Score: {0}", level = "Level {0}", lives = "Lives: {0}"
-   wave = "Wave {0}", time = "Time: {0}"
+  // ── Annotated keys — key() bakes note, max_chars, valid, warning ─────────────
 
-  // ── Notifications ──────────────────────────────────────────────────────
-  notify: level_up = "Level Up!"
-  game_over = "Game Over"
-   new_record = "New Record: {0}!"
+  hud_score   = loc.key("Score: {0}",  "HUD score counter — {0} is the score value",      20)
+  hud_health  = loc.key("HP: {0}",     "HUD health bar label — {0} is current HP",        12)
+  hud_level   = loc.key("Level {0}",   "HUD level indicator — {0} is the level number",   12)
+  ui_new_game = loc.key("New Game",    "Main menu — start a new game",                     16)
+  ui_resume   = loc.key("Resume",      "Pause menu — resume the current game",             12)
+  ui_quit     = loc.key("Quit",        "Quit the game entirely",                           10)
 
-  // ── Items ──────────────────────────────────────────────────────────────
-  items: sword = "Iron Sword", potion = "Health Potion", shield = "Wooden Shield"
-   gold = "Gold Coin", gem = "Ruby Gem"
+  // ── Grouped string tables (each TablePath defined exactly once) ───────────────
 
-  // ── Tutorial ───────────────────────────────────────────────────────────
-  tutorial: hint_move = "Use WASD or arrow keys to move"
-   hint_attack = "Press Space to attack"
-   hint_dodge = "Double-tap a direction to dodge"
-
-  // ── Enemies ────────────────────────────────────────────────────────────
-  enemies: goblin = "Goblin", orc = "Orc", dragon = "Dragon"
-
-  // ── Plural forms (indexed by plural category) ──────────────────────────
-  // English rule: 0 → "0 enemies", 1 → "1 enemy", 2+ → "{0} enemies"
-  plural_enemies::  "No enemies", "1 enemy", "{0} enemies"
-  plural_coins::    "No coins",   "1 coin",  "{0} coins"
-  plural_items::    "No items",   "1 item",  "{0} items"
-
-  // ── Error / system messages ────────────────────────────────────────────
-  errors: save_failed = "Failed to save: {0}"
-   load_failed = "Failed to load save file"
-   network_err = "Network error. Check your connection."
+  fmt:      decimal_sep = ".",  thousands_sep = ",",  date_pattern = "MM/DD/YYYY"
+  ui:       play = "Play",  settings = "Settings",  back = "Back",  confirm = "Confirm",  cancel = "Cancel"
+  menu:     start = "Start Game",  options = "Options",  credits = "Credits",  exit = "Exit"
+  gameplay: paused = "Paused",  game_over = "Game Over",  victory = "Victory!",  loading = "Loading…"
+  errors:   load_failed = "Failed to load",  network = "Network error",  save_failed = "Save failed"
+  prompts:  are_you_sure = "Are you sure?",  yes = "Yes",  no = "No"
 )

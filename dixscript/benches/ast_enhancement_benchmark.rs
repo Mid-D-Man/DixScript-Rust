@@ -10,22 +10,25 @@
 //!   Stage 6: GeneralAstEnhancer::new(&settings).enhance(&ast, Some(&sem))  ← measured here
 //!
 //! Groups:
-//!   ast_enhancement     — stage 6 in isolation (pre-parsed + pre-analysed)
-//!   enhancement_pipeline— stages 1-6 end-to-end, with stage 1-5 baseline
+//!   ast_enhancement      — stage 6 in isolation (pre-parsed + pre-analysed)
+//!   enhancement_pipeline — stages 1-6 end-to-end, with stage 1-5 baseline
 
 use criterion::{
     black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
 };
-use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
-use dixscript::Compiler::Core::Enhancement::GeneralAstEnhancer;
-use dixscript::Compiler::Core::GeneralParser;
-use dixscript::Compiler::Core::Semantics::GeneralSemanticAnalyzer;
-use dixscript::Compiler::Core::Tokenizer::{split_config_tokens, Tokenizer};
+use dixscript::Compiler::Core::{
+    Config::{ConfigSectionHandler, OperationalSettings},
+    GeneralAstEnhancer,
+    GeneralParser,
+    GeneralSemanticAnalyzer,
+    SemanticAnalysisResult,
+    Tokenizer::{split_config_tokens, Tokenizer},
+};
 use dixscript::DixScript;
 use std::time::Duration;
 
 // =============================================================================
-// Test inputs (same set as semantics_benchmark — covers the same spectrum)
+// Test inputs
 // =============================================================================
 
 const SIMPLE_DATA: &str = r#"@CONFIG(
@@ -162,7 +165,7 @@ const COMPLEX_ALL: &str = r#"@CONFIG(
 )"#;
 
 // =============================================================================
-// Pipeline helpers — updated for token-based flow
+// Pipeline helpers
 // =============================================================================
 
 /// Stages 1-4: source → parsed AST.
@@ -180,11 +183,145 @@ fn parse_to_ast(source: &str) -> (DixScript, OperationalSettings) {
 }
 
 /// Stages 1-5: source → parsed AST + semantic result.
-/// Enhancement (stage 6) needs both, so we pre-build them here.
-fn parse_and_analyze(
-    source: &str,
-) -> (DixScript, <GeneralSemanticAnalyzer as Analyzer>::Output, OperationalSettings) {
+/// Enhancement (stage 6) needs both, so we pre-build them here outside the timed loop.
+fn parse_and_analyze(source: &str) -> (DixScript, SemanticAnalysisResult, OperationalSettings) {
     let (ast, settings) = parse_to_ast(source);
     let sem = GeneralSemanticAnalyzer::new(&ast, &settings).analyze();
     (ast, sem, settings)
 }
+
+// =============================================================================
+// Benchmark 1 — enhancement in isolation
+//
+// AST and SemanticAnalysisResult are pre-built once outside the timed loop.
+// iter_batched clones the AST in the unmeasured setup phase so the timed
+// closure gets a fresh value each iteration.
+// GeneralAstEnhancer consumes self via enhance(), so a new one is built per iter.
+// =============================================================================
+
+fn bench_ast_enhancement(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ast_enhancement");
+    group.measurement_time(Duration::from_secs(8));
+    group.sample_size(100);
+
+    for (label, src) in &[
+        ("simple_data",     SIMPLE_DATA),
+        ("enum_heavy",      ENUM_HEAVY),
+        ("func_call_heavy", FUNC_CALL_HEAVY),
+        ("complex_all",     COMPLEX_ALL),
+    ] {
+        let (ast, sem, settings) = parse_and_analyze(src);
+        group.throughput(Throughput::Bytes(src.len() as u64));
+        group.bench_with_input(
+            BenchmarkId::new("enhance_only", label),
+            &(),
+            |b, _| {
+                b.iter_batched(
+                    || ast.clone(),
+                    |a| {
+                        let enhancer = GeneralAstEnhancer::new(&settings);
+                        black_box(enhancer.enhance(black_box(&a), Some(&sem)))
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+
+    // Real .dixscript file (optional, skipped if not found)
+    if let Ok(real_src) =
+        std::fs::read_to_string("../../mdix_files/intermediate/ComplexFull.mdix")
+    {
+        let (ast, sem, settings) = parse_and_analyze(&real_src);
+        group.throughput(Throughput::Bytes(real_src.len() as u64));
+        group.bench_function("real_file_enhance_only", |b| {
+            b.iter_batched(
+                || ast.clone(),
+                |a| {
+                    let enhancer = GeneralAstEnhancer::new(&settings);
+                    black_box(enhancer.enhance(black_box(&a), Some(&sem)))
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    group.finish();
+}
+
+// =============================================================================
+// Benchmark 2 — full pipeline through enhancement
+//
+// Two variants per input:
+//   tokenize_parse_analyze         — stages 1-5 (baseline, no enhancement)
+//   tokenize_parse_analyze_enhance — stages 1-6 (full)
+//
+// Subtracting the two isolates the enhancement cost from the rest of the
+// pipeline without needing a separate isolation benchmark.
+// =============================================================================
+
+fn bench_enhancement_pipeline(c: &mut Criterion) {
+    let mut group = c.benchmark_group("enhancement_pipeline");
+    group.measurement_time(Duration::from_secs(10));
+    group.sample_size(80);
+
+    let initial = OperationalSettings::default();
+
+    for (label, src) in &[
+        ("simple_data",     SIMPLE_DATA),
+        ("enum_heavy",      ENUM_HEAVY),
+        ("func_call_heavy", FUNC_CALL_HEAVY),
+        ("complex_all",     COMPLEX_ALL),
+    ] {
+        group.throughput(Throughput::Bytes(src.len() as u64));
+
+        // Stages 1-5 (no enhancement) — used as subtraction baseline
+        group.bench_with_input(
+            BenchmarkId::new("tokenize_parse_analyze", label),
+            src,
+            |b, s| {
+                b.iter(|| {
+                    let tok   = Tokenizer::new(black_box(s), &initial).tokenize();
+                    let split = split_config_tokens(tok.tokens);
+                    let mut h = ConfigSectionHandler::new(None);
+                    let cfg   = h.process_config_tokens(&split.config_tokens);
+                    let st    = cfg.operational_settings.clone();
+                    let p     = GeneralParser::new(split.rest_tokens, &cfg.config_section, &st)
+                        .expect("parser init");
+                    let ast   = p.parse().expect("parse failed");
+                    black_box(GeneralSemanticAnalyzer::new(&ast, &st).analyze())
+                });
+            },
+        );
+
+        // Stages 1-6 (full pipeline up to and including enhancement)
+        group.bench_with_input(
+            BenchmarkId::new("tokenize_parse_analyze_enhance", label),
+            src,
+            |b, s| {
+                b.iter(|| {
+                    let tok   = Tokenizer::new(black_box(s), &initial).tokenize();
+                    let split = split_config_tokens(tok.tokens);
+                    let mut h = ConfigSectionHandler::new(None);
+                    let cfg   = h.process_config_tokens(&split.config_tokens);
+                    let st    = cfg.operational_settings.clone();
+                    let p     = GeneralParser::new(split.rest_tokens, &cfg.config_section, &st)
+                        .expect("parser init");
+                    let ast   = p.parse().expect("parse failed");
+                    let sem   = GeneralSemanticAnalyzer::new(&ast, &st).analyze();
+                    let enhancer = GeneralAstEnhancer::new(&st);
+                    black_box(enhancer.enhance(&ast, Some(&sem)))
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+// =============================================================================
+// Registration
+// =============================================================================
+
+criterion_group!(benches, bench_ast_enhancement, bench_enhancement_pipeline);
+criterion_main!(benches);

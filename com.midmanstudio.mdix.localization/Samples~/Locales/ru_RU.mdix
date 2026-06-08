@@ -1,0 +1,54 @@
+// com.midmanstudio.mdix.localization/Samples~/ru_RU.mdix
+
+@CONFIG(
+  version -> "2.0.0"
+  author  -> "MidMan Studio"
+)
+
+@IMPORTS(
+  loc from "localization_helpers.mdix"
+)
+
+@DATA(
+  // ── Locale identity ──────────────────────────────────────────────────────────
+
+  locale_display_name<string> = "Русский"
+  locale_bcp47<string>        = "ru-RU"
+  locale_plural_rule<enum>    = loc.PluralRule.SLAVIC
+  locale_script_dir<enum>     = loc.ScriptDir.LTR
+  locale_gender_sys<enum>     = loc.GenderSystem.FULL
+
+  // ── Plural keys — p4 produces .zero .one .few .many ──────────────────────────
+  // Runtime pre-empts the resolver for count == 0 and uses .zero directly.
+  // SLAVIC rule (count % 10 == 1 && count % 100 != 11 → one;
+  //              count % 10 in 2..4 && count % 100 not in 12..14 → few; else → many)
+
+  plural_enemies = loc.p4("Нет врагов",     "{0} враг",    "{0} врага",    "{0} врагов")
+  plural_coins   = loc.p4("Нет монет",      "{0} монета",  "{0} монеты",   "{0} монет")
+  plural_items   = loc.p4("Нет предметов",  "{0} предмет", "{0} предмета", "{0} предметов")
+  plural_lives   = loc.p4("Нет жизней",     "{0} жизнь",   "{0} жизни",    "{0} жизней")
+
+  // ── Gender pairs — g() produces .masc and .fem sub-keys ──────────────────────
+
+  notify_enemy_down  = loc.g("Враг уничтожен",     "Цель уничтожена")
+  notify_boss_down   = loc.g("Босс побеждён",       "Боссиня побеждена")
+  notify_player_lost = loc.g("Игрок выбыл",         "Игрок выбыла")
+
+  // ── Annotated keys ────────────────────────────────────────────────────────────
+
+  hud_score   = loc.key("Счёт: {0}",     "HUD: счётчик очков — {0} является значением",       20)
+  hud_health  = loc.key("ОЗ: {0}",       "HUD: очки здоровья — {0} является текущим значением", 12)
+  hud_level   = loc.key("Уровень {0}",   "HUD: номер уровня — {0} является номером",           16)
+  ui_new_game = loc.key("Новая игра",    "Главное меню — начать новую игру",                    16)
+  ui_resume   = loc.key("Продолжить",    "Меню паузы — продолжить текущую игру",               16)
+  ui_quit     = loc.key("Выход",         "Полный выход из игры",                               12)
+
+  // ── Grouped string tables ─────────────────────────────────────────────────────
+
+  fmt:      decimal_sep = ",",  thousands_sep = " ",  date_pattern = "DD.MM.YYYY"
+  ui:       play = "Играть",  settings = "Настройки",  back = "Назад",  confirm = "Подтвердить",  cancel = "Отмена"
+  menu:     start = "Начать игру",  options = "Параметры",  credits = "Авторы",  exit = "Выход"
+  gameplay: paused = "Пауза",  game_over = "Игра окончена",  victory = "Победа!",  loading = "Загрузка…"
+  errors:   load_failed = "Ошибка загрузки",  network = "Ошибка сети",  save_failed = "Ошибка сохранения"
+  prompts:  are_you_sure = "Вы уверены?",  yes = "Да",  no = "Нет"
+)

@@ -17,7 +17,7 @@ use criterion::{
 };
 use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
 use dixscript::Compiler::Core::GeneralParser;
-use dixscript::Compiler::Core::Semantics::GeneralSemanticAnalyzer;
+use dixscript::Compiler::Core::GeneralSemanticAnalyzer;
 use dixscript::Compiler::Core::Tokenizer::{split_config_tokens, Tokenizer};
 use dixscript::DixScript;
 use std::time::Duration;

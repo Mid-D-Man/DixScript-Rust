@@ -290,6 +290,8 @@ jobs:
         continue-on-error: true
         run: |
           {
+            echo "=== format_comparison_benchmark ==="
+            cargo bench --bench format_comparison_benchmark --color=never 2>&1 || true
             echo "=== throughput_benchmark ==="
             cargo bench --bench throughput_benchmark --color=never 2>&1 || true
             echo "=== lexer_throughput ==="
@@ -308,6 +310,8 @@ jobs:
             cargo bench --bench binary_serialization_benchmark --color=never 2>&1 || true
             echo "=== runtime_benchmark ==="
             cargo bench --bench runtime_benchmark --color=never 2>&1 || true
+            echo "=== stress_test_benchmark ==="
+            cargo bench --bench stress_test_benchmark --color=never 2>&1 || true
           } | tee bench-raw.txt
 
       - name: Parse benchmark results to JSON
@@ -502,6 +506,7 @@ jobs:
         continue-on-error: true
         run: |
           cargo build --profile bench \
+            --bench format_comparison_benchmark \
             --bench throughput_benchmark \
             --bench lexer_throughput \
             --bench config_throughput \
@@ -511,6 +516,7 @@ jobs:
             --bench value_resolution_benchmark \
             --bench binary_serialization_benchmark \
             --bench runtime_benchmark \
+            --bench stress_test_benchmark \
             2>&1 || true
 
       - name: Generate flamegraphs
@@ -533,6 +539,7 @@ jobs:
             fi
           }
 
+          run_flame "format_comparison_benchmark"    "format_comparison_benchmark"
           run_flame "throughput_benchmark"           "throughput_benchmark"
           run_flame "lexer_throughput"               "lexer_throughput"
           run_flame "config_throughput"              "config_throughput"
@@ -542,6 +549,7 @@ jobs:
           run_flame "value_resolution_benchmark"     "value_resolution_benchmark"
           run_flame "binary_serialization_benchmark" "binary_serialization_benchmark"
           run_flame "runtime_benchmark"              "runtime_benchmark"
+          run_flame "stress_test_benchmark"          "stress_test_benchmark"
 
       - name: Build flamegraph index HTML
         run: |

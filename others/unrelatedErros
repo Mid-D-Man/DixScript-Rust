@@ -1,3 +1,1 @@
-Logical NOT requires bool, got String in 'somethingBigger' Suggestion: Use a comparison to create a boolean value. dixscript:semantic (QFUNC038)
-
-⚙ Compile failed: ✗ Compile error: Semantic analysis failed: ["Logical NOT requires bool, got String in 'validateServerConfig'", "Type 'Bool' has no instance method 'contains'"]
+<html>Function 'lambdaInObject' returns Object but declared return type is Int<br/>Suggestion: Change the return value to match Int or update the function return type

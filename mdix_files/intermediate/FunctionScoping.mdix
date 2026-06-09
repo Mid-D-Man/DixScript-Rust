@@ -15,29 +15,29 @@
 
 @QUICKFUNCS(
     ~globalCalculate<int> => global (x<int>, y<int>) {
-        result = x * y + 10;
+      let  result = x * y + 10;
         return result;
     }
     
     ~globalFormat<string> => global (name<string>, id<int>) {
-        formatted = $"{name}_{id}";
+       let formatted = $"{name}_{id}";
         return formatted;
     }
     
     ~scopedUserValidation<bool> => user.data (username<string>, age<int>) {
-        name_valid = username.length() > 3;
-        age_valid = age >= 18 && age <= 120;
+     let   name_valid = username.length() > 3;
+     let   age_valid = age >= 18 && age <= 120;
         return name_valid && age_valid;
     }
   
     ~scopedServerCheck<bool> => server.config (port<int>, timeout<int>) {
-        port_ok = port > 1024 && port < 65535;
-        timeout_ok = timeout > 0 && timeout < 60000;
+      let  port_ok = port > 1024 && port < 65535;
+     let   timeout_ok = timeout > 0 && timeout < 60000;
         return port_ok && timeout_ok;
     }
     
     ~scopedDatabaseInit<string> => database.settings (host<string>, db_name<string>) {
-        connection_string = $"{host}/{db_name}";
+     let   connection_string = $"{host}/{db_name}";
         return connection_string;
     }
 )

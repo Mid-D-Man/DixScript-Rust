@@ -191,8 +191,8 @@
 
       let max_value = unique_values.max();
       let min_value = unique_values.min();
-      let avg_value = unique_values.average();
-      let sum_value = unique_values.sum();
+      let mut avg_value = unique_values.average();
+      let mut sum_value = unique_values.sum();
 
       log: $"Max: {max_value}, Min: {min_value}";
       log: $"Average: {avg_value}, Sum: {sum_value}";
@@ -200,11 +200,11 @@
       result = (avg_value * access_multiplier) + (unique_count * 10.0);
     } elif: unique_count > 5 {
       log: "Medium size - basic statistics";
-      let avg_value = unique_values.average();
+       avg_value = unique_values.average();
       result = avg_value * access_multiplier;
     } else {
       log: "Small size - simple calculation";
-      let sum_value = unique_values.sum();
+       sum_value = unique_values.sum();
       result = sum_value * access_multiplier;
     }
 
@@ -520,7 +520,7 @@
         average = Math.round(values_avg * 100.0) / 100.0,
         top_values = top_three
       },
-      timestamp = formatted_time,
+      _timestamp = formatted_time,
       metadata_provided = true
     };
 

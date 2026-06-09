@@ -39,7 +39,7 @@
   ~databaseNode<object>(id<string>, dtype<enum>, host<string>, port<int>, replicas<int>, storage_class<enum>) {
     let read_replicas<int>  = replicas
     let write_primary<bool> = true
-    let backup_enabled<bool>= storage_class != StorageClass.ARCHIVE
+    let backup_enabled<bool> = storage_class != StorageClass.ARCHIVE
     return {
       id             = id
       type           = dtype

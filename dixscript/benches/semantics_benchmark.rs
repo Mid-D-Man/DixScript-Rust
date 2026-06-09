@@ -19,7 +19,7 @@ use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSetting
 use dixscript::Compiler::Core::GeneralParser;
 use dixscript::Compiler::Core::GeneralSemanticAnalyzer;
 use dixscript::Compiler::Core::Tokenizer::{split_config_tokens, Tokenizer};
-use dixscript::DixScript;
+use dixscript::Compiler::AST::DixScript;
 use std::time::Duration;
 
 // =============================================================================

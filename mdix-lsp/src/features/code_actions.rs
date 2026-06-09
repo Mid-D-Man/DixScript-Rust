@@ -204,6 +204,13 @@ fn fix_insert_security(doc: &Document, algorithm: &str) -> Option<CodeAction> {
     Some(make_action(&title, CodeActionKind::QUICKFIX, doc.uri.clone(), vec![edit], true))
 }
 
+/// Build a complete @SECURITY block for the given algorithm.
+///
+/// Always includes both an `encryption` block **and** a `keystore` block with
+/// `auto_generate = true`.  Without `keystore → { auto_generate = true }` the
+/// compiler expects an existing key file and will not produce a `.mdix.key`
+/// output — which is the unintuitive behaviour this function is designed to
+/// avoid.
 fn build_security_block(prefix: &str, algorithm: &str) -> String {
     match algorithm {
         "xor" => format!(
@@ -213,6 +220,9 @@ fn build_security_block(prefix: &str, algorithm: &str) -> String {
              \x20 encryption -> {{\n\
              \x20   mode      = \"keyfile\",\n\
              \x20   algorithm = \"xor\"\n\
+             \x20 }}\n\
+             \x20 keystore -> {{\n\
+             \x20   auto_generate = true\n\
              \x20 }}\n\
              )\n",
             prefix
@@ -231,6 +241,9 @@ fn build_security_block(prefix: &str, algorithm: &str) -> String {
                  \x20 encryption -> {{\n\
                  \x20   mode      = \"keyfile\",\n\
                  \x20   algorithm = \"{}\"\n\
+                 \x20 }}\n\
+                 \x20 keystore -> {{\n\
+                 \x20   auto_generate = true\n\
                  \x20 }}\n\
                  )\n",
                 prefix, sec_algo
@@ -255,6 +268,9 @@ fn algorithm_display_name(algorithm: &str) -> &str {
 // `encryption` entry.  This covers the case where the user has written an
 // empty `@SECURITY()` block (so SEC001 is suppressed) but the encryption
 // configuration is still missing.
+//
+// Also inserts `keystore → { auto_generate = true }` so that compilation
+// immediately produces a `.mdix.key` file without any further edits.
 
 fn provide_complete_security_actions(doc: &Document) -> Vec<CodeActionOrCommand> {
     let ast = match &doc.ast { Some(a) => a, None => return vec![] };
@@ -287,15 +303,21 @@ fn provide_complete_security_actions(doc: &Document) -> Vec<CodeActionOrCommand>
         .map(|t| t.line.saturating_sub(1) as u32)
         .unwrap_or(0);
 
-    // Insert the encryption block immediately after the @SECURITY( opening.
+    // Insert the encryption + keystore blocks immediately after the
+    // @SECURITY( opening line.
     let insert_line = security_kw_line + 1;
     let insert_pos  = Position::new(insert_line, 0);
 
+    // Build the entry text including both the encryption block and the
+    // keystore block so a `.mdix.key` file is generated on compilation.
     let entry = if algorithm == "xor" {
         "  // ⚠️  XOR is obfuscation only — consider upgrading to aes256\n  \
          encryption -> {\n    \
          mode      = \"keyfile\",\n    \
          algorithm = \"xor\"\n  \
+         }\n  \
+         keystore -> {\n    \
+         auto_generate = true\n  \
          }\n".to_string()
     } else {
         format!(
@@ -304,13 +326,16 @@ fn provide_complete_security_actions(doc: &Document) -> Vec<CodeActionOrCommand>
              encryption -> {{\n    \
              mode      = \"keyfile\",\n    \
              algorithm = \"{}\"\n  \
+             }}\n  \
+             keystore -> {{\n    \
+             auto_generate = true\n  \
              }}\n",
             algorithm
         )
     };
 
     vec![CodeActionOrCommand::CodeAction(make_action(
-        &format!("Complete @SECURITY: add encryption block ({})", algorithm_display_name(algorithm)),
+        &format!("Complete @SECURITY: add encryption + keystore blocks ({})", algorithm_display_name(algorithm)),
         CodeActionKind::QUICKFIX,
         doc.uri.clone(),
         vec![TextEdit {
@@ -1102,4 +1127,4 @@ fn extract_quoted_word(s: &str, n: usize) -> Option<String> {
         }
     }
     None
-                    }
+                }

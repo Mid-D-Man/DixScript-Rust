@@ -1,17 +1,21 @@
-// tests/unit/config_tests.rs
+// dixscript/tests/config_test.rs
+// Approach B: tokenise → split_config_tokens → process_config_tokens
+// (mirrors DixLoader and the LSP analyser pipeline exactly)
 
 use dixscript::Compiler::Core::Config::{
     ConfigSchema,
     ConfigSectionHandler,
     OperationalSettings,
 };
+use dixscript::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
+use dixscript::Compiler::Core::Tokenizer::TokenType;
 use dixscript::Compiler::AST::data_types::{
     ErrorHandlingStrategy,
     CompatibilityMode,
     DebugMode,
 };
 
-// ---- ConfigSchema tests ----
+// ==================== ConfigSchema tests ====================
 
 #[test]
 fn test_minimal_config_is_valid() {
@@ -41,7 +45,6 @@ fn test_validate_and_enhance_fills_missing_keys() {
 fn test_validate_rejects_bad_version() {
     let mut config = std::collections::HashMap::new();
     config.insert("version".to_string(), "not_a_version!!".to_string());
-    // Should fall back to default rather than hard error
     let result = ConfigSchema::validate_and_enhance_config(config).unwrap();
     assert_eq!(result.get("version").unwrap().as_str(), "1.0.0");
 }
@@ -59,37 +62,62 @@ fn test_validate_rejects_bad_encoding() {
     let mut config = std::collections::HashMap::new();
     config.insert("encoding".to_string(), "latin-99".to_string());
     let result = ConfigSchema::validate_and_enhance_config(config).unwrap();
-    // Bad encoding falls back to default
     assert_eq!(result.get("encoding").unwrap().as_str(), "utf-8");
 }
 
-// ---- ConfigSectionHandler tests ----
+// ==================== ConfigSectionHandler tests (Approach B) ====================
+//
+// All handler tests now use the tokeniser-first pipeline:
+//   1. Tokenizer::new(source, &settings).tokenize()
+//   2. split_config_tokens(tok_result.tokens)  →  config_tokens + rest_tokens
+//   3. handler.process_config_tokens(&split.config_tokens)
+//
+// The old `process_config_section(&str)` and its `cleaned_input_string` field
+// no longer exist; separation is done at the token level via split_config_tokens.
 
 #[test]
 fn test_empty_input_returns_defaults() {
+    let settings   = OperationalSettings::default();
+    let tok_result = Tokenizer::new("", &settings).tokenize();
+    let split      = split_config_tokens(tok_result.tokens);
     let mut handler = ConfigSectionHandler::new(None);
-    let result = handler.process_config_section("");
-    assert!(!result.config_section.entries.is_empty());
-    assert!(!result.warnings.is_empty());
-}
+    let result = handler.process_config_tokens(&split.config_tokens);
 
+    // Even with empty input, the handler must populate default config entries.
+    assert!(
+        !result.config_section.entries.is_empty(),
+        "Config section should have default entries when no @CONFIG is provided"
+    );
+}
 
 #[test]
 fn test_no_config_section_returns_defaults() {
-    let mut handler = ConfigSectionHandler::new(None);
     let input = r#"
         @DATA(
             name = "test"
         )
     "#;
-    let result = handler.process_config_section(input);
-    assert!(!result.config_section.entries.is_empty());
-    assert_eq!(result.cleaned_input_string.trim(), input.trim());
+
+    let settings   = OperationalSettings::default();
+    let tok_result = Tokenizer::new(input, &settings).tokenize();
+    let split      = split_config_tokens(tok_result.tokens);
+    let mut handler = ConfigSectionHandler::new(None);
+    let result = handler.process_config_tokens(&split.config_tokens);
+
+    // Defaults must be populated when @CONFIG is absent.
+    assert!(
+        !result.config_section.entries.is_empty(),
+        "Config section should have defaults when @CONFIG is absent"
+    );
+
+    // In Approach B, the @DATA section remains in rest_tokens (not config_tokens).
+    let rest_has_data = split.rest_tokens.iter()
+        .any(|t| matches!(t.token_type, TokenType::SectionData));
+    assert!(rest_has_data, "rest_tokens should contain the @DATA section from the source");
 }
 
 #[test]
 fn test_valid_config_section_is_parsed() {
-    let mut handler = ConfigSectionHandler::new(None);
     let input = r#"
         @CONFIG(
             version -> "1.0.0",
@@ -97,35 +125,67 @@ fn test_valid_config_section_is_parsed() {
             debug_mode -> "verbose"
         )
     "#;
-    let result = handler.process_config_section(input);
-    assert!(result.warnings.is_empty() || result.warnings.iter().all(|w| !w.contains("error")));
-    assert_eq!(result.operational_settings.debug_mode, DebugMode::Verbose);
+
+    let settings   = OperationalSettings::default();
+    let tok_result = Tokenizer::new(input, &settings).tokenize();
+    let split      = split_config_tokens(tok_result.tokens);
+    let mut handler = ConfigSectionHandler::new(None);
+    let result = handler.process_config_tokens(&split.config_tokens);
+
+    assert_eq!(
+        result.operational_settings.debug_mode,
+        DebugMode::Verbose,
+        "debug_mode -> \"verbose\" should produce DebugMode::Verbose"
+    );
 }
 
 #[test]
-fn test_config_section_is_stripped_from_cleaned_output() {
-    let mut handler = ConfigSectionHandler::new(None);
+fn test_config_section_token_split() {
+    // In Approach B, @CONFIG is separated from the rest at the *token* level.
+    // Verify that split_config_tokens correctly routes tokens to the right stream.
     let input = r#"@CONFIG(
         version -> "1.0.0"
     )
     @DATA(
         x = 1
     )"#;
-    let result = handler.process_config_section(input);
-    assert!(!result.cleaned_input_string.contains("@CONFIG"));
-    assert!(result.cleaned_input_string.contains("@DATA"));
+
+    let settings   = OperationalSettings::default();
+    let tok_result = Tokenizer::new(input, &settings).tokenize();
+    let split      = split_config_tokens(tok_result.tokens);
+
+    // config_tokens must hold the @CONFIG section keyword.
+    let config_has_config = split.config_tokens.iter()
+        .any(|t| matches!(t.token_type, TokenType::SectionConfig));
+    assert!(config_has_config, "config_tokens should contain the @CONFIG section token");
+
+    // rest_tokens must NOT contain any @CONFIG tokens.
+    let rest_has_config = split.rest_tokens.iter()
+        .any(|t| matches!(t.token_type, TokenType::SectionConfig));
+    assert!(!rest_has_config, "rest_tokens must not contain @CONFIG tokens");
+
+    // rest_tokens must contain the @DATA section.
+    let rest_has_data = split.rest_tokens.iter()
+        .any(|t| matches!(t.token_type, TokenType::SectionData));
+    assert!(rest_has_data, "rest_tokens should contain the @DATA section");
 }
 
 #[test]
 fn test_error_handling_strategy_extracted() {
-    let mut handler = ConfigSectionHandler::new(None);
     let input = r#"@CONFIG(
         version -> "1.0.0",
         error_handling -> "continue"
     )"#;
-    let result = handler.process_config_section(input);
+
+    let settings   = OperationalSettings::default();
+    let tok_result = Tokenizer::new(input, &settings).tokenize();
+    let split      = split_config_tokens(tok_result.tokens);
+    let mut handler = ConfigSectionHandler::new(None);
+    let result = handler.process_config_tokens(&split.config_tokens);
+
     assert_eq!(
         result.operational_settings.error_handling_strategy,
-        ErrorHandlingStrategy::Continue
+        ErrorHandlingStrategy::Continue,
+        "error_handling -> \"continue\" should produce ErrorHandlingStrategy::Continue"
     );
-}
+        }

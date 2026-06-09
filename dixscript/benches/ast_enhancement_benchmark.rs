@@ -24,7 +24,7 @@ use dixscript::Compiler::Core::{
     SemanticAnalysisResult,
     Tokenizer::{split_config_tokens, Tokenizer},
 };
-use dixscript::DixScript;
+
 use std::time::Duration;
 
 // =============================================================================

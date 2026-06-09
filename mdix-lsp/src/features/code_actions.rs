@@ -7,13 +7,16 @@
 //! - SEC001: "Insert @SECURITY section" when DEncryptor present without @SECURITY
 //! - Weak XOR: "Replace 'xor' with 'aes256' in @DLM"
 //! - Unknown enum: offer valid enum field replacements
+//! - Missing let/let mut: insert declaration on the error line
+//! - Missing closing brace: insert `}` after the error line
 //!
 //! ### Context-driven (position-based)
 //! - ⬇ Spread inline object / table-property / group-array / array to multiple lines
 //! - ⟳ Reformat file — normalise spacing, indentation, operators (always available)
 //!
-//! ### Proactive
-//! - DEncryptor present but no @SECURITY (same fix as SEC001 but without a diagnostic)
+//! ### Proactive (cursor-position-independent)
+//! - DEncryptor present but no @SECURITY → insert full @SECURITY section
+//! - @SECURITY present but missing encryption entry → complete the block
 //!
 //! ### Date / Timestamp
 //! - Increment / decrement day, month, year via lightbulb on date/timestamp tokens
@@ -70,7 +73,7 @@ fn provide_inner(
 
         if source.contains("semantic") || source.contains("parser") || source.contains("dixscript") {
 
-            // Missing @SECURITY — main quick-fix
+            // Missing / required @SECURITY section
             if is_security_missing_msg(&msg) {
                 if !added_security_insert {
                     let algorithm = infer_algorithm_from_doc(doc);
@@ -98,11 +101,12 @@ fn provide_inner(
         }
     }
 
-    // ── 2. Proactive: DEncryptor present but no @SECURITY ────────────────────
+    // ── 2. Proactive: DEncryptor present but no @SECURITY at all ─────────────
     if !added_security_insert {
         if let Some(info) = encryptor_without_security(doc) {
             if let Some(action) = fix_insert_security(doc, &info.algorithm) {
                 actions.push(CodeActionOrCommand::CodeAction(action));
+                added_security_insert = true;
                 if info.algorithm == "xor" {
                     if let Some(xor_fix) = fix_replace_xor_in_dlm(doc) {
                         actions.push(CodeActionOrCommand::CodeAction(xor_fix));
@@ -112,13 +116,24 @@ fn provide_inner(
         }
     }
 
-    // ── 3. Spread inline properties to multiple lines ─────────────────────────
+    // ── 3. Proactive: @SECURITY present but missing encryption entry ──────────
+    if !added_security_insert {
+        actions.extend(provide_complete_security_actions(doc));
+    }
+
+    // ── 4. Spread inline properties to multiple lines ─────────────────────────
     actions.extend(provide_spread_actions(doc, range));
 
-    // ── 4. Date / Timestamp picker actions ────────────────────────────────────
+    // ── 5. Date / Timestamp picker actions ────────────────────────────────────
     actions.extend(date_time_actions(doc, range));
 
-    // ── 5. Reformat file (always offered if changes would be made) ────────────
+    // ── 6. let / let mut declaration fixes ───────────────────────────────────
+    actions.extend(provide_let_declaration_actions(doc, range, diagnostics));
+
+    // ── 7. Missing closing brace ──────────────────────────────────────────────
+    actions.extend(provide_missing_brace_actions(doc, range, diagnostics));
+
+    // ── 8. Reformat file (always offered if changes would be made) ────────────
     if let Some(action) = provide_reformat_action(doc) {
         actions.push(CodeActionOrCommand::CodeAction(action));
     }
@@ -127,13 +142,21 @@ fn provide_inner(
 }
 
 // ── Security-message detection ────────────────────────────────────────────────
+//
+// The SEC001 message from the analyser is:
+//   "@SECURITY section required: DEncryptor.{algo} is present in @DLM but no
+//    @SECURITY block was found."
+// So we must match "required", not just "missing".
 
 fn is_security_missing_msg(msg: &str) -> bool {
     let lower = msg.to_lowercase();
-    (lower.contains("security") && lower.contains("missing"))
-        || lower.contains("@security section is required")
-        || lower.contains("encryptor requires")
+    // Primary: matches SEC001 and the generic "security ... required/missing" family
+    (lower.contains("security") && (lower.contains("missing") || lower.contains("required")))
+        // DEncryptor explicitly mentioned alongside security
+        || (lower.contains("dencryptor") && lower.contains("security"))
+        // Explicit codes / keywords used elsewhere in the codebase
         || lower.contains("sec001")
+        || lower.contains("encryptor requires")
 }
 
 // ── DLM introspection ─────────────────────────────────────────────────────────
@@ -144,6 +167,8 @@ struct EncryptorInfo {
 
 fn encryptor_without_security(doc: &Document) -> Option<EncryptorInfo> {
     let ast = doc.ast.as_ref()?;
+    // Only trigger when @SECURITY is completely absent from the AST.
+    // If @SECURITY exists but is incomplete, provide_complete_security_actions handles it.
     if ast.security.is_some() { return None; }
     let dlm = ast.dlm.as_ref()?;
     let enc = dlm.modules.iter().find(|m| matches!(m.module_type, DLMModuleType::DEncryptor))?;
@@ -184,7 +209,7 @@ fn build_security_block(prefix: &str, algorithm: &str) -> String {
         "xor" => format!(
             "{}\n\
              @SECURITY(\n\
-             \x20 // XOR is obfuscation only — consider upgrading to aes256\n\
+             \x20 // ⚠️  XOR is obfuscation only — consider upgrading to aes256\n\
              \x20 encryption -> {{\n\
              \x20   mode      = \"keyfile\",\n\
              \x20   algorithm = \"xor\"\n\
@@ -201,8 +226,9 @@ fn build_security_block(prefix: &str, algorithm: &str) -> String {
             format!(
                 "{}\n\
                  @SECURITY(\n\
+                 \x20 // mode: \"keyfile\"  → compiler auto-generates a .mdix.key file\n\
+                 \x20 // mode: \"password\" → compiler prompts for a password at compile time\n\
                  \x20 encryption -> {{\n\
-                 \x20   // mode: \"keyfile\" (auto-generates .mdix.key) or \"password\" (prompts at compile time)\n\
                  \x20   mode      = \"keyfile\",\n\
                  \x20   algorithm = \"{}\"\n\
                  \x20 }}\n\
@@ -218,9 +244,81 @@ fn algorithm_display_name(algorithm: &str) -> &str {
         "aes256-gcm"        => "AES-256-GCM",
         "aes128-gcm"        => "AES-128-GCM",
         "chacha20-poly1305" => "ChaCha20-Poly1305",
-        "xor"               => "XOR (weak)",
+        "xor"               => "XOR (weak — obfuscation only)",
         _                   => algorithm,
     }
+}
+
+// ── Complete an existing but incomplete @SECURITY section ─────────────────────
+//
+// Triggered proactively when @SECURITY exists in the AST but has no
+// `encryption` entry.  This covers the case where the user has written an
+// empty `@SECURITY()` block (so SEC001 is suppressed) but the encryption
+// configuration is still missing.
+
+fn provide_complete_security_actions(doc: &Document) -> Vec<CodeActionOrCommand> {
+    let ast = match &doc.ast { Some(a) => a, None => return vec![] };
+
+    let security = match &ast.security {
+        Some(s) => s,
+        None    => return vec![],
+    };
+
+    // Nothing to do if encryption entry is already present.
+    let has_encryption = security.entries.iter()
+        .any(|e| e.block_key.eq_ignore_ascii_case("encryption"));
+    if has_encryption { return vec![]; }
+
+    // Derive algorithm from @DLM if available.
+    let algorithm = ast.dlm.as_ref()
+        .and_then(|d| d.modules.iter().find(|m| matches!(m.module_type, DLMModuleType::DEncryptor)))
+        .map(|m| match m.subtype {
+            Some(DLMModuleSubtype::Aes128)   => "aes128-gcm",
+            Some(DLMModuleSubtype::Aes256)   => "aes256-gcm",
+            Some(DLMModuleSubtype::Chacha20) => "chacha20-poly1305",
+            Some(DLMModuleSubtype::Xor)      => "xor",
+            _                                => "aes256-gcm",
+        })
+        .unwrap_or("aes256-gcm");
+
+    // Find the line of the @SECURITY keyword token.
+    let security_kw_line = doc.tokens.iter()
+        .find(|t| matches!(t.token_type, TokenType::SectionSecurity))
+        .map(|t| t.line.saturating_sub(1) as u32)
+        .unwrap_or(0);
+
+    // Insert the encryption block immediately after the @SECURITY( opening.
+    let insert_line = security_kw_line + 1;
+    let insert_pos  = Position::new(insert_line, 0);
+
+    let entry = if algorithm == "xor" {
+        "  // ⚠️  XOR is obfuscation only — consider upgrading to aes256\n  \
+         encryption -> {\n    \
+         mode      = \"keyfile\",\n    \
+         algorithm = \"xor\"\n  \
+         }\n".to_string()
+    } else {
+        format!(
+            "  // mode: \"keyfile\"  → compiler auto-generates a .mdix.key file\n  \
+             // mode: \"password\" → compiler prompts for a password at compile time\n  \
+             encryption -> {{\n    \
+             mode      = \"keyfile\",\n    \
+             algorithm = \"{}\"\n  \
+             }}\n",
+            algorithm
+        )
+    };
+
+    vec![CodeActionOrCommand::CodeAction(make_action(
+        &format!("Complete @SECURITY: add encryption block ({})", algorithm_display_name(algorithm)),
+        CodeActionKind::QUICKFIX,
+        doc.uri.clone(),
+        vec![TextEdit {
+            range:    Range::new(insert_pos, insert_pos),
+            new_text: entry,
+        }],
+        true,
+    ))]
 }
 
 // ── XOR → aes256 replacement ──────────────────────────────────────────────────
@@ -274,6 +372,137 @@ fn fix_unknown_enum(doc: &Document, diag: &Diagnostic) -> Vec<CodeActionOrComman
             )));
         }
     }
+    actions
+}
+
+// ── Missing let / let mut declaration ─────────────────────────────────────────
+//
+// Triggered when a diagnostic reports an undefined-reference / undeclared-variable
+// error and the error line looks like a bare assignment  `x = expr`  without
+// the required `let` keyword.
+
+fn provide_let_declaration_actions(
+    doc:         &Document,
+    _range:      Range,
+    diagnostics: &[Diagnostic],
+) -> Vec<CodeActionOrCommand> {
+    let mut actions = Vec::new();
+
+    for diag in diagnostics {
+        let msg = diag.message.to_lowercase();
+
+        // Detect "undefined reference" family of errors.
+        let needs_let = msg.contains("not defined")
+            || msg.contains("undefined")
+            || msg.contains("undeclared")
+            || (msg.contains("identifier") && msg.contains("scope"))
+            || (msg.contains("variable") && msg.contains("declared"));
+
+        if !needs_let { continue; }
+
+        let line_idx  = diag.range.start.line as usize;
+        let line_text = match doc.source.lines().nth(line_idx) {
+            Some(l) => l,
+            None    => continue,
+        };
+        let trimmed = line_text.trim();
+
+        // Skip lines that already have a declaration keyword or are not assignments.
+        if trimmed.starts_with("let ")
+            || trimmed.starts_with("let mut ")
+            || trimmed.starts_with("const ")
+            || trimmed.starts_with("return ")
+            || trimmed.starts_with("if ")
+            || trimmed.starts_with("elif ")
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("log")
+        {
+            continue;
+        }
+
+        // The line must contain " = " (a simple assignment, not a comparison).
+        // Reject lines with `==`, `!=`, `<=`, `>=`.
+        let has_assign = trimmed.contains(" = ")
+            && !trimmed.contains("==")
+            && !trimmed.contains("!=")
+            && !trimmed.contains("<=")
+            && !trimmed.contains(">=");
+        if !has_assign { continue; }
+
+        // Column of the first non-whitespace character.
+        let indent_len = (line_text.len() - line_text.trim_start().len()) as u32;
+        let insert_pos  = Position::new(line_idx as u32, indent_len);
+        let insert_range = Range::new(insert_pos, insert_pos);
+
+        // Offer `let` (immutable).
+        actions.push(CodeActionOrCommand::CodeAction(make_action(
+            "Add 'let' immutable declaration",
+            CodeActionKind::QUICKFIX,
+            doc.uri.clone(),
+            vec![TextEdit { range: insert_range, new_text: "let ".to_string() }],
+            true,
+        )));
+
+        // Offer `let mut` (mutable).
+        actions.push(CodeActionOrCommand::CodeAction(make_action(
+            "Add 'let mut' mutable declaration",
+            CodeActionKind::QUICKFIX,
+            doc.uri.clone(),
+            vec![TextEdit { range: insert_range, new_text: "let mut ".to_string() }],
+            false,
+        )));
+    }
+
+    actions
+}
+
+// ── Missing closing brace ─────────────────────────────────────────────────────
+//
+// Triggered when a diagnostic indicates a missing `}`.  Inserts a closing brace
+// on the line immediately after the reported error position.
+
+fn provide_missing_brace_actions(
+    doc:         &Document,
+    _range:      Range,
+    diagnostics: &[Diagnostic],
+) -> Vec<CodeActionOrCommand> {
+    let mut actions = Vec::new();
+
+    for diag in diagnostics {
+        let msg = diag.message.to_lowercase();
+
+        let needs_brace = msg.contains("expected '}'")
+            || msg.contains("missing '}'")
+            || msg.contains("expected closing brace")
+            || msg.contains("unclosed block")
+            || msg.contains("unclosed brace")
+            || (msg.contains("unexpected") && msg.contains("end of file"))
+            || (msg.contains("missing token") && msg.contains("}"));
+
+        if !needs_brace { continue; }
+
+        let line_idx  = diag.range.start.line as usize;
+        let line_text = doc.source.lines().nth(line_idx).unwrap_or("");
+        let indent    = get_indent(line_text);
+
+        // Insert `}` on the line after the error.
+        let after_line = (line_idx as u32).saturating_add(1);
+        let insert_pos = Position::new(after_line, 0);
+
+        actions.push(CodeActionOrCommand::CodeAction(make_action(
+            "Insert missing closing brace '}'",
+            CodeActionKind::QUICKFIX,
+            doc.uri.clone(),
+            vec![TextEdit {
+                range:    Range::new(insert_pos, insert_pos),
+                new_text: format!("{}}}\n", indent),
+            }],
+            true,
+        )));
+
+        break; // One brace fix per request is sufficient.
+    }
+
     actions
 }
 
@@ -334,16 +563,11 @@ fn split_respecting_nesting(text: &str, separator: char) -> Option<Vec<String>> 
 }
 
 /// Find the byte index of a table-property colon (`path:`) in `text`.
-///
-/// Skips:
-/// - `::` (group-array operator)
-/// - colons inside string literals
-/// - digit`:` digit sequences (timestamp / time components like `10:30:00`)
 fn find_table_colon(text: &str) -> Option<usize> {
-    let mut in_str:  bool        = false;
-    let mut str_ch:  char        = '"';
-    let mut escaped: bool        = false;
-    let chars: Vec<char>         = text.chars().collect();
+    let mut in_str:  bool  = false;
+    let mut str_ch:  char  = '"';
+    let mut escaped: bool  = false;
+    let chars: Vec<char>   = text.chars().collect();
 
     for (i, &ch) in chars.iter().enumerate() {
         if escaped            { escaped = false; continue; }
@@ -355,9 +579,7 @@ fn find_table_colon(text: &str) -> Option<usize> {
         match ch {
             '"' | '\'' => { in_str = true; str_ch = ch; }
             ':' => {
-                // Reject ::
                 if chars.get(i + 1) == Some(&':') { continue; }
-                // Reject timestamp-style digit:digit
                 let prev_is_digit = i > 0 && chars[i - 1].is_ascii_digit();
                 let next_is_digit = chars.get(i + 1).map(|c| c.is_ascii_digit()).unwrap_or(false);
                 if prev_is_digit && next_is_digit { continue; }
@@ -369,9 +591,7 @@ fn find_table_colon(text: &str) -> Option<usize> {
     None
 }
 
-/// Find the byte index of `{` that looks like an inline object literal:
-///   - must have a matching `}` later on the same text slice
-///   - the content between `{` and `}` must contain `=` (property assignments)
+/// Find the byte index of `{` that looks like an inline object literal.
 fn find_object_open(text: &str) -> Option<usize> {
     for (i, ch) in text.char_indices() {
         if ch != '{' { continue; }
@@ -397,12 +617,6 @@ fn line_section_id(doc: &Document, line_idx: usize) -> SectionId {
 }
 
 // ── Spread: table property ────────────────────────────────────────────────────
-//
-// Before:  player.config: speed = 5, jump_height = 3, ai_type<enum> = AIType.AGGRESSIVE
-// After:   player.config:
-//            speed = 5,
-//            jump_height = 3,
-//            ai_type<enum> = AIType.AGGRESSIVE
 
 fn try_spread_table_property(
     doc:       &Document,
@@ -411,7 +625,7 @@ fn try_spread_table_property(
 ) -> Option<CodeAction> {
     if line_section_id(doc, line_idx) != SectionId::Data { return None; }
 
-    let trimmed = line_text.trim();
+    let trimmed   = line_text.trim();
     let colon_pos = find_table_colon(trimmed)?;
 
     let path_part  = trimmed[..colon_pos].trim();
@@ -435,7 +649,7 @@ fn try_spread_table_property(
     }
 
     let edit = TextEdit {
-        range:    Range::new(
+        range: Range::new(
             Position::new(line_idx as u32, 0),
             Position::new(line_idx as u32, line_text.len() as u32),
         ),
@@ -452,12 +666,6 @@ fn try_spread_table_property(
 }
 
 // ── Spread: group array ────────────────────────────────────────────────────────
-//
-// Before:  tags:: "alpha", "beta", "v1"
-// After:   tags::
-//            "alpha",
-//            "beta",
-//            "v1"
 
 fn try_spread_group_array(
     doc:       &Document,
@@ -491,7 +699,7 @@ fn try_spread_group_array(
     }
 
     let edit = TextEdit {
-        range:    Range::new(
+        range: Range::new(
             Position::new(line_idx as u32, 0),
             Position::new(line_idx as u32, line_text.len() as u32),
         ),
@@ -508,36 +716,22 @@ fn try_spread_group_array(
 }
 
 // ── Spread: object literal ────────────────────────────────────────────────────
-//
-// Before:  result = { name = name, hp = hp, armor = armor }
-// After:   result = {
-//            name = name,
-//            hp = hp,
-//            armor = armor
-//          }
-//
-// Also handles:  return { ... }  inside @QUICKFUNCS bodies.
 
 fn try_spread_object_literal(
     doc:       &Document,
     line_idx:  usize,
     line_text: &str,
 ) -> Option<CodeAction> {
-    let trimmed = line_text.trim();
-
+    let trimmed  = line_text.trim();
     let open_pos = find_object_open(trimmed)?;
     let after_open = &trimmed[open_pos + 1..];
+    let close_rel  = after_open.rfind('}')?;
+    let close_pos  = open_pos + 1 + close_rel;
 
-    // Use rfind so we get the matching close (handles any trailing `,` before `}`)
-    let close_rel = after_open.rfind('}')?;
-    let close_pos = open_pos + 1 + close_rel;
-
-    // Need at least one char inside
     if close_pos <= open_pos + 1 { return None; }
 
     let before = trimmed[..open_pos].trim_end();
     let inside = trimmed[open_pos + 1..close_pos].trim();
-    // Anything after the closing `}` on the same line (e.g. `,`)
     let suffix = trimmed[close_pos + 1..].trim();
 
     if !inside.contains(',') { return None; }
@@ -571,7 +765,7 @@ fn try_spread_object_literal(
     lines.push(closing_line);
 
     let edit = TextEdit {
-        range:    Range::new(
+        range: Range::new(
             Position::new(line_idx as u32, 0),
             Position::new(line_idx as u32, line_text.len() as u32),
         ),
@@ -588,39 +782,24 @@ fn try_spread_object_literal(
 }
 
 // ── Spread: array literal ──────────────────────────────────────────────────────
-//
-// Before:  enemies = [createEnemy("Goblin", 50, 10), createEnemy("Orc", 100, 20)]
-// After:   enemies = [
-//            createEnemy("Goblin", 50, 10),
-//            createEnemy("Orc", 100, 20)
-//          ]
-//
-// Also works for plain value arrays:  tags = ["alpha", "beta", "v1"]
 
 fn try_spread_array_literal(
     doc:       &Document,
     line_idx:  usize,
     line_text: &str,
 ) -> Option<CodeAction> {
-    let trimmed = line_text.trim();
-
-    // Must have an opening bracket somewhere on the line
+    let trimmed     = line_text.trim();
     let bracket_pos = trimmed.find('[')?;
+    let after_open  = &trimmed[bracket_pos + 1..];
+    let close_rel   = after_open.rfind(']')?;
+    let close_pos   = bracket_pos + 1 + close_rel;
 
-    // Find the last matching `]` on the same line
-    let after_open = &trimmed[bracket_pos + 1..];
-    let close_rel  = after_open.rfind(']')?;
-    let close_pos  = bracket_pos + 1 + close_rel;
-
-    // Nothing inside
     if close_pos <= bracket_pos + 1 { return None; }
 
     let before = trimmed[..bracket_pos].trim_end();
-    let inside  = trimmed[bracket_pos + 1..close_pos].trim();
-    // Anything after `]` on the same line (e.g. a trailing `,`)
-    let suffix  = trimmed[close_pos + 1..].trim();
+    let inside = trimmed[bracket_pos + 1..close_pos].trim();
+    let suffix = trimmed[close_pos + 1..].trim();
 
-    // Only spread when there are at least two items
     if !inside.contains(',') { return None; }
 
     let items = split_respecting_nesting(inside, ',')?;
@@ -652,7 +831,7 @@ fn try_spread_array_literal(
     lines.push(closing_line);
 
     let edit = TextEdit {
-        range:    Range::new(
+        range: Range::new(
             Position::new(line_idx as u32, 0),
             Position::new(line_idx as u32, line_text.len() as u32),
         ),
@@ -677,13 +856,10 @@ fn provide_spread_actions(doc: &Document, range: Range) -> Vec<CodeActionOrComma
         None    => return Vec::new(),
     };
 
-    // Skip obviously too-short lines
     if line_text.trim().len() < 10 { return Vec::new(); }
 
     let mut actions = Vec::new();
 
-    // Each detector returns at most one action; they are mutually exclusive in
-    // practice but we check all and let the user pick.
     if let Some(a) = try_spread_table_property(doc, line_idx, line_text) {
         actions.push(CodeActionOrCommand::CodeAction(a));
     }
@@ -704,7 +880,6 @@ fn provide_spread_actions(doc: &Document, range: Range) -> Vec<CodeActionOrComma
 
 fn provide_reformat_action(doc: &Document) -> Option<CodeAction> {
     let formatted = format_source(&doc.source, 2);
-    // Only offer the action when the formatter would actually change something
     if formatted == doc.source { return None; }
 
     let line_count = doc.source.lines().count() as u32;
@@ -725,10 +900,6 @@ fn provide_reformat_action(doc: &Document) -> Option<CodeAction> {
 }
 
 // ── Date / Timestamp picker actions ──────────────────────────────────────────
-//
-// LSP has no native "date picker" protocol (unlike documentColor which gives
-// an inline color wheel). We provide increment/decrement code actions as the
-// closest practical equivalent — clicking the lightbulb on a date shows these.
 
 fn date_time_actions(doc: &Document, range: Range) -> Vec<CodeActionOrCommand> {
     let range_start_line = (range.start.line + 1) as usize;
@@ -931,4 +1102,4 @@ fn extract_quoted_word(s: &str, n: usize) -> Option<String> {
         }
     }
     None
-    }
+                    }

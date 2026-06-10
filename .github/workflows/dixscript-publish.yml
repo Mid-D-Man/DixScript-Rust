@@ -12,12 +12,27 @@ on:
         required: true
         default: 'tests'
         type: choice
+        options: [tests, bench, flame, cli, all]
+      bench_target:
+        # Select a single bench to avoid runner timeouts.
+        # stress_test_benchmark in particular is very slow on CI.
+        description: 'Benchmark target (bench/all publish_type only)'
+        required: false
+        default: 'all'
+        type: choice
         options:
-          - tests
-          - bench
-          - flame
-          - cli
           - all
+          - format_comparison_benchmark
+          - throughput_benchmark
+          - lexer_throughput
+          - config_throughput
+          - general_parser_benchmark
+          - semantics_benchmark
+          - ast_enhancement_benchmark
+          - value_resolution_benchmark
+          - binary_serialization_benchmark
+          - runtime_benchmark
+          - stress_test_benchmark
 
 permissions:
   contents: write
@@ -31,15 +46,18 @@ jobs:
   parse-trigger:
     runs-on: ubuntu-latest
     outputs:
-      run_tests: ${{ steps.decide.outputs.run_tests }}
-      run_bench: ${{ steps.decide.outputs.run_bench }}
-      run_flame: ${{ steps.decide.outputs.run_flame }}
-      run_cli:   ${{ steps.decide.outputs.run_cli }}
+      run_tests:    ${{ steps.decide.outputs.run_tests }}
+      run_bench:    ${{ steps.decide.outputs.run_bench }}
+      run_flame:    ${{ steps.decide.outputs.run_flame }}
+      run_cli:      ${{ steps.decide.outputs.run_cli }}
+      bench_target: ${{ steps.decide.outputs.bench_target }}
     steps:
       - name: Decide what to publish
         id: decide
         run: |
           T=false; B=false; F=false; C=false
+          # bench_target only meaningful from workflow_dispatch; commit runs always use 'all'
+          BT="${{ github.event.inputs.bench_target || 'all' }}"
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             case "${{ github.event.inputs.publish_type }}" in
@@ -55,13 +73,15 @@ jobs:
             echo "$MSG" | grep -qiE '\-\-publish-(bench|all)' && B=true || true
             echo "$MSG" | grep -qiE '\-\-publish-(flame|all)' && F=true || true
             echo "$MSG" | grep -qiE '\-\-publish-(cli|all)'   && C=true || true
+            BT="all"
           fi
 
-          echo "run_tests=$T" >> $GITHUB_OUTPUT
-          echo "run_bench=$B" >> $GITHUB_OUTPUT
-          echo "run_flame=$F" >> $GITHUB_OUTPUT
-          echo "run_cli=$C"   >> $GITHUB_OUTPUT
-          echo "Tests=$T  Bench=$B  Flame=$F  Cli=$C"
+          echo "run_tests=$T"     >> $GITHUB_OUTPUT
+          echo "run_bench=$B"     >> $GITHUB_OUTPUT
+          echo "run_flame=$F"     >> $GITHUB_OUTPUT
+          echo "run_cli=$C"       >> $GITHUB_OUTPUT
+          echo "bench_target=$BT" >> $GITHUB_OUTPUT
+          echo "Tests=$T  Bench=$B  Flame=$F  Cli=$C  BenchTarget=$BT"
 
   # ── 2. Run tests ───────────────────────────────────────────────────────────
   run-tests:
@@ -94,18 +114,10 @@ jobs:
       - name: Build test binaries
         run: cargo test --no-run 2>&1
 
-      - name: Run all tests (continue on failure)
+      - name: Run all tests
         continue-on-error: true
         run: |
-          set +e
           cargo test --color=never --no-fail-fast -- --show-output 2>&1 | tee test-raw.txt
-          TEST_EXIT_CODE=${PIPESTATUS[0]}
-          echo "TEST_EXIT=${TEST_EXIT_CODE}" >> $GITHUB_ENV
-          if [ $TEST_EXIT_CODE -ne 0 ]; then
-            echo "Tests failed with exit code ${TEST_EXIT_CODE} — continuing to generate report"
-          else
-            echo "All tests passed"
-          fi
           exit 0
 
       - name: Parse results to JSON
@@ -115,121 +127,11 @@ jobs:
           COMMIT:       ${{ github.sha }}
           BUILD_DATE:   ${{ github.event.head_commit.timestamp }}
           RUST_VERSION: ${{ steps.rustver.outputs.ver }}
-        run: |
-          python3 - << 'PYEOF'
-          import re, json, os, sys
+        run: python3 scripts/parse_test_results.py
 
-          RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-          def strip_ansi(s):
-              return RE_ANSI.sub('', s)
-
-          def build_suite(name, tests, dur_s=0.0):
-              return {
-                  'name':       name,
-                  'passed':     sum(1 for t in tests if t['status'] == 'passed'),
-                  'failed':     sum(1 for t in tests if t['status'] == 'failed'),
-                  'ignored':    sum(1 for t in tests if t['status'] == 'ignored'),
-                  'duration_s': round(dur_s, 4),
-                  'tests':      tests,
-              }
-
-          raw  = open('test-raw.txt', encoding='utf-8', errors='replace').read()
-          text = strip_ansi(raw)
-
-          print("=== test-raw.txt preview (first 30 lines) ===")
-          for i, l in enumerate(text.splitlines()[:30], 1):
-              print(f"  {i:3}: {repr(l)}")
-          print("==============================================")
-
-          test_output = {}
-          for m in re.finditer(
-                  r'---- ([\w:]+(?:::\w+)*) stdout ----\n(.*?)'
-                  r'(?=\n---- |\n\n(?:successes|failures):\n|\ntest result:|\Z)',
-                  text, re.DOTALL):
-              name_key = m.group(1)
-              content  = m.group(2).strip()
-              if content:
-                  test_output[name_key] = content
-
-          suites    = []
-          cur_name  = None
-          cur_tests = []
-          cur_dur   = 0.0
-
-          RE_RUN    = re.compile(r'Running\s+(?:unittests?\s+)?(\S+)\s+\(')
-          RE_TEST   = re.compile(
-              r'^test\s+([\w:]+(?:::\w+)*)\s+\.\.\.\s+'
-              r'(ok|FAILED|ignored)(?:\s+\(([\d.]+)s\))?'
-          )
-          RE_RESULT = re.compile(r'test result:.*?finished in ([\d.]+)s')
-
-          for line in text.splitlines():
-              m = RE_RUN.search(line)
-              if m:
-                  if cur_name is not None and cur_tests:
-                      suites.append(build_suite(cur_name, cur_tests, cur_dur))
-                  raw_path = m.group(1)
-                  base     = os.path.splitext(os.path.basename(raw_path))[0]
-                  cur_name  = (base + ' (unit tests)') if base in ('lib', 'main') else base
-                  cur_tests = []
-                  cur_dur   = 0.0
-                  continue
-
-              m = RE_TEST.match(line)
-              if m:
-                  if cur_name is None:
-                      cur_name  = 'lib (unit tests)'
-                      cur_tests = []
-                      cur_dur   = 0.0
-                  tname, status, dur = m.group(1), m.group(2), m.group(3)
-                  cur_tests.append({
-                      'name':        tname,
-                      'status':      {'ok': 'passed', 'FAILED': 'failed',
-                                      'ignored': 'ignored'}.get(status, 'unknown'),
-                      'duration_ms': int(float(dur) * 1000) if dur else 0,
-                      'output':      test_output.get(tname, ''),
-                  })
-                  continue
-
-              m = RE_RESULT.search(line)
-              if m:
-                  cur_dur = float(m.group(1))
-                  if cur_name is not None and cur_tests:
-                      suites.append(build_suite(cur_name, cur_tests, cur_dur))
-                      cur_name  = None
-                      cur_tests = []
-                      cur_dur   = 0.0
-
-          if cur_name and cur_tests:
-              suites.append(build_suite(cur_name, cur_tests, cur_dur))
-
-          total   = sum(s['passed'] + s['failed'] + s['ignored'] for s in suites)
-          passed  = sum(s['passed']  for s in suites)
-          failed  = sum(s['failed']  for s in suites)
-          ignored = sum(s['ignored'] for s in suites)
-          dur     = sum(s['duration_s'] for s in suites)
-
-          result = {
-              'build':        os.environ.get('BUILD_NUM',    '0'),
-              'branch':       os.environ.get('BRANCH',       'unknown'),
-              'commit':       os.environ.get('COMMIT',       'unknown')[:8],
-              'date':         os.environ.get('BUILD_DATE',   ''),
-              'rust_version': os.environ.get('RUST_VERSION', 'stable'),
-              'summary': {
-                  'total':      total,
-                  'passed':     passed,
-                  'failed':     failed,
-                  'ignored':    ignored,
-                  'duration_s': round(dur, 3),
-              },
-              'suites': suites,
-          }
-
-          with open('test-results.json', 'w') as f:
-              json.dump(result, f, indent=2)
-
-          print(f"Suites:{len(suites)}  Total:{total}  Passed:{passed}  Failed:{failed}")
-          PYEOF
+      - name: Write job summary
+        if: always()
+        run: python3 scripts/generate_summary.py tests test-results.json
 
       - name: Build HTML report
         env:
@@ -281,158 +183,25 @@ jobs:
           key: ubuntu-latest-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check all benchmark targets compile
-        run: |
-          echo "=== Verifying benchmark compilation ==="
-          cargo bench --no-run --color=always 2>&1
-          echo "All bench targets compiled successfully"
+        run: cargo bench --no-run --color=always 2>&1
 
       - name: Run benchmarks
         continue-on-error: true
-        run: |
-          {
-            echo "=== format_comparison_benchmark ==="
-            cargo bench --bench format_comparison_benchmark --color=never 2>&1 || true
-            echo "=== throughput_benchmark ==="
-            cargo bench --bench throughput_benchmark --color=never 2>&1 || true
-            echo "=== lexer_throughput ==="
-            cargo bench --bench lexer_throughput --color=never 2>&1 || true
-            echo "=== config_throughput ==="
-            cargo bench --bench config_throughput --color=never 2>&1 || true
-            echo "=== general_parser_benchmark ==="
-            cargo bench --bench general_parser_benchmark --color=never 2>&1 || true
-            echo "=== semantics_benchmark ==="
-            cargo bench --bench semantics_benchmark --color=never 2>&1 || true
-            echo "=== ast_enhancement_benchmark ==="
-            cargo bench --bench ast_enhancement_benchmark --color=never 2>&1 || true
-            echo "=== value_resolution_benchmark ==="
-            cargo bench --bench value_resolution_benchmark --color=never 2>&1 || true
-            echo "=== binary_serialization_benchmark ==="
-            cargo bench --bench binary_serialization_benchmark --color=never 2>&1 || true
-            echo "=== runtime_benchmark ==="
-            cargo bench --bench runtime_benchmark --color=never 2>&1 || true
-            echo "=== stress_test_benchmark ==="
-            cargo bench --bench stress_test_benchmark --color=never 2>&1 || true
-          } | tee bench-raw.txt
+        env:
+          BENCH_TARGET: ${{ needs.parse-trigger.outputs.bench_target }}
+        run: python3 scripts/run_benches.py "${BENCH_TARGET:-all}"
 
-      - name: Parse benchmark results to JSON
+      - name: Parse results to JSON
         env:
           BUILD_NUM:  ${{ github.run_number }}
           BRANCH:     ${{ github.ref_name }}
           COMMIT:     ${{ github.sha }}
           BUILD_DATE: ${{ github.event.head_commit.timestamp }}
-        run: |
-          python3 - << 'PYEOF'
-          import re, json, os, glob, sys
+        run: python3 scripts/parse_bench_results.py
 
-          RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-          def strip_ansi(s):
-              return RE_ANSI.sub('', s)
-
-          def to_ns(val_str, unit):
-              v = float(val_str.replace(',', ''))
-              u = unit.strip().rstrip('/')
-              return v * {'ns': 1, 'µs': 1e3, 'us': 1e3,
-                          'ms': 1e6, 's': 1e9}.get(u, 1)
-
-          raw  = open('bench-raw.txt', encoding='utf-8', errors='replace').read()
-          text = strip_ansi(raw)
-
-          benches    = []
-          seen_names = set()
-
-          RE_CRIT = re.compile(
-              r'^([\w /\-]+?)\s{2,}time:\s+\[\s*'
-              r'([\d.,]+)\s*(ns|µs|us|ms|s)\s+'
-              r'([\d.,]+)\s*(ns|µs|us|ms|s)\s+'
-              r'([\d.,]+)\s*(ns|µs|us|ms|s)\s*\]',
-              re.MULTILINE
-          )
-
-          sections = re.split(r'^=== (\w+) ===$', text, flags=re.MULTILINE)
-          pairs = []
-          if len(sections) >= 3:
-              i = 1
-              while i + 1 < len(sections):
-                  pairs.append((sections[i], sections[i + 1]))
-                  i += 2
-          else:
-              pairs = [('benchmarks', text)]
-
-          for suite_name, body in pairs:
-              for m in RE_CRIT.finditer(body):
-                  name  = m.group(1).strip()
-                  lower = to_ns(m.group(2), m.group(3))
-                  mean  = to_ns(m.group(4), m.group(5))
-                  upper = to_ns(m.group(6), m.group(7))
-                  key   = f"{suite_name}/{name}"
-                  if key in seen_names:
-                      continue
-                  seen_names.add(key)
-                  parts      = name.rsplit('/', 1)
-                  group      = parts[0] if len(parts) == 2 else suite_name
-                  bench_name = parts[-1]
-                  benches.append({
-                      'suite':     suite_name,
-                      'group':     group,
-                      'name':      bench_name,
-                      'full_name': f'{suite_name}/{name}',
-                      'lower_ns':  round(lower, 2),
-                      'mean_ns':   round(mean,  2),
-                      'upper_ns':  round(upper, 2),
-                      'std_ns':    round((upper - lower) / 4, 2),
-                  })
-
-          if not benches:
-              for est in sorted(glob.glob('target/criterion/**/**/estimates.json',
-                                          recursive=True)):
-                  try:
-                      data = json.load(open(est, encoding='utf-8'))
-                      parts = est.replace('target/criterion/', '').split('/')
-                      if len(parts) < 3:
-                          continue
-                      suite_name = parts[0]
-                      bench_name = parts[1]
-                      if bench_name in ('new', 'base', 'baseline'):
-                          continue
-                      mn  = data.get('mean', {})
-                      ci  = mn.get('confidence_interval', {})
-                      sd  = data.get('std_dev', {}).get('point_estimate', 0)
-                      key = f"{suite_name}/{bench_name}"
-                      if key in seen_names:
-                          continue
-                      seen_names.add(key)
-                      benches.append({
-                          'suite':     suite_name,
-                          'group':     suite_name,
-                          'name':      bench_name,
-                          'full_name': key,
-                          'lower_ns':  round(ci.get('lower_bound', mn.get('point_estimate', 0)), 2),
-                          'mean_ns':   round(mn.get('point_estimate', 0), 2),
-                          'upper_ns':  round(ci.get('upper_bound', mn.get('point_estimate', 0)), 2),
-                          'std_ns':    round(sd, 2),
-                      })
-                  except Exception as e:
-                      print(f"Warn parsing {est}: {e}", file=sys.stderr)
-
-          suite_map = {}
-          for b in benches:
-              suite_map.setdefault(b['suite'], []).append(b)
-          suites = [{'name': k, 'benchmarks': v} for k, v in suite_map.items()]
-
-          result = {
-              'build':   os.environ.get('BUILD_NUM', '0'),
-              'branch':  os.environ.get('BRANCH',    'unknown'),
-              'commit':  os.environ.get('COMMIT',    'unknown')[:8],
-              'date':    os.environ.get('BUILD_DATE', ''),
-              'summary': {'total': len(benches), 'suites': len(suites)},
-              'suites':  suites,
-          }
-
-          with open('bench-results.json', 'w') as f:
-              json.dump(result, f, indent=2)
-
-          print(f"Suites:{len(suites)}  Benchmarks:{len(benches)}")
-          PYEOF
+      - name: Write job summary
+        if: always()
+        run: python3 scripts/generate_summary.py bench bench-results.json
 
       - name: Build HTML report
         env:
@@ -589,9 +358,9 @@ jobs:
           cp .github/flame-results-template.html flame-output/index.html
           python3 - "$CARDS_FILE" << 'PYEOF'
           import sys
-          cards    = open(sys.argv[1], encoding='utf-8').read()
-          html     = open('flame-output/index.html', encoding='utf-8').read()
-          html     = html.replace('CARDS_PLACEHOLDER', cards)
+          cards = open(sys.argv[1], encoding='utf-8').read()
+          html  = open('flame-output/index.html', encoding='utf-8').read()
+          html  = html.replace('CARDS_PLACEHOLDER', cards)
           open('flame-output/index.html', 'w', encoding='utf-8').write(html)
           PYEOF
           rm -f "$CARDS_FILE"
@@ -638,13 +407,11 @@ jobs:
 
       - name: Build mdix-cli
         run: |
-          echo "=== Building mdix-cli (debug) ==="
           cargo build -p mdix-cli
           echo "Binary: $(ls -lh target/debug/mdix)"
 
       - name: Verify test fixture files exist
         run: |
-          echo "=== Checking test fixtures ==="
           for f in \
             mdix_files/tests/cli/01_basic.mdix \
             mdix_files/tests/cli/02_enums.mdix \
@@ -652,11 +419,7 @@ jobs:
             mdix_files/tests/cli/04_all_types.mdix \
             mdix_files/tests/cli/05_game_config.mdix \
             mdix_files/tests/cli/06_app_config.mdix; do
-            if [ -f "$f" ]; then
-              echo "  ✓ $f"
-            else
-              echo "  ✗ MISSING: $f"
-            fi
+            [ -f "$f" ] && echo "  ✓ $f" || echo "  ✗ MISSING: $f"
           done
 
       - name: Run CLI test suite
@@ -668,9 +431,11 @@ jobs:
           BUILD_DATE:   ${{ github.event.head_commit.timestamp }}
           RUST_VERSION: ${{ steps.rustver.outputs.ver }}
           MDIX_BINARY:  target/debug/mdix
-        run: |
-          python3 tools/run_cli_tests.py
-          echo "CLI_TEST_EXIT=$?" >> $GITHUB_ENV
+        run: python3 tools/run_cli_tests.py
+
+      - name: Write job summary
+        if: always()
+        run: python3 scripts/generate_summary.py cli cli-test-results.json
 
       - name: Build HTML report
         env:
@@ -756,7 +521,6 @@ jobs:
             cp deploy/tests/test-results-index.html "$WORK/tests/index.html"
             cp deploy/tests/test-results.json       "$WORK/tests/builds/build_${BUILD_NUM}/test-results.json"
             cp deploy/tests/test-results-index.html "$WORK/tests/builds/build_${BUILD_NUM}/index.html"
-            echo "Test results deployed"
           fi
 
           if [ -d "deploy/bench" ]; then
@@ -765,14 +529,12 @@ jobs:
             cp deploy/bench/bench-results-index.html "$WORK/bench/index.html"
             cp deploy/bench/bench-results.json       "$WORK/bench/builds/build_${BUILD_NUM}/bench-results.json"
             cp deploy/bench/bench-results-index.html "$WORK/bench/builds/build_${BUILD_NUM}/index.html"
-            echo "Bench results deployed"
           fi
 
           if [ -d "deploy/flame" ]; then
             mkdir -p "$WORK/flame" "$WORK/flame/builds/build_${BUILD_NUM}"
             cp -r deploy/flame/* "$WORK/flame/"
             cp -r deploy/flame/* "$WORK/flame/builds/build_${BUILD_NUM}/"
-            echo "Flamegraphs deployed"
           fi
 
           if [ -d "deploy/cli" ]; then
@@ -781,7 +543,6 @@ jobs:
             cp deploy/cli/cli-test-index.html   "$WORK/cli/index.html"
             cp deploy/cli/cli-test-results.json "$WORK/cli/builds/build_${BUILD_NUM}/cli-test-results.json"
             cp deploy/cli/cli-test-index.html   "$WORK/cli/builds/build_${BUILD_NUM}/index.html"
-            echo "CLI test results deployed"
           fi
 
           cp .github/landing-index.html "$WORK/index.html"
@@ -810,12 +571,13 @@ jobs:
           echo "======================================================="
           echo "  DixScript — Publish Results Summary"
           echo "======================================================="
-          echo "Build:     #${{ github.run_number }}"
-          echo "Branch:    ${{ github.ref_name }}"
-          echo "Tests:     ${{ needs.run-tests.result     || 'skipped' }}"
-          echo "Bench:     ${{ needs.run-bench.result     || 'skipped' }}"
-          echo "Flame:     ${{ needs.run-flame.result     || 'skipped' }}"
-          echo "CLI:       ${{ needs.run-cli-test.result  || 'skipped' }}"
-          echo "Deploy:    ${{ needs.deploy-results.result || 'skipped' }}"
+          echo "Build:        #${{ github.run_number }}"
+          echo "Branch:       ${{ github.ref_name }}"
+          echo "Bench target: ${{ needs.parse-trigger.outputs.bench_target }}"
+          echo "Tests:        ${{ needs.run-tests.result     || 'skipped' }}"
+          echo "Bench:        ${{ needs.run-bench.result     || 'skipped' }}"
+          echo "Flame:        ${{ needs.run-flame.result     || 'skipped' }}"
+          echo "CLI:          ${{ needs.run-cli-test.result  || 'skipped' }}"
+          echo "Deploy:       ${{ needs.deploy-results.result || 'skipped' }}"
           echo ""
-          echo "View results: https://mid-d-man.github.io/DixScript-Rust/"
+          echo "View → https://mid-d-man.github.io/DixScript-Rust/"

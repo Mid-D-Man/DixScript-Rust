@@ -1486,154 +1486,177 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
     // =============================================================================
 
     fn apply_postfix_operations(&mut self, mut expr: Expression) -> Expression {
-        // Collect initial identifier part for chain detection
-        let mut parts: Vec<String> = match &expr {
-            Expression::Identifier { name, .. } => vec![name.clone()],
-            _ => Vec::new(),
-        };
+    // Collect initial identifier part for chain detection
+    let mut parts: Vec<String> = match &expr {
+        Expression::Identifier { name, .. } => vec![name.clone()],
+        _ => Vec::new(),
+    };
 
-        loop {
-            self.skip_whitespace();
+    loop {
+        self.skip_whitespace();
 
-            match self.current().token_type {
-                TokenType::Symbol('.') => {
-                    let dot_pos = Position::from_token(self.current());
-                    self.advance();
-                    self.skip_whitespace();
+        match self.current().token_type {
+            TokenType::Symbol('.') => {
+                let dot_pos = Position::from_token(self.current());
+                self.advance();
+                self.skip_whitespace();
 
-                    let member_opt: Option<String> = match &self.current().token_type {
-                        TokenType::Identifier(id) => {
-                            let name = id.clone();
+                let member_opt: Option<String> = match &self.current().token_type {
+                    TokenType::Identifier(id) => {
+                        let name = id.clone();
+                        self.advance();
+                        Some(name)
+                    }
+                    TokenType::Keyword(kw)
+                    if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
+                        {
+                            let name = kw.to_string();
                             self.advance();
                             Some(name)
                         }
-                        TokenType::Keyword(kw)
-                        if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
-                            {
-                                let name = kw.to_string();
-                                self.advance();
-                                Some(name)
-                            }
-                        _ => {
-                            let cur = self.current().clone();
-                            self.error_manager.add_parse_error(
-                                ParseErrorType::UnexpectedToken,
-                                "Expected identifier after '.'".to_string(),
-                                cur.line,
-                                cur.column,
-                                None,
-                                self.get_source_line(&cur),
-                            );
-                            None
-                        }
-                    };
-
-                    if let Some(member) = member_opt {
-                        if !parts.is_empty() {
-                            parts.push(member);
-                        } else {
-                            expr = Expression::PropertyAccess {
-                                object: Box::new(expr),
-                                property: member,
-                                position: dot_pos,
-                            };
-                        }
-                    } else {
-                        break;
+                    _ => {
+                        let cur = self.current().clone();
+                        self.error_manager.add_parse_error(
+                            ParseErrorType::UnexpectedToken,
+                            "Expected identifier after '.'".to_string(),
+                            cur.line,
+                            cur.column,
+                            None,
+                            self.get_source_line(&cur),
+                        );
+                        None
                     }
-                }
+                };
 
-                TokenType::Symbol('[') => {
-                    let bracket_pos = Position::from_token(self.current());
-                    self.advance();
-                    self.skip_whitespace();
-                    let index_expr = self.parse_expression(0);
-                    self.skip_whitespace();
-                    if !self.expect_symbol(']') { break; }
-
-                    // Flush any accumulated parts first
-                    if parts.len() >= 2 {
-                        let pos = expr.position();
-                        expr = Expression::QualifiedIdentifier {
-                            parts: std::mem::take(&mut parts),
-                            arguments: None,
-                            position: pos,
+                if let Some(member) = member_opt {
+                    if !parts.is_empty() {
+                        parts.push(member);
+                    } else {
+                        expr = Expression::PropertyAccess {
+                            object: Box::new(expr),
+                            property: member,
+                            position: dot_pos,
                         };
-                    } else {
-                        parts.clear();
                     }
-
-                    expr = Expression::IndexAccess {
-                        object: Box::new(expr),
-                        index: Box::new(index_expr),
-                        position: bracket_pos,
-                    };
+                } else {
+                    break;
                 }
+            }
 
-                // --- KEY FIX: was `return`, now `continue` so the chain keeps going ---
-                TokenType::Symbol('(') if !parts.is_empty() => {
-                    // Dotted chain call: obj.method() or Math.round() or input.trim()
-                    // Flush parts into a QualifiedIdentifier, then continue the loop
-                    // so subsequent `.method()` calls are parsed as InstanceMethodCalls.
+            TokenType::Symbol('[') => {
+                let bracket_pos = Position::from_token(self.current());
+                self.advance();
+                self.skip_whitespace();
+                let index_expr = self.parse_expression(0);
+                self.skip_whitespace();
+                if !self.expect_symbol(']') { break; }
+
+                // Flush any accumulated parts first
+                if parts.len() >= 2 {
                     let pos = expr.position();
-                    let args = self.parse_function_arguments();
                     expr = Expression::QualifiedIdentifier {
                         parts: std::mem::take(&mut parts),
-                        arguments: Some(args),
+                        arguments: None,
                         position: pos,
                     };
-                    // parts is now empty; the next '.' will enter the PropertyAccess branch
+                } else {
+                    parts.clear();
                 }
 
-                // --- NEW ARM: handles '(' when parts is empty (chained call after first) ---
-                TokenType::Symbol('(') => {
-                    // parts.is_empty() — this is a call directly following a PropertyAccess,
-                    // i.e. the `.split(" ")` portion of `input.trim().split(" ").join("-")`
-                    let tmp = expr;
-                    match tmp {
-                        Expression::PropertyAccess { object, property, position: prop_pos } => {
-                            let args = self.parse_function_arguments();
-                            expr = Expression::InstanceMethodCall {
-                                instance: object,
-                                method_name: property,
-                                arguments: args,
-                                position: prop_pos,
-                            };
-                            // Continue the loop — further chaining may follow
-                        }
-                        other => {
-                            // Not a property access; we cannot call it as a method here.
-                            expr = other;
-                            break;
-                        }
-                    }
-                }
-
-                _ => break,
+                expr = Expression::IndexAccess {
+                    object: Box::new(expr),
+                    index: Box::new(index_expr),
+                    position: bracket_pos,
+                };
             }
-        }
 
-        // Flush remaining chain
-        if parts.len() >= 2 {
-            let pos = expr.position();
-            self.skip_whitespace();
-            if self.check_symbol('(') {
+            // --- KEY FIX: was `return`, now `continue` so the chain keeps going ---
+            TokenType::Symbol('(') if !parts.is_empty() => {
+                // Dotted chain call: obj.method() or Math.round() or input.trim()
+                // Flush parts into a QualifiedIdentifier, then continue the loop
+                // so subsequent `.method()` calls are parsed as InstanceMethodCalls.
+                let pos = expr.position();
                 let args = self.parse_function_arguments();
-                return Expression::QualifiedIdentifier {
-                    parts,
+                expr = Expression::QualifiedIdentifier {
+                    parts: std::mem::take(&mut parts),
                     arguments: Some(args),
                     position: pos,
                 };
+                // parts is now empty; the next '.' will enter the PropertyAccess branch
             }
+
+            // --- NEW ARM: handles '(' when parts is empty (chained call after first) ---
+            TokenType::Symbol('(') => {
+                // parts.is_empty() — this is a call directly following a PropertyAccess
+                // or IndexAccess.  Match the specific forms we know how to lower.
+                let tmp = expr;
+                match tmp {
+                    Expression::PropertyAccess { object, property, position: prop_pos } => {
+                        let args = self.parse_function_arguments();
+                        expr = Expression::InstanceMethodCall {
+                            instance: object,
+                            method_name: property,
+                            arguments: args,
+                            position: prop_pos,
+                        };
+                        // Continue the loop — further chaining may follow
+                    }
+
+                    // FIX: lambda call through index access — arr[0](args), ops[i](x).
+                    // Previously this fell to `other => break` which silently dropped
+                    // the call, leaving `arr[0]` (the lambda key string) as the result
+                    // instead of invoking the lambda.
+                    // We use the sentinel method name "__call__" so that
+                    // evaluate_instance_method_call knows to do lambda dispatch on
+                    // whatever the index access evaluates to.
+                    Expression::IndexAccess { object, index, position: idx_pos } => {
+                        let args = self.parse_function_arguments();
+                        expr = Expression::InstanceMethodCall {
+                            instance: Box::new(Expression::IndexAccess {
+                                object,
+                                index,
+                                position: idx_pos,
+                            }),
+                            method_name: "__call__".to_string(),
+                            arguments: args,
+                            position: idx_pos,
+                        };
+                        // Continue the loop — further chaining may follow
+                    }
+
+                    other => {
+                        // Not a form we can call — restore and stop.
+                        expr = other;
+                        break;
+                    }
+                }
+            }
+
+            _ => break,
+        }
+    }
+
+    // Flush remaining chain
+    if parts.len() >= 2 {
+        let pos = expr.position();
+        self.skip_whitespace();
+        if self.check_symbol('(') {
+            let args = self.parse_function_arguments();
             return Expression::QualifiedIdentifier {
                 parts,
-                arguments: None,
+                arguments: Some(args),
                 position: pos,
             };
         }
-
-        expr
+        return Expression::QualifiedIdentifier {
+            parts,
+            arguments: None,
+            position: pos,
+        };
     }
+
+    expr
+                            }
 
     fn parse_primary_with_postfix(&mut self) -> Expression {
         let expr = self.parse_primary_base();

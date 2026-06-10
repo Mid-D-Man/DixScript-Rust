@@ -255,28 +255,39 @@ impl<'a> TypeInferenceVisitor<'a> {
         //      `items.length()`      where items: Array    → Int
         //      `dt.addDays(7)`       where dt: Timestamp   → Timestamp
         //
-        // This is the key fix that allows `!myStr.contains("x")` to be correctly
-        // inferred as UnaryOp("!", Bool) → valid, rather than triggering a cascade
-        // of false-positive type errors when the operand type is unknown (None).
+        // IMPORTANT: Object type is explicitly excluded from the registry lookup.
+        // Object variables may have lambda functions as properties (e.g.,
+        // `calculator.add` where add = (a,b) => a+b).  The built-in Object
+        // instance method registry contains methods like `add(key, value) → Object`
+        // for adding new properties, which has the same name but a completely
+        // different signature and return type.  Consulting the registry for Object
+        // would infer `DataType::Object` for the call and fire a false QFUNC015
+        // return-type-mismatch error.  Returning None here defers type checking to
+        // runtime, which is the correct behaviour for dynamic Object property calls.
         if parts.len() == 2 {
             if let Some(maybe_var_type) = self.local_variable_types.get(first_part.as_str()) {
                 if let Some(var_type) = maybe_var_type {
                     // Strip TypedArray/TypedTuple wrappers for registry lookup
                     let base_type = var_type.base_collection_type();
-                    if let Some(dix_type) = Self::convert_data_type_to_dix_type(base_type) {
-                        use crate::Builtins::Resolver::instance_method_registry;
-                        instance_method_registry::initialize();
-                        if let Some(method) = instance_method_registry::get_instance_method(
-                            dix_type,
-                            second_part.as_str(),
-                        ) {
-                            let ret = method.return_type();
-                            // Void/Null/Any cannot be usefully propagated
-                            if ret != DixType::Any
-                                && ret != DixType::Void
-                                && ret != DixType::Null
-                            {
-                                return Self::convert_dix_type_to_data_type(ret);
+
+                    // Object properties can be lambdas — skip registry to avoid
+                    // conflating built-in Object methods with lambda property calls.
+                    if base_type != DataType::Object {
+                        if let Some(dix_type) = Self::convert_data_type_to_dix_type(base_type) {
+                            use crate::Builtins::Resolver::instance_method_registry;
+                            instance_method_registry::initialize();
+                            if let Some(method) = instance_method_registry::get_instance_method(
+                                dix_type,
+                                second_part.as_str(),
+                            ) {
+                                let ret = method.return_type();
+                                // Void/Null/Any cannot be usefully propagated
+                                if ret != DixType::Any
+                                    && ret != DixType::Void
+                                    && ret != DixType::Null
+                                {
+                                    return Self::convert_dix_type_to_data_type(ret);
+                                }
                             }
                         }
                     }

@@ -1816,95 +1816,33 @@ fn evaluate_unary_op(
     }
 
     fn evaluate_instance_method_call(
-    &mut self,
-    instance:     &Expression,
-    method_name:  &str,
-    arguments:    &[Expression],
-    position:     Position,
-    context:      &mut ExecutionContext,
-    scope_context: &FxHashMap<String, String>,
-    namespace:    Option<&ImportedNamespace>,
-) -> Result<DixValue, InterpreterError> {
-    let instance_val =
-        self.evaluate_expression(instance, context, scope_context, namespace)?;
+        &mut self,
+        instance: &Expression,
+        method_name: &str,
+        arguments: &[Expression],
+        position: Position,
+        context: &mut ExecutionContext,
+        scope_context: &FxHashMap<String, String>,
+        namespace: Option<&ImportedNamespace>,
+    ) -> Result<DixValue, InterpreterError> {
+        let instance_val =
+            self.evaluate_expression(instance, context, scope_context, namespace)?;
 
-    // ── Lambda dispatch: instance evaluated to a lambda reference key ─────────
-    // Covers arr[0](args) after the parser lowers it to
-    // InstanceMethodCall { IndexAccess(arr,0), "__call__", args }.
-    // Also covers any other case where a variable holding a lambda key is
-    // called as if it were an instance method.
-    {
-        let val_str = instance_val.as_string();
-        if instance_val.get_type() == DixType::String && val_str.starts_with("__lam_") {
-            if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
-                if self.debug_config.is_enabled {
-                    self.error_manager.log_debug(&format!(
-                        "[InstanceMethodCall] Dispatching '{}' as lambda via key {}",
-                        method_name, val_str
-                    ));
-                }
-                return self.invoke_lambda(
-                    &lambda, arguments, position, context, scope_context, namespace,
-                );
-            }
+        let mut args = Vec::with_capacity(arguments.len());
+        for arg in arguments {
+            args.push(
+                self.evaluate_expression(arg, context, scope_context, namespace)?,
+            );
         }
-    }
 
-    // ── Lambda dispatch: instance is an Object whose property is a lambda ─────
-    // Covers calculator.add(x, 10) where add = (a, b) => a + b was stored
-    // as a property of the object literal.  The property value is the
-    // lambda reference key string "__lam_N"; look it up and invoke it.
-    if instance_val.get_type() == DixType::Object {
-        if let Some(prop_val) = instance_val.as_object().get(method_name).cloned() {
-            let prop_str = prop_val.as_string();
-            if prop_str.starts_with("__lam_") {
-                if let Some(lambda) = self.lambda_registry.get(&prop_str).cloned() {
-                    if self.debug_config.is_enabled {
-                        self.error_manager.log_debug(&format!(
-                            "[InstanceMethodCall] Dispatching object property '{}' \
-                             as lambda via key {}",
-                            method_name, prop_str
-                        ));
-                    }
-                    return self.invoke_lambda(
-                        &lambda, arguments, position, context, scope_context, namespace,
-                    );
-                }
-            }
-        }
+        builtin_call_resolver::resolve_instance_call(&instance_val, method_name, &args)
+            .map_err(|e| InterpreterError::BuiltinCallFailed {
+                object: format!("{:?}", instance_val.get_type()),
+                method: method_name.to_string(),
+                message: e,
+                position,
+            })
     }
-
-    // ── Standard built-in instance method dispatch ────────────────────────────
-    let chain_depth = Self::count_method_chain_depth(instance);
-    if chain_depth > MAX_METHOD_CHAIN_DEPTH {
-        self.error_manager.log_error(&format!(
-            "[InstanceMethodCall] Method chain depth {} exceeds limit {}",
-            chain_depth, MAX_METHOD_CHAIN_DEPTH
-        ));
-        return Err(InterpreterError::InvalidOperation {
-            message: format!(
-                "Method chain depth {} exceeds maximum {}",
-                chain_depth, MAX_METHOD_CHAIN_DEPTH
-            ),
-            position,
-        });
-    }
-
-    let mut args = Vec::with_capacity(arguments.len());
-    for arg in arguments {
-        args.push(
-            self.evaluate_expression(arg, context, scope_context, namespace)?,
-        );
-    }
-
-    builtin_call_resolver::resolve_instance_call(&instance_val, method_name, &args)
-        .map_err(|e| InterpreterError::BuiltinCallFailed {
-            object:  format!("{:?}", instance_val.get_type()),
-            method:  method_name.to_string(),
-            message: e,
-            position,
-        })
-}
 
     fn evaluate_property_access(
         &mut self,
@@ -2775,4 +2713,4 @@ fn expr_variant_name(expr: &Expression) -> &'static str {
         Expression::Conditional { .. }         => "Conditional",
         Expression::TypeCast { .. }            => "TypeCast",
     }
-}
+    }

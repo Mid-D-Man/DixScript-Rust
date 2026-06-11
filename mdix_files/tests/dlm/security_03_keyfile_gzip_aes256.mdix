@@ -1,0 +1,86 @@
+// Test: GZip compression + AES-256 keyfile (production recommended for large configs)
+// Compile: mdix compile security_03_keyfile_gzip_aes256.mdix -o ./output
+// Decrypt: mdix decrypt ./output/security_03_keyfile_gzip_aes256.mdix.enc --key ./output/security_03_keyfile_gzip_aes256.mdix.key
+
+@CONFIG(
+  version -> "1.0.0"
+  author  -> "MidManStudio Security Test — GZip + AES-256 Keyfile"
+)
+
+@ENUMS(
+  LogLevel     { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3, FATAL = 4 }
+  CacheBackend { MEMORY = 0, REDIS = 1, MEMCACHED = 2 }
+  QueueType    { RABBITMQ = 0, SQS = 1, KAFKA = 2 }
+)
+
+@DLM(
+  DCompressor.gzip
+  DEncryptor.aes256
+)
+
+@QUICKFUNCS(
+  ~cacheConfig<object>(backend<enum>, host, port<int>, ttl<int>) {
+    return {
+      backend = backend
+      host    = host
+      port    = port
+      ttl     = ttl
+      max_mem = 256
+    }
+  }
+
+  ~queueConfig<object>(type<enum>, host, vhost) {
+    return {
+      type  = type
+      host  = host
+      vhost = vhost
+      durable = true
+      prefetch = 10
+    }
+  }
+
+  ~featureFlag<object>(enabled<bool>, rollout<int>, description) {
+    return {
+      enabled     = enabled
+      rollout_pct = rollout
+      description = description
+    }
+  }
+)
+
+@DATA(
+  log_level<enum>      = LogLevel.INFO
+  cache_backend<enum>  = CacheBackend.REDIS
+  queue_type<enum>     = QueueType.RABBITMQ
+
+  service_name = "PlatformCore"
+  version      = "4.2.1"
+
+  primary_cache:   cacheConfig(CacheBackend.REDIS, "redis.prod.internal", 6379, 3600)
+  session_cache:   cacheConfig(CacheBackend.REDIS, "redis-sessions.prod.internal", 6379, 86400)
+
+  job_queue:    queueConfig(QueueType.RABBITMQ, "rmq.prod.internal", "/prod")
+  event_queue:  queueConfig(QueueType.RABBITMQ, "rmq.prod.internal", "/events")
+
+  feature_flags::
+    featureFlag(true,  100, "New dashboard UI enabled for all users")
+    featureFlag(true,  25,  "Beta AI features — 25% rollout")
+    featureFlag(false, 0,   "Legacy payment flow — disabled")
+    featureFlag(true,  50,  "A/B test checkout — 50% split")
+
+  rabbitmq_password  = "rmq_prod_password_replace_me"
+  redis_auth_token   = "redis_auth_token_replace_me"
+  kafka_api_key      = "kafka_api_key_replace_me"
+  kafka_api_secret   = "kafka_api_secret_replace_me"
+
+  datadog_api_key    = "dd_api_key_replace_me"
+  sentry_dsn         = "https://replace@sentry.io/project_id"
+  newrelic_key       = "nr_license_key_replace_me"
+)
+
+@SECURITY(
+  encryption -> {
+    mode      = "keyfile"
+    algorithm = "aes256-gcm"
+  }
+)

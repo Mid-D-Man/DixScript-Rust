@@ -1,0 +1,80 @@
+// Test: AES-256 keyfile mode (most common production use case)
+// Compile: mdix compile security_01_keyfile_aes256.mdix -o ./output
+// Decrypt: mdix decrypt ./output/security_01_keyfile_aes256.mdix.enc --key ./output/security_01_keyfile_aes256.mdix.key
+
+@CONFIG(
+  version -> "1.0.0"
+  author  -> "MidManStudio Security Test"
+)
+
+@ENUMS(
+  Environment  { DEV = 1, STAGING = 2, PROD = 3 }
+  AccessLevel  { GUEST = 0, USER = 1, ADMIN = 2, SUPERADMIN = 3 }
+  ServiceTier  { FREE = 0, PRO = 1, ENTERPRISE = 2 }
+)
+
+@DLM(
+  DEncryptor.aes256
+)
+
+@QUICKFUNCS(
+  ~dbConfig<object>(host, port<int>, ssl<bool>, pool_size<int>) {
+    return {
+      host      = host
+      port      = port
+      ssl       = ssl
+      pool_size = pool_size
+      timeout   = 30
+      retries   = 3
+    }
+  }
+
+  ~serviceKey<string>(name, env<enum>) {
+    return $"sk_{name}_prod_replace_me"
+  }
+
+  ~smtpConfig<object>(host, port<int>, user) {
+    return {
+      host     = host
+      port     = port
+      user     = user
+      tls      = true
+      timeout  = 15
+    }
+  }
+)
+
+@DATA(
+  environment<enum>  = Environment.PROD
+  access_level<enum> = AccessLevel.ADMIN
+  service_tier<enum> = ServiceTier.ENTERPRISE
+  app_name           = "SecureVault"
+  version            = "2.1.0"
+
+  database: dbConfig("db.prod.internal", 5432, true, 20)
+  replica:  dbConfig("db-replica.prod.internal", 5432, true, 10)
+
+  smtp: smtpConfig("smtp.sendgrid.net", 587, "apikey")
+
+  api_keys::
+    serviceKey("stripe", Environment.PROD)
+    serviceKey("sendgrid", Environment.PROD)
+    serviceKey("twilio", Environment.PROD)
+
+  jwt_secret        = "hs512_256bit_secret_replace_with_cryptographically_random_value"
+  session_secret    = "session_512bit_replace_with_secure_random_value_in_production"
+  stripe_secret     = "sk_live_replace_with_real_stripe_live_key"
+  stripe_webhook    = "whsec_replace_with_real_stripe_webhook_secret"
+  sendgrid_api_key  = "SG.replace_with_real_sendgrid_api_key"
+  db_password       = "replace_with_production_database_password"
+  redis_url         = "redis://:replace_with_redis_password@redis.prod.internal:6379/0"
+  s3_access_key     = "AKIA_REPLACE_WITH_AWS_ACCESS_KEY"
+  s3_secret_key     = "replace_with_aws_secret_access_key"
+)
+
+@SECURITY(
+  encryption -> {
+    mode      = "keyfile"
+    algorithm = "aes256-gcm"
+  }
+)

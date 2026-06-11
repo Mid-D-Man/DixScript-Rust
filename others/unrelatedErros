@@ -1,1 +1,1 @@
-<html>Function 'lambdaInObject' returns Object but declared return type is Int<br/>Suggestion: Change the return value to match Int or update the function return type
+⚙ Compile failed: ✗ Compile error: Value resolution failed: ["Execution of 'lambdaArray' at DATA.test.lambdacollections.lam_array failed: BuiltinCallFailed { object: "String", method: "call", message: "Error calling String.call: Type String has no method: call", position: Position { line: 1316, column: 37 } }"]

@@ -1,15 +1,20 @@
 // mdix-lsp/src/features/goto_definition.rs
 //! Go-to-definition provider.
 //!
-//! Approach B: @CONFIG tokens are real tokens with SectionId::Config and
-//! accurate positions. No config_line_range needed.
-//!
-//! Fixes:
-//!   - EnumAccess: position-aware — cursor on field name navigates to that
-//!     specific field declaration, cursor on enum name navigates to enum type.
-//!   - Identifier after '.': QuickFunc local object property navigation.
-//!     `let someone = { sss = 5 }` then `someone.sss` → navigates to `sss`.
-//!   - Imported-symbol navigation (2025): unchanged.
+//! Handles:
+//!   - QuickFunc call sites → declaration
+//!   - Enum access (position-aware: field vs type name)
+//!   - Object property access inside QuickFuncs
+//!   - Imported namespace members (functions, enums)
+//!   - Import aliases → @IMPORTS entry
+//!   - Import path strings → the imported file on disk
+//!   - DATA variable references
+//!   - QuickFunc parameters
+//!   - QuickFunc local variable declarations
+//!   - ConfigAccess tokens → @CONFIG entry
+//!   - InterpolatedString → identifier under cursor inside {expr}
+//!   - `~` symbol → the QuickFunc declaration that follows
+//!   - Section keywords → section start
 
 use std::panic;
 use std::path::Path;
@@ -31,9 +36,7 @@ pub fn provide(doc: Option<&Document>, pos: Position) -> Option<GotoDefinitionRe
     match result {
         Ok(r) => r,
         Err(payload) => {
-            let msg = payload
-                .downcast_ref::<String>()
-                .cloned()
+            let msg = payload.downcast_ref::<String>().cloned()
                 .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
                 .unwrap_or_else(|| "unknown panic".to_string());
             tracing::error!("goto_definition panicked: {}", msg);
@@ -45,7 +48,6 @@ pub fn provide(doc: Option<&Document>, pos: Position) -> Option<GotoDefinitionRe
 fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<GotoDefinitionResponse> {
     let doc = doc?;
 
-    // @CONFIG lines — definition IS the current line; nothing to jump to.
     if doc.pos_in_config(pos) {
         return None;
     }
@@ -64,21 +66,21 @@ fn definition_for(
 
         // ── Identifier ────────────────────────────────────────────────────────
         TokenType::Identifier(name) => {
-            // Priority 1: member of an imported namespace (e.g. Utils.calc or Utils.Status.ACTIVE)
-            if let Some(response) = find_imported_namespace_member(doc, name, index) {
-                return Some(response);
+            let name = name.clone();
+
+            // Priority 1: imported namespace member
+            if let Some(r) = find_imported_namespace_member(doc, &name, index) {
+                return Some(r);
             }
 
-            // Priority 2: object property in QuickFunc — dot access on a local variable
-            // e.g. `let someone = { sss = 5 }` then `sugar = someone.sss`
-            // clicking `sss` navigates to the `sss` key in the object literal
+            // Priority 2: object property via dot access (let obj = {x=1}; obj.x)
             if token.section == SectionId::QuickFuncs && index >= 2 {
                 let prev      = doc.tokens.get(index - 1);
                 let prev_prev = doc.tokens.get(index - 2);
-                if let (Some(dot_tok), Some(obj_tok)) = (prev, prev_prev) {
-                    if matches!(dot_tok.token_type, TokenType::Symbol('.')) {
-                        if let TokenType::Identifier(obj_name) = &obj_tok.token_type {
-                            if let Some(loc) = find_qf_object_property_def(doc, obj_name, name) {
+                if let (Some(dot), Some(obj)) = (prev, prev_prev) {
+                    if matches!(dot.token_type, TokenType::Symbol('.')) {
+                        if let TokenType::Identifier(obj_name) = &obj.token_type {
+                            if let Some(loc) = find_qf_object_property_def(doc, obj_name, &name) {
                                 return Some(GotoDefinitionResponse::Scalar(loc));
                             }
                         }
@@ -92,29 +94,36 @@ fn definition_for(
                 .unwrap_or(false);
 
             if is_call {
-                if let Some(loc) = find_quickfunc_def(doc, name) {
+                if let Some(loc) = find_quickfunc_def(doc, &name) {
                     return Some(GotoDefinitionResponse::Scalar(loc));
                 }
             }
 
-            // Priority 4: Enum type name → @ENUMS declaration
-            if let Some(loc) = find_enum_def(doc, name) {
+            // Priority 4: Enum type name → @ENUMS
+            if let Some(loc) = find_enum_def(doc, &name) {
                 return Some(GotoDefinitionResponse::Scalar(loc));
             }
 
-            // Priority 5: Namespace alias → @IMPORTS declaration in current file
-            if let Some(loc) = find_import_def(doc, name) {
+            // Priority 5: Import alias → @IMPORTS
+            if let Some(loc) = find_import_def(doc, &name) {
                 return Some(GotoDefinitionResponse::Scalar(loc));
             }
 
-            // Priority 6: Variable in @DATA → its definition line
-            if let Some(loc) = find_data_var_def(doc, name, token.section) {
-                return Some(GotoDefinitionResponse::Scalar(loc));
-            }
-
-            // Priority 7: QuickFunc parameter → declaration in the enclosing function
+            // Priority 6: QuickFunc local variable declaration
             if token.section == SectionId::QuickFuncs {
-                if let Some(loc) = find_param_def(doc, name) {
+                if let Some(loc) = find_quickfunc_local_var_def(doc, &name) {
+                    return Some(GotoDefinitionResponse::Scalar(loc));
+                }
+            }
+
+            // Priority 7: DATA variable
+            if let Some(loc) = find_data_var_def(doc, &name, token.section) {
+                return Some(GotoDefinitionResponse::Scalar(loc));
+            }
+
+            // Priority 8: QuickFunc parameter
+            if token.section == SectionId::QuickFuncs {
+                if let Some(loc) = find_param_def(doc, &name) {
                     return Some(GotoDefinitionResponse::Scalar(loc));
                 }
             }
@@ -122,30 +131,51 @@ fn definition_for(
             None
         }
 
-        // ── Enum access (EnumName.FIELD) ──────────────────────────────────────
-        //
-        // Position-aware: if cursor is after the dot (on the field name),
-        // navigate to the specific field declaration. If before/on the dot
-        // (on the enum type name), navigate to the enum type declaration.
+        // ── Enum access (EnumName.FIELD) — position-aware ────────────────────
         TokenType::EnumAccess { enum_name, value } => {
-            // token.column is 1-based; pos.character is 0-based.
             let token_start_0 = token.column.saturating_sub(1);
-            let dot_offset    = enum_name.len();          // index of '.' relative to token start
+            let dot_offset    = enum_name.len();
             let cursor_0      = pos.character as usize;
+            let on_value      = cursor_0 > token_start_0 + dot_offset;
 
-            // Cursor is on the value (field) part if it falls after the dot
-            let on_value_part = cursor_0 > token_start_0 + dot_offset;
-
-            if on_value_part {
-                // Navigate to the specific field, fall back to enum type
+            if on_value {
                 find_enum_field_def(doc, enum_name, value)
                     .or_else(|| find_enum_def(doc, enum_name))
                     .map(GotoDefinitionResponse::Scalar)
             } else {
-                // Navigate to the enum type declaration
-                find_enum_def(doc, enum_name)
-                    .map(GotoDefinitionResponse::Scalar)
+                find_enum_def(doc, enum_name).map(GotoDefinitionResponse::Scalar)
             }
+        }
+
+        // ── Interpolated string — navigate to identifier inside {expr} ────────
+        TokenType::InterpolatedString(template) => {
+            find_interpolated_string_def(token, template, pos, doc)
+        }
+
+        // ── ~ symbol — navigate to the QuickFunc that follows ─────────────────
+        // (User is at the declaration prefix; nothing to jump TO, but we try
+        // to jump to the identifier itself for consistency.)
+        TokenType::Symbol('~') => {
+            doc.tokens.get(index + 1).and_then(|next| {
+                if let TokenType::Identifier(name) = &next.token_type {
+                    find_quickfunc_def(doc, name).map(GotoDefinitionResponse::Scalar)
+                } else {
+                    None
+                }
+            })
+        }
+
+        // ── Import path string — navigate to the file on disk ────────────────
+        TokenType::String(path) if token.section == SectionId::Imports => {
+            navigate_to_import_path(path, doc)
+        }
+        TokenType::StringSingle(path) if token.section == SectionId::Imports => {
+            navigate_to_import_path(path, doc)
+        }
+
+        // ── ConfigAccess — jump to the @CONFIG entry ──────────────────────────
+        TokenType::ConfigAccess(key) => {
+            find_config_entry_def(doc, key)
         }
 
         // ── Section keywords → start of that section ─────────────────────────
@@ -159,6 +189,225 @@ fn definition_for(
 
         _ => None,
     }
+}
+
+// ── Interpolated string goto ──────────────────────────────────────────────────
+//
+// Source: $"Hello {name} and {x + y}"
+//           ^token.column (1-based, points to $)
+//
+// template = "Hello {name} and {x + y}"  (content without $" wrapper)
+//
+// cursor_col_0 (0-based LSP) → template_offset = cursor_col_0 - (token.column-1) - 2
+
+fn find_interpolated_string_def(
+    token:    &Token,
+    template: &str,
+    pos:      Position,
+    doc:      &Document,
+) -> Option<GotoDefinitionResponse> {
+    let token_start_col_0 = token.column.saturating_sub(1);
+    let cursor_col_0      = pos.character as usize;
+
+    // Guard: cursor must be past the $" prefix
+    if cursor_col_0 < token_start_col_0.saturating_add(2) {
+        return None;
+    }
+
+    let template_offset = cursor_col_0 - token_start_col_0 - 2;
+
+    let ident = extract_ident_at_template_offset(template, template_offset)?;
+
+    // Try to navigate to the identifier's definition.
+    // Order: param → local var → QF call → enum → import → data var
+    find_param_def(doc, &ident)
+        .or_else(|| find_quickfunc_local_var_def(doc, &ident))
+        .or_else(|| find_quickfunc_def(doc, &ident))
+        .or_else(|| find_enum_def(doc, &ident))
+        .or_else(|| find_import_def(doc, &ident))
+        .or_else(|| find_data_var_def_unconstrained(doc, &ident))
+        .map(GotoDefinitionResponse::Scalar)
+}
+
+/// Find `{...}` block at `offset` in `template`, then extract the identifier
+/// under the cursor within that block.
+fn extract_ident_at_template_offset(template: &str, offset: usize) -> Option<String> {
+    let chars: Vec<char> = template.chars().collect();
+    if offset >= chars.len() { return None; }
+
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i] == '{' {
+            let block_start = i;
+            let mut depth   = 1usize;
+            let mut j       = i + 1;
+
+            while j < chars.len() && depth > 0 {
+                match chars[j] {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _   => {}
+                }
+                j += 1;
+            }
+            // Block spans [block_start, j)  where j is the char AFTER '}'
+
+            if offset >= block_start && offset < j {
+                // Cursor is inside this {…} block
+                let content_start = block_start + 1;
+                let content_end   = j.saturating_sub(1); // position of '}'
+                if content_start >= content_end { return None; }
+
+                let expr: String = chars[content_start..content_end].iter().collect();
+                let expr_offset  = offset.saturating_sub(content_start);
+                return find_ident_at_str_offset(&expr, expr_offset);
+            }
+
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+/// Find the identifier token that covers `offset` (char index) in `s`.
+/// Returns `None` for non-identifier chars (digits, operators, spaces, etc.)
+/// and also rejects strings that start with a digit (numeric literals).
+fn find_ident_at_str_offset(s: &str, offset: usize) -> Option<String> {
+    let chars: Vec<char> = s.chars().collect();
+    if offset >= chars.len() { return None; }
+
+    let ch = chars[offset];
+    if !ch.is_alphanumeric() && ch != '_' { return None; }
+
+    // Walk back to identifier start
+    let mut start = offset;
+    while start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
+        start -= 1;
+    }
+
+    // Walk forward to identifier end
+    let mut end = offset;
+    while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
+        end += 1;
+    }
+
+    let ident: String = chars[start..end].iter().collect();
+
+    // Reject pure-digit strings (numeric literals) and keywords unlikely to be vars
+    if ident.is_empty() || chars[start].is_ascii_digit() {
+        return None;
+    }
+    // Reject DixScript keyword literals
+    if matches!(ident.as_str(), "true" | "false" | "null" | "and" | "or" | "not") {
+        return None;
+    }
+
+    Some(ident)
+}
+
+// ── Import path navigation ────────────────────────────────────────────────────
+
+fn navigate_to_import_path(path: &str, doc: &Document) -> Option<GotoDefinitionResponse> {
+    // Resolve relative to the current file's directory
+    let current_path = doc.uri.to_file_path().ok()?;
+    let base_dir     = current_path.parent()?;
+
+    let target = if path.starts_with('/') || path.starts_with("http") {
+        // Absolute or URL — absolute paths only (URLs not navigable on disk)
+        if path.starts_with("http") { return None; }
+        std::path::PathBuf::from(path)
+    } else {
+        base_dir.join(path)
+    };
+
+    if target.exists() {
+        let uri = Url::from_file_path(&target).ok()?;
+        Some(GotoDefinitionResponse::Scalar(make_location(&uri, 0, 0, 0, 0)))
+    } else {
+        tracing::debug!("navigate_to_import_path: file not found: {}", target.display());
+        None
+    }
+}
+
+// ── @CONFIG entry navigation ──────────────────────────────────────────────────
+
+fn find_config_entry_def(doc: &Document, key: &str) -> Option<GotoDefinitionResponse> {
+    let config = doc.ast.as_ref()?.config.as_ref()?;
+    let entry  = config.entries.iter().find(|e| e.key == key)?;
+
+    if !entry.position.is_valid() { return None; }
+
+    let line = entry.position.line.saturating_sub(1) as u32;
+    let col  = entry.position.column.saturating_sub(1) as u32;
+
+    // Try to refine position from the token stream
+    let refined = doc.tokens.iter()
+        .filter(|t| t.section == SectionId::Config && t.line == entry.position.line)
+        .find(|t| matches!(&t.token_type, TokenType::Identifier(n) if n.as_str() == key))
+        .map(|t| (t.line.saturating_sub(1) as u32, t.column.saturating_sub(1) as u32));
+
+    let (line, col) = refined.unwrap_or((line, col));
+    Some(GotoDefinitionResponse::Scalar(make_location(
+        &doc.uri, line, col, line, col + key.len() as u32,
+    )))
+}
+
+// ── QuickFunc local variable declaration ─────────────────────────────────────
+
+/// Find the first `let`/`const`/`let mut` declaration of `name` inside any
+/// QuickFunc body (including nested if/switch branches).
+pub fn find_quickfunc_local_var_def(doc: &Document, name: &str) -> Option<Location> {
+    let qf = doc.ast.as_ref()?.quick_functions.as_ref()?;
+    for func in &qf.functions {
+        if let Some(loc) = find_var_decl_in_stmts(&func.body, name, &doc.uri) {
+            return Some(loc);
+        }
+    }
+    None
+}
+
+fn find_var_decl_in_stmts(
+    stmts: &[QuickFuncStatement],
+    name:  &str,
+    uri:   &Url,
+) -> Option<Location> {
+    for stmt in stmts {
+        match stmt {
+            QuickFuncStatement::VariableDeclaration { variable_name, position, .. }
+                if variable_name == name =>
+            {
+                if !position.is_valid() { continue; }
+                let line = position.line.saturating_sub(1) as u32;
+                let col  = position.column.saturating_sub(1) as u32;
+                return Some(make_location(uri, line, col, line, col + name.len() as u32));
+            }
+            QuickFuncStatement::If { then_branch, else_branch, .. } => {
+                if let Some(loc) = find_var_decl_in_stmts(then_branch, name, uri) { return Some(loc); }
+                if let Some(eb) = else_branch {
+                    if let Some(loc) = find_var_decl_in_stmts(eb, name, uri) { return Some(loc); }
+                }
+            }
+            QuickFuncStatement::Switch { cases, default_case, .. } => {
+                for case in cases {
+                    if let Some(loc) = find_var_decl_in_stmts(&case.statements, name, uri) { return Some(loc); }
+                }
+                if let Some(dc) = default_case {
+                    if let Some(loc) = find_var_decl_in_stmts(&dc.statements, name, uri) { return Some(loc); }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+// ── Unconstrained data variable lookup (used by interpolated string handler) ──
+
+/// Like `find_data_var_def` but does not restrict by section.
+fn find_data_var_def_unconstrained(doc: &Document, name: &str) -> Option<Location> {
+    find_data_var_def(doc, name, SectionId::QuickFuncs) // non-Data section → no restriction
 }
 
 // ── Imported namespace member navigation ──────────────────────────────────────
@@ -179,7 +428,7 @@ fn find_imported_namespace_member(
 
     match &ns_token.token_type {
         TokenType::Identifier(potential_ns) => {
-            // ── Pattern A: ns.Member ──────────────────────────────────────────
+            // Pattern A: ns.Member
             if let Some(ns) = st.try_get_namespace(potential_ns.as_str()) {
                 if let Some(func_info) = ns.functions.get(member_name) {
                     return navigate_to_imported_func(
@@ -195,15 +444,14 @@ fn find_imported_namespace_member(
                 return None;
             }
 
-            // ── Pattern B: ns.EnumType.FIELD ─────────────────────────────────
+            // Pattern B: ns.EnumType.FIELD  (3-part)
             if token_index >= 4 {
                 let prev2 = doc.tokens.get(token_index - 3)?;
                 if matches!(prev2.token_type, TokenType::Symbol('.')) {
-                    let ns2_token = doc.tokens.get(token_index - 4)?;
-                    if let TokenType::Identifier(actual_ns) = &ns2_token.token_type {
+                    let ns2 = doc.tokens.get(token_index - 4)?;
+                    if let TokenType::Identifier(actual_ns) = &ns2.token_type {
                         if let Some(ns) = st.try_get_namespace(actual_ns.as_str()) {
-                            let enum_name = potential_ns.as_str();
-                            if let Some(fields) = ns.enums.get(enum_name) {
+                            if let Some(fields) = ns.enums.get(potential_ns.as_str()) {
                                 if fields.contains_key(member_name) {
                                     return navigate_to_imported_file_start(&ns.file_path);
                                 }
@@ -226,10 +474,7 @@ fn navigate_to_imported_func(
 ) -> Option<GotoDefinitionResponse> {
     let uri = file_uri_from_path(file_path)?;
     let (line, col) = if ast_pos.is_valid() {
-        (
-            ast_pos.line.saturating_sub(1) as u32,
-            ast_pos.column.saturating_sub(1) as u32,
-        )
+        (ast_pos.line.saturating_sub(1) as u32, ast_pos.column.saturating_sub(1) as u32)
     } else {
         (0, 0)
     };
@@ -250,17 +495,7 @@ fn file_uri_from_path(path: &str) -> Option<Url> {
     Url::from_file_path(Path::new(path)).ok()
 }
 
-// ── QuickFunc object property navigation ──────────────────────────────────────
-//
-// Finds the definition of `prop_name` inside an object literal that is
-// assigned to `obj_name` within any QuickFunc in the document.
-//
-// Example: `let someone = { sss = 5 }` then `someone.sss`
-//   → searches QuickFuncs token stream for `someone = { ... sss = ... }`
-//   → navigates to the `sss` key inside the object literal.
-//
-// Uses the token stream directly for robustness (AST positions on
-// ObjectProperty may be UNKNOWN if the parser doesn't set them).
+// ── QuickFunc object property navigation ─────────────────────────────────────
 
 fn find_qf_object_property_def(
     doc:       &Document,
@@ -272,134 +507,94 @@ fn find_qf_object_property_def(
 
     for i in 0..n {
         let t = &tokens[i];
-
-        // Only look in @QUICKFUNCS section
         if t.section != SectionId::QuickFuncs { continue; }
-
-        // Must be `obj_name` as an identifier
         if !matches!(&t.token_type, TokenType::Identifier(id) if id.as_str() == obj_name) {
             continue;
         }
-
-        // Must NOT be preceded by `.` (would be a property access, not a definition)
+        // Must NOT be preceded by '.' (would be a usage, not definition)
         if i > 0 && matches!(&tokens[i - 1].token_type, TokenType::Symbol('.')) {
             continue;
         }
 
-        // Look ahead for `=` within the next 8 tokens
-        // (skipping possible type annotation: `<object>`)
+        // Look ahead for '=' (within 8 tokens, skipping type annotations)
         let eq_rel = tokens[i + 1..].iter().take(8).position(|t| {
             matches!(&t.token_type, TokenType::Symbol('='))
         });
-        let eq_idx = match eq_rel {
-            Some(j) => i + 1 + j,
-            None    => continue,
-        };
+        let eq_idx = match eq_rel { Some(j) => i + 1 + j, None => continue };
 
-        // After `=`, look for `{` within the next 4 tokens
+        // After '=', look for '{' within 4 tokens
         let brace_rel = tokens[eq_idx + 1..].iter().take(4).position(|t| {
             t.section == SectionId::QuickFuncs
                 && matches!(&t.token_type, TokenType::Symbol('{'))
         });
-        let brace_idx = match brace_rel {
-            Some(j) => eq_idx + 1 + j,
-            None    => continue,
-        };
+        let brace_idx = match brace_rel { Some(j) => eq_idx + 1 + j, None => continue };
 
-        // Scan inside the braces (depth-tracked) for `prop_name =`
+        // Scan inside braces for prop_name =
         let mut depth = 0i32;
         for j in brace_idx..n {
             if tokens[j].section != SectionId::QuickFuncs { continue; }
-
             match &tokens[j].token_type {
                 TokenType::Symbol('{') => depth += 1,
-
                 TokenType::Symbol('}') => {
                     depth -= 1;
-                    if depth <= 0 { break; } // left the object literal
+                    if depth <= 0 { break; }
                 }
-
-                // At depth 1 we are at the direct properties of the object
                 TokenType::Identifier(id) if id.as_str() == prop_name && depth == 1 => {
-                    // Confirm it is a key (next non-whitespace token is `=`)
-                    let next_is_eq = tokens
-                        .get(j + 1)
+                    let next_is_eq = tokens.get(j + 1)
                         .map(|t| matches!(&t.token_type, TokenType::Symbol('=')))
                         .unwrap_or(false);
-
                     if next_is_eq {
                         let line = tokens[j].line.saturating_sub(1) as u32;
                         let col  = tokens[j].column.saturating_sub(1) as u32;
                         return Some(make_location(
-                            &doc.uri,
-                            line, col,
-                            line, col + prop_name.len() as u32,
+                            &doc.uri, line, col, line, col + prop_name.len() as u32,
                         ));
                     }
                 }
-
                 _ => {}
             }
         }
     }
-
     None
 }
 
-// ── Enum field definition lookup ──────────────────────────────────────────────
-//
-// Navigate to the specific field declaration inside an @ENUMS block.
-// Uses the AST position when valid, falls back to the token stream.
+// ── Enum field definition ─────────────────────────────────────────────────────
 
 fn find_enum_field_def(doc: &Document, enum_name: &str, field_name: &str) -> Option<Location> {
     let enums = doc.ast.as_ref()?.enums.as_ref()?;
     let decl  = enums.enums.iter().find(|e| e.name == enum_name)?;
     let field = decl.fields.iter().find(|f| f.name == field_name)?;
 
-    // Try AST position first (set by parser when tokens are available)
     if field.position.is_valid() {
         let l = field.position.line.saturating_sub(1) as u32;
         let c = field.position.column.saturating_sub(1) as u32;
-
-        // Refine with token stream to get the exact token start
-        let refined = doc.tokens
-            .iter()
-            .filter(|t| {
-                t.section == SectionId::Enums
-                    && t.line == field.position.line
-            })
+        let refined = doc.tokens.iter()
+            .filter(|t| t.section == SectionId::Enums && t.line == field.position.line)
             .find(|t| matches!(&t.token_type, TokenType::Identifier(n) if n.as_str() == field_name))
             .map(|t| (t.line.saturating_sub(1) as u32, t.column.saturating_sub(1) as u32));
-
         let (line, col) = refined.unwrap_or((l, c));
-        return Some(make_location(
-            &doc.uri, line, col, line, col + field_name.len() as u32,
-        ));
+        return Some(make_location(&doc.uri, line, col, line, col + field_name.len() as u32));
     }
 
-    // Fallback: search the token stream in @ENUMS section.
-    // Find `field_name` as an identifier that is NOT preceded by `.`
-    // (to avoid matching usages like `EnumName.FIELD` elsewhere).
+    // Fallback: token stream scan in @ENUMS
     for (i, t) in doc.tokens.iter().enumerate() {
         if t.section != SectionId::Enums { continue; }
         if !matches!(&t.token_type, TokenType::Identifier(n) if n.as_str() == field_name) {
             continue;
         }
-        // In @ENUMS, a field declaration is NOT preceded by `.`
+        // Field declaration is NOT preceded by '.'
         if i > 0 && matches!(&doc.tokens[i - 1].token_type, TokenType::Symbol('.')) {
             continue;
         }
         let line = t.line.saturating_sub(1) as u32;
         let col  = t.column.saturating_sub(1) as u32;
-        return Some(make_location(
-            &doc.uri, line, col, line, col + field_name.len() as u32,
-        ));
+        return Some(make_location(&doc.uri, line, col, line, col + field_name.len() as u32));
     }
 
     None
 }
 
-// ── QuickFunc declaration lookup ──────────────────────────────────────────────
+// ── QuickFunc declaration ─────────────────────────────────────────────────────
 
 fn find_quickfunc_def(doc: &Document, name: &str) -> Option<Location> {
     let qf   = doc.ast.as_ref()?.quick_functions.as_ref()?;
@@ -428,13 +623,10 @@ fn find_func_name_token(
                 && t.line <= def_line + 2
         })
         .find(|t| matches!(&t.token_type, TokenType::Identifier(n) if n.as_str() == name))
-        .map(|t| (
-            t.line.saturating_sub(1) as u32,
-            t.column.saturating_sub(1) as u32,
-        ))
+        .map(|t| (t.line.saturating_sub(1) as u32, t.column.saturating_sub(1) as u32))
 }
 
-// ── Enum type declaration lookup ──────────────────────────────────────────────
+// ── Enum type declaration ─────────────────────────────────────────────────────
 
 fn find_enum_def(doc: &Document, enum_name: &str) -> Option<Location> {
     let enums = doc.ast.as_ref()?.enums.as_ref()?;
@@ -452,19 +644,13 @@ fn find_enum_def(doc: &Document, enum_name: &str) -> Option<Location> {
                 && t.line <= decl.position.line + 1
         })
         .find(|t| matches!(&t.token_type, TokenType::Identifier(n) if n.as_str() == enum_name))
-        .map(|t| (
-            t.line.saturating_sub(1) as u32,
-            t.column.saturating_sub(1) as u32,
-        ));
+        .map(|t| (t.line.saturating_sub(1) as u32, t.column.saturating_sub(1) as u32));
 
     let (line, col) = refined.unwrap_or((line, col));
-
-    Some(make_location(
-        &doc.uri, line, col, line, col + enum_name.len() as u32,
-    ))
+    Some(make_location(&doc.uri, line, col, line, col + enum_name.len() as u32))
 }
 
-// ── Import alias lookup ───────────────────────────────────────────────────────
+// ── Import alias ──────────────────────────────────────────────────────────────
 
 fn find_import_def(doc: &Document, alias: &str) -> Option<Location> {
     let st = doc.semantic_result.as_ref()?.symbol_table.as_ref()?;
@@ -485,21 +671,16 @@ fn find_import_def(doc: &Document, alias: &str) -> Option<Location> {
                 && t.line <= import.position.line + 1
         })
         .find(|t| matches!(&t.token_type, TokenType::Identifier(n) if n.as_str() == alias))
-        .map(|t| (
-            t.line.saturating_sub(1) as u32,
-            t.column.saturating_sub(1) as u32,
-        ));
+        .map(|t| (t.line.saturating_sub(1) as u32, t.column.saturating_sub(1) as u32));
 
     let (line, col) = refined.unwrap_or((line, col));
-
-    Some(make_location(
-        &doc.uri, line, col, line, col + alias.len() as u32,
-    ))
+    Some(make_location(&doc.uri, line, col, line, col + alias.len() as u32))
 }
 
-// ── DATA variable definition lookup ──────────────────────────────────────────
+// ── DATA variable ─────────────────────────────────────────────────────────────
 
 fn find_data_var_def(doc: &Document, name: &str, section: SectionId) -> Option<Location> {
+    // Don't navigate when cursor is already in @DATA (you're at the definition)
     if section == SectionId::Data { return None; }
 
     let data = doc.ast.as_ref()?.data.as_ref()?;
@@ -511,9 +692,7 @@ fn find_data_var_def(doc: &Document, name: &str, section: SectionId) -> Option<L
                 if !position.is_valid() { return None; }
                 let line = position.line.saturating_sub(1) as u32;
                 let col  = position.column.saturating_sub(1) as u32;
-                return Some(make_location(
-                    &doc.uri, line, col, line, col + name.len() as u32,
-                ));
+                return Some(make_location(&doc.uri, line, col, line, col + name.len() as u32));
             }
             DataEntry::TableProperty { path, position, .. }
                 if path.segments.first().map(|s| s.as_str()) == Some(name) =>
@@ -521,9 +700,7 @@ fn find_data_var_def(doc: &Document, name: &str, section: SectionId) -> Option<L
                 if !position.is_valid() { return None; }
                 let line = position.line.saturating_sub(1) as u32;
                 let col  = position.column.saturating_sub(1) as u32;
-                return Some(make_location(
-                    &doc.uri, line, col, line, col + name.len() as u32,
-                ));
+                return Some(make_location(&doc.uri, line, col, line, col + name.len() as u32));
             }
             DataEntry::GroupArray { path, position, .. }
                 if path.segments.first().map(|s| s.as_str()) == Some(name) =>
@@ -531,9 +708,13 @@ fn find_data_var_def(doc: &Document, name: &str, section: SectionId) -> Option<L
                 if !position.is_valid() { return None; }
                 let line = position.line.saturating_sub(1) as u32;
                 let col  = position.column.saturating_sub(1) as u32;
-                return Some(make_location(
-                    &doc.uri, line, col, line, col + name.len() as u32,
-                ));
+                return Some(make_location(&doc.uri, line, col, line, col + name.len() as u32));
+            }
+            DataEntry::ObjectProperty { name: n, position, .. } if n == name => {
+                if !position.is_valid() { return None; }
+                let line = position.line.saturating_sub(1) as u32;
+                let col  = position.column.saturating_sub(1) as u32;
+                return Some(make_location(&doc.uri, line, col, line, col + name.len() as u32));
             }
             _ => {}
         }
@@ -541,7 +722,7 @@ fn find_data_var_def(doc: &Document, name: &str, section: SectionId) -> Option<L
     None
 }
 
-// ── QuickFunc parameter definition lookup ────────────────────────────────────
+// ── QuickFunc parameter ───────────────────────────────────────────────────────
 
 fn find_param_def(doc: &Document, name: &str) -> Option<Location> {
     let qf = doc.ast.as_ref()?.quick_functions.as_ref()?;
@@ -560,18 +741,11 @@ fn find_param_def(doc: &Document, name: &str) -> Option<Location> {
                         && t.line >= param.position.line
                         && t.line <= param.position.line + 1
                 })
-                .find(|t| matches!(&t.token_type,
-                    TokenType::Identifier(n) if n.as_str() == name))
-                .map(|t| (
-                    t.line.saturating_sub(1) as u32,
-                    t.column.saturating_sub(1) as u32,
-                ));
+                .find(|t| matches!(&t.token_type, TokenType::Identifier(n) if n.as_str() == name))
+                .map(|t| (t.line.saturating_sub(1) as u32, t.column.saturating_sub(1) as u32));
 
             let (line, col) = refined.unwrap_or((line, col));
-
-            return Some(make_location(
-                &doc.uri, line, col, line, col + name.len() as u32,
-            ));
+            return Some(make_location(&doc.uri, line, col, line, col + name.len() as u32));
         }
     }
     None
@@ -621,4 +795,91 @@ fn make_location(
             Position::new(end_line,   end_col),
         ),
     }
-                }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_ident_simple() {
+        // {name} at offset 1 (pointing to 'n' in 'name', after '{')
+        // template = "Hello {name}!"
+        // block_start=6, block_end=12, content="name", expr_offset=0
+        assert_eq!(
+            extract_ident_at_template_offset("Hello {name}!", 7),
+            Some("name".to_string())
+        );
+        assert_eq!(
+            extract_ident_at_template_offset("Hello {name}!", 9),
+            Some("name".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_ident_arithmetic() {
+        // {x + y} — cursor on 'x' or 'y'
+        // template = "{x + y}"
+        // block [0,7), content = "x + y"
+        // offset 0 → '{' → None (outside ident)... wait offset 0 IS '{', we'd look at block
+        // Actually offset 1 → 'x' → block [0,7), expr_offset = 1-1 = 0 → 'x' in "x + y"
+        assert_eq!(
+            extract_ident_at_template_offset("{x + y}", 1),
+            Some("x".to_string())
+        );
+        assert_eq!(
+            extract_ident_at_template_offset("{x + y}", 5),
+            Some("y".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_ident_on_brace_returns_none() {
+        // Cursor directly on '{' or '}' — not an identifier
+        // '{' is at index 6 in "Hello {name}!"
+        assert_eq!(extract_ident_at_template_offset("Hello {name}!", 6), None);
+    }
+
+    #[test]
+    fn extract_ident_outside_braces_returns_none() {
+        // Cursor on literal text outside {}
+        assert_eq!(extract_ident_at_template_offset("Hello {name}!", 2), None);
+    }
+
+    #[test]
+    fn extract_ident_property_access() {
+        // {obj.field} — cursor on 'obj' or 'field'
+        assert_eq!(
+            extract_ident_at_template_offset("{obj.field}", 1),
+            Some("obj".to_string())
+        );
+        assert_eq!(
+            extract_ident_at_template_offset("{obj.field}", 5),
+            Some("field".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_ident_rejects_numeric() {
+        // {x + 42} — cursor on '4'
+        assert_eq!(extract_ident_at_template_offset("{x + 42}", 5), None);
+    }
+
+    #[test]
+    fn find_ident_at_str_offset_basic() {
+        assert_eq!(find_ident_at_str_offset("myVar", 0), Some("myVar".to_string()));
+        assert_eq!(find_ident_at_str_offset("myVar", 4), Some("myVar".to_string()));
+        assert_eq!(find_ident_at_str_offset("x + y", 0), Some("x".to_string()));
+        assert_eq!(find_ident_at_str_offset("x + y", 4), Some("y".to_string()));
+        assert_eq!(find_ident_at_str_offset("x + y", 2), None); // space
+    }
+
+    #[test]
+    fn find_ident_at_str_offset_rejects_keywords() {
+        assert_eq!(find_ident_at_str_offset("true", 0), None);
+        assert_eq!(find_ident_at_str_offset("false", 0), None);
+        assert_eq!(find_ident_at_str_offset("null", 0), None);
+    }
+    }

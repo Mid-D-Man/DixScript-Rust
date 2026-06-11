@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::{
 use dixscript::Builtins::Core::DixType;
 use dixscript::Builtins::Resolver::{instance_method_registry, static_object_registry};
 use dixscript::Compiler::AST::{
-    DataType, DixScript, Expression, QuickFuncStatement, TypeInferenceVisitor, Value,
+    DataEntry, DataType, DixScript, Expression, QuickFuncStatement, TypeInferenceVisitor, Value,
 };
 use dixscript::Compiler::Core::Tokenizer::Token;
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
@@ -66,6 +66,16 @@ fn provide_inner(
                 }
                 return Some(CompletionResponse::Array(config_key_completions()));
             }
+
+            // @SECURITY
+            if section == SectionId::Security {
+                let sec_items = security_completions_at(&d.source, pos);
+                if !sec_items.is_empty() {
+                    return Some(CompletionResponse::Array(sec_items));
+                }
+                return Some(CompletionResponse::Array(security_block_key_completions()));
+            }
+
             if section == SectionId::None {
                 if line_looks_like_config_entry(&d.source, pos) {
                     let config_items = config_completions_at(&d.source, pos);
@@ -194,6 +204,207 @@ fn config_value_completions(key: &str) -> Vec<CompletionItem> {
     }).collect()
 }
 
+// ── @SECURITY section completions ─────────────────────────────────────────────
+
+/// Scan backwards from cursor_line to find the enclosing `blockname -> {` block.
+/// Counts `{` / `}` depth; when depth goes negative we've found our opening brace line.
+fn find_enclosing_security_block(source: &str, cursor_line: u32) -> Option<String> {
+    let lines: Vec<&str> = source.lines().collect();
+    let cursor = cursor_line as usize;
+    let mut depth = 0i32;
+
+    for i in (0..=cursor.min(lines.len().saturating_sub(1))).rev() {
+        let line = lines[i];
+        let closes = line.chars().filter(|&c| c == '}').count() as i32;
+        let opens  = line.chars().filter(|&c| c == '{').count() as i32;
+        depth += closes - opens;
+
+        if depth < 0 {
+            // This line has the unclosed `{` we are inside
+            if let Some(arrow_pos) = line.find("->") {
+                let block_name = line[..arrow_pos].trim();
+                if !block_name.is_empty()
+                    && !block_name.contains('@')
+                    && !block_name.contains('(')
+                    && !block_name.contains('/')
+                {
+                    return Some(block_name.to_string());
+                }
+            }
+            return None; // Brace but no -> (e.g. the @SECURITY( line itself)
+        }
+    }
+    None
+}
+
+/// Context-aware completions inside @SECURITY.
+fn security_completions_at(source: &str, pos: Position) -> Vec<CompletionItem> {
+    let line_text = source.lines().nth(pos.line as usize).unwrap_or("");
+    let up_to = &line_text[..((pos.character as usize).min(line_text.len()))];
+
+    // Value side: `field_name = ` (has = but NOT ->)
+    if let Some(eq_pos) = up_to.rfind('=') {
+        let before_eq = &up_to[..eq_pos];
+        if !before_eq.contains("->") {
+            let field_name = before_eq.trim().to_string();
+            let items = security_field_value_completions(&field_name);
+            if !items.is_empty() { return items; }
+        }
+    }
+
+    // Field key completions inside a block { }
+    if let Some(block) = find_enclosing_security_block(source, pos.line) {
+        return security_field_key_completions(&block);
+    }
+
+    vec![]
+}
+
+/// Top-level block key completions for @SECURITY (encryption, validation, keystore).
+fn security_block_key_completions() -> Vec<CompletionItem> {
+    let blocks: &[(&str, &str, &str)] = &[
+        (
+            "encryption",
+            concat!(
+                "encryption -> {\n",
+                "  mode      = \"${1|keyfile,password|}\",\n",
+                "  algorithm = \"${2|aes256-gcm,aes128-gcm,chacha20-poly1305|}\"\n",
+                "}"
+            ),
+            "Encryption configuration. Required when `@DLM` includes a `DEncryptor` module.",
+        ),
+        (
+            "validation",
+            concat!(
+                "validation -> {\n",
+                "  checksum_algorithm = \"${1|sha256,sha512|}\",\n",
+                "  auth_tag_length    = ${2:128},\n",
+                "  hmac_algorithm     = \"${3|hmac-sha256,hmac-sha512|}\"\n",
+                "}"
+            ),
+            "Content integrity and authentication tag settings.",
+        ),
+        (
+            "keystore",
+            concat!(
+                "keystore -> {\n",
+                "  auto_generate = ${1:true},\n",
+                "  backup_count  = ${2:3},\n",
+                "  backup_naming = \"${3|timestamp,sequence|}\"\n",
+                "}"
+            ),
+            "Key file management. Set `auto_generate = true` so the compiler produces a `.mdix.key` file.",
+        ),
+    ];
+
+    blocks.iter().map(|(key, snippet, doc)| CompletionItem {
+        label:              key.to_string(),
+        kind:               Some(CompletionItemKind::MODULE),
+        detail:             Some("@SECURITY block".to_string()),
+        documentation:      Some(Documentation::MarkupContent(MarkupContent {
+            kind:  MarkupKind::Markdown,
+            value: format!("**`{}`** — @SECURITY block\n\n{}", key, doc),
+        })),
+        insert_text:        Some(snippet.to_string()),
+        insert_text_format: Some(InsertTextFormat::SNIPPET),
+        sort_text:          Some(format!("0_{}", key)),
+        filter_text:        None,
+        ..Default::default()
+    }).collect()
+}
+
+/// Field key completions inside a specific @SECURITY block.
+fn security_field_key_completions(block_name: &str) -> Vec<CompletionItem> {
+    // (field_name, default_value_snippet, documentation)
+    let fields: &[(&str, &str, &str)] = match block_name.to_lowercase().as_str() {
+        "encryption" => &[
+            ("mode",            "\"${1|keyfile,password|}\"",               "How the key is supplied. `keyfile` = compiler auto-generates `.mdix.key`. `password` = compiler prompts at compile time."),
+            ("algorithm",       "\"${1|aes256-gcm,aes128-gcm,chacha20-poly1305,xor|}\"", "Encryption algorithm. Recommended: `aes256-gcm`."),
+            ("key_length",      "${1:32}",                                  "Key length in bytes. 16 for AES-128, 32 for AES-256 / ChaCha20."),
+            ("kdf",             "\"${1|argon2id,argon2i,argon2d|}\"",       "Key derivation function. Only used in `password` mode. Recommended: `argon2id`."),
+            ("kdf_memory",      "${1:65536}",                               "Argon2 memory cost in KiB. Only in `password` mode."),
+            ("kdf_iterations",  "${1:3}",                                   "Argon2 iteration count. Only in `password` mode."),
+            ("kdf_parallelism", "${1:4}",                                   "Argon2 parallelism factor. Only in `password` mode."),
+        ],
+        "validation" => &[
+            ("checksum_algorithm", "\"${1|sha256,sha512|}\"",              "Hash algorithm for content-integrity check."),
+            ("auth_tag_length",    "${1:128}",                              "Authentication tag length in bits (AEAD tag size)."),
+            ("hmac_algorithm",     "\"${1|hmac-sha256,hmac-sha512|}\"",    "HMAC algorithm for message authentication."),
+        ],
+        "keystore" => &[
+            ("auto_generate", "${1:true}",                                  "When `true`, the compiler automatically generates a `.mdix.key` file on compile."),
+            ("backup_count",  "${1:3}",                                     "Number of previous key file backups to retain."),
+            ("backup_naming", "\"${1|timestamp,sequence|}\"",               "Naming convention for backup key files."),
+        ],
+        _ => &[],
+    };
+
+    fields.iter().map(|(key, snippet, doc)| {
+        CompletionItem {
+            label:              key.to_string(),
+            kind:               Some(CompletionItemKind::FIELD),
+            detail:             Some(format!("{} field", block_name)),
+            documentation:      Some(Documentation::MarkupContent(MarkupContent {
+                kind:  MarkupKind::Markdown,
+                value: format!("**`{}`** — `{}` entry\n\n{}", key, block_name, doc),
+            })),
+            insert_text:        Some(format!("{} = {}", key, snippet)),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            sort_text:          Some(format!("0_{}", key)),
+            filter_text:        None,
+            ..Default::default()
+        }
+    }).collect()
+}
+
+/// Value completions for a specific field name inside @SECURITY.
+fn security_field_value_completions(field_name: &str) -> Vec<CompletionItem> {
+    let values: &[(&str, &str)] = match field_name.trim() {
+        "mode" => &[
+            ("keyfile",  "Compiler auto-generates a `.mdix.key` file — recommended"),
+            ("password", "Compiler prompts for a passphrase at compile time"),
+        ],
+        "algorithm" => &[
+            ("aes256-gcm",        "AES-256-GCM — recommended (256-bit, authenticated encryption)"),
+            ("aes128-gcm",        "AES-128-GCM — faster, slightly smaller keys"),
+            ("chacha20-poly1305", "ChaCha20-Poly1305 — excellent on mobile / ARM"),
+            ("xor",               "XOR — obfuscation only, NOT cryptographically secure"),
+        ],
+        "kdf" => &[
+            ("argon2id", "Argon2id — recommended; memory-hard, side-channel resistant"),
+            ("argon2i",  "Argon2i  — more side-channel resistant, less GPU resistant"),
+            ("argon2d",  "Argon2d  — fastest, less side-channel resistance"),
+        ],
+        "backup_naming" => &[
+            ("timestamp", "Embed a timestamp in the backup key filename"),
+            ("sequence",  "Use an incrementing sequence number"),
+        ],
+        "checksum_algorithm" => &[
+            ("sha256", "SHA-256 — recommended"),
+            ("sha512", "SHA-512 — stronger, larger output"),
+        ],
+        "hmac_algorithm" => &[
+            ("hmac-sha256", "HMAC-SHA256 — recommended"),
+            ("hmac-sha512", "HMAC-SHA512"),
+        ],
+        "auto_generate" => &[
+            ("true",  "Automatically write `.mdix.key` during compilation"),
+            ("false", "Require the key file to exist already"),
+        ],
+        _ => &[],
+    };
+
+    values.iter().map(|(val, detail)| CompletionItem {
+        label:              format!("\"{}\"", val),
+        kind:               Some(CompletionItemKind::ENUM_MEMBER),
+        detail:             Some(detail.to_string()),
+        insert_text:        Some(format!("\"{}\"", val)),
+        insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+        filter_text:        None,
+        ..Default::default()
+    }).collect()
+}
+
 // ── Section snippets ──────────────────────────────────────────────────────────
 
 fn section_snippet_completions() -> Vec<CompletionItem> {
@@ -204,7 +415,7 @@ fn section_snippet_completions() -> Vec<CompletionItem> {
         ("@ENUMS",      "ENUMS(\n  ${1:EnumName} { ${2:VALUE_A} = 0, ${3:VALUE_B} = 1 }\n)",                                                                                                                          "Named integer constants."),
         ("@QUICKFUNCS", "QUICKFUNCS(\n  ~${1:funcName}<${2:object}>(${3:param1}, ${4:param2}) {\n    return {\n      ${5:key} = ${6:param1}\n    }\n  }\n)",                                                           "Compile-time functions."),
         ("@DATA",       "DATA(\n  ${1:key} = ${2:value}\n\n  ${3:table}: ${4:field} = ${5:value}\n\n  ${6:array}::\n    ${7:item1},\n    ${8:item2}\n)",                                                              "Data payload."),
-        ("@SECURITY",   "SECURITY(\n  encryption -> {\n    mode = \"${1|password,keyfile|}\",\n    algorithm = \"${2|aes256-gcm,aes128-gcm,chacha20-poly1305|}\"\n  }\n)",                                            "Encryption configuration."),
+        ("@SECURITY",   "SECURITY(\n  encryption -> {\n    mode = \"${1|password,keyfile|}\",\n    algorithm = \"${2|aes256-gcm,aes128-gcm,chacha20-poly1305|}\"\n  }\n  keystore -> {\n    auto_generate = true\n  }\n)", "@SECURITY section — required when @DLM includes DEncryptor."),
     ];
     sections.iter().map(|(label, snippet, doc)| CompletionItem {
         label:              label.to_string(),
@@ -452,22 +663,192 @@ fn extract_object_value(expr: &Expression) -> Option<&Value> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// OBJECT USER-PROPERTY COMPLETIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Build a simple `FIELD` completion item for a user-defined object key.
+fn make_field_completion(key: &str, detail: Option<&str>) -> CompletionItem {
+    CompletionItem {
+        label:              key.to_string(),
+        kind:               Some(CompletionItemKind::FIELD),
+        detail:             detail.map(|s| s.to_string()),
+        documentation:      Some(Documentation::MarkupContent(MarkupContent {
+            kind:  MarkupKind::Markdown,
+            value: format!("**`{}`**{}", key,
+                detail.map(|d| format!(" — `{}`", d)).unwrap_or_default()),
+        })),
+        insert_text:        Some(key.to_string()),
+        insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+        sort_text:          Some(format!("000_{}", key)), // Sorts before registry methods
+        filter_text:        None,
+        ..Default::default()
+    }
+}
+
+/// Return completion items for user-defined properties on `var_name`.
+///
+/// Searches (in order):
+///  1. QuickFunc local `let` / assignment bound to an object literal
+///  2. `@DATA` `ObjectProperty` entry
+///  3. `@DATA` `SimpleProperty` whose value is a QuickFunc call (use that QF's return fields)
+fn object_user_properties_completions(doc: &Document, var_name: &str) -> Vec<CompletionItem> {
+    // ── 1. QuickFunc local variable ─────────────────────────────────────────
+    if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
+        for func in &qf.functions {
+            if let Some(Value::Object { properties, .. }) =
+                find_object_literal_for_var(&func.body, var_name)
+            {
+                return properties.iter().map(|prop| {
+                    let detail = infer_datatype_from_value_simple(&prop.value)
+                        .map(|dt| format!("<{}>", dt));
+                    make_field_completion(&prop.key, detail.as_deref())
+                }).collect();
+            }
+        }
+    }
+
+    // ── 2. @DATA ObjectProperty ──────────────────────────────────────────────
+    if let Some(data) = doc.ast.as_ref().and_then(|a| a.data.as_ref()) {
+        for entry in &data.entries {
+            match entry {
+                DataEntry::ObjectProperty { name, object, .. } if name == var_name => {
+                    if let Value::Object { properties, .. } = object.as_ref() {
+                        return properties.iter().map(|prop| {
+                            let detail = infer_datatype_from_value_simple(&prop.value)
+                                .map(|dt| format!("<{}>", dt));
+                            make_field_completion(&prop.key, detail.as_deref())
+                        }).collect();
+                    }
+                }
+                // ── 3. @DATA SimpleProperty whose value is a QF call ─────────
+                DataEntry::SimpleProperty { name, value, .. } if name == var_name => {
+                    let qf_name = match value {
+                        Value::QuickFuncCall { function_name, .. } => Some(function_name.clone()),
+                        Value::Expression { expr, .. } => {
+                            if let Expression::QuickFuncCall { name: fn_name, .. } = expr.as_ref() {
+                                Some(fn_name.clone())
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(fname) = qf_name {
+                        let props = quickfunc_return_object_properties(doc, &fname);
+                        if !props.is_empty() { return props; }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    vec![]
+}
+
+/// Return completion items for the fields of the object returned by QuickFunc `func_name`.
+///
+/// Finds the first `return { ... }` statement (including inside `if:` / `chk:`) and
+/// extracts its property names.
+fn quickfunc_return_object_properties(doc: &Document, func_name: &str) -> Vec<CompletionItem> {
+    let qf = match doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
+        Some(q) => q,
+        None => return vec![],
+    };
+    let func = match qf.functions.iter().find(|f| f.name == func_name) {
+        Some(f) => f,
+        None => return vec![],
+    };
+    collect_object_props_from_stmts(&func.body)
+}
+
+/// Recursively search `stmts` for the first `return { ... }` and convert its
+/// properties to completion items.
+fn collect_object_props_from_stmts(stmts: &[QuickFuncStatement]) -> Vec<CompletionItem> {
+    for stmt in stmts {
+        match stmt {
+            QuickFuncStatement::Return { value, .. } => {
+                if let Expression::Value { value: Value::Object { properties, .. }, .. } = value {
+                    return properties.iter().map(|prop| {
+                        let detail = infer_datatype_from_value_simple(&prop.value)
+                            .map(|dt| format!("<{}>", dt));
+                        make_field_completion(&prop.key, detail.as_deref())
+                    }).collect();
+                }
+            }
+            QuickFuncStatement::If { then_branch, else_branch, .. } => {
+                let props = collect_object_props_from_stmts(then_branch);
+                if !props.is_empty() { return props; }
+                if let Some(eb) = else_branch {
+                    let props = collect_object_props_from_stmts(eb);
+                    if !props.is_empty() { return props; }
+                }
+            }
+            QuickFuncStatement::Switch { cases, default_case, .. } => {
+                for case in cases {
+                    let props = collect_object_props_from_stmts(&case.statements);
+                    if !props.is_empty() { return props; }
+                }
+                if let Some(dc) = default_case {
+                    let props = collect_object_props_from_stmts(&dc.statements);
+                    if !props.is_empty() { return props; }
+                }
+            }
+            _ => {}
+        }
+    }
+    vec![]
+}
+
+/// Walk backwards from `close_idx` (a `)` token) to find the QuickFunc name
+/// that precedes the opening `(`.  Skips `<type>` annotations between the name
+/// and the parenthesis.
+fn func_name_from_paren_close(tokens: &[Token], close_idx: usize) -> Option<String> {
+    let mut depth = 0i32;
+    let mut i = close_idx;
+
+    loop {
+        match &tokens[i].token_type {
+            TokenType::Symbol(')') => depth += 1,
+            TokenType::Symbol('(') => {
+                depth -= 1;
+                if depth == 0 && i > 0 {
+                    // Walk backwards past any <type> annotation
+                    let mut j = i - 1;
+                    while j > 0 {
+                        match &tokens[j].token_type {
+                            // Skip closing > of annotation
+                            TokenType::Symbol('>') => {
+                                while j > 0 && !matches!(&tokens[j].token_type, TokenType::Symbol('<')) {
+                                    j -= 1;
+                                }
+                                if j > 0 { j -= 1; }
+                            }
+                            TokenType::Identifier(name) => {
+                                return Some(name.clone());
+                            }
+                            _ => break,
+                        }
+                    }
+                    // Check j == 0 edge case
+                    if let TokenType::Identifier(name) = &tokens[j].token_type {
+                        return Some(name.clone());
+                    }
+                    return None;
+                }
+            }
+            _ => {}
+        }
+        if i == 0 { break; }
+        i -= 1;
+    }
+    None
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CHAINED CALL TYPE RESOLUTION
 // ─────────────────────────────────────────────────────────────────────────────
-//
-// These helpers allow `"hello".toUpper().` and `Math.sqrt(4).` and
-// `t:(1,2).first().` to resolve the receiver type from a `)` token
-// by scanning backwards through the token stream.
 
-/// Resolves what DixType is produced by the expression ending with `)` at
-/// `close_idx`. Handles:
-///   - `funcName(...)`           → QuickFunc / symbol-table return type
-///   - `ClassName.method(...)`   → static method return type
-///   - `instance.method(...)`    → instance method return type
-///   - `t:(...)` / `b:(...)`  / `r:(...)` → Tuple / Blob / Regex
-///   - Nested chains: `a().b()`  → recursive
-///
-/// Returns `None` when the type cannot be determined (e.g. method returns Any).
 fn resolve_paren_close_dix_type(
     tokens:    &[Token],
     close_idx: usize,
@@ -491,20 +872,14 @@ fn resolve_paren_close_dix_type(
 
                 return match pre_tt {
                     TokenType::Identifier(name) => {
-                        // Instance or static method: receiver.method(...)
                         if pre >= 2 {
                             if matches!(&tokens[pre - 1].token_type, TokenType::Symbol('.')) {
                                 return resolve_dot_call_type(tokens, pre - 2, &name, doc);
                             }
                         }
-                        // Direct function call
                         resolve_direct_call_return(&name, doc)
                     }
 
-                    // ── Prefix constructor: t:(...), b:(...), r:(...) ─────────
-                    // Token sequence is Identifier → ':' → '('
-                    // When we find '(', the token before it is ':', so pre_tt = Symbol(':').
-                    // Look one more step back for the prefix letter.
                     TokenType::Symbol(':') => {
                         if pre >= 1 {
                             if let TokenType::Identifier(prefix) =
@@ -521,7 +896,6 @@ fn resolve_paren_close_dix_type(
                         None
                     }
 
-                    // Chained call: something()(...)
                     TokenType::Symbol(')') => {
                         resolve_paren_close_dix_type(tokens, pre, doc)
                     }
@@ -538,15 +912,12 @@ fn resolve_paren_close_dix_type(
     None
 }
 
-/// Resolve the return DixType when calling `tokens[receiver_idx].method_name(...)`.
-/// Handles both static objects (`Math.sqrt`) and instance methods (`myStr.toUpper`).
 fn resolve_dot_call_type(
     tokens:       &[Token],
     receiver_idx: usize,
     method_name:  &str,
     doc:          &Document,
 ) -> Option<DixType> {
-    // ── Static object? ─────────────────────────────────────────────────────
     if let TokenType::Identifier(recv_name) = tokens[receiver_idx].token_type.clone() {
         static_object_registry::initialize_static_registry();
         if static_object_registry::has_static_object(&recv_name) {
@@ -558,17 +929,14 @@ fn resolve_dot_call_type(
         }
     }
 
-    // ── Get receiver DixType (recursive for chained `)`) ───────────────────
     let recv_dix = get_token_dix_type_for_chain(tokens, receiver_idx, doc)?;
 
-    // ── Look up instance method return type ────────────────────────────────
     instance_method_registry::initialize();
     if let Some(method) = instance_method_registry::get_instance_method(recv_dix, method_name) {
         let ret = method.return_type();
         return match ret {
             DixType::Void | DixType::Null => None,
             DixType::Any => {
-                // Some modification methods return the same collection/string type.
                 if is_same_type_returning_method(method_name) {
                     Some(recv_dix)
                 } else {
@@ -583,10 +951,7 @@ fn resolve_dot_call_type(
     None
 }
 
-/// Get the DixType for any token, supporting recursive resolution when the
-/// token is `)` (chained call).
 fn get_token_dix_type_for_chain(tokens: &[Token], idx: usize, doc: &Document) -> Option<DixType> {
-    // Clone the token type to avoid borrow issues with recursive calls.
     match tokens[idx].token_type.clone() {
         TokenType::Identifier(name) =>
             completion_identifier_dix_type(&name, doc, tokens[idx].section),
@@ -616,9 +981,7 @@ fn get_token_dix_type_for_chain(tokens: &[Token], idx: usize, doc: &Document) ->
     }
 }
 
-/// Resolve the return type of a bare function call `funcName(...)` (no dot receiver).
 fn resolve_direct_call_return(name: &str, doc: &Document) -> Option<DixType> {
-    // QuickFuncs defined in this file
     if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
         for func in &qf.functions {
             if func.name == name {
@@ -626,7 +989,6 @@ fn resolve_direct_call_return(name: &str, doc: &Document) -> Option<DixType> {
             }
         }
     }
-    // Symbol table (imported functions)
     if let Some(st) = doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref()) {
         if let Some(sig) = st.try_get_function(name) {
             return sig.return_type.and_then(completion_dt_to_dix);
@@ -635,18 +997,13 @@ fn resolve_direct_call_return(name: &str, doc: &Document) -> Option<DixType> {
     None
 }
 
-/// Returns `true` for methods that are known to return the same type as their
-/// receiver (useful when the registry reports `Any` as the return type).
 fn is_same_type_returning_method(name: &str) -> bool {
     matches!(
         name,
-        // String self-returns
         | "toUpper" | "toLower" | "trim" | "trimStart" | "trimEnd"
         | "replace" | "replaceAll" | "padLeft" | "padRight"
-        // Array self-returns
         | "sort" | "reverse" | "shuffle" | "distinct" | "filter"
         | "concat" | "flatten" | "push" | "unshift"
-        // Universal
         | "clone" | "defaultIfNull" | "defaultIfEmpty"
     )
 }
@@ -655,13 +1012,6 @@ fn is_same_type_returning_method(name: &str) -> bool {
 // TOKEN-BEFORE-DOT HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Returns the last non-dot token before the cursor on the same line,
-/// together with its index in `tokens`.
-///
-/// BUG FIX over the old `token_before_dot`: the old implementation sometimes
-/// returned the dot itself. This version explicitly excludes all `Symbol('.')`
-/// tokens and provides the index for downstream use (e.g. chained call
-/// resolution via `resolve_paren_close_dix_type`).
 fn token_before_dot_with_idx<'a>(
     tokens: &'a [Token],
     pos:    Position,
@@ -681,8 +1031,6 @@ fn token_before_dot_with_idx<'a>(
         .map(|(i, t)| (t, i))
 }
 
-/// For chained access like `obj.prop.` — find the second-to-last identifier
-/// before the final dot.
 fn second_token_before_dot<'a>(tokens: &'a [Token], pos: Position) -> Option<&'a Token> {
     let target_line_1 = (pos.line + 1) as usize;
     let dot_col_0     = pos.character as usize;
@@ -707,9 +1055,6 @@ fn second_token_before_dot<'a>(tokens: &'a [Token], pos: Position) -> Option<&'a
 // TOKEN-TO-DIXTYPE MAPPING
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Map a literal / constructor token to its DixType for method-completion
-/// purposes. Does NOT handle `)` — that is done in `dot_completions` via
-/// `resolve_paren_close_dix_type`.
 fn dix_type_of_token(token: &Token, doc: &Document) -> Option<DixType> {
     match &token.token_type {
         TokenType::String(_) | TokenType::StringSingle(_) | TokenType::InterpolatedString(_) =>
@@ -725,7 +1070,6 @@ fn dix_type_of_token(token: &Token, doc: &Document) -> Option<DixType> {
         TokenType::RegexConstructor(_) => Some(DixType::Regex),
         TokenType::BlobConstructor(_)  => Some(DixType::Blob),
         TokenType::TupleConstructor(_) => Some(DixType::Tuple),
-        // Prefixed constructor t:(), b:(), r:() tokenized as PrefixedConstructor
         TokenType::PrefixedConstructor { prefix, .. } => {
             match prefix.to_lowercase().as_str() {
                 "t" => Some(DixType::Tuple),
@@ -742,13 +1086,6 @@ fn dix_type_of_token(token: &Token, doc: &Document) -> Option<DixType> {
     }
 }
 
-/// Resolve the DixType of an identifier for dot-completion purposes.
-///
-/// Priority order:
-///   1. QuickFunc parameter type annotation
-///   2. QuickFunc body local variable declaration (annotated → direct, unannotated → value inference)
-///   3. type_index from last semantic analysis
-///   4. Symbol table DATA variable
 fn completion_identifier_dix_type(
     name:    &str,
     doc:     &Document,
@@ -795,8 +1132,6 @@ fn completion_identifier_dix_type(
     completion_dt_to_dix(var.effective_type()?)
 }
 
-/// Convert DataType → DixType for method registry lookups.
-/// TypedArray/TypedTuple correctly map to Array/Tuple base types.
 fn completion_dt_to_dix(dt: DataType) -> Option<DixType> {
     match dt {
         DataType::Int                              => Some(DixType::Int),
@@ -822,8 +1157,6 @@ fn completion_dt_to_dix(dt: DataType) -> Option<DixType> {
 // REGISTRY-BACKED INSTANCE METHOD COMPLETIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Build completion items for ALL instance methods of `dix_type` from the
-/// registry (includes universal methods merged in during registry init).
 fn registry_instance_method_completions(dix_type: DixType) -> Vec<CompletionItem> {
     instance_method_registry::initialize();
 
@@ -889,7 +1222,7 @@ fn registry_instance_method_completions(dix_type: DixType) -> Vec<CompletionItem
                 insert_text:        Some(insert_text),
                 insert_text_format: Some(insert_fmt),
                 filter_text:        None,
-                sort_text:          Some(format!("0_{}", name)),
+                sort_text:          Some(format!("1_{}", name)), // After user fields (000_)
                 ..Default::default()
             })
         })
@@ -900,17 +1233,6 @@ fn registry_instance_method_completions(dix_type: DixType) -> Vec<CompletionItem
 // DOT COMPLETIONS  (main entry point for `.` trigger)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Main dot-completion entry point.
-///
-/// Resolution priority:
-///   1. Two-level chain: `obj.prop.`  (property on object literal)
-///   2. Chained call ending in `)`:   `expr().`  (recursive type resolution)
-///   3. Array index ending in `]`:    `arr[n].`
-///   4. Direct token type:            `"str".`, `42.`, `myVar.`
-///   5. Static object methods:        `Math.`, `DateTime.`
-///   6. Enum field completions:       `MyEnum.`
-///   7. Imported namespace members
-///   8. Name-heuristic fallback
 fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
     let mut items: Vec<CompletionItem> = Vec::new();
 
@@ -918,7 +1240,6 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
     let receiver_with_idx = token_before_dot_with_idx(&doc.tokens, pos);
 
     // ── Step 2: two-level chain  obj.prop. ────────────────────────────────────
-    //   receiver = Identifier("prop"), second = Identifier("obj")
     let chain_dix_type: Option<DixType> = receiver_with_idx.as_ref().and_then(|(recv, _)| {
         if let TokenType::Identifier(prop_name) = &recv.token_type {
             second_token_before_dot(&doc.tokens, pos).and_then(|second| {
@@ -946,23 +1267,51 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
     let receiver_dix_type: Option<DixType> = chain_dix_type.or_else(|| {
         receiver_with_idx.as_ref().and_then(|(tok, idx)| {
             match &tok.token_type {
-                // Chained call: expr().
                 TokenType::Symbol(')') => {
                     resolve_paren_close_dix_type(&doc.tokens, *idx, doc)
                 }
-                // Array index access: arr[n].
                 TokenType::Symbol(']') => Some(DixType::Array),
-                // Everything else uses the standard token→type mapping
                 _ => dix_type_of_token(tok, doc),
             }
         })
     });
 
+    // ── Step 4: registry instance methods ────────────────────────────────────
     if let Some(dix_type) = receiver_dix_type {
         items.extend(registry_instance_method_completions(dix_type));
     }
 
-    // ── Step 4: static objects, enums, namespaces (word-based) ───────────────
+    // ── Step 5: user-defined object properties (prepended, higher priority) ──
+    //
+    // For Object receivers, look up the actual fields the object has.
+    // These appear BEFORE the generic registry methods in the list.
+    if receiver_dix_type == Some(DixType::Object) {
+        let user_props: Vec<CompletionItem> = match receiver_with_idx.as_ref() {
+            Some((tok, idx)) => {
+                match &tok.token_type {
+                    TokenType::Identifier(var_name) => {
+                        object_user_properties_completions(doc, var_name.as_str())
+                    }
+                    TokenType::Symbol(')') => {
+                        // e.g. createEnemy("Goblin", 50, 10).   ← receiver is )
+                        func_name_from_paren_close(&doc.tokens, *idx)
+                            .map(|name| quickfunc_return_object_properties(doc, &name))
+                            .unwrap_or_default()
+                    }
+                    _ => vec![],
+                }
+            }
+            None => vec![],
+        };
+
+        if !user_props.is_empty() {
+            // Move user props to the front
+            let registry_items = std::mem::replace(&mut items, user_props);
+            items.extend(registry_items);
+        }
+    }
+
+    // ── Step 6: static objects, enums, namespaces (word-based) ───────────────
     let word_before = word_before_dot(&doc.source, pos);
     if !word_before.is_empty() {
         // Enum field completions
@@ -1366,8 +1715,6 @@ fn word_before_cursor(source: &str, pos: Position) -> String {
 
 fn word_before_dot(source: &str, pos: Position) -> String {
     let line = source.lines().nth(pos.line as usize).unwrap_or("");
-    // pos.character is the cursor position (after the dot)
-    // We want the word that ends right before the dot
     let up_to_dot: String = line
         .char_indices()
         .take_while(|(i, _)| *i < pos.character.saturating_sub(1) as usize)
@@ -1378,4 +1725,4 @@ fn word_before_dot(source: &str, pos: Position) -> String {
         .last()
         .unwrap_or("")
         .to_string()
-}
+    }

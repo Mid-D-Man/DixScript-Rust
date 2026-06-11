@@ -23,7 +23,7 @@ const TUPLE_ELEMENT_METHODS: &[&str] = &[
 /// Array instance methods that return a **new array of the same element type**.
 /// When the receiver is `TypedArray(T)` these also return `TypedArray(T)`.
 const ARRAY_PRESERVING_METHODS: &[&str] = &[
-    "reverse", "sort", "distinct", "slice", "concat", "push", "unshift",
+    "reverse", "sort", "distinct", "slice", "concat", "push", "unshift","pop","filter","concat","flatten","shift","set",
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

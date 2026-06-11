@@ -1370,6 +1370,7 @@
                 { values = [4, 5, 6] }
             ]
         };
+
         return data.levels[1].values[2];
     }
 

@@ -1816,33 +1816,95 @@ fn evaluate_unary_op(
     }
 
     fn evaluate_instance_method_call(
-        &mut self,
-        instance: &Expression,
-        method_name: &str,
-        arguments: &[Expression],
-        position: Position,
-        context: &mut ExecutionContext,
-        scope_context: &FxHashMap<String, String>,
-        namespace: Option<&ImportedNamespace>,
-    ) -> Result<DixValue, InterpreterError> {
-        let instance_val =
-            self.evaluate_expression(instance, context, scope_context, namespace)?;
+    &mut self,
+    instance:      &Expression,
+    method_name:   &str,
+    arguments:     &[Expression],
+    position:      Position,
+    context:       &mut ExecutionContext,
+    scope_context: &FxHashMap<String, String>,
+    namespace:     Option<&ImportedNamespace>,
+) -> Result<DixValue, InterpreterError> {
+    let instance_val =
+        self.evaluate_expression(instance, context, scope_context, namespace)?;
 
-        let mut args = Vec::with_capacity(arguments.len());
-        for arg in arguments {
-            args.push(
-                self.evaluate_expression(arg, context, scope_context, namespace)?,
-            );
-        }
-
-        builtin_call_resolver::resolve_instance_call(&instance_val, method_name, &args)
-            .map_err(|e| InterpreterError::BuiltinCallFailed {
-                object: format!("{:?}", instance_val.get_type()),
-                method: method_name.to_string(),
-                message: e,
+    // ── Fix A: String lambda ref as instance ───────────────────────────────
+    // Triggered by: `arr[0](x)`, `operations[0](x)`, etc.
+    // `arr[0]` returns DixValue::String("__lam_N").  The subsequent `(x)` call
+    // is parsed as InstanceMethodCall with synthetic method name "call".
+    // Without this the builtin resolver receives a String and fails:
+    //   "Type String has no method: call"
+    {
+        let val_str = instance_val.as_string();
+        if instance_val.get_type() == DixType::String
+            && val_str.starts_with("__lam_")
+        {
+            if let Some(lambda) = self.lambda_registry.get(&val_str).cloned() {
+                if self.debug_config.is_enabled {
+                    self.error_manager.log_debug(&format!(
+                        "[InstanceMethodCall] Lambda ref '{}' invoked via '{}()'",
+                        val_str, method_name
+                    ));
+                }
+                return self.invoke_lambda(
+                    &lambda, arguments, position, context, scope_context, namespace,
+                );
+            }
+            return Err(InterpreterError::UndefinedFunction {
+                name:     format!("<lambda ref '{}' not in registry>", val_str),
                 position,
-            })
+            });
+        }
     }
+
+    // ── Fix B: Object property is a lambda ref ─────────────────────────────
+    // Triggered by: `calculator.add(x, 10)` where `add` is a stored lambda.
+    // `calculator` resolves to an Object whose property "add" holds "__lam_N".
+    // The builtin resolver has no user-defined lambda methods, so it fails.
+    // Extract the key in a scoped block so the borrow of instance_val ends
+    // before we need &mut self for invoke_lambda.
+    if instance_val.get_type() == DixType::Object {
+        let lambda_key: Option<String> = {
+            let obj_map = instance_val.as_object();
+            obj_map.get(method_name).and_then(|prop_val| {
+                if prop_val.get_type() == DixType::String {
+                    let s = prop_val.as_string();
+                    if s.starts_with("__lam_") { Some(s) } else { None }
+                } else {
+                    None
+                }
+            })
+        };
+        if let Some(key) = lambda_key {
+            if let Some(lambda) = self.lambda_registry.get(&key).cloned() {
+                if self.debug_config.is_enabled {
+                    self.error_manager.log_debug(&format!(
+                        "[InstanceMethodCall] Object property lambda '{}' invoked",
+                        method_name
+                    ));
+                }
+                return self.invoke_lambda(
+                    &lambda, arguments, position, context, scope_context, namespace,
+                );
+            }
+        }
+    }
+
+    let mut args = Vec::with_capacity(arguments.len());
+    for arg in arguments {
+        args.push(
+            self.evaluate_expression(arg, context, scope_context, namespace)?,
+        );
+    }
+
+    builtin_call_resolver::resolve_instance_call(&instance_val, method_name, &args)
+        .map_err(|e| InterpreterError::BuiltinCallFailed {
+            object: format!("{:?}", instance_val.get_type()),
+            method: method_name.to_string(),
+            message: e,
+            position,
+        })
+        }
 
     fn evaluate_property_access(
         &mut self,

@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Thu Jun 11 11:25:57 UTC 2026
+Generated: Thu Jun 11 11:27:14 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: b37ad88fdb5e403d2091b409015ee8a1a45aafee
+Commit: be34f99d97826c50b068af02db7982dd542a0613
 Branch: master
 ==================================
 
@@ -401,6 +401,7 @@ DixScript Sample Files (.mdix):
   mdix_files/tests/dlm/08_enhanced_audit.mdix
   mdix_files/tests/dlm/09_gzip_aes256.mdix
   mdix_files/tests/dlm/10_full_pipeline.mdix
+  mdix_files/tests/dlm/security_05_password_full_pipeline.mdix
   mdix_files/tests/dlm/serialize_target.mdix
   mdix_files/tests/imports/01_basic_import.mdix
   mdix_files/tests/imports/02_alias_funcs_in_quickfuncs.mdix

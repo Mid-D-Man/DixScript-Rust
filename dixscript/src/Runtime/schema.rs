@@ -36,6 +36,9 @@ use super::dix_value::DixValue;
 pub enum ExpectedValueType {
     String,
     Int,
+    /// 64-bit integer field (`DixValue::Long`). Also accepts `DixValue::Int`
+    /// — an i32 value safely widens into an i64 field with no truncation.
+    Long,
     Float,
     Double,
     Bool,
@@ -56,6 +59,7 @@ impl std::fmt::Display for ExpectedValueType {
         let s = match self {
             ExpectedValueType::String    => "string",
             ExpectedValueType::Int       => "int",
+            ExpectedValueType::Long      => "long",
             ExpectedValueType::Float     => "float",
             ExpectedValueType::Double    => "double",
             ExpectedValueType::Bool      => "bool",
@@ -239,6 +243,14 @@ impl SchemaBuilder {
         self.require(path, ExpectedValueType::Int)
     }
 
+    /// Require a 64-bit integer (`DixValue::Long`) field.
+    ///
+    /// Also accepts `DixValue::Int` — an `i32` value safely widens into an
+    /// `i64` field with no precision loss.
+    pub fn require_long(self, path: impl Into<String>) -> Self {
+        self.require(path, ExpectedValueType::Long)
+    }
+
     pub fn require_float(self, path: impl Into<String>) -> Self {
         self.require(path, ExpectedValueType::Float)
     }
@@ -306,6 +318,12 @@ impl SchemaBuilder {
 
     pub fn optional_int(self, path: impl Into<String>) -> Self {
         self.optional(path, ExpectedValueType::Int)
+    }
+
+    /// Optional 64-bit integer (`DixValue::Long`) field. Also accepts
+    /// `DixValue::Int` when present.
+    pub fn optional_long(self, path: impl Into<String>) -> Self {
+        self.optional(path, ExpectedValueType::Long)
     }
 
     pub fn optional_float(self, path: impl Into<String>) -> Self {
@@ -442,11 +460,15 @@ fn type_matches(expected: &ExpectedValueType, actual: &DixValue) -> bool {
                 | DixValue::Blob(_)
                 | DixValue::Regex(_)
         ),
-        ExpectedValueType::Int    => matches!(actual, DixValue::Int(_) | DixValue::Enum { .. }),
+        ExpectedValueType::Int  => matches!(actual, DixValue::Int(_) | DixValue::Enum { .. }),
+        // NEW: 64-bit integer fields. Int widens into Long safely.
+        ExpectedValueType::Long => matches!(actual, DixValue::Long(_) | DixValue::Int(_)),
         ExpectedValueType::Float  => matches!(actual, DixValue::Float(_)),
+        // Double widening now also accepts Long (i64 -> f64 is always exact
+        // for the magnitudes DixScript configs realistically use).
         ExpectedValueType::Double => matches!(
             actual,
-            DixValue::Double(_) | DixValue::Float(_) | DixValue::Int(_)
+            DixValue::Double(_) | DixValue::Float(_) | DixValue::Int(_) | DixValue::Long(_)
         ),
         ExpectedValueType::Bool      => matches!(actual, DixValue::Bool(_)),
         ExpectedValueType::Array     => matches!(actual, DixValue::Array(_)),
@@ -474,6 +496,7 @@ mod tests {
                 d.with_int("port",        8080);
                 d.with_bool("debug",      true);
                 d.with_double("timeout",  30.0);
+                d.with_long("session_id", 9_000_000_000);
                 d.with_group_array_builder("tags", |arr| {
                     arr.add_string("web");
                     arr.add_string("api");
@@ -663,4 +686,51 @@ mod tests {
         assert!(schema.paths().contains(&"b"));
         assert!(schema.paths().contains(&"c"));
     }
-  }
+
+    // ── NEW: Long schema type ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_require_long_passes_for_long_value() {
+        let data = make_data();
+        let report = data.validate_schema(SchemaBuilder::new().require_long("session_id"));
+        assert!(report.is_valid(), "{}", report);
+    }
+
+    #[test]
+    fn test_long_widens_to_accept_int() {
+        let data = make_data();
+        // "port" is DixValue::Int — a Long-typed schema field should still accept it.
+        let report = data.validate_schema(SchemaBuilder::new().require_long("port"));
+        assert!(report.is_valid(), "{}", report);
+    }
+
+    #[test]
+    fn test_int_does_not_widen_to_accept_long() {
+        let data = make_data();
+        // "session_id" is DixValue::Long — an Int-typed schema field must
+        // reject it (i64 -> i32 would truncate silently otherwise).
+        let report = data.validate_schema(SchemaBuilder::new().require_int("session_id"));
+        assert!(!report.is_valid());
+        assert_eq!(report.errors[0].kind, ValidationErrorKind::WrongType);
+    }
+
+    #[test]
+    fn test_double_widens_to_accept_long_and_int() {
+        let data = make_data();
+        let report = data.validate_schema(
+            SchemaBuilder::new()
+                .require_double("session_id") // Long -> Double widening
+                .require_double("port"),      // Int -> Double widening
+        );
+        assert!(report.is_valid(), "{}", report);
+    }
+
+    #[test]
+    fn test_optional_long_absent_passes() {
+        let data = make_data();
+        let report = data.validate_schema(
+            SchemaBuilder::new().optional_long("nonexistent_session_id"),
+        );
+        assert!(report.is_valid(), "{}", report);
+    }
+    }

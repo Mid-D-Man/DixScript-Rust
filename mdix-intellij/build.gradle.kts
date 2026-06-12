@@ -32,4 +32,7 @@ tasks {
         sinceBuild.set(providers.gradleProperty("pluginSinceBuild").get())
         untilBuild.set("")  // open-ended — no max version
     }
+processResources {
+    from("src/main/resources")
+}
 }

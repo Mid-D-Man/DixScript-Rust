@@ -1,368 +1,416 @@
 // dixscript/src/Runtime/compactor.rs
+//! Utilities for compacting and minifying DixScript files.
+//!
+//! ## Why token-based `minify`?
+//!
+//! DixScript has complex lexical rules (kebab-case identifiers, `b:(…)` / `t:(…)`
+//! prefixed constructors, interpolated strings `$"…"`, multi-char operators
+//! `->` / `::`, section keywords `@DATA(`, etc.).  A character-by-character
+//! scanner must re-implement large parts of the lexer to know whether two
+//! adjacent characters need a separator space.
+//!
+//! `minify` uses the DixScript tokenizer and applies one rule: insert a space
+//! between two non-empty rendered tokens only when the **last character of the
+//! previous token** AND the **first character of the current token** are both
+//! "word characters" (alphanumeric or `_`).  This correctly prevents e.g.
+//! `789table:` and `trueother` while avoiding spurious spaces around `->`, `=`,
+//! `::`, `(`, etc.
 
-/// Utilities for compacting and minifying DixScript files
-/// 
-/// Provides three levels of compression:
-/// - `minify()` - Remove ALL unnecessary whitespace (smallest output)
-/// - `compact()` - Remove extra whitespace but keep readability
-/// - `remove_comments()` - Strip comments only
-pub struct DixCompactor;
+use crate::Compiler::Core::Tokenizer::{Tokenizer, Token, TokenType};
+use crate::Compiler::Core::Config::OperationalSettings;
 
-/// Characters that participate in identifiers/keywords/literals for the
-/// purposes of deciding whether two tokens need a separating space when
-/// whitespace between them is collapsed. `_` is included because it's a
-/// valid identifier character (`_foo`, `foo_bar`) but is NOT classified as
-/// alphanumeric by `char::is_alphanumeric`.
+/// `true` for alphanumeric characters and `_`.
 #[inline]
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-impl DixCompactor {
-    /// Minify DixScript content - remove all unnecessary whitespace
-    /// 
-    /// Preserves:
-    /// - String contents (including whitespace in strings)
-    /// - Necessary spaces between identifiers/keywords/numbers
-    /// 
-    /// # Examples
-    ///! ```
-    ///  let input = "@CONFIG(\n  version -> \"1.0.0\"\n)";
-    /// let output = DixCompactor::minify(input);
-    /// // "@CONFIG(version->\"1.0.0\")"
-    /// ```
-    ///
-    /// ## Whitespace-run handling
-    ///
-    /// Source whitespace is almost always a *run* of characters (newline +
-    /// indentation), not a single space. The decision of whether to keep a
-    /// single separating space is made **once per run**, by looking at the
-    /// last character actually written to `result` and the first
-    /// non-whitespace character *after the entire run* — not just the
-    /// immediately-adjacent character. Looking only one character ahead was
-    /// the cause of bugs like:
-    ///
-    /// ```text
-    /// count = 789
-    /// table: host = "x"
-    /// ```
-    /// incorrectly minifying to `...789table:...` (the `\n` + indentation
-    /// run collapsed to nothing because the char *immediately* after `\n`
-    /// was another space, not `t` — so by the time `t` was reached,
-    /// `last_char` was still `9` with nothing emitted in between), and:
-    /// ```text
-    /// flag = true
-    /// other = 5
-    /// ```
-    /// collapsing `true` and `other` into a single identifier `trueother`,
-    /// silently destroying the `Bool(true)` token.
-    pub fn minify(content: &str) -> String {
-        let mut result = String::with_capacity(content.len());
-        let chars: Vec<char> = content.chars().collect();
-        let n = chars.len();
-        let mut i = 0;
-
-        let mut in_string = false;
-        let mut in_interpolation = false;
-        let mut string_char = '\0';
-
-        while i < n {
-            let c = chars[i];
-            let next = if i + 1 < n { chars[i + 1] } else { '\0' };
-            let prev = if i > 0 { chars[i - 1] } else { '\0' };
-
-            // Handle string state
-            if (c == '"' || c == '\'') && prev != '\\' {
-                if !in_string {
-                    in_string = true;
-                    string_char = c;
-                    result.push(c);
-                } else if c == string_char {
-                    in_string = false;
-                    string_char = '\0';
-                    result.push(c);
-                } else {
-                    result.push(c);
-                }
-                i += 1;
-                continue;
-            }
-
-            // Handle interpolated strings
-            if c == '$' && next == '"' {
-                in_interpolation = true;
-                result.push(c);
-                i += 1;
-                continue;
-            }
-
-            // Inside string or interpolation - preserve everything
-            if in_string || in_interpolation {
-                result.push(c);
-                if in_interpolation && c == '"' && prev != '\\' {
-                    in_interpolation = false;
-                }
-                i += 1;
-                continue;
-            }
-
-            // Handle single-line comments
-            if c == '/' && next == '/' {
-                // Skip until end of line
-                while i < n && chars[i] != '\n' {
-                    i += 1;
-                }
-                continue;
-            }
-
-            // Handle multi-line comments
-            if c == '/' && next == '*' {
-                i += 2;
-                while i + 1 < n {
-                    if chars[i] == '*' && chars[i + 1] == '/' {
-                        i += 2;
-                        break;
-                    }
-                    i += 1;
-                }
-                continue;
-            }
-
-            // Handle whitespace — collapse the ENTIRE run at once.
-            if c.is_whitespace() {
-                let mut j = i + 1;
-                while j < n && chars[j].is_whitespace() {
-                    j += 1;
-                }
-
-                if j < n {
-                    let last_char = result.chars().last().unwrap_or('\0');
-                    let after_run = chars[j];
-                    if is_word_char(last_char) && is_word_char(after_run) {
-                        result.push(' ');
-                    }
-                }
-                // else: trailing whitespace at EOF — drop it entirely.
-
-                i = j;
-                continue;
-            }
-
-            // Keep all other characters
-            result.push(c);
-            i += 1;
-        }
-
-        result
-    }
-    
-    /// Compact DixScript - remove extra whitespace but keep readability
-    /// 
-    /// - Removes trailing whitespace
-    /// - Collapses multiple blank lines to single blank line
-    /// - Preserves overall structure
-    pub fn compact(content: &str) -> String {
-        let lines: Vec<&str> = content.lines().collect();
-        let mut result = String::with_capacity(content.len());
-        let mut consecutive_blank_lines = 0;
-        
-        for line in lines {
-            let trimmed = line.trim_end();
-            
-            if trimmed.is_empty() {
-                consecutive_blank_lines += 1;
-                if consecutive_blank_lines <= 1 {
-                    result.push('\n');
-                }
+/// Render one token to its minimal source representation.
+///
+/// Overrides `Token::get_token_value` for two cases where the default is lossy:
+///
+/// * `Double(d)` — Rust's `f64::to_string` drops `.0` for whole numbers
+///   (`4.0` → `"4"`), which re-parses as Integer and silently changes the type.
+///   We force `"4.0"`.
+///
+/// * `Float(f)` — `f32::to_string` omits the required `f` suffix (`3.14f`→`"3.14"`),
+///   which re-parses as Double.  We append `"f"`.
+///
+/// Returns an empty string for tokens that produce no output in minified text
+/// (comments, EOF, parse-context markers).
+fn render_token(token: &Token) -> String {
+    match &token.token_type {
+        TokenType::Double(d) => {
+            if d.is_finite() && d.fract() == 0.0 {
+                format!("{:.1}", d) // "4.0" not "4"
             } else {
-                consecutive_blank_lines = 0;
-                result.push_str(trimmed);
-                result.push('\n');
+                format!("{}", d)
             }
         }
-        
-        result
-    }
-    
-    /// Remove comments from DixScript
-    /// 
-    /// Preserves:
-    /// - String contents
-    /// - All code structure
-    /// 
-    /// Removes:
-    /// - Single-line comments (`//`)
-    /// - Multi-line comments (`/* */`)
-    pub fn remove_comments(content: &str) -> String {
-        let mut result = String::with_capacity(content.len());
-        let chars: Vec<char> = content.chars().collect();
-        let mut i = 0;
-        
-        let mut in_string = false;
-        let mut string_char = '\0';
-        
-        while i < chars.len() {
-            let c = chars[i];
-            let next = if i + 1 < chars.len() { chars[i + 1] } else { '\0' };
-            let prev = if i > 0 { chars[i - 1] } else { '\0' };
-            
-            // Handle string state
-            if (c == '"' || c == '\'') && prev != '\\' {
-                if !in_string {
-                    in_string = true;
-                    string_char = c;
-                } else if c == string_char {
-                    in_string = false;
-                }
-                result.push(c);
-                i += 1;
-                continue;
-            }
-            
-            // Inside string - preserve everything
-            if in_string {
-                result.push(c);
-                i += 1;
-                continue;
-            }
-            
-            // Handle single-line comments
-            if c == '/' && next == '/' {
-                // Skip until end of line
-                while i < chars.len() && chars[i] != '\n' {
-                    i += 1;
-                }
-                continue;
-            }
-            
-            // Handle multi-line comments
-            if c == '/' && next == '*' {
-                i += 2;
-                while i + 1 < chars.len() {
-                    if chars[i] == '*' && chars[i + 1] == '/' {
-                        i += 2;
-                        break;
-                    }
-                    i += 1;
-                }
-                continue;
-            }
-            
-            // Keep all other characters
-            result.push(c);
-            i += 1;
+        TokenType::Float(f) => {
+            // Append 'f' suffix so re-parse produces Float, not Double.
+            format!("{}f", f)
         }
-        
-        result
-    }
-    
-    /// Calculate compression ratio
-    /// 
-    /// Returns value between 0.0 and 1.0:
-    /// - 0.0 = no compression
-    /// - 1.0 = 100% compression
-    pub fn get_compression_ratio(original: &str, compressed: &str) -> f64 {
-        if original.is_empty() {
-            return 0.0;
+        // No output in minified form.
+        TokenType::Comment(_) | TokenType::EndOfFile | TokenType::ParseContext(_) => {
+            String::new()
         }
-        
-        1.0 - (compressed.len() as f64 / original.len() as f64)
+        // All other tokens: use the canonical rendering already in Token.
+        _ => token.get_token_value(),
     }
 }
 
+pub struct DixCompactor;
+
+impl DixCompactor {
+    /// Minify DixScript content — remove all unnecessary whitespace.
+    ///
+    /// Uses the DixScript tokenizer so that keyword, identifier, and literal
+    /// boundaries are always respected.  A single space is inserted between two
+    /// consecutive tokens only when both their adjacent characters are word chars.
+    ///
+    /// Preserves:
+    /// - String contents (whitespace and `//` inside strings are kept verbatim)
+    /// - Mandatory spaces between adjacent word tokens (`true other` ≠ `trueother`)
+    pub fn minify(content: &str) -> String {
+        if content.trim().is_empty() {
+            return String::new();
+        }
+
+        let settings = OperationalSettings::default();
+        let tokenizer = Tokenizer::new(content, &settings);
+        let tok_result = tokenizer.tokenize();
+
+        let mut result = String::with_capacity(content.len());
+        let mut prev_rendered: Option<String> = None;
+
+        for token in &tok_result.tokens {
+            let rendered = render_token(token);
+            if rendered.is_empty() {
+                continue;
+            }
+
+            if let Some(ref prev) = prev_rendered {
+                let prev_ends_word  = prev.chars().last().map(is_word_char).unwrap_or(false);let curr_starts_word = rendered.chars().next().map(is_word_char).unwrap_or(false);
+            if prev_ends_word && curr_starts_word {
+                result.push(' ');
+            }
+        }
+
+        result.push_str(&rendered);
+        prev_rendered = Some(rendered);
+    }
+
+    result
+}
+
+/// Compact DixScript — remove trailing whitespace and collapse consecutive
+/// blank lines to at most one.  Does NOT modify indentation or code.
+pub fn compact(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut result = String::with_capacity(content.len());
+    let mut consecutive_blank = 0usize;
+
+    for line in &lines {
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            consecutive_blank += 1;
+            if consecutive_blank <= 1 {
+                result.push('\n');
+            }
+        } else {
+            consecutive_blank = 0;
+            result.push_str(trimmed);
+            result.push('\n');
+        }
+    }
+
+    result
+}
+
+/// Remove single-line (`//`) and multi-line (`/* */`) comments from
+/// DixScript source.  Comment markers inside string literals are preserved.
+pub fn remove_comments(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let chars: Vec<char> = content.chars().collect();
+    let mut i = 0;
+
+    let mut in_string  = false;
+    let mut string_char = '\0';
+
+    while i < chars.len() {
+        let c    = chars[i];
+        let next = if i + 1 < chars.len() { chars[i + 1] } else { '\0' };
+        let prev = if i > 0 { chars[i - 1] } else { '\0' };
+
+        // Track string context (handles interpolated strings — `$` is a
+        // plain character and the `"` that follows sets in_string normally).
+        if (c == '"' || c == '\'') && prev != '\\' {
+            if !in_string {
+                in_string  = true;
+                string_char = c;
+            } else if c == string_char {
+                in_string = false;
+            }
+            result.push(c);
+            i += 1;
+            continue;
+        }
+
+        if in_string {
+            result.push(c);
+            i += 1;
+            continue;
+        }
+
+        // Single-line comment
+        if c == '/' && next == '/' {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+
+        // Multi-line comment
+        if c == '/' && next == '*' {
+            i += 2;
+            while i + 1 < chars.len() {
+                if chars[i] == '*' && chars[i + 1] == '/' {
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        result.push(c);
+        i += 1;
+    }
+
+    result
+}
+
+/// Compression ratio in `[0.0, 1.0]`.  `1.0` = 100 % reduction.
+pub fn get_compression_ratio(original: &str, compressed: &str) -> f64 {
+    if original.is_empty() {
+        return 0.0;
+    }
+    1.0 - (compressed.len() as f64 / original.len() as f64)
+        }}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_minify_basic() {
-        let input = "@CONFIG(\n  version -> \"1.0.0\"\n)";
-        let output = DixCompactor::minify(input);
-        assert_eq!(output, "@CONFIG(version->\"1.0.0\")");
-    }
-    
-    #[test]
-    fn test_minify_preserves_strings() {
-        let input = "name = \"Hello   World\"";
-        let output = DixCompactor::minify(input);
-        assert_eq!(output, "name=\"Hello   World\"");
-    }
-    
-    #[test]
-    fn test_minify_preserves_necessary_spaces() {
-        let input = "let x = 5";
-        let output = DixCompactor::minify(input);
-        assert_eq!(output, "let x=5");
-    }
+use super::*;// ── minify: core correctness ──────────────────────────────────────────────
 
-    #[test]
-    fn test_minify_does_not_merge_number_into_following_table_path() {
-        let input = "@DATA(\n  count = 789\n  table: host = \"x\"\n)";
-        let output = DixCompactor::minify(input);
-        // The bare number and the next identifier must remain separated by
-        // at least one space — they must NOT fuse into "789table:".
-        assert!(!output.contains("789table"), "got: {}", output);
-        assert!(output.contains("789 table:") || output.contains("789,table:"),
-            "expected a separator between 789 and table:, got: {}", output);
-    }
+#[test]
+fn test_minify_basic_config() {
+    let input  = "@CONFIG(\n  version -> \"1.0.0\"\n)";
+    let output = DixCompactor::minify(input);
+    assert_eq!(output, "@CONFIG(version->\"1.0.0\")");
+}
 
-    #[test]
-    fn test_minify_does_not_swallow_boolean_into_next_identifier() {
-        let input = "@DATA(\n  flag = true\n  other = 5\n)";
-        let output = DixCompactor::minify(input);
-        // `true` must remain a standalone token, not fused into `trueother`.
-        assert!(!output.contains("trueother"), "got: {}", output);
-        assert!(output.contains("true") , "got: {}", output);
-        assert!(output.contains("false") || true); // sanity placeholder
-    }
+#[test]
+fn test_minify_preserves_strings_with_spaces() {
+    let input  = "name = \"Hello   World\"";
+    let output = DixCompactor::minify(input);
+    assert_eq!(output, "name=\"Hello   World\"");
+}
 
-    #[test]
-    fn test_minify_handles_indentation_runs_of_any_width() {
-        let input = "@DATA(\n      deeply = 1\n      nested = 2\n)";
-        let output = DixCompactor::minify(input);
-        assert!(!output.contains("1nested"), "got: {}", output);
-    }
-    
-    #[test]
-    fn test_remove_comments_single_line() {
-        let input = "x = 5 // comment\ny = 10";
-        let output = DixCompactor::remove_comments(input);
-        assert_eq!(output, "x = 5 \ny = 10");
-    }
-    
-    #[test]
-    fn test_remove_comments_multi_line() {
-        let input = "x = 5 /* comment */ y = 10";
-        let output = DixCompactor::remove_comments(input);
-        assert_eq!(output, "x = 5  y = 10");
-    }
-    
-    #[test]
-    fn test_remove_comments_preserves_strings() {
-        let input = "url = \"http://example.com\" // not a comment in string";
-        let output = DixCompactor::remove_comments(input);
-        assert_eq!(output, "url = \"http://example.com\" ");
-    }
-    
-    #[test]
-    fn test_compact_removes_extra_blank_lines() {
-        let input = "line1\n\n\n\nline2";
-        let output = DixCompactor::compact(input);
-        assert_eq!(output, "line1\n\nline2\n");
-    }
-    
-    #[test]
-    fn test_compact_removes_trailing_whitespace() {
-        let input = "line1   \nline2\t\t";
-        let output = DixCompactor::compact(input);
-        assert_eq!(output, "line1\nline2\n");
-    }
-    
-    #[test]
-    fn test_compression_ratio() {
-        let original = "hello world";
-        let compressed = "hello";
-        let ratio = DixCompactor::get_compression_ratio(original, compressed);
-        assert!((ratio - 0.545).abs() < 0.01); // ~54.5% compression
-    }
-                    }
+#[test]
+fn test_minify_keeps_space_between_let_and_identifier() {
+    let input  = "let x = 5";
+    let output = DixCompactor::minify(input);
+    assert_eq!(output, "let x=5");
+}
+
+/// Regression: `789\n  table:` must not fuse to `789table:`.
+#[test]
+fn test_minify_no_fusion_integer_table_path() {
+    let input  = "@DATA(\n  count = 789\n  table: host = \"x\"\n)";
+    let output = DixCompactor::minify(input);
+    assert!(
+        !output.contains("789table"),
+        "integer and table-path fused — got: {output}"
+    );
+    assert!(
+        output.contains("789 table:"),
+        "expected '789 table:' in output, got: {output}"
+    );
+}
+
+/// Regression: `true\n  other` must not fuse to `trueother`.
+#[test]
+fn test_minify_no_fusion_bool_identifier() {
+    let input  = "@DATA(\n  flag = true\n  other = 5\n)";
+    let output = DixCompactor::minify(input);
+    assert!(
+        !output.contains("trueother"),
+        "bool and identifier fused — got: {output}"
+    );
+    assert!(
+        output.contains("true") && output.contains("other"),
+        "tokens gone — got: {output}"
+    );
+}
+
+/// Wide indentation must not fuse adjacent tokens.
+#[test]
+fn test_minify_deep_indentation_no_fusion() {
+    let input  = "@DATA(\n      deeply = 1\n      nested = 2\n)";
+    let output = DixCompactor::minify(input);
+    assert!(
+        !output.contains("1nested"),
+        "deep-indent tokens fused — got: {output}"
+    );
+}
+
+/// Two keyword tokens (`let result`) must retain a separator.
+#[test]
+fn test_minify_keyword_identifier_space() {
+    let input  = "let result = 42";
+    let output = DixCompactor::minify(input);
+    assert!(output.contains("let result"), "got: {output}");
+}
+
+// ── minify: comment stripping ─────────────────────────────────────────────
+
+#[test]
+fn test_minify_strips_single_line_comments() {
+    let input  = "x = 5 // comment\ny = 10";
+    let output = DixCompactor::minify(input);
+    assert!(!output.contains("comment"), "got: {output}");
+    assert!(output.contains("x=5"),      "got: {output}");
+    assert!(output.contains("y=10"),     "got: {output}");
+}
+
+#[test]
+fn test_minify_strips_multi_line_comments() {
+    let input  = "x = 5 /* a multi\nline comment */ y = 10";
+    let output = DixCompactor::minify(input);
+    assert!(!output.contains("multi"), "got: {output}");
+    assert!(output.contains("x=5"),    "got: {output}");
+    assert!(output.contains("y=10"),   "got: {output}");
+}
+
+/// `//` inside a string literal must NOT be stripped.
+#[test]
+fn test_minify_preserves_url_in_string() {
+    let input  = "url = \"https://example.com/path\"";
+    let output = DixCompactor::minify(input);
+    assert!(
+        output.contains("https://example.com/path"),
+        "URL inside string was incorrectly stripped — got: {output}"
+    );
+}
+
+// ── minify: operator spacing ──────────────────────────────────────────────
+
+#[test]
+fn test_minify_arrow_operator_no_spaces() {
+    let input  = "@CONFIG(\n  version -> \"2.0\"\n)";
+    let output = DixCompactor::minify(input);
+    assert!(output.contains("version->\"2.0\""), "got: {output}");
+}
+
+#[test]
+fn test_minify_double_colon_array() {
+    let input  = "@DATA(\n  tags:: \"a\", \"b\"\n)";
+    let output = DixCompactor::minify(input);
+    assert!(output.contains("tags::"), "got: {output}");
+}
+
+// ── minify: edge cases ────────────────────────────────────────────────────
+
+#[test]
+fn test_minify_empty_and_whitespace_only() {
+    assert_eq!(DixCompactor::minify(""), "");
+    assert_eq!(DixCompactor::minify("   \n  \n"), "");
+}
+
+#[test]
+fn test_minify_only_comments_returns_empty() {
+    let input  = "// single line\n/* multi\nline */";
+    let output = DixCompactor::minify(input);
+    assert!(output.trim().is_empty(), "expected empty, got: {output:?}");
+}
+
+// ── compact ───────────────────────────────────────────────────────────────
+
+#[test]
+fn test_compact_removes_trailing_whitespace() {
+    let input  = "line1   \nline2\t\t";
+    let output = DixCompactor::compact(input);
+    assert_eq!(output, "line1\nline2\n");
+}
+
+#[test]
+fn test_compact_collapses_many_blank_lines() {
+    let input  = "line1\n\n\n\nline2";
+    let output = DixCompactor::compact(input);
+    assert_eq!(output, "line1\n\nline2\n");
+}
+
+#[test]
+fn test_compact_single_blank_line_preserved() {
+    let output = DixCompactor::compact("a\n\nb");
+    assert_eq!(output, "a\n\nb\n");
+}
+
+#[test]
+fn test_compact_preserves_indentation() {
+    let input  = "@DATA(  \n  x = 1  \n)";
+    let output = DixCompactor::compact(input);
+    assert!(output.contains("  x = 1"), "indentation lost: {output}");
+}
+
+// ── remove_comments ───────────────────────────────────────────────────────
+
+#[test]
+fn test_remove_comments_single_line() {
+    let output = DixCompactor::remove_comments("x = 5 // a comment\ny = 10");
+    assert_eq!(output, "x = 5 \ny = 10");
+}
+
+#[test]
+fn test_remove_comments_multi_line() {
+    let output = DixCompactor::remove_comments("x = 5 /* comment */ y = 10");
+    assert_eq!(output, "x = 5  y = 10");
+}
+
+#[test]
+fn test_remove_comments_preserves_url_in_string() {
+    let output = DixCompactor::remove_comments("url = \"http://example.com\" // comment");
+    assert_eq!(output, "url = \"http://example.com\" ");
+}
+
+#[test]
+fn test_remove_comments_preserves_comment_text_in_string() {
+    let input  = "s = \"/* not a comment */\" // real comment";
+    let output = DixCompactor::remove_comments(input);
+    assert!(output.contains("/* not a comment */"), "got: {output}");
+    assert!(!output.contains("real comment"),       "got: {output}");
+}
+
+// ── compression ratio ─────────────────────────────────────────────────────
+
+#[test]
+fn test_compression_ratio() {
+    let original   = "hello world";
+    let compressed = "hello";
+    let ratio = DixCompactor::get_compression_ratio(original, compressed);
+    assert!((ratio - (1.0 - 5.0 / 11.0)).abs() < 0.001);
+}
+
+#[test]
+fn test_compression_ratio_empty_original() {
+    assert_eq!(DixCompactor::get_compression_ratio("", ""), 0.0);
+}
+
+#[test]
+fn test_compression_ratio_no_change() {
+    let s = "abc";
+    assert_eq!(DixCompactor::get_compression_ratio(s, s), 0.0);
+    }}

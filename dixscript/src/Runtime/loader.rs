@@ -16,7 +16,7 @@ use crate::ErrorManager::{ErrorManager, RuntimeErrorType, ErrorSeverity};
 use super::load_options::DixLoadOptions;
 use super::key_resolver::{KeyFileResolver, KeyFileResolution, KeyFileSource};
 use super::dix_data::DixData;
-
+use super::array_homogenizer::homogenize_data_section;
 /// Internal loader for DixScript files.
 ///
 /// Each `DixLoader` owns an isolated `ErrorManager` so loading multiple
@@ -316,6 +316,8 @@ impl DixLoader {
 
     // ── Compilation pipeline (Approach B: tokenizer-first) ────────────────────
 
+ // ── Compilation pipeline (Approach B: tokenizer-first) ────────────────────
+
     fn compile_source(
         &self,
         source_text: &str,
@@ -418,6 +420,19 @@ impl DixLoader {
         } else {
             self.error_manager.log_info("Skipping value resolution (no functions or no data)");
         }
+
+        // Stage 8: numeric array homogenization.
+        //
+        // QuickFunc-resolved array literals can end up with mixed numeric
+        // element types (e.g. `[12.3, 4, 4.9]` where `4` stayed an Integer
+        // because the original literal/expression was an int). This pass
+        // promotes every element of a numeric array to the highest-precision
+        // type present in that array, so the binary serializer, JSON/TOML
+        // converters, and the LSP "Create Resolved" output all see a
+        // consistent element type. Runs regardless of whether value
+        // resolution happened — a hand-written `[12.3, 4, 4.9]` literal gets
+        // the same treatment.
+        homogenize_data_section(&mut resolved_ast);
 
         Ok(resolved_ast)
     }

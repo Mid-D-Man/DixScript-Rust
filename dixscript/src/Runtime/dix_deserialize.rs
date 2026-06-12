@@ -1,3 +1,4 @@
+// dixscript/src/Runtime/dix_deserialize.rs
 //! Trait and helpers for reading Rust structs from a loaded DixScript database.
 //!
 //! # Quick start
@@ -101,9 +102,23 @@ impl DixDeserialize for DixValue {
 
 /// `Option<T>` deserializes as `None` when the path is absent,
 /// and as `Some(T)` when it is present (and succeeds).
+///
+/// "Present" means either:
+/// - `prefix` itself is a key in the flattened data (true for scalar fields
+///   and for `ObjectProperty`-declared nested objects, which are stored both
+///   as a whole `DixValue::Object` AND as individual `prefix.field` keys), OR
+/// - `prefix` has at least one child key `prefix.*` (true for
+///   `TableProperty`-declared nested structs, which only ever appear as
+///   `prefix.field` keys — `prefix` itself is never inserted).
+///
+/// FIX: previously only `data.exists(prefix)` was checked, which meant
+/// `Option<T>` for any table-property-declared nested struct (the common
+/// case — `server: host = ..., port = ...`) always evaluated to `None`,
+/// even when `server.host` / `server.port` were fully present.
 impl<T: DixDeserialize> DixDeserialize for Option<T> {
     fn from_dix(data: &DixData, prefix: &str) -> Result<Self, String> {
-        if !data.exists(prefix) {
+        let present = data.exists(prefix) || !data.get_keys(prefix).is_empty();
+        if !present {
             return Ok(None);
         }
         T::from_dix(data, prefix).map(Some)
@@ -256,6 +271,8 @@ impl DixData {
 mod tests {
     use super::*;
     use crate::Runtime::{DixDataBuilder, DixValue};
+    use crate::Compiler::AST::*;
+    use chrono::Utc;
 
     // ── Test fixture ──────────────────────────────────────────────────────────
 
@@ -395,7 +412,7 @@ mod tests {
         assert_eq!(val, 9090);
     }
 
-    // ── Option<T> ────────────────────────────────────────────────────────────
+    // ── Option<T> — scalar ───────────────────────────────────────────────────
 
     #[test]
     fn test_option_present_returns_some() {
@@ -409,6 +426,74 @@ mod tests {
         let data = flat_data();
         let val: Option<String> = data.deserialize_at("nonexistent").unwrap();
         assert_eq!(val, None);
+    }
+
+    // ── Option<T> — nested struct (the bug that was found) ────────────────────
+
+    #[test]
+    fn test_option_struct_present_via_table_property_returns_some() {
+        // "server" is a TableProperty: "server" itself is never inserted as
+        // a key, only "server.host" / "server.port" / "server.ssl" are.
+        // Before the fix, `data.exists("server")` was false, so
+        // `Option<ServerCfg>` always returned None here.
+        let data = nested_data();
+        let server: Option<ServerCfg> = data.deserialize_at("server").unwrap();
+        assert!(server.is_some(), "expected Some(ServerCfg) for a table-property prefix");
+
+        let server = server.unwrap();
+        assert_eq!(server.host, "localhost");
+        assert_eq!(server.port, 443);
+        assert!(server.ssl);
+    }
+
+    #[test]
+    fn test_option_struct_absent_returns_none_with_no_related_keys() {
+        let data = nested_data();
+        let missing: Option<ServerCfg> = data.deserialize_at("nonexistent").unwrap();
+        assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_option_struct_present_via_object_property_returns_some() {
+        // ObjectProperty-declared nested objects DID work before the fix
+        // (they get a literal "server" key as DixValue::Object). This test
+        // guards against a regression in that path.
+        let ast = DixScript {
+            config: None, imports: None, dlm: None,
+            enums: None, quick_functions: None, security: None,
+            data: Some(DataSection {
+                entries: vec![DataEntry::ObjectProperty {
+                    name: "server".into(),
+                    data_type: None,
+                    object: Box::new(Value::Object {
+                        properties: vec![
+                            ObjectProperty::new(
+                                "host".into(),
+                                Value::String { value: "localhost".into(), position: Position::UNKNOWN },
+                                Position::UNKNOWN,
+                            ),
+                            ObjectProperty::new(
+                                "port".into(),
+                                Value::Integer { value: 443, position: Position::UNKNOWN },
+                                Position::UNKNOWN,
+                            ),
+                        ],
+                        position: Position::UNKNOWN,
+                    }),
+                    position: Position::UNKNOWN,
+                }],
+                position: Position::UNKNOWN,
+            }),
+        };
+
+        let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
+
+        let server: Option<ServerCfg> = data.deserialize_at("server").unwrap();
+        assert!(server.is_some());
+        let server = server.unwrap();
+        assert_eq!(server.host, "localhost");
+        assert_eq!(server.port, 443);
+        assert!(!server.ssl); // not present, defaults via dix_get_or
     }
 
     // ── Vec<T> scalar ────────────────────────────────────────────────────────
@@ -432,16 +517,42 @@ mod tests {
     // ── dix_array_of ─────────────────────────────────────────────────────────
 
     #[test]
-    fn test_dix_array_of_structs() {
-        // Build data that looks like a grouped array of objects
-        // Each array item has sub-fields accessible as [i].field
-        // We test the path building logic here with a simple case
+    fn test_dix_array_of_structs_when_absent_errors_not_panics() {
         let data = nested_data();
-        // nested_data doesn't have an array of structs, so just verify no panic
-        // Full array-of-structs test requires QuickFuncs or manual construction
-        let result: Result<Vec<ServerCfg>, _> = dix_array_of(&data, "", "servers");
         // "servers" doesn't exist → should error on the array lookup, not panic
+        let result: Result<Vec<ServerCfg>, _> = dix_array_of(&data, "", "servers");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dix_array_of_populated_structs() {
+        fn item(name: &str, port: i32) -> Value {
+            Value::Object {
+                properties: vec![
+                    ObjectProperty::new("host".into(), Value::String { value: name.into(), position: Position::UNKNOWN }, Position::UNKNOWN),
+                    ObjectProperty::new("port".into(), Value::Integer { value: port, position: Position::UNKNOWN }, Position::UNKNOWN),
+                ],
+                position: Position::UNKNOWN,
+            }
+        }
+
+        let data = DixDataBuilder::new()
+            .data(|d| {
+                d.with_string("title", "Cluster");
+                d.with_group_array("servers", vec![
+                    item("node-a", 7000),
+                    item("node-b", 7001),
+                ]);
+            })
+            .build()
+            .unwrap();
+
+        let servers: Vec<ServerCfg> = dix_array_of(&data, "", "servers").unwrap();
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[0].host, "node-a");
+        assert_eq!(servers[0].port, 7000);
+        assert_eq!(servers[1].host, "node-b");
+        assert_eq!(servers[1].port, 7001);
     }
 
     // ── dix_path ─────────────────────────────────────────────────────────────
@@ -460,4 +571,4 @@ mod tests {
     fn test_dix_path_nested() {
         assert_eq!(dix_path("config.database", "host"), "config.database.host");
     }
-      }
+}

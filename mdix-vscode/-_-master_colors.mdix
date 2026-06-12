@@ -1,0 +1,27 @@
+@CONFIG(
+  version -> "1.0.0"
+  author  -> "Mid-D-Man"
+)
+
+@ENUMS(
+  Theme { DARK = 0, LIGHT = 1, HIGH_CONTRAST = 2 }
+)
+
+@DATA(
+  // Dark theme token colors
+  dark.keyword   = #569CD6
+  dark.string    = #CE9178
+  dark.number    = #B5CEA8
+  dark.function  = #DCDCAA
+  dark.type      = #4EC9B0
+  dark.comment   = #6A9955
+  dark.namespace = #9CDCFE
+  dark.enum      = #C8C8C8
+  dark.parameter = #9CDCFE
+  dark.decorator = #C586C0
+
+  // Light theme overrides
+  light.keyword  = #0000FF
+  light.string   = #A31515
+  light.function = #795E26
+)

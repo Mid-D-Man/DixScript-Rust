@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>MdixLanguageSupport</AssemblyName>
+    <RootNamespace>MidManStudio.Mdix</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- These DLLs live inside VS for Mac — adjust path if yours differs -->
+    <Reference Include="MonoDevelop.Ide">
+      <HintPath>/Applications/Visual Studio.app/Contents/MonoBundle/MonoDevelop.Ide.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Mono.Addins">
+      <HintPath>/Applications/Visual Studio.app/Contents/MonoBundle/Mono.Addins.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

@@ -967,7 +967,7 @@ impl DixConverter {
         }
     }
 
-    fn format_value_for_mdix(&self, value: &Value, opts: &DixFormatOptions) -> String {
+fn format_value_for_mdix(&self, value: &Value, opts: &DixFormatOptions) -> String {
         let sp = opts.get_space();
         match value {
             Value::Null { .. }                        => "null".to_string(),
@@ -975,7 +975,15 @@ impl DixConverter {
             Value::Integer { value: i, .. }           => i.to_string(),
             Value::Long { value: l, .. }              => format!("{}L", l),
             Value::Float { value: f, .. }             => format!("{}f", f),
-            Value::Double { value: d, .. }            => d.to_string(),
+            // FIX: see values.rs — a whole-number f64 must keep an explicit
+            // ".0" or it re-lexes as Integer on the next compile.
+            Value::Double { value: d, .. } => {
+                if d.is_finite() && d.fract() == 0.0 {
+                    format!("{:.1}", d)
+                } else {
+                    d.to_string()
+                }
+            }
             Value::ScientificNotation { value: d, .. } => format!("{:e}", d),
             Value::String { value: s, .. }            => format!("\"{}\"", s),
             Value::InterpolatedString { template, .. } => format!("$\"{}\"", template),
@@ -1014,7 +1022,7 @@ impl DixConverter {
 
             _ => String::new(),
         }
-    }
+                }
 }
 
 impl Default for DixConverter {

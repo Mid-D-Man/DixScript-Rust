@@ -186,7 +186,21 @@ impl std::fmt::Display for Value {
             Value::Integer { value, .. }            => write!(f, "{}", value),
             Value::Long { value, .. }               => write!(f, "{}L", value),
             Value::Float { value, .. }              => write!(f, "{}f", value),
-            Value::Double { value, .. }             => write!(f, "{}", value),
+            // FIX: Rust's f64 Display drops the fractional part for whole
+            // numbers (4.0 -> "4"). For DixScript, Double has NO suffix to
+            // disambiguate it from Integer in source text, so a whole-number
+            // Double MUST keep an explicit ".0" or it silently re-lexes as
+            // Integer on the next compile — exactly the "[12.3, 4, 4.9]"
+            // round-trip bug. ScientificNotation is unaffected (its `{:e}`
+            // formatting already includes an exponent marker, e.g. "4e0",
+            // which is unambiguous).
+            Value::Double { value, .. } => {
+                if value.is_finite() && value.fract() == 0.0 {
+                    write!(f, "{:.1}", value)
+                } else {
+                    write!(f, "{}", value)
+                }
+            }
             Value::ScientificNotation { value, .. } => write!(f, "{:e}", value),
             Value::String { value, .. }             => write!(f, "\"{}\"", value),
             Value::Boolean { value, .. }            => write!(f, "{}", if *value { "true" } else { "false" }),
@@ -269,4 +283,4 @@ impl std::fmt::Display for ObjectProperty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} = {}", self.key, self.value)
     }
-}
+    }

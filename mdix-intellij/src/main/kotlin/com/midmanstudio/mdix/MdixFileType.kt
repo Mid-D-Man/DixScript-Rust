@@ -8,5 +8,5 @@ object MdixFileType : LanguageFileType(MdixLanguage) {
     override fun getName()             = "MDIX"
     override fun getDescription()      = "DixScript Configuration File"
     override fun getDefaultExtension() = "mdix"
-    override fun getIcon(): Icon?      = null  // swap in your SVG icon later
+    override fun getIcon(): Icon       = MdixIcons.FILE
 }

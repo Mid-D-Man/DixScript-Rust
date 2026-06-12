@@ -34,6 +34,24 @@
 //! let config: ServerConfig = data.deserialize_at("server")?;
 //! ```
 //!
+//! ## Struct serialization
+//!
+//! ```rust,ignore
+//! use dixscript::Runtime::{DixSerialize, DataBuilder, dix_set_str, dix_set_int};
+//!
+//! impl DixSerialize for ServerConfig {
+//!     fn to_dix(&self, d: &mut DataBuilder, prefix: &str) -> Result<(), String> {
+//!         dix_set_str(d, prefix, "host", &self.host);
+//!         dix_set_int(d, prefix, "port", self.port);
+//!         Ok(())
+//!     }
+//! }
+//!
+//! let data = DixDataBuilder::new()
+//!     .serialize_at("server", &config)
+//!     .build()?;
+//! ```
+//!
 //! ## Schema validation
 //!
 //! ```rust,ignore
@@ -122,6 +140,7 @@ pub use dix_serialize::{
     dix_set_double,
     dix_set_float,
     dix_set_int,
+    dix_set_long,
     dix_set_nested,
     dix_set_str,
 };

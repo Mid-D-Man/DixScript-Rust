@@ -1,0 +1,235 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "DixScript",
+  "scopeName": "source.mdix",
+  "fileTypes": ["mdix"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#sections" },
+    { "include": "#interpolated_strings" },
+    { "include": "#strings" },
+    { "include": "#prefixed_constructors" },
+    { "include": "#hex_color" },
+    { "include": "#numbers" },
+    { "include": "#dates" },
+    { "include": "#constants" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#static_objects" },
+    { "include": "#quickfunc_decl" },
+    { "include": "#operators" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.mdix",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.mdix",
+          "begin": "/\\*",
+          "end":   "\\*/",
+          "beginCaptures": { "0": { "name": "punctuation.definition.comment.begin.mdix" } },
+          "endCaptures":   { "0": { "name": "punctuation.definition.comment.end.mdix"   } }
+        }
+      ]
+    },
+
+    "sections": {
+      "match": "@(CONFIG|IMPORTS|DLM|ENUMS|QUICKFUNCS|DATA|SECURITY)\\b",
+      "name": "keyword.control.section.mdix"
+    },
+
+    "interpolated_strings": {
+      "name": "string.interpolated.mdix",
+      "begin": "\\$\"",
+      "end":   "\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.mdix" } },
+      "endCaptures":   { "0": { "name": "punctuation.definition.string.end.mdix"   } },
+      "patterns": [
+        {
+          "name": "meta.interpolation.mdix",
+          "begin": "\\{",
+          "end":   "\\}",
+          "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.mdix" } },
+          "endCaptures":   { "0": { "name": "punctuation.section.interpolation.end.mdix"   } },
+          "patterns": [{ "include": "$self" }]
+        },
+        { "name": "constant.character.escape.mdix", "match": "\\\\." }
+      ]
+    },
+
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.mdix",
+          "begin": "\"",
+          "end":   "\"",
+          "patterns": [{ "name": "constant.character.escape.mdix", "match": "\\\\." }]
+        },
+        {
+          "name": "string.quoted.single.mdix",
+          "begin": "'",
+          "end":   "'",
+          "patterns": [{ "name": "constant.character.escape.mdix", "match": "\\\\." }]
+        }
+      ]
+    },
+
+    "prefixed_constructors": {
+      "patterns": [
+        {
+          "name": "keyword.other.constructor.mdix",
+          "match": "\\b(t|b|r):(\\()",
+          "captures": {
+            "1": { "name": "keyword.operator.constructor.mdix" },
+            "2": { "name": "punctuation.bracket.mdix" }
+          }
+        }
+      ]
+    },
+
+    "hex_color": {
+      "name": "constant.other.color.mdix",
+      "match": "#[0-9a-fA-F]{3,8}\\b"
+    },
+
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.mdix",
+          "match": "0[xX][0-9a-fA-F]+[Ll]?\\b"
+        },
+        {
+          "name": "constant.numeric.scientific.mdix",
+          "match": "\\b\\d+\\.?\\d*[eE][+-]?\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.float.mdix",
+          "match": "\\b\\d+\\.\\d+[fF]\\b"
+        },
+        {
+          "name": "constant.numeric.double.mdix",
+          "match": "\\b\\d+\\.\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.long.mdix",
+          "match": "\\b\\d[\\d_]*[Ll]\\b"
+        },
+        {
+          "name": "constant.numeric.integer.mdix",
+          "match": "\\b\\d[\\d_]*\\b"
+        }
+      ]
+    },
+
+    "dates": {
+      "patterns": [
+        {
+          "name": "constant.other.timestamp.mdix",
+          "match": "\\b\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(Z|[+-]\\d{2}:\\d{2})?\\b"
+        },
+        {
+          "name": "constant.other.date.mdix",
+          "match": "\\b\\d{4}-\\d{2}-\\d{2}\\b"
+        }
+      ]
+    },
+
+    "constants": {
+      "name": "constant.language.mdix",
+      "match": "\\b(true|false|null)\\b"
+    },
+
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.flow.mdix",
+          "match": "\\b(if|elif|else|chk|miss|return)\\b"
+        },
+        {
+          "name": "keyword.other.declaration.mdix",
+          "match": "\\b(let|mut|const|log|and|or|not)\\b"
+        },
+        {
+          "name": "keyword.other.import.mdix",
+          "match": "\\b(from|from_cloud|verify|global)\\b"
+        }
+      ]
+    },
+
+    "types": {
+      "name": "support.type.builtin.mdix",
+      "match": "(?<=<|,\\s*)\\b(int|long|float|double|string|bool|array|tuple|object|hex|blob|regex|date|timestamp|enum|any)\\b(?=\\s*[>,])"
+    },
+
+    "static_objects": {
+      "name": "support.class.builtin.mdix",
+      "match": "\\b(Math|DateTime|Array|Random|Guid|IpAddress|Enum|Dix|DCompressor|DEncryptor|DAuditor)\\b"
+    },
+
+    "quickfunc_decl": {
+      "match": "(~)([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.operator.quickfunc.mdix" },
+        "2": { "name": "entity.name.function.mdix" }
+      }
+    },
+
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.mdix",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.group-array.mdix",
+          "match": "::"
+        },
+        {
+          "name": "keyword.operator.comparison.mdix",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.assignment.mdix",
+          "match": "(?<![=!<>])=(?!=)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.mdix",
+          "match": "\\+|-|\\*|/|%|\\*\\*"
+        },
+        {
+          "name": "keyword.operator.logical.mdix",
+          "match": "&&|\\|\\||!"
+        }
+      ]
+    },
+
+    "identifiers": {
+      "patterns": [
+        {
+          "comment": "Enum access: EnumName.FIELD",
+          "match": "\\b([A-Z][a-zA-Z0-9_]*)\\.([A-Z_][A-Z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "support.type.enum.mdix" },
+            "2": { "name": "variable.other.enummember.mdix" }
+          }
+        },
+        {
+          "comment": "function calls",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.call.mdix" }
+          }
+        },
+        {
+          "name": "variable.other.mdix",
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+  }

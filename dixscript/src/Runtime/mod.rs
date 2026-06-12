@@ -1,3 +1,4 @@
+// dixscript/src/Runtime/mod.rs
 //! Runtime — public API for loading and using `.mdix` files.
 //!
 //! ## Loading
@@ -47,6 +48,7 @@
 //! assert!(report.is_valid());
 //! ```
 
+pub mod array_homogenizer;
 pub mod compactor;
 pub mod converter;
 pub mod data_builder;
@@ -62,6 +64,7 @@ pub mod schema;
 
 // ── Core types ────────────────────────────────────────────────────────────────
 
+pub use array_homogenizer::homogenize_data_section;
 pub use compactor::DixCompactor;
 pub use converter::DixConverter;
 pub use dix_data::DixData;

@@ -744,6 +744,20 @@ impl ErrorManagerInner {
 // =============================================================================
 
 impl ErrorManagerInner {
+    /// Writes one formatted log line.
+    ///
+    /// FIX (Group A — CLI stdout pollution): both branches previously used
+    /// `println!`, sending every Info/Warning/Error log line — including the
+    /// ANSI color codes from `write_to_console_colored` — to **stdout**. This
+    /// silently broke `--json` (the JSON envelope was no longer the first
+    /// thing on stdout, so `serde_json::from_str` failed at line 1, col 1) and
+    /// `--quiet` (stdout was never actually empty).
+    ///
+    /// Diagnostics/logs now go to stderr, which is where they belong per Unix
+    /// convention — stdout stays reserved for the command's actual result
+    /// (JSON envelope, formatted file body, etc.). `log_buffer` still captures
+    /// every line regardless, so programmatic log access (LSP output channel,
+    /// `get_log_contents()`) is unchanged.
     fn write_log(&mut self, level: LogLevel, message: &str) {
         if !self.log_enabled { return; }
         if level < self.log_level_filter { return; }
@@ -752,7 +766,7 @@ impl ErrorManagerInner {
 
         match self.log_format {
             LogFormat::Colored => Self::write_to_console_colored(&line, level),
-            LogFormat::Plain   => println!("{}", line),
+            LogFormat::Plain   => eprintln!("{}", line),
         }
 
         self.log_buffer.push(line);
@@ -763,12 +777,14 @@ impl ErrorManagerInner {
         format!("[{}] [{:?}] {}", timestamp, level, message)
     }
 
+    /// See `write_log` — routed to stderr so CLI stdout (JSON / `--quiet`)
+    /// stays clean.
     fn write_to_console_colored(line: &str, level: LogLevel) {
         match level {
-            LogLevel::Debug   => println!("\x1b[90m{}\x1b[0m", line),
-            LogLevel::Info    => println!("\x1b[97m{}\x1b[0m", line),
-            LogLevel::Warning => println!("\x1b[93m{}\x1b[0m", line),
-            LogLevel::Error   => println!("\x1b[91m{}\x1b[0m", line),
+            LogLevel::Debug   => eprintln!("\x1b[90m{}\x1b[0m", line),
+            LogLevel::Info    => eprintln!("\x1b[97m{}\x1b[0m", line),
+            LogLevel::Warning => eprintln!("\x1b[93m{}\x1b[0m", line),
+            LogLevel::Error   => eprintln!("\x1b[91m{}\x1b[0m", line),
             LogLevel::None    => {}
         }
     }
@@ -1302,4 +1318,4 @@ impl ErrorManagerInner {
                 .map_err(|e| format!("JSON serialization error: {}", e))
         }
     }
-            }
+}

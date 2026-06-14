@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Sat Jun 13 16:00:10 UTC 2026
+Generated: Sun Jun 14 06:25:43 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 82353ca54325a6e41965ed6d4e12d97d26273f36
+Commit: 7865eae36dd55ba75057bc21fb66e69903ab467b
 Branch: master
 ==================================
 
@@ -228,6 +228,7 @@ Source Files:
   dixscript/src/Runtime/key_resolver.rs
   dixscript/src/Runtime/load_options.rs
   dixscript/src/Runtime/loader.rs
+  dixscript/src/Runtime/merge.rs
   dixscript/src/Runtime/mod.rs
   dixscript/src/Runtime/schema.rs
   dixscript/src/Utilities/ast_debug_printer.rs
@@ -446,14 +447,14 @@ GitHub Workflows:
 
 Total Rust File Counts:
 =======================
-  Source files:    289
+  Source files:    290
   Test files:      15
   Benchmark files: 11
-  Total:           315
+  Total:           316
 
 Per-Member Breakdown:
 ====================
-  dixscript: src=221  tests=4  benches=11
+  dixscript: src=222  tests=4  benches=11
   mdix-cli: src=28  tests=10  benches=0
   mdix-ffi: src=4  tests=0  benches=0
   mdix-wasm: src=4  tests=0  benches=0

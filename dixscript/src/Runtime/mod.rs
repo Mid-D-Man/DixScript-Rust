@@ -65,6 +65,31 @@
 //!
 //! assert!(report.is_valid());
 //! ```
+//!
+//! ## Merging
+//!
+//! ```rust,ignore
+//! use dixscript::Runtime::merge::{MdixMerger, MdixMergeInput, MdixMergeStrategy};
+//!
+//! // AST-level merge with weight-based conflict resolution.
+//! let result = MdixMerger::new()
+//!     .with_strategy(MdixMergeStrategy::WeightedPriority)
+//!     .merge_all(vec![
+//!         MdixMergeInput::new(ast_base).with_weight(1.0).with_label("base"),
+//!         MdixMergeInput::new(ast_patch).with_weight(0.8).with_label("patch"),
+//!         MdixMergeInput::new(ast_local).with_weight(0.5).with_label("local"),
+//!     ]);
+//!
+//! // File-path convenience — loads, compiles, merges, returns DixData.
+//! let data = MdixMerger::new().merge_files(&["base.mdix", "overrides.mdix"])?;
+//!
+//! // Explicit per-file weights.
+//! let data = MdixMerger::new().merge_files_weighted(&[
+//!     ("base.mdix",      1.0),
+//!     ("overrides.mdix", 0.8),
+//!     ("local.mdix",     0.5),
+//! ])?;
+//! ```
 
 pub mod array_homogenizer;
 pub mod compactor;
@@ -78,6 +103,7 @@ pub mod format_options;
 pub mod key_resolver;
 pub mod load_options;
 pub mod loader;
+pub mod merge;
 pub mod schema;
 
 // ── Core types ────────────────────────────────────────────────────────────────
@@ -117,15 +143,10 @@ pub use key_resolver::{
 
 pub use dix_deserialize::{
     DixDeserialize,
-    // Build a dotted path from a prefix and a field segment.
     dix_path,
-    // Read a typed field at `prefix.field`, returning `Err` if absent.
     dix_get,
-    // Read a typed field, returning `default` if absent.
     dix_get_or,
-    // Deserialize a nested struct at `prefix.field`.
     dix_nested,
-    // Deserialize an array of structs at `prefix.field`.
     dix_array_of,
 };
 
@@ -153,4 +174,15 @@ pub use schema::{
     ValidationError,
     ValidationErrorKind,
     ValidationReport,
+};
+
+// ── Merging ───────────────────────────────────────────────────────────────────
+
+pub use merge::{
+    ArrayMergeStrategy,
+    MdixMergeInput,
+    MdixMergeResult,
+    MdixMergeStrategy,
+    MdixMerger,
+    MergeConflict,
 };

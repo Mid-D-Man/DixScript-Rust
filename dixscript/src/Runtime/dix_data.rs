@@ -4,6 +4,42 @@ use chrono::{DateTime, Utc};
 use crate::Compiler::AST::DixScript;
 use super::dix_value::DixValue;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Structural hashmap helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Returns `true` if `key` is a synthetic flattened child path of `parent` —
+/// i.e. `key == parent + "." + ...` or `key == parent + "[" + ...`.
+#[inline]
+fn is_child_path(key: &str, parent: &str) -> bool {
+    key.len() > parent.len()
+        && key.starts_with(parent)
+        && matches!(key.as_bytes()[parent.len()], b'.' | b'[')
+}
+
+/// Filter a fully-flattened hashmap down to its "structural" root entries —
+/// entries that are not derived child paths of another entry already present
+/// in the map (e.g. `"server.host"` when `"server"` is present as an
+/// `Object`, or `"tags[0]"` when `"tags"` is present as an `Array`).
+///
+/// [`DixData::to_hashmap`] (and `DixConverter::to_hashmap`) both produce a
+/// fully-flattened map for O(1) dotted-path access. Feeding that map directly
+/// into `DixConverter::from_hashmap` would emit invalid `.mdix` identifiers
+/// like `tags[0] = ...` or `server.host = ...` (DixScript identifiers cannot
+/// contain `[` or `.`). This filter keeps only the aggregate/root values
+/// needed to reconstruct the original structure.
+fn filter_structural_keys(map: &HashMap<String, DixValue>) -> HashMap<String, DixValue> {
+    let keys: Vec<&String> = map.keys().collect();
+    map.iter()
+        .filter(|(key, _)| {
+            !keys.iter().any(|other| {
+                other.as_str() != key.as_str() && is_child_path(key.as_str(), other.as_str())
+            })
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct DixData {
     flattened_data: HashMap<String, DixValue>,
@@ -110,8 +146,35 @@ impl DixData {
     #[inline]
     pub fn entry_count(&self) -> usize { self.flattened_data.len() }
 
+    /// Returns the fully-flattened data map, including synthetic child paths
+    /// like `"server.host"` and `"tags[0]"` used for O(1) dotted-path access.
+    ///
+    /// **Not suitable for round-tripping through `DixConverter::from_hashmap`**
+    /// — those synthetic paths are not valid DixScript identifiers on their
+    /// own. Use [`to_structural_hashmap`](Self::to_structural_hashmap) instead
+    /// for that purpose.
     pub fn to_hashmap(&self) -> HashMap<String, DixValue> {
         self.flattened_data.clone()
+    }
+
+    /// Like [`to_hashmap`](Self::to_hashmap), but returns only the
+    /// "structural" root entries — synthetic flattened child paths
+    /// (`"server.host"`, `"tags[0]"`, nested array/object indices, ...) are
+    /// removed, leaving only the aggregate/root `Object` / `Array` / scalar
+    /// values needed to reconstruct the original `.mdix` structure.
+    ///
+    /// Use this when feeding data into [`DixConverter::from_hashmap`] /
+    /// [`DixConverter::to_mdix`] — e.g. for `format`, `convert`, or any other
+    /// round-trip through `.mdix` source.
+    ///
+    /// ```rust,ignore
+    /// let data = loader.load_text("config.mdix", &DixLoadOptions::new())?;
+    /// let map  = data.to_structural_hashmap();
+    /// let ast  = converter.from_hashmap(map)?;
+    /// let src  = converter.to_mdix(&ast, None)?; // valid .mdix source
+    /// ```
+    pub fn to_structural_hashmap(&self) -> HashMap<String, DixValue> {
+        filter_structural_keys(&self.flattened_data)
     }
 
     // ── Pattern matching ──────────────────────────────────────────────────────
@@ -842,5 +905,150 @@ mod tests {
         let data = dix_data_from_flat(flat);
         let v: f64 = data.get("planck").unwrap();
         assert!((v - 6.62607015e-34_f64).abs() < 1e-50);
+    }
+
+    // ── to_structural_hashmap (Group D fix) ───────────────────────────────────
+
+    #[test]
+    fn test_structural_hashmap_filters_table_property_children() {
+        let ast = ast_with_table_prop(
+            &["server"],
+            vec![("host", str_val("localhost")), ("port", int_val(8080))],
+        );
+        let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
+
+        // Sanity: the fully-flattened map contains the synthetic children.
+        let flat = data.to_hashmap();
+        assert!(flat.contains_key("server.host"));
+        assert!(flat.contains_key("server.port"));
+        assert!(flat.contains_key("server"));
+
+        let structural = data.to_structural_hashmap();
+        assert!(!structural.contains_key("server.host"), "synthetic child 'server.host' leaked through");
+        assert!(!structural.contains_key("server.port"), "synthetic child 'server.port' leaked through");
+        assert!(structural.contains_key("server"), "aggregate 'server' missing");
+
+        match structural.get("server") {
+            Some(DixValue::Object(obj)) => {
+                assert_eq!(obj.get("host"), Some(&DixValue::String("localhost".into())));
+                assert_eq!(obj.get("port"), Some(&DixValue::Int(8080)));
+            }
+            other => panic!("expected Object for 'server', got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_structural_hashmap_filters_group_array_indices() {
+        let path = TablePath::new(vec!["tags".into()]);
+        let entry = DataEntry::GroupArray {
+            path,
+            items: vec![str_val("alpha"), str_val("beta"), str_val("gamma")],
+            position: Position::UNKNOWN,
+        };
+        let ast = DixScript {
+            data: Some(DataSection::new(vec![entry], Position::UNKNOWN)),
+            config: None, imports: None, dlm: None,
+            enums: None, quick_functions: None, security: None,
+        };
+        let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
+
+        let flat = data.to_hashmap();
+        assert!(flat.contains_key("tags[0]"));
+        assert!(flat.contains_key("tags[1]"));
+        assert!(flat.contains_key("tags[2]"));
+
+        let structural = data.to_structural_hashmap();
+        assert!(!structural.contains_key("tags[0]"), "synthetic index 'tags[0]' leaked through");
+        assert!(!structural.contains_key("tags[1]"), "synthetic index 'tags[1]' leaked through");
+        assert!(!structural.contains_key("tags[2]"), "synthetic index 'tags[2]' leaked through");
+        assert!(structural.contains_key("tags"), "aggregate 'tags' missing");
+
+        match structural.get("tags") {
+            Some(DixValue::Array(items)) => {
+                assert_eq!(items.len(), 3);
+                assert_eq!(items[0], DixValue::String("alpha".into()));
+            }
+            other => panic!("expected Array for 'tags', got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_structural_hashmap_preserves_unrelated_keys() {
+        // "matrix" and "matrix2" must not be confused — "matrix2" is not a
+        // child path of "matrix" even though it shares a string prefix.
+        let mut flat = HashMap::new();
+        flat.insert("matrix".to_string(),  DixValue::Array(vec![DixValue::Int(1), DixValue::Int(2)]));
+        flat.insert("matrix[0]".to_string(), DixValue::Int(1));
+        flat.insert("matrix[1]".to_string(), DixValue::Int(2));
+        flat.insert("matrix2".to_string(), DixValue::Int(99));
+        let data = dix_data_from_flat(flat);
+
+        let structural = data.to_structural_hashmap();
+        assert!(structural.contains_key("matrix"));
+        assert!(structural.contains_key("matrix2"), "unrelated key 'matrix2' incorrectly filtered");
+        assert!(!structural.contains_key("matrix[0]"));
+        assert!(!structural.contains_key("matrix[1]"));
+    }
+
+    #[test]
+    fn test_structural_hashmap_nested_object_in_array() {
+        // servers:: { host = "a", port = 1 }, { host = "b", port = 2 }
+        let item = |host: &str, port: i32| Value::Object {
+            properties: vec![
+                ObjectProperty::new("host".into(), str_val(host), Position::UNKNOWN),
+                ObjectProperty::new("port".into(), int_val(port), Position::UNKNOWN),
+            ],
+            position: Position::UNKNOWN,
+        };
+
+        let entry = DataEntry::GroupArray {
+            path: TablePath::new(vec!["servers".into()]),
+            items: vec![item("a.local", 1), item("b.local", 2)],
+            position: Position::UNKNOWN,
+        };
+        let ast = DixScript {
+            data: Some(DataSection::new(vec![entry], Position::UNKNOWN)),
+            config: None, imports: None, dlm: None,
+            enums: None, quick_functions: None, security: None,
+        };
+        let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
+
+        // Sanity on fully-flattened map.
+        assert!(data.exists("servers[0].host"));
+        assert!(data.exists("servers[1].port"));
+
+        let structural = data.to_structural_hashmap();
+        assert!(structural.contains_key("servers"), "aggregate 'servers' missing");
+        assert!(!structural.contains_key("servers[0]"));
+        assert!(!structural.contains_key("servers[0].host"));
+        assert!(!structural.contains_key("servers[1]"));
+        assert!(!structural.contains_key("servers[1].port"));
+
+        match structural.get("servers") {
+            Some(DixValue::Array(items)) => {
+                assert_eq!(items.len(), 2);
+                match &items[0] {
+                    DixValue::Object(obj) => {
+                        assert_eq!(obj.get("host"), Some(&DixValue::String("a.local".into())));
+                        assert_eq!(obj.get("port"), Some(&DixValue::Int(1)));
+                    }
+                    other => panic!("expected Object element, got {:?}", other),
+                }
+            }
+            other => panic!("expected Array for 'servers', got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_structural_hashmap_flat_scalars_unaffected() {
+        let mut flat = HashMap::new();
+        flat.insert("name".to_string(), DixValue::String("MyApp".into()));
+        flat.insert("port".to_string(), DixValue::Int(8080));
+        let data = dix_data_from_flat(flat);
+
+        let structural = data.to_structural_hashmap();
+        assert_eq!(structural.len(), 2);
+        assert_eq!(structural.get("name"), Some(&DixValue::String("MyApp".into())));
+        assert_eq!(structural.get("port"), Some(&DixValue::Int(8080)));
     }
     }

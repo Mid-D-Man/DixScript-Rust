@@ -10,9 +10,38 @@ repository = "https://github.com/Mid-D-Man/DixScript-Rust"
 
 [lib]
 name = "mdix_ffi"
-# cdylib   → .dll / .so / .dylib — Windows, Android, macOS, Linux (dynamic load)
-# staticlib → .a                  — iOS: dynamic loading is forbidden, .a links
-#             directly into the Xcode build.  C# uses DllImport("__Internal").
+# cdylib   → .dll / .so / .dylib  — Windows, Android, macOS, Linux (dynamic load)
+# staticlib → .a                   — iOS: Apple forbids runtime dynamic loading;
+#             the .a links directly into the Xcode build.
+#             C# side uses DllImport("__Internal").
+#
+# PER-PLATFORM BUILD COMMANDS (CI must call these explicitly):
+#
+#   macOS universal:
+#     cargo build --release --target x86_64-apple-darwin
+#     cargo build --release --target aarch64-apple-darwin
+#     lipo -create ...x86_64.../libmdix_ffi.dylib ...aarch64.../libmdix_ffi.dylib -output libmdix_ffi.dylib
+#
+#   Windows x64 (MinGW cross-compile from Linux):
+#     cargo build --release --target x86_64-pc-windows-gnu
+#
+#   Linux x64:
+#     cargo build --release
+#
+#   Android (via cargo-ndk):
+#     cargo ndk -t arm64-v8a   -o ./android-out build --release
+#     cargo ndk -t armeabi-v7a -o ./android-out build --release
+#     cargo ndk -t x86_64      -o ./android-out build --release
+#
+#   iOS device:
+#     cargo rustc --crate-type staticlib --release --target aarch64-apple-ios
+#   iOS simulator fat binary:
+#     cargo rustc --crate-type staticlib --release --target aarch64-apple-ios-sim
+#     cargo rustc --crate-type staticlib --release --target x86_64-apple-ios
+#     lipo -create ...sim.../libmdix_ffi.a ...x86_64.../libmdix_ffi.a -output libmdix_ffi_sim.a
+#
+#   WebGL: NOT SUPPORTED — Unity WebGL has no P/Invoke / DllImport path.
+#          Do not attempt a wasm32 build of this crate.
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
@@ -20,12 +49,10 @@ dixscript  = { path = "../dixscript" }
 serde_json = "1.0"
 
 [build-dependencies]
-# csbindgen parses our extern "C" functions and auto-generates MdixNative.cs.
-# Never hand-edit the generated file — rebuild instead.
+# csbindgen → auto-generates MdixNative.cs (C# P/Invoke bindings for Unity/NuGet).
+# Never hand-edit the generated file — always regenerate with `cargo build -p mdix-ffi`.
 csbindgen = "1"
-
-# cbindgen parses our extern "C" functions and auto-generates mdix_ffi.h.
-# Consumed by the Go package's cgo layer and any C/C++ consumers.
+# cbindgen  → auto-generates mdix_ffi.h (C header for Go cgo / C / C++ consumers).
 cbindgen  = "0.26"
 
 [profile.release]

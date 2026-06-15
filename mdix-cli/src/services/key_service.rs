@@ -1,10 +1,9 @@
-
 //! Wraps KeyFileManager for key generation and inspection.
 
 use std::path::Path;
 use crate::commands::CliError;
 use dixscript::Compiler::DLM::KeyManagement::{
-    KeyFileManager, KeyFileDataBuilder, EncryptionKeyData, MdixKeyWriter,
+    KeyFileManager, KeyFileDataBuilder, EncryptionKeyData, KDFParameters, MdixKeyWriter,
 };
 
 pub struct KeyGenResult {
@@ -23,6 +22,17 @@ pub struct KeyInfo {
 }
 
 /// Generate a new `.mdix.key` file with a random key and IV.
+///
+/// In keyfile mode (`password_mode = false`), `enc.key_data` is populated
+/// with the base64-encoded random key bytes.
+///
+/// In password mode (`password_mode = true`), `enc.key_data` is left `None`
+/// and `enc.kdf` is populated with Argon2id parameters (including a fresh
+/// random 32-byte salt) matching the defaults used by `Argon2KDF` on the
+/// decryption side. This is what makes `KeyFileManager::is_password_protected`
+/// and `mdix key info`'s mode detection correctly report "password" instead
+/// of "keyfile", and is also required by `KeyFileData::validate()`, which
+/// rejects password-mode key files with no KDF parameters.
 pub fn generate_key_file(
     output_path:   &str,
     algorithm:     &str,
@@ -65,7 +75,19 @@ pub fn generate_key_file(
     enc.iv             = BASE64.encode(&iv_bytes);
     enc.security_level = "HIGH".to_string();
 
-    if !password_mode {
+    if password_mode {
+        // Password mode: no raw key bytes are stored on disk. Populate
+        // Argon2id KDF parameters (with a fresh random salt) so the
+        // decryption-side Argon2KDF::from_params_with_salt can re-derive the
+        // same key from the user's password, and so `enc.kdf.is_some()`
+        // correctly marks this key file as password-protected.
+        let mut salt_bytes = vec![0u8; 32];
+        rand::thread_rng().fill_bytes(&mut salt_bytes);
+
+        let mut kdf = KDFParameters::new();
+        kdf.salt = BASE64.encode(&salt_bytes);
+        enc.kdf  = Some(kdf);
+    } else {
         enc.key_data = Some(BASE64.encode(&key_bytes));
     }
 

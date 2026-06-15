@@ -7,10 +7,11 @@
 //
 // 2. cbindgen   → mdix-go/internal/include/mdix_ffi.h
 //    C header consumed by the Go package's cgo layer.
-//    Also useful for any future C/C++ consumer that doesn't use mdix-c directly.
+//    Also useful for any C/C++ consumer.
 //
-// Neither generated file is tracked in git.  Run `cargo build -p mdix-ffi`
-// before opening the .sln in Rider or running `go build ./...`.
+// Neither generated file is tracked in git.
+// Run `cargo build -p mdix-ffi` before opening the .sln in Rider or
+// running `go build ./...`.
 
 fn main() {
     println!("cargo:rerun-if-changed=src/lib.rs");
@@ -29,6 +30,7 @@ fn main() {
     csbindgen::Builder::default()
         .input_extern_file("src/lib.rs")
         .csharp_dll_name("mdix_ffi")
+        // iOS forbids runtime dynamic linking — Unity uses __Internal for static libs.
         .csharp_dll_name_if("UNITY_IOS && !UNITY_EDITOR", "__Internal")
         .csharp_namespace("MidManStudio.DixScript.Native")
         .csharp_class_name("MdixNative")

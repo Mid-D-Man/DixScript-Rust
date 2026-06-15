@@ -10,7 +10,7 @@ use commands::{
     convert::ConvertArgs, create::CreateArgs, debug_ast::DebugAstArgs,
     debug_symbols::DebugSymbolsArgs, debug_tokens::DebugTokensArgs,
     decrypt::DecryptArgs, format::FormatArgs,
-    inspect::InspectArgs, key::KeyArgs, validate::ValidateArgs,
+    inspect::InspectArgs, key::KeyArgs, merge::MergeArgs, validate::ValidateArgs,
 };
 
 #[derive(Parser)]
@@ -39,6 +39,8 @@ pub enum Commands {
     Decrypt(DecryptArgs),
     /// Convert between .mdix and other formats (json, toml)
     Convert(ConvertArgs),
+    /// Merge two or more .mdix databases into one
+    Merge(MergeArgs),
     /// Create a new .mdix file from a template
     Create(CreateArgs),
     /// Format a .mdix file in-place
@@ -100,6 +102,7 @@ fn main() {
         Commands::Compile(args)      => commands::compile::run(args, &global),
         Commands::Decrypt(args)      => commands::decrypt::run(args, &global),
         Commands::Convert(args)      => commands::convert::run(args, &global),
+        Commands::Merge(args)        => commands::merge::run(args, &global),
         Commands::Create(args)       => commands::create::run(args, &global),
         Commands::Format(args)       => commands::format::run(args, &global),
         Commands::Compact(args)      => commands::compact::run(args, &global),
@@ -112,4 +115,4 @@ fn main() {
     };
 
     std::process::exit(exit_code);
-}
+        }

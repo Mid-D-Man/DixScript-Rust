@@ -13,6 +13,7 @@ pub mod decrypt;
 pub mod format;
 pub mod inspect;
 pub mod key;
+pub mod merge;
 pub mod validate;
 
 use std::path::PathBuf;
@@ -83,4 +84,4 @@ pub fn handle_error(error: &CliError, json: bool) -> i32 {
         crate::output::printer::error(&error.to_string());
     }
     error.exit_code()
-}
+                }

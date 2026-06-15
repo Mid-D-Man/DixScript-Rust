@@ -1,4 +1,3 @@
-
 use std::path::Path;
 use std::time::Instant;
 use dixscript::Runtime::{DixConverter, DixFormatOptions, DixLoader, DixLoadOptions};
@@ -107,6 +106,8 @@ pub fn convert_file(path: &Path, opts: &ConvertOpts) -> Result<ConversionResult,
         (Format::Json, Format::Mdix) => json_to_mdix(path, opts.pretty)?,
         (Format::Toml, Format::Mdix) => toml_to_mdix(path, opts.pretty)?,
         (Format::Mdix, Format::Toml) => mdix_to_toml(path)?,
+        (Format::Json, Format::Toml) => json_to_toml(path)?,
+        (Format::Toml, Format::Json) => toml_to_json(path, opts.pretty)?,
         (f, t) => {
             return Err(CliError::UnsupportedFormat(format!(
                 "Conversion from {:?} to {:?} is not supported",
@@ -204,6 +205,34 @@ fn mdix_to_toml(path: &Path) -> Result<String, CliError> {
         .map_err(|e| CliError::ConversionError(e.to_string()))
 }
 
+/// JSON → TOML directly via the AST: `DixConverter::from_json` parses the
+/// flattened map into a `DixScript` AST (same structural-key filtering used
+/// by `from_hashmap`), then `to_toml` serializes it. Avoids re-deriving the
+/// hashmap dance that `mdix_to_toml` needs for the `.mdix` source path.
+fn json_to_toml(path: &Path) -> Result<String, CliError> {
+    let content   = file_io::read_file(path)?;
+    let converter = DixConverter::new();
+
+    let ast = converter
+        .from_json(&content)
+        .map_err(CliError::ConversionError)?;
+
+    converter.to_toml(&ast).map_err(CliError::ConversionError)
+}
+
+/// TOML → JSON directly via the AST: `DixConverter::from_toml` parses the
+/// TOML table into a `DixScript` AST, then `to_json` serializes it.
+fn toml_to_json(path: &Path, pretty: bool) -> Result<String, CliError> {
+    let content   = file_io::read_file(path)?;
+    let converter = DixConverter::new();
+
+    let ast = converter
+        .from_toml(&content)
+        .map_err(CliError::ConversionError)?;
+
+    converter.to_json(&ast, pretty).map_err(CliError::ConversionError)
+}
+
 fn tempfile_from_json(json: &str) -> Result<std::path::PathBuf, CliError> {
     let tmp = std::env::temp_dir().join(format!(
         "mdix_conv_{}.json",
@@ -235,4 +264,4 @@ fn json_value_to_dix(v: serde_json::Value) -> dixscript::Runtime::DixValue {
             obj.into_iter().map(|(k, v)| (k, json_value_to_dix(v))).collect()
         ),
     }
-}
+    }

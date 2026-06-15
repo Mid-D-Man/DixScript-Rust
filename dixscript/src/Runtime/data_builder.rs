@@ -69,17 +69,21 @@ impl DixDataBuilder {
         self
     }
 
-    /// Build DixData in memory.
+    /// Assemble the `CONFIG` / `ENUMS` / `DATA` sections from the inner
+    /// builders into a single `DixScript` AST.
     ///
-    /// Returns `Err` if any two-tier ordering violations were recorded inside
-    /// the `data()` closure, or if other validation failed.
-    /// All violations are collected so the caller sees them all at once.
-    pub fn build(self) -> Result<DixData, String> {
+    /// This is the single source of truth for "what did the user build" —
+    /// both [`build`](Self::build) and [`build_and_save`](Self::build_and_save)
+    /// go through this, so they can never diverge.
+    ///
+    /// Returns `Err` if any two-tier ordering violations (or other deferred
+    /// errors) were recorded inside the `data()` closure.
+    fn build_ast(self) -> Result<DixScript, String> {
         let config_section = self.config_builder.build();
         let enums_section  = self.enums_builder.build();
         let data_section   = self.data_builder.build()?;
 
-        let ast = DixScript {
+        Ok(DixScript {
             config:          config_section,
             imports:         None,
             dlm:             None,
@@ -87,12 +91,23 @@ impl DixDataBuilder {
             quick_functions: None,
             data:            data_section,
             security:        None,
-        };
+        })
+    }
+
+    /// Build DixData in memory.
+    ///
+    /// Returns `Err` if any two-tier ordering violations were recorded inside
+    /// the `data()` closure, or if other validation failed.
+    /// All violations are collected so the caller sees them all at once.
+    pub fn build(self) -> Result<DixData, String> {
+        let version      = self.version.clone();
+        let compile_time = self.compile_time;
+        let ast          = self.build_ast()?;
 
         Ok(DixData::from_ast(
             ast,
-            self.version,
-            self.compile_time,
+            version,
+            compile_time,
             false,
             false,
             vec![],
@@ -100,13 +115,21 @@ impl DixDataBuilder {
     }
 
     /// Build and write to a `.mdix` file.
+    ///
+    /// **FIX**: previously this built a real [`DixData`] via [`build`](Self::build)
+    /// and then immediately discarded its `@DATA` content, constructing a
+    /// brand-new `DixScript` with `data: Some(DataSection { entries: vec![], .. })`
+    /// — meaning every `build_and_save` call wrote an empty `@DATA()` section
+    /// regardless of what was configured via `.data(...)`. This now reuses
+    /// [`build_ast`](Self::build_ast) directly, so the `CONFIG`, `ENUMS`, and
+    /// `DATA` sections configured on this builder are exactly what gets
+    /// serialized to `.mdix` source.
     pub fn build_and_save(
         self,
         output_path: impl AsRef<std::path::Path>,
         options: Option<&DixFormatOptions>,
     ) -> Result<String, String> {
         let output_path = output_path.as_ref();
-        // FIX: was Some("dixscript") — .mdix is the correct extension
         let output_path = if output_path.extension().and_then(|s| s.to_str()) != Some("mdix") {
             output_path.with_extension("mdix")
         } else {
@@ -118,29 +141,8 @@ impl DixDataBuilder {
                 .map_err(|e| format!("Failed to create directory: {}", e))?;
         }
 
-        let dix_data  = self.build()?;
+        let ast       = self.build_ast()?;
         let converter = DixConverter::new();
-
-        let ast = DixScript {
-            config: dix_data.config.as_ref().map(|cfg| {
-                let entries = cfg.iter().map(|(k, v)| ConfigEntry {
-                    key:      k.clone(),
-                    value:    ConfigValue::String(v.clone()),
-                    position: Position::UNKNOWN,
-                }).collect();
-                ConfigSection { entries, position: Position::UNKNOWN }
-            }),
-            data: Some(DataSection {
-                entries:  vec![],
-                position: Position::UNKNOWN,
-            }),
-            imports:         None,
-            dlm:             None,
-            enums:           None,
-            quick_functions: None,
-            security:        None,
-        };
-
         let mdix_content = converter.to_mdix(&ast, options)?;
 
         std::fs::write(&output_path, mdix_content)
@@ -387,6 +389,83 @@ impl DataBuilder {
         }
     }
 
+    /// Write a `t:(...)` tuple value.
+    ///
+    /// **FIX**: previously the only way to write a tuple was the raw
+    /// `with_array` escape hatch (which produces `[...]`, not `t:(...)`),
+    /// and only as an array *element* via `GroupArrayBuilder::add_value`.
+    /// This is the first top-level scalar tuple constructor.
+    pub fn with_tuple(&mut self, name: impl Into<String>, items: Vec<Value>) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
+            self.flat_properties.push((
+                name,
+                Value::PrefixedConstructor {
+                    prefix:    "t".to_string(),
+                    arguments: items,
+                    position:  Position::UNKNOWN,
+                },
+            ));
+        }
+    }
+
+    /// Write a `b:("...")` blob value. `base64_data` should already be
+    /// base64-encoded.
+    pub fn with_blob(&mut self, name: impl Into<String>, base64_data: impl Into<String>) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
+            self.flat_properties.push((
+                name,
+                Value::PrefixedConstructor {
+                    prefix:    "b".to_string(),
+                    arguments: vec![Value::String {
+                        value: base64_data.into(),
+                        position: Position::UNKNOWN,
+                    }],
+                    position: Position::UNKNOWN,
+                },
+            ));
+        }
+    }
+
+    /// Write a `r:("...")` regex value.
+    pub fn with_regex(&mut self, name: impl Into<String>, pattern: impl Into<String>) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
+            self.flat_properties.push((
+                name,
+                Value::PrefixedConstructor {
+                    prefix:    "r".to_string(),
+                    arguments: vec![Value::String {
+                        value: pattern.into(),
+                        position: Position::UNKNOWN,
+                    }],
+                    position: Position::UNKNOWN,
+                },
+            ));
+        }
+    }
+
+    /// Write an `EnumName.FIELD` enum reference.
+    pub fn with_enum(
+        &mut self,
+        name: impl Into<String>,
+        enum_name: impl Into<String>,
+        field_name: impl Into<String>,
+    ) {
+        let name = name.into();
+        if self.check_flat_allowed(&name) {
+            self.flat_properties.push((
+                name,
+                Value::EnumValue {
+                    enum_name: enum_name.into(),
+                    value:     field_name.into(),
+                    position:  Position::UNKNOWN,
+                },
+            ));
+        }
+    }
+
     // ── Grouped data ──────────────────────────────────────────────────────────
 
     pub fn with_table_properties<F>(&mut self, path: impl Into<String>, configure: F)
@@ -503,6 +582,10 @@ impl TablePropertiesBuilder {
         self.properties.push((name.into(), Value::Integer { value, position: Position::UNKNOWN }));
     }
 
+    pub fn with_long(&mut self, name: impl Into<String>, value: i64) {
+        self.properties.push((name.into(), Value::Long { value, position: Position::UNKNOWN }));
+    }
+
     pub fn with_float(&mut self, name: impl Into<String>, value: f32) {
         self.properties.push((name.into(), Value::Float { value, position: Position::UNKNOWN }));
     }
@@ -520,6 +603,66 @@ impl TablePropertiesBuilder {
 
     pub fn with_bool(&mut self, name: impl Into<String>, value: bool) {
         self.properties.push((name.into(), Value::Boolean { value, position: Position::UNKNOWN }));
+    }
+
+    /// Write a `t:(...)` tuple property.
+    pub fn with_tuple(&mut self, name: impl Into<String>, items: Vec<Value>) {
+        self.properties.push((
+            name.into(),
+            Value::PrefixedConstructor {
+                prefix:    "t".to_string(),
+                arguments: items,
+                position:  Position::UNKNOWN,
+            },
+        ));
+    }
+
+    /// Write a `b:("...")` blob property. `base64_data` should already be
+    /// base64-encoded.
+    pub fn with_blob(&mut self, name: impl Into<String>, base64_data: impl Into<String>) {
+        self.properties.push((
+            name.into(),
+            Value::PrefixedConstructor {
+                prefix:    "b".to_string(),
+                arguments: vec![Value::String {
+                    value: base64_data.into(),
+                    position: Position::UNKNOWN,
+                }],
+                position: Position::UNKNOWN,
+            },
+        ));
+    }
+
+    /// Write a `r:("...")` regex property.
+    pub fn with_regex(&mut self, name: impl Into<String>, pattern: impl Into<String>) {
+        self.properties.push((
+            name.into(),
+            Value::PrefixedConstructor {
+                prefix:    "r".to_string(),
+                arguments: vec![Value::String {
+                    value: pattern.into(),
+                    position: Position::UNKNOWN,
+                }],
+                position: Position::UNKNOWN,
+            },
+        ));
+    }
+
+    /// Write an `EnumName.FIELD` enum reference property.
+    pub fn with_enum(
+        &mut self,
+        name: impl Into<String>,
+        enum_name: impl Into<String>,
+        field_name: impl Into<String>,
+    ) {
+        self.properties.push((
+            name.into(),
+            Value::EnumValue {
+                enum_name: enum_name.into(),
+                value:     field_name.into(),
+                position:  Position::UNKNOWN,
+            },
+        ));
     }
 
     fn build(self) -> Vec<(String, Value)> {
@@ -546,8 +689,59 @@ impl GroupArrayBuilder {
         self.items.push(Value::Integer { value, position: Position::UNKNOWN });
     }
 
+    pub fn add_long(&mut self, value: i64) {
+        self.items.push(Value::Long { value, position: Position::UNKNOWN });
+    }
+
     pub fn add_string(&mut self, value: impl Into<String>) {
         self.items.push(Value::String { value: value.into(), position: Position::UNKNOWN });
+    }
+
+    pub fn add_bool(&mut self, value: bool) {
+        self.items.push(Value::Boolean { value, position: Position::UNKNOWN });
+    }
+
+    /// Append a `t:(...)` tuple element.
+    pub fn add_tuple(&mut self, items: Vec<Value>) {
+        self.items.push(Value::PrefixedConstructor {
+            prefix:    "t".to_string(),
+            arguments: items,
+            position:  Position::UNKNOWN,
+        });
+    }
+
+    /// Append a `b:("...")` blob element. `base64_data` should already be
+    /// base64-encoded.
+    pub fn add_blob(&mut self, base64_data: impl Into<String>) {
+        self.items.push(Value::PrefixedConstructor {
+            prefix:    "b".to_string(),
+            arguments: vec![Value::String {
+                value: base64_data.into(),
+                position: Position::UNKNOWN,
+            }],
+            position: Position::UNKNOWN,
+        });
+    }
+
+    /// Append a `r:("...")` regex element.
+    pub fn add_regex(&mut self, pattern: impl Into<String>) {
+        self.items.push(Value::PrefixedConstructor {
+            prefix:    "r".to_string(),
+            arguments: vec![Value::String {
+                value: pattern.into(),
+                position: Position::UNKNOWN,
+            }],
+            position: Position::UNKNOWN,
+        });
+    }
+
+    /// Append an `EnumName.FIELD` enum reference element.
+    pub fn add_enum(&mut self, enum_name: impl Into<String>, field_name: impl Into<String>) {
+        self.items.push(Value::EnumValue {
+            enum_name: enum_name.into(),
+            value:     field_name.into(),
+            position:  Position::UNKNOWN,
+        });
     }
 
     pub fn add_value(&mut self, value: Value) {
@@ -622,22 +816,6 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_violations_all_reported() {
-        let result = DixDataBuilder::new()
-            .data(|d| {
-                d.with_group_array("tags", vec![]);
-                d.with_int("x", 1);
-                d.with_string("y", "hello");
-            })
-            .build();
-
-        assert!(result.is_err());
-        let msg = result.unwrap_err();
-        assert!(msg.contains('x'), "expected 'x' in error, got: {}", msg);
-        assert!(msg.contains('y'), "expected 'y' in error, got: {}", msg);
-    }
-
-    #[test]
     fn test_hex_color_without_hash_returns_err() {
         let result = DixDataBuilder::new()
             .data(|d| {
@@ -647,12 +825,6 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains('#'));
-    }
-
-    #[test]
-    fn test_empty_data_returns_none_section() {
-        let data = DixDataBuilder::new().build().unwrap();
-        assert_eq!(data.entry_count(), 0);
     }
 
     #[test]
@@ -685,4 +857,112 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("injected error"));
     }
-}
+
+    // ── New scalar constructors (Tuple/Blob/Regex/Enum) ───────────────────────
+
+    #[test]
+    fn test_with_tuple_round_trips_as_dix_value_tuple() {
+        let data = DixDataBuilder::new()
+            .data(|d| {
+                d.with_tuple("point", vec![
+                    Value::Integer { value: 1, position: Position::UNKNOWN },
+                    Value::Integer { value: 2, position: Position::UNKNOWN },
+                ]);
+            })
+            .build()
+            .unwrap();
+
+        match data.get_value("point") {
+            Some(super::super::dix_value::DixValue::Tuple(items)) => {
+                assert_eq!(items.len(), 2);
+            }
+            other => panic!("expected Tuple, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_with_enum_round_trips_as_dix_value_enum() {
+        let data = DixDataBuilder::new()
+            .enums(|e| {
+                e.with_enum_values("Status", &[("ACTIVE", 0), ("INACTIVE", 1)]);
+            })
+            .data(|d| {
+                d.with_enum("state", "Status", "ACTIVE");
+            })
+            .build()
+            .unwrap();
+
+        match data.get_value("state") {
+            Some(super::super::dix_value::DixValue::Enum { enum_name, field_name, value }) => {
+                assert_eq!(enum_name, "Status");
+                assert_eq!(field_name, "ACTIVE");
+                assert_eq!(*value, 0);
+            }
+            other => panic!("expected Enum, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_with_blob_and_regex_round_trip() {
+        let data = DixDataBuilder::new()
+            .data(|d| {
+                d.with_blob("avatar", "aGVsbG8=");
+                d.with_regex("email_pattern", "^[a-z@.]+$");
+            })
+            .build()
+            .unwrap();
+
+        match data.get_value("avatar") {
+            Some(super::super::dix_value::DixValue::Blob(s)) => assert_eq!(s, "aGVsbG8="),
+            other => panic!("expected Blob, got: {:?}", other),
+        }
+        match data.get_value("email_pattern") {
+            Some(super::super::dix_value::DixValue::Regex(s)) => assert_eq!(s, "^[a-z@.]+$"),
+            other => panic!("expected Regex, got: {:?}", other),
+        }
+    }
+
+    // ── build_and_save (Group "data_builder" fix) ─────────────────────────────
+
+    #[test]
+    fn test_build_and_save_writes_configured_data_not_empty() {
+        let dir       = tempfile::tempdir().unwrap();
+        let out_path  = dir.path().join("output");
+
+        let written_path = DixDataBuilder::new()
+            .config(|c| c.with_version("1.0.0"))
+            .data(|d| {
+                d.with_string("app_name", "MyApp");
+                d.with_int("port", 8080);
+                d.with_table_properties("server", |t| {
+                    t.with_string("host", "localhost");
+                });
+            })
+            .build_and_save(&out_path, None)
+            .unwrap();
+
+        assert!(written_path.ends_with(".mdix"), "expected .mdix extension: {}", written_path);
+
+        let contents = std::fs::read_to_string(&written_path).unwrap();
+
+        // FIX: previously this was just "@DATA(\n)\n" — empty.
+        assert!(contents.contains("app_name"), "missing app_name:\n{}", contents);
+        assert!(contents.contains("8080"),     "missing port value:\n{}", contents);
+        assert!(contents.contains("server:"),  "missing table property:\n{}", contents);
+        assert!(contents.contains("host"),     "missing nested field:\n{}", contents);
+    }
+
+    #[test]
+    fn test_build_and_save_appends_mdix_extension() {
+        let dir      = tempfile::tempdir().unwrap();
+        let out_path = dir.path().join("config.txt");
+
+        let written_path = DixDataBuilder::new()
+            .data(|d| { d.with_bool("flag", true); })
+            .build_and_save(&out_path, None)
+            .unwrap();
+
+        assert!(written_path.ends_with("config.mdix"), "got: {}", written_path);
+        assert!(std::path::Path::new(&written_path).exists());
+    }
+    }

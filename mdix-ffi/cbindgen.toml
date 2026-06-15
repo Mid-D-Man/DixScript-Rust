@@ -12,10 +12,9 @@ exclude = []
 
 [enum]
 # prefix_with_name = true turns:
-#   MdixType::Null   → MDIX_TYPE_NULL    (avoids collision with stdlib.h NULL macro)
-#   MdixType::Bool   → MDIX_TYPE_BOOL
+#   MdixType::Null        → MDIX_TYPE_NULL    (avoids collision with stdlib.h NULL macro)
+#   MdixType::Bool        → MDIX_TYPE_BOOL
 #   MdixFormatMode::Default → MDIX_FORMAT_MODE_DEFAULT
-# This is the standard cbindgen pattern for C-safe enum variants.
 prefix_with_name = true
 rename_variants = "ScreamingSnakeCase"
 

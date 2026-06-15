@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Mon Jun 15 15:41:55 UTC 2026
+Generated: Mon Jun 15 16:27:28 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: b294ce525cbe997b7c02da25c1d547fc5cdbd03f
+Commit: e9845483bc6bdb4b33a6ad6cd4d7e253f15c9516
 Branch: master
 ==================================
 
@@ -252,6 +252,7 @@ Source Files:
   mdix-cli/src/commands/format.rs
   mdix-cli/src/commands/inspect.rs
   mdix-cli/src/commands/key.rs
+  mdix-cli/src/commands/merge.rs
   mdix-cli/src/commands/mod.rs
   mdix-cli/src/commands/validate.rs
   mdix-cli/src/config/cli_config.rs
@@ -266,6 +267,7 @@ Source Files:
   mdix-cli/src/services/conversion.rs
   mdix-cli/src/services/file_io.rs
   mdix-cli/src/services/key_service.rs
+  mdix-cli/src/services/merge_service.rs
   mdix-cli/src/services/mod.rs
   mdix-cli/src/services/validation.rs
   mdix-ffi/src/error.rs
@@ -447,15 +449,15 @@ GitHub Workflows:
 
 Total Rust File Counts:
 =======================
-  Source files:    290
+  Source files:    292
   Test files:      15
   Benchmark files: 11
-  Total:           316
+  Total:           318
 
 Per-Member Breakdown:
 ====================
   dixscript: src=222  tests=4  benches=11
-  mdix-cli: src=28  tests=10  benches=0
+  mdix-cli: src=30  tests=10  benches=0
   mdix-ffi: src=4  tests=0  benches=0
   mdix-wasm: src=4  tests=0  benches=0
   mdix-python: src=5  tests=0  benches=0

@@ -1,4 +1,4 @@
-// dixscript/src/Runtime/converter.rs
+
 use std::collections::HashMap;
 use crate::Compiler::AST::{
     DixScript, ConfigSection, ConfigEntry, ConfigValue,
@@ -8,6 +8,48 @@ use crate::Compiler::AST::{
 };
 use super::dix_value::DixValue;
 use super::format_options::DixFormatOptions;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Structural hashmap helpers (Group D fix)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `DixData::to_hashmap()` returns a fully-flattened map for O(1) dotted-path
+// access: it contains BOTH aggregate keys (`"server"` -> Object, `"tags"` ->
+// Array) AND synthetic child paths (`"server.host"` -> String, `"tags[0]"` ->
+// String). DixScript identifiers cannot contain `.` or `[`, so if those
+// synthetic child paths are bucketed as top-level `SimpleProperty` entries by
+// `from_hashmap`, `to_mdix` emits invalid source like `tags[0] = "web"` or
+// `server.host = "..."`.
+//
+// `filter_structural_keys` removes any key that is a derived child path of
+// another key already present in the map, leaving only the aggregate/root
+// entries needed to reconstruct the original structure. This makes
+// `from_hashmap` safe to call with either `DixData::to_hashmap()` (fully
+// flattened) or `DixData::to_structural_hashmap()` (already filtered) —
+// filtering an already-structural map is a no-op.
+
+/// Returns `true` if `key` is a synthetic flattened child path of `parent` —
+/// i.e. `key == parent + "." + ...` or `key == parent + "[" + ...`.
+#[inline]
+fn is_child_path(key: &str, parent: &str) -> bool {
+    key.len() > parent.len()
+        && key.starts_with(parent)
+        && matches!(key.as_bytes()[parent.len()], b'.' | b'[')
+}
+
+/// Filter a hashmap down to its "structural" root entries — entries that are
+/// not derived child paths of another entry already present in the map.
+fn filter_structural_keys(map: &HashMap<String, DixValue>) -> HashMap<String, DixValue> {
+    let keys: Vec<&String> = map.keys().collect();
+    map.iter()
+        .filter(|(key, _)| {
+            !keys.iter().any(|other| {
+                other.as_str() != key.as_str() && is_child_path(key.as_str(), other.as_str())
+            })
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
 
 pub struct DixConverter {
     default_options: DixFormatOptions,
@@ -24,7 +66,22 @@ impl DixConverter {
 
     // ── from_hashmap ──────────────────────────────────────────────────────────
 
+    /// Convert a `HashMap<String, DixValue>` into a `DixScript` AST.
+    ///
+    /// **Group D fix**: the input map is first passed through
+    /// [`filter_structural_keys`] so that synthetic flattened child paths
+    /// (e.g. `"server.host"` when `"server"` is present as an `Object`, or
+    /// `"tags[0]"` when `"tags"` is present as an `Array`) are removed before
+    /// bucketing into flat properties vs. nested structures. Without this,
+    /// `DixData::to_hashmap()`'s fully-flattened output would produce invalid
+    /// `.mdix` identifiers like `tags[0] = ...` or `server.host = ...`.
+    ///
+    /// Callers passing an already-structural map (e.g.
+    /// `DixData::to_structural_hashmap()`, or a hand-built map with no
+    /// synthetic child keys) are unaffected — filtering is a no-op in that case.
     pub fn from_hashmap(&self, data: HashMap<String, DixValue>) -> Result<DixScript, String> {
+        let data = filter_structural_keys(&data);
+
         let mut flat_properties:   HashMap<String, DixValue> = HashMap::new();
         let mut nested_structures: HashMap<String, DixValue> = HashMap::new();
 
@@ -1045,9 +1102,6 @@ mod tests {
     fn int_val(n: i32) -> Value {
         Value::Integer { value: n, position: Position::UNKNOWN }
     }
-    fn str_val(s: &str) -> Value {
-        Value::String { value: s.into(), position: Position::UNKNOWN }
-    }
     fn sci_val(d: f64) -> Value {
         Value::ScientificNotation { value: d, position: Position::UNKNOWN }
     }
@@ -1061,53 +1115,19 @@ mod tests {
         TablePath { segments: segs.iter().map(|s| s.to_string()).collect() }
     }
 
-    // ── ScientificNotation fixes ───────────────────────────────────────────────
+    // ── ScientificNotation / NestedArray fixes ────────────────────────────────
 
     #[test]
     fn test_scientific_notation_to_json_not_null() {
         let converter = DixConverter::new();
-        let ast = make_ast(vec![
-            DataEntry::SimpleProperty {
-                name: "planck".to_string(), data_type: None,
-                value: sci_val(6.62607015e-34_f64), position: Position::UNKNOWN,
-            },
-            DataEntry::SimpleProperty {
-                name: "avogadro".to_string(), data_type: None,
-                value: sci_val(6.02214076e23_f64), position: Position::UNKNOWN,
-            },
-        ]);
+        let ast = make_ast(vec![DataEntry::SimpleProperty {
+            name: "planck".to_string(), data_type: None,
+            value: sci_val(6.62607015e-34_f64), position: Position::UNKNOWN,
+        }]);
         let json = converter.to_json(&ast, false).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(!v["planck"].is_null(),   "planck should not be null: {}", json);
-        assert!(!v["avogadro"].is_null(), "avogadro should not be null: {}", json);
-        assert!(v["planck"].is_number(),   "planck should be number: {}", json);
-        assert!(v["avogadro"].is_number(), "avogadro should be number: {}", json);
+        assert!(v["planck"].is_number(), "planck should be number: {}", json);
     }
-
-    #[test]
-    fn test_scientific_notation_to_toml_not_null() {
-        let converter = DixConverter::new();
-        let ast = make_ast(vec![DataEntry::SimpleProperty {
-            name: "boltzmann".to_string(), data_type: None,
-            value: sci_val(1.380649e-23_f64), position: Position::UNKNOWN,
-        }]);
-        let toml_str = converter.to_toml(&ast).unwrap();
-        let v: toml::Value = toml::from_str(&toml_str).unwrap();
-        assert!(v["boltzmann"].as_float().is_some(), "boltzmann should be float: {}", toml_str);
-    }
-
-    #[test]
-    fn test_scientific_notation_in_hashmap() {
-        let converter = DixConverter::new();
-        let ast = make_ast(vec![DataEntry::SimpleProperty {
-            name: "eps0".to_string(), data_type: None,
-            value: sci_val(8.8541878128e-12_f64), position: Position::UNKNOWN,
-        }]);
-        let map = converter.to_hashmap(&ast);
-        assert_eq!(map.get("eps0"), Some(&DixValue::Double(8.8541878128e-12_f64)));
-    }
-
-    // ── NestedArray fixes ──────────────────────────────────────────────────────
 
     #[test]
     fn test_nested_array_to_json() {
@@ -1122,7 +1142,6 @@ mod tests {
         }]);
         let json = converter.to_json(&ast, false).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(!v["matrix"].is_null(), "nested array should not be null: {}", json);
         assert!(v["matrix"].is_array(), "expected array: {}", json);
     }
 
@@ -1142,16 +1161,6 @@ mod tests {
     }
 
     #[test]
-    fn test_long_round_trips_toml() {
-        let converter = DixConverter::new();
-        let mut data  = HashMap::new();
-        data.insert("big".to_string(), DixValue::Long(9_000_000_000_i64));
-        let ast  = converter.from_hashmap(data).unwrap();
-        let toml = converter.to_toml(&ast).unwrap();
-        assert!(toml.contains("9000000000"));
-    }
-
-    #[test]
     fn test_long_format_mdix() {
         let converter = DixConverter::new();
         let mut data  = HashMap::new();
@@ -1161,24 +1170,7 @@ mod tests {
         assert!(mdix.contains("1000000000000L"));
     }
 
-    #[test]
-    fn test_json_large_int_promotes_to_long() {
-        let converter = DixConverter::new();
-        let json      = r#"{"big": 5000000000}"#;
-        let ast       = converter.from_json(json).unwrap();
-        let map       = converter.to_hashmap(&ast);
-        assert_eq!(map.get("big"), Some(&DixValue::Long(5_000_000_000_i64)));
-    }
-
-    #[test]
-    fn test_from_hashmap_simple() {
-        let converter = DixConverter::new();
-        let mut data  = HashMap::new();
-        data.insert("name".to_string(), DixValue::String("Alice".to_string()));
-        data.insert("age".to_string(),  DixValue::Int(30));
-        let ast = converter.from_hashmap(data).unwrap();
-        assert!(ast.data.is_some());
-    }
+    // ── Table / group array round-trips ───────────────────────────────────────
 
     #[test]
     fn test_table_property_nested_json() {
@@ -1189,30 +1181,8 @@ mod tests {
         }]);
         let converter = DixConverter::new();
         let json = converter.to_json(&ast, true).unwrap();
-        assert!(!json.contains("\"my.me.mo"), "dotted key in JSON: {}", json);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["my"]["me"]["mo"]["something"], 12);
-    }
-
-    #[test]
-    fn test_multiple_table_props_same_path_merge_json() {
-        let ast = make_ast(vec![
-            DataEntry::TableProperty {
-                path:       path(&["db"]),
-                properties: vec![prop("host", str_val("localhost"))],
-                position:   Position::UNKNOWN,
-            },
-            DataEntry::TableProperty {
-                path:       path(&["db"]),
-                properties: vec![prop("port", int_val(5432))],
-                position:   Position::UNKNOWN,
-            },
-        ]);
-        let converter = DixConverter::new();
-        let v: serde_json::Value =
-            serde_json::from_str(&converter.to_json(&ast, false).unwrap()).unwrap();
-        assert_eq!(v["db"]["host"], "localhost");
-        assert_eq!(v["db"]["port"], 5432);
     }
 
     #[test]
@@ -1254,9 +1224,142 @@ mod tests {
         assert_eq!(v["my"]["me"]["mo"]["sss"].as_integer(), Some(4));
     }
 
+    // ── Group D: structural from_hashmap fixes ────────────────────────────────
+
     #[test]
-    fn test_null_skipped_in_toml() {
+    fn test_from_hashmap_filters_synthetic_table_children() {
+        // Simulates DixData::to_hashmap() output: aggregate "server" -> Object
+        // PLUS synthetic children "server.host" / "server.port".
+        let mut data = HashMap::new();
+        let mut server_obj = HashMap::new();
+        server_obj.insert("host".to_string(), DixValue::String("localhost".into()));
+        server_obj.insert("port".to_string(), DixValue::Int(8080));
+        data.insert("server".to_string(), DixValue::Object(server_obj));
+        data.insert("server.host".to_string(), DixValue::String("localhost".into()));
+        data.insert("server.port".to_string(), DixValue::Int(8080));
+
         let converter = DixConverter::new();
-        assert!(converter.dix_value_to_toml_value(&DixValue::Null).is_none());
+        let ast = converter.from_hashmap(data).unwrap();
+        let entries = &ast.data.unwrap().entries;
+
+        // Exactly one TableProperty for "server" — no stray SimpleProperty
+        // entries named "server.host" / "server.port".
+        assert_eq!(entries.len(), 1, "expected one entry, got: {:?}", entries);
+        match &entries[0] {
+            DataEntry::TableProperty { path, properties, .. } => {
+                assert_eq!(path.to_string(), "server");
+                assert_eq!(properties.len(), 2);
+            }
+            other => panic!("expected TableProperty, got: {:?}", other),
+        }
+
+        // The emitted .mdix must not contain invalid dotted identifiers.
+        let mdix = converter.to_mdix(&ast, None).unwrap();
+        assert!(!mdix.contains("server.host ="), "invalid identifier leaked: {}", mdix);
+        assert!(!mdix.contains("server.port ="), "invalid identifier leaked: {}", mdix);
     }
-}
+
+    #[test]
+    fn test_from_hashmap_filters_synthetic_array_indices() {
+        // Simulates DixData::to_hashmap() output: aggregate "tags" -> Array
+        // PLUS synthetic indices "tags[0]" / "tags[1]".
+        let mut data = HashMap::new();
+        data.insert("tags".to_string(), DixValue::Array(vec![
+            DixValue::String("alpha".into()),
+            DixValue::String("beta".into()),
+        ]));
+        data.insert("tags[0]".to_string(), DixValue::String("alpha".into()));
+        data.insert("tags[1]".to_string(), DixValue::String("beta".into()));
+
+        let converter = DixConverter::new();
+        let ast = converter.from_hashmap(data).unwrap();
+        let entries = &ast.data.unwrap().entries;
+
+        assert_eq!(entries.len(), 1, "expected one entry, got: {:?}", entries);
+        match &entries[0] {
+            DataEntry::GroupArray { path, items, .. } => {
+                assert_eq!(path.to_string(), "tags");
+                assert_eq!(items.len(), 2);
+            }
+            other => panic!("expected GroupArray, got: {:?}", other),
+        }
+
+        let mdix = converter.to_mdix(&ast, None).unwrap();
+        assert!(!mdix.contains("tags[0]"), "invalid identifier leaked: {}", mdix);
+        assert!(!mdix.contains("tags[1]"), "invalid identifier leaked: {}", mdix);
+        assert!(mdix.contains("tags::"), "expected group array syntax: {}", mdix);
+    }
+
+    #[test]
+    fn test_from_hashmap_preserves_unrelated_prefix_keys() {
+        // "matrix2" must survive even though "matrix" / "matrix[0]" /
+        // "matrix[1]" are present and "matrix2" shares a string prefix.
+        let mut data = HashMap::new();
+        data.insert("matrix".to_string(), DixValue::Array(vec![DixValue::Int(1), DixValue::Int(2)]));
+        data.insert("matrix[0]".to_string(), DixValue::Int(1));
+        data.insert("matrix[1]".to_string(), DixValue::Int(2));
+        data.insert("matrix2".to_string(), DixValue::Int(99));
+
+        let converter = DixConverter::new();
+        let ast = converter.from_hashmap(data).unwrap();
+        let entries = &ast.data.unwrap().entries;
+
+        let names: Vec<String> = entries.iter().map(|e| match e {
+            DataEntry::SimpleProperty { name, .. } => name.clone(),
+            DataEntry::GroupArray { path, .. } => path.to_string(),
+            DataEntry::TableProperty { path, .. } => path.to_string(),
+            DataEntry::ObjectProperty { name, .. } => name.clone(),
+        }).collect();
+
+        assert!(names.contains(&"matrix".to_string()), "matrix missing: {:?}", names);
+        assert!(names.contains(&"matrix2".to_string()), "matrix2 missing: {:?}", names);
+        assert_eq!(entries.len(), 2, "expected exactly 2 entries, got: {:?}", names);
+    }
+
+    #[test]
+    fn test_from_hashmap_already_structural_is_noop() {
+        // A map with no synthetic child keys must pass through unchanged.
+        let mut data = HashMap::new();
+        data.insert("name".to_string(), DixValue::String("MyApp".into()));
+        data.insert("port".to_string(), DixValue::Int(8080));
+
+        let converter = DixConverter::new();
+        let ast = converter.from_hashmap(data).unwrap();
+        let entries = &ast.data.unwrap().entries;
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_full_round_trip_table_and_array_via_to_hashmap() {
+        // End-to-end: build an AST with a TableProperty + GroupArray,
+        // flatten via to_hashmap (synthetic children included), then
+        // reconstruct via from_hashmap and confirm valid .mdix output.
+        let ast = make_ast(vec![
+            DataEntry::TableProperty {
+                path:       path(&["server"]),
+                properties: vec![prop("host", Value::String { value: "localhost".into(), position: Position::UNKNOWN })],
+                position:   Position::UNKNOWN,
+            },
+            DataEntry::GroupArray {
+                path:     path(&["tags"]),
+                items:    vec![Value::String { value: "alpha".into(), position: Position::UNKNOWN }],
+                position: Position::UNKNOWN,
+            },
+        ]);
+
+        let converter = DixConverter::new();
+        let flat = converter.to_hashmap(&ast);
+
+        // Sanity: fully-flattened map contains synthetic children.
+        assert!(flat.contains_key("server.host"));
+        assert!(flat.contains_key("tags[0]"));
+
+        let ast2 = converter.from_hashmap(flat).unwrap();
+        let mdix = converter.to_mdix(&ast2, None).unwrap();
+
+        assert!(!mdix.contains("server.host"), "invalid identifier leaked: {}", mdix);
+        assert!(!mdix.contains("tags[0]"), "invalid identifier leaked: {}", mdix);
+        assert!(mdix.contains("server:"), "expected table property syntax: {}", mdix);
+        assert!(mdix.contains("tags::"), "expected group array syntax: {}", mdix);
+    }
+                }

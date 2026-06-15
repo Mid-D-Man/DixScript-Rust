@@ -206,8 +206,6 @@ fn config_value_completions(key: &str) -> Vec<CompletionItem> {
 
 // ── @SECURITY section completions ─────────────────────────────────────────────
 
-/// Scan backwards from cursor_line to find the enclosing `blockname -> {` block.
-/// Counts `{` / `}` depth; when depth goes negative we've found our opening brace line.
 fn find_enclosing_security_block(source: &str, cursor_line: u32) -> Option<String> {
     let lines: Vec<&str> = source.lines().collect();
     let cursor = cursor_line as usize;
@@ -220,7 +218,6 @@ fn find_enclosing_security_block(source: &str, cursor_line: u32) -> Option<Strin
         depth += closes - opens;
 
         if depth < 0 {
-            // This line has the unclosed `{` we are inside
             if let Some(arrow_pos) = line.find("->") {
                 let block_name = line[..arrow_pos].trim();
                 if !block_name.is_empty()
@@ -231,18 +228,16 @@ fn find_enclosing_security_block(source: &str, cursor_line: u32) -> Option<Strin
                     return Some(block_name.to_string());
                 }
             }
-            return None; // Brace but no -> (e.g. the @SECURITY( line itself)
+            return None;
         }
     }
     None
 }
 
-/// Context-aware completions inside @SECURITY.
 fn security_completions_at(source: &str, pos: Position) -> Vec<CompletionItem> {
     let line_text = source.lines().nth(pos.line as usize).unwrap_or("");
     let up_to = &line_text[..((pos.character as usize).min(line_text.len()))];
 
-    // Value side: `field_name = ` (has = but NOT ->)
     if let Some(eq_pos) = up_to.rfind('=') {
         let before_eq = &up_to[..eq_pos];
         if !before_eq.contains("->") {
@@ -252,7 +247,6 @@ fn security_completions_at(source: &str, pos: Position) -> Vec<CompletionItem> {
         }
     }
 
-    // Field key completions inside a block { }
     if let Some(block) = find_enclosing_security_block(source, pos.line) {
         return security_field_key_completions(&block);
     }
@@ -260,7 +254,6 @@ fn security_completions_at(source: &str, pos: Position) -> Vec<CompletionItem> {
     vec![]
 }
 
-/// Top-level block key completions for @SECURITY (encryption, validation, keystore).
 fn security_block_key_completions() -> Vec<CompletionItem> {
     let blocks: &[(&str, &str, &str)] = &[
         (
@@ -313,26 +306,24 @@ fn security_block_key_completions() -> Vec<CompletionItem> {
     }).collect()
 }
 
-/// Field key completions inside a specific @SECURITY block.
 fn security_field_key_completions(block_name: &str) -> Vec<CompletionItem> {
-    // (field_name, default_value_snippet, documentation)
     let fields: &[(&str, &str, &str)] = match block_name.to_lowercase().as_str() {
         "encryption" => &[
-            ("mode",            "\"${1|keyfile,password|}\"",               "How the key is supplied. `keyfile` = compiler auto-generates `.mdix.key`. `password` = compiler prompts at compile time."),
-            ("algorithm",       "\"${1|aes256-gcm,aes128-gcm,chacha20-poly1305,xor|}\"", "Encryption algorithm. Recommended: `aes256-gcm`."),
-            ("key_length",      "${1:32}",                                  "Key length in bytes. 16 for AES-128, 32 for AES-256 / ChaCha20."),
-            ("kdf",             "\"${1|argon2id,argon2i,argon2d|}\"",       "Key derivation function. Only used in `password` mode. Recommended: `argon2id`."),
-            ("kdf_memory",      "${1:65536}",                               "Argon2 memory cost in KiB. Only in `password` mode."),
-            ("kdf_iterations",  "${1:3}",                                   "Argon2 iteration count. Only in `password` mode."),
-            ("kdf_parallelism", "${1:4}",                                   "Argon2 parallelism factor. Only in `password` mode."),
+            ("mode",            "\"${1|keyfile,password|}\"",               "How the key is supplied."),
+            ("algorithm",       "\"${1|aes256-gcm,aes128-gcm,chacha20-poly1305,xor|}\"", "Encryption algorithm."),
+            ("key_length",      "${1:32}",                                  "Key length in bytes."),
+            ("kdf",             "\"${1|argon2id,argon2i,argon2d|}\"",       "Key derivation function."),
+            ("kdf_memory",      "${1:65536}",                               "Argon2 memory cost in KiB."),
+            ("kdf_iterations",  "${1:3}",                                   "Argon2 iteration count."),
+            ("kdf_parallelism", "${1:4}",                                   "Argon2 parallelism factor."),
         ],
         "validation" => &[
             ("checksum_algorithm", "\"${1|sha256,sha512|}\"",              "Hash algorithm for content-integrity check."),
-            ("auth_tag_length",    "${1:128}",                              "Authentication tag length in bits (AEAD tag size)."),
+            ("auth_tag_length",    "${1:128}",                              "Authentication tag length in bits."),
             ("hmac_algorithm",     "\"${1|hmac-sha256,hmac-sha512|}\"",    "HMAC algorithm for message authentication."),
         ],
         "keystore" => &[
-            ("auto_generate", "${1:true}",                                  "When `true`, the compiler automatically generates a `.mdix.key` file on compile."),
+            ("auto_generate", "${1:true}",                                  "When `true`, auto-generates a `.mdix.key` file."),
             ("backup_count",  "${1:3}",                                     "Number of previous key file backups to retain."),
             ("backup_naming", "\"${1|timestamp,sequence|}\"",               "Naming convention for backup key files."),
         ],
@@ -357,7 +348,6 @@ fn security_field_key_completions(block_name: &str) -> Vec<CompletionItem> {
     }).collect()
 }
 
-/// Value completions for a specific field name inside @SECURITY.
 fn security_field_value_completions(field_name: &str) -> Vec<CompletionItem> {
     let values: &[(&str, &str)] = match field_name.trim() {
         "mode" => &[
@@ -365,15 +355,15 @@ fn security_field_value_completions(field_name: &str) -> Vec<CompletionItem> {
             ("password", "Compiler prompts for a passphrase at compile time"),
         ],
         "algorithm" => &[
-            ("aes256-gcm",        "AES-256-GCM — recommended (256-bit, authenticated encryption)"),
+            ("aes256-gcm",        "AES-256-GCM — recommended"),
             ("aes128-gcm",        "AES-128-GCM — faster, slightly smaller keys"),
             ("chacha20-poly1305", "ChaCha20-Poly1305 — excellent on mobile / ARM"),
             ("xor",               "XOR — obfuscation only, NOT cryptographically secure"),
         ],
         "kdf" => &[
-            ("argon2id", "Argon2id — recommended; memory-hard, side-channel resistant"),
-            ("argon2i",  "Argon2i  — more side-channel resistant, less GPU resistant"),
-            ("argon2d",  "Argon2d  — fastest, less side-channel resistance"),
+            ("argon2id", "Argon2id — recommended"),
+            ("argon2i",  "Argon2i"),
+            ("argon2d",  "Argon2d"),
         ],
         "backup_naming" => &[
             ("timestamp", "Embed a timestamp in the backup key filename"),
@@ -666,7 +656,6 @@ fn extract_object_value(expr: &Expression) -> Option<&Value> {
 // OBJECT USER-PROPERTY COMPLETIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Build a simple `FIELD` completion item for a user-defined object key.
 fn make_field_completion(key: &str, detail: Option<&str>) -> CompletionItem {
     CompletionItem {
         label:              key.to_string(),
@@ -679,20 +668,14 @@ fn make_field_completion(key: &str, detail: Option<&str>) -> CompletionItem {
         })),
         insert_text:        Some(key.to_string()),
         insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
-        sort_text:          Some(format!("000_{}", key)), // Sorts before registry methods
+        sort_text:          Some(format!("000_{}", key)),
         filter_text:        None,
         ..Default::default()
     }
 }
 
-/// Return completion items for user-defined properties on `var_name`.
-///
-/// Searches (in order):
-///  1. QuickFunc local `let` / assignment bound to an object literal
-///  2. `@DATA` `ObjectProperty` entry
-///  3. `@DATA` `SimpleProperty` whose value is a QuickFunc call (use that QF's return fields)
 fn object_user_properties_completions(doc: &Document, var_name: &str) -> Vec<CompletionItem> {
-    // ── 1. QuickFunc local variable ─────────────────────────────────────────
+    // 1. QuickFunc local variable
     if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
         for func in &qf.functions {
             if let Some(Value::Object { properties, .. }) =
@@ -707,7 +690,7 @@ fn object_user_properties_completions(doc: &Document, var_name: &str) -> Vec<Com
         }
     }
 
-    // ── 2. @DATA ObjectProperty ──────────────────────────────────────────────
+    // 2. @DATA ObjectProperty
     if let Some(data) = doc.ast.as_ref().and_then(|a| a.data.as_ref()) {
         for entry in &data.entries {
             match entry {
@@ -720,7 +703,7 @@ fn object_user_properties_completions(doc: &Document, var_name: &str) -> Vec<Com
                         }).collect();
                     }
                 }
-                // ── 3. @DATA SimpleProperty whose value is a QF call ─────────
+                // 3. @DATA SimpleProperty whose value is a QF call
                 DataEntry::SimpleProperty { name, value, .. } if name == var_name => {
                     let qf_name = match value {
                         Value::QuickFuncCall { function_name, .. } => Some(function_name.clone()),
@@ -746,10 +729,6 @@ fn object_user_properties_completions(doc: &Document, var_name: &str) -> Vec<Com
     vec![]
 }
 
-/// Return completion items for the fields of the object returned by QuickFunc `func_name`.
-///
-/// Finds the first `return { ... }` statement (including inside `if:` / `chk:`) and
-/// extracts its property names.
 fn quickfunc_return_object_properties(doc: &Document, func_name: &str) -> Vec<CompletionItem> {
     let qf = match doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
         Some(q) => q,
@@ -762,8 +741,6 @@ fn quickfunc_return_object_properties(doc: &Document, func_name: &str) -> Vec<Co
     collect_object_props_from_stmts(&func.body)
 }
 
-/// Recursively search `stmts` for the first `return { ... }` and convert its
-/// properties to completion items.
 fn collect_object_props_from_stmts(stmts: &[QuickFuncStatement]) -> Vec<CompletionItem> {
     for stmt in stmts {
         match stmt {
@@ -800,9 +777,6 @@ fn collect_object_props_from_stmts(stmts: &[QuickFuncStatement]) -> Vec<Completi
     vec![]
 }
 
-/// Walk backwards from `close_idx` (a `)` token) to find the QuickFunc name
-/// that precedes the opening `(`.  Skips `<type>` annotations between the name
-/// and the parenthesis.
 fn func_name_from_paren_close(tokens: &[Token], close_idx: usize) -> Option<String> {
     let mut depth = 0i32;
     let mut i = close_idx;
@@ -813,11 +787,9 @@ fn func_name_from_paren_close(tokens: &[Token], close_idx: usize) -> Option<Stri
             TokenType::Symbol('(') => {
                 depth -= 1;
                 if depth == 0 && i > 0 {
-                    // Walk backwards past any <type> annotation
                     let mut j = i - 1;
                     while j > 0 {
                         match &tokens[j].token_type {
-                            // Skip closing > of annotation
                             TokenType::Symbol('>') => {
                                 while j > 0 && !matches!(&tokens[j].token_type, TokenType::Symbol('<')) {
                                     j -= 1;
@@ -830,7 +802,6 @@ fn func_name_from_paren_close(tokens: &[Token], close_idx: usize) -> Option<Stri
                             _ => break,
                         }
                     }
-                    // Check j == 0 edge case
                     if let TokenType::Identifier(name) = &tokens[j].token_type {
                         return Some(name.clone());
                     }
@@ -841,6 +812,209 @@ fn func_name_from_paren_close(tokens: &[Token], close_idx: usize) -> Option<Stri
         }
         if i == 0 { break; }
         i -= 1;
+    }
+    None
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RECURSIVE OBJECT SHAPE RESOLUTION
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A field of an object literal, carrying its raw AST `Value` so that
+/// sub-property resolution can recurse into nested objects.
+struct FieldInfo {
+    name:  String,
+    value: Value,
+}
+
+/// Recursively resolve the object fields of the expression whose last token
+/// is at global index `tok_idx` in the full token stream.
+///
+/// Handles all chain patterns:
+///   • `a`          – direct variable lookup
+///   • `a.b`        – recurse into owner `a`, descend into field `b`
+///   • `a.b.c`      – arbitrary depth nesting
+///   • `func()`     – QuickFunc return object
+///   • `func().b`   – field of a function return value
+///
+/// Returns `None` when the expression is not object-typed or its shape
+/// cannot be statically determined.
+fn get_object_fields(
+    tokens:  &[Token],
+    tok_idx: usize,
+    doc:     &Document,
+) -> Option<Vec<FieldInfo>> {
+    let tok  = tokens.get(tok_idx)?;
+    let line = tok.line;
+
+    match &tok.token_type {
+        TokenType::Identifier(name) => {
+            // Check: is this identifier a property access (`owner.name`)?
+            // It is when preceded by `.` on the same line.
+            let preceded_by_dot = tok_idx
+                .checked_sub(1)
+                .and_then(|i| tokens.get(i))
+                .map(|t| t.line == line && matches!(t.token_type, TokenType::Symbol('.')))
+                .unwrap_or(false);
+
+            if preceded_by_dot && tok_idx >= 2 {
+                // Owner expression ends at tok_idx - 2 (tok_idx - 1 is the dot).
+                if tokens.get(tok_idx - 2).map(|t| t.line == line).unwrap_or(false) {
+                    // Recursively get owner's fields, then descend into `name`.
+                    let owner_fields = get_object_fields(tokens, tok_idx - 2, doc)?;
+                    for field in &owner_fields {
+                        if field.name == *name {
+                            return extract_object_fields_from_value(&field.value, doc);
+                        }
+                    }
+                    return None; // `name` found but not an object
+                }
+            }
+
+            // Direct variable — look up in AST.
+            find_variable_object_fields(doc, name)
+        }
+
+        TokenType::Symbol(')') => {
+            // Function / method call result.
+            let fname = func_name_from_paren_close(tokens, tok_idx)?;
+            find_quickfunc_return_fields(doc, &fname)
+        }
+
+        _ => None,
+    }
+}
+
+/// Find the object fields of `var_name` by searching QuickFunc bodies and
+/// `@DATA` entries.
+fn find_variable_object_fields(doc: &Document, var_name: &str) -> Option<Vec<FieldInfo>> {
+    // 1. QuickFunc local variable (let / assignment to an object literal)
+    if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
+        for func in &qf.functions {
+            if let Some(val) = find_object_literal_for_var(&func.body, var_name) {
+                if let Value::Object { properties, .. } = val {
+                    return Some(
+                        properties.iter()
+                            .map(|p| FieldInfo { name: p.key.clone(), value: p.value.clone() })
+                            .collect(),
+                    );
+                }
+            }
+        }
+    }
+
+    // 2. @DATA entries
+    if let Some(data) = doc.ast.as_ref().and_then(|a| a.data.as_ref()) {
+        for entry in &data.entries {
+            match entry {
+                DataEntry::SimpleProperty { name, value, .. } if name == var_name => {
+                    return extract_object_fields_from_value(value, doc);
+                }
+                DataEntry::ObjectProperty { name, object, .. } if name == var_name => {
+                    if let Value::Object { properties, .. } = object.as_ref() {
+                        return Some(
+                            properties.iter()
+                                .map(|p| FieldInfo { name: p.key.clone(), value: p.value.clone() })
+                                .collect(),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    None
+}
+
+/// Return the fields produced by QuickFunc `func_name`'s `return { … }`.
+fn find_quickfunc_return_fields(doc: &Document, func_name: &str) -> Option<Vec<FieldInfo>> {
+    let qf   = doc.ast.as_ref()?.quick_functions.as_ref()?;
+    let func = qf.functions.iter().find(|f| f.name == func_name)?;
+    find_return_object_fields_in_stmts(&func.body)
+}
+
+/// Recursively search `stmts` for the first `return { … }` and extract its fields.
+fn find_return_object_fields_in_stmts(stmts: &[QuickFuncStatement]) -> Option<Vec<FieldInfo>> {
+    for stmt in stmts {
+        match stmt {
+            QuickFuncStatement::Return { value, .. } => {
+                if let Expression::Value {
+                    value: Value::Object { properties, .. },
+                    ..
+                } = value
+                {
+                    return Some(
+                        properties.iter()
+                            .map(|p| FieldInfo { name: p.key.clone(), value: p.value.clone() })
+                            .collect(),
+                    );
+                }
+            }
+            QuickFuncStatement::If { then_branch, else_branch, .. } => {
+                if let Some(r) = find_return_object_fields_in_stmts(then_branch) { return Some(r); }
+                if let Some(eb) = else_branch {
+                    if let Some(r) = find_return_object_fields_in_stmts(eb) { return Some(r); }
+                }
+            }
+            QuickFuncStatement::Switch { cases, default_case, .. } => {
+                for case in cases {
+                    if let Some(r) = find_return_object_fields_in_stmts(&case.statements) { return Some(r); }
+                }
+                if let Some(dc) = default_case {
+                    if let Some(r) = find_return_object_fields_in_stmts(&dc.statements) { return Some(r); }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// If `value` is (or delegates to) an object, return its field list.
+fn extract_object_fields_from_value(value: &Value, doc: &Document) -> Option<Vec<FieldInfo>> {
+    match value {
+        Value::Object { properties, .. } => Some(
+            properties.iter()
+                .map(|p| FieldInfo { name: p.key.clone(), value: p.value.clone() })
+                .collect(),
+        ),
+        Value::QuickFuncCall { function_name, .. } => {
+            find_quickfunc_return_fields(doc, function_name)
+        }
+        Value::Expression { expr, .. } => {
+            if let Expression::QuickFuncCall { name, .. } = expr.as_ref() {
+                find_quickfunc_return_fields(doc, name)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Convert a `FieldInfo` list into LSP completion items.
+fn fields_to_completions(fields: &[FieldInfo], _doc: &Document) -> Vec<CompletionItem> {
+    fields.iter().map(|f| {
+        let detail = infer_datatype_from_value_simple(&f.value)
+            .map(|dt| format!("<{}>", dt));
+        make_field_completion(&f.name, detail.as_deref())
+    }).collect()
+}
+
+/// Infer the `DixType` of field `field_name` in the return object of QuickFunc
+/// `func_name`. Used by `chain_dix_type` for the `func().prop.` pattern.
+fn infer_field_type_in_quickfunc_return(
+    doc:        &Document,
+    func_name:  &str,
+    field_name: &str,
+) -> Option<DixType> {
+    let fields = find_quickfunc_return_fields(doc, func_name)?;
+    for field in &fields {
+        if field.name == field_name {
+            return infer_datatype_from_value_simple(&field.value)
+                .and_then(|dt| completion_dt_to_dix(dt));
+        }
     }
     None
 }
@@ -879,12 +1053,9 @@ fn resolve_paren_close_dix_type(
                         }
                         resolve_direct_call_return(&name, doc)
                     }
-
                     TokenType::Symbol(':') => {
                         if pre >= 1 {
-                            if let TokenType::Identifier(prefix) =
-                                tokens[pre - 1].token_type.clone()
-                            {
+                            if let TokenType::Identifier(prefix) = tokens[pre - 1].token_type.clone() {
                                 return match prefix.as_str() {
                                     "t" => Some(DixType::Tuple),
                                     "b" => Some(DixType::Blob),
@@ -895,11 +1066,7 @@ fn resolve_paren_close_dix_type(
                         }
                         None
                     }
-
-                    TokenType::Symbol(')') => {
-                        resolve_paren_close_dix_type(tokens, pre, doc)
-                    }
-
+                    TokenType::Symbol(')') => resolve_paren_close_dix_type(tokens, pre, doc),
                     _ => None,
                 };
             }
@@ -937,14 +1104,9 @@ fn resolve_dot_call_type(
         return match ret {
             DixType::Void | DixType::Null => None,
             DixType::Any => {
-                if is_same_type_returning_method(method_name) {
-                    Some(recv_dix)
-                } else {
-                    None
-                }
+                if is_same_type_returning_method(method_name) { Some(recv_dix) } else { None }
             }
-            dt => TypeInferenceVisitor::convert_dix_type_to_data_type(dt)
-                .and_then(completion_dt_to_dix),
+            dt => TypeInferenceVisitor::convert_dix_type_to_data_type(dt).and_then(completion_dt_to_dix),
         };
     }
 
@@ -1029,26 +1191,6 @@ fn token_before_dot_with_idx<'a>(
         })
         .last()
         .map(|(i, t)| (t, i))
-}
-
-fn second_token_before_dot<'a>(tokens: &'a [Token], pos: Position) -> Option<&'a Token> {
-    let target_line_1 = (pos.line + 1) as usize;
-    let dot_col_0     = pos.character as usize;
-
-    let candidates: Vec<&Token> = tokens
-        .iter()
-        .filter(|t| {
-            t.line == target_line_1
-                && (t.column.saturating_sub(1)) < dot_col_0
-                && !matches!(t.token_type, TokenType::Symbol('.'))
-        })
-        .collect();
-
-    if candidates.len() >= 2 {
-        Some(candidates[candidates.len() - 2])
-    } else {
-        None
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1171,10 +1313,10 @@ fn registry_instance_method_completions(dix_type: DixType) -> Vec<CompletionItem
         .filter_map(|name| {
             let method = instance_method_registry::get_instance_method(dix_type, name)?;
 
-            let pc            = method.parameter_count();
-            let is_variadic   = pc < 0;
-            let min_pc        = method.min_parameter_count();
-            let extra_params  = if is_variadic {
+            let pc           = method.parameter_count();
+            let is_variadic  = pc < 0;
+            let min_pc       = method.min_parameter_count();
+            let extra_params = if is_variadic {
                 (min_pc as i32).saturating_sub(1).max(0) as usize
             } else {
                 (pc as i32).saturating_sub(1).max(0) as usize
@@ -1222,7 +1364,7 @@ fn registry_instance_method_completions(dix_type: DixType) -> Vec<CompletionItem
                 insert_text:        Some(insert_text),
                 insert_text_format: Some(insert_fmt),
                 filter_text:        None,
-                sort_text:          Some(format!("1_{}", name)), // After user fields (000_)
+                sort_text:          Some(format!("1_{}", name)),
                 ..Default::default()
             })
         })
@@ -1239,11 +1381,49 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
     // ── Step 1: identify the receiver token AND its index ────────────────────
     let receiver_with_idx = token_before_dot_with_idx(&doc.tokens, pos);
 
-    // ── Step 2: two-level chain  obj.prop. ────────────────────────────────────
-    let chain_dix_type: Option<DixType> = receiver_with_idx.as_ref().and_then(|(recv, _)| {
-        if let TokenType::Identifier(prop_name) = &recv.token_type {
-            second_token_before_dot(&doc.tokens, pos).and_then(|second| {
-                if let TokenType::Identifier(obj_name) = &second.token_type {
+    // ── NEW: Compute the recursive object shape for the receiver ──────────────
+    //
+    // get_object_fields handles all chain patterns via recursion:
+    //   • a.         – direct variable
+    //   • a.b.       – nested object property      (was broken before)
+    //   • func().    – QuickFunc return object
+    //   • func().b.  – property of a return value  (was broken before)
+    //   • a.b.c.     – arbitrary depth nesting      (was broken before)
+    let object_shape: Vec<CompletionItem> = receiver_with_idx
+        .as_ref()
+        .and_then(|(_, idx)| get_object_fields(&doc.tokens, *idx, doc))
+        .map(|fields| fields_to_completions(&fields, doc))
+        .unwrap_or_default();
+
+    // ── Step 2: chain DixType — handles a.prop. AND func().prop. ─────────────
+    //
+    // Uses recv_idx directly (not second_token_before_dot) so we can also
+    // handle `)` as the owner token for the `func().prop.` pattern.
+    let chain_dix_type: Option<DixType> =
+        receiver_with_idx.as_ref().and_then(|(recv, recv_idx)| {
+            let prop_name = match &recv.token_type {
+                TokenType::Identifier(n) => n,
+                _ => return None,
+            };
+            let recv_line = recv.line;
+            let tokens    = &doc.tokens;
+
+            // Receiver must be preceded by `.` on the same line to be a property.
+            let has_dot_before = recv_idx
+                .checked_sub(1)
+                .and_then(|i| tokens.get(i))
+                .map(|t| t.line == recv_line && matches!(t.token_type, TokenType::Symbol('.')))
+                .unwrap_or(false);
+
+            if !has_dot_before || *recv_idx < 2 {
+                return None;
+            }
+
+            let owner_tok = tokens.get(*recv_idx - 2).filter(|t| t.line == recv_line)?;
+
+            match &owner_tok.token_type {
+                TokenType::Identifier(obj_name) => {
+                    // a.prop — look up prop's type via the owner's shape.
                     resolve_object_property_type(doc, obj_name, prop_name)
                         .or_else(|| {
                             static_object_registry::get_method_info(obj_name, prop_name)
@@ -1254,61 +1434,60 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
                                     .and_then(|dt| completion_dt_to_dix(dt))
                                 })
                         })
-                } else {
-                    None
                 }
-            })
-        } else {
-            None
-        }
-    });
+                TokenType::Symbol(')') => {
+                    // func().prop — infer prop's DixType from the return object.
+                    let owner_idx = *recv_idx - 2;
+                    let func_dt   = resolve_paren_close_dix_type(tokens, owner_idx, doc);
+                    if func_dt == Some(DixType::Object) {
+                        func_name_from_paren_close(tokens, owner_idx)
+                            .and_then(|fname| {
+                                infer_field_type_in_quickfunc_return(doc, &fname, prop_name)
+                            })
+                            // We know the owner returns Object; fall back so registry
+                            // methods for Object still appear even if we can't infer
+                            // the precise field type.
+                            .or(Some(DixType::Object))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        });
 
     // ── Step 3: resolve receiver DixType (with chained-call support) ─────────
-    let receiver_dix_type: Option<DixType> = chain_dix_type.or_else(|| {
-        receiver_with_idx.as_ref().and_then(|(tok, idx)| {
-            match &tok.token_type {
-                TokenType::Symbol(')') => {
-                    resolve_paren_close_dix_type(&doc.tokens, *idx, doc)
+    let receiver_dix_type: Option<DixType> = chain_dix_type
+        .or_else(|| {
+            receiver_with_idx.as_ref().and_then(|(tok, idx)| {
+                match &tok.token_type {
+                    TokenType::Symbol(')') => {
+                        resolve_paren_close_dix_type(&doc.tokens, *idx, doc)
+                    }
+                    TokenType::Symbol(']') => Some(DixType::Array),
+                    _ => dix_type_of_token(tok, doc),
                 }
-                TokenType::Symbol(']') => Some(DixType::Array),
-                _ => dix_type_of_token(tok, doc),
-            }
+            })
         })
-    });
+        // If the recursive shape resolver found an object but the type system
+        // couldn't determine the type (e.g. 3+ levels deep), treat as Object so
+        // that Object registry methods are still offered alongside the shape items.
+        .or_else(|| {
+            if !object_shape.is_empty() { Some(DixType::Object) } else { None }
+        });
 
     // ── Step 4: registry instance methods ────────────────────────────────────
     if let Some(dix_type) = receiver_dix_type {
         items.extend(registry_instance_method_completions(dix_type));
     }
 
-    // ── Step 5: user-defined object properties (prepended, higher priority) ──
+    // ── Step 5: user-defined object properties (prepended, highest priority) ──
     //
-    // For Object receivers, look up the actual fields the object has.
-    // These appear BEFORE the generic registry methods in the list.
-    if receiver_dix_type == Some(DixType::Object) {
-        let user_props: Vec<CompletionItem> = match receiver_with_idx.as_ref() {
-            Some((tok, idx)) => {
-                match &tok.token_type {
-                    TokenType::Identifier(var_name) => {
-                        object_user_properties_completions(doc, var_name.as_str())
-                    }
-                    TokenType::Symbol(')') => {
-                        // e.g. createEnemy("Goblin", 50, 10).   ← receiver is )
-                        func_name_from_paren_close(&doc.tokens, *idx)
-                            .map(|name| quickfunc_return_object_properties(doc, &name))
-                            .unwrap_or_default()
-                    }
-                    _ => vec![],
-                }
-            }
-            None => vec![],
-        };
-
-        if !user_props.is_empty() {
-            // Move user props to the front
-            let registry_items = std::mem::replace(&mut items, user_props);
-            items.extend(registry_items);
-        }
+    // object_shape is already fully resolved by get_object_fields above.
+    // Prepend before registry methods so user fields appear first.
+    if !object_shape.is_empty() {
+        let registry_items = std::mem::replace(&mut items, object_shape);
+        items.extend(registry_items);
     }
 
     // ── Step 6: static objects, enums, namespaces (word-based) ───────────────
@@ -1356,11 +1535,11 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
                             kind:  MarkupKind::Markdown,
                             value: format!(
                                 "**`{ns}.{name}<{ret}>({params})`** — imported QuickFunc\n\nFile: `{file}`",
-                                ns    = word_before,
-                                name  = func_name,
-                                ret   = ret,
+                                ns     = word_before,
+                                name   = func_name,
+                                ret    = ret,
                                 params = params.join(", "),
-                                file  = ns.file_path,
+                                file   = ns.file_path,
                             ),
                         })),
                         ..Default::default()
@@ -1562,7 +1741,7 @@ fn general_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
         }
     }
 
-    // ── Symbol table callables (imported namespace functions) ─────────────────
+    // Symbol table callables (imported namespace functions)
     if let Some(st) = doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref()) {
         for (ns_alias, ns) in &st.namespaces {
             for (func_name, func_info) in &ns.functions {
@@ -1593,11 +1772,11 @@ fn general_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
                         kind:  MarkupKind::Markdown,
                         value: format!(
                             "**`{ns}.{name}<{ret}>({params})`** — imported QuickFunc\n\nFile: `{file}`",
-                            ns    = ns_alias,
-                            name  = func_name,
-                            ret   = ret,
+                            ns     = ns_alias,
+                            name   = func_name,
+                            ret    = ret,
                             params = params.join(", "),
-                            file  = ns.file_path,
+                            file   = ns.file_path,
                         ),
                     })),
                     sort_text: Some(format!("1_{}", full_name)),
@@ -1725,4 +1904,4 @@ fn word_before_dot(source: &str, pos: Position) -> String {
         .last()
         .unwrap_or("")
         .to_string()
-    }
+                }

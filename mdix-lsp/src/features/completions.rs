@@ -1675,7 +1675,186 @@ fn instance_method_completions_heuristic(word: &str) -> Vec<CompletionItem> {
     }
     vec![]
 }
+// ─────────────────────────────────────────────────────────────────────────────
+// ENCLOSING QUICKFUNC RESOLUTION (for local variable / parameter completions)
+// ─────────────────────────────────────────────────────────────────────────────
 
+/// Find the `QuickFunction` whose body contains the cursor position, by
+/// walking the token stream and matching `~name(...) { ... }` brace ranges.
+///
+/// `QuickFunction` only carries a start `Position` (no end), so this
+/// reconstructs the body's line range from tokens: it locates each `~`
+/// declaration's body-opening `{` (skipping over the parameter list's
+/// parens) and then tracks brace depth to its matching `}`.
+///
+/// Functions are matched to `ast.quick_functions.functions` by source order,
+/// since both come from the same sequential token stream.
+///
+/// If the closing `}` hasn't been typed yet (mid-edit), the range is treated
+/// as extending to the end of the document instead of collapsing to a single
+/// line — this keeps completions working while typing inside an unfinished
+/// function body.
+fn find_enclosing_quickfunc<'a>(
+    ast: &'a DixScript,
+    tokens: &[Token],
+    pos: Position,
+) -> Option<&'a QuickFunction> {
+    let qf = ast.quick_functions.as_ref()?;
+    let cursor_line = (pos.line as usize) + 1; // tokens are 1-indexed
+    let eof_line = tokens.last().map(|t| t.line).unwrap_or(cursor_line);
+
+    let mut func_idx = 0usize;
+    let mut i = 0usize;
+
+    while i < tokens.len() {
+        let tok = &tokens[i];
+
+        if tok.section != SectionId::QuickFuncs || !matches!(tok.token_type, TokenType::Symbol('~')) {
+            i += 1;
+            continue;
+        }
+
+        let start_line = tok.line;
+
+        // Find the body-opening `{`, skipping over the parameter list's parens.
+        let mut j = i + 1;
+        let mut paren_depth = 0i32;
+        let mut open_brace_idx: Option<usize> = None;
+        while j < tokens.len() {
+            match &tokens[j].token_type {
+                TokenType::Symbol('(') => paren_depth += 1,
+                TokenType::Symbol(')') => paren_depth -= 1,
+                TokenType::Symbol('{') if paren_depth <= 0 => {
+                    open_brace_idx = Some(j);
+                    break;
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+
+        let open_idx = match open_brace_idx {
+            Some(idx) => idx,
+            None => {
+                i += 1;
+                continue;
+            }
+        };
+
+        // Track brace depth to find the matching closing `}`.
+        let mut depth = 1i32;
+        let mut k = open_idx + 1;
+        let mut end_line = eof_line; // fallback: unfinished body extends to EOF
+        while k < tokens.len() {
+            match &tokens[k].token_type {
+                TokenType::Symbol('{') => depth += 1,
+                TokenType::Symbol('}') => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_line = tokens[k].line;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+
+        if cursor_line >= start_line && cursor_line <= end_line {
+            return qf.functions.get(func_idx);
+        }
+
+        func_idx += 1;
+        i = if depth == 0 { k + 1 } else { tokens.len() };
+    }
+
+    None
+}
+
+fn function_param_completions(func: &QuickFunction) -> Vec<CompletionItem> {
+    func.parameters.iter().map(|p| {
+        let detail = p.data_type.map(|dt| format!("<{}>", dt));
+        CompletionItem {
+            label:              p.name.clone(),
+            kind:               Some(CompletionItemKind::VARIABLE),
+            detail:             Some(detail.clone().unwrap_or_else(|| "parameter".to_string())),
+            documentation:      Some(Documentation::MarkupContent(MarkupContent {
+                kind:  MarkupKind::Markdown,
+                value: format!(
+                    "**`{}`**{} — function parameter",
+                    p.name,
+                    detail.map(|d| format!(" {}", d)).unwrap_or_default()
+                ),
+            })),
+            insert_text:        Some(p.name.clone()),
+            insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+            sort_text:          Some(format!("0_{}", p.name)),
+            filter_text:        None,
+            ..Default::default()
+        }
+    }).collect()
+}
+
+fn collect_local_variable_completions(stmts: &[QuickFuncStatement]) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+    collect_local_variables_into(stmts, &mut items);
+    items
+}
+
+fn collect_local_variables_into(stmts: &[QuickFuncStatement], items: &mut Vec<CompletionItem>) {
+    for stmt in stmts {
+        match stmt {
+            QuickFuncStatement::VariableDeclaration {
+                declaration_type,
+                variable_name,
+                data_type,
+                value,
+                ..
+            } => {
+                let dt = data_type.or_else(|| infer_datatype_from_expr_simple(value));
+                let detail = dt.map(|d| format!("<{}>", d));
+                let kw = match declaration_type {
+                    DeclarationType::Let   => "let",
+                    DeclarationType::Const => "const",
+                };
+                items.push(CompletionItem {
+                    label:              variable_name.clone(),
+                    kind:               Some(CompletionItemKind::VARIABLE),
+                    detail:             Some(detail.clone().unwrap_or_else(|| format!("{} variable", kw))),
+                    documentation:      Some(Documentation::MarkupContent(MarkupContent {
+                        kind:  MarkupKind::Markdown,
+                        value: format!(
+                            "**`{}`**{} — local variable (`{}`)",
+                            variable_name,
+                            detail.map(|d| format!(" {}", d)).unwrap_or_default(),
+                            kw
+                        ),
+                    })),
+                    insert_text:        Some(variable_name.clone()),
+                    insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+                    sort_text:          Some(format!("0_{}", variable_name)),
+                    filter_text:        None,
+                    ..Default::default()
+                });
+            }
+            QuickFuncStatement::If { then_branch, else_branch, .. } => {
+                collect_local_variables_into(then_branch, items);
+                if let Some(eb) = else_branch {
+                    collect_local_variables_into(eb, items);
+                }
+            }
+            QuickFuncStatement::Switch { cases, default_case, .. } => {
+                for case in cases {
+                    collect_local_variables_into(&case.statements, items);
+                }
+                if let Some(dc) = default_case {
+                    collect_local_variables_into(&dc.statements, items);
+                }
+            }
+            _ => {}
+        }
+    }
+                }
 // ── General completions ───────────────────────────────────────────────────────
 
 fn general_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
@@ -1683,6 +1862,21 @@ fn general_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
     let word = word_before_cursor(&doc.source, pos);
     let word_lower = word.to_lowercase();
     let filter_by_word = word.len() >= 2;
+
+    // Local variables and parameters of the enclosing QuickFunc.
+    // Without this, typing inside a function body never suggested the
+    // function's own parameters or any `let`/`const` declared above the
+    // cursor — only QuickFunc names, enums, and builtins showed up.
+    if let Some(ast) = &doc.ast {
+        if let Some(func) = find_enclosing_quickfunc(ast, &doc.tokens, pos) {
+            let mut local_items = function_param_completions(func);
+            local_items.extend(collect_local_variable_completions(&func.body));
+            if filter_by_word {
+                local_items.retain(|item| item.label.to_lowercase().contains(&word_lower));
+            }
+            items.extend(local_items);
+        }
+    }
 
     if let Some(ast) = &doc.ast {
         // QuickFunc names (local)

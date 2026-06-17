@@ -1,9 +1,9 @@
-
+// mdix-cli/src/services/compilation.rs
 //! Wraps the full dixscript compilation and load pipeline.
 
 use std::path::Path;
 use std::time::Instant;
-use dixscript::Runtime::{DixLoader, DixLoadOptions};
+use dixscript::Runtime::{DixConverter, DixFormatOptions, DixLoader, DixLoadOptions};
 use crate::commands::CliError;
 
 #[derive(Debug)]
@@ -145,13 +145,39 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
     }
 
     let loader = DixLoader::new();
-    loader
+    let dix_data = loader
         .load_encrypted(path.to_str().unwrap_or(""), &load_opts)
         .map_err(CliError::CompileError)?;
 
     if opts.password.is_some() {
         unsafe{std::env::remove_var("MDIX_DLM_PASSWORD");}
     }
+
+    // ── Reconstruct and write the plaintext .mdix source ────────────────────
+    //
+    // BUG FIX: `load_encrypted` decrypts and deserializes the binary blob
+    // into a `DixData` (already-parsed, structured, in-memory data) — it
+    // never writes anything to disk. The code below previously computed a
+    // notional `output_path` string purely for display and returned it as
+    // if a file had been written there; nothing was ever created at that
+    // path, so any downstream step reading it (e.g. `mdix convert
+    // <decrypted>.mdix --to json`) failed with "File not found".
+    //
+    // To produce a real plaintext `.mdix` file at `-o <dir>`, convert the
+    // *structural* hashmap (aggregate Object/Array values only — synthetic
+    // flattened child paths like "database.password_dev" are filtered out,
+    // see `DixData::to_structural_hashmap`) back into an AST, then
+    // serialize that AST to `.mdix` source text and write it out.
+    let converter      = DixConverter::new();
+    let structural_map = dix_data.to_structural_hashmap();
+
+    let ast = converter
+        .from_hashmap(structural_map)
+        .map_err(CliError::ConversionError)?;
+
+    let mdix_text = converter
+        .to_mdix(&ast, Some(&DixFormatOptions::new()))
+        .map_err(CliError::ConversionError)?;
 
     let output_dir = opts.output_dir.as_deref().unwrap_or(".");
     let stem = path
@@ -160,7 +186,11 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
         .unwrap_or("output")
         .trim_end_matches(".enc");
 
-    let output_path = format!("{}/{}", output_dir, stem);
+    let output_path_buf = Path::new(output_dir).join(stem);
+
+    crate::services::file_io::write_file(&output_path_buf, &mdix_text)?;
+
+    let output_path = output_path_buf.to_string_lossy().to_string();
 
     Ok(DecryptResult {
         source_path: path.to_string_lossy().to_string(),

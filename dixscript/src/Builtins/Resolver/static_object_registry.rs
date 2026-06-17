@@ -170,6 +170,34 @@ pub fn get_method(object_name: &str, method_name: &str) -> Option<&'static dyn I
     }
 }
 
+/// Validate a static method call's argument *types* against the method's real
+/// `validate_arguments` (which may include a custom type validator), entirely
+/// inside the registry's read lock. This sidesteps the lifetime issue that
+/// prevents `get_method()` from returning a borrowed `&dyn IBuiltinMethod`
+/// directly to callers outside the lock.
+pub fn validate_call_with_types(
+    object_name: &str,
+    method_name: &str,
+    args: &[DixValue],
+) -> bool {
+    if object_name.is_empty() || method_name.is_empty() {
+        return false;
+    }
+
+    let registry = StaticObjectRegistry::get();
+    let objects = registry.objects.read().unwrap();
+
+    let obj = match objects.get(object_name) {
+        Some(o) => o,
+        None => return false,
+    };
+
+    match obj.get_method(method_name) {
+        Some(method) => method.validate_arguments(args),
+        None => false,
+    }
+}
+
 /// Validate a static method call
 pub fn validate_call(
     object_name: &str,
@@ -374,4 +402,28 @@ mod tests {
             assert_eq!(method_info.parameter_count, 2);
         }
     }
-}
+
+    #[test]
+    fn test_validate_call_with_types() {
+        initialize_static_registry();
+        // Math.max(a, b) requires all_numeric — two ints should pass
+        let ok = validate_call_with_types(
+            "Math",
+            "max",
+            &[DixValue::from_int(1), DixValue::from_int(2)],
+        );
+        assert!(ok);
+
+        // A string argument should fail Math.max's numeric validator
+        let bad = validate_call_with_types(
+            "Math",
+            "max",
+            &[DixValue::from_string("a".to_string()), DixValue::from_int(2)],
+        );
+        assert!(!bad);
+
+        // Unknown method
+        let missing = validate_call_with_types("Math", "nonexistent", &[]);
+        assert!(!missing);
+    }
+            }

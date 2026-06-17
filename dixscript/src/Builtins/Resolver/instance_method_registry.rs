@@ -271,7 +271,7 @@ pub fn validate_instance_call(
         ),
     };
 
-// parameter_count includes the instance as arg 0. -1 means variadic —
+    // parameter_count includes the instance as arg 0. -1 means variadic —
     // use min_parameter_count() instead (which uses the same instance-as-
     // slot-0 convention) rather than collapsing to a bogus "0 args expected".
     let pc = method.parameter_count();
@@ -291,13 +291,6 @@ pub fn validate_instance_call(
                 instance_type, method_name, expected, arg_count
             ));
         }
-    }
-
-    if expected != arg_count {
-        return ValidationResult::error(&format!(
-            "{:?}.{} expects {} arguments, got {}",
-            instance_type, method_name, expected, arg_count
-        ));
     }
 
     ValidationResult::success()

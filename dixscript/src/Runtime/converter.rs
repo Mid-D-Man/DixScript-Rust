@@ -1226,7 +1226,7 @@ mod tests {
 
     // ── Group D: structural from_hashmap fixes ────────────────────────────────
 
-    #[test]
+#[test]
     fn test_from_hashmap_filters_synthetic_table_children() {
         // Simulates DixData::to_hashmap() output: aggregate "server" -> Object
         // PLUS synthetic children "server.host" / "server.port".
@@ -1240,7 +1240,7 @@ mod tests {
 
         let converter = DixConverter::new();
         let ast = converter.from_hashmap(data).unwrap();
-        let entries = &ast.data.unwrap().entries;
+        let entries = &ast.data.as_ref().unwrap().entries;
 
         // Exactly one TableProperty for "server" — no stray SimpleProperty
         // entries named "server.host" / "server.port".
@@ -1259,7 +1259,7 @@ mod tests {
         assert!(!mdix.contains("server.port ="), "invalid identifier leaked: {}", mdix);
     }
 
-    #[test]
+#[test]
     fn test_from_hashmap_filters_synthetic_array_indices() {
         // Simulates DixData::to_hashmap() output: aggregate "tags" -> Array
         // PLUS synthetic indices "tags[0]" / "tags[1]".
@@ -1273,7 +1273,7 @@ mod tests {
 
         let converter = DixConverter::new();
         let ast = converter.from_hashmap(data).unwrap();
-        let entries = &ast.data.unwrap().entries;
+        let entries = &ast.data.as_ref().unwrap().entries;
 
         assert_eq!(entries.len(), 1, "expected one entry, got: {:?}", entries);
         match &entries[0] {

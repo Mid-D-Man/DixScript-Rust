@@ -256,6 +256,18 @@ fn extract_ident_at_template_offset(template: &str, offset: usize) -> Option<Str
                 // Cursor is inside this {…} block
                 let content_start = block_start + 1;
                 let content_end   = j.saturating_sub(1); // position of '}'
+
+                // FIX (Group I): cursor sitting exactly on '{' (offset == block_start)
+                // or exactly on '}' (offset == content_end) is not inside an
+                // identifier and must return None. Without this guard, offset ==
+                // block_start makes expr_offset = offset.saturating_sub(content_start)
+                // clamp to 0 instead of going negative, which incorrectly resolves
+                // to the first identifier in the block (e.g. cursor on '{' in
+                // "Hello {name}!" wrongly returned Some("name") instead of None).
+                if offset <= block_start || offset >= content_end {
+                    return None;
+                }
+
                 if content_start >= content_end { return None; }
 
                 let expr: String = chars[content_start..content_end].iter().collect();
@@ -843,6 +855,12 @@ mod tests {
     }
 
     #[test]
+    fn extract_ident_on_closing_brace_returns_none() {
+        // '}' is at index 11 in "Hello {name}!"
+        assert_eq!(extract_ident_at_template_offset("Hello {name}!", 11), None);
+    }
+
+    #[test]
     fn extract_ident_outside_braces_returns_none() {
         // Cursor on literal text outside {}
         assert_eq!(extract_ident_at_template_offset("Hello {name}!", 2), None);
@@ -868,6 +886,13 @@ mod tests {
     }
 
     #[test]
+    fn extract_ident_empty_block_returns_none() {
+        // {} — no content at all
+        assert_eq!(extract_ident_at_template_offset("a {} b", 2), None);
+        assert_eq!(extract_ident_at_template_offset("a {} b", 3), None);
+    }
+
+    #[test]
     fn find_ident_at_str_offset_basic() {
         assert_eq!(find_ident_at_str_offset("myVar", 0), Some("myVar".to_string()));
         assert_eq!(find_ident_at_str_offset("myVar", 4), Some("myVar".to_string()));
@@ -882,4 +907,4 @@ mod tests {
         assert_eq!(find_ident_at_str_offset("false", 0), None);
         assert_eq!(find_ident_at_str_offset("null", 0), None);
     }
-    }
+                                }

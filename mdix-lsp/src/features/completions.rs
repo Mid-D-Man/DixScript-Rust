@@ -12,7 +12,8 @@ use tower_lsp::lsp_types::{
 use dixscript::Builtins::Core::DixType;
 use dixscript::Builtins::Resolver::{instance_method_registry, static_object_registry};
 use dixscript::Compiler::AST::{
-    DataEntry, DataType, DixScript, Expression, QuickFuncStatement, TypeInferenceVisitor, Value,
+    DataEntry, DataType, DeclarationType, DixScript, Expression, QuickFuncStatement,
+    QuickFunction, TypeInferenceVisitor, Value,
 };
 use dixscript::Compiler::Core::Tokenizer::Token;
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;

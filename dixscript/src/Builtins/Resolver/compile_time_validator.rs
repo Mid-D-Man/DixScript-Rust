@@ -70,7 +70,15 @@ pub fn validate_static_call(
     CallValidationResult::success(CallType::Static)
 }
 
-/// Validate a static method call with argument types
+/// Validate a static method call with argument types.
+///
+/// Performs basic arg-count validation, then runs the method's real
+/// `validate_arguments` check (which may include a custom type validator)
+/// against dummy values built from `arg_types`. This delegates to
+/// `static_object_registry::validate_call_with_types`, which performs the
+/// check entirely inside the registry's read lock — sidestepping the
+/// lifetime issue that prevents `get_method()` from returning a borrowed
+/// `&dyn IBuiltinMethod` directly.
 pub fn validate_static_call_with_types(
     object_name: &str,
     method_name: &str,
@@ -91,10 +99,23 @@ pub fn validate_static_call_with_types(
         return basic_result;
     }
 
-    // NOTE: Full type-level validation (validate_arguments) requires a &dyn IBuiltinMethod
-    // reference, but static_object_registry cannot safely return one due to RwLock lifetimes.
-    // The parameter count check in validate_static_call above covers the primary failure mode.
-    // Type-specific validation is deferred to runtime.
+    let dummy_args: Result<Vec<DixValue>, String> =
+        arg_types.iter().map(|&t| create_dummy_value(t)).collect();
+
+    match dummy_args {
+        Ok(args) => {
+            if !static_object_registry::validate_call_with_types(object_name, method_name, &args) {
+                return create_error(
+                    &format!("Invalid argument types for {}.{}", object_name, method_name),
+                    line_number,
+                    column_number,
+                );
+            }
+        }
+        Err(e) => {
+            return create_error(&e, line_number, column_number);
+        }
+    }
 
     CallValidationResult::success(CallType::Static)
 }
@@ -126,16 +147,37 @@ pub fn validate_instance_call(
     // Check parameter count
     if let Some(method) = instance_method_registry::get_instance_method(instance_type, method_name)
     {
-        let expected_params = method.parameter_count().saturating_sub(1).max(0);
-        if expected_params as usize != arg_count {
-            return create_error(
-                &format!(
-                    "{:?}.{} expects {} arguments, got {}",
-                    instance_type, method_name, expected_params, arg_count
-                ),
-                line_number,
-                column_number,
-            );
+        let pc = method.parameter_count();
+
+        // FIX: parameter_count() == -1 means variadic. The old code ran
+        // `(-1).saturating_sub(1).max(0)` -> 0, which incorrectly forced
+        // every variadic instance method to accept exactly zero arguments.
+        // min_parameter_count() also counts the instance as slot 0 (same
+        // convention as parameter_count()), so subtract 1 from it instead.
+        if pc == -1 {
+            let min_extra = method.min_parameter_count().saturating_sub(1).max(0) as usize;
+            if arg_count < min_extra {
+                return create_error(
+                    &format!(
+                        "{:?}.{} expects at least {} arguments, got {}",
+                        instance_type, method_name, min_extra, arg_count
+                    ),
+                    line_number,
+                    column_number,
+                );
+            }
+        } else {
+            let expected_params = pc.saturating_sub(1).max(0);
+            if expected_params as usize != arg_count {
+                return create_error(
+                    &format!(
+                        "{:?}.{} expects {} arguments, got {}",
+                        instance_type, method_name, expected_params, arg_count
+                    ),
+                    line_number,
+                    column_number,
+                );
+            }
         }
     }
 
@@ -326,7 +368,13 @@ pub fn get_instance_method_signature(
 ) -> Option<MethodSignatureInfo> {
     let method = instance_method_registry::get_instance_method(dix_type, method_name)?;
 
-    let param_count = method.parameter_count().saturating_sub(1).max(0);
+    let raw_pc = method.parameter_count();
+
+    // FIX: previously `raw_pc.saturating_sub(1).max(0)` collapsed variadic
+    // methods (raw_pc == -1) to 0, misreporting them as zero-argument in
+    // signature info (hover, etc.). Preserve the -1 sentinel for variadics;
+    // only subtract the instance slot for fixed-arity methods.
+    let param_count = if raw_pc < 0 { -1 } else { raw_pc.saturating_sub(1).max(0) };
 
     Some(MethodSignatureInfo {
         full_name: format!("{:?}.{}", dix_type, method_name),

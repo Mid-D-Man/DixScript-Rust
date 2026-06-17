@@ -6,6 +6,92 @@ use crate::Builtins::Core::{DixValue, DixType, IBuiltinMethod, BuiltinMethod};
 use base64::{Engine as _, engine::general_purpose};
 use std::collections::HashMap;
 
+// ── Magic-byte MIME detection ─────────────────────────────────────────────────
+//
+// Inspects the leading bytes of decoded blob data to identify common file types.
+// Returns "application/octet-stream" when no signature matches.
+//
+// References:
+//   PNG  — https://www.w3.org/TR/PNG/#5PNG-file-signature  (8 bytes)
+//   JPEG — ISO/IEC 10918-1, SOI marker FF D8, followed by FF
+//   GIF  — GIF87a / GIF89a: bytes 0-3 = "GIF8"
+//   PDF  — ISO 32000: bytes 0-3 = "%PDF"
+//   ZIP  — PK\x03\x04 (covers docx, xlsx, jar, apk, …)
+//   WEBP — "RIFF" at 0-3, "WEBP" at 8-11
+//   BMP  — "BM" at 0-1
+//   ICO  — 00 00 01 00
+
+fn detect_mime_type(bytes: &[u8]) -> &'static str {
+    let len = bytes.len();
+
+    // PNG: 89 50 4E 47 0D 0A 1A 0A (8 bytes)
+    if len >= 8
+        && bytes[0] == 0x89
+        && bytes[1] == 0x50
+        && bytes[2] == 0x4E
+        && bytes[3] == 0x47
+        && bytes[4] == 0x0D
+        && bytes[5] == 0x0A
+        && bytes[6] == 0x1A
+        && bytes[7] == 0x0A
+    {
+        return "image/png";
+    }
+
+    // JPEG: FF D8 FF
+    if len >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF {
+        return "image/jpeg";
+    }
+
+    // GIF: 47 49 46 38 ("GIF8")
+    if len >= 4 && bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38 {
+        return "image/gif";
+    }
+
+    // PDF: 25 50 44 46 ("%PDF")
+    if len >= 4 && bytes[0] == 0x25 && bytes[1] == 0x50 && bytes[2] == 0x44 && bytes[3] == 0x46 {
+        return "application/pdf";
+    }
+
+    // ZIP / PK: 50 4B 03 04
+    if len >= 4 && bytes[0] == 0x50 && bytes[1] == 0x4B && bytes[2] == 0x03 && bytes[3] == 0x04 {
+        return "application/zip";
+    }
+
+    // WEBP: "RIFF" at [0..4] and "WEBP" at [8..12]
+    if len >= 12
+        && bytes[0] == 0x52
+        && bytes[1] == 0x49
+        && bytes[2] == 0x46
+        && bytes[3] == 0x46
+        && bytes[8]  == 0x57
+        && bytes[9]  == 0x45
+        && bytes[10] == 0x42
+        && bytes[11] == 0x50
+    {
+        return "image/webp";
+    }
+
+    // BMP: 42 4D ("BM")
+    if len >= 2 && bytes[0] == 0x42 && bytes[1] == 0x4D {
+        return "image/bmp";
+    }
+
+    // ICO: 00 00 01 00
+    if len >= 4
+        && bytes[0] == 0x00
+        && bytes[1] == 0x00
+        && bytes[2] == 0x01
+        && bytes[3] == 0x00
+    {
+        return "image/x-icon";
+    }
+
+    "application/octet-stream"
+}
+
+// ── Method registry ───────────────────────────────────────────────────────────
+
 /// Get all blob instance methods
 pub fn get_methods() -> HashMap<String, Box<dyn IBuiltinMethod>> {
     let mut methods: HashMap<String, Box<dyn IBuiltinMethod>> = HashMap::new();
@@ -30,6 +116,10 @@ pub fn get_methods() -> HashMap<String, Box<dyn IBuiltinMethod>> {
     );
 
     // blob.mimeType() - Detect MIME type from magic bytes
+    //
+    // FIX (Group H): Previously delegated to get_blob_metadata() which always
+    // returned "application/octet-stream". Now decodes the blob bytes directly
+    // and runs magic-byte detection via detect_mime_type().
     methods.insert(
         "mimeType".to_string(),
         Box::new(BuiltinMethod::new(
@@ -41,8 +131,9 @@ pub fn get_methods() -> HashMap<String, Box<dyn IBuiltinMethod>> {
                 if blob.get_type() != DixType::Blob {
                     return Err(format!("mimeType() requires a blob, got {:?}", blob.get_type()));
                 }
-                let (mime_type, _, _) = blob.get_blob_metadata()?;
-                Ok(DixValue::from_string(mime_type))
+                let bytes = blob.as_blob_bytes()?;
+                let mime = detect_mime_type(&bytes);
+                Ok(DixValue::from_string(mime.to_string()))
             },
             "Detects and returns the MIME type based on magic bytes".to_string(),
         )),
@@ -126,8 +217,7 @@ pub fn get_methods() -> HashMap<String, Box<dyn IBuiltinMethod>> {
                     ));
                 }
 
-                let sliced = &bytes[start_idx..end_idx];
-                // Use engine API — base64::encode() is deprecated since 0.21
+                let sliced  = &bytes[start_idx..end_idx];
                 let encoded = general_purpose::STANDARD.encode(sliced);
                 DixValue::from_blob(encoded)
             },
@@ -210,7 +300,7 @@ mod tests {
 
     #[test]
     fn test_blob_mime_type() {
-        // PNG magic bytes in base64 — use engine API
+        // PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
         let png_bytes = [0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         let png_header = general_purpose::STANDARD.encode(png_bytes);
         let blob = DixValue::from_blob(png_header).unwrap();
@@ -219,4 +309,59 @@ mod tests {
         let result = mime_method.call(&[blob]).unwrap();
         assert_eq!(result.as_string(), "image/png");
     }
-}
+
+    #[test]
+    fn test_detect_mime_type_jpeg() {
+        let jpeg_bytes = [0xFFu8, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+        assert_eq!(detect_mime_type(&jpeg_bytes), "image/jpeg");
+    }
+
+    #[test]
+    fn test_detect_mime_type_gif() {
+        let gif_bytes = b"GIF89a\x01\x00";
+        assert_eq!(detect_mime_type(gif_bytes), "image/gif");
+    }
+
+    #[test]
+    fn test_detect_mime_type_pdf() {
+        let pdf_bytes = b"%PDF-1.7";
+        assert_eq!(detect_mime_type(pdf_bytes), "application/pdf");
+    }
+
+    #[test]
+    fn test_detect_mime_type_zip() {
+        let zip_bytes = [0x50u8, 0x4B, 0x03, 0x04, 0x14, 0x00];
+        assert_eq!(detect_mime_type(&zip_bytes), "application/zip");
+    }
+
+    #[test]
+    fn test_detect_mime_type_webp() {
+        let mut webp = [0u8; 12];
+        webp[0..4].copy_from_slice(b"RIFF");
+        webp[4..8].copy_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+        webp[8..12].copy_from_slice(b"WEBP");
+        assert_eq!(detect_mime_type(&webp), "image/webp");
+    }
+
+    #[test]
+    fn test_detect_mime_type_unknown_returns_octet_stream() {
+        let unknown = [0x00u8, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        assert_eq!(detect_mime_type(&unknown), "application/octet-stream");
+    }
+
+    #[test]
+    fn test_detect_mime_type_empty() {
+        assert_eq!(detect_mime_type(&[]), "application/octet-stream");
+    }
+
+    #[test]
+    fn test_blob_mime_type_unknown_data() {
+        // Random data that doesn't match any signature
+        let random = general_purpose::STANDARD.encode([0x01u8, 0x02, 0x03, 0x04]);
+        let blob = DixValue::from_blob(random).unwrap();
+        let methods = get_methods();
+        let mime_method = methods.get("mimeType").unwrap();
+        let result = mime_method.call(&[blob]).unwrap();
+        assert_eq!(result.as_string(), "application/octet-stream");
+    }
+        }

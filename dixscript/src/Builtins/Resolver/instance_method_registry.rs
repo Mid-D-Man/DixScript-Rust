@@ -271,12 +271,27 @@ pub fn validate_instance_call(
         ),
     };
 
-    // parameter_count includes the instance as arg 0 — subtract 1
-    let expected = if method.parameter_count() > 0 {
-        (method.parameter_count() - 1) as usize
+// parameter_count includes the instance as arg 0. -1 means variadic —
+    // use min_parameter_count() instead (which uses the same instance-as-
+    // slot-0 convention) rather than collapsing to a bogus "0 args expected".
+    let pc = method.parameter_count();
+    if pc == -1 {
+        let min_extra = method.min_parameter_count().saturating_sub(1).max(0) as usize;
+        if arg_count < min_extra {
+            return ValidationResult::error(&format!(
+                "{:?}.{} expects at least {} arguments, got {}",
+                instance_type, method_name, min_extra, arg_count
+            ));
+        }
     } else {
-        0
-    };
+        let expected = pc.saturating_sub(1).max(0) as usize;
+        if expected != arg_count {
+            return ValidationResult::error(&format!(
+                "{:?}.{} expects {} arguments, got {}",
+                instance_type, method_name, expected, arg_count
+            ));
+        }
+    }
 
     if expected != arg_count {
         return ValidationResult::error(&format!(

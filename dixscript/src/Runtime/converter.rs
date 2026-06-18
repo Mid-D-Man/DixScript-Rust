@@ -1,4 +1,3 @@
-
 use std::collections::HashMap;
 use crate::Compiler::AST::{
     DixScript, ConfigSection, ConfigEntry, ConfigValue,
@@ -79,6 +78,15 @@ impl DixConverter {
     /// Callers passing an already-structural map (e.g.
     /// `DixData::to_structural_hashmap()`, or a hand-built map with no
     /// synthetic child keys) are unaffected — filtering is a no-op in that case.
+    ///
+    /// **Determinism fix**: entries are rebuilt in sorted-key order rather
+    /// than relying on `HashMap` iteration order, so two calls to
+    /// `from_hashmap` over the same logical data always produce the same
+    /// `DataEntry` ordering — this matters for round-trip idempotency checks
+    /// (e.g. `mdix format --check`). The auto-generated `@CONFIG` section no
+    /// longer stamps a `created` timestamp via `chrono::Utc::now()`, since
+    /// that made every call produce different output even for identical
+    /// input, breaking any byte-for-byte comparison of two round trips.
     pub fn from_hashmap(&self, data: HashMap<String, DixValue>) -> Result<DixScript, String> {
         let data = filter_structural_keys(&data);
 
@@ -95,14 +103,25 @@ impl DixConverter {
 
         let mut data_entries = Vec::new();
 
-        for (key, value) in flat_properties {
+        // Sorted, deterministic order — HashMap iteration order is not
+        // guaranteed stable across separate HashMap instances even within
+        // the same process, so relying on it here would make repeated
+        // from_hashmap calls over identical data produce different
+        // DataEntry orderings.
+        let mut flat_keys: Vec<String> = flat_properties.keys().cloned().collect();
+        flat_keys.sort();
+        for key in flat_keys {
+            let value = flat_properties.remove(&key).unwrap();
             let ast_value = self.convert_dix_value_to_ast_value(&value)?;
             data_entries.push(DataEntry::SimpleProperty {
                 name: key, data_type: None, value: ast_value, position: Position::UNKNOWN,
             });
         }
 
-        for (key, value) in nested_structures {
+        let mut nested_keys: Vec<String> = nested_structures.keys().cloned().collect();
+        nested_keys.sort();
+        for key in nested_keys {
+            let value = nested_structures.remove(&key).unwrap();
             self.process_nested_structure(&key, &value, &mut data_entries, "")?;
         }
 
@@ -112,18 +131,21 @@ impl DixConverter {
             None
         };
 
+        // FIX: previously included a "created" entry stamped with
+        // chrono::Utc::now(), which made every call to from_hashmap produce
+        // a different @CONFIG section even for byte-identical input data.
+        // That broke idempotency checks (e.g. `mdix format --check` running
+        // load -> to_hashmap -> from_hashmap -> to_mdix twice and comparing
+        // the result) since the timestamp differed between the two runs.
+        // The version string alone is deterministic and sufficient here —
+        // this function has no access to the original source file's real
+        // @CONFIG section anyway, so synthesizing a fake "created" time
+        // was never meaningful.
         let config_section = Some(ConfigSection {
             entries: vec![
                 ConfigEntry {
                     key: "version".to_string(),
                     value: ConfigValue::String("1.0.0".to_string()),
-                    position: Position::UNKNOWN,
-                },
-                ConfigEntry {
-                    key: "created".to_string(),
-                    value: ConfigValue::Timestamp(
-                        chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
-                    ),
                     position: Position::UNKNOWN,
                 },
             ],
@@ -734,7 +756,13 @@ impl DixConverter {
                 let mut properties: Vec<PropertyAssignment> = Vec::new();
                 let mut nested: Vec<(String, DixValue)>     = Vec::new();
 
-                for (k, v) in obj {
+                // Sorted iteration here too, so the same Object always
+                // produces the same property ordering across calls.
+                let mut obj_keys: Vec<&String> = obj.keys().collect();
+                obj_keys.sort();
+
+                for k in obj_keys {
+                    let v = &obj[k];
                     if matches!(v, DixValue::Object(_) | DixValue::Array(_)) {
                         nested.push((k.clone(), v.clone()));
                     } else {
@@ -904,6 +932,16 @@ impl DixConverter {
         if prefix.is_empty() { segment.to_string() } else { format!("{}.{}", prefix, segment) }
     }
 
+    /// Flatten a single `DataEntry` into `result`.
+    ///
+    /// **FIX**: `TableProperty` now also inserts an aggregate `DixValue::Object`
+    /// at the table path itself (mirroring the equivalent fix in
+    /// `DixData::flatten_entry`), not just the individual leaf paths. Without
+    /// this, `to_hashmap()` on an AST containing a `TableProperty` produced a
+    /// map with `"server.host"` but no `"server"` key at all — meaning
+    /// `filter_structural_keys` in `from_hashmap` had no aggregate to
+    /// recognize `"server.host"` as a child of, so it round-tripped back out
+    /// as an invalid flat identifier literally named `"server.host"`.
     fn flatten_entry(
         &self, entry: &DataEntry, prefix: &str,
         result: &mut HashMap<String, DixValue>,
@@ -918,10 +956,31 @@ impl DixConverter {
             }
             DataEntry::TableProperty { path, properties, .. } => {
                 let table_path = Self::build_path(prefix, &path.to_string());
+                let mut obj_map = HashMap::new();
+
                 for prop in properties {
                     let key = Self::build_path(&table_path, &prop.name);
                     if let Some(dix_value) = self.convert_ast_value_to_dix_value(&prop.value, enums) {
+                        obj_map.insert(prop.name.clone(), dix_value.clone());
                         result.insert(key, dix_value);
+                    }
+                }
+
+                // Insert or merge the aggregate Object — same merge behavior
+                // as DixData::flatten_entry, so two TableProperty entries
+                // sharing the same path don't clobber each other.
+                if !obj_map.is_empty() {
+                    match result.entry(table_path) {
+                        std::collections::hash_map::Entry::Vacant(e) => {
+                            e.insert(DixValue::Object(obj_map));
+                        }
+                        std::collections::hash_map::Entry::Occupied(mut e) => {
+                            if let DixValue::Object(ref mut existing) = e.get_mut() {
+                                for (k, v) in obj_map {
+                                    existing.entry(k).or_insert(v);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1350,9 +1409,12 @@ mod tests {
         let converter = DixConverter::new();
         let flat = converter.to_hashmap(&ast);
 
-        // Sanity: fully-flattened map contains synthetic children.
+        // Sanity: fully-flattened map contains synthetic children AND the
+        // aggregates they're derived from.
         assert!(flat.contains_key("server.host"));
+        assert!(flat.contains_key("server"));
         assert!(flat.contains_key("tags[0]"));
+        assert!(flat.contains_key("tags"));
 
         let ast2 = converter.from_hashmap(flat).unwrap();
         let mdix = converter.to_mdix(&ast2, None).unwrap();
@@ -1362,4 +1424,4 @@ mod tests {
         assert!(mdix.contains("server:"), "expected table property syntax: {}", mdix);
         assert!(mdix.contains("tags::"), "expected group array syntax: {}", mdix);
     }
-                }
+            }

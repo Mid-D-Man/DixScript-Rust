@@ -6,14 +6,43 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- These DLLs live inside VS for Mac — adjust path if yours differs -->
+    <!-- These DLLs live inside VS for Mac — adjust path if yours differs.
+         Legacy install path as of the final 17.6 release. -->
     <Reference Include="MonoDevelop.Ide">
       <HintPath>/Applications/Visual Studio.app/Contents/MonoBundle/MonoDevelop.Ide.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MonoDevelop.Core">
+      <HintPath>/Applications/Visual Studio.app/Contents/MonoBundle/MonoDevelop.Core.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Mono.Addins">
       <HintPath>/Applications/Visual Studio.app/Contents/MonoBundle/Mono.Addins.dll</HintPath>
       <Private>false</Private>
     </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Embedded so Mono.Addins finds it via assembly reflection at
+         registration time — merged into the addin module declared by
+         the attributes in AddinInfo.cs. -->
+    <EmbeddedResource Include="Manifest.addin.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Resources\mdix-file-icon.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Resources\mdix-file-icon-dark.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Bundled mdix-lsp binary — populated by scripts/copy-binary.sh.
+         Excluded from source control; see .gitignore. -->
+    <None Include="bin\**\mdix-lsp" Condition="Exists('bin')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 </Project>

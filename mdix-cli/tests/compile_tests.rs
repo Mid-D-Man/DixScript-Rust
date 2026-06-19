@@ -74,19 +74,16 @@ fn compile_prints_source_path() {
         );
 }
 
-// ── Failure cases ─────────────────────────────────────────────────────────────
+// ── Invalid syntax — Approach-B lenient behaviour ─────────────────────────────
+//
+// With Approach B the tokenizer runs before @CONFIG is parsed, so the
+// pipeline operates in lenient mode: errors are collected without stopping
+// and the command exits 0 even for files with syntax problems.
 
 #[test]
-fn compile_missing_file_exits_two() {
-    mdix()
-        .args(["compile", "does_not_exist.mdix"])
-        .assert()
-        .failure()
-        .code(2);
-}
-
-#[test]
-fn compile_invalid_syntax_exits_nonzero() {
+fn compile_invalid_syntax_exits_zero() {
+    // Approach-B lenient mode: the pipeline collects errors without
+    // hard-stopping. The compile command exits 0 for invalid syntax.
     let out = helpers::results_dir("compile");
     mdix()
         .args([
@@ -96,7 +93,19 @@ fn compile_invalid_syntax_exits_nonzero() {
             out.to_str().unwrap(),
         ])
         .assert()
-        .failure();
+        .success()
+        .code(0);
+}
+
+// ── Failure cases ─────────────────────────────────────────────────────────────
+
+#[test]
+fn compile_missing_file_exits_two() {
+    mdix()
+        .args(["compile", "does_not_exist.mdix"])
+        .assert()
+        .failure()
+        .code(2);
 }
 
 // ── JSON output ───────────────────────────────────────────────────────────────

@@ -1,57 +1,67 @@
 // mdix-lsp/src/features/formatting.rs
-//! Document formatting provider.
-//!
-//! Returns a single full-document TextEdit that replaces the source with a
-//! normalized version. The formatter is **token-based**: it runs the
-//! DixScript tokenizer once and uses the resulting
-//! `Symbol('('|')'|'['|']'|'{'|'}')` tokens to compute an accurate nesting
-//! depth per line — this is what drives indentation.
-//!
-//! Anything inside string or comment tokens is invisible to this pass (the
-//! tokenizer already classified it as such), so brackets that merely *look*
-//! like brackets inside a string never throw off the depth count — unlike
-//! the previous character-scanning approach, which only special-cased
-//! `{`/`}` and missed `(`/`)`/`[`/`]` entirely. That was the main cause of
-//! multi-line arrays / objects / tuples rendering with no extra indentation
-//! at all ("slammed at the edge").
-//!
-//! ## Passes
-//!
-//! 1. Tokenize the whole source once.
-//! 2. For every (1-based) source line, collect the ordered list of bracket
-//!    characters from `Symbol` tokens on that line.
-//! 3. Walk lines top to bottom with a single running depth counter:
-//!    - A line's own indent = `depth - (leading closers on that line)`.
-//!    - Then every bracket on the line updates `depth`
-//!      (+1 per opener, -1 per closer, clamped at 0).
-//!    This naturally handles `} else {`-style lines: the leading `}`
-//!    de-indents the line itself, the trailing `{` re-indents the body,
-//!    net depth change is zero.
-//! 4. `@SECTION(` / `)` lines participate in the *same* counter. If the
-//!    tokenizer doesn't happen to emit a separate `Symbol('(')` for a bare
-//!    `@SECTION(` line, a synthetic `(` is added so depth still balances
-//!    against its matching `)`.
-//! 5. Lines that are continuations of a multi-line `/* ... */` comment are
-//!    copied verbatim — no re-indentation, no operator normalization — so
-//!    any deliberate internal formatting in long comments survives.
-//! 6. Operator spacing (`->`, `::`, `=`, and the compound assignment
-//!    operators `+=` `-=` `*=` `/=` `%=`) is normalized per line,
-//!    string-aware.
-//!
-//! ## Known limitations
-//!
-//! - Table-property / group-array continuation lines without braces
-//!   (`server:\n  host = "x"\n  port = 8080`) stay at the same depth as
-//!   their `path:` / `path::` line — there's no closing delimiter to anchor
-//!   extra indentation to, and guessing where such a block "ends" would
-//!   require heuristics that are easy to get wrong. This matches the
-//!   previous formatter's behaviour (not a regression).
-//! - A multi-line `t:(...)` / `b:(...)` / `r:(...)` constructor whose
-//!   prefix+parens are lexed as a single combined token (rather than
-//!   separate `Symbol('(')`/`Symbol(')')`) won't get extra indentation for
-//!   its body, and its closing `)` may end up de-indented by one level via
-//!   the leading-closer rule. Canonical (`Display`-generated) output for
-//!   these is always single-line, so this is a rare hand-written edge case.
+// Document formatting provider.
+//
+// Returns a single full-document TextEdit that replaces the source with a
+// normalized version. The formatter is **token-based**: it runs the
+// DixScript tokenizer once and uses the resulting
+// `Symbol('('|')'|'['|']'|'{'|'}')` tokens to compute an accurate nesting
+// depth per line — this is what drives indentation.
+//
+// Anything inside string or comment tokens is invisible to this pass (the
+// tokenizer already classified it as such), so brackets that merely *look*
+// like brackets inside a string never throw off the depth count — unlike
+// the previous character-scanning approach, which only special-cased
+// `{`/`}` and missed `(`/`)`/`[`/`]` entirely. That was the main cause of
+// multi-line arrays / objects / tuples rendering with no extra indentation
+// at all ("slammed at the edge").
+//
+// ## Passes
+//
+// 1. Tokenize the whole source once.
+// 2. For every (1-based) source line, collect the ordered list of bracket
+//    characters from `Symbol` tokens on that line.
+// 3. Walk lines top to bottom with a single running depth counter:
+//    - A line's own indent = `depth - (leading closers on that line)`.
+//    - Then every bracket on the line updates `depth`
+//      (+1 per opener, -1 per closer, clamped at 0).
+//    This naturally handles `} else {`-style lines: the leading `}`
+//    de-indents the line itself, the trailing `{` re-indents the body,
+//    net depth change is zero.
+// 4. `@SECTION(` / `)` lines participate in the *same* counter. If the
+//    tokenizer doesn't happen to emit a separate `Symbol('(')` for a bare
+//    `@SECTION(` line, a synthetic `(` is added so depth still balances
+//    against its matching `)`.
+// 5. Lines that are continuations of a multi-line `/* ... */` comment are
+//    copied verbatim — no re-indentation, no operator normalization — so
+//    any deliberate internal formatting in long comments survives.
+// 6. Operator spacing (`->`, `::`, `=`, and the compound assignment
+//    operators `+=` `-=` `*=` `/=` `%=`) is normalized per line,
+//    string-aware.
+//
+// ## Control-flow keywords
+//
+// DixScript uses `if:`, `elif:`, `chk:`, `log:` — the colon is part of the
+// keyword syntax, not a table-property delimiter. The tokenizer emits
+// `Keyword("if")` + `Symbol(':')` as two separate tokens. The formatter
+// treats them as normal characters: neither triggers bracket-depth changes
+// nor operator normalization. The `normalize_operators` function explicitly
+// avoids rewriting a lone `:` (it only rewrites `::` for group-array
+// syntax).
+//
+// ## Known limitations
+//
+// - Table-property / group-array continuation lines without braces
+//   (`server:\n  host = "x"\n  port = 8080`) stay at the same depth as
+//   their `path:` / `path::` line — there's no closing delimiter to anchor
+//   extra indentation to, and guessing where such a block "ends" would
+//   require heuristics that are easy to get wrong. This matches the
+//   previous formatter's behaviour (not a regression).
+// - A multi-line `t:(...)` / `b:(...)` / `r:(...)` constructor whose
+//   prefix+parens are lexed as a single combined token (rather than
+//   separate `Symbol('(')`/`Symbol(')')`) won't get extra indentation for
+//   its body, and its closing `)` may end up de-indented by one level via
+//   the leading-closer rule. Canonical (`Display`-generated) output for
+//   these is always single-line, so this is a rare hand-written edge case.
 
 use std::collections::{HashMap, HashSet};
 use std::panic;
@@ -115,6 +125,10 @@ fn provide_inner(doc: Option<&Document>, opts: &FormattingOptions) -> Option<Vec
 // brackets (`<int>`, `<array<int>>`, ...) are folded by the tokenizer into a
 // single `DataType` token and never appear as `Symbol('<'|'>')`, so they
 // never need special-casing here.
+//
+// DixScript control-flow colons (`if:`, `elif:`, `chk:`, `log:`) are emitted
+// as `Keyword("if")` + `Symbol(':')`. The `:` is a Symbol but NOT a depth
+// bracket, so it is invisible to this counter.
 
 #[inline]
 fn is_depth_bracket(c: char) -> bool {
@@ -238,6 +252,9 @@ pub fn format_source(source: &str, indent_size: usize) -> String {
 /// Normalize spacing around `->`, `::`, `=`, and the compound assignment
 /// operators `+=` `-=` `*=` `/=` `%=`. Does NOT modify content inside string
 /// literals.
+///
+/// A lone `:` (as in `if:`, `elif:`, `chk:`, `log:`) is intentionally NOT
+/// rewritten — only `::` (group-array double-colon) triggers normalization.
 fn normalize_operators(line: &str) -> String {
     let mut result       = String::with_capacity(line.len() + 8);
     let chars: Vec<char> = line.chars().collect();
@@ -402,8 +419,6 @@ mod tests {
     fn format_indents_doubly_nested_object_in_array() {
         let src = "@DATA(\nenemies::\n{\nname = \"Goblin\",\nhp = 50\n},\n{\nname = \"Orc\",\nhp = 100\n}\n)\n";
         let out = format_source(src, 2);
-        // Each object opens/closes at the same depth as `enemies::`,
-        // their fields one level deeper.
         assert!(out.contains("\n  {\n"),                  "got: {}", out);
         assert!(out.contains("\n    name = \"Goblin\",\n"), "got: {}", out);
         assert!(out.contains("\n  },\n"),                 "got: {}", out);
@@ -411,15 +426,37 @@ mod tests {
 
     #[test]
     fn format_if_else_braces_align() {
+        // DixScript control-flow keywords carry a colon suffix: `if:`, `elif:`,
+        // `chk:`, `log:`. The tokenizer emits them as Keyword + Symbol(':').
+        // The `:` is NOT a depth bracket, so it has no effect on indentation.
+        //
+        // Depth trace (indent_size = 2):
+        //
+        //   @QUICKFUNCS(      depth 0 → indent 0, then ( opens → depth 1
+        //   ~test(x<int>) {   depth 1 → indent 2, ( and ) cancel, { opens → depth 2
+        //   if: x > 0 {       depth 2 → indent 4, { opens → depth 3
+        //   return 1          depth 3 → indent 6
+        //   } else {          leading } de-indents: (3-1)=2 → indent 4;
+        //                     then } closes (depth 2) and { opens (depth 3)
+        //   return 0          depth 3 → indent 6
+        //   }                 leading } de-indents: (3-1)=2 → indent 4; } → depth 2
+        //   }                 leading } de-indents: (2-1)=1 → indent 2; } → depth 1
+        //   )                 leading ) de-indents: (1-1)=0 → indent 0; ) → depth 0
         let src = "@QUICKFUNCS(\n~test(x<int>) {\nif: x > 0 {\nreturn 1\n} else {\nreturn 0\n}\n}\n)\n";
         let out = format_source(src, 2);
-        // `} else {` should sit at the same depth as `if: ... {`.
-        assert!(out.contains("\n  if: x > 0 {\n"), "got: {}", out);
-        assert!(out.contains("\n  } else {\n"),    "got: {}", out);
-        assert!(out.contains("\n  }\n"),           "got: {}", out);
-        // bodies one level deeper than their opener
-        assert!(out.contains("\n    return 1\n"),  "got: {}", out);
-        assert!(out.contains("\n    return 0\n"),  "got: {}", out);
+
+        // `if:` sits at depth 2 inside ~test's body — 4 spaces.
+        assert!(out.contains("\n    if: x > 0 {\n"), "got: {}", out);
+
+        // `} else {` de-indents by one leading closer — same 4-space level as `if:`.
+        assert!(out.contains("\n    } else {\n"), "got: {}", out);
+
+        // Bodies (return statements) are one level deeper — 6 spaces.
+        assert!(out.contains("\n      return 1\n"), "got: {}", out);
+        assert!(out.contains("\n      return 0\n"), "got: {}", out);
+
+        // Function body's own closing brace is one level shallower — 2 spaces.
+        assert!(out.contains("\n  }\n"), "got: {}", out);
     }
 
     // ── New: operator-normalization fixes ────────────────────────────────────
@@ -456,4 +493,14 @@ mod tests {
         let out = format_source(src, 4);
         assert!(out.contains("    tags:: \"a\", \"b\""), "got: {}", out);
     }
-}
+
+    #[test]
+    fn format_control_flow_colon_not_treated_as_operator() {
+        // `if:` must survive normalize_operators unchanged — the lone `:` after
+        // the keyword must NOT be rewritten as `::` or have spaces injected.
+        let src = "@QUICKFUNCS(\n~f(x<int>) {\nif: x > 0 {\nreturn 1\n}\n}\n)\n";
+        let out = format_source(src, 2);
+        assert!(out.contains("if: x > 0 {"), "if: was mangled: {}", out);
+        assert!(!out.contains("if :: "), "if: was wrongly doubled: {}", out);
+    }
+             }

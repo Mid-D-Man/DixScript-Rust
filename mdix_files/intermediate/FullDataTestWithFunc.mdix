@@ -703,9 +703,9 @@
         defense = defense_calc,
         speed = speed_calc,
         critical_chance = critical_calc,
-        power_level = power_level_calc
+        power_level = power_level_calc, waka = {zuse =12}
     };
-    
+
     return stats;
 }
 

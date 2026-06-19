@@ -13,6 +13,7 @@
 )
 
 @QUICKFUNCS(
+
   ~makeGearPiece<object>(slot<enum>, name<string>, rarity<enum>) {
     let id<string>   = $"GEAR_{slot}"
     let value<int>   = Base.scaledValue(40, rarity)

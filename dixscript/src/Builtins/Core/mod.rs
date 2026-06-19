@@ -1,4 +1,4 @@
-// src/Builtins/Core/mod.rs
+
 //! Core - DixType, DixValue, and IBuiltinMethod
 
 pub mod dix_type;

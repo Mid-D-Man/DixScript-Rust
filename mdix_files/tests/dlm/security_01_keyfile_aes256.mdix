@@ -51,16 +51,16 @@
   app_name           = "SecureVault"
   version            = "2.1.0"
 
-  database: dbConfig("db.prod.internal", 5432, true, 20)
-  replica:  dbConfig("db-replica.prod.internal", 5432, true, 10)
+  database = dbConfig("db.prod.internal", 5432, true, 20)
+  replica =  dbConfig("db-replica.prod.internal", 5432, true, 10)
 
-  smtp: smtpConfig("smtp.sendgrid.net", 587, "apikey")
+  smtp = smtpConfig("smtp.sendgrid.net", 587, "apikey")
 
   api_keys::
     serviceKey("stripe", Environment.PROD)
     serviceKey("sendgrid", Environment.PROD)
     serviceKey("twilio", Environment.PROD)
-
+secrets:
   jwt_secret        = "hs512_256bit_secret_replace_with_cryptographically_random_value"
   session_secret    = "session_512bit_replace_with_secure_random_value_in_production"
   stripe_secret     = "sk_live_replace_with_real_stripe_live_key"
@@ -74,7 +74,7 @@
 
 @SECURITY(
   encryption -> {
-    mode      = "keyfile"
+    mode      = "keyfile",
     algorithm = "aes256-gcm"
   }
 )

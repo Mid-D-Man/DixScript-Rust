@@ -5,18 +5,17 @@
     <vendor email="midmanstudio@github" url="https://github.com/Mid-D-Man/DixScript-Rust">
         MidManStudio
     </vendor>
-    <description>
+    <description><![CDATA[
         Full IDE support for DixScript (.mdix) configuration files.
         Powered by mdix-lsp: completions, hover, diagnostics, goto-definition,
         inlay hints, semantic highlighting, formatting, and more.
-    </description>
+    ]]></description>
 
     <!-- Works in Rider, IntelliJ IDEA, Rust Rover, and any other JetBrains IDE -->
     <depends>com.intellij.modules.platform</depends>
     <depends>com.redhat.devtools.lsp4ij</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <!-- Register the .mdix file type -->
         <fileType name="MDIX"
                   implementationClass="com.midmanstudio.mdix.MdixFileType"
                   fieldName="INSTANCE"
@@ -25,13 +24,11 @@
     </extensions>
 
     <extensions defaultExtensionNs="com.redhat.devtools.lsp4ij">
-        <!-- Register the language server -->
         <server id="com.midmanstudio.mdix.server"
                 name="DixScript Language Server"
                 factoryClass="com.midmanstudio.mdix.MdixServerFactory"
                 lastDocumentDisconnectedTimeout="5"/>
 
-        <!-- Map .mdix file type to the server -->
         <fileTypeMapping serverId="com.midmanstudio.mdix.server"
                          fileType="MDIX"/>
     </extensions>

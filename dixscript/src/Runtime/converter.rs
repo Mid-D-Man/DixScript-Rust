@@ -255,12 +255,62 @@ impl DixConverter {
                 }
             }
 
-            if !flat_props.is_empty() && (!table_props.is_empty() || !group_arrays.is_empty()) {
+            // ── FIX: mandatory comma separators across the flat→grouped
+            // boundary and between every pair of grouped entries ───────────────
+            //
+            // The grammar treats the comma between top-level @DATA entries as
+            // OPTIONAL because normally real whitespace/newlines disambiguate
+            // adjacent entries. That assumption quietly broke for minified
+            // output: `DixFormatOptions::minified()` makes `nl`/`sp`/`indent`
+            // all resolve to `""`, so this section used to glue adjacent
+            // top-level entries together with NO separator at all — unlike
+            // the property/item lists below, which already always emit a
+            // literal `,` between siblings.
+            //
+            // Two concrete failure modes resulted from that, both reproducible
+            // against real multi-section .mdix files:
+            //
+            //   1. Hard tokenizer abort. A flat numeric property ending in a
+            //      digit (e.g. `rydberg_constant = 10973731.568160`)
+            //      immediately followed by a TablePath starting with a vowel
+            //      (`elements.hydrogen.identity:`) fuses into the literal
+            //      substring `...568160elements...`. The lexer's numeric
+            //      scanner is greedy about scientific-notation markers — it
+            //      consumes the leading `e` of "elements" as an exponent
+            //      marker, fails to find exponent digits after it, and raises
+            //      an invalid-number lexical error. Depending on the error
+            //      strategy this can abort tokenization outright, silently
+            //      dropping every entry written after that point — i.e. the
+            //      output looks like it was simply cut off right where the
+            //      grouped (table-property) entries begin.
+            //   2. Silent corruption, no error raised at all. A grouped entry
+            //      whose last rendered token ends in a letter (an EnumValue
+            //      like `enums.Phase.GAS`, or a bare GroupArray scalar like
+            //      `1312.0` whose trailing digit then meets a following `e`)
+            //      fuses with the next entry's leading identifier into one
+            //      bogus Identifier token.
+            //
+            // A comma can never be absorbed by any literal/identifier scanner
+            // — it isn't alphanumeric and isn't part of any numeric or
+            // identifier grammar rule — so making it a hard separator here,
+            // instead of relying on whitespace that minify intentionally
+            // strips, closes both failure modes permanently, in every output
+            // mode (minified, compact, and indented alike).
+            let grouped_count = table_props.len() + group_arrays.len();
+
+            if !flat_props.is_empty() && grouped_count > 0 {
+                output.push(',');
                 output.push_str(nl);
                 output.push_str(nl);
             }
 
-            for entry in table_props {
+            let mut grouped_index = 0usize;
+
+            for entry in &table_props {
+                if grouped_index > 0 {
+                    output.push(',');
+                    output.push_str(nl);
+                }
                 if let DataEntry::TableProperty { path, properties, .. } = entry {
                     output.push_str(&indent);
                     output.push_str(&path.to_string());
@@ -274,11 +324,15 @@ impl DixConverter {
                         output.push_str(sp);
                         output.push_str(&self.format_value_for_mdix(&prop.value, opts));
                     }
-                    output.push_str(nl);
                 }
+                grouped_index += 1;
             }
 
-            for entry in group_arrays {
+            for entry in &group_arrays {
+                if grouped_index > 0 {
+                    output.push(',');
+                    output.push_str(nl);
+                }
                 if let DataEntry::GroupArray { path, items, .. } = entry {
                     output.push_str(&indent);
                     output.push_str(&path.to_string());
@@ -288,8 +342,12 @@ impl DixConverter {
                         if i > 0 { output.push(','); output.push_str(sp); }
                         output.push_str(&self.format_value_for_mdix(item, opts));
                     }
-                    output.push_str(nl);
                 }
+                grouped_index += 1;
+            }
+
+            if grouped_count > 0 {
+                output.push_str(nl);
             }
 
             output.push(')');
@@ -1424,4 +1482,133 @@ mod tests {
         assert!(mdix.contains("server:"), "expected table property syntax: {}", mdix);
         assert!(mdix.contains("tags::"), "expected group array syntax: {}", mdix);
     }
-            }
+
+    // ── NEW: minify-mode entry-separator regression coverage ──────────────────
+    //
+    // Reproduces the exact failure class found in real chemistry-DB files:
+    // a flat numeric property whose rendered value ends in a digit, directly
+    // followed by a grouped (TableProperty/GroupArray) entry. Before the fix,
+    // `to_mdix` under `DixFormatOptions::minified()` glued these together with
+    // zero separator, and — when the numeric value had a decimal point — the
+    // lexer's exponent scanner would misread the next entry's leading letter
+    // as a scientific-notation marker and raise an invalid-number error.
+
+    #[test]
+    fn test_minified_output_separates_flat_and_table_tier_with_comma() {
+        let ast = make_ast(vec![
+            DataEntry::SimpleProperty {
+                name: "rydberg_constant".to_string(), data_type: None,
+                value: Value::Double { value: 10973731.568160, position: Position::UNKNOWN },
+                position: Position::UNKNOWN,
+            },
+            DataEntry::TableProperty {
+                path: path(&["elements", "hydrogen", "identity"]),
+                properties: vec![prop("name", Value::String { value: "Hydrogen".into(), position: Position::UNKNOWN })],
+                position: Position::UNKNOWN,
+            },
+        ]);
+
+        let converter = DixConverter::new();
+        let opts = DixFormatOptions::minified();
+        let minified = converter.to_mdix(&ast, Some(&opts)).unwrap();
+
+        // The literal bug: no comma meant "...568160elements..." was produced,
+        // which the lexer cannot safely re-tokenize (568160 + leading 'e' of
+        // "elements" reads as a broken scientific-notation literal).
+        assert!(
+            !minified.contains("568160elements"),
+            "flat property fused with following table path with no separator: {}",
+            minified
+        );
+
+        // The fix: a literal comma must separate the two tiers.
+        assert!(
+            minified.contains("568160,elements"),
+            "expected a comma separating the flat and grouped tiers, got: {}",
+            minified
+        );
+
+        // And the table property itself must have survived intact —
+        // this is the actual symptom that was reported: everything after
+        // the flat→table boundary used to be silently dropped.
+        assert!(
+            minified.contains("elements.hydrogen.identity:"),
+            "table property was dropped from minified output: {}",
+            minified
+        );
+        assert!(
+            minified.contains("name=\"Hydrogen\""),
+            "table property's own fields were dropped: {}",
+            minified
+        );
+    }
+
+    #[test]
+    fn test_minified_output_separates_consecutive_table_properties_with_comma() {
+        let ast = make_ast(vec![
+            DataEntry::TableProperty {
+                path: path(&["elements", "hydrogen", "identity"]),
+                properties: vec![prop("symbol", Value::EnumValue {
+                    enum_name: "enums".into(), value: "GAS".into(), position: Position::UNKNOWN,
+                })],
+                position: Position::UNKNOWN,
+            },
+            DataEntry::TableProperty {
+                path: path(&["elements", "helium", "identity"]),
+                properties: vec![prop("symbol", Value::String { value: "He".into(), position: Position::UNKNOWN })],
+                position: Position::UNKNOWN,
+            },
+        ]);
+
+        let converter = DixConverter::new();
+        let opts = DixFormatOptions::minified();
+        let minified = converter.to_mdix(&ast, Some(&opts)).unwrap();
+
+        // Old bug: "...enums.GAS" + "elements.helium..." with no separator
+        // fuses into a single bogus identifier "GASelements".
+        assert!(
+            !minified.contains("GASelements"),
+            "two consecutive table properties were fused into one identifier: {}",
+            minified
+        );
+
+        // Both table properties must be independently present.
+        assert!(minified.contains("elements.hydrogen.identity:"), "got: {}", minified);
+        assert!(minified.contains("elements.helium.identity:"), "got: {}", minified);
+    }
+
+    #[test]
+    fn test_minified_output_separates_table_and_group_array_with_comma() {
+        let ast = make_ast(vec![
+            DataEntry::TableProperty {
+                path: path(&["server"]),
+                properties: vec![prop("port", int_val(8080))],
+                position: Position::UNKNOWN,
+            },
+            DataEntry::GroupArray {
+                path: path(&["tags"]),
+                items: vec![Value::String { value: "alpha".into(), position: Position::UNKNOWN }],
+                position: Position::UNKNOWN,
+            },
+        ]);
+
+        let converter = DixConverter::new();
+        let opts = DixFormatOptions::minified();
+        let minified = converter.to_mdix(&ast, Some(&opts)).unwrap();
+
+        assert!(minified.contains("server:"), "got: {}", minified);
+        assert!(minified.contains("tags::"), "got: {}", minified);
+        // Re-tokenizing the minified output must succeed end-to-end and
+        // recover both entries — the real regression test for the bug.
+        let settings = crate::Compiler::Core::Config::OperationalSettings::default();
+        let tok = crate::Compiler::Core::Tokenizer::Tokenizer::new(&minified, &settings);
+        let result = tok.tokenize();
+        let rendered: Vec<String> = result.tokens.iter()
+            .filter_map(|t| match &t.token_type {
+                crate::Compiler::Core::Tokenizer::TokenType::Identifier(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(rendered.iter().any(|s| s == "tags"), "tags entry lost on re-tokenize: {:?}", rendered);
+    }
+}

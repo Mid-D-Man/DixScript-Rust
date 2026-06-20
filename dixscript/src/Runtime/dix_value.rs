@@ -179,3 +179,95 @@ impl From<Vec<DixValue>>             for DixValue { fn from(v: Vec<DixValue>)   
 impl From<HashMap<String, DixValue>> for DixValue { fn from(v: HashMap<String, DixValue>) -> Self { DixValue::Object(v) } }
 
 // NOTE: TryFrom<DixValue> for i64 lives in dix_data.rs — do NOT duplicate here.
+
+// ── Shared AST -> DixValue conversion ───────────────────────────────────────
+//
+// Previously this exact match (all 18-ish `Value` variants) was implemented
+// twice, nearly verbatim, in `dix_data.rs` (`DixData::ast_value_to_dix_value`)
+// and `converter.rs` (`DixConverter::convert_ast_value_to_dix_value`). Two
+// copies of the same logic in the same crate is exactly the kind of drift
+// risk that produced the ScientificNotation/InterpolatedString/NestedArray
+// gaps documented in converter.rs's history — a fix applied to one copy
+// silently doesn't apply to the other. There is now exactly one
+// implementation; both call sites delegate to it.
+
+/// Convert a single AST `Value` node into a runtime `DixValue`.
+///
+/// `enums` resolves `Value::EnumValue { enum_name, value: field_name }`
+/// references to their declared integer value; pass `None` when no enum
+/// table is available (the field then resolves to `0`).
+///
+/// Runtime-only / unresolved AST nodes (`Lambda`, `Range`, `Identifier`,
+/// `QuickFuncCall`, `Expression`, error/diagnostic variants) are not
+/// representable as static data and return `None`.
+pub(crate) fn ast_value_to_dix_value(
+    value: &crate::Compiler::AST::Value,
+    enums: Option<&HashMap<String, HashMap<String, i32>>>,
+) -> Option<DixValue> {
+    use crate::Compiler::AST::Value;
+
+    match value {
+        Value::Null { .. }                          => Some(DixValue::Null),
+        Value::Boolean { value: b, .. }              => Some(DixValue::Bool(*b)),
+        Value::Integer { value: i, .. }              => Some(DixValue::Int(*i)),
+        Value::Long { value: l, .. }                 => Some(DixValue::Long(*l)),
+        Value::Float { value: f, .. }                => Some(DixValue::Float(*f)),
+        Value::Double { value: d, .. }                => Some(DixValue::Double(*d)),
+        Value::ScientificNotation { value: d, .. }    => Some(DixValue::Double(*d)),
+        Value::String { value: s, .. }                => Some(DixValue::String(s.clone())),
+        Value::Date { value: d, .. }                  => Some(DixValue::Date(d.clone())),
+        Value::Timestamp { value: t, .. }             => Some(DixValue::Timestamp(t.clone())),
+        Value::HexColor { value: c, .. }              => Some(DixValue::HexColor(c.clone())),
+        Value::InterpolatedString { template, .. }    => Some(DixValue::String(template.clone())),
+
+        Value::Array { values, .. } | Value::NestedArray { values, .. } => {
+            let items: Vec<DixValue> = values.iter()
+                .filter_map(|v| ast_value_to_dix_value(v, enums))
+                .collect();
+            Some(DixValue::Array(items))
+        }
+
+        Value::Object { properties, .. } => {
+            let mut obj = HashMap::new();
+            for prop in properties {
+                if let Some(dix_value) = ast_value_to_dix_value(&prop.value, enums) {
+                    obj.insert(prop.key.clone(), dix_value);
+                }
+            }
+            Some(DixValue::Object(obj))
+        }
+
+        Value::EnumValue { enum_name, value: field_name, .. } => {
+            let resolved = enums
+                .and_then(|e| e.get(enum_name.as_str()))
+                .and_then(|fields| fields.get(field_name.as_str()))
+                .copied()
+                .unwrap_or(0);
+            Some(DixValue::Enum {
+                enum_name:  enum_name.clone(),
+                field_name: field_name.clone(),
+                value:      resolved,
+            })
+        }
+
+        Value::PrefixedConstructor { prefix, arguments, .. } => match prefix.as_str() {
+            "t" => {
+                let items: Vec<DixValue> = arguments.iter()
+                    .filter_map(|v| ast_value_to_dix_value(v, enums))
+                    .collect();
+                Some(DixValue::Tuple(items))
+            }
+            "b" => match arguments.first() {
+                Some(Value::String { value: s, .. }) => Some(DixValue::Blob(s.clone())),
+                _ => None,
+            },
+            "r" => match arguments.first() {
+                Some(Value::String { value: s, .. }) => Some(DixValue::Regex(s.clone())),
+                _ => None,
+            },
+            _ => None,
+        },
+
+        _ => None,
+    }
+                }

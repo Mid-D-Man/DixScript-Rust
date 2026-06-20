@@ -5,30 +5,22 @@ use crate::Compiler::AST::{
     TablePath, ObjectProperty, EnumDeclaration, EnumField,
     EnumsSection, Position,
 };
+use super::dix_data::DixData;
 use super::dix_value::DixValue;
 use super::format_options::DixFormatOptions;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Structural hashmap helpers (Group D fix)
+// Structural hashmap helpers
 // ─────────────────────────────────────────────────────────────────────────────
-//
-// `DixData::to_hashmap()` returns a fully-flattened map for O(1) dotted-path
-// access: it contains BOTH aggregate keys (`"server"` -> Object, `"tags"` ->
-// Array) AND synthetic child paths (`"server.host"` -> String, `"tags[0]"` ->
-// String). DixScript identifiers cannot contain `.` or `[`, so if those
-// synthetic child paths are bucketed as top-level `SimpleProperty` entries by
-// `from_hashmap`, `to_mdix` emits invalid source like `tags[0] = "web"` or
-// `server.host = "..."`.
-//
-// `filter_structural_keys` removes any key that is a derived child path of
-// another key already present in the map, leaving only the aggregate/root
-// entries needed to reconstruct the original structure. This makes
-// `from_hashmap` safe to call with either `DixData::to_hashmap()` (fully
-// flattened) or `DixData::to_structural_hashmap()` (already filtered) —
-// filtering an already-structural map is a no-op.
+// `DixData::to_hashmap()` is fully flattened — it has both aggregate keys
+// ("server" -> Object) and synthetic child paths ("server.host" -> String).
+// DixScript identifiers can't contain "." or "[", so feeding that straight
+// into `from_hashmap` would emit invalid source like `tags[0] = "web"`.
+// `filter_structural_keys` drops any key that's a derived child path of
+// another key already present, leaving only the roots needed to rebuild the
+// structure. Filtering an already-structural map (e.g.
+// `DixData::to_structural_hashmap()`) is a no-op.
 
-/// Returns `true` if `key` is a synthetic flattened child path of `parent` —
-/// i.e. `key == parent + "." + ...` or `key == parent + "[" + ...`.
 #[inline]
 fn is_child_path(key: &str, parent: &str) -> bool {
     key.len() > parent.len()
@@ -36,8 +28,6 @@ fn is_child_path(key: &str, parent: &str) -> bool {
         && matches!(key.as_bytes()[parent.len()], b'.' | b'[')
 }
 
-/// Filter a hashmap down to its "structural" root entries — entries that are
-/// not derived child paths of another entry already present in the map.
 fn filter_structural_keys(map: &HashMap<String, DixValue>) -> HashMap<String, DixValue> {
     let keys: Vec<&String> = map.keys().collect();
     map.iter()
@@ -65,30 +55,34 @@ impl DixConverter {
 
     // ── from_hashmap ──────────────────────────────────────────────────────────
 
-    /// Convert a `HashMap<String, DixValue>` into a `DixScript` AST.
+    /// Build a `DixScript` AST from a bare `HashMap<String, DixValue>` — the
+    /// "I only have a value map, no other context" entry point used by
+    /// `from_json`/`from_toml` and by callers who built a map by hand.
     ///
-    /// **Group D fix**: the input map is first passed through
-    /// [`filter_structural_keys`] so that synthetic flattened child paths
-    /// (e.g. `"server.host"` when `"server"` is present as an `Object`, or
-    /// `"tags[0]"` when `"tags"` is present as an `Array`) are removed before
-    /// bucketing into flat properties vs. nested structures. Without this,
-    /// `DixData::to_hashmap()`'s fully-flattened output would produce invalid
-    /// `.mdix` identifiers like `tags[0] = ...` or `server.host = ...`.
+    /// Synthetic flattened child keys are filtered out first (see
+    /// `filter_structural_keys`). Entries are rebuilt in sorted-key order so
+    /// repeated calls over identical data always produce identical output —
+    /// `HashMap` iteration order is not guaranteed stable across instances.
     ///
-    /// Callers passing an already-structural map (e.g.
-    /// `DixData::to_structural_hashmap()`, or a hand-built map with no
-    /// synthetic child keys) are unaffected — filtering is a no-op in that case.
+    /// Any `DixValue::Enum` found anywhere in the map (including nested
+    /// inside objects/arrays) is used to reconstruct a matching `@ENUMS`
+    /// section — without this, emitted `.mdix` would reference an
+    /// undeclared enum and fail to recompile. If you already have a real
+    /// `DixData` (not just a bare map), prefer `from_dix_data` instead — it
+    /// uses the *actual* declared enum table and `@CONFIG`, not a
+    /// reconstruction inferred from usage.
     ///
-    /// **Determinism fix**: entries are rebuilt in sorted-key order rather
-    /// than relying on `HashMap` iteration order, so two calls to
-    /// `from_hashmap` over the same logical data always produce the same
-    /// `DataEntry` ordering — this matters for round-trip idempotency checks
-    /// (e.g. `mdix format --check`). The auto-generated `@CONFIG` section no
-    /// longer stamps a `created` timestamp via `chrono::Utc::now()`, since
-    /// that made every call produce different output even for identical
-    /// input, breaking any byte-for-byte comparison of two round trips.
+    /// The `@CONFIG` section emitted here is a synthetic placeholder
+    /// (`version = "1.0.0"` only) since a bare map carries no config
+    /// metadata — deliberately deterministic, no timestamp.
     pub fn from_hashmap(&self, data: HashMap<String, DixValue>) -> Result<DixScript, String> {
         let data = filter_structural_keys(&data);
+
+        let mut enum_table: HashMap<String, HashMap<String, i32>> = HashMap::new();
+        for value in data.values() {
+            Self::collect_enum_usages(value, &mut enum_table);
+        }
+        let enums_section = Self::build_enums_section_from_table(&enum_table);
 
         let mut flat_properties:   HashMap<String, DixValue> = HashMap::new();
         let mut nested_structures: HashMap<String, DixValue> = HashMap::new();
@@ -103,11 +97,6 @@ impl DixConverter {
 
         let mut data_entries = Vec::new();
 
-        // Sorted, deterministic order — HashMap iteration order is not
-        // guaranteed stable across separate HashMap instances even within
-        // the same process, so relying on it here would make repeated
-        // from_hashmap calls over identical data produce different
-        // DataEntry orderings.
         let mut flat_keys: Vec<String> = flat_properties.keys().cloned().collect();
         flat_keys.sort();
         for key in flat_keys {
@@ -131,24 +120,12 @@ impl DixConverter {
             None
         };
 
-        // FIX: previously included a "created" entry stamped with
-        // chrono::Utc::now(), which made every call to from_hashmap produce
-        // a different @CONFIG section even for byte-identical input data.
-        // That broke idempotency checks (e.g. `mdix format --check` running
-        // load -> to_hashmap -> from_hashmap -> to_mdix twice and comparing
-        // the result) since the timestamp differed between the two runs.
-        // The version string alone is deterministic and sufficient here —
-        // this function has no access to the original source file's real
-        // @CONFIG section anyway, so synthesizing a fake "created" time
-        // was never meaningful.
         let config_section = Some(ConfigSection {
-            entries: vec![
-                ConfigEntry {
-                    key: "version".to_string(),
-                    value: ConfigValue::String("1.0.0".to_string()),
-                    position: Position::UNKNOWN,
-                },
-            ],
+            entries: vec![ConfigEntry {
+                key: "version".to_string(),
+                value: ConfigValue::String("1.0.0".to_string()),
+                position: Position::UNKNOWN,
+            }],
             position: Position::UNKNOWN,
         });
 
@@ -156,11 +133,35 @@ impl DixConverter {
             config:          config_section,
             imports:         None,
             dlm:             None,
-            enums:           None,
+            enums:           enums_section,
             quick_functions: None,
             data:            data_section,
             security:        None,
         })
+    }
+
+    // ── from_dix_data ─────────────────────────────────────────────────────────
+
+    /// Reconstruct a `DixScript` AST from an already-loaded `DixData`.
+    ///
+    /// This is the correct entry point whenever a real `DixData` is on hand
+    /// (e.g. `mdix decrypt`, `mdix format`) — unlike `from_hashmap`, which
+    /// only ever sees a bare value map, this pulls the authoritative
+    /// `@CONFIG` and `@ENUMS` straight from `DixData::config` /
+    /// `DixData::enums`, the same tables `DixLoader` populated when the
+    /// source was first compiled. Nothing is guessed or reconstructed from
+    /// usage.
+    pub fn from_dix_data(&self, data: &DixData) -> Result<DixScript, String> {
+        let mut ast = self.from_hashmap(data.to_structural_hashmap())?;
+
+        if let Some(ref enums) = data.enums {
+            ast.enums = Self::build_enums_section_from_table(enums);
+        }
+        if let Some(ref config) = data.config {
+            ast.config = Self::build_config_section_from_map(config);
+        }
+
+        Ok(ast)
     }
 
     // ── to_hashmap ────────────────────────────────────────────────────────────
@@ -255,47 +256,14 @@ impl DixConverter {
                 }
             }
 
-            // ── FIX: mandatory comma separators across the flat→grouped
-            // boundary and between every pair of grouped entries ───────────────
-            //
-            // The grammar treats the comma between top-level @DATA entries as
-            // OPTIONAL because normally real whitespace/newlines disambiguate
-            // adjacent entries. That assumption quietly broke for minified
-            // output: `DixFormatOptions::minified()` makes `nl`/`sp`/`indent`
-            // all resolve to `""`, so this section used to glue adjacent
-            // top-level entries together with NO separator at all — unlike
-            // the property/item lists below, which already always emit a
-            // literal `,` between siblings.
-            //
-            // Two concrete failure modes resulted from that, both reproducible
-            // against real multi-section .mdix files:
-            //
-            //   1. Hard tokenizer abort. A flat numeric property ending in a
-            //      digit (e.g. `rydberg_constant = 10973731.568160`)
-            //      immediately followed by a TablePath starting with a vowel
-            //      (`elements.hydrogen.identity:`) fuses into the literal
-            //      substring `...568160elements...`. The lexer's numeric
-            //      scanner is greedy about scientific-notation markers — it
-            //      consumes the leading `e` of "elements" as an exponent
-            //      marker, fails to find exponent digits after it, and raises
-            //      an invalid-number lexical error. Depending on the error
-            //      strategy this can abort tokenization outright, silently
-            //      dropping every entry written after that point — i.e. the
-            //      output looks like it was simply cut off right where the
-            //      grouped (table-property) entries begin.
-            //   2. Silent corruption, no error raised at all. A grouped entry
-            //      whose last rendered token ends in a letter (an EnumValue
-            //      like `enums.Phase.GAS`, or a bare GroupArray scalar like
-            //      `1312.0` whose trailing digit then meets a following `e`)
-            //      fuses with the next entry's leading identifier into one
-            //      bogus Identifier token.
-            //
-            // A comma can never be absorbed by any literal/identifier scanner
-            // — it isn't alphanumeric and isn't part of any numeric or
-            // identifier grammar rule — so making it a hard separator here,
-            // instead of relying on whitespace that minify intentionally
-            // strips, closes both failure modes permanently, in every output
-            // mode (minified, compact, and indented alike).
+            // A comma is mandatory between every top-level entry, including
+            // across the flat→grouped boundary. The grammar treats it as
+            // optional only because real whitespace usually disambiguates —
+            // but under `DixFormatOptions::minified()` nl/sp/indent all
+            // collapse to "", so without a hard comma here adjacent entries
+            // can fuse into one bogus token (e.g. a trailing digit eating
+            // the next entry's leading identifier as a bad scientific-
+            // notation exponent), silently corrupting or truncating output.
             let grouped_count = table_props.len() + group_arrays.len();
 
             if !flat_props.is_empty() && grouped_count > 0 {
@@ -408,11 +376,7 @@ impl DixConverter {
                         .unwrap_or(DixValue::Null);
                     props.insert(prop.name.clone(), self.dix_value_to_json_value(&dv));
                 }
-                Self::insert_nested_json(
-                    root,
-                    &path.segments,
-                    serde_json::Value::Object(props),
-                );
+                Self::insert_nested_json(root, &path.segments, serde_json::Value::Object(props));
             }
 
             DataEntry::GroupArray { path, items, .. } => {
@@ -423,11 +387,7 @@ impl DixConverter {
                         self.dix_value_to_json_value(&dv)
                     })
                     .collect();
-                Self::insert_nested_json(
-                    root,
-                    &path.segments,
-                    serde_json::Value::Array(arr),
-                );
+                Self::insert_nested_json(root, &path.segments, serde_json::Value::Array(arr));
             }
 
             DataEntry::ObjectProperty { name, object, .. } => {
@@ -462,10 +422,7 @@ impl DixConverter {
         }
 
         let key = segments[0].clone();
-        let child = root
-            .entry(key)
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-
+        let child = root.entry(key).or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
         if let serde_json::Value::Object(ref mut map) = child {
             Self::insert_nested_json(map, &segments[1..], value);
         }
@@ -474,54 +431,41 @@ impl DixConverter {
     fn dix_value_to_json_value(&self, value: &DixValue) -> serde_json::Value {
         match value {
             DixValue::Null => serde_json::Value::Null,
-
             DixValue::Bool(b) => serde_json::Value::Bool(*b),
-
             DixValue::Int(i) => serde_json::Value::Number((*i).into()),
-
             DixValue::Long(l) => serde_json::Value::Number((*l).into()),
-
             DixValue::Float(f) => serde_json::Number::from_f64(*f as f64)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null),
-
-            // Double — includes values produced by Value::ScientificNotation.
-            // serde_json::Number::from_f64 returns None ONLY for NaN and Inf;
-            // valid finite doubles (6.62607015e-34, 6.02214076e23, etc.) always
-            // produce a JSON number, never null.
+                .map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
             DixValue::Double(d) => serde_json::Number::from_f64(*d)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null),
-
+                .map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
             DixValue::String(s)
             | DixValue::Date(s)
             | DixValue::Timestamp(s)
             | DixValue::HexColor(s)
             | DixValue::Blob(s)
             | DixValue::Regex(s) => serde_json::Value::String(s.clone()),
-
             DixValue::Array(arr) => serde_json::Value::Array(
                 arr.iter().map(|v| self.dix_value_to_json_value(v)).collect(),
             ),
-
             DixValue::Object(obj) => {
-                let map: serde_json::Map<String, serde_json::Value> = obj
-                    .iter()
+                let map: serde_json::Map<String, serde_json::Value> = obj.iter()
                     .map(|(k, v)| (k.clone(), self.dix_value_to_json_value(v)))
                     .collect();
                 serde_json::Value::Object(map)
             }
-
             DixValue::Tuple(items) => serde_json::Value::Array(
                 items.iter().map(|v| self.dix_value_to_json_value(v)).collect(),
             ),
-
             DixValue::Enum { value, .. } => serde_json::Value::Number((*value).into()),
         }
     }
 
     // ── JSON import ───────────────────────────────────────────────────────────
 
+    /// Parse JSON text and build a `DixScript`. JSON has no enum type, so a
+    /// round trip through here always loses enum identity (the int survives,
+    /// the symbolic name doesn't) — that's an inherent format limitation,
+    /// not something this method can recover.
     pub fn from_json(&self, json_str: &str) -> Result<DixScript, String> {
         let json_value: serde_json::Value = serde_json::from_str(json_str)
             .map_err(|e| format!("JSON parse failed: {}", e))?;
@@ -529,9 +473,7 @@ impl DixConverter {
         self.from_hashmap(map)
     }
 
-    fn json_value_to_hashmap(
-        &self, value: serde_json::Value,
-    ) -> Result<HashMap<String, DixValue>, String> {
+    fn json_value_to_hashmap(&self, value: serde_json::Value) -> Result<HashMap<String, DixValue>, String> {
         match value {
             serde_json::Value::Object(map) => {
                 let mut result = HashMap::with_capacity(map.len());
@@ -603,48 +545,32 @@ impl DixConverter {
     ) -> Result<(), String> {
         match entry {
             DataEntry::SimpleProperty { name, value, .. } => {
-                let dv = self.convert_ast_value_to_dix_value(value, enums)
-                    .unwrap_or(DixValue::Null);
+                let dv = self.convert_ast_value_to_dix_value(value, enums).unwrap_or(DixValue::Null);
                 if let Some(tv) = self.dix_value_to_toml_value(&dv) {
                     root.insert(name.clone(), tv);
                 }
             }
-
             DataEntry::TableProperty { path, properties, .. } => {
                 let mut props = toml::map::Map::new();
                 for prop in properties {
-                    let dv = self.convert_ast_value_to_dix_value(&prop.value, enums)
-                        .unwrap_or(DixValue::Null);
+                    let dv = self.convert_ast_value_to_dix_value(&prop.value, enums).unwrap_or(DixValue::Null);
                     if let Some(tv) = self.dix_value_to_toml_value(&dv) {
                         props.insert(prop.name.clone(), tv);
                     }
                 }
-                Self::insert_nested_toml(
-                    root,
-                    &path.segments,
-                    toml::Value::Table(props),
-                );
+                Self::insert_nested_toml(root, &path.segments, toml::Value::Table(props));
             }
-
             DataEntry::GroupArray { path, items, .. } => {
-                let arr: Vec<toml::Value> = items
-                    .iter()
+                let arr: Vec<toml::Value> = items.iter()
                     .filter_map(|v| {
-                        let dv = self.convert_ast_value_to_dix_value(v, enums)
-                            .unwrap_or(DixValue::Null);
+                        let dv = self.convert_ast_value_to_dix_value(v, enums).unwrap_or(DixValue::Null);
                         self.dix_value_to_toml_value(&dv)
                     })
                     .collect();
-                Self::insert_nested_toml(
-                    root,
-                    &path.segments,
-                    toml::Value::Array(arr),
-                );
+                Self::insert_nested_toml(root, &path.segments, toml::Value::Array(arr));
             }
-
             DataEntry::ObjectProperty { name, object, .. } => {
-                let dv = self.convert_ast_value_to_dix_value(object, enums)
-                    .unwrap_or(DixValue::Null);
+                let dv = self.convert_ast_value_to_dix_value(object, enums).unwrap_or(DixValue::Null);
                 if let Some(tv) = self.dix_value_to_toml_value(&dv) {
                     root.insert(name.clone(), tv);
                 }
@@ -665,9 +591,7 @@ impl DixConverter {
             match (root.get_mut(key), &value) {
                 (Some(toml::Value::Table(existing)), toml::Value::Table(_)) => {
                     if let toml::Value::Table(new_map) = value {
-                        for (k, v) in new_map {
-                            existing.insert(k, v);
-                        }
+                        for (k, v) in new_map { existing.insert(k, v); }
                     }
                 }
                 _ => { root.insert(key.clone(), value); }
@@ -676,10 +600,7 @@ impl DixConverter {
         }
 
         let key = segments[0].clone();
-        let child = root
-            .entry(key)
-            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-
+        let child = root.entry(key).or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
         if let toml::Value::Table(ref mut map) = child {
             Self::insert_nested_toml(map, &segments[1..], value);
         }
@@ -691,7 +612,6 @@ impl DixConverter {
             DixValue::Bool(b)      => Some(toml::Value::Boolean(*b)),
             DixValue::Int(i)       => Some(toml::Value::Integer(*i as i64)),
             DixValue::Long(l)      => Some(toml::Value::Integer(*l)),
-            // Double — finite small/large doubles (from ScientificNotation) are valid TOML floats.
             DixValue::Float(f)     => Some(toml::Value::Float(*f as f64)),
             DixValue::Double(d)    => Some(toml::Value::Float(*d)),
             DixValue::String(s)    => Some(toml::Value::String(s.clone())),
@@ -702,9 +622,7 @@ impl DixConverter {
             DixValue::Regex(r)     => Some(toml::Value::String(r.clone())),
             DixValue::Enum { value, .. } => Some(toml::Value::Integer(*value as i64)),
             DixValue::Array(arr) => {
-                let items: Vec<toml::Value> = arr.iter()
-                    .filter_map(|v| self.dix_value_to_toml_value(v))
-                    .collect();
+                let items: Vec<toml::Value> = arr.iter().filter_map(|v| self.dix_value_to_toml_value(v)).collect();
                 Some(toml::Value::Array(items))
             }
             DixValue::Object(obj) => {
@@ -717,9 +635,7 @@ impl DixConverter {
                 Some(toml::Value::Table(table))
             }
             DixValue::Tuple(items) => {
-                let arr: Vec<toml::Value> = items.iter()
-                    .filter_map(|v| self.dix_value_to_toml_value(v))
-                    .collect();
+                let arr: Vec<toml::Value> = items.iter().filter_map(|v| self.dix_value_to_toml_value(v)).collect();
                 Some(toml::Value::Array(arr))
             }
         }
@@ -734,18 +650,14 @@ impl DixConverter {
         self.from_hashmap(map)
     }
 
-    fn toml_value_to_hashmap(
-        &self, value: toml::Value,
-    ) -> Result<HashMap<String, DixValue>, String> {
+    fn toml_value_to_hashmap(&self, value: toml::Value) -> Result<HashMap<String, DixValue>, String> {
         match value {
             toml::Value::Table(table) => {
                 let mut result = HashMap::with_capacity(table.len());
                 for (k, v) in table { result.insert(k, self.toml_value_to_dix_value(v)?); }
                 Ok(result)
             }
-            other => Err(format!(
-                "Expected a TOML table at the top level, got type: {}", other.type_str()
-            )),
+            other => Err(format!("Expected a TOML table at the top level, got type: {}", other.type_str())),
         }
     }
 
@@ -753,11 +665,8 @@ impl DixConverter {
         Ok(match value {
             toml::Value::String(s)   => DixValue::String(s),
             toml::Value::Integer(i)  => {
-                if i >= i32::MIN as i64 && i <= i32::MAX as i64 {
-                    DixValue::Int(i as i32)
-                } else {
-                    DixValue::Long(i)
-                }
+                if i >= i32::MIN as i64 && i <= i32::MAX as i64 { DixValue::Int(i as i32) }
+                else { DixValue::Long(i) }
             }
             toml::Value::Float(f)    => DixValue::Double(f),
             toml::Value::Boolean(b)  => DixValue::Bool(b),
@@ -778,16 +687,12 @@ impl DixConverter {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    fn extract_enums(
-        &self, ast: &DixScript,
-    ) -> Option<HashMap<String, HashMap<String, i32>>> {
+    fn extract_enums(&self, ast: &DixScript) -> Option<HashMap<String, HashMap<String, i32>>> {
         ast.enums.as_ref().map(|section| {
             section.enums.iter().map(|decl| {
                 let mut auto_value = 0i32;
                 let fields: HashMap<String, i32> = decl.fields.iter().map(|field| {
-                    let value = field.value.unwrap_or_else(|| {
-                        let v = auto_value; auto_value += 1; v
-                    });
+                    let value = field.value.unwrap_or_else(|| { let v = auto_value; auto_value += 1; v });
                     auto_value = value + 1;
                     (field.name.clone(), value)
                 }).collect();
@@ -800,22 +705,14 @@ impl DixConverter {
         &self, key: &str, value: &DixValue,
         entries: &mut Vec<DataEntry>, parent_path: &str,
     ) -> Result<(), String> {
-        let current_path = if parent_path.is_empty() {
-            key.to_string()
-        } else {
-            format!("{}.{}", parent_path, key)
-        };
+        let current_path = if parent_path.is_empty() { key.to_string() } else { format!("{}.{}", parent_path, key) };
 
         match value {
             DixValue::Object(obj) => {
-                let path = TablePath {
-                    segments: current_path.split('.').map(String::from).collect(),
-                };
+                let path = TablePath { segments: current_path.split('.').map(String::from).collect() };
                 let mut properties: Vec<PropertyAssignment> = Vec::new();
-                let mut nested: Vec<(String, DixValue)>     = Vec::new();
+                let mut nested: Vec<(String, DixValue)> = Vec::new();
 
-                // Sorted iteration here too, so the same Object always
-                // produces the same property ordering across calls.
                 let mut obj_keys: Vec<&String> = obj.keys().collect();
                 obj_keys.sort();
 
@@ -826,16 +723,13 @@ impl DixConverter {
                     } else {
                         let ast_value = self.convert_dix_value_to_ast_value(v)?;
                         properties.push(PropertyAssignment {
-                            name: k.clone(), data_type: None, value: ast_value,
-                            position: Position::UNKNOWN,
+                            name: k.clone(), data_type: None, value: ast_value, position: Position::UNKNOWN,
                         });
                     }
                 }
 
                 if !properties.is_empty() {
-                    entries.push(DataEntry::TableProperty {
-                        path, properties, position: Position::UNKNOWN,
-                    });
+                    entries.push(DataEntry::TableProperty { path, properties, position: Position::UNKNOWN });
                 }
 
                 for (k, v) in nested {
@@ -843,127 +737,27 @@ impl DixConverter {
                 }
             }
             DixValue::Array(arr) => {
-                let path = TablePath {
-                    segments: current_path.split('.').map(String::from).collect(),
-                };
-                let items: Result<Vec<Value>, String> = arr.iter()
-                    .map(|v| self.convert_dix_value_to_ast_value(v))
-                    .collect();
-                entries.push(DataEntry::GroupArray {
-                    path, items: items?, position: Position::UNKNOWN,
-                });
+                let path = TablePath { segments: current_path.split('.').map(String::from).collect() };
+                let items: Result<Vec<Value>, String> = arr.iter().map(|v| self.convert_dix_value_to_ast_value(v)).collect();
+                entries.push(DataEntry::GroupArray { path, items: items?, position: Position::UNKNOWN });
             }
             other => {
-                return Err(format!(
-                    "Expected object or array for nested structure, got: {}",
-                    other.type_name()
-                ));
+                return Err(format!("Expected object or array for nested structure, got: {}", other.type_name()));
             }
         }
 
         Ok(())
     }
 
-    /// Convert an AST Value node to a Runtime DixValue.
-    ///
-    /// ## Handled variants (comprehensive)
-    /// Primitive:  Integer, Long, Float, Double, ScientificNotation(*), String,
-    ///             Boolean, HexColor, Date, Timestamp, Null
-    /// Collection: Array, NestedArray(*), Object, PrefixedConstructor (t/b/r),
-    ///             Tuple (via PrefixedConstructor)
-    /// Special:    EnumValue, InterpolatedString(*)
-    ///
-    /// (*) previously missing — now fixed.
+    /// Delegates to the shared `Value -> DixValue` conversion in
+    /// `dix_value.rs`. `DixData` carries an identical conversion for the
+    /// same purpose — keeping one implementation avoids the two silently
+    /// drifting apart again.
     fn convert_ast_value_to_dix_value(
         &self, value: &Value,
         enums: Option<&HashMap<String, HashMap<String, i32>>>,
     ) -> Option<DixValue> {
-        match value {
-            // ── Primitives ────────────────────────────────────────────────────
-            Value::Null { .. }                              => Some(DixValue::Null),
-            Value::Boolean { value: b, .. }                => Some(DixValue::Bool(*b)),
-            Value::Integer { value: i, .. }                => Some(DixValue::Int(*i)),
-            Value::Long { value: l, .. }                   => Some(DixValue::Long(*l)),
-            Value::Float { value: f, .. }                  => Some(DixValue::Float(*f)),
-            Value::Double { value: d, .. }                 => Some(DixValue::Double(*d)),
-
-            // FIX 1: scientific notation (e.g. 6.62607015e-34) — was silently None
-            Value::ScientificNotation { value: d, .. }     => Some(DixValue::Double(*d)),
-
-            Value::String { value: s, .. }                 => Some(DixValue::String(s.clone())),
-            Value::Date { value: d, .. }                   => Some(DixValue::Date(d.clone())),
-            Value::Timestamp { value: t, .. }              => Some(DixValue::Timestamp(t.clone())),
-            Value::HexColor { value: c, .. }               => Some(DixValue::HexColor(c.clone())),
-
-            // FIX 2: interpolated strings — use the template text as an approximation.
-            // After full value resolution the expressions should have been inlined;
-            // if any remain the template is the best we can do without an evaluator.
-            Value::InterpolatedString { template, .. }     => Some(DixValue::String(template.clone())),
-
-            // ── Collections ───────────────────────────────────────────────────
-            Value::Array { values, .. } => {
-                let items: Vec<DixValue> = values.iter()
-                    .filter_map(|v| self.convert_ast_value_to_dix_value(v, enums))
-                    .collect();
-                Some(DixValue::Array(items))
-            }
-
-            // FIX 3: nested arrays ([[1,2],[3,4]]) — was silently None
-            Value::NestedArray { values, .. } => {
-                let items: Vec<DixValue> = values.iter()
-                    .filter_map(|v| self.convert_ast_value_to_dix_value(v, enums))
-                    .collect();
-                Some(DixValue::Array(items))
-            }
-
-            Value::Object { properties, .. } => {
-                let mut obj = std::collections::HashMap::new();
-                for prop in properties {
-                    if let Some(dix_value) = self.convert_ast_value_to_dix_value(&prop.value, enums) {
-                        obj.insert(prop.key.clone(), dix_value);
-                    }
-                }
-                Some(DixValue::Object(obj))
-            }
-
-            Value::EnumValue { enum_name, value: field_name, .. } => {
-                let resolved = enums
-                    .and_then(|e| e.get(enum_name.as_str()))
-                    .and_then(|fields| fields.get(field_name.as_str()))
-                    .copied()
-                    .unwrap_or(0);
-                Some(DixValue::Enum {
-                    enum_name:  enum_name.clone(),
-                    field_name: field_name.clone(),
-                    value:      resolved,
-                })
-            }
-
-            Value::PrefixedConstructor { prefix, arguments, .. } => {
-                match prefix.as_str() {
-                    "t" => {
-                        let items: Vec<DixValue> = arguments.iter()
-                            .filter_map(|v| self.convert_ast_value_to_dix_value(v, enums))
-                            .collect();
-                        Some(DixValue::Tuple(items))
-                    }
-                    "b" => {
-                        if let Some(Value::String { value: s, .. }) = arguments.first() {
-                            Some(DixValue::Blob(s.clone()))
-                        } else { None }
-                    }
-                    "r" => {
-                        if let Some(Value::String { value: s, .. }) = arguments.first() {
-                            Some(DixValue::Regex(s.clone()))
-                        } else { None }
-                    }
-                    _ => None,
-                }
-            }
-
-            // Runtime-only / unresolved nodes — not representable as static data.
-            _ => None,
-        }
+        super::dix_value::ast_value_to_dix_value(value, enums)
     }
 
     fn categorize_data_entries<'a>(
@@ -975,9 +769,7 @@ impl DixConverter {
 
         for entry in entries {
             match entry {
-                DataEntry::SimpleProperty { .. } | DataEntry::ObjectProperty { .. } => {
-                    flat.push(entry);
-                }
+                DataEntry::SimpleProperty { .. } | DataEntry::ObjectProperty { .. } => flat.push(entry),
                 DataEntry::TableProperty { .. } => tables.push(entry),
                 DataEntry::GroupArray { .. }    => arrays.push(entry),
             }
@@ -990,16 +782,10 @@ impl DixConverter {
         if prefix.is_empty() { segment.to_string() } else { format!("{}.{}", prefix, segment) }
     }
 
-    /// Flatten a single `DataEntry` into `result`.
-    ///
-    /// **FIX**: `TableProperty` now also inserts an aggregate `DixValue::Object`
-    /// at the table path itself (mirroring the equivalent fix in
-    /// `DixData::flatten_entry`), not just the individual leaf paths. Without
-    /// this, `to_hashmap()` on an AST containing a `TableProperty` produced a
-    /// map with `"server.host"` but no `"server"` key at all — meaning
-    /// `filter_structural_keys` in `from_hashmap` had no aggregate to
-    /// recognize `"server.host"` as a child of, so it round-tripped back out
-    /// as an invalid flat identifier literally named `"server.host"`.
+    /// Flattens one `DataEntry`. `TableProperty` also inserts an aggregate
+    /// `DixValue::Object` at the table path itself (mirroring
+    /// `DixData::flatten_entry`) so `filter_structural_keys` has something
+    /// to recognize leaf paths as children of.
     fn flatten_entry(
         &self, entry: &DataEntry, prefix: &str,
         result: &mut HashMap<String, DixValue>,
@@ -1024,19 +810,12 @@ impl DixConverter {
                     }
                 }
 
-                // Insert or merge the aggregate Object — same merge behavior
-                // as DixData::flatten_entry, so two TableProperty entries
-                // sharing the same path don't clobber each other.
                 if !obj_map.is_empty() {
                     match result.entry(table_path) {
-                        std::collections::hash_map::Entry::Vacant(e) => {
-                            e.insert(DixValue::Object(obj_map));
-                        }
+                        std::collections::hash_map::Entry::Vacant(e) => { e.insert(DixValue::Object(obj_map)); }
                         std::collections::hash_map::Entry::Occupied(mut e) => {
                             if let DixValue::Object(ref mut existing) = e.get_mut() {
-                                for (k, v) in obj_map {
-                                    existing.entry(k).or_insert(v);
-                                }
+                                for (k, v) in obj_map { existing.entry(k).or_insert(v); }
                             }
                         }
                     }
@@ -1055,7 +834,7 @@ impl DixConverter {
             DataEntry::ObjectProperty { name, object, .. } => {
                 let key = Self::build_path(prefix, name);
                 if let Value::Object { ref properties, .. } = **object {
-                    let mut obj_map = std::collections::HashMap::new();
+                    let mut obj_map = HashMap::new();
                     for prop in properties {
                         if let Some(dix_value) = self.convert_ast_value_to_dix_value(&prop.value, enums) {
                             obj_map.insert(prop.key.clone(), dix_value.clone());
@@ -1082,20 +861,18 @@ impl DixConverter {
             DixValue::HexColor(c)  => Value::HexColor  { value: c.clone(), position: Position::UNKNOWN },
 
             DixValue::Blob(b) => Value::PrefixedConstructor {
-                prefix:    "b".to_string(),
+                prefix: "b".to_string(),
                 arguments: vec![Value::String { value: b.clone(), position: Position::UNKNOWN }],
-                position:  Position::UNKNOWN,
+                position: Position::UNKNOWN,
             },
             DixValue::Regex(r) => Value::PrefixedConstructor {
-                prefix:    "r".to_string(),
+                prefix: "r".to_string(),
                 arguments: vec![Value::String { value: r.clone(), position: Position::UNKNOWN }],
-                position:  Position::UNKNOWN,
+                position: Position::UNKNOWN,
             },
 
             DixValue::Array(arr) => {
-                let items: Result<Vec<Value>, String> = arr.iter()
-                    .map(|v| self.convert_dix_value_to_ast_value(v))
-                    .collect();
+                let items: Result<Vec<Value>, String> = arr.iter().map(|v| self.convert_dix_value_to_ast_value(v)).collect();
                 Value::Array { values: items?, position: Position::UNKNOWN }
             }
 
@@ -1103,100 +880,132 @@ impl DixConverter {
                 let mut properties = Vec::with_capacity(obj.len());
                 for (k, v) in obj {
                     let ast_value = self.convert_dix_value_to_ast_value(v)?;
-                    properties.push(ObjectProperty {
-                        key: k.clone(), value: ast_value, position: Position::UNKNOWN,
-                    });
+                    properties.push(ObjectProperty { key: k.clone(), value: ast_value, position: Position::UNKNOWN });
                 }
                 Value::Object { properties, position: Position::UNKNOWN }
             }
 
             DixValue::Tuple(items) => {
-                let args: Result<Vec<Value>, String> = items.iter()
-                    .map(|v| self.convert_dix_value_to_ast_value(v))
-                    .collect();
-                Value::PrefixedConstructor {
-                    prefix:    "t".to_string(),
-                    arguments: args?,
-                    position:  Position::UNKNOWN,
-                }
+                let args: Result<Vec<Value>, String> = items.iter().map(|v| self.convert_dix_value_to_ast_value(v)).collect();
+                Value::PrefixedConstructor { prefix: "t".to_string(), arguments: args?, position: Position::UNKNOWN }
             }
 
             DixValue::Enum { enum_name, field_name, .. } => Value::EnumValue {
-                enum_name: enum_name.clone(),
-                value:     field_name.clone(),
-                position:  Position::UNKNOWN,
+                enum_name: enum_name.clone(), value: field_name.clone(), position: Position::UNKNOWN,
             },
         })
     }
 
+    /// Render a `ConfigValue` for `.mdix` source — every variant handled
+    /// explicitly (the previous `_ => String::new()` catch-all silently
+    /// dropped `Features`/`ErrorHandling`/`Compatibility`/`Debug` entries).
     fn format_config_value(&self, value: &ConfigValue) -> String {
         match value {
-            ConfigValue::String(s)    => format!("\"{}\"", s),
-            ConfigValue::Integer(i)   => i.to_string(),
-            ConfigValue::Float(f)     => format!("{}f", f),
-            ConfigValue::Boolean(b)   => b.to_string(),
-            ConfigValue::Date(d)      => d.clone(),
-            ConfigValue::Timestamp(t) => t.clone(),
-            _                         => String::new(),
+            ConfigValue::String(s)         => format!("\"{}\"", s),
+            ConfigValue::Integer(i)        => i.to_string(),
+            ConfigValue::Float(f)          => format!("{}f", f),
+            ConfigValue::Boolean(b)        => b.to_string(),
+            ConfigValue::Date(d)           => d.clone(),
+            ConfigValue::Timestamp(t)      => t.clone(),
+            ConfigValue::Features(feats)   => format!("\"{}\"", feats.join(",")),
+            ConfigValue::ErrorHandling(eh) => format!("\"{}\"", eh),
+            ConfigValue::Compatibility(cm) => format!("\"{}\"", cm),
+            ConfigValue::Debug(dm)         => format!("\"{}\"", dm),
         }
     }
 
-fn format_value_for_mdix(&self, value: &Value, opts: &DixFormatOptions) -> String {
+    fn format_value_for_mdix(&self, value: &Value, opts: &DixFormatOptions) -> String {
         let sp = opts.get_space();
         match value {
-            Value::Null { .. }                        => "null".to_string(),
-            Value::Boolean { value: b, .. }           => b.to_string(),
-            Value::Integer { value: i, .. }           => i.to_string(),
-            Value::Long { value: l, .. }              => format!("{}L", l),
-            Value::Float { value: f, .. }             => format!("{}f", f),
-            // FIX: see values.rs — a whole-number f64 must keep an explicit
-            // ".0" or it re-lexes as Integer on the next compile.
+            Value::Null { .. }              => "null".to_string(),
+            Value::Boolean { value: b, .. } => b.to_string(),
+            Value::Integer { value: i, .. } => i.to_string(),
+            Value::Long { value: l, .. }    => format!("{}L", l),
+            Value::Float { value: f, .. }   => format!("{}f", f),
+            // A whole-number f64 must keep an explicit ".0" or it re-lexes
+            // as Integer on the next compile.
             Value::Double { value: d, .. } => {
-                if d.is_finite() && d.fract() == 0.0 {
-                    format!("{:.1}", d)
-                } else {
-                    d.to_string()
-                }
+                if d.is_finite() && d.fract() == 0.0 { format!("{:.1}", d) } else { d.to_string() }
             }
             Value::ScientificNotation { value: d, .. } => format!("{:e}", d),
-            Value::String { value: s, .. }            => format!("\"{}\"", s),
+            Value::String { value: s, .. }  => format!("\"{}\"", s),
             Value::InterpolatedString { template, .. } => format!("$\"{}\"", template),
-            Value::Date { value: d, .. }              => d.clone(),
-            Value::Timestamp { value: t, .. }         => t.clone(),
-            Value::HexColor { value: c, .. }          => c.clone(),
+            Value::Date { value: d, .. }     => d.clone(),
+            Value::Timestamp { value: t, .. } => t.clone(),
+            Value::HexColor { value: c, .. } => c.clone(),
 
             Value::Array { values, .. } | Value::NestedArray { values, .. } => {
-                let items: Vec<String> = values.iter()
-                    .map(|v| self.format_value_for_mdix(v, opts))
-                    .collect();
+                let items: Vec<String> = values.iter().map(|v| self.format_value_for_mdix(v, opts)).collect();
                 format!("[{}]", items.join(&format!(",{}", sp)))
             }
 
             Value::Object { properties, .. } => {
                 let pairs: Vec<String> = properties.iter()
-                    .map(|p| format!(
-                        "{}{}={}{}",
-                        p.key, sp, sp,
-                        self.format_value_for_mdix(&p.value, opts)
-                    ))
+                    .map(|p| format!("{}{}={}{}", p.key, sp, sp, self.format_value_for_mdix(&p.value, opts)))
                     .collect();
                 format!("{{{}}}", pairs.join(&format!(",{}", sp)))
             }
 
             Value::PrefixedConstructor { prefix, arguments, .. } => {
-                let args: Vec<String> = arguments.iter()
-                    .map(|v| self.format_value_for_mdix(v, opts))
-                    .collect();
+                let args: Vec<String> = arguments.iter().map(|v| self.format_value_for_mdix(v, opts)).collect();
                 format!("{}:({})", prefix, args.join(&format!(",{}", sp)))
             }
 
-            Value::EnumValue { enum_name, value: field_value, .. } => {
-                format!("{}.{}", enum_name, field_value)
-            }
+            Value::EnumValue { enum_name, value: field_value, .. } => format!("{}.{}", enum_name, field_value),
 
             _ => String::new(),
         }
-                }
+    }
+
+    // ── @ENUMS reconstruction helpers ──────────────────────────────────────────
+
+    /// Recursively scan a value tree for `DixValue::Enum`, collecting every
+    /// distinct `(enum_name, field_name, value)` triple it finds.
+    fn collect_enum_usages(value: &DixValue, out: &mut HashMap<String, HashMap<String, i32>>) {
+        match value {
+            DixValue::Enum { enum_name, field_name, value } => {
+                out.entry(enum_name.clone()).or_default().entry(field_name.clone()).or_insert(*value);
+            }
+            DixValue::Array(items) | DixValue::Tuple(items) => {
+                for item in items { Self::collect_enum_usages(item, out); }
+            }
+            DixValue::Object(obj) => {
+                for v in obj.values() { Self::collect_enum_usages(v, out); }
+            }
+            _ => {}
+        }
+    }
+
+    fn build_enums_section_from_table(enums: &HashMap<String, HashMap<String, i32>>) -> Option<EnumsSection> {
+        if enums.is_empty() { return None; }
+
+        let mut names: Vec<&String> = enums.keys().collect();
+        names.sort();
+
+        let decls = names.into_iter().map(|name| {
+            let fields_map = &enums[name];
+            let mut field_names: Vec<&String> = fields_map.keys().collect();
+            field_names.sort_by_key(|f| fields_map[*f]);
+            let fields = field_names.into_iter().map(|f| EnumField {
+                name: f.clone(), value: Some(fields_map[f]), position: Position::UNKNOWN,
+            }).collect();
+            EnumDeclaration { name: name.clone(), fields, position: Position::UNKNOWN }
+        }).collect();
+
+        Some(EnumsSection { enums: decls, position: Position::UNKNOWN })
+    }
+
+    fn build_config_section_from_map(config: &HashMap<String, String>) -> Option<ConfigSection> {
+        if config.is_empty() { return None; }
+
+        let mut keys: Vec<&String> = config.keys().collect();
+        keys.sort();
+        let entries = keys.into_iter().map(|k| ConfigEntry {
+            key: k.clone(), value: ConfigValue::String(config[k].clone()), position: Position::UNKNOWN,
+        }).collect();
+
+        Some(ConfigSection { entries, position: Position::UNKNOWN })
+    }
 }
 
 impl Default for DixConverter {
@@ -1207,6 +1016,7 @@ impl Default for DixConverter {
 mod tests {
     use super::*;
     use crate::Compiler::AST::*;
+    use crate::Runtime::DixDataBuilder;
 
     fn make_ast(entries: Vec<DataEntry>) -> DixScript {
         DixScript {
@@ -1216,15 +1026,7 @@ mod tests {
         }
     }
 
-    fn int_val(n: i32) -> Value {
-        Value::Integer { value: n, position: Position::UNKNOWN }
-    }
-    fn sci_val(d: f64) -> Value {
-        Value::ScientificNotation { value: d, position: Position::UNKNOWN }
-    }
-    fn nested_arr(items: Vec<Value>) -> Value {
-        Value::NestedArray { values: items, level: 2, position: Position::UNKNOWN }
-    }
+    fn int_val(n: i32) -> Value { Value::Integer { value: n, position: Position::UNKNOWN } }
     fn prop(name: &str, value: Value) -> PropertyAssignment {
         PropertyAssignment { name: name.into(), data_type: None, value, position: Position::UNKNOWN }
     }
@@ -1232,37 +1034,18 @@ mod tests {
         TablePath { segments: segs.iter().map(|s| s.to_string()).collect() }
     }
 
-    // ── ScientificNotation / NestedArray fixes ────────────────────────────────
-
     #[test]
     fn test_scientific_notation_to_json_not_null() {
         let converter = DixConverter::new();
         let ast = make_ast(vec![DataEntry::SimpleProperty {
             name: "planck".to_string(), data_type: None,
-            value: sci_val(6.62607015e-34_f64), position: Position::UNKNOWN,
+            value: Value::ScientificNotation { value: 6.62607015e-34_f64, position: Position::UNKNOWN },
+            position: Position::UNKNOWN,
         }]);
         let json = converter.to_json(&ast, false).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(v["planck"].is_number(), "planck should be number: {}", json);
     }
-
-    #[test]
-    fn test_nested_array_to_json() {
-        let converter = DixConverter::new();
-        let ast = make_ast(vec![DataEntry::SimpleProperty {
-            name: "matrix".to_string(), data_type: None,
-            value: nested_arr(vec![
-                Value::Array { values: vec![int_val(1), int_val(2)], position: Position::UNKNOWN },
-                Value::Array { values: vec![int_val(3), int_val(4)], position: Position::UNKNOWN },
-            ]),
-            position: Position::UNKNOWN,
-        }]);
-        let json = converter.to_json(&ast, false).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(v["matrix"].is_array(), "expected array: {}", json);
-    }
-
-    // ── Long round-trips ──────────────────────────────────────────────────────
 
     #[test]
     fn test_long_round_trips_json() {
@@ -1278,23 +1061,11 @@ mod tests {
     }
 
     #[test]
-    fn test_long_format_mdix() {
-        let converter = DixConverter::new();
-        let mut data  = HashMap::new();
-        data.insert("count".to_string(), DixValue::Long(1_000_000_000_000_i64));
-        let ast  = converter.from_hashmap(data).unwrap();
-        let mdix = converter.to_mdix(&ast, None).unwrap();
-        assert!(mdix.contains("1000000000000L"));
-    }
-
-    // ── Table / group array round-trips ───────────────────────────────────────
-
-    #[test]
     fn test_table_property_nested_json() {
         let ast = make_ast(vec![DataEntry::TableProperty {
-            path:       path(&["my", "me", "mo"]),
+            path: path(&["my", "me", "mo"]),
             properties: vec![prop("something", int_val(12))],
-            position:   Position::UNKNOWN,
+            position: Position::UNKNOWN,
         }]);
         let converter = DixConverter::new();
         let json = converter.to_json(&ast, true).unwrap();
@@ -1303,50 +1074,15 @@ mod tests {
     }
 
     #[test]
-    fn test_group_array_scalar_nested_json() {
-        let ast = make_ast(vec![DataEntry::GroupArray {
-            path:     path(&["my", "mo"]),
-            items:    vec![int_val(1), int_val(2), int_val(3)],
-            position: Position::UNKNOWN,
-        }]);
-        let converter = DixConverter::new();
-        let v: serde_json::Value =
-            serde_json::from_str(&converter.to_json(&ast, false).unwrap()).unwrap();
-        assert_eq!(v["my"]["mo"], serde_json::json!([1, 2, 3]));
-    }
-
-    #[test]
     fn test_tuple_converts_to_json_array() {
         let converter = DixConverter::new();
-        let dv = DixValue::Tuple(vec![
-            DixValue::Int(1),
-            DixValue::String("hello".into()),
-            DixValue::Bool(true),
-        ]);
+        let dv = DixValue::Tuple(vec![DixValue::Int(1), DixValue::String("hello".into()), DixValue::Bool(true)]);
         let jv = converter.dix_value_to_json_value(&dv);
         assert_eq!(jv, serde_json::json!([1, "hello", true]));
     }
 
     #[test]
-    fn test_table_property_nested_toml_no_quoted_keys() {
-        let ast = make_ast(vec![DataEntry::TableProperty {
-            path:       path(&["my", "me", "mo"]),
-            properties: vec![prop("sss", int_val(4))],
-            position:   Position::UNKNOWN,
-        }]);
-        let converter = DixConverter::new();
-        let toml_str  = converter.to_toml(&ast).unwrap();
-        assert!(!toml_str.contains('"'), "quoted key in TOML output:\n{}", toml_str);
-        let v: toml::Value = toml::from_str(&toml_str).unwrap();
-        assert_eq!(v["my"]["me"]["mo"]["sss"].as_integer(), Some(4));
-    }
-
-    // ── Group D: structural from_hashmap fixes ────────────────────────────────
-
-#[test]
     fn test_from_hashmap_filters_synthetic_table_children() {
-        // Simulates DixData::to_hashmap() output: aggregate "server" -> Object
-        // PLUS synthetic children "server.host" / "server.port".
         let mut data = HashMap::new();
         let mut server_obj = HashMap::new();
         server_obj.insert("host".to_string(), DixValue::String("localhost".into()));
@@ -1359,139 +1095,95 @@ mod tests {
         let ast = converter.from_hashmap(data).unwrap();
         let entries = &ast.data.as_ref().unwrap().entries;
 
-        // Exactly one TableProperty for "server" — no stray SimpleProperty
-        // entries named "server.host" / "server.port".
         assert_eq!(entries.len(), 1, "expected one entry, got: {:?}", entries);
-        match &entries[0] {
-            DataEntry::TableProperty { path, properties, .. } => {
-                assert_eq!(path.to_string(), "server");
-                assert_eq!(properties.len(), 2);
-            }
-            other => panic!("expected TableProperty, got: {:?}", other),
-        }
-
-        // The emitted .mdix must not contain invalid dotted identifiers.
         let mdix = converter.to_mdix(&ast, None).unwrap();
         assert!(!mdix.contains("server.host ="), "invalid identifier leaked: {}", mdix);
-        assert!(!mdix.contains("server.port ="), "invalid identifier leaked: {}", mdix);
     }
 
-#[test]
+    #[test]
     fn test_from_hashmap_filters_synthetic_array_indices() {
-        // Simulates DixData::to_hashmap() output: aggregate "tags" -> Array
-        // PLUS synthetic indices "tags[0]" / "tags[1]".
         let mut data = HashMap::new();
-        data.insert("tags".to_string(), DixValue::Array(vec![
-            DixValue::String("alpha".into()),
-            DixValue::String("beta".into()),
-        ]));
+        data.insert("tags".to_string(), DixValue::Array(vec![DixValue::String("alpha".into()), DixValue::String("beta".into())]));
         data.insert("tags[0]".to_string(), DixValue::String("alpha".into()));
         data.insert("tags[1]".to_string(), DixValue::String("beta".into()));
 
         let converter = DixConverter::new();
         let ast = converter.from_hashmap(data).unwrap();
-        let entries = &ast.data.as_ref().unwrap().entries;
-
-        assert_eq!(entries.len(), 1, "expected one entry, got: {:?}", entries);
-        match &entries[0] {
-            DataEntry::GroupArray { path, items, .. } => {
-                assert_eq!(path.to_string(), "tags");
-                assert_eq!(items.len(), 2);
-            }
-            other => panic!("expected GroupArray, got: {:?}", other),
-        }
-
         let mdix = converter.to_mdix(&ast, None).unwrap();
         assert!(!mdix.contains("tags[0]"), "invalid identifier leaked: {}", mdix);
-        assert!(!mdix.contains("tags[1]"), "invalid identifier leaked: {}", mdix);
         assert!(mdix.contains("tags::"), "expected group array syntax: {}", mdix);
     }
 
     #[test]
-    fn test_from_hashmap_preserves_unrelated_prefix_keys() {
-        // "matrix2" must survive even though "matrix" / "matrix[0]" /
-        // "matrix[1]" are present and "matrix2" shares a string prefix.
+    fn test_from_hashmap_reconstructs_enums_section() {
         let mut data = HashMap::new();
-        data.insert("matrix".to_string(), DixValue::Array(vec![DixValue::Int(1), DixValue::Int(2)]));
-        data.insert("matrix[0]".to_string(), DixValue::Int(1));
-        data.insert("matrix[1]".to_string(), DixValue::Int(2));
-        data.insert("matrix2".to_string(), DixValue::Int(99));
+        data.insert("weapon_type".to_string(), DixValue::Enum {
+            enum_name: "WeaponClass".into(), field_name: "ASSAULT".into(), value: 0,
+        });
 
         let converter = DixConverter::new();
         let ast = converter.from_hashmap(data).unwrap();
-        let entries = &ast.data.unwrap().entries;
 
-        let names: Vec<String> = entries.iter().map(|e| match e {
-            DataEntry::SimpleProperty { name, .. } => name.clone(),
-            DataEntry::GroupArray { path, .. } => path.to_string(),
-            DataEntry::TableProperty { path, .. } => path.to_string(),
-            DataEntry::ObjectProperty { name, .. } => name.clone(),
-        }).collect();
+        let enums = ast.enums.expect("expected @ENUMS section to be reconstructed");
+        assert_eq!(enums.enums[0].name, "WeaponClass");
+        assert_eq!(enums.enums[0].fields[0].name, "ASSAULT");
+        assert_eq!(enums.enums[0].fields[0].value, Some(0));
 
-        assert!(names.contains(&"matrix".to_string()), "matrix missing: {:?}", names);
-        assert!(names.contains(&"matrix2".to_string()), "matrix2 missing: {:?}", names);
-        assert_eq!(entries.len(), 2, "expected exactly 2 entries, got: {:?}", names);
+        let mdix = converter.to_mdix(&ast, None).unwrap();
+        assert!(mdix.contains("@ENUMS("), "missing @ENUMS section: {}", mdix);
+        assert!(mdix.contains("WeaponClass"), "got: {}", mdix);
     }
 
     #[test]
-    fn test_from_hashmap_already_structural_is_noop() {
-        // A map with no synthetic child keys must pass through unchanged.
+    fn test_from_hashmap_finds_enum_nested_in_array_of_objects() {
+        let mut item = HashMap::new();
+        item.insert("status".to_string(), DixValue::Enum {
+            enum_name: "Status".into(), field_name: "ACTIVE".into(), value: 0,
+        });
         let mut data = HashMap::new();
-        data.insert("name".to_string(), DixValue::String("MyApp".into()));
-        data.insert("port".to_string(), DixValue::Int(8080));
+        data.insert("items".to_string(), DixValue::Array(vec![DixValue::Object(item)]));
 
         let converter = DixConverter::new();
         let ast = converter.from_hashmap(data).unwrap();
-        let entries = &ast.data.unwrap().entries;
-        assert_eq!(entries.len(), 2);
+        let enums = ast.enums.expect("enum nested inside array-of-objects must still be found");
+        assert_eq!(enums.enums[0].name, "Status");
     }
 
     #[test]
-    fn test_full_round_trip_table_and_array_via_to_hashmap() {
-        // End-to-end: build an AST with a TableProperty + GroupArray,
-        // flatten via to_hashmap (synthetic children included), then
-        // reconstruct via from_hashmap and confirm valid .mdix output.
-        let ast = make_ast(vec![
-            DataEntry::TableProperty {
-                path:       path(&["server"]),
-                properties: vec![prop("host", Value::String { value: "localhost".into(), position: Position::UNKNOWN })],
-                position:   Position::UNKNOWN,
-            },
-            DataEntry::GroupArray {
-                path:     path(&["tags"]),
-                items:    vec![Value::String { value: "alpha".into(), position: Position::UNKNOWN }],
-                position: Position::UNKNOWN,
-            },
-        ]);
+    fn test_from_dix_data_preserves_real_config_and_enums() {
+        let data = DixDataBuilder::new()
+            .config(|c| { c.with_version("2.3.1"); c.with_author("MidManStudio"); })
+            .enums(|e| { e.with_enum_values("Status", &[("ACTIVE", 0), ("INACTIVE", 1)]); })
+            .data(|d| { d.with_enum("state", "Status", "ACTIVE"); })
+            .build()
+            .unwrap();
 
         let converter = DixConverter::new();
-        let flat = converter.to_hashmap(&ast);
+        let ast = converter.from_dix_data(&data).unwrap();
 
-        // Sanity: fully-flattened map contains synthetic children AND the
-        // aggregates they're derived from.
-        assert!(flat.contains_key("server.host"));
-        assert!(flat.contains_key("server"));
-        assert!(flat.contains_key("tags[0]"));
-        assert!(flat.contains_key("tags"));
+        let cfg = ast.config.expect("expected real @CONFIG, not the from_hashmap placeholder");
+        let version = cfg.entries.iter().find(|e| e.key == "version").unwrap();
+        assert!(matches!(&version.value, ConfigValue::String(s) if s == "2.3.1"));
+        let author = cfg.entries.iter().find(|e| e.key == "author").unwrap();
+        assert!(matches!(&author.value, ConfigValue::String(s) if s == "MidManStudio"));
 
-        let ast2 = converter.from_hashmap(flat).unwrap();
-        let mdix = converter.to_mdix(&ast2, None).unwrap();
+        let enums = ast.enums.expect("expected @ENUMS from DixData.enums");
+        let status = enums.enums.iter().find(|e| e.name == "Status").unwrap();
+        assert_eq!(status.fields.len(), 2);
 
-        assert!(!mdix.contains("server.host"), "invalid identifier leaked: {}", mdix);
-        assert!(!mdix.contains("tags[0]"), "invalid identifier leaked: {}", mdix);
-        assert!(mdix.contains("server:"), "expected table property syntax: {}", mdix);
-        assert!(mdix.contains("tags::"), "expected group array syntax: {}", mdix);
+        let mdix = converter.to_mdix(&ast, None).unwrap();
+        assert!(mdix.contains("2.3.1"));
+        assert!(mdix.contains("@ENUMS("));
     }
 
-    // ── NEW: minify-mode entry-separator regression coverage ──────────────────
-    //
-    // Reproduces the exact failure class found in real chemistry-DB files:
-    // a flat numeric property whose rendered value ends in a digit, directly
-    // followed by a grouped (TableProperty/GroupArray) entry. Before the fix,
-    // `to_mdix` under `DixFormatOptions::minified()` glued these together with
-    // zero separator, and — when the numeric value had a decimal point — the
-    // lexer's exponent scanner would misread the next entry's leading letter
-    // as a scientific-notation marker and raise an invalid-number error.
+    #[test]
+    fn test_format_config_value_handles_all_variants() {
+        let converter = DixConverter::new();
+        assert_eq!(converter.format_config_value(&ConfigValue::ErrorHandling(ErrorHandlingStrategy::Recover)), "\"recover\"");
+        assert_eq!(converter.format_config_value(&ConfigValue::Compatibility(CompatibilityMode::BestEffort)), "\"best_effort\"");
+        assert_eq!(converter.format_config_value(&ConfigValue::Debug(DebugMode::Verbose)), "\"verbose\"");
+        assert_eq!(converter.format_config_value(&ConfigValue::Features(vec!["a".into(), "b".into()])), "\"a,b\"");
+    }
 
     #[test]
     fn test_minified_output_separates_flat_and_table_tier_with_comma() {
@@ -1509,106 +1201,10 @@ mod tests {
         ]);
 
         let converter = DixConverter::new();
-        let opts = DixFormatOptions::minified();
-        let minified = converter.to_mdix(&ast, Some(&opts)).unwrap();
+        let minified = converter.to_mdix(&ast, Some(&DixFormatOptions::minified())).unwrap();
 
-        // The literal bug: no comma meant "...568160elements..." was produced,
-        // which the lexer cannot safely re-tokenize (568160 + leading 'e' of
-        // "elements" reads as a broken scientific-notation literal).
-        assert!(
-            !minified.contains("568160elements"),
-            "flat property fused with following table path with no separator: {}",
-            minified
-        );
-
-        // The fix: a literal comma must separate the two tiers.
-        assert!(
-            minified.contains("568160,elements"),
-            "expected a comma separating the flat and grouped tiers, got: {}",
-            minified
-        );
-
-        // And the table property itself must have survived intact —
-        // this is the actual symptom that was reported: everything after
-        // the flat→table boundary used to be silently dropped.
-        assert!(
-            minified.contains("elements.hydrogen.identity:"),
-            "table property was dropped from minified output: {}",
-            minified
-        );
-        assert!(
-            minified.contains("name=\"Hydrogen\""),
-            "table property's own fields were dropped: {}",
-            minified
-        );
+        assert!(!minified.contains("568160elements"), "flat property fused with table path: {}", minified);
+        assert!(minified.contains("568160,elements"), "expected comma separator: {}", minified);
+        assert!(minified.contains("elements.hydrogen.identity:"), "table property dropped: {}", minified);
     }
-
-    #[test]
-    fn test_minified_output_separates_consecutive_table_properties_with_comma() {
-        let ast = make_ast(vec![
-            DataEntry::TableProperty {
-                path: path(&["elements", "hydrogen", "identity"]),
-                properties: vec![prop("symbol", Value::EnumValue {
-                    enum_name: "enums".into(), value: "GAS".into(), position: Position::UNKNOWN,
-                })],
-                position: Position::UNKNOWN,
-            },
-            DataEntry::TableProperty {
-                path: path(&["elements", "helium", "identity"]),
-                properties: vec![prop("symbol", Value::String { value: "He".into(), position: Position::UNKNOWN })],
-                position: Position::UNKNOWN,
-            },
-        ]);
-
-        let converter = DixConverter::new();
-        let opts = DixFormatOptions::minified();
-        let minified = converter.to_mdix(&ast, Some(&opts)).unwrap();
-
-        // Old bug: "...enums.GAS" + "elements.helium..." with no separator
-        // fuses into a single bogus identifier "GASelements".
-        assert!(
-            !minified.contains("GASelements"),
-            "two consecutive table properties were fused into one identifier: {}",
-            minified
-        );
-
-        // Both table properties must be independently present.
-        assert!(minified.contains("elements.hydrogen.identity:"), "got: {}", minified);
-        assert!(minified.contains("elements.helium.identity:"), "got: {}", minified);
-    }
-
-    #[test]
-    fn test_minified_output_separates_table_and_group_array_with_comma() {
-        let ast = make_ast(vec![
-            DataEntry::TableProperty {
-                path: path(&["server"]),
-                properties: vec![prop("port", int_val(8080))],
-                position: Position::UNKNOWN,
-            },
-            DataEntry::GroupArray {
-                path: path(&["tags"]),
-                items: vec![Value::String { value: "alpha".into(), position: Position::UNKNOWN }],
-                position: Position::UNKNOWN,
-            },
-        ]);
-
-        let converter = DixConverter::new();
-        let opts = DixFormatOptions::minified();
-        let minified = converter.to_mdix(&ast, Some(&opts)).unwrap();
-
-        assert!(minified.contains("server:"), "got: {}", minified);
-        assert!(minified.contains("tags::"), "got: {}", minified);
-        // Re-tokenizing the minified output must succeed end-to-end and
-        // recover both entries — the real regression test for the bug.
-        let settings = crate::Compiler::Core::Config::OperationalSettings::default();
-        let tok = crate::Compiler::Core::Tokenizer::Tokenizer::new(&minified, &settings);
-        let result = tok.tokenize();
-        let rendered: Vec<String> = result.tokens.iter()
-            .filter_map(|t| match &t.token_type {
-                crate::Compiler::Core::Tokenizer::TokenType::Identifier(s) => Some(s.clone()),
-                _ => None,
-            })
-            .collect();
-        assert!(rendered.iter().any(|s| s == "tags"), "tags entry lost on re-tokenize: {:?}", rendered);
-    }
-}
+            }

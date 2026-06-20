@@ -32,7 +32,23 @@ tasks {
         sinceBuild.set(providers.gradleProperty("pluginSinceBuild").get())
         untilBuild.set("")  // open-ended — no max version
     }
-processResources {
-    from("src/main/resources")
-}
+    processResources {
+        from("src/main/resources")
+    }
+
+    // Pulls the platform-appropriate mdix-lsp binary into bin/{platform}/
+    // before the sandbox is assembled. isIgnoreExitValue so a missing
+    // `node` or not-yet-built binary degrades to "no bundled binary, fall
+    // back to PATH" instead of failing the whole Gradle build.
+    register<Exec>("copyLspBinary") {
+        commandLine("node", "scripts/copy-binary.js", "--release")
+        isIgnoreExitValue = true
+    }
+
+    prepareSandbox {
+        dependsOn("copyLspBinary")
+        from(layout.projectDirectory.dir("bin")) {
+            into("${intellij.pluginName.get()}/bin")
+        }
+    }
 }

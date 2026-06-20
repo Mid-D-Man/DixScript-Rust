@@ -1,4 +1,3 @@
-
 use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Utc};
 use crate::Compiler::AST::DixScript;
@@ -165,7 +164,11 @@ impl DixData {
     ///
     /// Use this when feeding data into [`DixConverter::from_hashmap`] /
     /// [`DixConverter::to_mdix`] — e.g. for `format`, `convert`, or any other
-    /// round-trip through `.mdix` source.
+    /// round-trip through `.mdix` source. For the common case of "I already
+    /// have a real `DixData` and want faithful `.mdix` back", prefer
+    /// `DixConverter::from_dix_data(&self)` instead — it also restores the
+    /// real `@CONFIG` and `@ENUMS` sections rather than `from_hashmap`'s
+    /// best-effort reconstruction.
     ///
     /// ```rust,ignore
     /// let data = loader.load_text("config.mdix", &DixLoadOptions::new())?;
@@ -256,7 +259,7 @@ impl DixData {
             sec.entries.iter().map(|entry| {
                 let mut block_data = HashMap::new();
                 for field in &entry.fields {
-                    if let Some(dix_val) = Self::ast_value_to_dix_value(&field.value, None) {
+                    if let Some(dix_val) = super::dix_value::ast_value_to_dix_value(&field.value, None) {
                         block_data.insert(field.key.clone(), dix_val);
                     }
                 }
@@ -304,7 +307,7 @@ impl DixData {
         match entry {
             DataEntry::SimpleProperty { name, value, .. } => {
                 let key = Self::build_path(prefix, name);
-                if let Some(dix_value) = Self::ast_value_to_dix_value(value, enums) {
+                if let Some(dix_value) = super::dix_value::ast_value_to_dix_value(value, enums) {
                     Self::flatten_dix_value(&key, &dix_value, result);
                 }
             }
@@ -318,7 +321,7 @@ impl DixData {
 
                 for prop in properties {
                     let key = Self::build_path(&table_path, &prop.name);
-                    if let Some(dix_value) = Self::ast_value_to_dix_value(&prop.value, enums) {
+                    if let Some(dix_value) = super::dix_value::ast_value_to_dix_value(&prop.value, enums) {
                         obj_map.insert(prop.name.clone(), dix_value.clone());
                         Self::flatten_dix_value(&key, &dix_value, result);
                     }
@@ -345,7 +348,7 @@ impl DixData {
             DataEntry::GroupArray { path, items, .. } => {
                 let array_path = Self::build_path(prefix, &path.to_string());
                 let array_values: Vec<DixValue> = items.iter()
-                    .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
+                    .filter_map(|v| super::dix_value::ast_value_to_dix_value(v, enums))
                     .collect();
                 result.insert(array_path.clone(), DixValue::Array(array_values.clone()));
                 for (i, value) in array_values.iter().enumerate() {
@@ -359,7 +362,7 @@ impl DixData {
                 if let crate::Compiler::AST::Value::Object { ref properties, .. } = **object {
                     let mut obj_map = HashMap::new();
                     for prop in properties {
-                        if let Some(dix_value) = Self::ast_value_to_dix_value(&prop.value, enums) {
+                        if let Some(dix_value) = super::dix_value::ast_value_to_dix_value(&prop.value, enums) {
                             obj_map.insert(prop.key.clone(), dix_value.clone());
                             Self::flatten_dix_value(
                                 &Self::build_path(&key, &prop.key), &dix_value, result,
@@ -446,94 +449,31 @@ impl DixData {
 
     // ── Conversion helpers ────────────────────────────────────────────────────
 
+    /// Render a `ConfigValue` to its raw string form for `DixData::config`.
+    ///
+    /// **FIX**: previously this had a catch-all `_ => String::new()` arm that
+    /// silently dropped `Features`, `ErrorHandling`, `Compatibility`, and
+    /// `Debug` config values to an empty string — e.g.
+    /// `@CONFIG(error_handling -> "recover")` would read back as
+    /// `data.config["error_handling"] == ""`. Every `ConfigValue` variant is
+    /// now handled explicitly (and the match is exhaustive, so a future new
+    /// variant fails to compile here instead of silently going blank again).
+    /// Note this intentionally returns the *raw* value (`"recover"`, not
+    /// `"\"recover\""`) — `DixConverter::format_config_value` is the
+    /// quote-wrapping counterpart used when re-emitting `.mdix` source.
     fn config_value_to_string(value: &crate::Compiler::AST::ConfigValue) -> String {
         use crate::Compiler::AST::ConfigValue;
         match value {
-            ConfigValue::String(s)    => s.clone(),
-            ConfigValue::Integer(i)   => i.to_string(),
-            ConfigValue::Float(f)     => f.to_string(),
-            ConfigValue::Boolean(b)   => b.to_string(),
-            ConfigValue::Date(d)      => d.clone(),
-            ConfigValue::Timestamp(t) => t.clone(),
-            _                         => String::new(),
-        }
-    }
-
-    fn ast_value_to_dix_value(
-        value: &crate::Compiler::AST::Value,
-        enums: Option<&HashMap<String, HashMap<String, i32>>>,
-    ) -> Option<DixValue> {
-        use crate::Compiler::AST::Value;
-
-        match value {
-            Value::Null { .. }                              => Some(DixValue::Null),
-            Value::Boolean { value: b, .. }                => Some(DixValue::Bool(*b)),
-            Value::Integer { value: i, .. }                => Some(DixValue::Int(*i)),
-            Value::Long { value: l, .. }                   => Some(DixValue::Long(*l)),
-            Value::Float { value: f, .. }                  => Some(DixValue::Float(*f)),
-            Value::Double { value: d, .. }                 => Some(DixValue::Double(*d)),
-            Value::ScientificNotation { value: d, .. }     => Some(DixValue::Double(*d)),
-            Value::String { value: s, .. }                 => Some(DixValue::String(s.clone())),
-            Value::Date { value: d, .. }                   => Some(DixValue::Date(d.clone())),
-            Value::Timestamp { value: t, .. }              => Some(DixValue::Timestamp(t.clone())),
-            Value::HexColor { value: c, .. }               => Some(DixValue::HexColor(c.clone())),
-            Value::InterpolatedString { template, .. }     => Some(DixValue::String(template.clone())),
-
-            Value::Array { values, .. } => {
-                let items: Vec<DixValue> = values.iter()
-                    .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
-                    .collect();
-                Some(DixValue::Array(items))
-            }
-            Value::NestedArray { values, .. } => {
-                let items: Vec<DixValue> = values.iter()
-                    .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
-                    .collect();
-                Some(DixValue::Array(items))
-            }
-            Value::Object { properties, .. } => {
-                let mut obj = HashMap::new();
-                for prop in properties {
-                    if let Some(dix_value) = Self::ast_value_to_dix_value(&prop.value, enums) {
-                        obj.insert(prop.key.clone(), dix_value);
-                    }
-                }
-                Some(DixValue::Object(obj))
-            }
-            Value::EnumValue { enum_name, value: field_name, .. } => {
-                let resolved = enums
-                    .and_then(|e| e.get(enum_name.as_str()))
-                    .and_then(|fields| fields.get(field_name.as_str()))
-                    .copied()
-                    .unwrap_or(0);
-                Some(DixValue::Enum {
-                    enum_name:  enum_name.clone(),
-                    field_name: field_name.clone(),
-                    value:      resolved,
-                })
-            }
-            Value::PrefixedConstructor { prefix, arguments, .. } => {
-                match prefix.as_str() {
-                    "t" => {
-                        let items: Vec<DixValue> = arguments.iter()
-                            .filter_map(|v| Self::ast_value_to_dix_value(v, enums))
-                            .collect();
-                        Some(DixValue::Tuple(items))
-                    }
-                    "b" => {
-                        if let Some(Value::String { value: s, .. }) = arguments.first() {
-                            Some(DixValue::Blob(s.clone()))
-                        } else { None }
-                    }
-                    "r" => {
-                        if let Some(Value::String { value: s, .. }) = arguments.first() {
-                            Some(DixValue::Regex(s.clone()))
-                        } else { None }
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
+            ConfigValue::String(s)         => s.clone(),
+            ConfigValue::Integer(i)        => i.to_string(),
+            ConfigValue::Float(f)          => f.to_string(),
+            ConfigValue::Boolean(b)        => b.to_string(),
+            ConfigValue::Date(d)           => d.clone(),
+            ConfigValue::Timestamp(t)      => t.clone(),
+            ConfigValue::Features(feats)   => feats.join(","),
+            ConfigValue::ErrorHandling(eh) => eh.to_string(),
+            ConfigValue::Compatibility(cm) => cm.to_string(),
+            ConfigValue::Debug(dm)         => dm.to_string(),
         }
     }
 }
@@ -1051,4 +991,60 @@ mod tests {
         assert_eq!(structural.get("name"), Some(&DixValue::String("MyApp".into())));
         assert_eq!(structural.get("port"), Some(&DixValue::Int(8080)));
     }
-        }
+
+    // ── config_value_to_string fix ─────────────────────────────────────────────
+
+    #[test]
+    fn test_config_features_value_survives() {
+        let ast = DixScript {
+            config: Some(ConfigSection {
+                entries: vec![ConfigEntry {
+                    key: "features".into(),
+                    value: ConfigValue::Features(vec!["foo".into(), "bar".into()]),
+                    position: Position::UNKNOWN,
+                }],
+                position: Position::UNKNOWN,
+            }),
+            imports: None, dlm: None, enums: None, quick_functions: None,
+            data: None, security: None,
+        };
+        let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
+        let cfg = data.config.unwrap();
+        assert_eq!(cfg.get("features").map(String::as_str), Some("foo,bar"));
+    }
+
+    #[test]
+    fn test_config_error_handling_compatibility_debug_values_survive() {
+        let ast = DixScript {
+            config: Some(ConfigSection {
+                entries: vec![
+                    ConfigEntry {
+                        key: "error_handling".into(),
+                        value: ConfigValue::ErrorHandling(ErrorHandlingStrategy::Recover),
+                        position: Position::UNKNOWN,
+                    },
+                    ConfigEntry {
+                        key: "compatibility".into(),
+                        value: ConfigValue::Compatibility(CompatibilityMode::BestEffort),
+                        position: Position::UNKNOWN,
+                    },
+                    ConfigEntry {
+                        key: "debug".into(),
+                        value: ConfigValue::Debug(DebugMode::Verbose),
+                        position: Position::UNKNOWN,
+                    },
+                ],
+                position: Position::UNKNOWN,
+            }),
+            imports: None, dlm: None, enums: None, quick_functions: None,
+            data: None, security: None,
+        };
+        let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
+        let cfg = data.config.unwrap();
+        // FIX: previously all three of these came back as "" via the `_ =>
+        // String::new()` catch-all.
+        assert_eq!(cfg.get("error_handling").map(String::as_str), Some("recover"));
+        assert_eq!(cfg.get("compatibility").map(String::as_str), Some("best_effort"));
+        assert_eq!(cfg.get("debug").map(String::as_str), Some("verbose"));
+    }
+}

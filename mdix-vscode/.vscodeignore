@@ -5,5 +5,3 @@ node_modules/**
 test_files/**
 *.map
 tsconfig.json
-bin/linux-arm64/**
-bin/darwin-arm64/**

@@ -22,20 +22,30 @@ class MdixServerFactory : LanguageServerFactory {
     // ── Binary resolution ─────────────────────────────────────────────────────
 
     private fun resolveBinary(): String {
-        val exe = if (System.getProperty("os.name").lowercase().contains("win"))
-            "mdix-lsp.exe" else "mdix-lsp"
+        val isWindows = System.getProperty("os.name").lowercase().contains("win")
+        val exe = if (isWindows) "mdix-lsp.exe" else "mdix-lsp"
 
         // 1. Env override
         System.getenv("MDIX_LSP_PATH")
             ?.takeIf { File(it).exists() }
             ?.let { return it }
 
-        // 2. Bundled inside the plugin JAR's sibling bin/ directory
+        // 2. Bundled inside the plugin's sandbox bin/ directory
+        //    (populated by scripts/copy-binary.js via the copyLspBinary
+        //    Gradle task — see build.gradle.kts)
         val pluginDir  = Paths.get(
             MdixServerFactory::class.java.protectionDomain.codeSource.location.toURI()
         ).parent.parent.toString()
         val bundled = File(pluginDir, "bin/${platformDir()}/$exe")
-        if (bundled.exists()) return bundled.absolutePath
+        if (bundled.exists()) {
+            // Zip extraction doesn't reliably preserve the executable bit
+            // across platforms during plugin install — set it defensively
+            // rather than trust the packaging pipeline.
+            if (!isWindows && !bundled.canExecute()) {
+                bundled.setExecutable(true)
+            }
+            return bundled.absolutePath
+        }
 
         // 3. System PATH
         which(exe)?.let { return it }
@@ -55,7 +65,7 @@ class MdixServerFactory : LanguageServerFactory {
             os.contains("mac")                               -> "darwin-x64"
             os.contains("win")                               -> "win32-x64"
             arch.contains("aarch64")                         -> "linux-arm64"
-            else                                             -> "linux-x64"
+            else                                              -> "linux-x64"
         }
     }
 

@@ -103,7 +103,14 @@ fn is_valid_data_type(data_type: DataType) -> bool {
 fn is_numeric_type(dt: DataType) -> bool {
     matches!(dt, DataType::Int | DataType::Long | DataType::Float | DataType::Double | DataType::Enum)
 }
-
+/// `true` for types valid as bitwise/shift operands: int and long.
+/// `long` was previously excluded, which caused spurious errors for any
+/// bitwise or shift operation (&, |, ^, <<, >>, ~?, &=, |=, ^=, <<=, >>=)
+/// performed on a `long`-typed variable or expression.
+#[inline]
+fn is_bitwise_operand_type(dt: DataType) -> bool {
+    matches!(dt, DataType::Int | DataType::Long)
+}
 // ==================== ANALYZER ====================
 
 /// Semantic analyzer for the @QUICKFUNCS section.

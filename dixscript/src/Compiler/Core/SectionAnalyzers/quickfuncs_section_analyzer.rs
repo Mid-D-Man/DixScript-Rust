@@ -1880,22 +1880,24 @@ fn validate_arithmetic_op_expression(
         ("Right", right, "QFUNC031"),
     ] {
         if let Some(t) = visitor.infer_type_from_expression(expr) {
-            // Skip check for Any — type is unknown/deferred
-            if t != DataType::Int && t != DataType::Any {
+            // FIX: was `t != DataType::Int`, rejecting valid `long` operands.
+            // Skip the check for Any — type is unknown/deferred.
+            if !is_bitwise_operand_type(t) && t != DataType::Any {
                 self.add_error(
                     result,
                     code,
                     "NON_INT_BITWISE_OPERAND",
                     &format!(
-                        "{} operand of '{}' must be int, got {:?} in '{}'",
+                        "{} operand of '{}' must be int or long, got {:?} in '{}'",
                         side, operator, t, func.name
                     ),
-                    "Convert to int or use arithmetic operators instead.",
+                    "Convert to int/long or use arithmetic operators instead.",
                     expr.position(),
                 );
             }
         }
     }
+}
 }
 
     // ── Operator expression validators ─────────────────────────────────────────
@@ -2087,16 +2089,17 @@ fn validate_unary_op_expression(
                     operand.position(),
                 );
             }
-            "~?" if ot != DataType::Int => {
+            // FIX: was `ot != DataType::Int`, rejecting valid `long` operands.
+            "~?" if !is_bitwise_operand_type(ot) => {
                 self.add_error(
                     result,
                     "QFUNC039",
                     "NON_INT_BITWISE_NOT",
                     &format!(
-                        "Bitwise NOT (~?) requires int, got {:?} in '{}'",
+                        "Bitwise NOT (~?) requires int or long, got {:?} in '{}'",
                         ot, func.name
                     ),
-                    "Convert to int before using bitwise NOT.",
+                    "Convert to int or long before using bitwise NOT.",
                     operand.position(),
                 );
             }

@@ -2120,7 +2120,65 @@ fn validate_unary_op_expression(
         }
     }
 }
+fn validate_arithmetic_operation(
+    &self,
+    op: &str,
+    left_type: DataType,
+    right_type: DataType,
+    function_name: &str,
+    result: &mut SectionAnalysisResult,
+    position: Position,
+) {
+    if op == "+=" {
+        match (left_type, right_type) {
+            (DataType::String, DataType::String) => return,
+            (DataType::String, _) | (_, DataType::String) => {
+                self.add_error(
+                    result, "QFUNC061", "INVALID_STRING_CONCAT_ASSIGN",
+                    &format!("Cannot use '+=' to concatenate string with non-string in function '{}'", function_name),
+                    "Use only string += string, or convert to string first.", position,
+                );
+                return;
+            }
+            _ => {}
+        }
+    }
 
+    if !is_numeric_type(left_type) {
+        self.add_error(
+            result, "QFUNC062", "NON_NUMERIC_ARITHMETIC_ASSIGN",
+            &format!("Arithmetic assignment '{}' requires numeric type, left operand is {:?}", op, left_type),
+            "Use int, float, or double.", position,
+        );
+    }
+    if !is_numeric_type(right_type) {
+        self.add_error(
+            result, "QFUNC063", "NON_NUMERIC_ARITHMETIC_ASSIGN",
+            &format!("Arithmetic assignment '{}' requires numeric type, right operand is {:?}", op, right_type),
+            "Use int, float, or double.", position,
+        );
+    }
+
+    // FIX: bitwise compound-assignment operators previously required
+    // DataType::Int exactly, rejecting `long` operands — this is the
+    // >>= bug: `x >>= 1` on a `long` variable would incorrectly error.
+    if matches!(op, "&=" | "|=" | "^=" | "<<=" | ">>=") {
+        if !is_bitwise_operand_type(left_type) {
+            self.add_error(
+                result, "QFUNC064", "NON_INT_BITWISE_ASSIGN",
+                &format!("Bitwise assignment '{}' requires int or long, got {:?}", op, left_type),
+                "Convert to int or long before using bitwise assignment.", position,
+            );
+        }
+        if !is_bitwise_operand_type(right_type) {
+            self.add_error(
+                result, "QFUNC065", "NON_INT_BITWISE_ASSIGN",
+                &format!("Bitwise assignment '{}' requires int or long, got {:?}", op, right_type),
+                "Convert to int or long before using bitwise assignment.", position,
+            );
+        }
+    }
+}
 // ── validate_conditional_expression ──────────────────────────────────────────
 //
 // CHANGE: tightened QFUNC_WARN003.
@@ -2759,62 +2817,7 @@ fn are_types_comparable(a: DataType, b: DataType) -> bool {
 
 
 
-    fn validate_arithmetic_operation(
-        &self,
-        op: &str,
-        left_type: DataType,
-        right_type: DataType,
-        function_name: &str,
-        result: &mut SectionAnalysisResult,
-        position: Position,
-    ) {
-        if op == "+=" {
-            match (left_type, right_type) {
-                (DataType::String, DataType::String) => return,
-                (DataType::String, _) | (_, DataType::String) => {
-                    self.add_error(
-                        result, "QFUNC061", "INVALID_STRING_CONCAT_ASSIGN",
-                        &format!("Cannot use '+=' to concatenate string with non-string in function '{}'", function_name),
-                        "Use only string += string, or convert to string first.", position,
-                    );
-                    return;
-                }
-                _ => {}
-            }
-        }
-
-        if !is_numeric_type(left_type) {
-            self.add_error(
-                result, "QFUNC062", "NON_NUMERIC_ARITHMETIC_ASSIGN",
-                &format!("Arithmetic assignment '{}' requires numeric type, left operand is {:?}", op, left_type),
-                "Use int, float, or double.", position,
-            );
-        }
-        if !is_numeric_type(right_type) {
-            self.add_error(
-                result, "QFUNC063", "NON_NUMERIC_ARITHMETIC_ASSIGN",
-                &format!("Arithmetic assignment '{}' requires numeric type, right operand is {:?}", op, right_type),
-                "Use int, float, or double.", position,
-            );
-        }
-
-        if matches!(op, "&=" | "|=" | "^=" | "<<=" | ">>=") {
-            if left_type != DataType::Int {
-                self.add_error(
-                    result, "QFUNC064", "NON_INT_BITWISE_ASSIGN",
-                    &format!("Bitwise assignment '{}' requires int, got {:?}", op, left_type),
-                    "Convert to int before using bitwise assignment.", position,
-                );
-            }
-            if right_type != DataType::Int {
-                self.add_error(
-                    result, "QFUNC065", "NON_INT_BITWISE_ASSIGN",
-                    &format!("Bitwise assignment '{}' requires int, got {:?}", op, right_type),
-                    "Convert to int before using bitwise assignment.", position,
-                );
-            }
-        }
-    }
+    
 
     /// Maps DataType → DixType for instance-method registry lookups.
 /// `Long` is included (was missing in previous version — bug fix).

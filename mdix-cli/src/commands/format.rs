@@ -1,4 +1,3 @@
-
 use std::path::PathBuf;
 use clap::Args;
 use serde::Serialize;
@@ -63,9 +62,16 @@ pub fn run(args: FormatArgs, global: &GlobalOpts) -> i32 {
 
     let converter = DixConverter::new();
 
-    // Reconstruct a minimal AST from the loaded data for re-serialisation.
-    let map = dix_data.to_hashmap();
-    let ast = match converter.from_hashmap(map) {
+    // FIX: previously this went `dix_data.to_hashmap()` -> `from_hashmap()`,
+    // which (a) passed the fully-flattened map instead of the structural one
+    // — harmless on its own since from_hashmap filters synthetic children,
+    // but wasteful — and (b) discarded the file's real @CONFIG (author,
+    // version, etc.) and could only reconstruct @ENUMS by scanning for usage
+    // rather than reading the actual declared enum table. `from_dix_data`
+    // pulls both straight from `dix_data.config`/`dix_data.enums`, so a
+    // formatted file keeps its real metadata and every declared enum, used
+    // or not.
+    let ast = match converter.from_dix_data(&dix_data) {
         Ok(a)  => a,
         Err(e) => {
             let err = crate::commands::CliError::CompileError(e);
@@ -118,4 +124,4 @@ pub fn run(args: FormatArgs, global: &GlobalOpts) -> i32 {
     }
 
     0
-  }
+        }

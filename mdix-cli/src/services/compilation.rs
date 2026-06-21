@@ -36,14 +36,8 @@ pub fn compile(path: &Path, opts: &CompileOpts) -> Result<CompileResult, CliErro
     if let Some(ref dir) = opts.output_dir {
         load_opts.output_directory = Some(dir.clone());
     }
-    // Thread the password through so the DLM pipeline can access it via
-    // DixLoadOptions. The encryptors read MDIX_DLM_PASSWORD from env —
-    // set it here so password-mode encryption works in non-interactive contexts.
     if let Some(ref pw) = opts.password {
         load_opts.password = Some(pw.clone());
-        // Set as env var so the encryptor layer can read it without changing
-        // the DLMPipelineExecutor signature. This is intentionally scoped to
-        // the current process only (not a child process).
         std::env::set_var("MDIX_DLM_PASSWORD", pw);
     }
 
@@ -52,8 +46,6 @@ pub fn compile(path: &Path, opts: &CompileOpts) -> Result<CompileResult, CliErro
         .load_text(path.to_str().unwrap_or(""), &load_opts)
         .map_err(CliError::CompileError)?;
 
-    // Clear the env var after compilation so it doesn't leak to later commands
-    // in the same process invocation.
     if opts.password.is_some() {
         unsafe{std::env::remove_var("MDIX_DLM_PASSWORD");}
     }
@@ -96,15 +88,11 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
     let mut load_opts = DixLoadOptions::new();
 
     if let Some(ref kp) = opts.key_file_path {
-        // Explicit key path supplied by the caller.
         load_opts.key_file_path = Some(kp.clone());
     } else {
         // Auto-detect: strip .mdix.enc (or .enc) from the encrypted filename
-        // and append .mdix.key.
-        //
-        // Without this, DixLoader would naively append .mdix.key to the full
-        // encrypted filename, producing nonsense like
-        // "foo.mdix.enc.mdix.key" instead of "foo.mdix.key".
+        // and append .mdix.key, instead of naively producing
+        // "foo.mdix.enc.mdix.key".
         let enc_name = path
             .file_name()
             .and_then(|n| n.to_str())
@@ -125,8 +113,6 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
         if key_candidate.exists() {
             load_opts.key_file_path = Some(key_candidate.to_string_lossy().to_string());
         } else {
-            // Surface a clear error rather than letting DixLoader produce a
-            // confusing "file not found" message with a mangled filename.
             return Err(CliError::KeyError(format!(
                 "Key file '{}' not found. Searched in: {}",
                 key_filename,
@@ -137,7 +123,7 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
 
     if let Some(ref pw) = opts.password {
         load_opts.password = Some(pw.clone());
-      unsafe{  std::env::set_var("MDIX_DLM_PASSWORD", pw); }
+        unsafe{ std::env::set_var("MDIX_DLM_PASSWORD", pw); }
     }
 
     if let Some(ref dir) = opts.output_dir {
@@ -153,26 +139,21 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
         unsafe{std::env::remove_var("MDIX_DLM_PASSWORD");}
     }
 
-    // ── Reconstruct and write the plaintext .mdix source ────────────────────
+    // `load_encrypted` only decrypts/deserializes into an in-memory
+    // `DixData` — it never writes a plaintext file. Reconstruct the AST and
+    // write it out below.
     //
-    // BUG FIX: `load_encrypted` decrypts and deserializes the binary blob
-    // into a `DixData` (already-parsed, structured, in-memory data) — it
-    // never writes anything to disk. The code below previously computed a
-    // notional `output_path` string purely for display and returned it as
-    // if a file had been written there; nothing was ever created at that
-    // path, so any downstream step reading it (e.g. `mdix convert
-    // <decrypted>.mdix --to json`) failed with "File not found".
-    //
-    // To produce a real plaintext `.mdix` file at `-o <dir>`, convert the
-    // *structural* hashmap (aggregate Object/Array values only — synthetic
-    // flattened child paths like "database.password_dev" are filtered out,
-    // see `DixData::to_structural_hashmap`) back into an AST, then
-    // serialize that AST to `.mdix` source text and write it out.
-    let converter      = DixConverter::new();
-    let structural_map = dix_data.to_structural_hashmap();
+    // FIX: previously this went `to_structural_hashmap()` -> `from_hashmap()`,
+    // which had no access to the file's real @CONFIG (author, version, etc.)
+    // and could only reconstruct @ENUMS by scanning which enums were
+    // actually referenced in @DATA. `from_dix_data` pulls both straight off
+    // `dix_data.config`/`dix_data.enums` — the genuine tables the loader
+    // populated during decryption — so the decrypted .mdix keeps its real
+    // metadata and every declared enum, used or not.
+    let converter = DixConverter::new();
 
     let ast = converter
-        .from_hashmap(structural_map)
+        .from_dix_data(&dix_data)
         .map_err(CliError::ConversionError)?;
 
     let mdix_text = converter

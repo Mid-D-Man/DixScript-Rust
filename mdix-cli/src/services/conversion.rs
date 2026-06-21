@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::time::Instant;
-use dixscript::Runtime::{DixConverter, DixFormatOptions, DixLoader, DixLoadOptions};
+use dixscript::Runtime::{DixConverter, DixFormatOptions, DixLoader};
 use crate::commands::CliError;
 use crate::services::file_io;
 
@@ -137,78 +137,77 @@ pub fn convert_file(path: &Path, opts: &ConvertOpts) -> Result<ConversionResult,
 
 // ── Format converters ─────────────────────────────────────────────────────────
 
+/// FIX: previously dumped `dix_data.to_hashmap()` (the fully-flattened map,
+/// containing BOTH the aggregate "server" -> Object AND synthetic children
+/// like "server.host") straight through `serde_json::to_string`, producing
+/// JSON with redundant/duplicate keys. Compiling to the resolved AST and
+/// using `DixConverter::to_json` reconstructs proper nesting with no
+/// synthetic-key leakage, and also picks up the file's real `@ENUMS` for
+/// enum-value resolution.
 fn mdix_to_json(path: &Path, pretty: bool) -> Result<String, CliError> {
-    let loader   = DixLoader::new();
-    let dix_data = loader
-        .load_text(path.to_str().unwrap_or(""), &DixLoadOptions::new())
+    let loader = DixLoader::new();
+    let ast = loader
+        .compile_to_resolved_ast(path.to_str().unwrap_or(""))
         .map_err(CliError::ConversionError)?;
-
-    let map = dix_data.to_hashmap();
-
-    if pretty {
-        serde_json::to_string_pretty(&map)
-            .map_err(|e| CliError::ConversionError(e.to_string()))
-    } else {
-        serde_json::to_string(&map)
-            .map_err(|e| CliError::ConversionError(e.to_string()))
-    }
-}
-
-fn json_to_mdix(path: &Path, pretty: bool) -> Result<String, CliError> {
-    let content = file_io::read_file(path)?;
-    let map: std::collections::HashMap<String, serde_json::Value> =
-        serde_json::from_str(&content)
-            .map_err(|e| CliError::ConversionError(format!("Invalid JSON: {}", e)))?;
-
-    let dix_map: std::collections::HashMap<String, dixscript::Runtime::DixValue> = map
-        .into_iter()
-        .map(|(k, v)| (k, json_value_to_dix(v)))
-        .collect();
 
     let converter = DixConverter::new();
+    converter.to_json(&ast, pretty).map_err(CliError::ConversionError)
+}
+
+/// FIX: previously hand-rolled its own JSON -> DixValue conversion
+/// (`json_value_to_dix`, below) which silently truncated any `i64` to `i32`
+/// instead of widening to `DixValue::Long`. `DixConverter::from_json` is the
+/// single correct implementation of this conversion — delegate to it.
+fn json_to_mdix(path: &Path, pretty: bool) -> Result<String, CliError> {
+    let content   = file_io::read_file(path)?;
+    let converter = DixConverter::new();
+
     let ast = converter
-        .from_hashmap(dix_map)
+        .from_json(&content)
         .map_err(CliError::ConversionError)?;
 
-    let fmt_opts = if pretty {
-        DixFormatOptions::pretty()
-    } else {
-        DixFormatOptions::new()
-    };
+    let fmt_opts = if pretty { DixFormatOptions::pretty() } else { DixFormatOptions::new() };
 
     converter
         .to_mdix(&ast, Some(&fmt_opts))
         .map_err(CliError::ConversionError)
 }
 
+/// FIX: previously round-tripped TOML -> JSON (writing a temp file) -> mdix
+/// via `json_to_mdix`, inheriting that function's truncation bug plus the
+/// extra I/O and an unnecessary intermediate format with its own lossiness
+/// (e.g. TOML datetimes flattened to JSON strings then re-parsed). Calling
+/// `DixConverter::from_toml` directly removes the temp file, the extra hop,
+/// and the bug.
 fn toml_to_mdix(path: &Path, pretty: bool) -> Result<String, CliError> {
-    let content = file_io::read_file(path)?;
-    let value: toml::Value = toml::from_str(&content)
-        .map_err(|e| CliError::ConversionError(format!("Invalid TOML: {}", e)))?;
+    let content   = file_io::read_file(path)?;
+    let converter = DixConverter::new();
 
-    let json_str = serde_json::to_string(&value)
-        .map_err(|e| CliError::ConversionError(e.to_string()))?;
+    let ast = converter
+        .from_toml(&content)
+        .map_err(CliError::ConversionError)?;
 
-    let tmp = tempfile_from_json(&json_str)?;
-    let result = json_to_mdix(&tmp, pretty);
+    let fmt_opts = if pretty { DixFormatOptions::pretty() } else { DixFormatOptions::new() };
 
-    // Best-effort cleanup of the temp file.
-    let _ = std::fs::remove_file(&tmp);
-    result
+    converter
+        .to_mdix(&ast, Some(&fmt_opts))
+        .map_err(CliError::ConversionError)
 }
 
+/// FIX: previously routed through the broken `mdix_to_json`. Now compiles
+/// to the resolved AST directly and serializes with `DixConverter::to_toml`.
 fn mdix_to_toml(path: &Path) -> Result<String, CliError> {
-    let json_str = mdix_to_json(path, false)?;
-    let value: toml::Value = serde_json::from_str(&json_str)
-        .map_err(|e| CliError::ConversionError(e.to_string()))?;
-    toml::to_string_pretty(&value)
-        .map_err(|e| CliError::ConversionError(e.to_string()))
+    let loader = DixLoader::new();
+    let ast = loader
+        .compile_to_resolved_ast(path.to_str().unwrap_or(""))
+        .map_err(CliError::ConversionError)?;
+
+    let converter = DixConverter::new();
+    converter.to_toml(&ast).map_err(CliError::ConversionError)
 }
 
-/// JSON → TOML directly via the AST: `DixConverter::from_json` parses the
-/// flattened map into a `DixScript` AST (same structural-key filtering used
-/// by `from_hashmap`), then `to_toml` serializes it. Avoids re-deriving the
-/// hashmap dance that `mdix_to_toml` needs for the `.mdix` source path.
+/// JSON → TOML via the AST: `from_json` parses into a `DixScript`, `to_toml`
+/// serializes it. No `.mdix` involved on either side.
 fn json_to_toml(path: &Path) -> Result<String, CliError> {
     let content   = file_io::read_file(path)?;
     let converter = DixConverter::new();
@@ -220,8 +219,8 @@ fn json_to_toml(path: &Path) -> Result<String, CliError> {
     converter.to_toml(&ast).map_err(CliError::ConversionError)
 }
 
-/// TOML → JSON directly via the AST: `DixConverter::from_toml` parses the
-/// TOML table into a `DixScript` AST, then `to_json` serializes it.
+/// TOML → JSON via the AST: `from_toml` parses into a `DixScript`, `to_json`
+/// serializes it.
 fn toml_to_json(path: &Path, pretty: bool) -> Result<String, CliError> {
     let content   = file_io::read_file(path)?;
     let converter = DixConverter::new();
@@ -231,37 +230,4 @@ fn toml_to_json(path: &Path, pretty: bool) -> Result<String, CliError> {
         .map_err(CliError::ConversionError)?;
 
     converter.to_json(&ast, pretty).map_err(CliError::ConversionError)
-}
-
-fn tempfile_from_json(json: &str) -> Result<std::path::PathBuf, CliError> {
-    let tmp = std::env::temp_dir().join(format!(
-        "mdix_conv_{}.json",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::write(&tmp, json).map_err(CliError::IoError)?;
-    Ok(tmp)
-}
-
-// ── serde_json → DixValue ─────────────────────────────────────────────────────
-
-fn json_value_to_dix(v: serde_json::Value) -> dixscript::Runtime::DixValue {
-    use dixscript::Runtime::DixValue;
-    use serde_json::Value;
-
-    match v {
-        Value::Null        => DixValue::Null,
-        Value::Bool(b)     => DixValue::Bool(b),
-        Value::Number(n)   => {
-            if let Some(i) = n.as_i64() {
-                DixValue::Int(i as i32)
-            } else {
-                DixValue::Double(n.as_f64().unwrap_or(0.0))
-            }
         }
-        Value::String(s)   => DixValue::String(s),
-        Value::Array(arr)  => DixValue::Array(arr.into_iter().map(json_value_to_dix).collect()),
-        Value::Object(obj) => DixValue::Object(
-            obj.into_iter().map(|(k, v)| (k, json_value_to_dix(v))).collect()
-        ),
-    }
-    }

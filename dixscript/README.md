@@ -15,6 +15,8 @@ resulting data at runtime.
 
 > **Format documentation and language reference:**
 > [`github.com/Mid-D-Man/DixScript-Rust`](https://github.com/Mid-D-Man/DixScript-Rust)
+>
+> **Module and API index for contributors:** see [`CATALOGUE.md`](./CATALOGUE.md)
 
 ---
 
@@ -50,7 +52,7 @@ server: host = "api.example.com", port = 443, ssl = true
 | `Runtime::DixData` | O(1) flat dotted-path access to loaded data |
 | `Runtime::DixValue` | Runtime value type — 15 variants covering all DixScript types |
 | `Runtime::DixDataBuilder` | Fluent builder for creating save data at runtime without a template |
-| `Runtime::DixConverter` | Convert between DixScript, JSON, TOML, and `HashMap<String, DixValue>` |
+| `Runtime::DixConverter` | Convert between DixScript, JSON, TOML, and `HashMap<String, DixValue>` — see [`from_dix_data` vs `from_hashmap`](#from_dix_data-vs-from_hashmap) below for which one to reach for |
 | `Runtime::DixCompactor` | Minify and compact `.mdix` source text |
 | `Runtime::DixLoadOptions` | Configure loading: passwords, key files, output directories |
 | `Runtime::DixFormatOptions` | Configure serialization: indentation, minification, section inclusion |
@@ -276,8 +278,7 @@ let converter = DixConverter::new();
 // Load a .mdix file and export as JSON
 let loader = DixLoader::new();
 let data   = loader.load_text("config.mdix", &DixLoadOptions::new())?;
-let map    = data.to_hashmap();
-let ast    = converter.from_hashmap(map)?;
+let ast    = converter.from_dix_data(&data)?;
 let json   = converter.to_json(&ast, true /* pretty */)?;
 
 // Parse JSON and convert to .mdix
@@ -288,6 +289,29 @@ let mdix  = converter.to_mdix(&ast2, None)?;
 let toml  = converter.to_toml(&ast)?;
 let ast3  = converter.from_toml(&toml)?;
 ```
+
+### `from_dix_data` vs `from_hashmap`
+
+`DixConverter` has two ways to turn loaded data back into a `DixScript`
+AST — pick based on what you actually have on hand:
+
+- **`from_dix_data(&data)`** — use this whenever you already have a real
+  `DixData` (the common case: anything that came out of `DixLoader`). It
+  reads the genuine `@CONFIG` and `@ENUMS` straight from `DixData::config`
+  / `DixData::enums`, so the round trip is a faithful reconstruction, not
+  a guess.
+- **`from_hashmap(map)`** — use this only when all you have is a bare
+  `HashMap<String, DixValue>` with no other context — e.g. a map you built
+  by hand, or the internals of `from_json`/`from_toml` (JSON and TOML have
+  no config/enum concept of their own, so there's nothing extra to pull
+  from). It still reconstructs a usable `@ENUMS` section by scanning the
+  map for `DixValue::Enum` usage, but the emitted `@CONFIG` is a synthetic
+  placeholder (`version = "1.0.0"` only).
+
+Note: JSON and TOML have no native enum type, so `from_json`/`from_toml`
+round trips always lose the symbolic enum name — the integer survives,
+the `EnumName.FIELD` identity doesn't. That's an inherent limitation of
+those formats, not something either `from_*` method can recover.
 
 ---
 
@@ -491,6 +515,7 @@ let x: f64 = save.get("player.position.x")?;
 | `Null` | — | `null` |
 | `Bool(bool)` | `bool` | `true` / `false` |
 | `Int(i32)` | `i32` | `42` |
+| `Long(i64)` | `i64` | `9_000_000_000L` |
 | `Float(f32)` | `f32` | `3.14f` |
 | `Double(f64)` | `f64` | `3.14159` |
 | `String(String)` | `String` | `"hello"` |
@@ -559,5 +584,6 @@ MIT — see [LICENSE](../LICENSE).
 
 - [Format reference & language spec](https://github.com/Mid-D-Man/DixScript-Rust)
 - [C# reference implementation](https://github.com/Mid-D-Man/DixScript)
+- [Module & API catalogue](./CATALOGUE.md)
 - [CI results & benchmarks](https://mid-d-man.github.io/DixScript-Rust/)
 - [mdix-cli](https://crates.io/crates/mdix-cli) — command-line toolchain

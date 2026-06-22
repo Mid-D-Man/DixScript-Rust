@@ -1898,7 +1898,7 @@ fn validate_arithmetic_op_expression(
         }
     }
 }
-}
+
 
     // ── Operator expression validators ─────────────────────────────────────────
 

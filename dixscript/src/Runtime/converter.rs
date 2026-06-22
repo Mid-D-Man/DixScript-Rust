@@ -1124,7 +1124,7 @@ mod tests {
         let converter = DixConverter::new();
         let ast = converter.from_hashmap(data).unwrap();
 
-        let enums = ast.enums.expect("expected @ENUMS section to be reconstructed");
+        let enums = ast.clone().enums.expect("expected @ENUMS section to be reconstructed");
         assert_eq!(enums.enums[0].name, "WeaponClass");
         assert_eq!(enums.enums[0].fields[0].name, "ASSAULT");
         assert_eq!(enums.enums[0].fields[0].value, Some(0));
@@ -1161,13 +1161,13 @@ mod tests {
         let converter = DixConverter::new();
         let ast = converter.from_dix_data(&data).unwrap();
 
-        let cfg = ast.config.expect("expected real @CONFIG, not the from_hashmap placeholder");
+        let cfg = ast.clone().config.expect("expected real @CONFIG, not the from_hashmap placeholder");
         let version = cfg.entries.iter().find(|e| e.key == "version").unwrap();
-        assert!(matches!(&version.value, ConfigValue::String(s) if s == "2.3.1"));
+        assert!(matches!(&version.value, ConfigValue::String(s) if *s == "2.3.1"));
         let author = cfg.entries.iter().find(|e| e.key == "author").unwrap();
-        assert!(matches!(&author.value, ConfigValue::String(s) if s == "MidManStudio"));
+        assert!(matches!(&author.value, ConfigValue::String(s) if *s == "MidManStudio"));
 
-        let enums = ast.enums.expect("expected @ENUMS from DixData.enums");
+        let enums = ast.clone().enums.expect("expected @ENUMS from DixData.enums");
         let status = enums.enums.iter().find(|e| e.name == "Status").unwrap();
         assert_eq!(status.fields.len(), 2);
 

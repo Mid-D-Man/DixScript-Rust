@@ -15,15 +15,150 @@
 //! "word characters" (alphanumeric or `_`).  This correctly prevents e.g.
 //! `789table:` and `trueother` while avoiding spurious spaces around `->`, `=`,
 //! `::`, `(`, etc.
+//!
+//! ## Comma-before-grouped-entry replacement
+//!
+//! The grammar marks commas between `GroupedEntry` items (`TableProperty` and
+//! `GroupArray`) as optional (`","?`). The parser, however, rejects them.
+//! `minify` therefore replaces any `Symbol(',')` token whose next meaningful
+//! token sequence matches the head of a `GroupedEntry` with a forced space
+//! instead.
+//!
+//! A `GroupedEntry` head is detected by the lookahead
+//! [`is_next_grouped_entry`]:
+//!
+//! ```text
+//! Identifier  ('.' Identifier)*  (':' | '::')
+//! ```
+//!
+//! The tokenizer never emits a composite `TablePath` token; it emits exactly
+//! that `Identifier Symbol('.') Identifier … Symbol(':')` (or `DoubleColon`)
+//! sequence.  The lookahead inspects up to N meaningful tokens (where N grows
+//! with path depth) without consuming them.
+//!
+//! Commas *within* a group-array item list (`tags:: "a", "b"`) or within
+//! a table-property assignment list (`db: host = "a", port = 5432`) are
+//! unaffected: the token immediately after them is always a value or bare
+//! `Identifier`, never the start of an `Identifier ('.' Identifier)* (':' | '::')`
+//! chain.
 
-use crate::Compiler::Core::Tokenizer::{Tokenizer, Token, TokenType};
 use crate::Compiler::Core::Config::OperationalSettings;
+use crate::Compiler::Core::Tokenizer::{Token, TokenType, Tokenizer};
+
+// ── Character helpers ──────────────────────────────────────────────────────────
 
 /// `true` for alphanumeric characters and `_`.
 #[inline]
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
+
+// ── Token-stream helpers ───────────────────────────────────────────────────────
+
+/// Returns `true` for tokens that produce no visible output in minified form.
+///
+/// **Must stay in sync** with the empty-`String` arms in [`render_token`].
+/// Adding a new "silent" token variant to `render_token` requires a matching
+/// arm here; otherwise the lookahead will stall on that token type instead of
+/// skipping past it.
+#[inline]
+fn renders_empty(token: &Token) -> bool {
+    matches!(
+        token.token_type,
+        TokenType::Comment(_) | TokenType::EndOfFile | TokenType::ParseContext(_)
+    )
+}
+
+/// Advance `from` past zero or more empty-rendering tokens.
+///
+/// Returns `Some(index)` pointing at the first visible token at or after
+/// `from`, or `None` if no such token exists.
+#[inline]
+fn skip_empty_from(tokens: &[Token], from: usize) -> Option<usize> {
+    let mut i = from;
+    while i < tokens.len() && renders_empty(&tokens[i]) {
+        i += 1;
+    }
+    if i < tokens.len() {
+        Some(i)
+    } else {
+        None
+    }
+}
+
+/// Returns `true` when the visible token sequence starting at `from` matches
+/// the **head of a `GroupedEntry`**:
+///
+/// ```text
+/// Identifier  ('.' Identifier)*  (':' | '::')
+/// ```
+///
+/// This is the exact token shape the tokenizer emits for what the grammar
+/// calls `TablePath ':'` (table property) or `TablePath '::'` (group array).
+/// There is no composite `TablePath` token in the stream.
+///
+/// Empty-rendering tokens (comments, EOF, ParseContext) are skipped at every
+/// position so the check works even if a comment sits between tokens.
+///
+/// ### Why this is safe to use as a comma-replacement trigger
+///
+/// * A bare `Identifier` followed immediately by `=` starts a
+///   `SimpleProperty` — the loop hits `=` and returns `false`. ✓
+/// * A bare `Identifier` that is a function call is followed by `(` — returns
+///   `false`. ✓
+/// * A value token (`String`, number, `Bool`, …) is not an `Identifier` —
+///   fails the first check and returns `false`. ✓
+/// * An `Identifier` followed by `.` but then a non-`Identifier` (e.g. a
+///   method call `obj.method(`) returns `false` because the post-dot token is
+///   not a plain `Identifier`. ✓
+fn is_next_grouped_entry(tokens: &[Token], from: usize) -> bool {
+    // ── Step 1: must begin with an Identifier ─────────────────────────────
+    let Some(mut i) = skip_empty_from(tokens, from) else {
+        return false;
+    };
+    if !matches!(tokens[i].token_type, TokenType::Identifier(_)) {
+        return false;
+    }
+    i += 1;
+
+    // ── Step 2: follow ('.' Identifier)* then expect ':' or '::' ─────────
+    loop {
+        let Some(j) = skip_empty_from(tokens, i) else {
+            return false;
+        };
+        i = j;
+
+        match &tokens[i].token_type {
+            // GroupArray terminator — `::` was lexed as a DoubleColon token.
+            TokenType::DoubleColon => return true,
+
+            // TableProperty terminator — single `:`.
+            // Symbol(':') is the most likely form in @DATA.
+            // ControlFlowColon is also handled defensively in case the
+            // tokenizer uses that variant for colons outside control-flow
+            // keywords in some contexts.
+            TokenType::Symbol(':') | TokenType::ControlFlowColon => return true,
+
+            // Dot — must be followed by another Identifier segment.
+            TokenType::Symbol('.') => {
+                i += 1;
+                let Some(k) = skip_empty_from(tokens, i) else {
+                    return false;
+                };
+                i = k;
+                if !matches!(tokens[i].token_type, TokenType::Identifier(_)) {
+                    return false;
+                }
+                i += 1;
+            }
+
+            // Anything else (=, (, [, value token, …) → not a grouped-entry head.
+            _ => return false,
+        }
+    }
+}
+
+// ── Token rendering ────────────────────────────────────────────────────────────
 
 /// Render one token to its minimal source representation.
 ///
@@ -69,16 +204,14 @@ fn render_token(token: &Token) -> String {
             format!("{}f", f)
         }
 
-        // FIX: restore quote delimiters — get_token_value() returns the raw
-        // inner content with no quotes, which corrupts the token stream.
+        // FIX: restore quote delimiters — get_token_value() strips them.
         TokenType::String(s) => format!("\"{}\"", s),
         TokenType::StringSingle(s) => format!("'{}'", s),
 
         // FIX: restore the `$"..."` interpolation wrapper.
         TokenType::InterpolatedString(s) => format!("$\"{}\"", s),
 
-        // FIX: section keywords — render the actual `@SECTION` source text
-        // instead of the Display fallback `"SectionConfig(@CONFIG)"`.
+        // FIX: render the actual `@SECTION` keyword, not the Display fallback.
         TokenType::SectionConfig     => "@CONFIG".to_string(),
         TokenType::SectionImports    => "@IMPORTS".to_string(),
         TokenType::SectionDLM        => "@DLM".to_string(),
@@ -91,10 +224,13 @@ fn render_token(token: &Token) -> String {
         TokenType::Comment(_) | TokenType::EndOfFile | TokenType::ParseContext(_) => {
             String::new()
         }
+
         // All other tokens: use the canonical rendering already in Token.
         _ => token.get_token_value(),
     }
 }
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 pub struct DixCompactor;
 
@@ -105,9 +241,17 @@ impl DixCompactor {
     /// boundaries are always respected.  A single space is inserted between two
     /// consecutive tokens only when both their adjacent characters are word chars.
     ///
-    /// Preserves:
+    /// ### Preserves
     /// - String contents (whitespace and `//` inside strings are kept verbatim)
     /// - Mandatory spaces between adjacent word tokens (`true other` ≠ `trueother`)
+    /// - Commas within group-array item lists and table-property assignment lists
+    ///
+    /// ### Replaces with a space (never outputs `,`)
+    /// Any `Symbol(',')` token whose **next meaningful token sequence** matches
+    /// `Identifier ('.' Identifier)* (':' | '::')` — i.e. the head of a
+    /// `GroupedEntry` (table property or group array) in a `@DATA` section.
+    /// The grammar marks these commas optional; the parser rejects them.
+    /// A space is emitted instead to guarantee token separation in the output.
     pub fn minify(content: &str) -> String {
         if content.trim().is_empty() {
             return String::new();
@@ -116,26 +260,51 @@ impl DixCompactor {
         let settings = OperationalSettings::default();
         let tokenizer = Tokenizer::new(content, &settings);
         let tok_result = tokenizer.tokenize();
+        let tokens = &tok_result.tokens;
 
         let mut result = String::with_capacity(content.len());
         let mut prev_rendered: Option<String> = None;
+        // Set to `true` when a comma is dropped before a grouped entry.
+        // Forces a space before the very next visible token regardless of the
+        // word-char rule, ensuring the previous value and the table/group-array
+        // head remain properly separated (e.g. `"val" db:` not `"val"db:`).
+        let mut force_space = false;
+        let mut i = 0;
 
-        for token in &tok_result.tokens {
+        while i < tokens.len() {
+            let token = &tokens[i];
+
+            // ── Comma-before-grouped-entry replacement ────────────────────
+            // When a comma immediately precedes a table-property or
+            // group-array header, drop it and schedule a forced space.
+            if matches!(token.token_type, TokenType::Symbol(',')) {
+                if is_next_grouped_entry(tokens, i + 1) {
+                    force_space = true; // guarantee separation without the ','
+                    i += 1;
+                    continue;
+                }
+            }
+            // ─────────────────────────────────────────────────────────────
+
             let rendered = render_token(token);
             if rendered.is_empty() {
+                i += 1;
                 continue;
             }
 
-            if let Some(ref prev) = prev_rendered {
-                let prev_ends_word  = prev.chars().last().map(is_word_char).unwrap_or(false);
+            if prev_rendered.is_some() {
+                let prev = prev_rendered.as_deref().unwrap_or("");
+                let prev_ends_word   = prev.chars().last().map(is_word_char).unwrap_or(false);
                 let curr_starts_word = rendered.chars().next().map(is_word_char).unwrap_or(false);
-                if prev_ends_word && curr_starts_word {
+                if force_space || (prev_ends_word && curr_starts_word) {
                     result.push(' ');
                 }
             }
+            force_space = false;
 
             result.push_str(&rendered);
             prev_rendered = Some(rendered);
+            i += 1;
         }
 
         result
@@ -184,7 +353,7 @@ impl DixCompactor {
             // plain character and the `"` that follows sets in_string normally).
             if (c == '"' || c == '\'') && prev != '\\' {
                 if !in_string {
-                    in_string  = true;
+                    in_string   = true;
                     string_char = c;
                 } else if c == string_char {
                     in_string = false;
@@ -377,7 +546,7 @@ mod tests {
         assert!(output.trim().is_empty(), "expected empty, got: {output:?}");
     }
 
-    // ── minify: new coverage for the String/Section fixes ─────────────────────
+    // ── minify: string / section keyword fixes ────────────────────────────────
 
     /// Single-quoted strings must keep their delimiters.
     #[test]
@@ -390,7 +559,7 @@ mod tests {
         );
     }
 
-    /// Section keywords other than @CONFIG must also render as `@SECTION`.
+    /// Section keywords must render as `@SECTION`, not the Display fallback.
     #[test]
     fn test_minify_data_section_keyword() {
         let input  = "@DATA(\n  x = 1\n)";
@@ -405,12 +574,250 @@ mod tests {
         );
     }
 
-    /// A minified, already-minimal file must be idempotent under minify.
+    /// A minified file must be idempotent under minify.
     #[test]
     fn test_minify_idempotent_on_already_minified_config() {
         let once  = DixCompactor::minify("@CONFIG(\n  version -> \"1.0.0\"\n)");
         let twice = DixCompactor::minify(&once);
         assert_eq!(once, twice, "minify should be idempotent: {once} vs {twice}");
+    }
+
+    // ── minify: comma-before-grouped-entry replacement ────────────────────────
+    //
+    // The tokenizer emits table-property and group-array headers as the token
+    // sequence  `Identifier ('.' Identifier)* (':' | '::')` — never as a
+    // composite TablePath token.  The lookahead in `minify` detects that shape
+    // and replaces the preceding comma with a space.
+
+    /// Comma between a flat property and a single-segment table property.
+    /// Input comma must be replaced by a space, never appear as `,ident:`.
+    #[test]
+    fn test_minify_replaces_comma_before_table_property_with_space() {
+        let input  = "@DATA(\n  count = 1,\n  host: key = \"v\"\n)";
+        let output = DixCompactor::minify(input);
+        assert!(
+            !output.contains(",host"),
+            "comma leaked before table-property — got: {output}"
+        );
+        // The space replacement must keep the tokens separated.
+        assert!(
+            output.contains(" host:") || output.contains("1 host:"),
+            "no space before table-property — got: {output}"
+        );
+        assert!(
+            output.contains("host:"),
+            "table-property missing — got: {output}"
+        );
+    }
+
+    /// Comma before a dotted (multi-segment) table path: `db.host: …`
+    #[test]
+    fn test_minify_replaces_comma_before_dotted_table_property() {
+        let input  = "@DATA(\n  count = 1,\n  db.host: port = 5432\n)";
+        let output = DixCompactor::minify(input);
+        assert!(
+            !output.contains(",db"),
+            "comma leaked before dotted table-property — got: {output}"
+        );
+        assert!(
+            output.contains("db.host:") || output.contains("db.host :"),
+            "dotted table-property missing — got: {output}"
+        );
+    }
+
+    /// Comma between a flat property and a group array.
+    #[test]
+    fn test_minify_replaces_comma_before_group_array_with_space() {
+        let input  = "@DATA(\n  x = 1,\n  tags:: \"a\"\n)";
+        let output = DixCompactor::minify(input);
+        assert!(
+            !output.contains(",tags"),
+            "comma leaked before group-array — got: {output}"
+        );
+        assert!(
+            output.contains(" tags::") || output.contains("1 tags::"),
+            "no space before group-array — got: {output}"
+        );
+        assert!(
+            output.contains("tags::"),
+            "group-array missing — got: {output}"
+        );
+    }
+
+    /// Comma before a dotted group-array path: `db.tags:: …`
+    #[test]
+    fn test_minify_replaces_comma_before_dotted_group_array() {
+        let input  = "@DATA(\n  x = 1,\n  db.tags:: \"a\", \"b\"\n)";
+        let output = DixCompactor::minify(input);
+        assert!(
+            !output.contains(",db"),
+            "comma leaked before dotted group-array — got: {output}"
+        );
+        assert!(
+            output.contains("db.tags::"),
+            "dotted group-array missing — got: {output}"
+        );
+    }
+
+    /// Comma between two table-property blocks.
+    #[test]
+    fn test_minify_replaces_comma_between_table_properties() {
+        let input  = "@DATA(\n  db: host = \"a\",\n  cache: host = \"b\"\n)";
+        let output = DixCompactor::minify(input);
+        assert!(
+            !output.contains(",cache"),
+            "comma leaked between table-properties — got: {output}"
+        );
+        assert!(
+            output.contains("db:") && output.contains("cache:"),
+            "a table-property is missing — got: {output}"
+        );
+        // The two blocks must be separated by whitespace, not squashed together.
+        assert!(
+            output.contains(" cache:"),
+            "no space between table-property blocks — got: {output}"
+        );
+    }
+
+    /// Comma between two group-array declarations.
+    #[test]
+    fn test_minify_replaces_comma_between_group_arrays() {
+        let input  = "@DATA(\n  tags:: \"a\",\n  flags:: true\n)";
+        let output = DixCompactor::minify(input);
+        assert!(
+            !output.contains(",flags"),
+            "comma leaked between group-arrays — got: {output}"
+        );
+        assert!(
+            output.contains("tags::") && output.contains("flags::"),
+            "a group-array is missing — got: {output}"
+        );
+        assert!(
+            output.contains(" flags::"),
+            "no space between group-array declarations — got: {output}"
+        );
+    }
+
+    /// Commas WITHIN a group-array item list must be kept — they follow a
+    /// value token, never an `Identifier ('.' Identifier)* (':' | '::')` head.
+    #[test]
+    fn test_minify_keeps_comma_within_group_array_items() {
+        let input  = "@DATA(\n  tags:: \"a\", \"b\", \"c\"\n)";
+        let output = DixCompactor::minify(input);
+        // All three items must be present.
+        assert!(output.contains("\"a\""), "got: {output}");
+        assert!(output.contains("\"b\""), "got: {output}");
+        assert!(output.contains("\"c\""), "got: {output}");
+        // The commas between items (followed by String literals) must survive.
+        assert!(
+            output.contains("\"a\",\"b\"") || output.contains("\"a\", \"b\""),
+            "comma between group-array items was incorrectly dropped — got: {output}"
+        );
+        assert!(
+            output.contains("\"b\",\"c\"") || output.contains("\"b\", \"c\""),
+            "second comma between group-array items was incorrectly dropped — got: {output}"
+        );
+    }
+
+    /// Commas within a table-property assignment list must be kept — they
+    /// follow a value token, not a grouped-entry head.
+    #[test]
+    fn test_minify_keeps_comma_within_table_property_assignments() {
+        let input  = "@DATA(\n  db: host = \"a\", port = 5432\n)";
+        let output = DixCompactor::minify(input);
+        assert!(
+            output.contains("host=") && output.contains("port="),
+            "an assignment was dropped — got: {output}"
+        );
+        // The comma between `"a"` (String) and `port` (Identifier) must stay.
+        // `port` is preceded by a value, so is_next_grouped_entry sees
+        // Identifier followed by `=`, not `:` — returns false, comma kept.
+        assert!(
+            output.contains(",port") || output.contains(", port"),
+            "comma between table-property assignments was incorrectly dropped — got: {output}"
+        );
+    }
+
+    /// Comma between a string-valued flat property and a table property.
+    /// Previous token ends with `"` (non-word char) so force_space is needed
+    /// to guarantee separation — the word-char rule alone would not add a space.
+    #[test]
+    fn test_minify_space_after_string_value_before_table_property() {
+        let input  = "@DATA(\n  name = \"Alice\",\n  db: host = \"x\"\n)";
+        let output = DixCompactor::minify(input);
+        assert!(
+            !output.contains(",db"),
+            "comma leaked — got: {output}"
+        );
+        // `"Alice"` ends with `"` which is NOT a word char, so force_space
+        // must fire to avoid `"Alice"db:`.
+        assert!(
+            !output.contains("\"Alice\"db"),
+            "string-value and table-property fused — got: {output}"
+        );
+        assert!(
+            output.contains("db:"),
+            "table-property missing — got: {output}"
+        );
+    }
+
+    /// Comma between a string-valued group array and another group array.
+    #[test]
+    fn test_minify_space_after_string_item_before_group_array() {
+        let input  = "@DATA(\n  tags:: \"x\", \"y\",\n  flags:: true\n)";
+        let output = DixCompactor::minify(input);
+        // Last item of first group array is `"y"` → ends with `"` (non-word).
+        // force_space must still fire and prevent `"y"flags::`.
+        assert!(
+            !output.contains("\"y\"flags"),
+            "string item and group-array fused — got: {output}"
+        );
+        assert!(
+            !output.contains(",flags"),
+            "comma leaked before second group-array — got: {output}"
+        );
+        assert!(
+            output.contains("flags::"),
+            "second group-array missing — got: {output}"
+        );
+        // Commas within the first group array's item list must survive.
+        assert!(
+            output.contains("\"x\",\"y\"") || output.contains("\"x\", \"y\""),
+            "inner comma between group-array items dropped — got: {output}"
+        );
+    }
+
+    /// Full @DATA section: flat properties, a table property, and a group array
+    /// — all optional inter-entry commas replaced with spaces; inner commas kept.
+    #[test]
+    fn test_minify_full_data_section_mixed() {
+        let input = concat!(
+            "@DATA(\n",
+            "  count = 42,\n",
+            "  label = \"hello\",\n",
+            "  db: host = \"localhost\", port = 5432,\n",
+            "  tags:: \"x\", \"y\"\n",
+            ")"
+        );
+        let output = DixCompactor::minify(input);
+
+        // No comma immediately before an entry header.
+        assert!(!output.contains(",db"),   "comma before 'db:'   — got: {output}");
+        assert!(!output.contains(",tags"), "comma before 'tags::' — got: {output}");
+
+        // Tokens from every entry must be present.
+        assert!(output.contains("count="),  "got: {output}");
+        assert!(output.contains("label="),  "got: {output}");
+        assert!(output.contains("db:"),     "got: {output}");
+        assert!(output.contains("host="),   "got: {output}");
+        assert!(output.contains("port="),   "got: {output}");
+        assert!(output.contains("tags::"),  "got: {output}");
+        assert!(output.contains("\"x\""),   "got: {output}");
+        assert!(output.contains("\"y\""),   "got: {output}");
+
+        // Entry headers must be preceded by whitespace (not squashed together).
+        assert!(output.contains(" db:"),   "no space before 'db:'   — got: {output}");
+        assert!(output.contains(" tags::"), "no space before 'tags::' — got: {output}");
     }
 
     // ── compact ───────────────────────────────────────────────────────────────
@@ -490,4 +897,4 @@ mod tests {
         let s = "abc";
         assert_eq!(DixCompactor::get_compression_ratio(s, s), 0.0);
     }
-            }
+    }

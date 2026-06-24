@@ -53,6 +53,19 @@
 //! A proactive check fires on every grouped-entry head: if the previous rendered
 //! token does not end with a [`is_grouped_entry_separator`] character, a space
 //! is forced regardless of the word-char rule.
+//!
+//! ### Why `.` is included in [`is_grouped_entry_separator`]
+//!
+//! For a multi-segment path like `elements.hydrogen.identity:`, every interior
+//! segment (`hydrogen`, `identity`) also satisfies `is_next_grouped_entry` when
+//! inspected in isolation (e.g. `hydrogen.identity:` is a valid grouped-entry
+//! head).  Without `.` in the separator set the proactive check would fire at
+//! each interior segment, inserting a spurious space after every path dot.
+//!
+//! The only token that ever renders to a string ending in `.` is `Symbol('.')`
+//! itself — floating-point literals like `42.0` end in `0`, not `.`.  So
+//! treating a trailing `.` as a natural separator is safe and precise: it
+//! uniquely identifies the "we are already inside a dotted path" state.
 
 use crate::Compiler::Core::Config::OperationalSettings;
 use crate::Compiler::Core::Tokenizer::{Token, TokenType, Tokenizer};
@@ -68,12 +81,18 @@ fn is_word_char(c: char) -> bool {
 /// `true` for characters that already act as a natural token boundary,
 /// meaning no additional space is needed before a grouped-entry head.
 ///
-/// Covers bracket/delimiter characters and `=`, `:`.  Notably does **not**
-/// include `"` or `'` (string delimiters) or word characters — those cases
-/// still need an explicit space.
+/// Covers bracket/delimiter characters, `=`, `:`, and `.`.
+///
+/// `.` is included because the only token that renders to a string ending in
+/// `.` is the path-separator `Symbol('.')` itself.  When `prev_rendered` ends
+/// with `.` we are already inside a dotted table path — inserting a space
+/// between `db.` and `host` (producing `db. host:`) would be incorrect.
+///
+/// Notably does **not** include `"` or `'` (string delimiters) or word
+/// characters — those cases still need an explicit space (e.g. `"Alice" db:`).
 #[inline]
 fn is_grouped_entry_separator(c: char) -> bool {
-    matches!(c, '(' | '[' | '{' | ')' | ']' | '}' | '=' | ':')
+    matches!(c, '(' | '[' | '{' | ')' | ']' | '}' | '=' | ':' | '.')
 }
 
 // ── Token-stream helpers ───────────────────────────────────────────────────────
@@ -134,6 +153,15 @@ fn skip_empty_from(tokens: &[Token], from: usize) -> Option<usize> {
 /// * An `Identifier` followed by `.` but then a non-`Identifier` (e.g. a
 ///   method call `obj.method(`) returns `false` because the post-dot token is
 ///   not a plain `Identifier`. ✓
+///
+/// ### Interior-segment note
+///
+/// For a path like `elements.hydrogen.identity:`, this function returns `true`
+/// when called at the `hydrogen` or `identity` position as well as at
+/// `elements`, because each suffix is itself a valid grouped-entry head.  The
+/// proactive space check in [`DixCompactor::minify`] relies on
+/// [`is_grouped_entry_separator`] (which now includes `.`) to suppress
+/// force_space when the previous rendered token already ends with `.`.
 fn is_next_grouped_entry(tokens: &[Token], from: usize) -> bool {
     // ── Step 1: must begin with an Identifier ─────────────────────────────
     let Some(mut i) = skip_empty_from(tokens, from) else {
@@ -288,6 +316,11 @@ impl DixCompactor {
     /// symbol (see [`is_grouped_entry_separator`]).  This prevents fusions like
     /// `"Alice"db:` or `10973731.56816elements:` (where the trailing `e` would
     /// be misread as a scientific-notation exponent by the lexer).
+    ///
+    /// Interior path segments (e.g. `hydrogen` and `identity` inside
+    /// `elements.hydrogen.identity:`) are NOT spuriously spaced because `.` is
+    /// included in [`is_grouped_entry_separator`] — a prev_rendered ending in `.`
+    /// means we are already inside the dotted path, not at an entry boundary.
     pub fn minify(content: &str) -> String {
         if content.trim().is_empty() {
             return String::new();
@@ -332,6 +365,11 @@ impl DixCompactor {
             //   `"Alice"\n  db: host = "x"` → minified `"Alice" db:host="x"` ✓
             //   `10973731.56816\n  elements: name = "H"` — already covered by the
             //   word-char rule (digit → letter), but fires here too (no harm). ✓
+            //
+            // Interior path segments (e.g. `hydrogen` in `elements.hydrogen:`)
+            // also satisfy is_next_grouped_entry, but their prev_rendered ends
+            // with `.` which IS in is_grouped_entry_separator, so force_space is
+            // NOT set for them.  This prevents `elements. hydrogen:` output. ✓
             if !force_space && prev_rendered.is_some() && is_next_grouped_entry(tokens, i) {
                 let prev = prev_rendered.as_deref().unwrap_or("");
                 if let Some(last) = prev.chars().last() {
@@ -667,6 +705,10 @@ mod tests {
     }
 
     /// Comma before a dotted (multi-segment) table path: `db.host: …`
+    ///
+    /// The dot between `db` and `host` must NOT trigger a spurious space —
+    /// `is_grouped_entry_separator('.')` returns true so the proactive check
+    /// is suppressed for interior path segments.
     #[test]
     fn test_minify_replaces_comma_before_dotted_table_property() {
         let input  = "@DATA(\n  count = 1,\n  db.host: port = 5432\n)";
@@ -701,6 +743,9 @@ mod tests {
     }
 
     /// Comma before a dotted group-array path: `db.tags:: …`
+    ///
+    /// Interior segment `tags` must not be preceded by a spurious space —
+    /// the `.` before it is in `is_grouped_entry_separator`.
     #[test]
     fn test_minify_replaces_comma_before_dotted_group_array() {
         let input  = "@DATA(\n  x = 1,\n  db.tags:: \"a\", \"b\"\n)";

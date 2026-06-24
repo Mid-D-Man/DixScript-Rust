@@ -39,8 +39,20 @@
 //! Commas *within* a group-array item list (`tags:: "a", "b"`) or within
 //! a table-property assignment list (`db: host = "a", port = 5432`) are
 //! unaffected: the token immediately after them is always a value or bare
-//! `Identifier`, never the start of an `Identifier ('.' Identifier)* (':' | '::')`
-//! chain.
+//! `Identifier`, never the start of an `Identifier ('.' Identifier)* (':' | '::')` chain.
+//!
+//! ## Proactive space before grouped-entry heads (no-comma case)
+//!
+//! When no comma precedes a grouped entry (e.g. a hand-written file with bare
+//! newlines between entries), the comma-drop path does not fire.  The
+//! word-char rule handles the common `number → identifier` transition
+//! (`10973731.56816 elements:`), but misses cases like `"Alice" db:` where the
+//! previous rendered token ends with a non-word character (`"`) that is also not
+//! a natural separator symbol (`(`, `=`, `:`, etc.).
+//!
+//! A proactive check fires on every grouped-entry head: if the previous rendered
+//! token does not end with a [`is_grouped_entry_separator`] character, a space
+//! is forced regardless of the word-char rule.
 
 use crate::Compiler::Core::Config::OperationalSettings;
 use crate::Compiler::Core::Tokenizer::{Token, TokenType, Tokenizer};
@@ -51,6 +63,17 @@ use crate::Compiler::Core::Tokenizer::{Token, TokenType, Tokenizer};
 #[inline]
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
+}
+
+/// `true` for characters that already act as a natural token boundary,
+/// meaning no additional space is needed before a grouped-entry head.
+///
+/// Covers bracket/delimiter characters and `=`, `:`.  Notably does **not**
+/// include `"` or `'` (string delimiters) or word characters — those cases
+/// still need an explicit space.
+#[inline]
+fn is_grouped_entry_separator(c: char) -> bool {
+    matches!(c, '(' | '[' | '{' | ')' | ']' | '}' | '=' | ':')
 }
 
 // ── Token-stream helpers ───────────────────────────────────────────────────────
@@ -246,12 +269,25 @@ impl DixCompactor {
     /// - Mandatory spaces between adjacent word tokens (`true other` ≠ `trueother`)
     /// - Commas within group-array item lists and table-property assignment lists
     ///
-    /// ### Replaces with a space (never outputs `,`)
-    /// Any `Symbol(',')` token whose **next meaningful token sequence** matches
-    /// `Identifier ('.' Identifier)* (':' | '::')` — i.e. the head of a
-    /// `GroupedEntry` (table property or group array) in a `@DATA` section.
-    /// The grammar marks these commas optional; the parser rejects them.
-    /// A space is emitted instead to guarantee token separation in the output.
+    /// ### Separator rules across tier boundaries
+    ///
+    /// **Flat → flat**: commas between `SimpleProperty` entries are kept as-is.
+    /// The token immediately after such a comma is always an `Identifier` followed
+    /// by `=`, so `is_next_grouped_entry` returns `false` and the comma is left
+    /// alone.
+    ///
+    /// **Flat → table / group-array, table ↔ group-array, table → table,
+    /// group-array → group-array**: any `Symbol(',')` whose next meaningful token
+    /// sequence matches `Identifier ('.' Identifier)* (':' | '::')` is dropped
+    /// and a forced space is scheduled instead.  The parser rejects commas before
+    /// grouped-entry heads; a space is the correct separator.
+    ///
+    /// Additionally, even when no comma is present (hand-written source using
+    /// bare newlines), a space is forced before a grouped-entry head whenever the
+    /// previous rendered token does not already end with a natural separator
+    /// symbol (see [`is_grouped_entry_separator`]).  This prevents fusions like
+    /// `"Alice"db:` or `10973731.56816elements:` (where the trailing `e` would
+    /// be misread as a scientific-notation exponent by the lexer).
     pub fn minify(content: &str) -> String {
         if content.trim().is_empty() {
             return String::new();
@@ -264,27 +300,47 @@ impl DixCompactor {
 
         let mut result = String::with_capacity(content.len());
         let mut prev_rendered: Option<String> = None;
-        // Set to `true` when a comma is dropped before a grouped entry.
-        // Forces a space before the very next visible token regardless of the
-        // word-char rule, ensuring the previous value and the table/group-array
-        // head remain properly separated (e.g. `"val" db:` not `"val"db:`).
+        // Set to `true` when a comma is dropped before a grouped entry, OR when
+        // the proactive check determines a space is required before a grouped-entry
+        // head even with no preceding comma.  Forces a space before the very next
+        // visible token regardless of the word-char rule.
         let mut force_space = false;
         let mut i = 0;
 
         while i < tokens.len() {
             let token = &tokens[i];
 
-            // ── Comma-before-grouped-entry replacement ────────────────────
-            // When a comma immediately precedes a table-property or
-            // group-array header, drop it and schedule a forced space.
+            // ── Comma-before-grouped-entry replacement ────────────────────────
+            // When a comma immediately precedes a table-property or group-array
+            // header, drop it and schedule a forced space.  The parser rejects
+            // commas in this position; a space keeps tokens properly separated.
             if matches!(token.token_type, TokenType::Symbol(',')) {
                 if is_next_grouped_entry(tokens, i + 1) {
-                    force_space = true; // guarantee separation without the ','
+                    force_space = true;
                     i += 1;
                     continue;
                 }
             }
-            // ─────────────────────────────────────────────────────────────
+
+            // ── Proactive space before grouped-entry head (no-comma case) ─────
+            // When the current token is the first identifier of a grouped-entry
+            // head and no comma was dropped just before it (force_space already
+            // false), check whether the previous rendered token ends with a
+            // character that provides natural separation.  If not, force a space.
+            //
+            // This handles e.g.:
+            //   `"Alice"\n  db: host = "x"` → minified `"Alice" db:host="x"` ✓
+            //   `10973731.56816\n  elements: name = "H"` — already covered by the
+            //   word-char rule (digit → letter), but fires here too (no harm). ✓
+            if !force_space && prev_rendered.is_some() && is_next_grouped_entry(tokens, i) {
+                let prev = prev_rendered.as_deref().unwrap_or("");
+                if let Some(last) = prev.chars().last() {
+                    if !is_grouped_entry_separator(last) {
+                        force_space = true;
+                    }
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────
 
             let rendered = render_token(token);
             if rendered.is_empty() {
@@ -787,6 +843,21 @@ mod tests {
         );
     }
 
+    /// Proactive space: string value before table property WITHOUT a comma.
+    /// The proactive grouped-entry check must fire here — the word-char rule
+    /// alone won't because `"` is not a word char.
+    #[test]
+    fn test_minify_proactive_space_string_value_no_comma_before_table() {
+        // No comma — bare newline between entries.
+        let input  = "@DATA(\n  name = \"Alice\"\n  db: host = \"x\"\n)";
+        let output = DixCompactor::minify(input);
+        assert!(
+            !output.contains("\"Alice\"db"),
+            "string and table-property fused without comma — got: {output}"
+        );
+        assert!(output.contains("db:"), "table-property missing — got: {output}");
+    }
+
     /// Full @DATA section: flat properties, a table property, and a group array
     /// — all optional inter-entry commas replaced with spaces; inner commas kept.
     #[test]
@@ -897,4 +968,4 @@ mod tests {
         let s = "abc";
         assert_eq!(DixCompactor::get_compression_ratio(s, s), 0.0);
     }
-    }
+}

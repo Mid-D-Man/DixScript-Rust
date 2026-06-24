@@ -1,3 +1,4 @@
+// dixscript/src/Runtime/converter.rs
 use std::collections::HashMap;
 use crate::Compiler::AST::{
     DixScript, ConfigSection, ConfigEntry, ConfigValue,
@@ -100,7 +101,7 @@ impl DixConverter {
         let mut flat_keys: Vec<String> = flat_properties.keys().cloned().collect();
         flat_keys.sort();
         for key in flat_keys {
-            let value = flat_properties.remove(&key).unwrap();
+            let value = flat_properties[&key].clone();
             let ast_value = self.convert_dix_value_to_ast_value(&value)?;
             data_entries.push(DataEntry::SimpleProperty {
                 name: key, data_type: None, value: ast_value, position: Position::UNKNOWN,
@@ -110,15 +111,9 @@ impl DixConverter {
         let mut nested_keys: Vec<String> = nested_structures.keys().cloned().collect();
         nested_keys.sort();
         for key in nested_keys {
-            let value = nested_structures.remove(&key).unwrap();
+            let value = nested_structures[&key].clone();
             self.process_nested_structure(&key, &value, &mut data_entries, "")?;
         }
-
-        let data_section = if !data_entries.is_empty() {
-            Some(DataSection { entries: data_entries, position: Position::UNKNOWN })
-        } else {
-            None
-        };
 
         let config_section = Some(ConfigSection {
             entries: vec![ConfigEntry {
@@ -130,13 +125,13 @@ impl DixConverter {
         });
 
         Ok(DixScript {
-            config:          config_section,
-            imports:         None,
-            dlm:             None,
-            enums:           enums_section,
+            config: config_section,
+            imports: None,
+            dlm: None,
+            enums: enums_section,
             quick_functions: None,
-            data:            data_section,
-            security:        None,
+            security: None,
+            data: Some(DataSection { entries: data_entries, position: Position::UNKNOWN }),
         })
     }
 
@@ -256,14 +251,16 @@ impl DixConverter {
                 }
             }
 
-            // A comma is mandatory between every top-level entry, including
-            // across the flat→grouped boundary. The grammar treats it as
-            // optional only because real whitespace usually disambiguates —
-            // but under `DixFormatOptions::minified()` nl/sp/indent all
-            // collapse to "", so without a hard comma here adjacent entries
-            // can fuse into one bogus token (e.g. a trailing digit eating
-            // the next entry's leading identifier as a bad scientific-
-            // notation exponent), silently corrupting or truncating output.
+            // A comma is inserted between the last flat property and the first
+            // grouped entry (table property or group array).  In non-minified
+            // output the surrounding newlines already provide disambiguation;
+            // the comma is grammatically optional there.  In minified output
+            // (nl = "", sp = "", indent = ""), the comma is the only token
+            // separator — but `DixCompactor::minify` (called below) detects
+            // commas immediately before a grouped-entry head and replaces them
+            // with a space, since the parser rejects commas in that position.
+            // The minifier also handles the table→table, table→group-array, and
+            // group-array→group-array boundaries the same way.
             let grouped_count = table_props.len() + group_arrays.len();
 
             if !flat_props.is_empty() && grouped_count > 0 {
@@ -652,50 +649,50 @@ impl DixConverter {
 
     fn toml_value_to_hashmap(&self, value: toml::Value) -> Result<HashMap<String, DixValue>, String> {
         match value {
-            toml::Value::Table(table) => {
-                let mut result = HashMap::with_capacity(table.len());
-                for (k, v) in table { result.insert(k, self.toml_value_to_dix_value(v)?); }
+            toml::Value::Table(map) => {
+                let mut result = HashMap::with_capacity(map.len());
+                for (k, v) in map { result.insert(k, self.toml_value_to_dix_value(v)?); }
                 Ok(result)
             }
-            other => Err(format!("Expected a TOML table at the top level, got type: {}", other.type_str())),
+            other => Err(format!("Expected a TOML table at the top level, got: {}", other.type_str())),
         }
     }
 
     fn toml_value_to_dix_value(&self, value: toml::Value) -> Result<DixValue, String> {
         Ok(match value {
-            toml::Value::String(s)   => DixValue::String(s),
+            toml::Value::Boolean(b)  => DixValue::Bool(b),
             toml::Value::Integer(i)  => {
-                if i >= i32::MIN as i64 && i <= i32::MAX as i64 { DixValue::Int(i as i32) }
-                else { DixValue::Long(i) }
+                if i >= i32::MIN as i64 && i <= i32::MAX as i64 {
+                    DixValue::Int(i as i32)
+                } else {
+                    DixValue::Long(i)
+                }
             }
             toml::Value::Float(f)    => DixValue::Double(f),
-            toml::Value::Boolean(b)  => DixValue::Bool(b),
-            toml::Value::Datetime(d) => DixValue::Timestamp(d.to_string()),
+            toml::Value::String(s)   => DixValue::String(s),
+            toml::Value::Datetime(d) => DixValue::String(d.to_string()),
             toml::Value::Array(arr)  => {
                 let items: Result<Vec<DixValue>, String> = arr.into_iter()
                     .map(|v| self.toml_value_to_dix_value(v))
                     .collect();
                 DixValue::Array(items?)
             }
-            toml::Value::Table(table) => {
-                let mut obj = HashMap::with_capacity(table.len());
-                for (k, v) in table { obj.insert(k, self.toml_value_to_dix_value(v)?); }
+            toml::Value::Table(map) => {
+                let mut obj = HashMap::with_capacity(map.len());
+                for (k, v) in map { obj.insert(k, self.toml_value_to_dix_value(v)?); }
                 DixValue::Object(obj)
             }
         })
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    // ── Internal helpers ──────────────────────────────────────────────────────
 
     fn extract_enums(&self, ast: &DixScript) -> Option<HashMap<String, HashMap<String, i32>>> {
-        ast.enums.as_ref().map(|section| {
-            section.enums.iter().map(|decl| {
-                let mut auto_value = 0i32;
-                let fields: HashMap<String, i32> = decl.fields.iter().map(|field| {
-                    let value = field.value.unwrap_or_else(|| { let v = auto_value; auto_value += 1; v });
-                    auto_value = value + 1;
-                    (field.name.clone(), value)
-                }).collect();
+        ast.enums.as_ref().map(|enums_section| {
+            enums_section.enums.iter().map(|decl| {
+                let fields: HashMap<String, i32> = decl.fields.iter()
+                    .filter_map(|f| f.value.map(|v| (f.name.clone(), v)))
+                    .collect();
                 (decl.name.clone(), fields)
             }).collect()
         })
@@ -1203,8 +1200,11 @@ mod tests {
         let converter = DixConverter::new();
         let minified = converter.to_mdix(&ast, Some(&DixFormatOptions::minified())).unwrap();
 
+        // No token fusion: the double value must not run directly into the table path identifier.
         assert!(!minified.contains("568160elements"), "flat property fused with table path: {}", minified);
-        assert!(minified.contains("568160,elements"), "expected comma separator: {}", minified);
+        // The parser rejects commas before grouped-entry heads; the minifier replaces
+        // the boundary comma with a space.  Assert space separation, not a comma.
+        assert!(minified.contains(" elements.hydrogen.identity:"), "expected space separator before table path (no comma allowed here): {}", minified);
         assert!(minified.contains("elements.hydrogen.identity:"), "table property dropped: {}", minified);
     }
-            }
+}

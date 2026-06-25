@@ -1,3 +1,4 @@
+// Database.java
 package com.midmanstudio.dixscript;
 
 import com.midmanstudio.dixscript.internal.MdixNative;
@@ -93,8 +94,16 @@ public final class Database implements Closeable {
         return getInt(path);
     }
 
+    /** Also accepts Int values (widened without loss). */
     public long getLong(String path) {
-        return (long) getInt(path);
+        checkOpen();
+        checkPath(path);
+        return MdixNative.getLong(handle, path);
+    }
+
+    public long getLong(String path, long defaultValue) {
+        if (!exists(path)) return defaultValue;
+        return getLong(path);
     }
 
     public float getFloat(String path) {
@@ -209,4 +218,4 @@ public final class Database implements Closeable {
         if (path == null || path.isEmpty())
             throw new MdixException(MdixException.Kind.INVALID_PATH, "path must not be null or empty");
     }
-  }
+            }

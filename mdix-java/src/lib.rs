@@ -233,18 +233,19 @@ pub extern "system" fn Java_com_midmanstudio_dixscript_internal_MdixNative_getTy
         Some(DixValue::Null)         => 0,
         Some(DixValue::Bool(_))      => 1,
         Some(DixValue::Int(_))       => 2,
-        Some(DixValue::Float(_))     => 3,
-        Some(DixValue::Double(_))    => 4,
-        Some(DixValue::String(_))    => 5,
-        Some(DixValue::Date(_))      => 6,
-        Some(DixValue::Timestamp(_)) => 7,
-        Some(DixValue::HexColor(_))  => 8,
-        Some(DixValue::Blob(_))      => 9,
-        Some(DixValue::Regex(_))     => 10,
-        Some(DixValue::Array(_))     => 11,
-        Some(DixValue::Object(_))    => 12,
-        Some(DixValue::Tuple(_))     => 13,
-        Some(DixValue::Enum { .. })  => 14,
+        Some(DixValue::Long(_))      => 3,
+        Some(DixValue::Float(_))     => 4,
+        Some(DixValue::Double(_))    => 5,
+        Some(DixValue::String(_))    => 6,
+        Some(DixValue::Date(_))      => 7,
+        Some(DixValue::Timestamp(_)) => 8,
+        Some(DixValue::HexColor(_))  => 9,
+        Some(DixValue::Blob(_))      => 10,
+        Some(DixValue::Regex(_))     => 11,
+        Some(DixValue::Array(_))     => 12,
+        Some(DixValue::Object(_))    => 13,
+        Some(DixValue::Tuple(_))     => 14,
+        Some(DixValue::Enum { .. })  => 15,
     }
 }
 
@@ -304,6 +305,27 @@ pub extern "system" fn Java_com_midmanstudio_dixscript_internal_MdixNative_getIn
     match h.data.get::<i32>(&p) {
         Ok(v) => v as jint,
         Err(e) => { set_exception(&mut env, &format!("getInt('{}'): {}", p, e)); 0 }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_midmanstudio_dixscript_internal_MdixNative_getLong<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    path: JString<'local>,
+) -> jlong {
+    let h = match unsafe { as_read(handle) } {
+        Some(h) => h,
+        None => { set_exception(&mut env, "getLong: null handle"); return 0; }
+    };
+    let p = match jstr(&mut env, path) {
+        Some(s) => s,
+        None => { set_exception(&mut env, "getLong: null path"); return 0; }
+    };
+    match h.data.get::<i64>(&p) {
+        Ok(v) => v as jlong,
+        Err(e) => { set_exception(&mut env, &format!("getLong('{}'): {}", p, e)); 0 }
     }
 }
 
@@ -690,6 +712,23 @@ pub extern "system" fn Java_com_midmanstudio_dixscript_internal_MdixNative_build
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_midmanstudio_dixscript_internal_MdixNative_builderSetLong<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    path: JString<'local>,
+    value: jlong,
+) -> jboolean {
+    let b = match unsafe { as_builder_mut(handle) } {
+        Some(b) => b,
+        None => { set_exception(&mut env, "builderSetLong: null handle"); return JNI_FALSE; }
+    };
+    let p = match jstr(&mut env, path) { Some(s) => s, None => return JNI_FALSE };
+    b.entries.insert(p, DixValue::Long(value));
+    JNI_TRUE
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_midmanstudio_dixscript_internal_MdixNative_builderSetFloat<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -830,4 +869,4 @@ pub extern "system" fn Java_com_midmanstudio_dixscript_internal_MdixNative_build
         Ok(s) => to_jstring(&mut env, &s),
         Err(e) => { set_exception(&mut env, &format!("builderToString: {}", e)); std::ptr::null_mut() }
     }
-}
+    }

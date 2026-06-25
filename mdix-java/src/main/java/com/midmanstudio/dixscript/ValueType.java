@@ -1,3 +1,4 @@
+// ValueType.java
 package com.midmanstudio.dixscript;
 
 /**
@@ -9,18 +10,19 @@ public enum ValueType {
     NULL(0),
     BOOL(1),
     INT(2),
-    FLOAT(3),
-    DOUBLE(4),
-    STRING(5),
-    DATE(6),
-    TIMESTAMP(7),
-    HEX_COLOR(8),
-    BLOB(9),
-    REGEX(10),
-    ARRAY(11),
-    OBJECT(12),
-    TUPLE(13),
-    ENUM(14);
+    LONG(3),
+    FLOAT(4),
+    DOUBLE(5),
+    STRING(6),
+    DATE(7),
+    TIMESTAMP(8),
+    HEX_COLOR(9),
+    BLOB(10),
+    REGEX(11),
+    ARRAY(12),
+    OBJECT(13),
+    TUPLE(14),
+    ENUM(15);
 
     private final int code;
 
@@ -34,4 +36,4 @@ public enum ValueType {
         }
         return UNKNOWN;
     }
-                }
+}

@@ -1,7 +1,6 @@
-// dixscript/src/Compiler/Core/Tokenizer/lexer.rs
 //! DixScript Lexer — tokenises a `.mdix` source string into a `Vec<Token>`.
 //!
-//! ## Numeric literal additions (v1.0.0+)
+//! ## Numeric literal additions (v1.0.0)
 //!
 //! ### Underscore separators
 //! Any integer, hex, or binary literal may contain `_` between digits as a
@@ -26,15 +25,6 @@
 //!   `0b1111L`         → `Long(15)`
 //! Plain integers that overflow i32 are also auto-promoted to `Long`:
 //!   `3_000_000_000`   → `Long(3000000000)`
-//!
-//! ### Long suffix lookahead guard
-//! `L`/`l` is only consumed as a Long suffix when the character immediately
-//! after it is NOT an identifier continuation character. This prevents
-//! `789Level` from being tokenised as `Long(789)` + `Identifier("evel")`;
-//! instead it correctly produces `Integer(789)` + `Identifier("Level")`.
-//!
-//! ## Key fix: section token self-stamping
-//! Section keyword tokens carry their OWN `SectionId`. See `try_scan_section_keyword`.
 
 use phf::phf_map;
 use memchr::memchr;

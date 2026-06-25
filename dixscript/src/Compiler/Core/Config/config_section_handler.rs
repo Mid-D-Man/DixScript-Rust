@@ -1,8 +1,7 @@
-// dixscript/src/Compiler/Core/Config/config_section_handler.rs
 //! Extracts and processes the @CONFIG section, then initialises VersionManager
 //! and ErrorManager.
 //!
-//! Token-based pipeline (the only supported path):
+//! Token-based pipeline
 //!
 //!   Tokenizer (full source)
 //!       ↓

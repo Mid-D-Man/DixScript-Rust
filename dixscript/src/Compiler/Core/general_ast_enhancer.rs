@@ -1,5 +1,3 @@
-// dixscript/src/Compiler/Core/general_ast_enhancer.rs
-
 //! Applies compile-time enhancements to a validated AST.
 //!
 //! Must run after semantic analysis: Parse → Semantic Analysis → AST Enhancement → Value Resolution.

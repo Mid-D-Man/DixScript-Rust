@@ -12,21 +12,27 @@ use std::collections::HashSet;
 /// 2. Run DFS-based cycle detection (O(V+E) complexity)
 /// 3. Report detailed errors with call paths if cycles found
 /// 4. Validate that all called functions are defined
-pub struct CycleDetectionValidator {
+pub struct CycleDetectionValidator<'a> {
     error_manager: ErrorManager,
-    operational_settings: OperationalSettings,
+    operational_settings:    &'a OperationalSettings,
 }
 
-impl CycleDetectionValidator {
-    pub fn new(
+impl<'a> CycleDetectionValidator<'a> {
+
+    pub fn new(operational_settings: &'a OperationalSettings) -> Self {
+        Self::new_with_error_manager(operational_settings, ErrorManager::get_shared_instance())
+    }
+
+    pub fn new_with_error_manager(
+        operational_settings: &'a OperationalSettings,
         error_manager: ErrorManager,
-        operational_settings: OperationalSettings,
     ) -> Self {
         CycleDetectionValidator {
             error_manager,
             operational_settings,
         }
     }
+
     /// Main entry point: Validate function calls in a QuickFuncs section
     /// Returns true if validation passed (no cycles), false otherwise
     pub fn validate_function_calls(&self, section: &QuickFuncsSection) -> bool {

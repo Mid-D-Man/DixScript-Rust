@@ -1,4 +1,3 @@
-// dixscript/src/Compiler/Core/Config/mod.rs
 //! Configuration handling for DixScript
 //!
 //! This module contains:

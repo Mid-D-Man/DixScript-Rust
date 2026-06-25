@@ -1637,29 +1637,29 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
 
             self.advance();
 
-            match pattern.pattern_type {
+            return match pattern.pattern_type {
                 IdentifierPatternType::LocalFunctionCall => {
-                    return self.parse_function_call_expression(&identifier_name, expr_pos);
+                    self.parse_function_call_expression(&identifier_name, expr_pos)
                 }
                 IdentifierPatternType::LocalEnumAccess => {
                     self.advance();
                     self.advance();
-                    return Some(Expression::EnumAccess {
+                    Some(Expression::EnumAccess {
                         namespace_name: None,
                         enum_name: identifier_name,
                         value: pattern.second_part.unwrap(),
                         position: expr_pos,
-                    });
+                    })
                 }
                 IdentifierPatternType::ImportedFunctionCall => {
                     self.advance();
                     let func_name = pattern.second_part.unwrap();
                     self.advance();
-                    return self.parse_imported_function_call_expression(
+                    self.parse_imported_function_call_expression(
                         &identifier_name,
                         &func_name,
                         expr_pos,
-                    );
+                    )
                 }
                 IdentifierPatternType::ImportedEnumAccess => {
                     self.advance();
@@ -1668,18 +1668,18 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                     self.advance();
                     let enum_value = pattern.third_part.unwrap();
                     self.advance();
-                    return Some(Expression::EnumAccess {
+                    Some(Expression::EnumAccess {
                         namespace_name: Some(identifier_name),
                         enum_name,
                         value: enum_value,
                         position: expr_pos,
-                    });
+                    })
                 }
                 _ => {
-                    return Some(Expression::Identifier {
+                    Some(Expression::Identifier {
                         name: identifier_name,
                         position: expr_pos,
-                    });
+                    })
                 }
             }
         }

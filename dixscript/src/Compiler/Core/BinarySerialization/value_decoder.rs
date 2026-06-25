@@ -1,4 +1,3 @@
-// dixscript/src/Compiler/Core/BinarySerialization/value_decoder.rs
 //! Decodes binary format to DixScript AST values
 
 use std::io::{Read, Result as IoResult};

@@ -1,20 +1,20 @@
 
-// QuickFunctions Section Parser v1.0.0
-//
-// SPEC (BENF grammar):
-//   QuickFuncsSection ::= "@QUICKFUNCS(" QuickFunc* ")"
-//   QuickFunc         ::= "~" Identifier TypeAnnotation? ScopeDeclaration? FunctionSignature FunctionBody
-//   TypeAnnotation    ::= "<" DataType ">"
-//   ScopeDeclaration  ::= "=>" ScopeTarget ("," ScopeTarget)*
-//   ScopeTarget       ::= "global" | QualifiedIdentifier
-//   FunctionSignature ::= "(" ParameterList? ")"
-//   ParameterList     ::= Parameter ("," Parameter)*
-//   Parameter         ::= Identifier TypeAnnotation? ("=" DefaultValue)?
-//   FunctionBody      ::= "{" Statement* ReturnStatement "}"
-//
-// All dotted identifier chains (A.B.C) become QualifiedIdentifier.
-// The semantic analyzer resolves them (enum access, static call, property access, import, etc.).
-// Error strategies: Halt = stop immediately; Continue = collect all errors; Recover = sync and resume.
+//!  Parser for the `@QuickFunctions(...)`
+//! ```text,no_run
+//! SPEC (BENF grammar):
+//!   QuickFuncsSection ::= "@QUICKFUNCS(" QuickFunc* ")"
+//!  QuickFunc         ::= "~" Identifier TypeAnnotation? ScopeDeclaration? FunctionSignature FunctionBody
+//!   TypeAnnotation    ::= "<" DataType ">"
+//!   ScopeDeclaration  ::= "=>" ScopeTarget ("," ScopeTarget)*
+//!  ScopeTarget       ::= "global" | QualifiedIdentifier
+//!   FunctionSignature ::= "(" ParameterList? ")"
+//!   ParameterList     ::= Parameter ("," Parameter)*
+//!   Parameter         ::= Identifier TypeAnnotation? ("=" DefaultValue)?
+//!   FunctionBody      ::= "{" Statement* ReturnStatement "}"
+//!  ```
+//! All dotted identifier chains (A.B.C) become QualifiedIdentifier.
+//! The semantic analyzer resolves them (enum access, static call, property access, import, etc.).
+//! Error strategies: Halt = stop immediately; Continue = collect all errors; Recover = sync and resume.
 
 use crate::Compiler::AST::{
     QuickFuncsSection, QuickFunction, QuickFuncParam, QuickFuncStatement, SwitchCase,

@@ -1340,7 +1340,7 @@ fn is_type_compatible(expected: DataType, actual: DataType) -> bool {
         DataType::Function  => actual == DataType::Function,
         DataType::Range     => actual == DataType::Range,
 
-        // Any was handled above — unreachable
+
         DataType::Any => true,
     }
 }
@@ -1386,7 +1386,7 @@ fn is_type_compatible(expected: DataType, actual: DataType) -> bool {
             error_type:   error_type.to_string(),
             message:      message.to_string(),
             section_name: "DATA".to_string(),
-            suggestion:   suggestion.map(|s| s.to_string()).unwrap_or_default(),
+            suggestion:   suggestion.as_ref().map(|s| s.to_string()).unwrap_or_default(),
             position:     Some(position),
         });
 

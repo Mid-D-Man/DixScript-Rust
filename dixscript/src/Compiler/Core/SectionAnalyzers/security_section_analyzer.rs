@@ -4,7 +4,7 @@
 use crate::Compiler::AST::{SecuritySection, SecurityEntry, SecurityField, Value, Position};
 use crate::Compiler::Utilities::SymbolTable;
 use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
-use crate::ErrorManager::{ErrorManager, SemanticErrorType, DebugConfig};
+use crate::ErrorManager::{ErrorManager, DebugConfig};
 use rustc_hash::FxHashMap;
 use lazy_static::lazy_static;
 

@@ -7,7 +7,6 @@
 //! absolute and dynamic limits.
 
 use std::cell::RefCell;
-use std::net::ToSocketAddrs;
 use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
@@ -24,7 +23,6 @@ use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 use crate::ErrorManager::{DebugConfig, ErrorManager};
 
 use super::execution_context::ExecutionContext;
-use super::supporting_classes::ExecutionError;
 
 const ABSOLUTE_MAX_RECURSION: u32 = 10_000;
 const BASE_RECURSION_DEPTH: u32 = 1_000;

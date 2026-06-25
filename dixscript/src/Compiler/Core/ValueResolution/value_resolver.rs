@@ -2589,7 +2589,7 @@ pub fn convert_dix_value_to_value(dix: &DixValue, position: Position) -> Value {
             position,
         },
 
-        // FIX: Tuple must round-trip as t:(...) not as [...].
+        //  Tuple must round-trip as t:(...) not as [...].
         // Previously both Array and Tuple produced Value::Array, which broke
         // subsequent resolution passes that needed to re-read tuple elements
         // (e.g. createLennardJones returns t:(epsilon, sigma), then the caller

@@ -1,4 +1,3 @@
-// dixscript/src/Compiler/Core/Tokenizer/token.rs
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -61,20 +60,6 @@ impl fmt::Display for SectionId {
     }
 }
 
-// =============================================================================
-// TokenType
-// =============================================================================
-
-/// Token types for DixScript v1.0.0
-///
-/// ## Numeric literal additions
-/// - `Long(i64)`   — 64-bit integer. Written with `L`/`l` suffix: `9_000_000_000L`,
-///                   `0xFF_FF_FF_FFL`, `0b1111_0000L`. Also auto-promoted when a
-///                   plain integer literal overflows i32.
-/// - `Integer(i32)` — now accepts `_` separators and `0b`/`0B` binary prefix.
-///
-/// ## Note on `~` (QuickFunc prefix)
-/// Emitted as `Symbol('~')` — there is no `FunctionPrefix` variant.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenType {
     // ── Static-string variants ───────────────────────────────────────────────

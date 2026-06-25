@@ -1,4 +1,3 @@
-// dixscript/src/Compiler/Core/BinarySerialization/value_encoder.rs
 //! Encodes DixScript AST values to binary format
 
 use std::io::{Write, Result as IoResult};

@@ -227,11 +227,10 @@ pub fn new_with_error_manager(
             self.error_manager.log_debug("Phase 4: detecting circular function calls");
         }
 
-        // NOTE: CycleDetectionValidator currently requires owned OperationalSettings.
-        // When its API is updated to accept &OperationalSettings, remove the clone.
-        let cycle_validator = CycleDetectionValidator::new(
-            self.error_manager.clone(),
-            self.operational_settings.clone(),
+
+        let cycle_validator = CycleDetectionValidator::new_with_error_manager(
+            &self.operational_settings,   self.error_manager.clone(),
+
         );
         if !cycle_validator.validate_function_calls(section) {
             result.is_success = false;
@@ -482,11 +481,6 @@ pub fn new_with_error_manager(
     }
 
     // ── validate_default_value_type_strict ────────────────────────────────────────
-//
-// CHANGE: removed QFUNC_WARN003 on the None arm.
-// Same rationale: default-value expressions can be complex and the inference
-// gap is not actionable.  A genuine type MISMATCH (Some(actual) != expected)
-// still produces QFUNC009.
 
 fn validate_default_value_type_strict(
     &self,
@@ -2573,7 +2567,7 @@ fn validate_conditional_expression(
                         let valid: Vec<&String> = fields.keys().collect();
                         self.add_error(
                             result, "QFUNC053", "ENUM_VALUE_NOT_FOUND",
-                            &format!("Enum '{}' does not have value '{}'", enum_name, value),
+                            &format!("Enum '{}' does not have value '{}' called in '{}'", enum_name, value,function_name),
                             &format!("Valid values: {}", valid.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")),
                             position,
                         );

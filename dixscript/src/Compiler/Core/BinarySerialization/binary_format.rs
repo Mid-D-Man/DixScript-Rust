@@ -1,4 +1,4 @@
-// dixscript/src/Compiler/Core/BinarySerialization/binary_format.rs
+
 //! Binary format constants and type definitions for DixScript v1.0.0
 //! Defines the structure and type tags for .mdix.enc files
 //!
@@ -6,7 +6,7 @@
 //! Changing them is a breaking change — existing .mdix.enc files
 //! must be recompiled after any reorder.
 
-use crate::Compiler::AST::{DataType, Position};
+use crate::Compiler::AST::{DataType};
 
 // ==================== MAGIC NUMBER AND VERSION ====================
 

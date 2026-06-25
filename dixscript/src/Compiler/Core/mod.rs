@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::time::Duration;
-use crate::Compiler::AST::{Position, DataType, DixScript};
+use crate::Compiler::AST::{ DataType, DixScript};
 use crate::Compiler::Utilities::SymbolTable;
 
 pub mod Tokenizer;

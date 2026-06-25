@@ -3,7 +3,6 @@
 use std::io::{Write, Seek, SeekFrom};
 use crate::Compiler::AST::{ConfigSection, ConfigEntry, ConfigValue, Value, Position};
 use crate::Compiler::AST::data_types::{ErrorHandlingStrategy, CompatibilityMode, DebugMode};
-use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
 use super::binary_format::SectionId;
 use super::section_offset::SectionOffset;
 use super::binary_serialization_context::BinarySerializationContext;

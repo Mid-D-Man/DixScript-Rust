@@ -1,13 +1,5 @@
 //! GeneralParser — filters comments, extracts sections, delegates to section parsers.
 //!
-//! ## @CONFIG handling
-//!
-//! `ConfigSectionHandler` now replaces the @CONFIG block with blank lines before
-//! this parser ever sees the token stream.  The tokenizer produces no
-//! `SectionConfig` tokens from blank lines, so there is nothing to skip here.
-//! The `script.config` field is populated from the pre-parsed `ConfigSection`
-//! passed in via the constructor — exactly as before.
-//!
 //! ## Error manager propagation
 //! `propagate_error_manager = true` (LSP / `new_for_lsp`):
 //!   every section parser gets `self.error_manager.clone()` so diagnostics from

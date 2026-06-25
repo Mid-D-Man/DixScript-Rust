@@ -1,8 +1,6 @@
 //! SHA-256 checksum validation for binary files
 
 use sha2::{Sha256, Digest};
-use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
-
 /// Handles SHA-256 checksum calculation and validation
 pub struct ChecksumValidator;
 

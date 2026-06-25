@@ -2,7 +2,6 @@
 
 use std::io::{Write, Seek, SeekFrom};
 use crate::Compiler::AST::{DataSection, DataEntry, TablePath, PropertyAssignment, Value};
-use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
 use super::binary_format::SectionId;
 use super::section_offset::SectionOffset;
 use super::binary_serialization_context::BinarySerializationContext;

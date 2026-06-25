@@ -1,5 +1,4 @@
-// dixscript/src/Compiler/Core/Tokenizer/mod.rs
-//! Tokenizer - Lexical analysis
+//! Tokenizer - for the Lexical analysis
 
 pub mod lexer;
 pub mod token;

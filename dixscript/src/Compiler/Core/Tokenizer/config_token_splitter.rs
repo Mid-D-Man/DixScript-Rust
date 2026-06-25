@@ -1,7 +1,6 @@
-// dixscript/src/Compiler/Core/Tokenizer/config_token_splitter.rs
 //! Splits a full DixScript token stream at the `@CONFIG` section boundary.
 //!
-//! Approach B pipeline (tokeniser-first):
+//! pipeline
 //!
 //!   Tokenizer (full source)
 //!       ↓

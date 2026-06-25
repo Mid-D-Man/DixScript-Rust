@@ -46,7 +46,7 @@ impl<'a> QuickFunctionsAstEnhancer<'a> {
 
         // Build the resolver once for the entire section. Creating it per-function
         // would clone the resolution map f times, making cost O(f^2 * q) rather than O(f*q).
-        let resolver = analysis_result
+        let resolver = analysis_result.as_ref()
             .filter(|r| !r.qualified_id_resolutions.is_empty())
             .map(|r| {
                 if self.debug_config.is_verbose {

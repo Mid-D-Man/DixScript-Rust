@@ -1,14 +1,27 @@
+# Cargo.toml
 [workspace]
 members = [
     "dixscript",
     "mdix-cli",
-    "mdix-lsp"
-    #unlock later
-  #  "mdix-ffi",
-   # "mdix-wasm",
-  #  "mdix-python",
-  #  "mdix-java"
-   # "mdix-lua"
+    "mdix-lsp",
+    "mdix-ffi",
+    "mdix-wasm",
+    "mdix-python",
+    "mdix-java",
+    "mdix-lua",
+]
+# Keep the bare `cargo build` / `cargo test` / `cargo bench` (no -p flag)
+# scoped to exactly what it covered before this change. The 5 binding
+# crates below are now real members (fixes `cargo build -p mdix-ffi` /
+# `-p mdix-java` / `-p mdix-lua`, and `--manifest-path mdix-python/Cargo.toml`,
+# and `wasm-pack build mdix-wasm` — all of which currently fail with
+# "package is not a member of the workspace" without this), but they're
+# native/language-binding crates that were never meant to be swept into a
+# generic workspace-wide build/test/bench run.
+default-members = [
+    "dixscript",
+    "mdix-cli",
+    "mdix-lsp",
 ]
 resolver = "2"
 

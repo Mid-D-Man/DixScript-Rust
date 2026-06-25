@@ -5,7 +5,7 @@
 //! The subdirectory key is the first 16 hex characters of SHA-256(url).
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use sha2::{Digest, Sha256};
 use crate::ErrorManager::ErrorManager;
 

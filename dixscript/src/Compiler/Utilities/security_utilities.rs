@@ -32,7 +32,7 @@ impl SecurityUtilities {
         error_manager.log_debug("[SecurityUtilities] Ensuring valid SECURITY section...");
 
         // Check if encryption module is present
-        let has_encryption = dlm_section
+        let has_encryption = dlm_section.as_ref()
             .map(|dlm| Self::has_encryption_module(dlm))
             .unwrap_or(false);
 
@@ -52,7 +52,6 @@ impl SecurityUtilities {
             encryption_algorithm
         ));
 
-        // FIXED: Now we can safely match on existing since we didn't consume it above
         match existing {
             None => {
                 error_manager.log_info("[SecurityUtilities] @SECURITY section missing - auto-generating defaults");

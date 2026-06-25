@@ -1,4 +1,3 @@
-// dixscript/src/Runtime/dix_deserialize.rs
 //! Trait and helpers for reading Rust structs from a loaded DixScript database.
 //!
 //! # Quick start
@@ -270,7 +269,7 @@ impl DixData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Runtime::{DixDataBuilder, DixValue};
+    use crate::Runtime::{DixDataBuilder};
     use crate::Compiler::AST::*;
     use chrono::Utc;
 

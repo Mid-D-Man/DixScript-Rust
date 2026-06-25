@@ -1,4 +1,3 @@
-// dixscript/src/Runtime/array_homogenizer.rs
 //! Post-resolution numeric array homogenization.
 //!
 //! QuickFunc value resolution can produce array literals whose elements

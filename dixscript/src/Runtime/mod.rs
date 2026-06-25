@@ -1,4 +1,3 @@
-// dixscript/src/Runtime/mod.rs
 //! Runtime — public API for loading and using `.mdix` files.
 //!
 //! ## Loading

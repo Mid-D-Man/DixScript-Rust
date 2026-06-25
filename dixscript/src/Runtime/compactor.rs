@@ -1,4 +1,3 @@
-// dixscript/src/Runtime/compactor.rs
 //! Utilities for compacting and minifying DixScript files.
 //!
 //! ## Why token-based `minify`?

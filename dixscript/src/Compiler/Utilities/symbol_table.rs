@@ -9,7 +9,7 @@
 //! - Configuration keys
 
 use std::collections::HashMap;
-use crate::Compiler::AST::{DataType, Position, QuickFunction};
+use crate::Compiler::AST::{DataType, QuickFunction};
 use crate::Compiler::AST::expressions::Expression;
 
 // ==================== MAIN SYMBOL TABLE ====================

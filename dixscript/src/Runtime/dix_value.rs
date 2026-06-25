@@ -1,19 +1,14 @@
-// dixscript/src/Runtime/dix_value.rs
-// dixscript/src/Runtime/dix_value.rs
+
 use std::collections::HashMap;
 use serde::Serialize;
 
 /// Runtime value type for loaded DixScript data.
-///
-/// `Long(i64)` is the 64-bit integer variant. It surfaces when the source
-/// uses an explicit `L` suffix (`9_000_000_000L`), a binary/hex literal that
-/// overflows i32, or when a plain integer literal overflows i32 at lex time.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum DixValue {
     Null,
     Bool(bool),
-    Int(i32),
+    Int(i32), ///32-bit integer
     /// 64-bit integer. Produced by `L`-suffixed literals or auto-promotion.
     Long(i64),
     Float(f32),

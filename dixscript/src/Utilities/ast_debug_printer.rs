@@ -1,6 +1,5 @@
 
 use crate::Compiler::AST::*;
-use std::fmt::Write;
 
 /// Debug printer for DixScript AST
 /// Shows exact node types and structure for debugging

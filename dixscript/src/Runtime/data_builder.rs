@@ -391,7 +391,7 @@ impl DataBuilder {
 
     /// Write a `t:(...)` tuple value.
     ///
-    /// **FIX**: previously the only way to write a tuple was the raw
+    /// previously the only way to write a tuple was the raw
     /// `with_array` escape hatch (which produces `[...]`, not `t:(...)`),
     /// and only as an array *element* via `GroupArrayBuilder::add_value`.
     /// This is the first top-level scalar tuple constructor.
@@ -894,8 +894,8 @@ mod tests {
 
         match data.get_value("state") {
             Some(super::super::dix_value::DixValue::Enum { enum_name, field_name, value }) => {
-                assert_eq!(enum_name, "Status");
-                assert_eq!(field_name, "ACTIVE");
+                assert_eq!(*enum_name, "Status");
+                assert_eq!(*field_name, "ACTIVE");
                 assert_eq!(*value, 0);
             }
             other => panic!("expected Enum, got: {:?}", other),
@@ -913,11 +913,11 @@ mod tests {
             .unwrap();
 
         match data.get_value("avatar") {
-            Some(super::super::dix_value::DixValue::Blob(s)) => assert_eq!(s, "aGVsbG8="),
+            Some(super::super::dix_value::DixValue::Blob(s)) => assert_eq!(*s, "aGVsbG8="),
             other => panic!("expected Blob, got: {:?}", other),
         }
         match data.get_value("email_pattern") {
-            Some(super::super::dix_value::DixValue::Regex(s)) => assert_eq!(s, "^[a-z@.]+$"),
+            Some(super::super::dix_value::DixValue::Regex(s)) => assert_eq!(*s, "^[a-z@.]+$"),
             other => panic!("expected Regex, got: {:?}", other),
         }
     }

@@ -1,4 +1,3 @@
-// dixscript/src/Runtime/dix_serialize.rs
 //! Trait and helpers for writing Rust structs into a [`DataBuilder`] for
 //! `.mdix` serialization.
 //!

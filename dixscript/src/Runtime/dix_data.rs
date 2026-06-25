@@ -312,7 +312,7 @@ impl DixData {
                 }
             }
 
-            // FIX: TableProperty now also inserts an aggregate DixValue::Object
+            // TableProperty now also inserts an aggregate DixValue::Object
             // so that data.exists("server") and schema require_object("server")
             // work correctly — not just the individual leaf paths.
             DataEntry::TableProperty { path, properties, .. } => {
@@ -1041,8 +1041,7 @@ mod tests {
         };
         let data = DixData::from_ast(ast, "1.0.0".into(), Utc::now(), false, false, vec![]);
         let cfg = data.config.unwrap();
-        // FIX: previously all three of these came back as "" via the `_ =>
-        // String::new()` catch-all.
+
         assert_eq!(cfg.get("error_handling").map(String::as_str), Some("recover"));
         assert_eq!(cfg.get("compatibility").map(String::as_str), Some("best_effort"));
         assert_eq!(cfg.get("debug").map(String::as_str), Some("verbose"));

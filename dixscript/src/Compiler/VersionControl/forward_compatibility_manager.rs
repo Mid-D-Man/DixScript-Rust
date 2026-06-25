@@ -3,7 +3,6 @@
 //!
 //! Simplified framework for DixScript v1.0.0
 
-use super::compatibility_result::CompatibilityResult;
 use super::version_manager::VersionManager;
 use crate::ErrorManager::ErrorManager;
 use std::collections::HashMap;

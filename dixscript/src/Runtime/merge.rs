@@ -1,4 +1,3 @@
-// dixscript/src/Runtime/merge.rs
 //! AST-level merging of two or more DixScript databases.
 //!
 //! Works directly on `DixScript` AST nodes — no JSON round-trip, no information
@@ -46,7 +45,6 @@ use crate::Compiler::AST::{
     DLMModule, DLMModuleType, DLMSection,
     EnumDeclaration, EnumField, EnumsSection,
     ImportDeclaration, ImportsSection,
-    ObjectProperty,
     Position,
     PropertyAssignment,
     QuickFunction, QuickFuncsSection,
@@ -1446,7 +1444,7 @@ mod tests {
         if let DataEntry::TableProperty { properties, .. } = &entries[0] {
             assert_eq!(properties.len(), 3, "host + port (primary wins) + ssl from secondary");
             let host = properties.iter().find(|p| p.name == "host").unwrap();
-            assert!(matches!(&host.value, Value::String { value, .. } if value == "a.local"));
+            assert!(matches!(&host.value, Value::String { value, .. } if *value == "a.local"));
             let port = properties.iter().find(|p| p.name == "port").unwrap();
             assert!(matches!(&port.value, Value::Integer { value: 8080, .. }));
             let ssl = properties.iter().find(|p| p.name == "ssl").unwrap();
@@ -1490,7 +1488,7 @@ mod tests {
             &result.merged_ast.data.unwrap().entries[0]
         {
             assert_eq!(items.len(), 1);
-            assert!(matches!(&items[0], Value::String { value, .. } if value == "omega"));
+            assert!(matches!(&items[0], Value::String { value, .. } if *value == "omega"));
         }
     }
 
@@ -1516,7 +1514,7 @@ mod tests {
         assert_eq!(cfg.entries.len(), 3); // version(primary), author, debug
 
         let version = cfg.entries.iter().find(|e| e.key == "version").unwrap();
-        assert!(matches!(&version.value, ConfigValue::String(s) if s == "1.0.0"));
+        assert!(matches!(&version.value, ConfigValue::String(s) if *s == "1.0.0"));
     }
 
     // ── Enum deep-merge ───────────────────────────────────────────────────────
@@ -1579,7 +1577,7 @@ mod tests {
         assert_eq!(entries.len(), 3, "a, b, c");
 
         if let DataEntry::SimpleProperty { name, value: Value::Integer { value, .. }, .. } =
-            entries.iter().find(|e| matches!(e, DataEntry::SimpleProperty { name, .. } if name == "a")).unwrap()
+            entries.iter().find(|e| matches!(e, DataEntry::SimpleProperty { name, .. } if *name == "a")).unwrap()
         {
             assert_eq!(*value, 1);
         }

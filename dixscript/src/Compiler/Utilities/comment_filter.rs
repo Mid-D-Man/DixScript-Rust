@@ -1,10 +1,5 @@
 //! CommentFilter — reusable utility for stripping comment tokens from a
 //! token stream.
-//!
-//! Extracted from `GeneralParser` so it can be used in other contexts
-//! (formatters, linters, IDE language-server pipelines, etc.) without
-//! spinning up a full parser.
-
 use crate::Compiler::Core::Tokenizer::{Token, TokenType};
 use crate::ErrorManager::Helpers::ParseException;
 

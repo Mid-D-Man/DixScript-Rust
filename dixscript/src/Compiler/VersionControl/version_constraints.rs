@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use crate::Compiler::AST::*;
-use crate::Compiler::VersionControl::{VersionManager, ForwardCompatibilityManager, CompatibilityResult};
+use crate::Compiler::VersionControl::{VersionManager, ForwardCompatibilityManager};
 use crate::Compiler::Extensions::TypeSystemManager;
 use crate::Builtins::Resolver::static_object_registry;
 use crate::Builtins::Resolver::instance_method_registry;

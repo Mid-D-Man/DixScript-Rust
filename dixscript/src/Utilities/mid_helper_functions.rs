@@ -1,5 +1,4 @@
 use rand::Rng;
-use std::collections::HashSet;
 use std::fmt::Write;
 
 /// Helper functions for common operations

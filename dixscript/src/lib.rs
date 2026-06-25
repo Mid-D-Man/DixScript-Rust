@@ -1,4 +1,4 @@
-//! # DixScript - MidManStudio Data Interchange Extension Script
+//! # DixScript - .mdix MidMans Data Interchange Extension Script
 //!
 //! Secure, efficient data interchange format with built-in encryption,
 //! compile-time functions, and cross-platform support.

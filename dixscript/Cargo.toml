@@ -1,3 +1,4 @@
+# dixscript/Cargo.toml
 [package]
 name = "dixscript"
 version = "1.0.0"
@@ -56,13 +57,23 @@ hostname = "0.3"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
-[dev-dependencies]
+# Bench/test-only deps. Gated off wasm32 on purpose: criterion pulls in
+# rayon (one of its default features) plus a pile of native-only tooling
+# (walkdir, is-terminal, plotters, ...) that has no business resolving
+# against a wasm32 target. Nothing in CI currently runs
+# `cargo bench`/`cargo test --benches` against wasm32 — the wasm job only
+# does `wasm-pack build mdix-wasm`, which never touches dev-dependencies —
+# but this makes that guarantee explicit at the manifest level instead of
+# relying on nobody ever running a broad `--workspace --all-targets
+# --target wasm32-unknown-unknown` check.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion  = { version = "0.5", features = ["html_reports"] }
 tempfile   = "3.10"
 bincode    = "1.3"
 rmp-serde  = "1.1"
 postcard   = { version = "1.0", features = ["alloc"] }
 ciborium   = "0.2"
+
 [[bench]]
 name    = "format_comparison_benchmark"
 harness = false

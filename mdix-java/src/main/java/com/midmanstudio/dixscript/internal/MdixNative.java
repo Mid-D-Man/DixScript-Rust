@@ -1,3 +1,4 @@
+// MdixNative.java
 package com.midmanstudio.dixscript.internal;
 
 /**
@@ -36,9 +37,9 @@ public final class MdixNative {
     // ── Type inspection ───────────────────────────────────────────────────────
     /**
      * Returns a ValueType ordinal:
-     * -1=Unknown 0=Null 1=Bool 2=Int 3=Float 4=Double 5=String
-     *  6=Date 7=Timestamp 8=HexColor 9=Blob 10=Regex 11=Array
-     * 12=Object 13=Tuple 14=Enum
+     * -1=Unknown 0=Null 1=Bool 2=Int 3=Long 4=Float 5=Double 6=String
+     *  7=Date 8=Timestamp 9=HexColor 10=Blob 11=Regex 12=Array
+     * 13=Object 14=Tuple 15=Enum
      */
     public static native int     getType(long handle, String path);
     public static native int     getArrayLength(long handle, String path);
@@ -46,6 +47,8 @@ public final class MdixNative {
     // ── Typed getters ─────────────────────────────────────────────────────────
     public static native String  getString(long handle, String path);
     public static native int     getInt(long handle, String path);
+    /** Also accepts Int values (widened without loss). */
+    public static native long    getLong(long handle, String path);
     public static native float   getFloat(long handle, String path);
     public static native double  getDouble(long handle, String path);
     public static native boolean getBool(long handle, String path);
@@ -75,6 +78,7 @@ public final class MdixNative {
     public static native void    builderFree(long handle);
     public static native boolean builderSetString(long handle, String path, String value);
     public static native boolean builderSetInt(long handle, String path, int value);
+    public static native boolean builderSetLong(long handle, String path, long value);
     public static native boolean builderSetFloat(long handle, String path, float value);
     public static native boolean builderSetDouble(long handle, String path, double value);
     public static native boolean builderSetBool(long handle, String path, boolean value);
@@ -83,4 +87,4 @@ public final class MdixNative {
     public static native boolean builderHasKey(long handle, String path);
     public static native boolean builderSave(long handle, String path);
     public static native String  builderToString(long handle);
-                                          }
+                                                 }

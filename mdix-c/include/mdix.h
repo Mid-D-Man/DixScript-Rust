@@ -36,23 +36,30 @@ extern "C" {
 
 /* ── Type discriminants ───────────────────────────────────────────────── */
 
+/*
+ * Numeric types are contiguous: Int=2, Long=3, Float=4, Double=5.
+ * These values MUST match mdix-ffi/src/lib.rs's MdixType exactly —
+ * this enum is hand-maintained (not cbindgen-generated), so it does
+ * NOT auto-correct when the Rust side changes. Update both together.
+ */
 typedef enum MdixType {
     MDIX_TYPE_UNKNOWN   = -1,
     MDIX_TYPE_NULL      =  0,
     MDIX_TYPE_BOOL      =  1,
     MDIX_TYPE_INT       =  2,
-    MDIX_TYPE_FLOAT     =  3,
-    MDIX_TYPE_DOUBLE    =  4,
-    MDIX_TYPE_STRING    =  5,
-    MDIX_TYPE_DATE      =  6,
-    MDIX_TYPE_TIMESTAMP =  7,
-    MDIX_TYPE_HEX_COLOR =  8,
-    MDIX_TYPE_BLOB      =  9,
-    MDIX_TYPE_REGEX     = 10,
-    MDIX_TYPE_ARRAY     = 11,
-    MDIX_TYPE_OBJECT    = 12,
-    MDIX_TYPE_TUPLE     = 13,
-    MDIX_TYPE_ENUM      = 14
+    MDIX_TYPE_LONG      =  3,
+    MDIX_TYPE_FLOAT     =  4,
+    MDIX_TYPE_DOUBLE    =  5,
+    MDIX_TYPE_STRING    =  6,
+    MDIX_TYPE_DATE      =  7,
+    MDIX_TYPE_TIMESTAMP =  8,
+    MDIX_TYPE_HEX_COLOR =  9,
+    MDIX_TYPE_BLOB      = 10,
+    MDIX_TYPE_REGEX     = 11,
+    MDIX_TYPE_ARRAY     = 12,
+    MDIX_TYPE_OBJECT    = 13,
+    MDIX_TYPE_TUPLE     = 14,
+    MDIX_TYPE_ENUM      = 15
 } MdixType;
 
 typedef enum MdixFormatMode {
@@ -106,6 +113,8 @@ MDIX_API int32_t  mdix_get_array_length(const void* handle, const char* path);
 /** Returned char* must be freed with mdix_free_string(). Returns NULL on failure. */
 MDIX_API char*   mdix_get_string    (const void* handle, const char* path);
 MDIX_API int32_t mdix_get_int       (const void* handle, const char* path);
+/** Get a 64-bit integer at path. Also accepts Int values (widened without loss). */
+MDIX_API int64_t mdix_get_long      (const void* handle, const char* path);
 MDIX_API float   mdix_get_float     (const void* handle, const char* path);
 MDIX_API double  mdix_get_double    (const void* handle, const char* path);
 MDIX_API bool    mdix_get_bool      (const void* handle, const char* path);
@@ -167,6 +176,7 @@ MDIX_API bool    mdix_builder_clear       (void* builder);
 
 MDIX_API bool mdix_builder_set_string(void* builder, const char* path, const char* value);
 MDIX_API bool mdix_builder_set_int   (void* builder, const char* path, int32_t value);
+MDIX_API bool mdix_builder_set_long  (void* builder, const char* path, int64_t value);
 MDIX_API bool mdix_builder_set_float (void* builder, const char* path, float value);
 MDIX_API bool mdix_builder_set_double(void* builder, const char* path, double value);
 MDIX_API bool mdix_builder_set_bool  (void* builder, const char* path, bool value);
@@ -177,6 +187,7 @@ MDIX_API bool mdix_builder_remove    (void* builder, const char* path);
 MDIX_API bool    mdix_builder_has_key   (const void* builder, const char* path);
 MDIX_API char*   mdix_builder_get_string(const void* builder, const char* path);
 MDIX_API int32_t mdix_builder_get_int   (const void* builder, const char* path);
+MDIX_API int64_t mdix_builder_get_long  (const void* builder, const char* path);
 MDIX_API float   mdix_builder_get_float (const void* builder, const char* path);
 MDIX_API double  mdix_builder_get_double(const void* builder, const char* path);
 MDIX_API bool    mdix_builder_get_bool  (const void* builder, const char* path);

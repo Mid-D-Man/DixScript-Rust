@@ -30,9 +30,9 @@ impl AuditorPathUtils {
         let fallback = Path::new(output_directory).join(format!("{}.mdix.au", base_name));
 
         if fallback.exists() && !Self::same_path(source_dir, Path::new(output_directory)) {
-            match std::fs::rename(&fallback, &primary) {
-                Ok(_) => return Ok((primary, true)),
-                Err(_) => return Ok((fallback, false)),
+            return match std::fs::rename(&fallback, &primary) {
+                Ok(_) => Ok((primary, true)),
+                Err(_) => Ok((fallback, false)),
             }
         }
 

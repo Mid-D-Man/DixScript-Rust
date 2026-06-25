@@ -1,6 +1,6 @@
 //! Auditor trait and supporting types
 
-use crate::Compiler::AST::{DixScript, Position};
+use crate::Compiler::AST::{DixScript};
 use std::collections::HashMap;
 
 /// Result type for audit operations
@@ -199,7 +199,7 @@ pub trait IAuditor {
     /// Validate auditor can execute
     fn validate(&self) -> Result<(), String>;
 
-    /// Get metadata for .dixscript.key file
+    /// Get metadata for .mdix.key file
     fn get_metadata(&self) -> HashMap<String, String>;
 
     /// Get priority (lower = earlier execution)

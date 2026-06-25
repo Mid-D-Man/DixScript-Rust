@@ -28,7 +28,7 @@ pub trait IEncryptor {
     /// Validate encryptor can execute
     fn validate(&self) -> Result<(), String>;
 
-    /// Get metadata for .dixscript.key file
+    /// Get metadata for .mdix.key file
     fn get_metadata(&self) -> HashMap<String, String>;
 
     /// Get priority (lower = earlier execution)

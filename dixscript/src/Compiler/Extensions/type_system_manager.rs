@@ -4,7 +4,7 @@
 //! All methods are stateless utility functions.
 
 use crate::Compiler::AST::{
-    DataType, QuickFunction, QuickFuncParam, Expression, Value, ObjectProperty, Position
+    DataType, QuickFunction, QuickFuncParam, Expression, Value, Position
 };
 use crate::Builtins::Core::DixType;
 use crate::ErrorManager::ErrorManager;

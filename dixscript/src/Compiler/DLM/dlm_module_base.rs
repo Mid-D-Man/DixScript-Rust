@@ -2,7 +2,6 @@
 
 use crate::ErrorManager::{ErrorManager, DlmErrorType};
 use crate::Compiler::Core::Config::DebugMode;
-use std::collections::HashMap;
 
 /// Base struct for all DLM modules
 /// Provides common functionality and lifecycle management

@@ -1,7 +1,6 @@
-//! In-memory data model for `.dixscript.key` file contents.
+//! In-memory data model for `.mdix.key` file contents.
 
 use chrono::{DateTime, Utc};
-use std::collections::HashMap;
 
 /// Complete key file data — the canonical in-memory representation.
 #[derive(Debug, Clone)]

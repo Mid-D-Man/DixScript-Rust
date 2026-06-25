@@ -241,7 +241,7 @@ impl AuditFileParser {
                     .unwrap_or_else(|| "UNKNOWN".to_string());
                 rec.execution_time_ms = Self::opt_f64(&map, "execution_time_ms").unwrap_or(0.0);
                 rec.changes_summary   = Self::opt_string(&map, "changes_summary")
-                    .filter(|s| s != "none" && !s.is_empty());
+                    .filter(|s| *s != "none" && !s.is_empty());
 
                 if let Some(ts) = Self::opt_string(&map, "timestamp") {
                     if let Ok(dt) = ts.parse::<chrono::DateTime<chrono::Utc>>() {

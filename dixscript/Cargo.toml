@@ -1,4 +1,4 @@
-# dixscript/Cargo.toml
+
 [package]
 name = "dixscript"
 version = "1.0.0"

@@ -1,1 +1,0 @@
-⚙ Compile failed: ✗ Compile error: Value resolution failed: ["Execution of 'lambdaArray' at DATA.test.lambdacollections.lam_array failed: BuiltinCallFailed { object: "String", method: "call", message: "Error calling String.call: Type String has no method: call", position: Position { line: 1316, column: 37 } }"]

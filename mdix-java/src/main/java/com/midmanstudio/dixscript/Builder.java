@@ -1,3 +1,4 @@
+// Builder.java
 package com.midmanstudio.dixscript;
 
 import com.midmanstudio.dixscript.internal.MdixNative;
@@ -72,7 +73,11 @@ public final class Builder implements Closeable {
     }
 
     public Builder setLong(String path, long value) {
-        return setInt(path, (int) value);
+        checkOpen();
+        checkPath(path);
+        if (!MdixNative.builderSetLong(handle, path, value))
+            throw new MdixException("setLong failed for path: " + path);
+        return this;
     }
 
     public Builder setFloat(String path, float value) {
@@ -168,4 +173,4 @@ public final class Builder implements Closeable {
             throw new MdixException(MdixException.Kind.INVALID_PATH,
                 "path must not be null or empty");
     }
-  }
+    }

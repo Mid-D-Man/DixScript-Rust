@@ -6,6 +6,7 @@ rust-version = "1.70"
 authors = ["MidManStudio"]
 description = "Config, code, and encryption in one file — a data interchange format with compile-time functions, AES-256/ChaCha20 built-in, and cross-platform FFI"
 license = "MIT"
+readme = "README.md"
 repository = "https://github.com/Mid-D-Man/DixScript-Rust"
 keywords = ["config", "encryption", "serialization", "data-format", "gamedev"]
 categories = ["config", "encoding", "data-structures", "cryptography"]
@@ -105,4 +106,3 @@ harness = false
 
 [features]
 default = []
-

@@ -213,6 +213,14 @@ public:
         return Result<int32_t>::ok(v);
     }
 
+    /** Also accepts Int values (widened without loss). */
+    Result<int64_t> get_long(std::string_view path) const {
+        ::mdix_clear_error();
+        int64_t v = ::mdix_get_long(h_, std::string(path).c_str());
+        if (::mdix_get_last_error()) return Result<int64_t>::err(last_error("get_long failed"));
+        return Result<int64_t>::ok(v);
+    }
+
     Result<float> get_float(std::string_view path) const {
         ::mdix_clear_error();
         float v = ::mdix_get_float(h_, std::string(path).c_str());
@@ -332,6 +340,10 @@ public:
         ::mdix_builder_set_int(h_, std::string(path).c_str(), value);
         return *this;
     }
+    Builder& set_long(std::string_view path, int64_t value) {
+        ::mdix_builder_set_long(h_, std::string(path).c_str(), value);
+        return *this;
+    }
     Builder& set_float(std::string_view path, float value) {
         ::mdix_builder_set_float(h_, std::string(path).c_str(), value);
         return *this;
@@ -361,6 +373,10 @@ public:
     std::optional<int32_t> get_int(std::string_view path) const {
         if (!has_key(path)) return std::nullopt;
         return ::mdix_builder_get_int(h_, std::string(path).c_str());
+    }
+    std::optional<int64_t> get_long(std::string_view path) const {
+        if (!has_key(path)) return std::nullopt;
+        return ::mdix_builder_get_long(h_, std::string(path).c_str());
     }
     std::optional<float> get_float(std::string_view path) const {
         if (!has_key(path)) return std::nullopt;

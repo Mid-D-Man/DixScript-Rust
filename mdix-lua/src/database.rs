@@ -156,47 +156,130 @@ impl UserData for LuaMdixDatabase {
         });
 
         /// Get an integer value (returned as Lua integer / i64).
+        /// Strict: only succeeds on an actual Int (or Enum ordinal) value —
+        /// does NOT silently coerce from Long/Float/Double. This matches
+        /// the widening rule schema.rs's own type_matches() uses, not the
+        /// looser dixscript::Runtime::DixData::get::<T>() convenience,
+        /// which would happily truncate a Float/Double into this without
+        /// any error.
         ///
         ///   local port = db:get_int("port")
         ///   local cap  = db:get_int("max_players", 100)
         methods.add_method("get_int", |_, this, (path, default): (String, Option<i64>)| {
             let data = this.data()?;
-            match data.get::<i32>(&path) {
-                Ok(v)  => Ok(v as i64),
-                Err(e) => match default {
+            match data.get_value(&path) {
+                Some(DixValue::Int(v))             => Ok(*v as i64),
+                Some(DixValue::Enum { value, .. }) => Ok(*value as i64),
+                Some(other) => match default {
                     Some(d) => Ok(d),
-                    None    => Err(mdix_err("get_int", e)),
+                    None => Err(mdix_err("get_int", format!(
+                        "'{}' is {}, not int", path, other.type_name()
+                    ))),
+                },
+                None => match default {
+                    Some(d) => Ok(d),
+                    None    => Err(not_found_err(&path)),
                 },
             }
         });
 
         /// Get a 64-bit integer value (returned as Lua integer / i64).
-        /// Also accepts Int values (widened without loss).
+        /// Accepts Long (exact) or Int (widened — i32 -> i64 is always
+        /// lossless). Rejects Float/Double: those are different numeric
+        /// families, and silently truncating one into a Long is exactly
+        /// the kind of bug this method exists to prevent.
         ///
         ///   local created_at = db:get_long("created_at_ms")
         ///   local id          = db:get_long("user.id", 0)
         methods.add_method("get_long", |_, this, (path, default): (String, Option<i64>)| {
             let data = this.data()?;
-            match data.get::<i64>(&path) {
-                Ok(v)  => Ok(v),
-                Err(e) => match default {
+            match data.get_value(&path) {
+                Some(DixValue::Long(v)) => Ok(*v),
+                Some(DixValue::Int(v))  => Ok(*v as i64),
+                Some(other) => match default {
                     Some(d) => Ok(d),
-                    None    => Err(mdix_err("get_long", e)),
+                    None => Err(mdix_err("get_long", format!(
+                        "'{}' is {}, not long", path, other.type_name()
+                    ))),
+                },
+                None => match default {
+                    Some(d) => Ok(d),
+                    None    => Err(not_found_err(&path)),
                 },
             }
         });
 
-        /// Get a float or double value (returned as Lua number / f64).
+        /// Get a Float value strictly — rejects Double, Int, and Long.
+        /// Lua numbers are f64 either way, so the returned value is
+        /// numerically identical to what get_double would give for the
+        /// same data; the point of this method is to assert the *stored*
+        /// type really is Float, the same role get_int plays for Int.
+        ///
+        ///   local scale = db:get_float("ui.scale")
+        methods.add_method("get_float", |_, this, (path, default): (String, Option<f64>)| {
+            let data = this.data()?;
+            match data.get_value(&path) {
+                Some(DixValue::Float(v)) => Ok(*v as f64),
+                Some(other) => match default {
+                    Some(d) => Ok(d),
+                    None => Err(mdix_err("get_float", format!(
+                        "'{}' is {}, not float", path, other.type_name()
+                    ))),
+                },
+                None => match default {
+                    Some(d) => Ok(d),
+                    None    => Err(not_found_err(&path)),
+                },
+            }
+        });
+
+        /// Get a Double value, widened from Float/Int/Long if needed —
+        /// all three are always exact when promoted to f64 at the
+        /// magnitudes DixScript configs realistically use, matching
+        /// schema.rs's own Double widening rule exactly.
+        ///
+        ///   local gravity = db:get_double("gravity")
+        ///   local scale   = db:get_double("ui.scale", 1.0)
+        methods.add_method("get_double", |_, this, (path, default): (String, Option<f64>)| {
+            let data = this.data()?;
+            match data.get_value(&path) {
+                Some(DixValue::Double(v)) => Ok(*v),
+                Some(DixValue::Float(v))  => Ok(*v as f64),
+                Some(DixValue::Int(v))    => Ok(*v as f64),
+                Some(DixValue::Long(v))   => Ok(*v as f64),
+                Some(other) => match default {
+                    Some(d) => Ok(d),
+                    None => Err(mdix_err("get_double", format!(
+                        "'{}' is {}, not double", path, other.type_name()
+                    ))),
+                },
+                None => match default {
+                    Some(d) => Ok(d),
+                    None    => Err(not_found_err(&path)),
+                },
+            }
+        });
+
+        /// Alias for get_double — kept for backwards compatibility with
+        /// code written before get_float/get_double were split out.
         ///
         ///   local gravity = db:get_number("gravity")
-        ///   local scale   = db:get_number("ui.scale", 1.0)
         methods.add_method("get_number", |_, this, (path, default): (String, Option<f64>)| {
             let data = this.data()?;
-            match data.get::<f64>(&path) {
-                Ok(v)  => Ok(v),
-                Err(e) => match default {
+            match data.get_value(&path) {
+                Some(DixValue::Double(v)) => Ok(*v),
+                Some(DixValue::Float(v))  => Ok(*v as f64),
+                Some(DixValue::Int(v))    => Ok(*v as f64),
+                Some(DixValue::Long(v))   => Ok(*v as f64),
+                Some(other) => match default {
                     Some(d) => Ok(d),
-                    None    => Err(mdix_err("get_number", e)),
+                    None => Err(mdix_err("get_number", format!(
+                        "'{}' is {}, not a number", path, other.type_name()
+                    ))),
+                },
+                None => match default {
+                    Some(d) => Ok(d),
+                    None    => Err(not_found_err(&path)),
                 },
             }
         });

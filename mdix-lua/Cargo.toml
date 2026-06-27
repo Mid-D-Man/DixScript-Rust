@@ -1,3 +1,4 @@
+# mdix-lua/Cargo.toml
 [package]
 name        = "mdix-lua"
 version     = "1.0.0"
@@ -16,7 +17,17 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 dixscript   = { path = "../dixscript" }
-# "module" and "vendored" are mutually exclusive. 
-# We use "module" + "macros" for a dynamic Lua library.
+# "module" and "vendored" are mutually exclusive — and the choice here is
+# load-bearing, not stylistic. This crate is meant to be require()'d from
+# inside a HOST process that embeds its own Lua interpreter (typically via
+# mlua + "vendored"), e.g. a game's Lua modding layer. "module" makes this
+# .so resolve Lua symbols dynamically against that already-running
+# interpreter instead of statically linking a second, separate Lua runtime
+# into the same process — which is what "vendored" would do here, and which
+# breaks the moment two distinct Lua states exist side by side.
+# The host and this module must agree on the Lua version: both lua54, no
+# mixing 5.1/5.2/5.3/PUC-Lua/LuaJIT across the require() boundary.
 mlua        = { version = "0.10", features = ["lua54", "module", "macros"] }
 serde_json  = "1.0"
+# Only needed for DixData::from_ast's compile_time stamp in merge.rs.
+chrono      = "0.4"

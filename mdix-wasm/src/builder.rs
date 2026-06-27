@@ -1,3 +1,5 @@
+// mdix-wasm/src/builder.rs
+
 use crate::database::MdixDatabase;
 use crate::error::{freed_err, invalid_path_err, runtime_err};
 use dixscript::Runtime::{DixLoadOptions, DixLoader};
@@ -204,6 +206,20 @@ impl MdixBuilder {
     #[wasm_bindgen(js_name = withInt)]
     pub fn with_int(mut self, path: &str, value: i32) -> Result<MdixBuilder, JsValue> {
         self.add_flat(path, value.to_string())
+    }
+
+    /// Adds a 64-bit integer value, explicitly typed as Long.
+    ///
+    /// Takes a JS `bigint`, not `number` — e.g. `withLong("id", 123n)`,
+    /// not `withLong("id", 123)`. wasm-bindgen will throw a TypeError if
+    /// you pass a plain number here. Values that overflow i32 are
+    /// auto-promoted to Long by the parser regardless of suffix, but a
+    /// small value (e.g. `5n`) would otherwise re-parse as Int — the `L`
+    /// suffix pins the type to Long no matter the magnitude, matching
+    /// DixScript's own `123L` literal syntax.
+    #[wasm_bindgen(js_name = withLong)]
+    pub fn with_long(mut self, path: &str, value: i64) -> Result<MdixBuilder, JsValue> {
+        self.add_flat(path, format!("{}L", value))
     }
 
     #[wasm_bindgen(js_name = withFloat)]
@@ -568,4 +584,4 @@ fn escape_mdix(s: &str) -> String {
      .replace('\n', "\\n")
      .replace('\r', "\\r")
      .replace('\t', "\\t")
-  }
+    }

@@ -89,6 +89,21 @@
 //!     ("local.mdix",     0.5),
 //! ])?;
 //! ```
+//!
+//! ## Hot reload
+//!
+//! ```rust,ignore
+//! use dixscript::Runtime::HotReloadWatcher;
+//!
+//! let mut watcher = HotReloadWatcher::new("config.mdix");
+//!
+//! // in your game loop / tick / update:
+//! match watcher.check_and_reload() {
+//!     Ok(Some(data)) => apply_new_config(data),  // file changed, reloaded
+//!     Ok(None)       => {}                       // unchanged, nothing to do
+//!     Err(e)         => eprintln!("hot reload failed: {e}"),
+//! }
+//! ```
 
 pub mod array_homogenizer;
 pub mod compactor;
@@ -99,6 +114,7 @@ pub mod dix_deserialize;
 pub mod dix_serialize;
 pub mod dix_value;
 pub mod format_options;
+pub mod hot_reload;
 pub mod key_resolver;
 pub mod load_options;
 pub mod loader;
@@ -185,3 +201,10 @@ pub use merge::{
     MdixMerger,
     MergeConflict,
 };
+
+// ── Hot reload ────────────────────────────────────────────────────────────────
+// Poll-based watcher for Rust consumers only.  Each language binding implements
+// its own native FS-event mechanism (inotify, FSEvents, ReadDirectoryChangesW).
+// See `hot_reload` module docs for the intended game-loop usage pattern.
+
+pub use hot_reload::HotReloadWatcher;

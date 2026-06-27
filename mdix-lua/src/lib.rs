@@ -2,22 +2,50 @@
 //
 // Lua 5.4 module entrypoint — called by Lua's require("mdix").
 //
+// Primary deployment target: a Rust host process that embeds Lua itself
+// via `mlua` (typically with the "vendored" feature, e.g. a game's
+// modding layer) for running user-supplied .lua scripts. Mod scripts
+// running inside that embedded interpreter can then `require("mdix")` to
+// read/write .mdix config and save data — this module is THAT side of the
+// boundary, not the embedding side. It is built with mlua's "module"
+// feature specifically because of that: "module" does not vendor its own
+// copy of the Lua C library — it dynamically resolves Lua symbols against
+// whatever interpreter loaded it via require(), which is exactly the host's
+// already-running (possibly "vendored") Lua 5.4 instance. Building this
+// crate with "vendored" instead would statically link a second, separate
+// Lua runtime into the same process and break in confusing ways the moment
+// two different Lua states try to coexist.
+//
+// This DOES require the host and this module to agree on the Lua version
+// (both must be lua54 — mixing 5.1/5.4 or PUC-Lua/LuaJIT across the
+// boundary is not supported and not checked at compile time, only at
+// require() time when it fails to load). Not yet verified on a real
+// `cargo apk`/Android build — see mdix-lua/Cargo.toml.
+//
 // Exposes these module-level symbols:
 //
 //   mdix.version                                     -- string
 //   mdix.load(path)                                  -- MdixDatabase
-//   mdix.load_str(source)                            -- MdixDatabase
+//   mdix.load_str(source)                             -- MdixDatabase
 //   mdix.load_encrypted(enc_path [, key_path])       -- MdixDatabase
 //   mdix.load_encrypted_password(enc_path, password) -- MdixDatabase
 //   mdix.from_json(json)                             -- MdixDatabase
 //   mdix.from_toml(toml)                             -- MdixDatabase
+//   mdix.from_table(table)                           -- MdixBuilder
 //   mdix.builder()                                   -- MdixBuilder
+//   mdix.schema()                                     -- MdixSchema
+//   mdix.watch(path)                                  -- MdixWatcher
+//   mdix.merge_files(paths [, strategy [, array_strategy]])
+//                                                      -- MdixDatabase, conflicts
+//   mdix.merge_files_weighted(entries [, strategy [, array_strategy]])
+//                                                      -- MdixDatabase, conflicts
 //   mdix.minify_source(source)                       -- string
 //   mdix.format_source(source)                       -- string
 //
-// All database-access methods are on MdixDatabase userdata objects.
-// All builder methods are on MdixBuilder userdata objects.
-// See database.rs and builder.rs for the full method surfaces.
+// MdixDatabase additionally exposes :to_table(), :validate_schema(schema),
+// and :merge_with(other [, strategy [, array_strategy [, temp_dir]]]).
+// See database.rs, builder.rs, schema.rs, merge.rs, and watch.rs for the
+// full method surfaces.
 //
 // Cargo.toml crate-type is ["cdylib", "rlib"].
 //   cdylib → mdix.so / mdix.dylib / mdix.dll  (loaded by require)
@@ -31,7 +59,10 @@
 mod builder;
 mod database;
 mod error;
+mod merge;
+mod schema;
 mod value;
+mod watch;
 
 use mlua::prelude::*;
 use dixscript::Runtime::{
@@ -41,6 +72,8 @@ use dixscript::Runtime::{
 use builder::LuaMdixBuilder;
 use database::LuaMdixDatabase;
 use error::mdix_err;
+use schema::LuaMdixSchema;
+use watch::LuaMdixWatcher;
 
 /// Module entry point — Lua calls luaopen_mdix when require("mdix") is evaluated.
 ///
@@ -195,6 +228,59 @@ fn mdix(lua: &Lua) -> LuaResult<LuaTable> {
         Ok(LuaMdixBuilder::new())
     })?)?;
 
+    /// Build an MdixBuilder from a single nested Lua table in one shot —
+    /// the reverse of MdixDatabase:to_table(). See builder.rs for exactly
+    /// how nested arrays/tables map onto DixScript's section kinds.
+    ///
+    ///   local b  = mdix.from_table({app_name = "AirStrike", port = 7777})
+    ///   local db = b:build()
+    m.set("from_table", lua.create_function(|_, table: LuaTable| {
+        LuaMdixBuilder::from_table(&table)
+    })?)?;
+
+    // ── Schema validation ───────────────────────────────────────────────────
+
+    /// Create a new empty MdixSchema. See schema.rs for the full
+    /// require_*/optional_* method surface.
+    ///
+    ///   local schema = mdix.schema():require_string("app_name"):require_int("port")
+    ///   local report = db:validate_schema(schema)
+    m.set("schema", lua.create_function(|_, ()| {
+        Ok(LuaMdixSchema::new())
+    })?)?;
+
+    // ── Hot reload ───────────────────────────────────────────────────────────
+
+    /// Start watching a .mdix file for changes. See watch.rs.
+    ///
+    ///   local watcher = mdix.watch("config.mdix")
+    ///   local db, changed = watcher:check()
+    m.set("watch", lua.create_function(|_, path: String| {
+        if path.trim().is_empty() {
+            return Err(LuaError::RuntimeError(
+                "[mdix:watch] path cannot be empty".into(),
+            ));
+        }
+        Ok(LuaMdixWatcher::new(path))
+    })?)?;
+
+    // ── Merging ──────────────────────────────────────────────────────────────
+
+    /// Merge two or more .mdix files. Files are weighted in descending
+    /// order (first = highest priority). strategy defaults to "weighted";
+    /// array_strategy defaults to "concat_dedup". See merge.rs.
+    /// Returns (database, conflicts).
+    ///
+    ///   local db, conflicts = mdix.merge_files({"base.mdix", "patch.mdix"})
+    m.set("merge_files", lua.create_function(merge::merge_files)?)?;
+
+    /// Merge .mdix files with explicit per-file weights.
+    /// Returns (database, conflicts). See merge.rs.
+    ///
+    ///   local db, conflicts = mdix.merge_files_weighted(
+    ///       {{"base.mdix", 1.0}, {"patch.mdix", 0.8}}, "weighted")
+    m.set("merge_files_weighted", lua.create_function(merge::merge_files_weighted)?)?;
+
     // ── Source text utilities ──────────────────────────────────────────────
 
     /// Minify a raw .mdix source string.
@@ -216,4 +302,4 @@ fn mdix(lua: &Lua) -> LuaResult<LuaTable> {
     })?)?;
 
     Ok(m)
-}
+                    }

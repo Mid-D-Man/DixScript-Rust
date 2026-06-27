@@ -146,35 +146,66 @@ impl MdixDatabase {
             .map_err(|e| runtime_err("get_string", e))
     }
 
+    /// Strict: only succeeds on an actual Int (or Enum ordinal) value —
+    /// does NOT silently coerce from Long/Float/Double. Matches the
+    /// widening rule dixscript's schema.rs type_matches() uses, not the
+    /// looser DixData::get::<T>() convenience used elsewhere in this
+    /// file, which would happily truncate a Float/Double into this with
+    /// no error.
     #[wasm_bindgen(js_name = getInt)]
     pub fn get_int(&self, path: &str) -> Result<i32, JsValue> {
         let data = self.data(path)?;
-        data.get::<i32>(path)
-            .map_err(|e| runtime_err("get_int", e))
+        match data.get_value(path) {
+            Some(DixValue::Int(v))             => Ok(*v),
+            Some(DixValue::Enum { value, .. }) => Ok(*value),
+            Some(other) => Err(runtime_err("get_int",
+                format!("'{}' is {}, not int", path, other.type_name()))),
+            None => Err(runtime_err("get_int", format!("path not found: '{}'", path))),
+        }
     }
 
-    /// Get a 64-bit integer value. Also accepts Int values (widened
-    /// without loss). Returns a JS `bigint`, not `number` — JS numbers
-    /// are f64 and lose precision above 2^53, so this must be a bigint
-    /// to carry the full 64-bit range. Pass one in too: `db.getLong(...)`
-    /// returns `9223372036854775807n`-style values, and the matching
+    /// Get a 64-bit integer value. Accepts Long (exact) or Int (widened —
+    /// i32 -> i64 is always lossless). Rejects Float/Double: silently
+    /// truncating one into a Long is exactly the bug this guards against.
+    /// Returns a JS `bigint`, not `number` — JS numbers are f64 and lose
+    /// precision above 2^53, so this must be a bigint to carry the full
+    /// 64-bit range. Pass one in too: `db.getLong(...)` returns
+    /// `9223372036854775807n`-style values, and the matching
     /// `MdixBuilder.withLong(path, value)` expects a bigint argument
     /// (e.g. `withLong("id", 123n)`), not a plain `number`.
     #[wasm_bindgen(js_name = getLong)]
     pub fn get_long(&self, path: &str) -> Result<i64, JsValue> {
         let data = self.data(path)?;
-        data.get::<i64>(path)
-            .map_err(|e| runtime_err("get_long", e))
+        match data.get_value(path) {
+            Some(DixValue::Long(v)) => Ok(*v),
+            Some(DixValue::Int(v))  => Ok(*v as i64),
+            Some(other) => Err(runtime_err("get_long",
+                format!("'{}' is {}, not long", path, other.type_name()))),
+            None => Err(runtime_err("get_long", format!("path not found: '{}'", path))),
+        }
     }
 
+    /// Get a Float value strictly — rejects Double, Int, and Long. Was
+    /// previously implemented via the lenient f64 path then narrowed to
+    /// f32, which silently accepted (and truncated) Int/Long/Double; that
+    /// defeats the point of having a typed getter at all.
     #[wasm_bindgen(js_name = getFloat)]
     pub fn get_float(&self, path: &str) -> Result<f32, JsValue> {
         let data = self.data(path)?;
-        data.get::<f64>(path)
-            .map(|v| v as f32)
-            .map_err(|e| runtime_err("get_float", e))
+        match data.get_value(path) {
+            Some(DixValue::Float(v)) => Ok(*v),
+            Some(other) => Err(runtime_err("get_float",
+                format!("'{}' is {}, not float", path, other.type_name()))),
+            None => Err(runtime_err("get_float", format!("path not found: '{}'", path))),
+        }
     }
 
+    /// Get a Double value, widened from Float/Int/Long if needed — all
+    /// three are always exact when promoted to f64 at the magnitudes
+    /// DixScript configs realistically use. This matches schema.rs's own
+    /// Double widening rule exactly, so it's left on the lenient
+    /// DixData::get::<T>() path rather than rewritten like get_int/
+    /// get_long/get_float above.
     #[wasm_bindgen(js_name = getDouble)]
     pub fn get_double(&self, path: &str) -> Result<f64, JsValue> {
         let data = self.data(path)?;

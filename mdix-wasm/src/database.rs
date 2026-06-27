@@ -1,3 +1,5 @@
+// mdix-wasm/src/database.rs
+
 use crate::error::{freed_err, invalid_path_err, runtime_err};
 use dixscript::Runtime::{DixData, DixLoadOptions, DixLoader, DixValue};
 use wasm_bindgen::prelude::*;
@@ -106,6 +108,7 @@ impl MdixDatabase {
             Some(DixValue::Null) => "null",
             Some(DixValue::Bool(_)) => "bool",
             Some(DixValue::Int(_)) => "int",
+            Some(DixValue::Long(_)) => "long",
             Some(DixValue::Float(_)) => "float",
             Some(DixValue::Double(_)) => "double",
             Some(DixValue::String(_)) => "string",
@@ -148,6 +151,20 @@ impl MdixDatabase {
         let data = self.data(path)?;
         data.get::<i32>(path)
             .map_err(|e| runtime_err("get_int", e))
+    }
+
+    /// Get a 64-bit integer value. Also accepts Int values (widened
+    /// without loss). Returns a JS `bigint`, not `number` — JS numbers
+    /// are f64 and lose precision above 2^53, so this must be a bigint
+    /// to carry the full 64-bit range. Pass one in too: `db.getLong(...)`
+    /// returns `9223372036854775807n`-style values, and the matching
+    /// `MdixBuilder.withLong(path, value)` expects a bigint argument
+    /// (e.g. `withLong("id", 123n)`), not a plain `number`.
+    #[wasm_bindgen(js_name = getLong)]
+    pub fn get_long(&self, path: &str) -> Result<i64, JsValue> {
+        let data = self.data(path)?;
+        data.get::<i64>(path)
+            .map_err(|e| runtime_err("get_long", e))
     }
 
     #[wasm_bindgen(js_name = getFloat)]
@@ -284,4 +301,4 @@ impl MdixDatabase {
         }
         self.inner.as_ref().ok_or_else(|| freed_err("MdixDatabase"))
     }
-          }
+        }

@@ -1,13 +1,4 @@
-
 //! Recursive import resolution with cycle detection and cloud download.
-//!
-//! ## Approach B in imported files
-//! `read_and_parse_raw` now uses the tokenizer-first pipeline:
-//!   Tokenizer (full content) → split_config_tokens → process_config_tokens
-//!   → GeneralParser(rest_tokens, config_section)
-//!
-//! This gives imported files accurate @CONFIG token positions and removes
-//! the source-stripping workaround from the import path.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -26,7 +17,11 @@ use crate::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
 use crate::Compiler::Utilities::{FunctionSignature, ParameterInfo, QuickFunctionInfo, SymbolTable};
 use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 use crate::ErrorManager::{DebugConfig, ErrorManager, ImportsResolutionErrorType};
-use super::{HashVerifier, CloudFileCache, CloudProviderFactory};
+// CloudFileCache and HashVerifier are always present (no reqwest/tokio dependency).
+// CloudProviderFactory → http_cloud_provider → reqwest, so only when cloud-import is on.
+use super::{HashVerifier, CloudFileCache};
+#[cfg(feature = "cloud-import")]
+use super::CloudProviderFactory;
 
 pub struct ImportsResolver<'a> {
     symbol_table:         &'a mut SymbolTable,
@@ -730,6 +725,9 @@ impl<'a> ImportsResolver<'a> {
         }
     }
 
+    // ── Cloud download — real impl requires the `cloud-import` feature ─────────
+
+    #[cfg(feature = "cloud-import")]
     fn download_cloud_file_sync(
         &mut self,
         cloud_url: &str,
@@ -779,6 +777,22 @@ impl<'a> ImportsResolver<'a> {
 
         self.cloud_cache.cache_file(&url_for_cache, &content);
         Ok(content)
+    }
+
+    /// Stub used when the `cloud-import` feature is disabled.
+    /// Returns a clear error rather than failing to compile.
+    #[cfg(not(feature = "cloud-import"))]
+    fn download_cloud_file_sync(
+        &mut self,
+        cloud_url: &str,
+        _alias:    &str,
+    ) -> Result<String, String> {
+        Err(format!(
+            "Cloud imports are not available in this build — the `cloud-import` \
+             feature is disabled. Enable it in your Cargo dependency declaration: \
+             dixscript = {{ ..., features = [\"cloud-import\"] }}. URL: {}",
+            cloud_url
+        ))
     }
 
     // ── Symbol extraction ─────────────────────────────────────────────────────
@@ -985,4 +999,4 @@ impl std::fmt::Display for ImportResolutionStats {
             self.files_visited
         )
     }
-}
+        }

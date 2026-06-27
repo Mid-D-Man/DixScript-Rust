@@ -309,7 +309,28 @@ impl UserData for LuaMdixBuilder {
             Ok(())
         });
 
-        /// Set a float or double flat property.
+        /// Set a double-precision flat property (no type suffix — this is
+        /// DixScript's default for any bare decimal literal).
+        ///   builder:set_double("gravity", 9.81)
+        methods.add_method_mut("set_double", |_, this, (path, value): (String, f64)| {
+            this.check_flat_ok(&path)?;
+            this.flat.push((path, value.to_string()));
+            Ok(())
+        });
+
+        /// Set a single-precision flat property, explicitly typed as
+        /// Float via the `f` suffix — without it, a bare decimal literal
+        /// always lexes as Double, matching the `withFloat`/`withDouble`
+        /// split already in mdix-wasm.
+        ///   builder:set_float("scale", 1.5)
+        methods.add_method_mut("set_float", |_, this, (path, value): (String, f32)| {
+            this.check_flat_ok(&path)?;
+            this.flat.push((path, format!("{}f", value)));
+            Ok(())
+        });
+
+        /// Alias for set_double — kept for backwards compatibility with
+        /// code written before set_float/set_double were split out.
         ///   builder:set_number("gravity", 9.81)
         methods.add_method_mut("set_number", |_, this, (path, value): (String, f64)| {
             this.check_flat_ok(&path)?;
@@ -503,4 +524,4 @@ impl UserData for LuaMdixBuilder {
             ))
         });
     }
-                }
+        }

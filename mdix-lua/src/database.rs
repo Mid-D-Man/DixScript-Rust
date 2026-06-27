@@ -5,13 +5,14 @@
 // inspect structure, and export to JSON / TOML / .mdix.
 
 use mlua::{
-    Error as LuaError, Lua, MetaMethod, Result as LuaResult,
+    AnyUserData, Error as LuaError, Lua, MetaMethod, Result as LuaResult,
     Table as LuaTable, UserData, UserDataMethods, Value as LuaValue,
 };
 use dixscript::Runtime::{
     DixConverter, DixData, DixFormatOptions, DixValue,
 };
 use crate::error::*;
+use crate::schema::{LuaMdixSchema, LuaMdixValidationReport};
 use crate::value::dix_to_lua;
 
 pub struct LuaMdixDatabase {
@@ -25,6 +26,20 @@ impl LuaMdixDatabase {
 
     fn data(&self) -> LuaResult<&DixData> {
         self.inner.as_ref().ok_or_else(closed_err)
+    }
+
+    /// Re-serializes this database back to a .mdix source string.
+    /// Plain-Rust helper (not a Lua method) shared by the registered
+    /// `to_mdix` method below and by `merge::merge_with`, which needs to
+    /// round-trip two in-memory databases through source text to merge
+    /// them at the AST level.
+    pub(crate) fn to_mdix_string(&self) -> LuaResult<String> {
+        let data    = self.data()?;
+        let entries = data.to_hashmap();
+        let conv    = DixConverter::new();
+        let ast     = conv.from_hashmap(entries).map_err(|e| mdix_err("to_mdix", e))?;
+        conv.to_mdix(&ast, Some(&DixFormatOptions::pretty()))
+            .map_err(|e| mdix_err("to_mdix", e))
     }
 }
 
@@ -65,6 +80,7 @@ impl UserData for LuaMdixDatabase {
                 Some(DixValue::Null)         => "null",
                 Some(DixValue::Bool(_))      => "bool",
                 Some(DixValue::Int(_))       => "int",
+                Some(DixValue::Long(_))      => "long",
                 Some(DixValue::Float(_))     => "float",
                 Some(DixValue::Double(_))    => "double",
                 Some(DixValue::String(_))    => "string",
@@ -154,6 +170,22 @@ impl UserData for LuaMdixDatabase {
             }
         });
 
+        /// Get a 64-bit integer value (returned as Lua integer / i64).
+        /// Also accepts Int values (widened without loss).
+        ///
+        ///   local created_at = db:get_long("created_at_ms")
+        ///   local id          = db:get_long("user.id", 0)
+        methods.add_method("get_long", |_, this, (path, default): (String, Option<i64>)| {
+            let data = this.data()?;
+            match data.get::<i64>(&path) {
+                Ok(v)  => Ok(v),
+                Err(e) => match default {
+                    Some(d) => Ok(d),
+                    None    => Err(mdix_err("get_long", e)),
+                },
+            }
+        });
+
         /// Get a float or double value (returned as Lua number / f64).
         ///
         ///   local gravity = db:get_number("gravity")
@@ -223,13 +255,63 @@ impl UserData for LuaMdixDatabase {
 
         /// Serialize back to a .mdix source string.
         methods.add_method("to_mdix", |_, this, ()| {
+            this.to_mdix_string()
+        });
+
+        /// Convert the *entire* database into one nested Lua table —
+        /// the dynamic-language equivalent of MidManStudio.Mdix.Core's
+        /// reflection-based object serializer in C#: Lua has no static
+        /// classes/attributes to reflect over, but a table with the same
+        /// shape as the desired structure serves the same role.
+        ///
+        ///   local cfg = db:to_table()
+        ///   print(cfg.server.host, cfg.server.port)
+        ///
+        /// Pairs with `mdix.from_table(table)` (see lib.rs) for a full
+        /// round trip: `mdix.from_table(db:to_table()):build()`.
+        methods.add_method("to_table", |lua, this, ()| {
             let data    = this.data()?;
             let entries = data.to_hashmap();
             let conv    = DixConverter::new();
-            let ast     = conv.from_hashmap(entries).map_err(|e| mdix_err("to_mdix", e))?;
-            conv.to_mdix(&ast, Some(&DixFormatOptions::pretty()))
-                .map_err(|e| mdix_err("to_mdix", e))
+            let ast     = conv.from_hashmap(entries).map_err(|e| mdix_err("to_table", e))?;
+            let map     = conv.to_hashmap(&ast);
+            let t: LuaTable = lua.create_table()?;
+            for (k, v) in &map {
+                t.set(k.as_str(), dix_to_lua(lua, v)?)?;
+            }
+            Ok(t)
         });
+
+        /// Validates this database against a schema built with
+        /// `mdix.schema()`. Returns an `MdixValidationReport` — see
+        /// schema.rs. Deliberately calls `SchemaBuilder::validate(&self, ..)`
+        /// directly rather than `DixData::validate_schema(self, ..)`, since
+        /// the latter takes the schema by value and would move it out of
+        /// the Lua userdata the caller might still want to reuse.
+        methods.add_method("validate_schema", |_, this, schema: AnyUserData| {
+            let data = this.data()?;
+            let schema_ref = schema.borrow::<LuaMdixSchema>()?;
+            let report = schema_ref.as_builder()?.validate(data);
+            Ok(LuaMdixValidationReport::new(report))
+        });
+
+        /// Merges this database with `other`, returning a new
+        /// `(database, conflicts)` — see merge.rs for strategy names and
+        /// the conflict table shape. Neither `self` nor `other` is
+        /// mutated; both stay usable afterwards.
+        ///
+        /// `temp_dir` (optional 4th arg) overrides where the round-trip
+        /// temp files get written — pass your app's writable cache
+        /// directory on Android/sandboxed targets, where the default
+        /// system temp dir usually isn't writable. See merge.rs.
+        methods.add_method(
+            "merge_with",
+            |lua, this, (other, strategy, array_strategy, temp_dir):
+                (AnyUserData, Option<String>, Option<String>, Option<String>)| {
+                let other_ref = other.borrow::<LuaMdixDatabase>()?;
+                crate::merge::merge_with(lua, this, &other_ref, strategy, array_strategy, temp_dir)
+            },
+        );
 
         // ── Meta ────────────────────────────────────────────────────────────
 
@@ -240,4 +322,4 @@ impl UserData for LuaMdixDatabase {
             })
         });
     }
-              }
+    }

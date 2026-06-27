@@ -26,6 +26,8 @@ pub fn dix_to_lua(lua: &Lua, value: &DixValue) -> LuaResult<LuaValue> {
         DixValue::Null => Ok(LuaValue::Nil),
         DixValue::Bool(b) => Ok(LuaValue::Boolean(*b)),
         DixValue::Int(i) => Ok(LuaValue::Integer(*i as i64)),
+        // Lua 5.4 integers are already i64, so Long maps over with no loss.
+        DixValue::Long(i) => Ok(LuaValue::Integer(*i)),
         DixValue::Float(f) => Ok(LuaValue::Number(*f as f64)),
         DixValue::Double(d) => Ok(LuaValue::Number(*d)),
 
@@ -156,4 +158,4 @@ pub fn table_is_sequence(table: &LuaTable) -> LuaResult<bool> {
         }
     }
     Ok(count == len)
-}
+            }

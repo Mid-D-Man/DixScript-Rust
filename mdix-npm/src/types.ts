@@ -1,9 +1,12 @@
+// mdix-npm/src/types.ts
+
 /** Mirrors MdixValueType from the C# layer. */
 export type MdixValueType =
   | "unknown"
   | "null"
   | "bool"
   | "int"
+  | "long"
   | "float"
   | "double"
   | "string"

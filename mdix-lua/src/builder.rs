@@ -13,7 +13,7 @@ use mlua::{
 use dixscript::Runtime::{DixLoadOptions, DixLoader};
 use crate::database::LuaMdixDatabase;
 use crate::error::*;
-use crate::value::{escape_mdix, lua_to_mdix};
+use crate::value::{escape_mdix, lua_to_mdix, table_is_sequence};
 
 // ── Internal storage types ────────────────────────────────────────────────────
 
@@ -30,6 +30,19 @@ struct TableEntry {
 struct ArrayEntry {
     path:  String,
     items: Vec<String>,
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+fn lua_key_to_string(k: &LuaValue) -> LuaResult<String> {
+    match k {
+        LuaValue::String(s)  => Ok(s.to_str()?.to_string()),
+        LuaValue::Integer(i) => Ok(i.to_string()),
+        other => Err(LuaError::RuntimeError(format!(
+            "[mdix] from_table: keys must be strings or integers, got {}",
+            other.type_name()
+        ))),
+    }
 }
 
 // ── Builder ───────────────────────────────────────────────────────────────────
@@ -61,6 +74,73 @@ impl LuaMdixBuilder {
         } else {
             Ok(())
         }
+    }
+
+    /// Build a `LuaMdixBuilder` from a single nested Lua table in one shot
+    /// — the dynamic-language counterpart of MidManStudio.Mdix.Core's
+    /// reflection-based object serializer (Lua has no static classes or
+    /// attributes to reflect over, so the table's own shape stands in for
+    /// the schema). The reverse of `Database:to_table()`:
+    ///
+    ///   local builder = mdix.from_table({
+    ///       app_name = "AirStrike",
+    ///       port     = 7777,
+    ///       tags     = {"alpha", "beta"},
+    ///       server   = { host = "localhost", port = 7777 },
+    ///   })
+    ///   local db = builder:build()
+    ///
+    /// Top-level scalar entries become flat properties, top-level array
+    /// entries become group arrays, and top-level table (hash) entries
+    /// become table property blocks. Structures nested *inside* one of
+    /// those (e.g. a table inside `server`) are emitted as inline literals
+    /// by `lua_to_mdix`, so arbitrary depth still works — only the
+    /// top level needs to route into one of DixScript's three section kinds.
+    /// Empty nested tables are skipped rather than erroring, so a round
+    /// trip through `db:to_table()` never fails on a legitimately empty
+    /// nested object.
+    pub fn from_table(table: &LuaTable) -> LuaResult<Self> {
+        let mut builder = LuaMdixBuilder::new();
+
+        // Pass 1: flat scalars first — required by the two-tier ordering
+        // rule (all set_* entries must precede any grouped entry).
+        for pair in table.clone().pairs::<LuaValue, LuaValue>() {
+            let (k, v) = pair?;
+            if matches!(v, LuaValue::Table(_)) {
+                continue; // handled in pass 2
+            }
+            builder.flat.push((lua_key_to_string(&k)?, lua_to_mdix(&v)?));
+        }
+
+        // Pass 2: grouped — arrays and nested tables.
+        for pair in table.clone().pairs::<LuaValue, LuaValue>() {
+            let (k, v) = pair?;
+            let path = lua_key_to_string(&k)?;
+            if let LuaValue::Table(t) = v {
+                if table_is_sequence(&t)? {
+                    let len = t.len()? as i64;
+                    let mut items = Vec::with_capacity(len as usize);
+                    for i in 1..=len {
+                        let item: LuaValue = t.get(i)?;
+                        items.push(lua_to_mdix(&item)?);
+                    }
+                    builder.has_grouped = true;
+                    builder.arrays.push(ArrayEntry { path, items });
+                } else {
+                    let mut props = Vec::new();
+                    for inner in t.clone().pairs::<LuaValue, LuaValue>() {
+                        let (pk, pv) = inner?;
+                        props.push((lua_key_to_string(&pk)?, lua_to_mdix(&pv)?));
+                    }
+                    if !props.is_empty() {
+                        builder.has_grouped = true;
+                        builder.tables.push(TableEntry { path, props });
+                    }
+                }
+            }
+        }
+
+        Ok(builder)
     }
 
     /// Render all registered sections to .mdix source text.
@@ -212,6 +292,20 @@ impl UserData for LuaMdixBuilder {
         methods.add_method_mut("set_int", |_, this, (path, value): (String, i64)| {
             this.check_flat_ok(&path)?;
             this.flat.push((path, value.to_string()));
+            Ok(())
+        });
+
+        /// Set a 64-bit integer flat property, explicitly typed as Long.
+        ///
+        /// Values that overflow i32 are auto-promoted to Long by the parser
+        /// regardless, but small values (e.g. `5`) would otherwise re-parse
+        /// as Int — the `L` suffix pins the type to Long no matter the
+        /// magnitude, matching DixScript's own `123L` literal syntax.
+        ///
+        ///   builder:set_long("created_at_ms", 1750000000000)
+        methods.add_method_mut("set_long", |_, this, (path, value): (String, i64)| {
+            this.check_flat_ok(&path)?;
+            this.flat.push((path, format!("{}L", value)));
             Ok(())
         });
 
@@ -409,4 +503,4 @@ impl UserData for LuaMdixBuilder {
             ))
         });
     }
-      }
+                }

@@ -1101,26 +1101,19 @@ fn integration_load_then_get_keys_then_select() {
     println!("  feature_flags.* values ({} found): {:?}", flags.len(), flags);
     assert_eq!(flags.len(), 3, "should find 3 feature flag booleans");
 }
-
 // ═════════════════════════════════════════════════════════════════════════════
 // GROUP 11: hot_reload
 // ═════════════════════════════════════════════════════════════════════════════
-//
-// These tests exercise HotReloadWatcher via real on-disk temp files.
-// `NamedTempFile` is used so cleanup is automatic even on test failure.
-// Each test is deliberately independent — no shared state, no ordering deps.
 
 mod hot_reload_tests {
     use super::*;
-    use std::io::Write;
     use tempfile::NamedTempFile;
 
-    // Write a complete .mdix document to a NamedTempFile and flush it.
-    fn write_mdix(tmp: &mut NamedTempFile, content: &str) {
-        tmp.as_file_mut().set_len(0).unwrap();
-        tmp.seek(std::io::SeekFrom::Start(0)).unwrap();
-        tmp.write_all(content.as_bytes()).unwrap();
-        tmp.flush().unwrap();
+    /// Write content to the temp file path via std::fs::write — no trait
+    /// imports needed, OS-level truncate + write, guaranteed fresh mtime.
+    fn write_mdix(tmp: &NamedTempFile, content: &str) {
+        std::fs::write(tmp.path(), content)
+            .expect("write_mdix: failed to write temp file");
     }
 
     #[test]
@@ -1136,26 +1129,27 @@ mod hot_reload_tests {
 
     #[test]
     fn hot_reload_fresh_watcher_reports_changed() {
-        // A fresh watcher (last_modified = None) must always report changed —
-        // the intent is that the first check_and_reload() always loads.
-        let mut tmp = NamedTempFile::new().expect("tempfile");
-        write_mdix(&mut tmp, "@DATA( ping = true )\n");
+        let tmp = NamedTempFile::new().expect("tempfile");
+        write_mdix(&tmp, "@DATA( ping = true )\n");
 
         let watcher = HotReloadWatcher::new(tmp.path());
-        let changed = watcher.has_changed().expect("has_changed must not error on existing file");
+        let changed = watcher
+            .has_changed()
+            .expect("has_changed must not error on existing file");
         assert!(changed, "fresh watcher must report changed (last_modified is None)");
         println!("[hot_reload_fresh_watcher_reports_changed] changed=true ✓");
     }
 
     #[test]
     fn hot_reload_first_check_and_reload_returns_data() {
-        let mut tmp = NamedTempFile::new().expect("tempfile");
-        write_mdix(&mut tmp, "@DATA( greeting = \"hello\" )\n");
+        let tmp = NamedTempFile::new().expect("tempfile");
+        write_mdix(&tmp, "@DATA( greeting = \"hello\" )\n");
 
         let mut watcher = HotReloadWatcher::new(tmp.path());
-        let result = watcher.check_and_reload();
+        let maybe_data = watcher
+            .check_and_reload()
+            .expect("check_and_reload must not error on valid file");
 
-        let maybe_data = result.expect("check_and_reload must not error on valid file");
         assert!(maybe_data.is_some(), "first check must return Some(data)");
         assert!(watcher.has_loaded(), "has_loaded() must be true after first reload");
 
@@ -1167,8 +1161,8 @@ mod hot_reload_tests {
 
     #[test]
     fn hot_reload_second_check_returns_none_when_unchanged() {
-        let mut tmp = NamedTempFile::new().expect("tempfile");
-        write_mdix(&mut tmp, "@DATA( count = 1 )\n");
+        let tmp = NamedTempFile::new().expect("tempfile");
+        write_mdix(&tmp, "@DATA( count = 1 )\n");
 
         let mut watcher = HotReloadWatcher::new(tmp.path());
         let _first = watcher
@@ -1180,31 +1174,24 @@ mod hot_reload_tests {
         let second = watcher
             .check_and_reload()
             .expect("second check must not error");
-        assert!(
-            second.is_none(),
-            "unchanged file must return Ok(None) on second check"
-        );
+        assert!(second.is_none(), "unchanged file must return Ok(None) on second check");
         println!("[hot_reload_second_check_returns_none_when_unchanged] Ok(None) ✓");
     }
 
     #[test]
     fn hot_reload_force_reload_always_reloads() {
-        let mut tmp = NamedTempFile::new().expect("tempfile");
-        write_mdix(&mut tmp, "@DATA( flag = true )\n");
+        let tmp = NamedTempFile::new().expect("tempfile");
+        write_mdix(&tmp, "@DATA( flag = true )\n");
 
         let mut watcher = HotReloadWatcher::new(tmp.path());
-
-        // Initial load.
         let _first = watcher
             .check_and_reload()
             .expect("initial load")
             .expect("must reload");
 
-        // force_reload regardless of mtime — should succeed.
         let data = watcher
             .force_reload()
             .expect("force_reload must not error");
-
         let flag: bool = data.get("flag").expect("flag key");
         assert!(flag, "flag must be true after force_reload");
         println!("[hot_reload_force_reload_always_reloads] flag={} ✓", flag);
@@ -1212,25 +1199,20 @@ mod hot_reload_tests {
 
     #[test]
     fn hot_reload_error_on_nonexistent_file() {
-        // No temp file created — path does not exist.
         let mut watcher =
             HotReloadWatcher::new("/tmp/__mdix_definitely_missing_hot_reload_test__.mdix");
         let result = watcher.check_and_reload();
-        assert!(
-            result.is_err(),
-            "nonexistent path must return Err, got: {:?}", result
+        assert!(result.is_err(), "nonexistent path must return Err, got: {:?}", result);
+        println!(
+            "[hot_reload_error_on_nonexistent_file] got expected error: {} ✓",
+            result.unwrap_err()
         );
-        let err = result.unwrap_err();
-        println!("[hot_reload_error_on_nonexistent_file] got expected error: {} ✓", err);
     }
 
     #[test]
     fn hot_reload_error_does_not_advance_mtime() {
-        // If reload fails (e.g. parse error), last_modified must NOT advance
-        // so the next check retries.  Write valid content first so we can
-        // get a baseline mtime, then verify state is consistent.
-        let mut tmp = NamedTempFile::new().expect("tempfile");
-        write_mdix(&mut tmp, "@DATA( x = 1 )\n");
+        let tmp = NamedTempFile::new().expect("tempfile");
+        write_mdix(&tmp, "@DATA( x = 1 )\n");
 
         let mut watcher = HotReloadWatcher::new(tmp.path());
         let first = watcher
@@ -1241,36 +1223,25 @@ mod hot_reload_tests {
         let x: i32 = first.get("x").expect("x");
         assert_eq!(x, 1);
 
-        // Overwrite with invalid syntax.
-        write_mdix(&mut tmp, "@DATA( broken = \n");
-        // Touch the mtime so has_changed() returns true.
-        // On most CI filesystems mtime is sub-second so writing suffices;
-        // if the write happened within the same mtime granularity tick,
-        // force_reload will still pick it up.
-        let reload_result = watcher.check_and_reload();
+        // Overwrite with invalid syntax — mtime changes on most CI filesystems.
+        write_mdix(&tmp, "@DATA( broken = \n");
 
-        // Two valid outcomes depending on whether the file write changed mtime:
-        // 1. Err — parse failed, mtime NOT advanced (desired behavior verified here)
-        // 2. Ok(None) — mtime unchanged (granularity tick, nothing to do)
-        // Either way, watcher must still be in a valid, usable state.
-        match reload_result {
+        match watcher.check_and_reload() {
             Err(_) => {
-                // Good — the watcher caught the error.
-                // last_modified must still point at the PREVIOUS good state,
-                // so has_loaded() stays true.
-                assert!(watcher.has_loaded(), "has_loaded must remain true after reload error");
+                // parse failed → last_modified must NOT have advanced
+                assert!(
+                    watcher.has_loaded(),
+                    "has_loaded must remain true after reload error"
+                );
                 println!("[hot_reload_error_does_not_advance_mtime] Err path ✓");
             }
             Ok(None) => {
-                // mtime granularity — no reload attempted, also fine.
-                println!("[hot_reload_error_does_not_advance_mtime] Ok(None) path (mtime granularity) ✓");
+                // mtime granularity tick — file write didn't advance mtime, nothing to do
+                println!("[hot_reload_error_does_not_advance_mtime] Ok(None) — mtime tick ✓");
             }
             Ok(Some(_)) => {
-                // If the parser is lenient enough to accept the broken content,
-                // that's a different (parser) bug — note it but don't fail the
-                // hot_reload test.
                 println!("[hot_reload_error_does_not_advance_mtime] WARN: parser accepted broken content");
             }
         }
     }
-    }
+}

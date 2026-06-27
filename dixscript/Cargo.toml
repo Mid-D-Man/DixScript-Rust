@@ -1,3 +1,4 @@
+# dixscript/Cargo.toml
 
 [package]
 name = "dixscript"
@@ -43,14 +44,39 @@ chacha20poly1305 = "0.10"
 argon2           = "0.5"
 hex              = "0.4"
 
-reqwest     = { version = "0.11", features = ["json"] }
-tokio       = { version = "1",    features = ["full"] }
+# ── Cloud import deps ──────────────────────────────────────────────────────────
+# Both optional — activated via the `cloud-import` feature (on by default).
+# Consumers that don't need HTTP imports (e.g. embedded / Android brush engine)
+# can opt out with  default-features = false  in their dependency declaration.
+#
+# reqwest: rustls-tls instead of the default native-tls backend.
+#   native-tls → OpenSSL → NDK cross-compile pain (the one confirmed Android risk).
+#   rustls is pure Rust; no C, no system SSL library, identical HTTP behaviour.
+reqwest     = { version = "0.11", default-features = false, features = ["json", "rustls-tls"], optional = true }
+# tokio: trimmed from "full" to only the runtime features actually used
+# (rt-multi-thread for block_on, macros for #[tokio::main] if needed, fs + time for
+# the cloud download path).  "full" pulled in every tokio sub-crate unnecessarily.
+tokio       = { version = "1", features = ["rt-multi-thread", "macros", "fs", "time"], optional = true }
+# async-trait and url are used outside the cloud path (cloud_storage_provider trait
+# definition; url crate used by cloud_file_cache for URL parsing), so they stay
+# unconditional.
 async-trait = "0.1"
 url         = "2.5"
 
+# ── Non-WASM native deps ───────────────────────────────────────────────────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bzip2    = "0.4"
-xz2      = "0.1"
+# bzip2 / xz2: C-FFI but small, self-contained, no build-system quirks.
+# They cross-compile cleanly through NDK clang (unlike OpenSSL).
+# Made optional so embedders that genuinely never compress .mdix files
+# (e.g. pure-read use-cases) can exclude the C compilation step entirely.
+# On wasm32 the target-cfg already excluded them; the optional + feature
+# gating adds the same opt-out to non-wasm targets.
+#
+# Note: dep:bzip2 / dep:xz2 in [features] refers to these target-conditional
+# optional deps.  Cargo 1.60+ handles this correctly: on wasm32 the dep
+# simply isn't declared and the feature activation is a no-op.
+bzip2    = { version = "0.4", optional = true }
+xz2      = { version = "0.1", optional = true }
 rayon    = "1.8"
 hostname = "0.3"
 
@@ -60,7 +86,7 @@ getrandom = { version = "0.2", features = ["js"] }
 # Bench/test-only deps. Gated off wasm32 on purpose: criterion pulls in
 # rayon (one of its default features) plus a pile of native-only tooling
 # (walkdir, is-terminal, plotters, ...) that has no business resolving
-# against a wasm32 target. Nothing in CI currently runs
+# against a wasm32 target.  Nothing in CI currently runs
 # `cargo bench`/`cargo test --benches` against wasm32 — the wasm job only
 # does `wasm-pack build mdix-wasm`, which never touches dev-dependencies —
 # but this makes that guarantee explicit at the manifest level instead of
@@ -80,11 +106,9 @@ harness = false
 [[bench]]
 name    = "throughput_benchmark"
 harness = false
-
 [[bench]]
 name    = "lexer_throughput"
 harness = false
-
 [[bench]]
 name    = "config_throughput"
 harness = false
@@ -94,26 +118,34 @@ harness = false
 [[bench]]
 name    = "general_parser_benchmark"
 harness = false
-
 [[bench]]
 name    = "semantics_benchmark"
 harness = false
-
 [[bench]]
 name    = "ast_enhancement_benchmark"
 harness = false
-
 [[bench]]
 name    = "value_resolution_benchmark"
 harness = false
-
 [[bench]]
 name    = "binary_serialization_benchmark"
 harness = false
-
 [[bench]]
 name    = "runtime_benchmark"
 harness = false
 
+# ── Feature flags ──────────────────────────────────────────────────────────────
+# Default pulls in everything — existing consumers (desktop, CI, mdix-cli,
+# mdix-lsp, mdix-ffi) get identical behaviour with no changes to their
+# dependency declarations.
+#
+# To build without cloud or compression deps (e.g. mxross-brush-lua):
+#   dixscript = { path = "...", default-features = false }
+#
+# To restore just one group:
+#   dixscript = { path = "...", default-features = false, features = ["cloud-import"] }
 [features]
-default = []
+default       = ["cloud-import", "bzip2-support", "xz-support"]
+cloud-import  = ["dep:reqwest", "dep:tokio"]
+bzip2-support = ["dep:bzip2"]
+xz-support    = ["dep:xz2"]

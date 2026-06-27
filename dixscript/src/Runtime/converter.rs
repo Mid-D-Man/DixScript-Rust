@@ -250,16 +250,6 @@ impl DixConverter {
                 }
             }
 
-            // A comma is inserted between the last flat property and the first
-            // grouped entry (table property or group array).  In non-minified
-            // output the surrounding newlines already provide disambiguation;
-            // the comma is grammatically optional there.  In minified output
-            // (nl = "", sp = "", indent = ""), the comma is the only token
-            // separator — but `DixCompactor::minify` (called below) detects
-            // commas immediately before a grouped-entry head and replaces them
-            // with a space, since the parser rejects commas in that position.
-            // The minifier also handles the table→table, table→group-array, and
-            // group-array→group-array boundaries the same way.
             let grouped_count = table_props.len() + group_arrays.len();
 
             if !flat_props.is_empty() && grouped_count > 0 {
@@ -485,25 +475,50 @@ impl DixConverter {
             serde_json::Value::Null      => DixValue::Null,
             serde_json::Value::Bool(b)   => DixValue::Bool(b),
             serde_json::Value::String(s) => DixValue::String(s),
+
             serde_json::Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
+                    // Fits in i64 — prefer Int (i32) when it fits, Long otherwise.
                     if i >= i32::MIN as i64 && i <= i32::MAX as i64 {
                         DixValue::Int(i as i32)
                     } else {
                         DixValue::Long(i)
                     }
+                } else if n.as_u64().is_some() {
+                    // Value is in (i64::MAX, u64::MAX] — too large for Long (i64).
+                    // All such values exceed 2^53, so f64 cannot represent them
+                    // exactly — silently downgrading would corrupt data silently.
+                    // The caller must store this value as a JSON string instead.
+                    return Err(format!(
+                        "JSON number {} exceeds DixScript's Long range (i64::MAX = {}). \
+                         f64 cannot represent it exactly (2^53 = {} is the largest \
+                         exactly-representable integer in f64). Store this value as a \
+                         JSON string and parse it in your application code.",
+                        n, i64::MAX, 9_007_199_254_740_992_u64
+                    ));
                 } else if let Some(f) = n.as_f64() {
                     DixValue::Double(f)
                 } else {
-                    return Err(format!("Cannot convert JSON number {} to DixValue", n));
+                    return Err(format!("Cannot convert JSON number {} to any DixValue type", n));
                 }
             }
+
             serde_json::Value::Array(arr) => {
                 let items: Result<Vec<DixValue>, String> = arr.into_iter()
                     .map(|v| self.json_value_to_dix_value(v))
                     .collect();
-                DixValue::Array(items?)
+                let items = items?;
+                // Heterogeneous items (values from different type-kind buckets)
+                // become a DixValue::Tuple, which round-trips as t:(a, b, c) in
+                // DixScript — an explicitly mixed-type construct.
+                // Homogeneous items stay as DixValue::Array (:: syntax in .mdix).
+                if Self::is_heterogeneous(&items) {
+                    DixValue::Tuple(items)
+                } else {
+                    DixValue::Array(items)
+                }
             }
+
             serde_json::Value::Object(map) => {
                 let mut obj = HashMap::with_capacity(map.len());
                 for (k, v) in map { obj.insert(k, self.json_value_to_dix_value(v)?); }
@@ -618,7 +633,9 @@ impl DixConverter {
             DixValue::Regex(r)     => Some(toml::Value::String(r.clone())),
             DixValue::Enum { value, .. } => Some(toml::Value::Integer(*value as i64)),
             DixValue::Array(arr) => {
-                let items: Vec<toml::Value> = arr.iter().filter_map(|v| self.dix_value_to_toml_value(v)).collect();
+                let items: Vec<toml::Value> = arr.iter()
+                    .filter_map(|v| self.dix_value_to_toml_value(v))
+                    .collect();
                 Some(toml::Value::Array(items))
             }
             DixValue::Object(obj) => {
@@ -631,7 +648,9 @@ impl DixConverter {
                 Some(toml::Value::Table(table))
             }
             DixValue::Tuple(items) => {
-                let arr: Vec<toml::Value> = items.iter().filter_map(|v| self.dix_value_to_toml_value(v)).collect();
+                let arr: Vec<toml::Value> = items.iter()
+                    .filter_map(|v| self.dix_value_to_toml_value(v))
+                    .collect();
                 Some(toml::Value::Array(arr))
             }
         }
@@ -674,7 +693,14 @@ impl DixConverter {
                 let items: Result<Vec<DixValue>, String> = arr.into_iter()
                     .map(|v| self.toml_value_to_dix_value(v))
                     .collect();
-                DixValue::Array(items?)
+                let items = items?;
+                // TOML 1.0 requires homogeneous arrays, but apply the same guard
+                // defensively — future-proofs against lenient parser behaviour.
+                if Self::is_heterogeneous(&items) {
+                    DixValue::Tuple(items)
+                } else {
+                    DixValue::Array(items)
+                }
             }
             toml::Value::Table(map) => {
                 let mut obj = HashMap::with_capacity(map.len());
@@ -682,6 +708,40 @@ impl DixConverter {
                 DixValue::Object(obj)
             }
         })
+    }
+
+    // ── Array homogeneity helpers ─────────────────────────────────────────────
+
+    /// Classify a `DixValue` into a type-kind bucket for array homogeneity
+    /// checks. Items in the same bucket coexist cleanly in a DixScript `::`
+    /// array without type ambiguity. Items from different buckets produce a
+    /// `Tuple` (explicitly mixed-type) instead.
+    ///
+    /// Numeric types (`Int`/`Long`/`Float`/`Double`) share bucket 0 — they
+    /// all emit as number literals and the runtime promotes to the widest
+    /// type, so mixing them in an array is safe and expected.
+    #[inline]
+    fn type_kind(v: &DixValue) -> u8 {
+        match v {
+            DixValue::Int(_) | DixValue::Long(_) |
+            DixValue::Float(_) | DixValue::Double(_) => 0,
+            DixValue::Bool(_) => 1,
+            DixValue::String(_) | DixValue::Date(_) | DixValue::Timestamp(_)
+                | DixValue::HexColor(_) | DixValue::Blob(_) | DixValue::Regex(_) => 2,
+            DixValue::Null     => 3,
+            DixValue::Object(_) => 4,
+            DixValue::Array(_) | DixValue::Tuple(_) => 5,
+            DixValue::Enum { .. } => 6,
+        }
+    }
+
+    /// Returns `true` if `items` contains values from more than one type-kind
+    /// bucket (i.e. the array cannot be represented as a homogeneous `::`
+    /// group array in DixScript).
+    fn is_heterogeneous(items: &[DixValue]) -> bool {
+        if items.len() <= 1 { return false; }
+        let first = Self::type_kind(&items[0]);
+        items[1..].iter().any(|v| Self::type_kind(v) != first)
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -701,11 +761,17 @@ impl DixConverter {
         &self, key: &str, value: &DixValue,
         entries: &mut Vec<DataEntry>, parent_path: &str,
     ) -> Result<(), String> {
-        let current_path = if parent_path.is_empty() { key.to_string() } else { format!("{}.{}", parent_path, key) };
+        let current_path = if parent_path.is_empty() {
+            key.to_string()
+        } else {
+            format!("{}.{}", parent_path, key)
+        };
 
         match value {
             DixValue::Object(obj) => {
-                let path = TablePath { segments: current_path.split('.').map(String::from).collect() };
+                let path = TablePath {
+                    segments: current_path.split('.').map(String::from).collect(),
+                };
                 let mut properties: Vec<PropertyAssignment> = Vec::new();
                 let mut nested: Vec<(String, DixValue)> = Vec::new();
 
@@ -719,13 +785,16 @@ impl DixConverter {
                     } else {
                         let ast_value = self.convert_dix_value_to_ast_value(v)?;
                         properties.push(PropertyAssignment {
-                            name: k.clone(), data_type: None, value: ast_value, position: Position::UNKNOWN,
+                            name: k.clone(), data_type: None,
+                            value: ast_value, position: Position::UNKNOWN,
                         });
                     }
                 }
 
                 if !properties.is_empty() {
-                    entries.push(DataEntry::TableProperty { path, properties, position: Position::UNKNOWN });
+                    entries.push(DataEntry::TableProperty {
+                        path, properties, position: Position::UNKNOWN,
+                    });
                 }
 
                 for (k, v) in nested {
@@ -733,22 +802,27 @@ impl DixConverter {
                 }
             }
             DixValue::Array(arr) => {
-                let path = TablePath { segments: current_path.split('.').map(String::from).collect() };
-                let items: Result<Vec<Value>, String> = arr.iter().map(|v| self.convert_dix_value_to_ast_value(v)).collect();
-                entries.push(DataEntry::GroupArray { path, items: items?, position: Position::UNKNOWN });
+                let path = TablePath {
+                    segments: current_path.split('.').map(String::from).collect(),
+                };
+                let items: Result<Vec<Value>, String> = arr.iter()
+                    .map(|v| self.convert_dix_value_to_ast_value(v))
+                    .collect();
+                entries.push(DataEntry::GroupArray {
+                    path, items: items?, position: Position::UNKNOWN,
+                });
             }
             other => {
-                return Err(format!("Expected object or array for nested structure, got: {}", other.type_name()));
+                return Err(format!(
+                    "Expected object or array for nested structure, got: {}",
+                    other.type_name()
+                ));
             }
         }
 
         Ok(())
     }
 
-    /// Delegates to the shared `Value -> DixValue` conversion in
-    /// `dix_value.rs`. `DixData` carries an identical conversion for the
-    /// same purpose — keeping one implementation avoids the two silently
-    /// drifting apart again.
     fn convert_ast_value_to_dix_value(
         &self, value: &Value,
         enums: Option<&HashMap<String, HashMap<String, i32>>>,
@@ -778,10 +852,6 @@ impl DixConverter {
         if prefix.is_empty() { segment.to_string() } else { format!("{}.{}", prefix, segment) }
     }
 
-    /// Flattens one `DataEntry`. `TableProperty` also inserts an aggregate
-    /// `DixValue::Object` at the table path itself (mirroring
-    /// `DixData::flatten_entry`) so `filter_structural_keys` has something
-    /// to recognize leaf paths as children of.
     fn flatten_entry(
         &self, entry: &DataEntry, prefix: &str,
         result: &mut HashMap<String, DixValue>,
@@ -808,7 +878,9 @@ impl DixConverter {
 
                 if !obj_map.is_empty() {
                     match result.entry(table_path) {
-                        std::collections::hash_map::Entry::Vacant(e) => { e.insert(DixValue::Object(obj_map)); }
+                        std::collections::hash_map::Entry::Vacant(e) => {
+                            e.insert(DixValue::Object(obj_map));
+                        }
                         std::collections::hash_map::Entry::Occupied(mut e) => {
                             if let DixValue::Object(ref mut existing) = e.get_mut() {
                                 for (k, v) in obj_map { existing.entry(k).or_insert(v); }
@@ -855,7 +927,6 @@ impl DixConverter {
             DixValue::Date(d)      => Value::Date      { value: d.clone(), position: Position::UNKNOWN },
             DixValue::Timestamp(t) => Value::Timestamp { value: t.clone(), position: Position::UNKNOWN },
             DixValue::HexColor(c)  => Value::HexColor  { value: c.clone(), position: Position::UNKNOWN },
-
             DixValue::Blob(b) => Value::PrefixedConstructor {
                 prefix: "b".to_string(),
                 arguments: vec![Value::String { value: b.clone(), position: Position::UNKNOWN }],
@@ -866,35 +937,36 @@ impl DixConverter {
                 arguments: vec![Value::String { value: r.clone(), position: Position::UNKNOWN }],
                 position: Position::UNKNOWN,
             },
-
             DixValue::Array(arr) => {
-                let items: Result<Vec<Value>, String> = arr.iter().map(|v| self.convert_dix_value_to_ast_value(v)).collect();
+                let items: Result<Vec<Value>, String> = arr.iter()
+                    .map(|v| self.convert_dix_value_to_ast_value(v))
+                    .collect();
                 Value::Array { values: items?, position: Position::UNKNOWN }
             }
-
             DixValue::Object(obj) => {
                 let mut properties = Vec::with_capacity(obj.len());
                 for (k, v) in obj {
                     let ast_value = self.convert_dix_value_to_ast_value(v)?;
-                    properties.push(ObjectProperty { key: k.clone(), value: ast_value, position: Position::UNKNOWN });
+                    properties.push(ObjectProperty {
+                        key: k.clone(), value: ast_value, position: Position::UNKNOWN,
+                    });
                 }
                 Value::Object { properties, position: Position::UNKNOWN }
             }
-
             DixValue::Tuple(items) => {
-                let args: Result<Vec<Value>, String> = items.iter().map(|v| self.convert_dix_value_to_ast_value(v)).collect();
-                Value::PrefixedConstructor { prefix: "t".to_string(), arguments: args?, position: Position::UNKNOWN }
+                let args: Result<Vec<Value>, String> = items.iter()
+                    .map(|v| self.convert_dix_value_to_ast_value(v))
+                    .collect();
+                Value::PrefixedConstructor {
+                    prefix: "t".to_string(), arguments: args?, position: Position::UNKNOWN,
+                }
             }
-
             DixValue::Enum { enum_name, field_name, .. } => Value::EnumValue {
                 enum_name: enum_name.clone(), value: field_name.clone(), position: Position::UNKNOWN,
             },
         })
     }
 
-    /// Render a `ConfigValue` for `.mdix` source — every variant handled
-    /// explicitly (the previous `_ => String::new()` catch-all silently
-    /// dropped `Features`/`ErrorHandling`/`Compatibility`/`Debug` entries).
     fn format_config_value(&self, value: &ConfigValue) -> String {
         match value {
             ConfigValue::String(s)         => format!("\"{}\"", s),
@@ -918,8 +990,6 @@ impl DixConverter {
             Value::Integer { value: i, .. } => i.to_string(),
             Value::Long { value: l, .. }    => format!("{}L", l),
             Value::Float { value: f, .. }   => format!("{}f", f),
-            // A whole-number f64 must keep an explicit ".0" or it re-lexes
-            // as Integer on the next compile.
             Value::Double { value: d, .. } => {
                 if d.is_finite() && d.fract() == 0.0 { format!("{:.1}", d) } else { d.to_string() }
             }
@@ -929,38 +999,38 @@ impl DixConverter {
             Value::Date { value: d, .. }     => d.clone(),
             Value::Timestamp { value: t, .. } => t.clone(),
             Value::HexColor { value: c, .. } => c.clone(),
-
             Value::Array { values, .. } | Value::NestedArray { values, .. } => {
-                let items: Vec<String> = values.iter().map(|v| self.format_value_for_mdix(v, opts)).collect();
+                let items: Vec<String> = values.iter()
+                    .map(|v| self.format_value_for_mdix(v, opts))
+                    .collect();
                 format!("[{}]", items.join(&format!(",{}", sp)))
             }
-
             Value::Object { properties, .. } => {
                 let pairs: Vec<String> = properties.iter()
                     .map(|p| format!("{}{}={}{}", p.key, sp, sp, self.format_value_for_mdix(&p.value, opts)))
                     .collect();
                 format!("{{{}}}", pairs.join(&format!(",{}", sp)))
             }
-
             Value::PrefixedConstructor { prefix, arguments, .. } => {
-                let args: Vec<String> = arguments.iter().map(|v| self.format_value_for_mdix(v, opts)).collect();
+                let args: Vec<String> = arguments.iter()
+                    .map(|v| self.format_value_for_mdix(v, opts))
+                    .collect();
                 format!("{}:({})", prefix, args.join(&format!(",{}", sp)))
             }
-
-            Value::EnumValue { enum_name, value: field_value, .. } => format!("{}.{}", enum_name, field_value),
-
+            Value::EnumValue { enum_name, value: field_value, .. } => {
+                format!("{}.{}", enum_name, field_value)
+            }
             _ => String::new(),
         }
     }
 
-    // ── @ENUMS reconstruction helpers ──────────────────────────────────────────
+    // ── @ENUMS reconstruction helpers ─────────────────────────────────────────
 
-    /// Recursively scan a value tree for `DixValue::Enum`, collecting every
-    /// distinct `(enum_name, field_name, value)` triple it finds.
     fn collect_enum_usages(value: &DixValue, out: &mut HashMap<String, HashMap<String, i32>>) {
         match value {
             DixValue::Enum { enum_name, field_name, value } => {
-                out.entry(enum_name.clone()).or_default().entry(field_name.clone()).or_insert(*value);
+                out.entry(enum_name.clone()).or_default()
+                   .entry(field_name.clone()).or_insert(*value);
             }
             DixValue::Array(items) | DixValue::Tuple(items) => {
                 for item in items { Self::collect_enum_usages(item, out); }
@@ -972,7 +1042,9 @@ impl DixConverter {
         }
     }
 
-    fn build_enums_section_from_table(enums: &HashMap<String, HashMap<String, i32>>) -> Option<EnumsSection> {
+    fn build_enums_section_from_table(
+        enums: &HashMap<String, HashMap<String, i32>>,
+    ) -> Option<EnumsSection> {
         if enums.is_empty() { return None; }
 
         let mut names: Vec<&String> = enums.keys().collect();
@@ -997,7 +1069,9 @@ impl DixConverter {
         let mut keys: Vec<&String> = config.keys().collect();
         keys.sort();
         let entries = keys.into_iter().map(|k| ConfigEntry {
-            key: k.clone(), value: ConfigValue::String(config[k].clone()), position: Position::UNKNOWN,
+            key: k.clone(),
+            value: ConfigValue::String(config[k].clone()),
+            position: Position::UNKNOWN,
         }).collect();
 
         Some(ConfigSection { entries, position: Position::UNKNOWN })
@@ -1072,7 +1146,11 @@ mod tests {
     #[test]
     fn test_tuple_converts_to_json_array() {
         let converter = DixConverter::new();
-        let dv = DixValue::Tuple(vec![DixValue::Int(1), DixValue::String("hello".into()), DixValue::Bool(true)]);
+        let dv = DixValue::Tuple(vec![
+            DixValue::Int(1),
+            DixValue::String("hello".into()),
+            DixValue::Bool(true),
+        ]);
         let jv = converter.dix_value_to_json_value(&dv);
         assert_eq!(jv, serde_json::json!([1, "hello", true]));
     }
@@ -1099,7 +1177,9 @@ mod tests {
     #[test]
     fn test_from_hashmap_filters_synthetic_array_indices() {
         let mut data = HashMap::new();
-        data.insert("tags".to_string(), DixValue::Array(vec![DixValue::String("alpha".into()), DixValue::String("beta".into())]));
+        data.insert("tags".to_string(), DixValue::Array(vec![
+            DixValue::String("alpha".into()), DixValue::String("beta".into()),
+        ]));
         data.insert("tags[0]".to_string(), DixValue::String("alpha".into()));
         data.insert("tags[1]".to_string(), DixValue::String("beta".into()));
 
@@ -1157,7 +1237,7 @@ mod tests {
         let converter = DixConverter::new();
         let ast = converter.from_dix_data(&data).unwrap();
 
-        let cfg = ast.clone().config.expect("expected real @CONFIG, not the from_hashmap placeholder");
+        let cfg = ast.clone().config.expect("expected real @CONFIG, not placeholder");
         let version = cfg.entries.iter().find(|e| e.key == "version").unwrap();
         assert!(matches!(&version.value, ConfigValue::String(s) if *s == "2.3.1"));
         let author = cfg.entries.iter().find(|e| e.key == "author").unwrap();
@@ -1175,10 +1255,22 @@ mod tests {
     #[test]
     fn test_format_config_value_handles_all_variants() {
         let converter = DixConverter::new();
-        assert_eq!(converter.format_config_value(&ConfigValue::ErrorHandling(ErrorHandlingStrategy::Recover)), "\"recover\"");
-        assert_eq!(converter.format_config_value(&ConfigValue::Compatibility(CompatibilityMode::BestEffort)), "\"best_effort\"");
-        assert_eq!(converter.format_config_value(&ConfigValue::Debug(DebugMode::Verbose)), "\"verbose\"");
-        assert_eq!(converter.format_config_value(&ConfigValue::Features(vec!["a".into(), "b".into()])), "\"a,b\"");
+        assert_eq!(
+            converter.format_config_value(&ConfigValue::ErrorHandling(ErrorHandlingStrategy::Recover)),
+            "\"recover\""
+        );
+        assert_eq!(
+            converter.format_config_value(&ConfigValue::Compatibility(CompatibilityMode::BestEffort)),
+            "\"best_effort\""
+        );
+        assert_eq!(
+            converter.format_config_value(&ConfigValue::Debug(DebugMode::Verbose)),
+            "\"verbose\""
+        );
+        assert_eq!(
+            converter.format_config_value(&ConfigValue::Features(vec!["a".into(), "b".into()])),
+            "\"a,b\""
+        );
     }
 
     #[test]
@@ -1191,7 +1283,9 @@ mod tests {
             },
             DataEntry::TableProperty {
                 path: path(&["elements", "hydrogen", "identity"]),
-                properties: vec![prop("name", Value::String { value: "Hydrogen".into(), position: Position::UNKNOWN })],
+                properties: vec![prop("name", Value::String {
+                    value: "Hydrogen".into(), position: Position::UNKNOWN,
+                })],
                 position: Position::UNKNOWN,
             },
         ]);
@@ -1199,11 +1293,129 @@ mod tests {
         let converter = DixConverter::new();
         let minified = converter.to_mdix(&ast, Some(&DixFormatOptions::minified())).unwrap();
 
-        // No token fusion: the double value must not run directly into the table path identifier.
-        assert!(!minified.contains("568160elements"), "flat property fused with table path: {}", minified);
-        // The parser rejects commas before grouped-entry heads; the minifier replaces
-        // the boundary comma with a space.  Assert space separation, not a comma.
-        assert!(minified.contains(" elements.hydrogen.identity:"), "expected space separator before table path (no comma allowed here): {}", minified);
-        assert!(minified.contains("elements.hydrogen.identity:"), "table property dropped: {}", minified);
+        assert!(
+            !minified.contains("568160elements"),
+            "flat property fused with table path: {}", minified
+        );
+        assert!(
+            minified.contains(" elements.hydrogen.identity:"),
+            "expected space separator before table path: {}", minified
+        );
+        assert!(
+            minified.contains("elements.hydrogen.identity:"),
+            "table property dropped: {}", minified
+        );
     }
-}
+
+    // ── JSON import: number edge cases ────────────────────────────────────────
+
+    #[test]
+    fn test_json_number_small_int_becomes_int() {
+        let converter = DixConverter::new();
+        let ast = converter.from_json(r#"{"n": 42}"#).unwrap();
+        let map = converter.to_hashmap(&ast);
+        assert_eq!(map.get("n"), Some(&DixValue::Int(42)));
+    }
+
+    #[test]
+    fn test_json_number_fits_i64_max_stays_long() {
+        // i64::MAX = 9223372036854775807 — must produce Long, not demote to Double.
+        let converter = DixConverter::new();
+        let ast = converter.from_json(r#"{"n": 9223372036854775807}"#).unwrap();
+        let map = converter.to_hashmap(&ast);
+        assert_eq!(map.get("n"), Some(&DixValue::Long(i64::MAX)));
+    }
+
+    #[test]
+    fn test_json_number_float_becomes_double() {
+        let converter = DixConverter::new();
+        let ast = converter.from_json(r#"{"x": 3.14}"#).unwrap();
+        let map = converter.to_hashmap(&ast);
+        assert!(matches!(map.get("x"), Some(DixValue::Double(_))));
+    }
+
+    #[test]
+    fn test_json_big_u64_over_i64_max_errors() {
+        // 9999999999999999999 > i64::MAX — serde_json stores as u64.
+        // Silent precision loss to f64 would corrupt data; must return Err.
+        let converter = DixConverter::new();
+        let result = converter.from_json(r#"{"n": 9999999999999999999}"#);
+        assert!(result.is_err(), "u64 > i64::MAX must return Err, got Ok");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Long range") || err.contains("i64::MAX"),
+            "error must mention overflow, got: {}", err
+        );
+    }
+
+    // ── JSON import: array homogeneity ────────────────────────────────────────
+
+    #[test]
+    fn test_json_homogeneous_int_array_stays_array() {
+        let converter = DixConverter::new();
+        let ast = converter.from_json(r#"{"nums": [1, 2, 3]}"#).unwrap();
+        let map = converter.to_hashmap(&ast);
+        assert!(
+            matches!(map.get("nums"), Some(DixValue::Array(_))),
+            "homogeneous int array must stay Array, got: {:?}", map.get("nums")
+        );
+    }
+
+    #[test]
+    fn test_json_mixed_numeric_array_stays_array() {
+        // Int + Double are same type-kind bucket — no Tuple.
+        let converter = DixConverter::new();
+        let ast = converter.from_json(r#"{"nums": [1, 2.5, 3]}"#).unwrap();
+        let map = converter.to_hashmap(&ast);
+        assert!(
+            matches!(map.get("nums"), Some(DixValue::Array(_))),
+            "mixed-numeric array must stay Array, got: {:?}", map.get("nums")
+        );
+    }
+
+    #[test]
+    fn test_json_heterogeneous_array_becomes_tuple() {
+        // int + string + bool → three different type-kind buckets → Tuple.
+        let converter = DixConverter::new();
+        let ast = converter.from_json(r#"{"mixed": [1, "hello", true]}"#).unwrap();
+        let map = converter.to_hashmap(&ast);
+        assert!(
+            matches!(map.get("mixed"), Some(DixValue::Tuple(_))),
+            "[int, string, bool] must become Tuple, got: {:?}", map.get("mixed")
+        );
+    }
+
+    #[test]
+    fn test_json_null_mixed_with_string_becomes_tuple() {
+        // null (kind 3) mixed with string (kind 2) → heterogeneous → Tuple.
+        let converter = DixConverter::new();
+        let ast = converter.from_json(r#"{"maybe": [null, "value"]}"#).unwrap();
+        let map = converter.to_hashmap(&ast);
+        assert!(
+            matches!(map.get("maybe"), Some(DixValue::Tuple(_))),
+            "[null, string] must become Tuple, got: {:?}", map.get("maybe")
+        );
+    }
+
+    #[test]
+    fn test_json_homogeneous_string_array_stays_array() {
+        let converter = DixConverter::new();
+        let ast = converter.from_json(r#"{"tags": ["a", "b", "c"]}"#).unwrap();
+        let map = converter.to_hashmap(&ast);
+        assert!(
+            matches!(map.get("tags"), Some(DixValue::Array(_))),
+            "homogeneous string array must stay Array, got: {:?}", map.get("tags")
+        );
+    }
+
+    #[test]
+    fn test_json_empty_array_stays_array() {
+        let converter = DixConverter::new();
+        let ast = converter.from_json(r#"{"empty": []}"#).unwrap();
+        let map = converter.to_hashmap(&ast);
+        assert!(
+            matches!(map.get("empty"), Some(DixValue::Array(_))),
+            "empty array must stay Array"
+        );
+    }
+            }

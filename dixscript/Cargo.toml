@@ -11,7 +11,8 @@ license = "MIT"
 readme = "README.md"
 repository = "https://github.com/Mid-D-Man/DixScript-Rust"
 keywords = ["config", "encryption", "serialization", "data-format", "gamedev"]
-categories = ["config", "encoding", "data-structures", "cryptography"]
+# "config" is not a valid crates.io category slug — replaced with "development-tools"
+categories = ["development-tools", "encoding", "data-structures", "cryptography"]
 
 [lib]
 name = "dixscript"

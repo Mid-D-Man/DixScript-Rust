@@ -60,58 +60,66 @@ impl fmt::Display for SectionId {
     }
 }
 
+/// Every variant in this enum is actually emitted by the lexer.
+/// No dead/speculative variants are kept here — if the lexer does not produce
+/// it, it does not belong in this enum.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenType {
-    // ── Static-string variants ───────────────────────────────────────────────
+    // ── Keywords ─────────────────────────────────────────────────────────────
+    /// Reserved word matched by the KEYWORDS phf map.
+    /// e.g. `if`, `return`, `from_cloud`, `true` (Bool), etc.
+    /// Note: `true`/`false` produce `Bool(bool)`, not `Keyword`.
     Keyword(&'static str),
-    MultiCharSymbol(&'static str),
-    ArithmeticOp(&'static str),
-    ArithmeticAssignOp(&'static str),
-    ComparisonOp(&'static str),
-    LogicalOp(&'static str),
-    BitwiseOp(&'static str),
-    DataType(&'static str),
 
-    // ── Owned-string / primitive variants ───────────────────────────────────
+    // ── Operators (all emitted by try_scan_multi_char_operator / scan_single_character) ─
+    ArithmeticOp(&'static str),        // +  -  *  /  %  **  %%  %&  &%  ++  --
+    ArithmeticAssignOp(&'static str),  // +=  -=  *=  /=  %=  **=
+    ComparisonOp(&'static str),        // ==  !=  <=  >=
+    LogicalOp(&'static str),           // &&  ||
+    BitwiseOp(&'static str),           // ^  &  |  <<  >>  >_<  ~?  &=  |=  ^=  <<=  >>=
+
+    // ── Literals ──────────────────────────────────────────────────────────────
     Identifier(String),
     Integer(i32),
-    /// 64-bit integer literal. Suffix `L`/`l`, or auto-promoted from overflowing i32.
-    /// Covers plain decimal (`9_000_000_000L`), hex (`0xDEAD_BEEFL`),
-    /// and binary (`0b1111_0000_1111_0000L`) forms.
+    /// 64-bit integer literal.
+    /// Emitted for: `L`/`l`-suffixed decimals, hex, or binary; plain decimals
+    /// that overflow i32; hex/binary that overflow i32 (auto-promoted).
     Long(i64),
-    Float(f32),
-    Double(f64),
-    ScientificNotation(f64),
-    String(String),
-    StringSingle(String),
-    InterpolatedString(String),
-    Bool(bool),
+    Float(f32),          // decimal with `.` + `f`/`F` suffix, or integer + `f`/`F`
+    Double(f64),         // decimal with `.` and no suffix
+    ScientificNotation(f64),  // decimal with `e`/`E` exponent, no `f` suffix
+    String(String),           // "…"
+    StringSingle(String),     // '…'
+    InterpolatedString(String), // $"…" or $'…'  (only inside advanced sections)
+    Bool(bool),               // keyword `true` / `false`
 
-    // ── Symbols ──────────────────────────────────────────────────────────────
+    // ── Single-character symbols ──────────────────────────────────────────────
+    /// Any character that doesn't map to a more specific variant.
+    /// Includes: `(`, `)`, `[`, `]`, `{`, `}`, `,`, `;`, `.`, `_`, `@`
+    /// (when not a section keyword), `:`, `<`, `>`, `=`, `!`, etc.
     Symbol(char),
 
-    // ── Special data types ───────────────────────────────────────────────────
-    HexColor(String),
-    HexLiteral(i32),
+    // ── Special literal forms ─────────────────────────────────────────────────
+    HexColor(String),    // #RRGGBB / #RGB — emitted by scan_hex_color
+    /// Date literal: YYYY-MM-DD  (no time component)
     Date(String),
+    /// Timestamp literal: YYYY-MM-DDThh:mm:ss[.fff][Z|±hh:mm]
     Timestamp(String),
 
-    // ── Table / group syntax ─────────────────────────────────────────────────
-    TablePath(String),
+    // ── Structural punctuation ────────────────────────────────────────────────
+    /// `::`  — double-colon (group-array separator / qualified name)
     DoubleColon,
+    /// `=>`  — scope / lambda arrow
     Arrow,
+    /// `->`  — switch-case / config-entry arrow
     SwitchCase,
 
-    // ── Function / control-flow markers ──────────────────────────────────────
-    ControlFlowColon,
+    // ── Prefixed constructors  (prefix char + `:`) ───────────────────────────
+    BlobConstructor(String),   // b:…
+    TupleConstructor(String),  // t:…
+    RegexConstructor(String),  // r:…
 
-    // ── Prefixed constructors ─────────────────────────────────────────────────
-    PrefixedConstructor { prefix: String, value: String },
-    BlobConstructor(String),
-    TupleConstructor(String),
-    RegexConstructor(String),
-
-    // ── Section keywords ──────────────────────────────────────────────────────
+    // ── Section keywords (@…) ─────────────────────────────────────────────────
     SectionConfig,
     SectionImports,
     SectionDLM,
@@ -120,22 +128,10 @@ pub enum TokenType {
     SectionData,
     SectionSecurity,
 
-    // ── Access / scope ────────────────────────────────────────────────────────
-    ConfigAccess(String),
-    EnumAccess { enum_name: String, value: String },
-    ObjectAccess(Vec<String>),
-    ScopeDeclaration(String),
-
-    // ── Built-in function categories ──────────────────────────────────────────
-    StaticFunction { class: String, method: String },
-    DixFunction(String),
-    BuiltinMethod(String),
-
-    // ── Diagnostic / special tokens ───────────────────────────────────────────
+    // ── Diagnostic / structural ───────────────────────────────────────────────
     Comment(String),
     Error(String),
     EndOfFile,
-    ParseContext(String),
 }
 
 // =============================================================================
@@ -143,10 +139,10 @@ pub enum TokenType {
 // =============================================================================
 
 impl TokenType {
+    // Factory helpers (used by parsers for construction / comparison)
     #[inline] pub fn double_colon()       -> Self { TokenType::DoubleColon }
     #[inline] pub fn arrow()              -> Self { TokenType::Arrow }
     #[inline] pub fn switch_case()        -> Self { TokenType::SwitchCase }
-    #[inline] pub fn control_flow_colon() -> Self { TokenType::ControlFlowColon }
     #[inline] pub fn end_of_file()        -> Self { TokenType::EndOfFile }
     #[inline] pub fn section_config()     -> Self { TokenType::SectionConfig }
     #[inline] pub fn section_imports()    -> Self { TokenType::SectionImports }
@@ -186,7 +182,7 @@ impl TokenType {
         }
     }
 
-    /// Returns `true` for any numeric token type.
+    /// Returns `true` for any numeric literal token type.
     pub fn is_numeric(&self) -> bool {
         matches!(
             self,
@@ -195,7 +191,6 @@ impl TokenType {
                 | TokenType::Float(_)
                 | TokenType::Double(_)
                 | TokenType::ScientificNotation(_)
-                | TokenType::HexLiteral(_)
         )
     }
 }
@@ -207,62 +202,42 @@ impl TokenType {
 impl fmt::Display for TokenType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TokenType::Keyword(k)                        => write!(f, "Keyword({})", k),
-            TokenType::MultiCharSymbol(ms)               => write!(f, "MultiCharSymbol({})", ms),
-            TokenType::ArithmeticOp(ao)                  => write!(f, "ArithmeticOp({})", ao),
-            TokenType::ArithmeticAssignOp(aao)           => write!(f, "ArithmeticAssignOp({})", aao),
-            TokenType::ComparisonOp(co)                  => write!(f, "ComparisonOp({})", co),
-            TokenType::LogicalOp(lo)                     => write!(f, "LogicalOp({})", lo),
-            TokenType::BitwiseOp(bo)                     => write!(f, "BitwiseOp({})", bo),
-            TokenType::DataType(dt)                      => write!(f, "DataType(<{}>)", dt),
-            TokenType::Identifier(i)                     => write!(f, "Identifier({})", i),
-            TokenType::Integer(i)                        => write!(f, "Integer({})", i),
-            TokenType::Long(l)                           => write!(f, "Long({}L)", l),
-            TokenType::Float(fl)                         => write!(f, "Float({})", fl),
-            TokenType::Double(d)                         => write!(f, "Double({})", d),
-            TokenType::ScientificNotation(sn)            => write!(f, "ScientificNotation({})", sn),
-            TokenType::String(s)                         => write!(f, "String(\"{}\")", s),
-            TokenType::StringSingle(ss)                  => write!(f, "StringSingle('{}')", ss),
-            TokenType::Bool(b)                           => write!(f, "Bool({})", b),
-            TokenType::InterpolatedString(ist)           => write!(f, "InterpolatedString($\"{}\")", ist),
-            TokenType::Symbol(s)                         => write!(f, "Symbol({})", s),
-            TokenType::HexColor(hc)                      => write!(f, "HexColor({})", hc),
-            TokenType::HexLiteral(hl)                    => write!(f, "HexLiteral(0x{:X})", hl),
-            TokenType::Date(d)                           => write!(f, "Date({})", d),
-            TokenType::Timestamp(t)                      => write!(f, "Timestamp({})", t),
-            TokenType::TablePath(tp)                     => write!(f, "TablePath({})", tp),
-            TokenType::DoubleColon                       => write!(f, "DoubleColon(::)"),
-            TokenType::Arrow                             => write!(f, "Arrow(=>)"),
-            TokenType::SwitchCase                        => write!(f, "SwitchCase(->)"),
-            TokenType::ControlFlowColon                  => write!(f, "ControlFlowColon(:)"),
-            TokenType::PrefixedConstructor { prefix, value } => {
-                write!(f, "PrefixedConstructor({}:{})", prefix, value)
-            }
-            TokenType::BlobConstructor(bc)               => write!(f, "BlobConstructor(b:{})", bc),
-            TokenType::TupleConstructor(tc)              => write!(f, "TupleConstructor(t:{})", tc),
-            TokenType::RegexConstructor(rc)              => write!(f, "RegexConstructor(r:{})", rc),
-            TokenType::SectionConfig                     => write!(f, "SectionConfig(@CONFIG)"),
-            TokenType::SectionDLM                        => write!(f, "SectionDLM(@DLM)"),
-            TokenType::SectionEnums                      => write!(f, "SectionEnums(@ENUMS)"),
-            TokenType::SectionQuickFuncs                 => write!(f, "SectionQuickFuncs(@QUICKFUNCS)"),
-            TokenType::SectionData                       => write!(f, "SectionData(@DATA)"),
-            TokenType::SectionSecurity                   => write!(f, "SectionSecurity(@SECURITY)"),
-            TokenType::SectionImports                    => write!(f, "SectionImports(@IMPORTS)"),
-            TokenType::ConfigAccess(ca)                  => write!(f, "ConfigAccess(config.{})", ca),
-            TokenType::EnumAccess { enum_name, value }   => {
-                write!(f, "EnumAccess({}.{})", enum_name, value)
-            }
-            TokenType::ObjectAccess(oa)                  => write!(f, "ObjectAccess({})", oa.join(".")),
-            TokenType::ScopeDeclaration(sd)              => write!(f, "ScopeDeclaration(=> {})", sd),
-            TokenType::StaticFunction { class, method }  => {
-                write!(f, "StaticFunction({}.{})", class, method)
-            }
-            TokenType::DixFunction(df)                   => write!(f, "DixFunction(Dix.{})", df),
-            TokenType::BuiltinMethod(bm)                 => write!(f, "BuiltinMethod(.{})", bm),
-            TokenType::Comment(c)                        => write!(f, "Comment({})", c),
-            TokenType::Error(e)                          => write!(f, "Error({})", e),
-            TokenType::EndOfFile                         => write!(f, "EndOfFile"),
-            TokenType::ParseContext(pc)                  => write!(f, "ParseContext({})", pc),
+            TokenType::Keyword(k)              => write!(f, "Keyword({})", k),
+            TokenType::ArithmeticOp(ao)        => write!(f, "ArithmeticOp({})", ao),
+            TokenType::ArithmeticAssignOp(aao) => write!(f, "ArithmeticAssignOp({})", aao),
+            TokenType::ComparisonOp(co)        => write!(f, "ComparisonOp({})", co),
+            TokenType::LogicalOp(lo)           => write!(f, "LogicalOp({})", lo),
+            TokenType::BitwiseOp(bo)           => write!(f, "BitwiseOp({})", bo),
+            TokenType::Identifier(i)           => write!(f, "Identifier({})", i),
+            TokenType::Integer(i)              => write!(f, "Integer({})", i),
+            TokenType::Long(l)                 => write!(f, "Long({}L)", l),
+            TokenType::Float(fl)               => write!(f, "Float({})", fl),
+            TokenType::Double(d)               => write!(f, "Double({})", d),
+            TokenType::ScientificNotation(sn)  => write!(f, "ScientificNotation({})", sn),
+            TokenType::String(s)               => write!(f, "String(\"{}\")", s),
+            TokenType::StringSingle(ss)        => write!(f, "StringSingle('{}')", ss),
+            TokenType::Bool(b)                 => write!(f, "Bool({})", b),
+            TokenType::InterpolatedString(ist) => write!(f, "InterpolatedString($\"{}\")", ist),
+            TokenType::Symbol(s)               => write!(f, "Symbol({})", s),
+            TokenType::HexColor(hc)            => write!(f, "HexColor({})", hc),
+            TokenType::Date(d)                 => write!(f, "Date({})", d),
+            TokenType::Timestamp(t)            => write!(f, "Timestamp({})", t),
+            TokenType::DoubleColon             => write!(f, "DoubleColon(::)"),
+            TokenType::Arrow                   => write!(f, "Arrow(=>)"),
+            TokenType::SwitchCase              => write!(f, "SwitchCase(->)"),
+            TokenType::BlobConstructor(bc)     => write!(f, "BlobConstructor(b:{})"),
+            TokenType::TupleConstructor(tc)    => write!(f, "TupleConstructor(t:{})"),
+            TokenType::RegexConstructor(rc)    => write!(f, "RegexConstructor(r:{})"),
+            TokenType::SectionConfig           => write!(f, "SectionConfig(@CONFIG)"),
+            TokenType::SectionDLM              => write!(f, "SectionDLM(@DLM)"),
+            TokenType::SectionEnums            => write!(f, "SectionEnums(@ENUMS)"),
+            TokenType::SectionQuickFuncs       => write!(f, "SectionQuickFuncs(@QUICKFUNCS)"),
+            TokenType::SectionData             => write!(f, "SectionData(@DATA)"),
+            TokenType::SectionSecurity         => write!(f, "SectionSecurity(@SECURITY)"),
+            TokenType::SectionImports          => write!(f, "SectionImports(@IMPORTS)"),
+            TokenType::Comment(c)              => write!(f, "Comment({})", c),
+            TokenType::Error(e)                => write!(f, "Error({})", e),
+            TokenType::EndOfFile               => write!(f, "EndOfFile"),
         }
     }
 }
@@ -293,13 +268,11 @@ impl Token {
     pub fn get_token_value(&self) -> String {
         match &self.token_type {
             TokenType::Keyword(k)              => k.to_string(),
-            TokenType::MultiCharSymbol(ms)     => ms.to_string(),
             TokenType::ArithmeticOp(ao)        => ao.to_string(),
             TokenType::ArithmeticAssignOp(aao) => aao.to_string(),
             TokenType::ComparisonOp(co)        => co.to_string(),
             TokenType::LogicalOp(lo)           => lo.to_string(),
             TokenType::BitwiseOp(bo)           => bo.to_string(),
-            TokenType::DataType(dt)            => dt.to_string(),
             TokenType::Identifier(i)           => i.clone(),
             TokenType::Integer(i)              => i.to_string(),
             TokenType::Long(l)                 => format!("{}L", l),
@@ -309,27 +282,21 @@ impl Token {
             TokenType::String(s)               => s.clone(),
             TokenType::StringSingle(ss)        => ss.clone(),
             TokenType::Bool(b)                 => b.to_string().to_lowercase(),
+            TokenType::InterpolatedString(ist) => ist.clone(),
             TokenType::Symbol(s)               => s.to_string(),
             TokenType::HexColor(hc)            => hc.clone(),
-            TokenType::HexLiteral(hl)          => format!("0x{:X}", hl),
             TokenType::Date(d)                 => d.clone(),
             TokenType::Timestamp(t)            => t.clone(),
-            TokenType::InterpolatedString(ist) => ist.clone(),
-            TokenType::TablePath(tp)           => tp.clone(),
-            TokenType::PrefixedConstructor { prefix, value } => format!("{}:{}", prefix, value),
-            TokenType::BlobConstructor(bc)     => format!("b:{}", bc),
-            TokenType::TupleConstructor(tc)    => format!("t:{}", tc),
-            TokenType::RegexConstructor(rc)    => format!("r:{}", rc),
             TokenType::DoubleColon             => "::".to_string(),
             TokenType::Arrow                   => "=>".to_string(),
             TokenType::SwitchCase              => "->".to_string(),
-            TokenType::ControlFlowColon        => ":".to_string(),
-            TokenType::ConfigAccess(ca)        => format!("config.{}", ca),
-            TokenType::EnumAccess { enum_name, value } => format!("{}.{}", enum_name, value),
+            TokenType::BlobConstructor(bc)     => format!("b:{}", bc),
+            TokenType::TupleConstructor(tc)    => format!("t:{}", tc),
+            TokenType::RegexConstructor(rc)    => format!("r:{}", rc),
             TokenType::Comment(c)              => c.clone(),
             TokenType::Error(e)                => e.clone(),
             TokenType::EndOfFile               => "EOF".to_string(),
-            _                                  => self.token_type.to_string(),
+            _ => self.token_type.to_string(),
         }
     }
 }
@@ -373,4 +340,4 @@ impl TokenExtensions for Token {
             false
         }
     }
-}
+    }

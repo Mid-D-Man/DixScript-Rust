@@ -241,15 +241,21 @@ impl ConfigSchema {
     }
 
     fn create_feature_value(value: &str) -> ConfigValue {
+        // Shorthand keywords are stored normalised as lowercase singletons.
         if value.eq_ignore_ascii_case("basic") {
             return ConfigValue::Features(vec!["basic".to_string()]);
         }
         if value.eq_ignore_ascii_case("advanced") {
             return ConfigValue::Features(vec!["advanced".to_string()]);
         }
+
+        // Comma-separated specific-feature list.
+        // Normalise to lowercase so downstream comparisons are unambiguous
+        // regardless of what case the author used (e.g. "QuickFuncs" → "quickfuncs").
         let features: Vec<String> = value
             .split(',')
-            .map(|s| s.trim().to_string())
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
             .collect();
         ConfigValue::Features(features)
     }
@@ -331,15 +337,21 @@ impl ConfigSchema {
                 }
                 "features" => {
                     if let ConfigValue::Features(ref features) = entry.value {
+                        // Features are already normalised to lowercase by create_feature_value.
                         settings.enabled_features = features.clone();
                     } else if let ConfigValue::String(ref s) = entry.value {
+                        // Fallback: raw string (shouldn't happen after schema processing,
+                        // but guard against bypass paths).
                         if s.eq_ignore_ascii_case("advanced") {
                             settings.enabled_features = vec!["advanced".to_string()];
                         } else if s.eq_ignore_ascii_case("basic") {
                             settings.enabled_features = vec!["basic".to_string()];
                         } else {
-                            settings.enabled_features =
-                                s.split(',').map(|f| f.trim().to_string()).collect();
+                            settings.enabled_features = s
+                                .split(',')
+                                .map(|f| f.trim().to_lowercase())
+                                .filter(|f| !f.is_empty())
+                                .collect();
                         }
                     }
                 }

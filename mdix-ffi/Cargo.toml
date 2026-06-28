@@ -45,7 +45,8 @@ name = "mdix_ffi"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-dixscript  = { path = "../dixscript" }
+# version field required for `cargo publish -p mdix-ffi` after dixscript lands on crates.io
+dixscript  = { path = "../dixscript", version = "1.0.0" }
 serde_json = "1.0"
 
 [build-dependencies]

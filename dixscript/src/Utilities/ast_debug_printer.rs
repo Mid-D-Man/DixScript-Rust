@@ -1,13 +1,12 @@
-
 use crate::Compiler::AST::*;
 
-/// Debug printer for DixScript AST
-/// Shows exact node types and structure for debugging
+/// Debug printer for DixScript AST.
+/// Shows exact node types and structure for debugging.
 pub struct AstDebugPrinter {
-    output: String,
-    indent_level: usize,
+    output:         String,
+    indent_level:   usize,
     show_positions: bool,
-    show_types: bool,
+    show_types:     bool,
 }
 
 const INDENT: &str = "  ";
@@ -29,7 +28,10 @@ impl AstDebugPrinter {
         self.indent_level = 0;
 
         self.writeln("=== DIXSCRIPT AST DEBUG OUTPUT ===");
-        self.writeln(&format!("Generated: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
+        self.writeln(&format!(
+            "Generated: {}",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        ));
         self.writeln("");
 
         self.visit_dixscript(ast);
@@ -38,19 +40,20 @@ impl AstDebugPrinter {
     }
 
     /// Print AST to file in project directory
-    pub fn print_to_file(&mut self, ast: &DixScript, filename: &str) -> Result<String, String> {
+    pub fn print_to_file(
+        &mut self,
+        ast: &DixScript,
+        filename: &str,
+    ) -> Result<String, String> {
         let content = self.print(ast);
 
-        // Find project root
         let mut project_dir = std::env::current_dir()
             .map_err(|e| format!("Failed to get current directory: {}", e))?;
 
-        // Look for Cargo.toml
         loop {
             if project_dir.join("../../Cargo.toml").exists() {
                 break;
             }
-
             match project_dir.parent() {
                 Some(parent) => project_dir = parent.to_path_buf(),
                 None => break,
@@ -175,8 +178,14 @@ impl AstDebugPrinter {
 
     fn visit_imports_section(&mut self, section: &ImportsSection) {
         for import in &section.imports {
-            let from_keyword = if import.is_cloud_import { "from_cloud" } else { "from" };
-            let verify = import.verify_hash.as_ref()
+            let from_keyword = if import.is_cloud_import {
+                "from_cloud"
+            } else {
+                "from"
+            };
+            let verify = import
+                .verify_hash
+                .as_ref()
                 .map(|h| format!(" verify \"{}\"", h))
                 .unwrap_or_default();
 
@@ -193,7 +202,8 @@ impl AstDebugPrinter {
 
     fn visit_dlm_section(&mut self, section: &DLMSection) {
         for module in &section.modules {
-            let subtype = module.subtype
+            let subtype = module
+                .subtype
                 .map(|s| format!(".{}", s))
                 .unwrap_or_default();
             self.writeln(&format!("{}{}", module.module_type, subtype));
@@ -202,14 +212,15 @@ impl AstDebugPrinter {
 
     fn visit_enums_section(&mut self, section: &EnumsSection) {
         for enum_decl in &section.enums {
-            self.writeln(&format!("enum {} {{{}",
-                                  enum_decl.name,
-                                  self.format_position(&enum_decl.position)
+            self.writeln(&format!(
+                "enum {} {{{}",
+                enum_decl.name,
+                self.format_position(&enum_decl.position)
             ));
-
             self.indent();
             for field in &enum_decl.fields {
-                let value = field.value
+                let value = field
+                    .value
                     .map(|v| format!(" = {}", v))
                     .unwrap_or_default();
                 self.writeln(&format!(
@@ -220,40 +231,200 @@ impl AstDebugPrinter {
                 ));
             }
             self.unindent();
-
             self.writeln("}");
         }
     }
 
-    fn visit_quickfuncs_section(&mut self, _section: &QuickFuncsSection) {
-        // TODO: Implement when QuickFuncs is ready
-        self.writeln("[QuickFuncs section - not yet implemented]");
+    fn visit_quickfuncs_section(&mut self, section: &QuickFuncsSection) {
+        self.writeln(&format!(
+            "{} function(s){}",
+            section.functions.len(),
+            self.format_node_type("QuickFuncsSection")
+        ));
+
+        for func in &section.functions {
+            let return_type = func
+                .return_type
+                .map(|rt| format!("<{}>", rt))
+                .unwrap_or_default();
+            let scope = func
+                .scope_list
+                .as_ref()
+                .map(|s| format!(" => {}", s.join(",")))
+                .unwrap_or_default();
+            let pos = self.format_position(&func.position);
+
+            self.writeln(&format!(
+                "~{}{}{}{} {}",
+                func.name,
+                return_type,
+                scope,
+                pos,
+                self.format_node_type("QuickFunction")
+            ));
+
+            self.indent();
+
+            // Parameters
+            if func.parameters.is_empty() {
+                self.writeln("params: (none)");
+            } else {
+                self.writeln(&format!("params: ({} total)", func.parameters.len()));
+                self.indent();
+                for param in &func.parameters {
+                    let type_str = param
+                        .data_type
+                        .map(|dt| format!("<{}>", dt))
+                        .unwrap_or_default();
+                    let default_str = if param.default_value.is_some() {
+                        " = <default>".to_string()
+                    } else {
+                        String::new()
+                    };
+                    let param_pos = self.format_position(&param.position);
+                    self.writeln(&format!(
+                        "{}{}{}{}",
+                        param.name, type_str, default_str, param_pos
+                    ));
+                }
+                self.unindent();
+            }
+
+            // Body
+            self.writeln(&format!("body: {} statement(s)", func.body.len()));
+            for stmt in &func.body {
+                self.indent();
+                self.writeln(&format!("{}", stmt));
+                self.unindent();
+            }
+
+            self.unindent();
+        }
     }
 
-    fn visit_data_section(&mut self, _section: &DataSection) {
-        // TODO: Implement when Data section is ready
-        self.writeln("[Data section - not yet implemented]");
+    fn visit_data_section(&mut self, section: &DataSection) {
+        self.writeln(&format!(
+            "{} entry/entries{}",
+            section.entries.len(),
+            self.format_node_type("DataSection")
+        ));
+
+        for entry in &section.entries {
+            match entry {
+                DataEntry::SimpleProperty { name, data_type, value, position } => {
+                    let type_str = data_type
+                        .map(|dt| format!("<{}>", dt))
+                        .unwrap_or_default();
+                    let pos = self.format_position(position);
+                    self.writeln(&format!(
+                        "SimpleProperty{}: {}{} = {}{}",
+                        self.format_node_type("SimpleProperty"),
+                        name,
+                        type_str,
+                        value,
+                        pos
+                    ));
+                }
+
+                DataEntry::TableProperty { path, properties, position } => {
+                    let pos = self.format_position(position);
+                    self.writeln(&format!(
+                        "TableProperty{}: {}{}",
+                        self.format_node_type("TableProperty"),
+                        path,
+                        pos
+                    ));
+                    self.indent();
+                    for prop in properties {
+                        let type_str = prop
+                            .data_type
+                            .map(|dt| format!("<{}>", dt))
+                            .unwrap_or_default();
+                        let prop_pos = self.format_position(&prop.position);
+                        self.writeln(&format!(
+                            "{}{} = {}{}",
+                            prop.name, type_str, prop.value, prop_pos
+                        ));
+                    }
+                    self.unindent();
+                }
+
+                DataEntry::GroupArray { path, items, position } => {
+                    let pos = self.format_position(position);
+                    self.writeln(&format!(
+                        "GroupArray{}: {}:: ({} item(s)){}",
+                        self.format_node_type("GroupArray"),
+                        path,
+                        items.len(),
+                        pos
+                    ));
+                    self.indent();
+                    for item in items {
+                        self.writeln(&format!("- {}", item));
+                    }
+                    self.unindent();
+                }
+
+                DataEntry::ObjectProperty { name, data_type, object, position } => {
+                    let type_str = data_type
+                        .map(|dt| format!("<{}>", dt))
+                        .unwrap_or_default();
+                    let pos = self.format_position(position);
+                    self.writeln(&format!(
+                        "ObjectProperty{}: {}{} = {}{}",
+                        self.format_node_type("ObjectProperty"),
+                        name,
+                        type_str,
+                        object,
+                        pos
+                    ));
+                }
+            }
+        }
     }
 
-    fn visit_security_section(&mut self, _section: &SecuritySection) {
-        // TODO: Implement when Security section is ready
-        self.writeln("[Security section - not yet implemented]");
+    fn visit_security_section(&mut self, section: &SecuritySection) {
+        self.writeln(&format!(
+            "{} entry/entries{}",
+            section.entries.len(),
+            self.format_node_type("SecuritySection")
+        ));
+
+        for entry in &section.entries {
+            let pos = self.format_position(&entry.position);
+            self.writeln(&format!(
+                "{} ->{}{}",
+                entry.block_key,
+                pos,
+                self.format_node_type("SecurityEntry")
+            ));
+
+            self.indent();
+            for field in &entry.fields {
+                let field_pos = self.format_position(&field.position);
+                self.writeln(&format!(
+                    "{} = {}{}",
+                    field.key, field.value, field_pos
+                ));
+            }
+            self.unindent();
+        }
     }
 
     // ==================== VALUE FORMATTING ====================
 
     fn format_config_value(&self, value: &ConfigValue) -> String {
         match value {
-            ConfigValue::String(s) => format!("\"{}\"", s),
-            ConfigValue::Integer(i) => i.to_string(),
-            ConfigValue::Float(f) => f.to_string(),
-            ConfigValue::Boolean(b) => b.to_string().to_lowercase(),
-            ConfigValue::Date(d) => d.clone(),
-            ConfigValue::Timestamp(t) => t.clone(),
+            ConfigValue::String(s)          => format!("\"{}\"", s),
+            ConfigValue::Integer(i)         => i.to_string(),
+            ConfigValue::Float(f)           => f.to_string(),
+            ConfigValue::Boolean(b)         => b.to_string().to_lowercase(),
+            ConfigValue::Date(d)            => d.clone(),
+            ConfigValue::Timestamp(t)       => t.clone(),
             ConfigValue::Features(features) => format!("[{}]", features.join(", ")),
-            ConfigValue::ErrorHandling(eh) => format!("{:?}", eh),
-            ConfigValue::Compatibility(c) => format!("{:?}", c),
-            ConfigValue::Debug(d) => format!("{:?}", d),
+            ConfigValue::ErrorHandling(eh)  => format!("{:?}", eh),
+            ConfigValue::Compatibility(c)   => format!("{:?}", c),
+            ConfigValue::Debug(d)           => format!("{:?}", d),
         }
     }
 }
@@ -262,4 +433,4 @@ impl Default for AstDebugPrinter {
     fn default() -> Self {
         Self::new(true, true)
     }
-}
+        }

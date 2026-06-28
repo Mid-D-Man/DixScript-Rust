@@ -1,4 +1,4 @@
-// dixscript/src/Runtime/hot_reload.rs
+
 //! Poll-based hot reload for `.mdix` files.
 //!
 //! ```rust,ignore

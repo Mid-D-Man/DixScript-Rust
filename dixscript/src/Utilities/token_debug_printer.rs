@@ -1,16 +1,15 @@
 use crate::Compiler::Core::Tokenizer::{Token, TokenType, TokenizationResult};
 
-/// Debug printer for DixScript tokens
-/// Shows exact token types and positions for debugging lexer output
+/// Debug printer for DixScript tokens.
+/// Shows exact token types and positions for debugging lexer output.
 pub struct TokenDebugPrinter {
-    output: String,
+    output:         String,
     show_positions: bool,
-    show_sections: bool,
-    group_by_line: bool,
+    show_sections:  bool,
+    group_by_line:  bool,
 }
 
 impl TokenDebugPrinter {
-    /// Create new debug printer
     pub fn new(show_positions: bool, show_sections: bool, group_by_line: bool) -> Self {
         TokenDebugPrinter {
             output: String::new(),
@@ -20,7 +19,6 @@ impl TokenDebugPrinter {
         }
     }
 
-    /// Print tokens to string
     pub fn print(&mut self, result: &TokenizationResult) -> String {
         self.output.clear();
 
@@ -41,7 +39,7 @@ impl TokenDebugPrinter {
         self.writeln(&format!("Version: {}", result.metadata.version));
         self.writeln(&format!("Sections Detected: {:?}", result.metadata.sections_detected));
         self.writeln(&format!("Prefixed Constructors: {}", result.metadata.prefixed_constructors_found));
-        self.writeln(&format!("  - Blob: {}", result.metadata.blob_constructors));
+        self.writeln(&format!("  - Blob: {}",  result.metadata.blob_constructors));
         self.writeln(&format!("  - Tuple: {}", result.metadata.tuple_constructors));
         self.writeln(&format!("  - Regex: {}", result.metadata.regex_constructors));
         self.writeln(&format!("Static Calls Found: {}", result.metadata.static_calls_found));
@@ -53,11 +51,7 @@ impl TokenDebugPrinter {
             for pc in &result.prefixed_constructors {
                 self.writeln(&format!(
                     "{}:{} at L{}:C{} ({})",
-                    pc.prefix,
-                    pc.constructor_type,
-                    pc.line,
-                    pc.column,
-                    pc.section
+                    pc.prefix, pc.constructor_type, pc.line, pc.column, pc.section
                 ));
             }
         }
@@ -68,11 +62,7 @@ impl TokenDebugPrinter {
             for sc in &result.static_calls {
                 self.writeln(&format!(
                     "{}.{} at L{}:C{} ({})",
-                    sc.object_name,
-                    sc.method_name,
-                    sc.line,
-                    sc.column,
-                    sc.section
+                    sc.object_name, sc.method_name, sc.line, sc.column, sc.section
                 ));
             }
         }
@@ -80,20 +70,21 @@ impl TokenDebugPrinter {
         self.output.clone()
     }
 
-    /// Print tokens to file in project directory
-    pub fn print_to_file(&mut self, result: &TokenizationResult, filename: &str) -> Result<String, String> {
+    pub fn print_to_file(
+        &mut self,
+        result:   &TokenizationResult,
+        filename: &str,
+    ) -> Result<String, String> {
         let content = self.print(result);
 
         let mut project_dir = std::env::current_dir()
             .map_err(|e| format!("Failed to get current directory: {}", e))?;
 
         loop {
-            if project_dir.join("../../Cargo.toml").exists() {
-                break;
-            }
+            if project_dir.join("../../Cargo.toml").exists() { break; }
             match project_dir.parent() {
                 Some(parent) => project_dir = parent.to_path_buf(),
-                None => break,
+                None         => break,
             }
         }
 
@@ -103,9 +94,10 @@ impl TokenDebugPrinter {
 
         let filepath_str = filepath.to_string_lossy().to_string();
         println!("[TokenDebugPrinter] Tokens dumped to: {}", filepath_str);
-
         Ok(filepath_str)
     }
+
+    // ── Internal helpers ──────────────────────────────────────────────────────
 
     fn print_sequential(&mut self, tokens: &[Token]) {
         for (idx, token) in tokens.iter().enumerate() {
@@ -114,12 +106,10 @@ impl TokenDebugPrinter {
     }
 
     fn print_grouped_by_line(&mut self, tokens: &[Token]) {
-        if tokens.is_empty() {
-            return;
-        }
+        if tokens.is_empty() { return; }
 
-        let mut current_line = 1;
-        let mut line_tokens = Vec::new();
+        let mut current_line  = 1;
+        let mut line_tokens: Vec<(usize, &Token)> = Vec::new();
 
         for (idx, token) in tokens.iter().enumerate() {
             if token.line != current_line {
@@ -129,7 +119,6 @@ impl TokenDebugPrinter {
             }
             line_tokens.push((idx, token));
         }
-
         if !line_tokens.is_empty() {
             self.print_line(current_line, &line_tokens);
         }
@@ -151,7 +140,6 @@ impl TokenDebugPrinter {
         if self.show_positions {
             parts.push(format!("@L{}:C{}", token.line, token.column));
         }
-
         if self.show_sections {
             if let Some(section) = token.section.to_option() {
                 parts.push(format!("({})", section));
@@ -161,82 +149,78 @@ impl TokenDebugPrinter {
         self.writeln(&parts.join(" "));
     }
 
+    /// Format a token type to its debug string representation.
+    /// Only contains variants that the lexer actually emits.
     fn format_token_type(&self, token_type: &TokenType) -> String {
         match token_type {
-            TokenType::Keyword(k) => format!("Keyword({})", k),
+            // ── Keywords / identifiers ────────────────────────────────────────
+            TokenType::Keyword(k)    => format!("Keyword({})", k),
             TokenType::Identifier(i) => format!("Identifier({})", i),
-            TokenType::Integer(i) => format!("Integer({})", i),
-            TokenType::Long(i) => format!("Long({})", i),
-            TokenType::Float(f) => format!("Float({})", f),
-            TokenType::Double(d) => format!("Double({})", d),
-            TokenType::ScientificNotation(sn) => format!("ScientificNotation({})", sn),
-            TokenType::String(s) => format!("String(\"{}\")", Self::escape_string(s)),
-            TokenType::StringSingle(ss) => format!("StringSingle('{}')", Self::escape_string(ss)),
-            TokenType::Bool(b) => format!("Bool({})", b),
-            TokenType::InterpolatedString(ist) => format!("InterpolatedString($\"{}\")", Self::escape_string(ist)),
-            TokenType::Symbol(s) => format!("Symbol({})", s),
-            TokenType::MultiCharSymbol(ms) => format!("MultiCharSymbol({})", ms),
-            TokenType::HexColor(hc) => format!("HexColor({})", hc),
-            TokenType::HexLiteral(hl) => format!("HexLiteral(0x{:X})", hl),
-            TokenType::Date(d) => format!("Date({})", d),
+
+            // ── Numerics ──────────────────────────────────────────────────────
+            TokenType::Integer(i)            => format!("Integer({})", i),
+            TokenType::Long(l)               => format!("Long({}L)", l),
+            TokenType::Float(f)              => format!("Float({}f)", f),
+            TokenType::Double(d)             => format!("Double({})", d),
+            TokenType::ScientificNotation(s) => format!("ScientificNotation({})", s),
+
+            // ── Strings ───────────────────────────────────────────────────────
+            TokenType::String(s)               => format!("String(\"{}\")", Self::escape(s)),
+            TokenType::StringSingle(s)         => format!("StringSingle('{}')", Self::escape(s)),
+            TokenType::InterpolatedString(s)   => format!("InterpolatedString($\"{}\")", Self::escape(s)),
+
+            // ── Bool / Symbol ─────────────────────────────────────────────────
+            TokenType::Bool(b)  => format!("Bool({})", b),
+            TokenType::Symbol(c) => format!("Symbol({})", c),
+
+            // ── Special literals ──────────────────────────────────────────────
+            TokenType::HexColor(h)  => format!("HexColor({})", h),
+            TokenType::Date(d)      => format!("Date({})", d),
             TokenType::Timestamp(t) => format!("Timestamp({})", t),
-            TokenType::TablePath(tp) => format!("TablePath({})", tp),
+
+            // ── Structural punctuation ────────────────────────────────────────
             TokenType::DoubleColon => "DoubleColon(::)".to_string(),
-            TokenType::Arrow => "Arrow(=>)".to_string(),
-            TokenType::SwitchCase => "SwitchCase(->)".to_string(),
-            
-            TokenType::ControlFlowColon => "ControlFlowColon(:)".to_string(),
-            TokenType::PrefixedConstructor { prefix, value } => {
-                format!("PrefixedConstructor({}:{})", prefix, value)
-            }
-            TokenType::BlobConstructor(bc) => format!("BlobConstructor(b:{})", bc),
-            TokenType::TupleConstructor(tc) => format!("TupleConstructor(t:{})", tc),
-            TokenType::RegexConstructor(rc) => format!("RegexConstructor(r:{})", rc),
-            TokenType::ArithmeticOp(ao) => format!("ArithmeticOp({})", ao),
-            TokenType::ArithmeticAssignOp(aao) => format!("ArithmeticAssignOp({})", aao),
-            TokenType::ComparisonOp(co) => format!("ComparisonOp({})", co),
-            TokenType::LogicalOp(lo) => format!("LogicalOp({})", lo),
-            TokenType::BitwiseOp(bo) => format!("BitwiseOp({})", bo),
-            TokenType::SectionConfig => "SectionConfig(@CONFIG)".to_string(),
-            TokenType::SectionDLM => "SectionDLM(@DLM)".to_string(),
-            TokenType::SectionEnums => "SectionEnums(@ENUMS)".to_string(),
-            TokenType::SectionImports => "SectionImports(@IMPORTS)".to_string(),
+            TokenType::Arrow       => "Arrow(=>)".to_string(),
+            TokenType::SwitchCase  => "SwitchCase(->)".to_string(),
+
+            // ── Operators ─────────────────────────────────────────────────────
+            TokenType::ArithmeticOp(op)       => format!("ArithmeticOp({})", op),
+            TokenType::ArithmeticAssignOp(op) => format!("ArithmeticAssignOp({})", op),
+            TokenType::ComparisonOp(op)       => format!("ComparisonOp({})", op),
+            TokenType::LogicalOp(op)          => format!("LogicalOp({})", op),
+            TokenType::BitwiseOp(op)          => format!("BitwiseOp({})", op),
+
+            // ── Prefixed constructors ─────────────────────────────────────────
+            TokenType::BlobConstructor(v)  => format!("BlobConstructor(b:{})", v),
+            TokenType::TupleConstructor(v) => format!("TupleConstructor(t:{})", v),
+            TokenType::RegexConstructor(v) => format!("RegexConstructor(r:{})", v),
+
+            // ── Section keywords ──────────────────────────────────────────────
+            TokenType::SectionConfig     => "SectionConfig(@CONFIG)".to_string(),
+            TokenType::SectionDLM        => "SectionDLM(@DLM)".to_string(),
+            TokenType::SectionEnums      => "SectionEnums(@ENUMS)".to_string(),
+            TokenType::SectionImports    => "SectionImports(@IMPORTS)".to_string(),
             TokenType::SectionQuickFuncs => "SectionQuickFuncs(@QUICKFUNCS)".to_string(),
-            TokenType::SectionData => "SectionData(@DATA)".to_string(),
-            TokenType::SectionSecurity => "SectionSecurity(@SECURITY)".to_string(),
-            TokenType::ConfigAccess(ca) => format!("ConfigAccess(config.{})", ca),
-            TokenType::EnumAccess { enum_name, value } => {
-                format!("EnumAccess({}.{})", enum_name, value)
-            }
-            TokenType::ObjectAccess(oa) => format!("ObjectAccess({})", oa.join(".")),
-            TokenType::ScopeDeclaration(sd) => format!("ScopeDeclaration(=> {})", sd),
-            TokenType::StaticFunction { class, method } => {
-                format!("StaticFunction({}.{})", class, method)
-            }
-            TokenType::DixFunction(df) => format!("DixFunction(Dix.{})", df),
-            TokenType::BuiltinMethod(bm) => format!("BuiltinMethod(.{})", bm),
-            TokenType::DataType(dt) => format!("DataType(<{}>)", dt),
-            TokenType::Comment(c) => format!("Comment({})", Self::truncate_string(c, 50)),
-            TokenType::Error(e) => format!("Error({})", e),
-            TokenType::EndOfFile => "EndOfFile".to_string(),
-            TokenType::ParseContext(pc) => format!("ParseContext({})", pc),
+            TokenType::SectionData       => "SectionData(@DATA)".to_string(),
+            TokenType::SectionSecurity   => "SectionSecurity(@SECURITY)".to_string(),
+
+            // ── Diagnostic ───────────────────────────────────────────────────
+            TokenType::Comment(c) => format!("Comment({})", Self::truncate(c, 50)),
+            TokenType::Error(e)   => format!("Error({})", e),
+            TokenType::EndOfFile  => "EndOfFile".to_string(),
         }
     }
 
-    fn escape_string(s: &str) -> String {
+    fn escape(s: &str) -> String {
         s.replace('\\', "\\\\")
             .replace('\n', "\\n")
             .replace('\t', "\\t")
             .replace('\r', "\\r")
-            .replace('"', "\\\"")
+            .replace('"',  "\\\"")
     }
 
-    fn truncate_string(s: &str, max_len: usize) -> String {
-        if s.len() <= max_len {
-            s.to_string()
-        } else {
-            format!("{}...", &s[..max_len])
-        }
+    fn truncate(s: &str, max: usize) -> String {
+        if s.len() <= max { s.to_string() } else { format!("{}...", &s[..max]) }
     }
 
     fn writeln(&mut self, text: &str) {
@@ -249,4 +233,4 @@ impl Default for TokenDebugPrinter {
     fn default() -> Self {
         Self::new(true, true, false)
     }
-}
+        }

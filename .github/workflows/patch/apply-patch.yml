@@ -1,0 +1,19 @@
+name: Apply Surgical Patch
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview changes without writing (true/false)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    uses: Mid-D-Man/mdix-scaffold/.github/workflows/generate-structure.yml@main
+    with:
+      template:  '.mdix/patches/patch.mdix'
+      dry_run:   ${{ inputs.dry_run || 'false' }}

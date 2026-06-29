@@ -137,13 +137,22 @@ pub fn convert_file(path: &Path, opts: &ConvertOpts) -> Result<ConversionResult,
 
 // ── Format converters ─────────────────────────────────────────────────────────
 
-/// FIX: previously dumped `dix_data.to_hashmap()` (the fully-flattened map,
-/// containing BOTH the aggregate "server" -> Object AND synthetic children
-/// like "server.host") straight through `serde_json::to_string`, producing
-/// JSON with redundant/duplicate keys. Compiling to the resolved AST and
-/// using `DixConverter::to_json` reconstructs proper nesting with no
-/// synthetic-key leakage, and also picks up the file's real `@ENUMS` for
-/// enum-value resolution.
+/// FIX (2026-06-29): this used to call `DixConverter::to_json`, which
+/// reconstructs nested JSON objects from dotted `@DATA` paths. That broke
+/// every multi-segment dotted path (e.g. "crates.midn-ecs",
+/// "crates.midn-ecs.src") for any downstream consumer expecting flat
+/// dotted-string keys (e.g. mdix-scaffold's generate_structure.py) — and
+/// silently dropped data outright whenever one declared path was a prefix
+/// of another (a GroupArray at "crates.midn-ecs" followed by a deeper one
+/// at "crates.midn-ecs.src": the already-inserted Array at "midn-ecs"
+/// can't be converted into an Object to hold "src", so the `if let
+/// Value::Object(..)` match silently fails and "src" is dropped with no
+/// error). `to_json_flat` reuses the same resolved AST and the
+/// already-correct `to_hashmap` flattening (also used by
+/// mdix-python's `MdixDatabase::to_json`) — every dotted path is its own
+/// independent top-level key, never nested, so no path can collide with
+/// another. Still benefits from `compile_to_resolved_ast`'s real `@ENUMS`
+/// resolution.
 fn mdix_to_json(path: &Path, pretty: bool) -> Result<String, CliError> {
     let loader = DixLoader::new();
     let ast = loader
@@ -151,7 +160,7 @@ fn mdix_to_json(path: &Path, pretty: bool) -> Result<String, CliError> {
         .map_err(CliError::ConversionError)?;
 
     let converter = DixConverter::new();
-    converter.to_json(&ast, pretty).map_err(CliError::ConversionError)
+    converter.to_json_flat(&ast, pretty).map_err(CliError::ConversionError)
 }
 
 /// FIX: previously hand-rolled its own JSON -> DixValue conversion
@@ -230,4 +239,4 @@ fn toml_to_json(path: &Path, pretty: bool) -> Result<String, CliError> {
         .map_err(CliError::ConversionError)?;
 
     converter.to_json(&ast, pretty).map_err(CliError::ConversionError)
-        }
+    }

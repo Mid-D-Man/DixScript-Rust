@@ -1,3 +1,4 @@
+# mdix-python/python/midmanstudio/mdix/__init__.py
 """
 MidManStudio.Mdix — DixScript (.mdix) runtime for Python.
 
@@ -28,6 +29,47 @@ Quick start::
           ])
           .to_database())
 
+Schema validation::
+
+    from midmanstudio.mdix import MdixSchema
+
+    schema = (MdixSchema()
+        .require_string("app_name")
+        .require_int("port")
+        .require_long("created_at_ms")
+        .optional_bool("debug"))
+    report = db.validate_schema(schema)
+    if not report.is_valid:
+        print(report)
+
+Hot reload::
+
+    from midmanstudio.mdix import MdixWatcher
+
+    watcher = MdixWatcher("config.mdix")
+    # in your update loop / tick / timer callback:
+    db, changed = watcher.check()
+    if changed:
+        apply_new_config(db)
+
+Merging — real AST-level merge (weighted priority, conflict reporting),
+not a JSON round-trip::
+
+    from midmanstudio.mdix import merge_files, merge_files_weighted
+
+    db, conflicts = merge_files(["base.mdix", "patch.mdix"])
+    db, conflicts = merge_files_weighted(
+        [("base.mdix", 1.0), ("patch.mdix", 0.8)], strategy="weighted")
+
+    # or merge two already-loaded databases:
+    merged, conflicts = primary.merge_with(secondary, strategy="primary_wins")
+
+Table-based serialization — the dynamic-language equivalent of this
+package's reflection-based object mapping in C#::
+
+    config = db.to_table()                       # dict / list
+    db2    = MdixDatabase.from_table(config)      # round trip
+
 ML extras (requires numpy / pandas)::
 
     from midmanstudio.mdix.ml import MdixNumpy, MdixMLConfig, MdixDataFrame, MdixTensor
@@ -40,6 +82,11 @@ from ._mdix import (  # type: ignore[import]
     MdixResult,
     MdixDatabase,
     MdixBuilder,
+    MdixSchema,
+    MdixValidationReport,
+    MdixWatcher,
+    merge_files,
+    merge_files_weighted,
     __version__,
 )
 
@@ -48,5 +95,10 @@ __all__ = [
     "MdixResult",
     "MdixDatabase",
     "MdixBuilder",
+    "MdixSchema",
+    "MdixValidationReport",
+    "MdixWatcher",
+    "merge_files",
+    "merge_files_weighted",
     "__version__",
 ]

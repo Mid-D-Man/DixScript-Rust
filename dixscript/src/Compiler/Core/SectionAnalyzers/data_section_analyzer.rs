@@ -33,7 +33,7 @@ const ERROR_INVALID_BLOB_CONTENT:       &str = "INVALID_BLOB_CONTENT";
 const ERROR_INVALID_REGEX_PATTERN:      &str = "INVALID_REGEX_PATTERN";
 const ERROR_DUPLICATE_FLAT_PROPERTY:    &str = "DUPLICATE_FLAT_PROPERTY";
 const ERROR_DUPLICATE_TABLE_PROPERTY_NAME: &str = "DUPLICATE_TABLE_PROPERTY_NAME";
-const MAX_NESTING_DEPTH:  usize = 5;
+const MAX_NESTING_DEPTH:  usize = 12;//incremnted no ones gonna need more than this
 const MAX_TUPLE_ELEMENTS: usize = 6;
 
 lazy_static! {

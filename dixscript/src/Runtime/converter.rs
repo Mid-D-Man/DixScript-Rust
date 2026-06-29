@@ -328,7 +328,35 @@ impl DixConverter {
                 .map_err(|e| format!("JSON serialization failed: {}", e))
         }
     }
-
+/// Like `to_json`, but serializes the *flat* hashmap representation
+    /// (see `to_hashmap`) instead of reconstructing nested JSON objects from
+    /// dotted `TablePath` segments.
+    ///
+    /// Every dotted path becomes its own literal top-level JSON key —
+    /// `"crates.midn-ecs"` and `"crates.midn-ecs.src"` are two independent
+    /// keys, never nested into each other. This is the format
+    /// mdix-scaffold's generate_structure.py (key_to_dir / collect_dir_groups)
+    /// expects, and the one `to_json`'s nested form can't safely produce
+    /// whenever one dotted path is a prefix of another: a GroupArray at
+    /// "crates.midn-ecs" followed by a deeper one at "crates.midn-ecs.src"
+    /// collides in the nested form (the already-inserted Array can't be
+    /// turned into an Object to hold "src"), and the deeper one is silently
+    /// dropped.
+    pub fn to_json_flat(&self, ast: &DixScript, pretty: bool) -> Result<String, String> {
+        let flat = self.to_hashmap(ast);
+        let mut map = serde_json::Map::with_capacity(flat.len());
+        for (key, value) in flat {
+            map.insert(key, self.dix_value_to_json_value(&value));
+        }
+        let json_value = serde_json::Value::Object(map);
+        if pretty {
+            serde_json::to_string_pretty(&json_value)
+                .map_err(|e| format!("JSON serialization failed: {}", e))
+        } else {
+            serde_json::to_string(&json_value)
+                .map_err(|e| format!("JSON serialization failed: {}", e))
+        }
+    }
     fn ast_to_json_value(&self, ast: &DixScript) -> Result<serde_json::Value, String> {
         let enums = self.extract_enums(ast);
         let mut root = serde_json::Map::new();

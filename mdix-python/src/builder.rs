@@ -1,3 +1,4 @@
+// mdix-python/src/builder.rs
 //! MdixBuilder — programmatic .mdix builder with two-tier ordering enforcement.
 
 use pyo3::prelude::*;
@@ -9,16 +10,19 @@ use crate::result::MdixResult;
 
 // ── Internal storage types ─────────────────────────────────────────────────
 
+#[derive(Clone)]
 struct EnumDef {
     name:   String,
     fields: Vec<(String, Option<i32>)>,
 }
 
+#[derive(Clone)]
 struct TableEntry {
     path:       String,
     properties: Vec<(String, String)>,
 }
 
+#[derive(Clone)]
 struct GroupEntry {
     path:  String,
     items: Vec<String>,
@@ -204,6 +208,66 @@ impl MdixBuilder {
         )
     }
 
+    // ── Pickle support ───────────────────────────────────────────────────────
+    //
+    // MdixBuilder holds plain Rust collections (no live handle/pointer like
+    // MdixDatabase does), so it pickles by snapshotting those collections
+    // directly rather than round-tripping through serialized .mdix text —
+    // there's no "parse this text back into a Builder" constructor (only
+    // Builder -> text -> Database, one direction), so text isn't a usable
+    // intermediate form here the way it is for MdixDatabase below.
+
+    #[allow(clippy::type_complexity)]
+    fn __getstate__(&self) -> (
+        Vec<(String, String)>,
+        Vec<(String, Vec<(String, Option<i32>)>)>,
+        Vec<(String, String)>,
+        Vec<(String, Vec<(String, String)>)>,
+        Vec<(String, Vec<String>)>,
+        bool,
+    ) {
+        (
+            self.config.clone(),
+            self.enums.iter().map(|e| (e.name.clone(), e.fields.clone())).collect(),
+            self.flat.clone(),
+            self.tables.iter().map(|t| (t.path.clone(), t.properties.clone())).collect(),
+            self.arrays.iter().map(|a| (a.path.clone(), a.items.clone())).collect(),
+            self.has_grouped,
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __setstate__(&mut self, state: (
+        Vec<(String, String)>,
+        Vec<(String, Vec<(String, Option<i32>)>)>,
+        Vec<(String, String)>,
+        Vec<(String, Vec<(String, String)>)>,
+        Vec<(String, Vec<String>)>,
+        bool,
+    )) {
+        let (config, enums, flat, tables, arrays, has_grouped) = state;
+        self.config = config;
+        self.enums = enums.into_iter().map(|(name, fields)| EnumDef { name, fields }).collect();
+        self.flat = flat;
+        self.tables = tables.into_iter().map(|(path, properties)| TableEntry { path, properties }).collect();
+        self.arrays = arrays.into_iter().map(|(path, items)| GroupEntry { path, items }).collect();
+        self.has_grouped = has_grouped;
+    }
+
+    /// Enables `pickle.dumps(builder)` / `pickle.loads(data)`, and
+    /// transitively anything built on pickle — `multiprocessing`,
+    /// `copy.deepcopy`, `joblib` caching, etc. Returns
+    /// `(MdixBuilder, (), state)`: pickle calls `MdixBuilder()` (the
+    /// existing no-arg constructor) to get a fresh empty instance, then
+    /// `__setstate__(state)` to populate it — no special construction
+    /// path needed beyond what already exists.
+    fn __reduce__(&self, py: Python<'_>) -> PyResult<(PyObject, PyObject, PyObject)> {
+        let cls = py.get_type_bound::<MdixBuilder>().into_py(py);
+        let args = PyTuple::empty_bound(py).into_py(py);
+        let state = self.__getstate__().into_py(py);
+        Ok((cls, args, state))
+    }
+
     // ── @CONFIG ────────────────────────────────────────────────────────────
 
     /// Add a key to the `@CONFIG` section.
@@ -294,6 +358,18 @@ impl MdixBuilder {
     fn set_int(mut slf: PyRefMut<'_, Self>, path: &str, value: i32) -> PyResult<Py<Self>> {
         slf.check_flat_allowed(path)?;
         slf.flat.push((path.to_string(), value.to_string()));
+        Ok(slf.into())
+    }
+
+    /// Add a 64-bit integer flat property, explicitly typed as Long.
+    ///
+    /// Values that overflow i32 are auto-promoted to Long by the parser
+    /// regardless, but a small value (e.g. `5`) would otherwise re-parse
+    /// as Int — the `L` suffix pins the type to Long no matter the
+    /// magnitude, matching DixScript's own `123L` literal syntax.
+    fn set_long(mut slf: PyRefMut<'_, Self>, path: &str, value: i64) -> PyResult<Py<Self>> {
+        slf.check_flat_allowed(path)?;
+        slf.flat.push((path.to_string(), format!("{}L", value)));
         Ok(slf.into())
     }
 
@@ -620,4 +696,4 @@ fn _with_raw_table_properties(
         self.arrays.clear();
         self.has_grouped = false;
     }
-                 }
+                    }

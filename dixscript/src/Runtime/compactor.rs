@@ -106,7 +106,7 @@ fn is_grouped_entry_separator(c: char) -> bool {
 fn renders_empty(token: &Token) -> bool {
     matches!(
         token.token_type,
-        TokenType::Comment(_) | TokenType::EndOfFile | TokenType::ParseContext(_)
+        TokenType::Comment(_) | TokenType::EndOfFile
     )
 }
 
@@ -187,7 +187,7 @@ fn is_next_grouped_entry(tokens: &[Token], from: usize) -> bool {
             // ControlFlowColon is also handled defensively in case the
             // tokenizer uses that variant for colons outside control-flow
             // keywords in some contexts.
-            TokenType::Symbol(':') | TokenType::ControlFlowColon => return true,
+            TokenType::Symbol(':')  => return true,
 
             // Dot — must be followed by another Identifier segment.
             TokenType::Symbol('.') => {
@@ -271,7 +271,7 @@ fn render_token(token: &Token) -> String {
         TokenType::SectionSecurity   => "@SECURITY".to_string(),
 
         // No output in minified form.
-        TokenType::Comment(_) | TokenType::EndOfFile | TokenType::ParseContext(_) => {
+        TokenType::Comment(_) | TokenType::EndOfFile  => {
             String::new()
         }
 

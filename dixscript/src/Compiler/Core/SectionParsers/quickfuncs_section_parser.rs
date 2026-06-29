@@ -3083,12 +3083,7 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
 
     /// Consume a `->`  switch-case arrow (distinct from `=>` scope arrow).
     fn match_arrow(&mut self) -> bool {
-        if let TokenType::MultiCharSymbol(ms) = &self.current().token_type {
-            if *ms == "->" {
-                self.advance();
-                return true;
-            }
-        }
+
         if matches!(self.current().token_type, TokenType::SwitchCase) {
             self.advance();
             return true;
@@ -3108,10 +3103,7 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
 
     /// Check for `=>` scope/lambda arrow without consuming.
     fn check_arrow(&self) -> bool {
-        if let TokenType::MultiCharSymbol(ms) = &self.current().token_type {
-            // ms: &&'static str — compare directly
-            return *ms == "=>";
-        }
+
         matches!(self.current().token_type, TokenType::Arrow)
     }
 

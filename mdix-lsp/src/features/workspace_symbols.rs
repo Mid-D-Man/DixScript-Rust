@@ -1,4 +1,4 @@
-// mdix-lsp/src/features/workspace_symbols.rs
+
 //! Workspace symbol provider — powers Cmd+T / Ctrl+T symbol search.
 //!
 //! Searches all indexed documents for symbols matching `query` using

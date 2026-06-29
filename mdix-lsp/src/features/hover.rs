@@ -1,4 +1,4 @@
-// mdix-lsp/src/features/hover.rs
+
 //! Hover provider.
 //!
 //! ## Changes from previous version

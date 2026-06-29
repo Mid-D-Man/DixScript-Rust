@@ -1,4 +1,4 @@
-// mdix-lsp/src/features/signature_help.rs
+
 //! Signature-help provider — shows parameter hints when inside a function call.
 //!
 //! Triggered by `(` and `,`. Scans backwards through the token stream from
@@ -203,7 +203,6 @@ fn scan_backwards_for_func_name(tokens: &[Token], open_paren_idx: usize) -> Opti
 
             // Keywords / DataType tokens / commas inside `<…>` annotations — skip
             TokenType::Keyword(_)
-            | TokenType::DataType(_)
             | TokenType::Symbol(',')
                 if angle_depth > 0 =>
             {

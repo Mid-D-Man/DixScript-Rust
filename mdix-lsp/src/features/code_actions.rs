@@ -1,4 +1,4 @@
-// mdix-lsp/src/features/code_actions.rs
+
 //! Code action / quick-fix provider.
 //!
 //! ## Actions provided

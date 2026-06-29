@@ -132,8 +132,7 @@ impl TypeSystemManager {
             token_type,
             TokenType::Integer(_) | TokenType::Float(_) | TokenType::Double(_) |
             TokenType::String(_) | TokenType::StringSingle(_) | TokenType::Bool(_) |
-            TokenType::HexColor(_) | TokenType::Date(_) | TokenType::Timestamp(_) |
-            TokenType::HexLiteral(_)
+            TokenType::HexColor(_) | TokenType::Date(_) | TokenType::Timestamp(_)
         )
     }
 

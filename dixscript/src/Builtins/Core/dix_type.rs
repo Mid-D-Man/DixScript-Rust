@@ -1,4 +1,4 @@
-// dixscript/src/Builtins/Core/dix_type.rs
+
 use crate::Compiler::AST::DataType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

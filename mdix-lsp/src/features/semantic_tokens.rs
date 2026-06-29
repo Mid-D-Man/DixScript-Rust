@@ -1,4 +1,4 @@
-// mdix-lsp/src/features/semantic_tokens.rs
+
 //!
 //! ## Token coloring scheme
 //! - `TT_NAMESPACE`   — static object receivers (Math, DateTime, …) & import aliases
@@ -400,7 +400,7 @@ impl<'a> ClassifierState<'a> {
         if token.section == SectionId::QuickFuncs {
             let next_is_colon = tokens.get(index + 1)
                 .map(|t| matches!(t.token_type,
-                    TokenType::ControlFlowColon | TokenType::Symbol(':')))
+                    TokenType::Symbol(':')))
                 .unwrap_or(false);
             if next_is_colon {
                 return (TT_KEYWORD, 0);
@@ -691,7 +691,6 @@ fn classify(
         // Language keywords
         TokenType::Keyword(_)            => Some((TT_KEYWORD, 0)),
         TokenType::Bool(_)               => Some((TT_KEYWORD, MOD_READONLY)),
-        TokenType::DataType(_)           => Some((TT_TYPE, 0)),
 
         // String literals
         TokenType::String(_)
@@ -708,7 +707,6 @@ fn classify(
         | TokenType::Float(_)
         | TokenType::Double(_)
         | TokenType::ScientificNotation(_) => Some((TT_NUMBER, 0)),
-        TokenType::HexLiteral(_)           => Some((TT_NUMBER, 0)),
         TokenType::HexColor(_)             => Some((TT_NUMBER, MOD_READONLY)),
 
         // Operators
@@ -716,59 +714,29 @@ fn classify(
         | TokenType::ArithmeticAssignOp(_)
         | TokenType::ComparisonOp(_)
         | TokenType::LogicalOp(_)
-        | TokenType::BitwiseOp(_)
-        | TokenType::MultiCharSymbol(_)  => Some((TT_OPERATOR, 0)),
+        | TokenType::BitwiseOp(_)  => Some((TT_OPERATOR, 0)),
 
         TokenType::Arrow
         | TokenType::SwitchCase
-        | TokenType::DoubleColon
-        | TokenType::ControlFlowColon    => Some((TT_OPERATOR, 0)),
+        | TokenType::DoubleColon   => Some((TT_OPERATOR, 0)),
 
         TokenType::Symbol('~')           => Some((TT_OPERATOR, 0)),
 
         // Comments
         TokenType::Comment(_)            => Some((TT_COMMENT, 0)),
 
-        // Pre-analysed enum access token (spans full EnumName.FIELD)
-        TokenType::EnumAccess { .. }     => Some((TT_ENUM_MEMBER, 0)),
-
-        // TablePath tokens from post-processing — consistent with our decorator color
-        TokenType::TablePath(_)          => Some((TT_DECORATOR, 0)),
-
-        // Pre-analysed static/Dix calls
-        TokenType::StaticFunction { .. } if token.section == SectionId::Dlm
-                                         => Some((TT_MACRO, 0)),
-        TokenType::StaticFunction { .. } => Some((TT_FUNCTION, MOD_STATIC)),
-        TokenType::DixFunction(_)        => Some((TT_FUNCTION, MOD_STATIC)),
-        TokenType::BuiltinMethod(_)      => Some((TT_METHOD, 0)),
 
         // Prefixed constructors
         TokenType::RegexConstructor(_)   => Some((TT_REGEXP, 0)),
         TokenType::BlobConstructor(_)
-        | TokenType::TupleConstructor(_)
-        | TokenType::PrefixedConstructor { .. } => Some((TT_KEYWORD, 0)),
+        | TokenType::TupleConstructor(_) => Some((TT_KEYWORD, 0)),
 
-        // Object/config access paths
-        TokenType::ObjectAccess(_) => {
-            if token.section == SectionId::Dlm {
-                Some((TT_MACRO, 0))
-            } else {
-                Some((TT_PROPERTY, 0))
-            }
-        }
 
         // Plain identifiers: position-set lookup then stateful fallback
         TokenType::Identifier(_) => Some(state.classify_identifier(token, tokens, index)),
 
-        // Scope declarations
-        TokenType::ScopeDeclaration(_) => Some((TT_TYPE, 0)),
-
-        // Config access paths
-        TokenType::ConfigAccess(_)     => Some((TT_PROPERTY, 0)),
-
         // Structural / ignored
-        TokenType::ParseContext(_)
-        | TokenType::Symbol(_)
+        TokenType::Symbol(_)
         | TokenType::EndOfFile
         | TokenType::Error(_)          => None,
     }
@@ -796,14 +764,10 @@ fn token_length(token: &Token) -> usize {
         TokenType::DoubleColon            =>  2,
         TokenType::Arrow                  =>  2,
         TokenType::SwitchCase             =>  2,
-        TokenType::ControlFlowColon       =>  1,
         TokenType::Bool(b)                => if *b { 4 } else { 5 },
         TokenType::BlobConstructor(_)     =>  2,
         TokenType::RegexConstructor(_)    =>  2,
         TokenType::TupleConstructor(_)    =>  2,
-        TokenType::EnumAccess { enum_name, value } => enum_name.len() + 1 + value.len(),
-        TokenType::TablePath(s)           => s.len(),
-        TokenType::ObjectAccess(parts)    => parts.join(".").len(),
         _ => {
             let v = token.get_token_value();
             if v.is_empty() { 1 } else { v.len() }

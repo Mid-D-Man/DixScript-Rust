@@ -1,4 +1,4 @@
-// mdix-lsp/src/features/folding.rs
+
 //!
 //! Fold regions:
 //! 1. Outer section fold for every @SECTION(...) — paren-depth tracking

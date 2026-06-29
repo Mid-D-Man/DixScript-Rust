@@ -396,10 +396,6 @@ impl<'a> SecuritySectionParser<'a> {
                 value: *b,
                 position: pos,
             }),
-            TokenType::HexLiteral(h) => Some(Value::Integer {
-                value: *h,
-                position: pos,
-            }),
             TokenType::HexColor(h) => Some(Value::HexColor {
                 value: h.clone(),
                 position: pos,

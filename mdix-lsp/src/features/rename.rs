@@ -1,4 +1,4 @@
-// mdix-lsp/src/features/rename.rs
+
 //! Rename provider.
 //!
 //! Implements prepareRename (validates the symbol under the cursor can be renamed)

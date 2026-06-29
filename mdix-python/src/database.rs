@@ -1,3 +1,4 @@
+// mdix-python/src/database.rs
 //! MdixDatabase — loaded DixScript database with raising and railway access.
 
 use pyo3::prelude::*;
@@ -28,6 +29,21 @@ impl MdixDatabase {
 
     fn data(&self) -> PyResult<&DixData> {
         self.inner.as_ref().ok_or_else(|| disposed_err("MdixDatabase"))
+    }
+
+    /// Re-serializes this database back to a .mdix source string.
+    /// Plain-Rust helper (not a #[pymethods] fn) shared by the `to_mdix`
+    /// pymethod and by `merge::merge_with`, which needs to round-trip two
+    /// in-memory databases through source text to merge them at the AST
+    /// level.
+    pub(crate) fn to_mdix_string(&self) -> PyResult<String> {
+        let data    = self.data()?;
+        let entries = data.to_hashmap();
+        let conv    = DixConverter::new();
+        let ast     = conv.from_hashmap(entries)
+            .map_err(|e| runtime_err("to_mdix:ast", e))?;
+        conv.to_mdix(&ast, Some(&DixFormatOptions::pretty()))
+            .map_err(|e| runtime_err("to_mdix:serialize", e))
     }
 }
 
@@ -72,6 +88,25 @@ impl MdixDatabase {
             Some(d) => format!("MdixDatabase(entries={})", d.entry_count()),
             None    => "MdixDatabase(freed)".to_string(),
         }
+    }
+
+    // ── Pickle support ───────────────────────────────────────────────────────
+    //
+    // Enables `pickle.dumps(db)` / `pickle.loads(data)`, and transitively
+    // anything built on pickle — `multiprocessing.Pool`, `copy.deepcopy`,
+    // `joblib` caching, etc. Returns `(MdixDatabase.load_str, (source,))`:
+    // pickle calls `MdixDatabase.load_str(source)` to reconstruct, reusing
+    // the existing, already-tested loader path instead of a separate
+    // `__new__`/`__setstate__` construction route. `DixData` (the live
+    // Rust handle this class wraps) isn't itself serializable, so the
+    // .mdix source text — which `to_mdix_string()` already produces for
+    // the `to_mdix()` method — is the natural thing to pickle instead.
+    fn __reduce__(&self, py: Python<'_>) -> PyResult<(PyObject, PyObject)> {
+        let cls = py.get_type_bound::<MdixDatabase>();
+        let load_str = cls.getattr("load_str")?.into_py(py);
+        let src = self.to_mdix_string()?;
+        let args: PyObject = (src,).into_py(py);
+        Ok((load_str, args))
     }
 
     // ── Loading — raising ──────────────────────────────────────────────────
@@ -205,6 +240,7 @@ impl MdixDatabase {
             Some(DixValue::Null)         => "null",
             Some(DixValue::Bool(_))      => "bool",
             Some(DixValue::Int(_))       => "int",
+            Some(DixValue::Long(_))      => "long",
             Some(DixValue::Float(_))     => "float",
             Some(DixValue::Double(_))    => "double",
             Some(DixValue::String(_))    => "string",
@@ -247,30 +283,81 @@ impl MdixDatabase {
         }
     }
 
+    /// Strict: only succeeds on an actual Int (or Enum ordinal) value —
+    /// does NOT silently coerce from Long/Float/Double. Matches the
+    /// widening rule dixscript's schema.rs type_matches() uses, not the
+    /// looser DixData::get::<T>() convenience used elsewhere in this
+    /// file, which would happily truncate a Float/Double into this with
+    /// no error.
     #[pyo3(signature = (path, default = None))]
     fn get_int(&self, path: &str, default: Option<i32>) -> PyResult<i32> {
         if path.is_empty() { return Err(invalid_path_err(path)); }
-        match self.data()?.get::<i32>(path) {
-            Ok(v)  => Ok(v),
-            Err(e) => match default {
+        match self.data()?.get_value(path) {
+            Some(DixValue::Int(v))             => Ok(*v),
+            Some(DixValue::Enum { value, .. }) => Ok(*value),
+            Some(other) => match default {
                 Some(d) => Ok(d),
-                None    => Err(runtime_err("get_int", e)),
+                None => Err(runtime_err("get_int", format!(
+                    "'{}' is {}, not int", path, other.type_name()
+                ))),
+            },
+            None => match default {
+                Some(d) => Ok(d),
+                None    => Err(runtime_err("get_int", format!("path not found: '{}'", path))),
             },
         }
     }
 
+    /// Accepts Long (exact) or Int (widened — i32 -> i64 is always
+    /// lossless). Rejects Float/Double: those are different numeric
+    /// families, and silently truncating one into a Long is exactly
+    /// the kind of bug this method exists to prevent.
+    #[pyo3(signature = (path, default = None))]
+    fn get_long(&self, path: &str, default: Option<i64>) -> PyResult<i64> {
+        if path.is_empty() { return Err(invalid_path_err(path)); }
+        match self.data()?.get_value(path) {
+            Some(DixValue::Long(v)) => Ok(*v),
+            Some(DixValue::Int(v))  => Ok(*v as i64),
+            Some(other) => match default {
+                Some(d) => Ok(d),
+                None => Err(runtime_err("get_long", format!(
+                    "'{}' is {}, not long", path, other.type_name()
+                ))),
+            },
+            None => match default {
+                Some(d) => Ok(d),
+                None    => Err(runtime_err("get_long", format!("path not found: '{}'", path))),
+            },
+        }
+    }
+
+    /// Strict: rejects Double, Int, and Long. Was previously implemented
+    /// via the lenient f64 path then narrowed to f32, which silently
+    /// accepted (and truncated) Int/Long/Double — that defeats the point
+    /// of having a typed getter at all.
     #[pyo3(signature = (path, default = None))]
     fn get_float(&self, path: &str, default: Option<f32>) -> PyResult<f32> {
         if path.is_empty() { return Err(invalid_path_err(path)); }
-        match self.data()?.get::<f64>(path).map(|v| v as f32) {
-            Ok(v)  => Ok(v),
-            Err(e) => match default {
+        match self.data()?.get_value(path) {
+            Some(DixValue::Float(v)) => Ok(*v),
+            Some(other) => match default {
                 Some(d) => Ok(d),
-                None    => Err(runtime_err("get_float", e)),
+                None => Err(runtime_err("get_float", format!(
+                    "'{}' is {}, not float", path, other.type_name()
+                ))),
+            },
+            None => match default {
+                Some(d) => Ok(d),
+                None    => Err(runtime_err("get_float", format!("path not found: '{}'", path))),
             },
         }
     }
 
+    /// Widened from Float/Int/Long if needed — all three are always
+    /// exact when promoted to f64 at the magnitudes DixScript configs
+    /// realistically use. Matches schema.rs's own Double widening rule
+    /// exactly, so this is left on the lenient DixData::get::<T>() path
+    /// rather than rewritten like get_int/get_long/get_float above.
     #[pyo3(signature = (path, default = None))]
     fn get_double(&self, path: &str, default: Option<f64>) -> PyResult<f64> {
         if path.is_empty() { return Err(invalid_path_err(path)); }
@@ -341,6 +428,13 @@ impl MdixDatabase {
         }
     }
 
+    fn try_get_long(&self, py: Python<'_>, path: &str) -> MdixResult {
+        match self.get_long(path, None) {
+            Ok(v)  => MdixResult::ok(py, v),
+            Err(e) => MdixResult::from_py_err(e),
+        }
+    }
+
     fn try_get_float(&self, py: Python<'_>, path: &str) -> MdixResult {
         match self.get_float(path, None) {
             Ok(v)  => MdixResult::ok(py, v),
@@ -398,12 +492,73 @@ impl MdixDatabase {
     }
 
     fn to_mdix(&self) -> PyResult<String> {
-        let data    = self.data()?;
-        let entries = data.to_hashmap();
-        let conv    = DixConverter::new();
-        let ast     = conv.from_hashmap(entries)
-            .map_err(|e| runtime_err("to_mdix:ast", e))?;
-        conv.to_mdix(&ast, Some(&DixFormatOptions::pretty()))
-            .map_err(|e| runtime_err("to_mdix:serialize", e))
+        self.to_mdix_string()
+    }
+
+    /// Convert the *entire* database into a native Python dict/list
+    /// structure — the dynamic-language equivalent of MidManStudio.Mdix.Core's
+    /// reflection-based object serializer in C#. Implemented by reusing
+    /// to_json() and handing the string to Python's own `json.loads`,
+    /// rather than hand-writing a second recursive DixValue -> PyObject
+    /// converter that would have to be kept in sync with the JSON one.
+    ///
+    /// Pairs with `MdixDatabase.from_table(table)` for a full round trip.
+    fn to_table(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let json_str = self.to_json(true)?;
+        let json_module = py.import_bound("json")
+            .map_err(|e| runtime_err("to_table", format!("failed to import json module: {}", e)))?;
+        let obj = json_module.call_method1("loads", (json_str,))
+            .map_err(|e| runtime_err("to_table", format!("json.loads failed: {}", e)))?;
+        Ok(obj.unbind())
+    }
+
+    /// Build a database directly from a dict/list structure — the reverse
+    /// of to_table(). Routes through json.dumps() + from_json() rather
+    /// than a hand-rolled dict walker, for the same reason to_table()
+    /// routes through json.loads(): one well-tested conversion path
+    /// instead of two that have to agree with each other.
+    ///
+    /// ```python
+    /// db = MdixDatabase.from_table({"app_name": "MyGame", "port": 8080})
+    /// ```
+    #[staticmethod]
+    fn from_table(py: Python<'_>, table: &Bound<'_, PyAny>) -> PyResult<MdixDatabase> {
+        let json_module = py.import_bound("json")
+            .map_err(|e| runtime_err("from_table", format!("failed to import json module: {}", e)))?;
+        let json_str: String = json_module.call_method1("dumps", (table,))
+            .map_err(|e| runtime_err("from_table", format!("json.dumps failed: {}", e)))?
+            .extract()
+            .map_err(|e| runtime_err("from_table", format!("json.dumps did not return a string: {}", e)))?;
+        MdixDatabase::from_json(&json_str)
+    }
+
+    /// Validates this database against a schema built with `MdixSchema()`.
+    /// Returns an `MdixValidationReport` — see schema.rs. Deliberately
+    /// calls `SchemaBuilder::validate(&self, ..)` directly rather than
+    /// `DixData::validate_schema(self, ..)`, since the latter takes the
+    /// schema by value and PyO3 only hands us a borrowed reference here.
+    fn validate_schema(&self, schema: &crate::schema::MdixSchema) -> PyResult<crate::schema::MdixValidationReport> {
+        let data = self.data()?;
+        let report = schema.as_builder()?.validate(data);
+        Ok(crate::schema::MdixValidationReport::new(report))
+    }
+
+    /// Merges this database with `other`. Returns `(database, conflicts)`
+    /// — see merge.rs for strategy names and the conflict dict shape.
+    /// Neither `self` nor `other` is mutated.
+    ///
+    /// `temp_dir` overrides where the round-trip temp files get written —
+    /// pass an app-writable cache directory on sandboxed targets where
+    /// the default system temp dir may not be writable. See merge.rs.
+    #[pyo3(signature = (other, strategy = None, array_strategy = None, temp_dir = None))]
+    fn merge_with(
+        &self,
+        py: Python<'_>,
+        other: &MdixDatabase,
+        strategy: Option<String>,
+        array_strategy: Option<String>,
+        temp_dir: Option<String>,
+    ) -> PyResult<(MdixDatabase, Vec<PyObject>)> {
+        crate::merge::merge_with(py, self, other, strategy, array_strategy, temp_dir)
     }
 }

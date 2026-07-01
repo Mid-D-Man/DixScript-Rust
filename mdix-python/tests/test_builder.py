@@ -115,6 +115,53 @@ class TestFlatValueTypes:
         assert "port" in src
 
 
+class TestDateTimestampBlobRegex:
+    """set_date / set_timestamp / set_blob / set_regex had zero coverage.
+
+    Note: unlike set_string, the date/timestamp setters push the raw value
+    string unquoted — DixScript's lexer treats a bare digit-dash sequence
+    as a Date literal (and digit-dash...T... as Timestamp), so the value
+    must already be a valid bare literal, not a quoted string.
+    """
+
+    def test_set_date_appears_in_output(self):
+        src = MdixBuilder().set_date("created", "2024-01-15").serialize()
+        assert "2024-01-15" in src
+        assert "created" in src
+
+    def test_set_date_readable_back(self):
+        db = MdixBuilder().set_date("created", "2024-01-15").to_database()
+        assert db.get_type("created") == "date"
+        db.close()
+
+    def test_set_timestamp_appears_in_output(self):
+        src = MdixBuilder().set_timestamp("seen_at", "2024-01-15T10:30:00Z").serialize()
+        assert "2024-01-15T10:30:00Z" in src
+
+    def test_set_timestamp_readable_back(self):
+        db = MdixBuilder().set_timestamp("seen_at", "2024-01-15T10:30:00Z").to_database()
+        assert db.get_type("seen_at") == "timestamp"
+        db.close()
+
+    def test_set_blob_wraps_constructor_syntax(self):
+        src = MdixBuilder().set_blob("payload", "aGVsbG8=").serialize()
+        assert 'b:("aGVsbG8=")' in src
+
+    def test_set_blob_readable_back(self):
+        db = MdixBuilder().set_blob("payload", "aGVsbG8=").to_database()
+        assert db.get_type("payload") == "blob"
+        db.close()
+
+    def test_set_regex_wraps_constructor_syntax(self):
+        src = MdixBuilder().set_regex("pattern", "^[a-z]+$").serialize()
+        assert 'r:("^[a-z]+$")' in src
+
+    def test_set_regex_readable_back(self):
+        db = MdixBuilder().set_regex("pattern", "^[a-z]+$").to_database()
+        assert db.get_type("pattern") == "regex"
+        db.close()
+
+
 class TestTier2GroupedData:
 
     def test_with_table_properties_dict(self):

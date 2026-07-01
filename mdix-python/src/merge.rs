@@ -1,260 +1,242 @@
-// mdix-python/src/merge.rs
-//! Merge support for Python — thin bindings over dixscript::Runtime::merge.
+//! MdixMerger — Python binding for AST-level multi-source merging.
 //!
-//! Same rationale as mdix-lua's merge.rs: this does NOT reimplement
-//! merging the way MidManStudio.Mdix.Core's MdixMerge.cs has to (JSON
-//! round-trip + a hand-written deep-merge in C#, with zero conflict
-//! reporting) — that approach exists there only because C# can only
-//! reach DixScript through the C ABI. mdix-python links directly against
-//! the `dixscript` crate, so it gets the *real* AST-level merger for
-//! free: weighted-priority resolution, per-source labels, array merge
-//! strategies, and a full conflict report. Long, Float, Double, enums,
-//! and every other DixScript type survive the merge exactly as-is — no
-//! information loss through JSON flattening.
-//!
-//! Exposed as module-level functions (registered in lib.rs), not as
-//! `MdixDatabase` methods, because merging operates over files/ASTs
-//! rather than already-resolved `DixData`:
-//!
-//! ```python
-//! from midmanstudio.mdix import merge_files, merge_files_weighted
-//!
-//! db, conflicts = merge_files(["base.mdix", "patch.mdix"])
-//! db, conflicts = merge_files(["base.mdix", "patch.mdix"], strategy="primary_wins")
-//! db, conflicts = merge_files_weighted(
-//!     [("base.mdix", 1.0), ("patch.mdix", 0.8)], strategy="weighted")
-//! ```
-//!
-//! Both return `(database, conflicts)` — `conflicts` is a list of dicts
-//! shaped `{"path": ..., "winning_source": ..., "winning_label": ...}`.
-//!
-//! `MdixDatabase.merge_with(other, strategy, array_strategy, temp_dir)`
-//! merges two already-loaded in-memory databases. `DixData` does not
-//! retain its source AST after resolution, so this round-trips through a
-//! pair of temp files using the same `to_mdix()` serialization the rest
-//! of the API already exposes, then re-parses and merges at the AST level
-//! exactly like `merge_files` does. `temp_dir` defaults to
-//! `std::env::temp_dir()` but can be overridden — see `merge_with`'s doc
-//! comment below for why that matters on sandboxed targets.
-
-use std::path::PathBuf;
+//! Wraps `dixscript::Runtime::merge::{MdixMerger, MdixMergeStrategy,
+//! ArrayMergeStrategy}`. Because the underlying merge produces a `DixData`
+//! (not a raw AST) via `merge_files_weighted`, this binding never needs to
+//! expose `DixScript` AST node types to Python at all — it hands back the
+//! same `MdixDatabase` wrapper every other entry point in this crate uses.
 
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
-use dixscript::Runtime::{
-    ArrayMergeStrategy, DixData, DixLoader, MdixMergeInput, MdixMergeResult,
-    MdixMergeStrategy, MdixMerger,
+use pyo3::types::{PyList, PyTuple};
+use std::io::Write;
+
+use dixscript::Runtime::merge::{
+    ArrayMergeStrategy, MdixMergeStrategy, MdixMerger as CoreMerger,
 };
 
 use crate::database::MdixDatabase;
-use crate::error::{runtime_err, to_py_err};
+use crate::error::to_py_err;
+use crate::result::MdixResult;
 
-// ── Strategy parsing ──────────────────────────────────────────────────────────
+// ── Strategy string parsing ─────────────────────────────────────────────────
 
-fn parse_strategy(s: Option<String>) -> PyResult<MdixMergeStrategy> {
-    match s.as_deref().unwrap_or("weighted") {
-        "weighted"          => Ok(MdixMergeStrategy::WeightedPriority),
+fn parse_merge_strategy(s: &str) -> PyResult<MdixMergeStrategy> {
+    match s {
+        "weighted_priority" => Ok(MdixMergeStrategy::WeightedPriority),
         "primary_wins"      => Ok(MdixMergeStrategy::PrimaryWins),
         "secondary_wins"    => Ok(MdixMergeStrategy::SecondaryWins),
         "throw_on_conflict" => Ok(MdixMergeStrategy::ThrowOnConflict),
         other => Err(to_py_err(format!(
-            "[mdix:merge] unknown strategy '{}' — expected \
-             \"weighted\" | \"primary_wins\" | \"secondary_wins\" | \"throw_on_conflict\"",
+            "[mdix] Unknown merge strategy '{}'. Expected one of: \
+             weighted_priority, primary_wins, secondary_wins, throw_on_conflict.",
             other
         ))),
     }
 }
 
-fn parse_array_strategy(s: Option<String>) -> PyResult<ArrayMergeStrategy> {
-    match s.as_deref().unwrap_or("concat_dedup") {
+fn parse_array_strategy(s: &str) -> PyResult<ArrayMergeStrategy> {
+    match s {
         "replace"      => Ok(ArrayMergeStrategy::Replace),
         "concat"       => Ok(ArrayMergeStrategy::Concat),
         "concat_dedup" => Ok(ArrayMergeStrategy::ConcatDedup),
         other => Err(to_py_err(format!(
-            "[mdix:merge] unknown array_strategy '{}' — expected \
-             \"replace\" | \"concat\" | \"concat_dedup\"",
+            "[mdix] Unknown array merge strategy '{}'. Expected one of: \
+             replace, concat, concat_dedup.",
             other
         ))),
     }
 }
 
-// ── Conflict list ─────────────────────────────────────────────────────────────
+// ── MdixMerger ────────────────────────────────────────────────────────────────
 
-fn conflicts_to_py(py: Python<'_>, result: &MdixMergeResult) -> PyResult<Vec<PyObject>> {
-    let mut out = Vec::with_capacity(result.conflicts.len());
-    for c in &result.conflicts {
-        let d = PyDict::new_bound(py);
-        d.set_item("path", &c.path)?;
-        d.set_item("winning_source", c.winning_source as i64)?;
-        match &c.winning_label {
-            Some(label) => d.set_item("winning_label", label)?,
-            None        => d.set_item("winning_label", py.None())?,
-        }
-        out.push(d.into_py(py));
-    }
-    Ok(out)
-}
-
-// ── Shared merge_all -> (Database, conflicts) ────────────────────────────────
-
-fn merge_all_to_database(
-    py: Python<'_>,
-    sources: Vec<MdixMergeInput>,
-    strategy: MdixMergeStrategy,
+/// Programmatic AST-level merger for two or more `.mdix` sources.
+///
+/// ```python
+/// from midmanstudio.mdix import MdixMerger
+///
+/// db = (MdixMerger()
+///       .with_strategy("weighted_priority")
+///       .with_array_strategy("concat_dedup")
+///       .merge_files_weighted([("base.mdix", 1.0), ("patch.mdix", 0.8)]))
+///
+/// print(db.get_string("app_name"))
+/// ```
+#[pyclass(module = "midmanstudio.mdix")]
+pub struct MdixMerger {
+    strategy:       MdixMergeStrategy,
     array_strategy: ArrayMergeStrategy,
-) -> PyResult<(MdixDatabase, Vec<PyObject>)> {
-    let result = MdixMerger::new()
-        .with_strategy(strategy)
-        .with_array_strategy(array_strategy)
-        .merge_all(sources);
-
-    if !result.is_success {
-        return Err(runtime_err("merge", result.errors.join("; ")));
-    }
-
-    let conflicts = conflicts_to_py(py, &result)?;
-    let data = DixData::from_ast(
-        result.merged_ast,
-        "1.0.0".to_string(),
-        chrono::Utc::now(),
-        false,
-        false,
-        vec![],
-    );
-    Ok((MdixDatabase::from_data_pub(data), conflicts))
 }
 
-// ── Module-level functions (registered from lib.rs) ──────────────────────────
-
-/// `merge_files(paths, strategy=None, array_strategy=None)`
-///
-/// Files are weighted in descending order: the first path gets weight
-/// 1.0, the last gets the lowest weight (weight only matters under the
-/// "weighted" strategy). Returns `(database, conflicts)`.
-#[pyfunction]
-#[pyo3(signature = (paths, strategy = None, array_strategy = None))]
-pub fn merge_files(
-    py: Python<'_>,
-    paths: Vec<String>,
-    strategy: Option<String>,
-    array_strategy: Option<String>,
-) -> PyResult<(MdixDatabase, Vec<PyObject>)> {
-    let strategy       = parse_strategy(strategy)?;
-    let array_strategy = parse_array_strategy(array_strategy)?;
-
-    if paths.is_empty() {
-        return Err(runtime_err("merge_files", "paths list is empty"));
+// ── Non-pymethods helpers — plain impl block (same convention as database.rs) ──
+impl MdixMerger {
+    fn build_core(&self) -> CoreMerger {
+        CoreMerger::new()
+            .with_strategy(self.strategy)
+            .with_array_strategy(self.array_strategy)
     }
-    let loader = DixLoader::new();
-    let len = paths.len();
-    let mut sources = Vec::with_capacity(len);
-    for (i, path) in paths.into_iter().enumerate() {
-        let weight = if len == 1 { 1.0 } else { 1.0 - (i as f64 / (len - 1) as f64) };
-        let ast = loader.compile_to_resolved_ast(&path)
-            .map_err(|e| runtime_err("merge_files", format!("'{}': {}", path, e)))?;
-        sources.push(MdixMergeInput::new(ast).with_weight(weight).with_label(path));
+
+    fn extract_paths(paths: &Bound<'_, PyList>) -> PyResult<Vec<String>> {
+        if paths.is_empty() {
+            return Err(to_py_err("[mdix] merge_files: no paths provided"));
+        }
+        paths.iter().map(|p| p.extract::<String>()).collect()
     }
-    merge_all_to_database(py, sources, strategy, array_strategy)
+
+    fn extract_weighted(paths_and_weights: &Bound<'_, PyList>) -> PyResult<Vec<(String, f64)>> {
+        if paths_and_weights.is_empty() {
+            return Err(to_py_err("[mdix] merge_files_weighted: no paths provided"));
+        }
+        paths_and_weights
+            .iter()
+            .map(|item| {
+                let tuple = item.downcast::<PyTuple>().map_err(|_| {
+                    to_py_err(
+                        "[mdix] merge_files_weighted expects a list of (path, weight) tuples",
+                    )
+                })?;
+                if tuple.len() != 2 {
+                    return Err(to_py_err(
+                        "[mdix] merge_files_weighted expects 2-tuples of (path, weight)",
+                    ));
+                }
+                let path:   String = tuple.get_item(0)?.extract()?;
+                let weight: f64    = tuple.get_item(1)?.extract()?;
+                Ok((path, weight))
+            })
+            .collect()
+    }
+
+    fn merge_files_inner(&self, paths: &[String]) -> PyResult<MdixDatabase> {
+        let data = self
+            .build_core()
+            .merge_files(paths)
+            .map_err(|e| to_py_err(format!("[mdix:merge] {}", e)))?;
+        Ok(MdixDatabase::from_data_pub(data))
+    }
+
+    fn merge_files_weighted_inner(&self, pairs: &[(String, f64)]) -> PyResult<MdixDatabase> {
+        let borrowed: Vec<(&str, f64)> = pairs.iter().map(|(p, w)| (p.as_str(), *w)).collect();
+        let data = self
+            .build_core()
+            .merge_files_weighted(&borrowed)
+            .map_err(|e| to_py_err(format!("[mdix:merge] {}", e)))?;
+        Ok(MdixDatabase::from_data_pub(data))
+    }
 }
 
-/// `merge_files_weighted([(path, weight), ...], strategy=None, array_strategy=None)`
-///
-/// Returns `(database, conflicts)`.
-#[pyfunction]
-#[pyo3(signature = (entries, strategy = None, array_strategy = None))]
-pub fn merge_files_weighted(
-    py: Python<'_>,
-    entries: Vec<(String, f64)>,
-    strategy: Option<String>,
-    array_strategy: Option<String>,
-) -> PyResult<(MdixDatabase, Vec<PyObject>)> {
-    let strategy       = parse_strategy(strategy)?;
-    let array_strategy = parse_array_strategy(array_strategy)?;
-
-    if entries.is_empty() {
-        return Err(runtime_err("merge_files_weighted", "entries list is empty"));
+#[pymethods]
+impl MdixMerger {
+    #[new]
+    fn new() -> Self {
+        MdixMerger {
+            strategy:       MdixMergeStrategy::default(),
+            array_strategy: ArrayMergeStrategy::default(),
+        }
     }
-    let loader = DixLoader::new();
-    let mut sources = Vec::with_capacity(entries.len());
-    for (path, weight) in entries {
-        let ast = loader.compile_to_resolved_ast(&path)
-            .map_err(|e| runtime_err("merge_files_weighted", format!("'{}': {}", path, e)))?;
-        sources.push(MdixMergeInput::new(ast).with_weight(weight).with_label(path));
+
+    /// Set the conflict resolution strategy.
+    /// One of: "weighted_priority" (default) | "primary_wins" |
+    /// "secondary_wins" | "throw_on_conflict".
+    fn with_strategy(mut slf: PyRefMut<'_, Self>, strategy: &str) -> PyResult<Py<Self>> {
+        slf.strategy = parse_merge_strategy(strategy)?;
+        Ok(slf.into())
     }
-    merge_all_to_database(py, sources, strategy, array_strategy)
-}
 
-// ── MdixDatabase.merge_with(other, strategy, array_strategy, temp_dir) ───────
+    /// Set the array merge strategy.
+    /// One of: "replace" | "concat" | "concat_dedup" (default).
+    fn with_array_strategy(mut slf: PyRefMut<'_, Self>, strategy: &str) -> PyResult<Py<Self>> {
+        slf.array_strategy = parse_array_strategy(strategy)?;
+        Ok(slf.into())
+    }
 
-/// Merges two already-loaded in-memory databases. Returns `(database, conflicts)`.
-///
-/// `temp_dir` is an optional override for where the round-trip temp files
-/// get written. Defaults to `std::env::temp_dir()`, which is fine on
-/// desktop but is frequently NOT writable inside a sandboxed environment
-/// (mobile app, restricted container, etc.) — pass a known-writable
-/// directory explicitly in that case.
-pub fn merge_with(
-    py: Python<'_>,
-    primary: &MdixDatabase,
-    secondary: &MdixDatabase,
-    strategy: Option<String>,
-    array_strategy: Option<String>,
-    temp_dir: Option<String>,
-) -> PyResult<(MdixDatabase, Vec<PyObject>)> {
-    let strategy       = parse_strategy(strategy)?;
-    let array_strategy = parse_array_strategy(array_strategy)?;
+    /// Load and merge `.mdix` files from disk. Weights are assigned in
+    /// descending order — the first path gets the highest priority (1.0),
+    /// the last gets the lowest (approaching 0.0). Use
+    /// `merge_files_weighted` for explicit weights.
+    fn merge_files(&self, paths: &Bound<'_, PyList>) -> PyResult<MdixDatabase> {
+        let paths = Self::extract_paths(paths)?;
+        self.merge_files_inner(&paths)
+    }
 
-    let primary_src   = primary.to_mdix_string()?;
-    let secondary_src = secondary.to_mdix_string()?;
+    /// Load and merge `.mdix` files from disk with explicit
+    /// `(path, weight)` pairs. Higher weight wins under
+    /// `"weighted_priority"`.
+    fn merge_files_weighted(&self, paths_and_weights: &Bound<'_, PyList>) -> PyResult<MdixDatabase> {
+        let pairs = Self::extract_weighted(paths_and_weights)?;
+        self.merge_files_weighted_inner(&pairs)
+    }
 
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let pid = std::process::id();
+    /// Railway-style variant of `merge_files` — never raises, returns a
+    /// failed `MdixResult` instead.
+    fn try_merge_files(&self, py: Python<'_>, paths: &Bound<'_, PyList>) -> MdixResult {
+        match Self::extract_paths(paths).and_then(|p| self.merge_files_inner(&p)) {
+            Ok(db) => MdixResult::ok(py, db),
+            Err(e) => MdixResult::err(e.to_string()),
+        }
+    }
 
-    let base_dir: PathBuf = match temp_dir {
-        Some(d) => PathBuf::from(d),
-        None    => std::env::temp_dir(),
-    };
+    /// Railway-style variant of `merge_files_weighted`.
+    fn try_merge_files_weighted(
+        &self,
+        py: Python<'_>,
+        paths_and_weights: &Bound<'_, PyList>,
+    ) -> MdixResult {
+        match Self::extract_weighted(paths_and_weights)
+            .and_then(|p| self.merge_files_weighted_inner(&p))
+        {
+            Ok(db) => MdixResult::ok(py, db),
+            Err(e) => MdixResult::err(e.to_string()),
+        }
+    }
 
-    let primary_path: PathBuf   = base_dir.join(format!("mdix-merge-{}-{}-a.mdix", pid, stamp));
-    let secondary_path: PathBuf = base_dir.join(format!("mdix-merge-{}-{}-b.mdix", pid, stamp));
+    /// Merge `.mdix` *source text* directly, without touching disk.
+    ///
+    /// Binding-layer convenience, not a core-crate feature: the core
+    /// `compile_to_resolved_ast` is path-based only, so each source is
+    /// written to a short-lived temp file and cleaned up immediately after
+    /// compiling. `sources` is a list of `(label, source_text, weight)`
+    /// triples — `label` is used only for conflict-report readability.
+    fn merge_strings(&self, sources: &Bound<'_, PyList>) -> PyResult<MdixDatabase> {
+        if sources.is_empty() {
+            return Err(to_py_err("[mdix] merge_strings: no sources provided"));
+        }
 
-    std::fs::write(&primary_path, &primary_src).map_err(|e| runtime_err(
-        "merge_with",
+        let mut temp_files = Vec::with_capacity(sources.len());
+        let mut weighted: Vec<(String, f64)> = Vec::with_capacity(sources.len());
+
+        for item in sources.iter() {
+            let tuple = item.downcast::<PyTuple>().map_err(|_| {
+                to_py_err("[mdix] merge_strings expects a list of (label, source, weight) tuples")
+            })?;
+            if tuple.len() != 3 {
+                return Err(to_py_err(
+                    "[mdix] merge_strings expects 3-tuples of (label, source, weight)",
+                ));
+            }
+            let _label: String = tuple.get_item(0)?.extract()?;
+            let source: String = tuple.get_item(1)?.extract()?;
+            let weight: f64    = tuple.get_item(2)?.extract()?;
+
+            let mut tmp = tempfile::Builder::new()
+                .suffix(".mdix")
+                .tempfile()
+                .map_err(|e| to_py_err(format!("[mdix] failed to create temp file: {}", e)))?;
+            tmp.write_all(source.as_bytes())
+                .map_err(|e| to_py_err(format!("[mdix] failed to write temp file: {}", e)))?;
+            let path = tmp.path().to_string_lossy().to_string();
+            weighted.push((path, weight));
+            temp_files.push(tmp); // kept alive until merge completes below
+        }
+
+        let result = self.merge_files_weighted_inner(&weighted);
+        drop(temp_files); // explicit: temp files are deleted here, after compiling
+        result
+    }
+
+    fn __repr__(&self) -> String {
         format!(
-            "failed to write temp file at '{}': {}. If this is a sandboxed \
-             environment, std::env::temp_dir() may not be writable — pass an \
-             explicit temp_dir argument pointing at a writable directory.",
-            primary_path.display(), e
-        ),
-    ))?;
-    std::fs::write(&secondary_path, &secondary_src).map_err(|e| {
-        let _ = std::fs::remove_file(&primary_path);
-        runtime_err(
-            "merge_with",
-            format!("failed to write temp file at '{}': {}", secondary_path.display(), e),
+            "MdixMerger(strategy={:?}, array_strategy={:?})",
+            self.strategy, self.array_strategy
         )
-    })?;
-
-    let loader = DixLoader::new();
-    let result = (|| -> PyResult<(MdixDatabase, Vec<PyObject>)> {
-        let primary_ast = loader
-            .compile_to_resolved_ast(primary_path.to_string_lossy().as_ref())
-            .map_err(|e| runtime_err("merge_with", e))?;
-        let secondary_ast = loader
-            .compile_to_resolved_ast(secondary_path.to_string_lossy().as_ref())
-            .map_err(|e| runtime_err("merge_with", e))?;
-        let sources = vec![
-            MdixMergeInput::new(primary_ast).with_weight(1.0).with_label("primary"),
-            MdixMergeInput::new(secondary_ast).with_weight(0.5).with_label("secondary"),
-        ];
-        merge_all_to_database(py, sources, strategy, array_strategy)
-    })();
-
-    let _ = std::fs::remove_file(&primary_path);
-    let _ = std::fs::remove_file(&secondary_path);
-
-    result
-      }
+    }
+            }

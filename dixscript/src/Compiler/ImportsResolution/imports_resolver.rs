@@ -1,4 +1,7 @@
+
+
 //! Recursive import resolution with cycle detection and cloud download.
+
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -17,10 +20,12 @@ use crate::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
 use crate::Compiler::Utilities::{FunctionSignature, ParameterInfo, QuickFunctionInfo, SymbolTable};
 use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 use crate::ErrorManager::{DebugConfig, ErrorManager, ImportsResolutionErrorType};
-// CloudFileCache and HashVerifier are always present (no reqwest/tokio dependency).
-// CloudProviderFactory → http_cloud_provider → reqwest, so only when cloud-import is on.
 use super::{HashVerifier, CloudFileCache};
-#[cfg(feature = "cloud-import")]
+// Only referenced from the native variant of download_cloud_file_sync
+// below — gating the import too avoids an unused-import warning on
+// wasm32 (which the repo's clippy CI runs with -D warnings, turning that
+// warning into a hard failure).
+#[cfg(not(target_arch = "wasm32"))]
 use super::CloudProviderFactory;
 
 pub struct ImportsResolver<'a> {
@@ -725,9 +730,7 @@ impl<'a> ImportsResolver<'a> {
         }
     }
 
-    // ── Cloud download — real impl requires the `cloud-import` feature ─────────
-
-    #[cfg(feature = "cloud-import")]
+    #[cfg(not(target_arch = "wasm32"))]
     fn download_cloud_file_sync(
         &mut self,
         cloud_url: &str,
@@ -779,20 +782,45 @@ impl<'a> ImportsResolver<'a> {
         Ok(content)
     }
 
-    /// Stub used when the `cloud-import` feature is disabled.
-    /// Returns a clear error rather than failing to compile.
-    #[cfg(not(feature = "cloud-import"))]
+    /// wasm32 variant: no tokio runtime can be constructed on this target
+    /// (no real OS threads/scheduler for it to run on) and no HTTP
+    /// provider exists either (see CloudProviderFactory's wasm32 variant)
+    /// — so this returns the same kind of clear, actionable error
+    /// `CloudProviderFactory::get_provider` would have, without ever
+    /// touching tokio or reqwest at all. `cloud_cache`'s in-memory lookup
+    /// is still consulted first for parity with the native path, even
+    /// though nothing can ever populate it via a cloud download on this
+    /// target — it costs nothing and keeps the two implementations
+    /// structurally aligned.
+    #[cfg(target_arch = "wasm32")]
     fn download_cloud_file_sync(
         &mut self,
         cloud_url: &str,
-        _alias:    &str,
+        alias:     &str,
     ) -> Result<String, String> {
-        Err(format!(
-            "Cloud imports are not available in this build — the `cloud-import` \
-             feature is disabled. Enable it in your Cargo dependency declaration: \
-             dixscript = {{ ..., features = [\"cloud-import\"] }}. URL: {}",
+        let url_for_cache = Self::strip_query_parameters(cloud_url);
+        if self.cloud_cache.is_cached(&url_for_cache) {
+            if let Some(content) = self.cloud_cache.get_cached_content(&url_for_cache) {
+                return Ok(content);
+            }
+        }
+
+        let message = format!(
+            "Cloud (http/https) imports are not supported when DixScript is \
+             compiled to wasm32 — fetch the content yourself (e.g. JS fetch() \
+             in a browser, or Node's fs/http) and load it with loadStr() or \
+             mergeSources() instead. URL: {}",
             cloud_url
-        ))
+        );
+        self.error_manager.add_imports_resolution_error(
+            ImportsResolutionErrorType::CloudImportNotSupported,
+            message.clone(),
+            alias.to_string(),
+            Some(cloud_url.to_string()),
+            Some(cloud_url.to_string()),
+            None, 0, 0, None,
+        );
+        Err(message)
     }
 
     // ── Symbol extraction ─────────────────────────────────────────────────────

@@ -1,21 +1,12 @@
 // =============================================================================
-// COMPRESSION MIGRATION PATCH  ·  DixScript v1.0.0
+// COMPRESSION MIGRATION + DATABASE VISIBILITY PATCH  ·  DixScript v1.0.0
 // =============================================================================
-// Migrates DLM compressors from C-FFI deps to pure-Rust equivalents
-// so bzip2 and LZMA work on wasm32, Android, iOS, and every other target
-// without build-system quirks or cross-compilation headaches.
-//
-// CHANGES:
-//   - bzip2 = "0.4"  →  bzip2 = "0.6"  (libbz2-rs-sys pure Rust backend)
-//   - xz2   = "0.1"  →  xz    = "0.4"  (youknowone pure Rust fork of liblzma)
-//   - Both deps moved from [target.'cfg(not(wasm32))'.dependencies]
-//     to regular [dependencies] — they now work on all targets.
-//   - #![cfg(not(target_arch = "wasm32"))] guards removed from both
-//     compressor files.
-//   - mod.rs cfg gates and conditional pub use blocks removed.
-//   - lzma_compressor.rs import changed from xz2::write to xz::write.
-//   - DLM token name (DCompressor.lzma) unchanged — same algorithm.
-//   - xz4rust evaluated and rejected (decoder-only, no XzEncoder).
+// 1. bzip2 0.4 → 0.6       (pure Rust via libbz2-rs-sys, all targets)
+// 2. xz2   0.1 → xz 0.4   (pure Rust fork of liblzma, all targets)
+// 3. Both moved from target-conditional to regular [dependencies]
+// 4. cfg gates removed from bzip2_compressor.rs, lzma_compressor.rs, mod.rs
+// 5. mdix-python: database.rs fn data → pub(crate)
+// 6. mdix-python: Cargo.toml adds tempfile = "3"
 // =============================================================================
 
 @CONFIG(
@@ -50,55 +41,55 @@
 
   patch_files::
 
-    // ── 1. Cargo.toml: remove bzip2/xz2 from the wasm32-excluded block ──────
-    // Replaces the comment block + both C-FFI dep lines.
-    // rayon and hostname remain in the target-conditional section (they still
-    // need native targets), so only the bzip2/xz2 lines are removed here.
     patch_replace_block(
-      "dixscript/Cargo.toml"
-      "# bzip2 / xz2: C-FFI but small, self-contained, no build-system quirks."
-      "xz2      = { version = \"0.1\", optional = true }"
-      "# bzip2 0.6+ / xz 0.4+: pure Rust — moved to [dependencies] (wasm32-safe).\n# See the regular [dependencies] block for these."
+      "dixscript/Cargo.toml",
+      "[target.'cfg(not(target_arch = \"wasm32\"))'.dependencies]",
+      "xz2      = { version = \"0.1\", optional = true }",
+      "[target.'cfg(not(target_arch = \"wasm32\"))'.dependencies]"
     )
 
-    // ── 2. Cargo.toml: add bzip2/xz to regular [dependencies] ───────────────
-    // Anchors off url = "2.5" which is the last dep before the blank line
-    // that ends the regular dependencies block.
     patch_replace_text(
-      "dixscript/Cargo.toml"
-      "url         = \"2.5\""
-      "url         = \"2.5\"\n# bzip2 0.6+: pure Rust via libbz2-rs-sys — wasm32/Android/all targets.\n# xz    0.4+: pure Rust fork of liblzma     — wasm32/Android/all targets.\n# Both optional: embedders that never compress can --no-default-features.\nbzip2       = { version = \"0.6\", optional = true }\nxz          = { version = \"0.4\", optional = true }"
+      "dixscript/Cargo.toml",
+      "url         = \"2.5\"",
+      "url         = \"2.5\"\nbzip2       = { version = \"0.6\", optional = true }\nxz          = { version = \"0.4\", optional = true }"
     )
 
-    // ── 3. Cargo.toml: update xz-support feature flag dep alias ─────────────
     patch_replace_text(
-      "dixscript/Cargo.toml"
-      "xz-support    = [\"dep:xz2\"]"
+      "dixscript/Cargo.toml",
+      "xz-support    = [\"dep:xz2\"]",
       "xz-support    = [\"dep:xz\"]"
     )
 
-    // ── 4. mod.rs: replace entire file — remove all wasm32 cfg gates ─────────
     patch_replace_block(
-      "dixscript/src/Compiler/DLM/Compressor/mod.rs"
-      "//! Compressor — data compression modules."
-      "pub use lzma_compressor::LzmaCompressor;"
-      "//! Compressor — data compression modules.\n//! All three compressors are pure Rust and work on every target including\n//! wasm32-unknown-unknown, wasm32-wasip*, Android (via NDK), iOS, and Windows.\n//! No C FFI, no cc crate, no cross-compilation toolchain quirks.\n//!\n//! Gzip:  flate2 with rust_backend feature (miniz_oxide) — always was pure Rust.\n//! Bzip2: bzip2 0.6+ via libbz2-rs-sys      — pure Rust since June 2025.\n//! LZMA:  xz 0.4+ (youknowone fork of liblzma) — pure Rust, xz2-compatible API.\n\nmod compressor_trait;\nmod gzip_compressor;\nmod bzip2_compressor;\nmod lzma_compressor;\n\npub use compressor_trait::{ICompressor, CompressorResult};\npub use gzip_compressor::{GzipCompressor, CompressionLevel};\npub use bzip2_compressor::Bzip2Compressor;\npub use lzma_compressor::LzmaCompressor;"
+      "dixscript/src/Compiler/DLM/Compressor/mod.rs",
+      "//! Compressor — data compression modules.",
+      "pub use lzma_compressor::LzmaCompressor;",
+      "//! Compressor — data compression modules.\n//! All three compressors are pure Rust and build on every target:\n//! wasm32-unknown-unknown, wasm32-wasip2, Android, iOS, Windows.\n//!\n//! Gzip:  flate2 rust_backend (miniz_oxide) — always pure Rust.\n//! Bzip2: bzip2 0.6+ via libbz2-rs-sys      — pure Rust since June 2025.\n//! LZMA:  xz 0.4+ youknowone fork of liblzma — pure Rust, xz2-compat API.\n\nmod compressor_trait;\nmod gzip_compressor;\nmod bzip2_compressor;\nmod lzma_compressor;\n\npub use compressor_trait::{ICompressor, CompressorResult};\npub use gzip_compressor::{GzipCompressor, CompressionLevel};\npub use bzip2_compressor::Bzip2Compressor;\npub use lzma_compressor::LzmaCompressor;"
     )
 
-    // ── 5. bzip2_compressor.rs: remove cfg gate, update doc comment ──────────
-    patch_replace_text(
-      "dixscript/src/Compiler/DLM/Compressor/bzip2_compressor.rs"
-      "//! BZIP2 compression implementation\n//! Slower compression with better ratio (for larger files)\n#![cfg(not(target_arch = \"wasm32\"))]"
-      "//! BZIP2 compression implementation.\n//! Pure Rust since bzip2 0.6.0 (libbz2-rs-sys backend) — wasm32/Android safe.\n//! Slower than Gzip with better ratio (good for medium-large payloads)."
+    patch_replace_block(
+      "dixscript/src/Compiler/DLM/Compressor/bzip2_compressor.rs",
+      "//! BZIP2 compression implementation",
+      "#![cfg(not(target_arch = \"wasm32\"))]",
+      "//! BZIP2 compression implementation.\n//! Pure Rust since bzip2 0.6.0 (libbz2-rs-sys) — wasm32 and Android safe.\n//! Slower than Gzip with better ratio (good for medium to large payloads)."
     )
 
-    // ── 6. lzma_compressor.rs: remove cfg gate + change xz2 → xz import ─────
-    // This is the only code change needed in this file — the XzEncoder/XzDecoder
-    // API is identical between xz2 and xz (xz is a fork of liblzma which is
-    // itself a fork of xz2 with the same write::* types).
+    patch_replace_block(
+      "dixscript/src/Compiler/DLM/Compressor/lzma_compressor.rs",
+      "//! LZMA compression implementation",
+      "use xz2::write::{XzEncoder, XzDecoder};",
+      "//! LZMA compression implementation.\n//! Pure Rust via xz 0.4+ (youknowone fork of liblzma) — wasm32 and Android safe.\n//! Slowest compression with the best ratio.\nuse super::compressor_trait::{ICompressor, CompressorResult};\nuse crate::Compiler::DLM::dlm_module_base::DLMModuleBase;\nuse crate::ErrorManager::{DlmErrorType, ErrorSeverity};\nuse xz::write::{XzEncoder, XzDecoder};"
+    )
+
     patch_replace_text(
-      "dixscript/src/Compiler/DLM/Compressor/lzma_compressor.rs"
-      "//! LZMA compression implementation\n//! Slowest compression with best ratio (for maximum compression)\n#![cfg(not(target_arch = \"wasm32\"))]\nuse super::compressor_trait::{ICompressor, CompressorResult};\nuse crate::Compiler::DLM::dlm_module_base::DLMModuleBase;\nuse crate::ErrorManager::{DlmErrorType, ErrorSeverity};\nuse xz2::write::{XzEncoder, XzDecoder};"
-      "//! LZMA compression implementation.\n//! Pure Rust via xz 0.4+ (youknowone fork of liblzma) — wasm32/Android safe.\n//! Slowest compression with the best ratio (ideal for maximum size reduction).\nuse super::compressor_trait::{ICompressor, CompressorResult};\nuse crate::Compiler::DLM::dlm_module_base::DLMModuleBase;\nuse crate::ErrorManager::{DlmErrorType, ErrorSeverity};\nuse xz::write::{XzEncoder, XzDecoder};"
+      "mdix-python/src/database.rs",
+      "fn data(&self) -> PyResult<&DixData>",
+      "pub(crate) fn data(&self) -> PyResult<&DixData>"
+    )
+
+    patch_replace_text(
+      "mdix-python/Cargo.toml",
+      "pyo3       = { version = \"0.21\", features = [\"extension-module\", \"abi3-py38\"] }",
+      "pyo3       = { version = \"0.21\", features = [\"extension-module\", \"abi3-py38\"] }\ntempfile   = \"3\""
     )
 )

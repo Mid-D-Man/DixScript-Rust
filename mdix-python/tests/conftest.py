@@ -45,6 +45,27 @@ ENUMS_SOURCE = """
 )
 """
 
+# Mirrors the exact mdix-scaffold regression (2026-06-29): a shallow group
+# ("crates.beta", like "crates.midn-ecs") with a deeper group sharing the
+# same prefix ("crates.beta.src", like "crates.midn-ecs.src"), plus an
+# unrelated sibling shallow group ("crates.alpha", like "crates.midn-auth").
+SCAFFOLD_LIKE_SOURCE = """
+@DATA(
+  project_name = "demo-core"
+
+  crates.alpha::
+    { name = "Cargo", ext = "toml", content = "" },
+    { name = "lib",    ext = "rs",   content = "" }
+
+  crates.beta::
+    { name = "Cargo", ext = "toml", content = "" }
+
+  crates.beta.src::
+    { name = "lib",  ext = "rs",   content = "" },
+    { name = "main", ext = "rs",   content = "" }
+)
+"""
+
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -71,6 +92,13 @@ def array_db():
 @pytest.fixture
 def enums_db():
     db = MdixDatabase.load_str(ENUMS_SOURCE)
+    yield db
+    db.close()
+
+
+@pytest.fixture
+def scaffold_like_db():
+    db = MdixDatabase.load_str(SCAFFOLD_LIKE_SOURCE)
     yield db
     db.close()
 

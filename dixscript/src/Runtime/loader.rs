@@ -1,5 +1,6 @@
+
 use std::fs;
-use std::path::{Path};
+use std::path::{Path, PathBuf};
 use chrono::Utc;
 use crate::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
 use crate::Compiler::Core::Config::{ConfigSectionHandler, DebugMode, OperationalSettings};
@@ -11,11 +12,12 @@ use crate::Compiler::DLM::KeyManagement::KeyFileManager;
 use crate::Compiler::DLM::Auditor::{IAuditor, DiyAuditor, EnhancedAuditor};
 use crate::Compiler::Utilities::SecurityUtilities;
 use crate::Compiler::AST::{DixScript, DLMModuleType, DLMModuleSubtype};
-use crate::ErrorManager::{ErrorManager, RuntimeErrorType};
+use crate::ErrorManager::{ErrorManager, RuntimeErrorType, ErrorSeverity};
 use super::load_options::DixLoadOptions;
 use super::key_resolver::{KeyFileResolver, KeyFileResolution, KeyFileSource};
 use super::dix_data::DixData;
 use super::array_homogenizer::homogenize_data_section;
+
 /// Internal loader for DixScript files.
 ///
 /// Each `DixLoader` owns an isolated `ErrorManager` so loading multiple
@@ -224,7 +226,7 @@ impl DixLoader {
         result
     }
 
-    // ── NEW: Compile-only path for the LSP "Create Resolved" command ──────────
+    // ── Compile-only path ─────────────────────────────────────────────────────
     //
     // Runs the full tokenise → parse → semantic → enhance → value-resolve
     // pipeline and returns the resolved AST without running any DLM modules.
@@ -243,6 +245,28 @@ impl DixLoader {
             .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
 
         self.compile_source(&source_text, file_path)
+    }
+
+    /// String-based sibling of `compile_to_resolved_ast` — same pipeline
+    /// (tokenize -> parse -> semantic -> enhance -> value-resolve), minus
+    /// the file read. `label` is used only for error messages (pass
+    /// something like `"<source>"` or a caller-meaningful name) — it does
+    /// not need to be a real path. Exists for targets with no real
+    /// filesystem (wasm32-unknown-unknown has none at all) and for
+    /// callers merging already-in-memory source text instead of files.
+    pub fn compile_to_resolved_ast_from_str(
+        &self,
+        source: &str,
+        label: &str,
+    ) -> Result<DixScript, String> {
+        self.error_manager.clear_errors();
+        self.error_manager.log_info(&format!("compile_to_resolved_ast_from_str: {}", label));
+
+        if source.trim().is_empty() {
+            return Err(format!("'{}': source is empty", label));
+        }
+
+        self.compile_source(source, label)
     }
 
     // ── Shared decryption + deserialization ───────────────────────────────────
@@ -314,8 +338,6 @@ impl DixLoader {
     }
 
     // ── Compilation pipeline (Approach B: tokenizer-first) ────────────────────
-
- // ── Compilation pipeline (Approach B: tokenizer-first) ────────────────────
 
     fn compile_source(
         &self,
@@ -749,4 +771,4 @@ mod tests {
         let errors = loader.error_manager.get_runtime_errors();
         assert_eq!(errors.len(), 1, "only the most recent load's error should remain");
     }
-    }
+           }

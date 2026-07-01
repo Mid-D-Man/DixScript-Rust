@@ -62,22 +62,11 @@ tokio       = { version = "1", features = ["rt-multi-thread", "macros", "fs", "t
 # unconditional.
 async-trait = "0.1"
 url         = "2.5"
+bzip2       = { version = "0.6", optional = true }
+xz          = { version = "0.4", optional = true }
 
 # ── Non-WASM native deps ───────────────────────────────────────────────────────
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# bzip2 / xz2: C-FFI but small, self-contained, no build-system quirks.
-# They cross-compile cleanly through NDK clang (unlike OpenSSL).
-# Made optional so embedders that genuinely never compress .mdix files
-# (e.g. pure-read use-cases) can exclude the C compilation step entirely.
-# On wasm32 the target-cfg already excluded them; the optional + feature
-# gating adds the same opt-out to non-wasm targets.
-#
-# Note: dep:bzip2 / dep:xz2 in [features] refers to these target-conditional
-# optional deps.  Cargo 1.60+ handles this correctly: on wasm32 the dep
-# simply isn't declared and the feature activation is a no-op.
-bzip2    = { version = "0.4", optional = true }
-xz2      = { version = "0.1", optional = true }
-rayon    = "1.8"
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]rayon    = "1.8"
 hostname = "0.3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -148,4 +137,4 @@ harness = false
 default       = ["cloud-import", "bzip2-support", "xz-support"]
 cloud-import  = ["dep:reqwest", "dep:tokio"]
 bzip2-support = ["dep:bzip2"]
-xz-support    = ["dep:xz2"]
+xz-support    = ["dep:xz"]

@@ -1,7 +1,6 @@
-//! BZIP2 compression implementation
-//! Slower compression with better ratio (for larger files)
-#![cfg(not(target_arch = "wasm32"))]
-use super::compressor_trait::{ICompressor, CompressorResult};
+//! BZIP2 compression implementation.
+//! Pure Rust since bzip2 0.6.0 (libbz2-rs-sys) — wasm32 and Android safe.
+//! Slower than Gzip with better ratio (good for medium to large payloads).use super::compressor_trait::{ICompressor, CompressorResult};
 use crate::Compiler::DLM::dlm_module_base::DLMModuleBase;
 use crate::ErrorManager::{DlmErrorType, ErrorSeverity};
 use bzip2::Compression;

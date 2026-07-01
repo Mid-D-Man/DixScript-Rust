@@ -27,7 +27,7 @@ impl MdixDatabase {
         MdixDatabase { inner: Some(data) }
     }
 
-    fn data(&self) -> PyResult<&DixData> {
+    pub(crate) fn data(&self) -> PyResult<&DixData> {
         self.inner.as_ref().ok_or_else(|| disposed_err("MdixDatabase"))
     }
 

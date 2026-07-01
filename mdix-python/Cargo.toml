@@ -17,5 +17,6 @@ crate-type = ["cdylib"]
 dixscript  = { path = "../dixscript" }
 serde_json = "1.0"
 pyo3       = { version = "0.21", features = ["extension-module", "abi3-py38"] }
+tempfile   = "3"
 # Only needed for DixData::from_ast's compile_time stamp in merge.rs.
 chrono     = "0.4"

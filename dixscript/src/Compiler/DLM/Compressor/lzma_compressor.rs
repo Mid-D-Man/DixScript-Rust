@@ -1,11 +1,10 @@
-//! LZMA compression implementation
-//! Slowest compression with best ratio (for maximum compression)
-#![cfg(not(target_arch = "wasm32"))]
+//! LZMA compression implementation.
+//! Pure Rust via xz 0.4+ (youknowone fork of liblzma) — wasm32 and Android safe.
+//! Slowest compression with the best ratio.
 use super::compressor_trait::{ICompressor, CompressorResult};
 use crate::Compiler::DLM::dlm_module_base::DLMModuleBase;
 use crate::ErrorManager::{DlmErrorType, ErrorSeverity};
-use xz2::write::{XzEncoder, XzDecoder};
-use std::io::Write;
+use xz::write::{XzEncoder, XzDecoder};use std::io::Write;
 use std::collections::HashMap;
 
 /// LZMA compression implementation

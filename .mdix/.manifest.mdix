@@ -1,0 +1,21 @@
+@CONFIG(
+  version    -> "1.0.0"
+  generated  -> "2026-07-01T10:38:16Z"
+  debug_mode -> "off"
+)
+
+@DATA(
+  template      = ".mdix/patches/patch.mdix"
+  template_hash = "337b06052edb"
+  last_run      = "2026-07-01T10:38:16Z"
+  new_this_run  = 0
+  overridden    = 0
+  skipped       = 0
+  deleted       = 0
+  renamed       = 0
+  moved         = 0
+  updated       = 0
+
+  created_files::
+    
+)

@@ -4,24 +4,41 @@ use crate::error::{freed_err, invalid_path_err, runtime_err};
 use dixscript::Runtime::{DixData, DixLoadOptions, DixLoader, DixValue};
 use wasm_bindgen::prelude::*;
 
+/// Seed the cloud-import cache before compiling.
+///
+/// `@IMPORTS(...)` cloud (http/https) URLs can't be fetched from inside a
+/// wasm build — there's no way to do a real network request synchronously
+/// from within the compile pipeline. This is the actual working path
+/// instead: `fetch()` the URL yourself in JS (normal `async`/`await`, no
+/// wasm involved), then call this with the URL and the text you got back,
+/// *before* calling `loadStr()` on source that references it. The
+/// synchronous resolver checks this cache first and will find it already
+/// there — no network access happens inside wasm at all.
+///
+/// Call once per URL. Cached in the browser's `localStorage` for the
+/// current origin, so it also persists across page reloads — call it again
+/// any time you want to force a re-fetch to be picked up (there's no
+/// separate "evict one entry" call; `MdixDatabase` doesn't expose
+/// `clear_cache`/`get_statistics` yet either — those exist on the Rust
+/// side in `CloudFileCache` but aren't wired through to this binding).
+///
+/// No-op on native targets — this function only exists in the wasm build.
+#[wasm_bindgen(js_name = prefetchImport)]
+pub fn prefetch_import(url: &str, content: &str) {
+    let cache = dixscript::Compiler::ImportsResolution::CloudFileCache::new(
+        dixscript::ErrorManager::ErrorManager::get_shared_instance(),
+    );
+    cache.prefetch(url, content);
+}
+
 /// A loaded DixScript database.
 ///
-/// Construct via `MdixDatabase.loadStr()` or `MdixDatabase.fromJson()`.
+/// Construct via `MdixDatabase.load_str()` or `MdixDatabase.from_json()`.
 /// Call `free()` when done — the GC will also clean up but explicit
 /// freeing is recommended in hot loops.
 #[wasm_bindgen]
 pub struct MdixDatabase {
     inner: Option<DixData>,
-}
-
-// Plain (non-#[wasm_bindgen]) impl block — for helpers used by sibling
-// modules (merge.rs, schema.rs) within this crate, not exposed to JS.
-// Mirrors the from_data/from_data_pub pattern already used in mdix-lua
-// and mdix-python's database.rs.
-impl MdixDatabase {
-    pub(crate) fn from_data(data: DixData) -> MdixDatabase {
-        MdixDatabase { inner: Some(data) }
-    }
 }
 
 #[wasm_bindgen]
@@ -114,23 +131,23 @@ impl MdixDatabase {
             return Err(invalid_path_err(path));
         }
         let type_name = match data.get_value(path) {
-            None                         => "unknown",
-            Some(DixValue::Null)         => "null",
-            Some(DixValue::Bool(_))      => "bool",
-            Some(DixValue::Int(_))       => "int",
-            Some(DixValue::Long(_))      => "long",
-            Some(DixValue::Float(_))     => "float",
-            Some(DixValue::Double(_))    => "double",
-            Some(DixValue::String(_))    => "string",
-            Some(DixValue::Date(_))      => "date",
+            None => "unknown",
+            Some(DixValue::Null) => "null",
+            Some(DixValue::Bool(_)) => "bool",
+            Some(DixValue::Int(_)) => "int",
+            Some(DixValue::Long(_)) => "long",
+            Some(DixValue::Float(_)) => "float",
+            Some(DixValue::Double(_)) => "double",
+            Some(DixValue::String(_)) => "string",
+            Some(DixValue::Date(_)) => "date",
             Some(DixValue::Timestamp(_)) => "timestamp",
-            Some(DixValue::HexColor(_))  => "hex_color",
-            Some(DixValue::Blob(_))      => "blob",
-            Some(DixValue::Regex(_))     => "regex",
-            Some(DixValue::Array(_))     => "array",
-            Some(DixValue::Object(_))    => "object",
-            Some(DixValue::Tuple(_))     => "tuple",
-            Some(DixValue::Enum { .. })  => "enum",
+            Some(DixValue::HexColor(_)) => "hex_color",
+            Some(DixValue::Blob(_)) => "blob",
+            Some(DixValue::Regex(_)) => "regex",
+            Some(DixValue::Array(_)) => "array",
+            Some(DixValue::Object(_)) => "object",
+            Some(DixValue::Tuple(_)) => "tuple",
+            Some(DixValue::Enum { .. }) => "enum",
         };
         Ok(type_name.to_string())
     }
@@ -159,8 +176,9 @@ impl MdixDatabase {
     /// Strict: only succeeds on an actual Int (or Enum ordinal) value —
     /// does NOT silently coerce from Long/Float/Double. Matches the
     /// widening rule dixscript's schema.rs type_matches() uses, not the
-    /// looser DixData::get::<T>() convenience, which would happily
-    /// truncate a Float/Double into this with no error.
+    /// looser DixData::get::<T>() convenience used elsewhere in this
+    /// file, which would happily truncate a Float/Double into this with
+    /// no error.
     #[wasm_bindgen(js_name = getInt)]
     pub fn get_int(&self, path: &str) -> Result<i32, JsValue> {
         let data = self.data(path)?;
@@ -249,7 +267,7 @@ impl MdixDatabase {
         match data.get_value(path) {
             Some(DixValue::Array(arr)) => Ok(arr.len() as i32),
             Some(_) => Err(runtime_err("get_array_length", format!("'{}' is not an array", path))),
-            None    => Err(runtime_err("get_array_length", format!("path not found: '{}'", path))),
+            None => Err(runtime_err("get_array_length", format!("path not found: '{}'", path))),
         }
     }
 
@@ -271,7 +289,7 @@ impl MdixDatabase {
         match data.get_value(path) {
             Some(DixValue::Enum { enum_name, .. }) => Ok(enum_name.clone()),
             Some(_) => Err(runtime_err("get_enum_name", format!("'{}' is not an enum", path))),
-            None    => Err(runtime_err("get_enum_name", format!("path not found: '{}'", path))),
+            None => Err(runtime_err("get_enum_name", format!("path not found: '{}'", path))),
         }
     }
 
@@ -281,7 +299,7 @@ impl MdixDatabase {
         match data.get_value(path) {
             Some(DixValue::Enum { field_name, .. }) => Ok(field_name.clone()),
             Some(_) => Err(runtime_err("get_enum_field", format!("'{}' is not an enum", path))),
-            None    => Err(runtime_err("get_enum_field", format!("path not found: '{}'", path))),
+            None => Err(runtime_err("get_enum_field", format!("path not found: '{}'", path))),
         }
     }
 
@@ -333,48 +351,6 @@ impl MdixDatabase {
             .map_err(|e| runtime_err("to_mdix serialize", e))
     }
 
-    /// Returns a real JS object (not a string) by parsing the JSON this
-    /// database would export — mapped to `toJSON` specifically so
-    /// `JSON.stringify(db)` works transparently without callers needing
-    /// to know to call `toJson()` first. The JS analogue of `__reduce__`
-    /// in mdix-python: hooking into the host language's own native
-    /// serialization convention rather than only offering a bespoke one.
-    #[wasm_bindgen(js_name = toJSON)]
-    pub fn to_json_value(&self) -> Result<JsValue, JsValue> {
-        let json_str = self.to_json(true)?;
-        js_sys::JSON::parse(&json_str)
-    }
-
-    /// Validates this database against a schema built with `new MdixSchema()`.
-    /// Returns an `MdixValidationReport` — see schema.rs.
-    #[wasm_bindgen(js_name = validateSchema)]
-    pub fn validate_schema(
-        &self,
-        schema: &crate::schema::MdixSchema,
-    ) -> Result<crate::schema::MdixValidationReport, JsValue> {
-        let data = self.inner.as_ref().ok_or_else(|| freed_err("MdixDatabase"))?;
-        let report = schema.inner.validate(data);
-        Ok(crate::schema::MdixValidationReport::new(report))
-    }
-
-    /// Merges this database with `other`. Returns an `MdixMergeOutcome` —
-    /// call `.database()` to consume the merged result and `.conflicts()`
-    /// for the conflict list. Neither `self` nor `other` is mutated.
-    ///
-    /// Unlike the Lua/Python equivalents (which round-trip through temp
-    /// files on disk), this uses `compile_to_resolved_ast_from_str` — a
-    /// string-based sibling added to the core specifically because wasm32
-    /// has no filesystem at all. No temp files anywhere.
-    #[wasm_bindgen(js_name = mergeWith)]
-    pub fn merge_with(
-        &self,
-        other: &MdixDatabase,
-        strategy: Option<String>,
-        array_strategy: Option<String>,
-    ) -> Result<crate::merge::MdixMergeOutcome, JsValue> {
-        crate::merge::merge_with(self, other, strategy, array_strategy)
-    }
-
     // ── Private helpers ───────────────────────────────────────────────────
 
     fn data(&self, path: &str) -> Result<&DixData, JsValue> {
@@ -383,4 +359,4 @@ impl MdixDatabase {
         }
         self.inner.as_ref().ok_or_else(|| freed_err("MdixDatabase"))
     }
-                                     }
+            }

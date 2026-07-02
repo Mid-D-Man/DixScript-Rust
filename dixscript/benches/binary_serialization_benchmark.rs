@@ -19,17 +19,17 @@ use criterion::{
 };
 use bzip2::{write::BzEncoder, Compression as BzCompression};
 use flate2::{write::GzEncoder, Compression as GzCompression};
+use lzma_rust2::XzWriter;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::sync::Once;
 use std::time::Duration;
-use xz2::write::XzEncoder;
 
 use dixscript::Compiler::AST::DixScript;
 use dixscript::Compiler::Core::{
     BinarySerialization::BinaryPacker,
     Config::{ConfigSectionHandler, OperationalSettings},
-    GeneralAstEnhancer, GeneralParser, GeneralSemanticAnalyzer,
+    GeneralParser,
     Tokenizer::{split_config_tokens, Tokenizer},
 };
 
@@ -237,7 +237,7 @@ fn compress_bzip2(data: &[u8]) -> Vec<u8> {
 }
 
 fn compress_lzma(data: &[u8]) -> Vec<u8> {
-    let mut enc = XzEncoder::new(Vec::with_capacity(data.len()), 6);
+    let mut enc = XzWriter::new(Vec::with_capacity(data.len()), 6);
     enc.write_all(data).unwrap();
     enc.finish().unwrap()
 }

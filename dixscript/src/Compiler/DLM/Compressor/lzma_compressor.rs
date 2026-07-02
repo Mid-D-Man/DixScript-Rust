@@ -1,13 +1,20 @@
-//! LZMA compression implementation.
-//! Pure Rust via xz 0.4+ (youknowone fork of liblzma) — wasm32 and Android safe.
+//! LZMA/XZ compression implementation.
+//! Pure Rust via lzma-rust2 (ported from tukaani's xz-for-java, not a
+//! liblzma C binding) — wasm32 and Android safe. `optimization` feature is
+//! deliberately disabled (see Cargo.toml) so this is 100% safe standard Rust
+//! on every target, no hand-written-asm fast path anywhere.
 //! Slowest compression with the best ratio.
 use super::compressor_trait::{ICompressor, CompressorResult};
 use crate::Compiler::DLM::dlm_module_base::DLMModuleBase;
 use crate::ErrorManager::{DlmErrorType, ErrorSeverity};
-use xz::write::{XzEncoder, XzDecoder};use std::io::Write;
+use lzma_rust2::{XzOptions, XzReader, XzWriter};
+use std::io::{Read, Write};
 use std::collections::HashMap;
 
-/// LZMA compression implementation
+/// XZ compression level (0-9). 9 = best compression, slowest.
+const XZ_PRESET_LEVEL: u32 = 9;
+
+/// LZMA/XZ compression implementation
 pub struct LzmaCompressor {
     base: DLMModuleBase,
 }
@@ -56,11 +63,24 @@ impl ICompressor for LzmaCompressor {
         }
 
         if self.base.is_debug_enabled() {
-            self.base.log_info(&format!("Compressing {} bytes with LZMA...", data.len()));
+            self.base.log_info(&format!("Compressing {} bytes with LZMA/XZ...", data.len()));
             self.base.log_warning("⏱️ LZMA compression is slow - this may take a while for large files");
         }
 
-        let mut encoder = XzEncoder::new(Vec::new(), 9); // Level 9 = best compression
+        let options = XzOptions::with_preset(XZ_PRESET_LEVEL);
+
+        let mut encoder = XzWriter::new(Vec::new(), options).map_err(|e| {
+            let error_msg = format!("LZMA encoder init failed: {}", e);
+            self.base.error_manager().add_dlm_error(
+                DlmErrorType::InvocationFailed,
+                error_msg.clone(),
+                Some(self.module_name().to_string()),
+                None,
+                None,
+                ErrorSeverity::Error,
+            );
+            error_msg
+        })?;
 
         encoder.write_all(data).map_err(|e| {
             let error_msg = format!("LZMA compression failed: {}", e);
@@ -116,12 +136,15 @@ impl ICompressor for LzmaCompressor {
         }
 
         if self.base.is_debug_enabled() {
-            self.base.log_info(&format!("Decompressing {} bytes with LZMA...", compressed_data.len()));
+            self.base.log_info(&format!("Decompressing {} bytes with LZMA/XZ...", compressed_data.len()));
         }
 
-        let mut decoder = XzDecoder::new(Vec::new());
+        // `false`: we only ever emit a single XZ stream ourselves, so we
+        // don't need to tolerate concatenated multi-stream .xz input here.
+        let mut decoder = XzReader::new(compressed_data, false);
+        let mut decompressed = Vec::new();
 
-        decoder.write_all(compressed_data).map_err(|e| {
+        decoder.read_to_end(&mut decompressed).map_err(|e| {
             let error_msg = format!("LZMA decompression failed: {}", e);
             self.base.error_manager().add_dlm_error(
                 DlmErrorType::InvocationFailed,
@@ -129,19 +152,6 @@ impl ICompressor for LzmaCompressor {
                 Some(self.module_name().to_string()),
                 None,
                 Some("Verify data integrity and format".to_string()),
-                ErrorSeverity::Error,
-            );
-            error_msg
-        })?;
-
-        let decompressed = decoder.finish().map_err(|e| {
-            let error_msg = format!("LZMA decompression finish failed: {}", e);
-            self.base.error_manager().add_dlm_error(
-                DlmErrorType::InvocationFailed,
-                error_msg.clone(),
-                Some(self.module_name().to_string()),
-                None,
-                None,
                 ErrorSeverity::Error,
             );
             error_msg
@@ -159,7 +169,7 @@ impl ICompressor for LzmaCompressor {
     }
 
     fn validate(&self) -> Result<(), String> {
-        // LZMA always available via xz2 crate
+        // LZMA/XZ always available via lzma-rust2 crate
         Ok(())
     }
 
@@ -174,4 +184,4 @@ impl ICompressor for LzmaCompressor {
     fn priority(&self) -> i32 {
         self.base.priority()
     }
-}
+                }

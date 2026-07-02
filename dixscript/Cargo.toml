@@ -90,6 +90,10 @@ tokio    = { version = "1", features = ["rt-multi-thread", "macros", "fs", "time
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
+# Only used by CloudFileCache's localStorage backend — Window to reach
+# `window.localStorage`, Storage for the get/set/remove/key/length calls.
+# Not the whole web-sys surface, just these two, to keep the wasm binary lean.
+web-sys   = { version = "0.3", features = ["Window", "Storage"] }
 
 # Bench/test-only deps. Gated off wasm32 on purpose: criterion pulls in
 # rayon (one of its default features) plus a pile of native-only tooling

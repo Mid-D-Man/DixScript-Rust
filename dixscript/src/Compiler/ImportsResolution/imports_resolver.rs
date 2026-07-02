@@ -1,10 +1,13 @@
-
-
 //! Recursive import resolution with cycle detection and cloud download.
 
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+// Only referenced from the native variant of read_local_file_sync below —
+// gating it avoids an unused-import warning on wasm32 (clippy CI runs with
+// -D warnings, turning that into a hard failure). Same reasoning as the
+// CloudProviderFactory gate just below.
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 use crate::Compiler::AST::*;
 use crate::Compiler::Core::{
@@ -716,18 +719,63 @@ impl<'a> ImportsResolver<'a> {
                     resolved_path
                 ));
             }
-            fs::read_to_string(resolved_path).map_err(|e| {
-                self.error_manager.add_imports_resolution_error(
-                    ImportsResolutionErrorType::FileNotFound,
-                    format!("Failed to read file: {}", e),
-                    import.alias.clone(),
-                    Some(import.path.clone()),
-                    Some(resolved_path.to_string()),
-                    None, 0, 0, None,
-                );
-                format!("Failed to read file: {}", e)
-            })
+            self.read_local_file_sync(resolved_path, import)
         }
+    }
+
+    /// Native variant: a real filesystem is available, so this is a
+    /// straightforward read.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn read_local_file_sync(
+        &mut self,
+        resolved_path: &str,
+        import:        &ImportDeclaration,
+    ) -> Result<String, String> {
+        fs::read_to_string(resolved_path).map_err(|e| {
+            self.error_manager.add_imports_resolution_error(
+                ImportsResolutionErrorType::FileNotFound,
+                format!("Failed to read file: {}", e),
+                import.alias.clone(),
+                Some(import.path.clone()),
+                Some(resolved_path.to_string()),
+                None, 0, 0, None,
+            );
+            format!("Failed to read file: {}", e)
+        })
+    }
+
+    /// wasm32 variant: `std::fs` compiles here but every call always
+    /// returns an error — there's no real filesystem on this target
+    /// regardless of whether the host is a browser or Node.js, since
+    /// `std::fs` doesn't special-case the host at compile time. Rather
+    /// than surface whatever generic OS error `fs::read_to_string` would
+    /// produce, this returns the same kind of clear, actionable message
+    /// the cloud-import wasm32 path already gives: resolve the content on
+    /// the JS side and hand it to `loadStr()` instead. Matches
+    /// `download_cloud_file_sync`'s wasm32 variant in spirit and shape.
+    #[cfg(target_arch = "wasm32")]
+    fn read_local_file_sync(
+        &mut self,
+        resolved_path: &str,
+        import:        &ImportDeclaration,
+    ) -> Result<String, String> {
+        let message = format!(
+            "Local file imports are not supported when DixScript is compiled \
+             to wasm32 — there is no real filesystem on this target. Read the \
+             file yourself (e.g. JS fetch()/File API in a browser, or Node's \
+             fs module) and either inline its content before calling loadStr(), \
+             or pass it in directly instead of an @IMPORTS path. Path: {}",
+            resolved_path
+        );
+        self.error_manager.add_imports_resolution_error(
+            ImportsResolutionErrorType::FileNotFound,
+            message.clone(),
+            import.alias.clone(),
+            Some(import.path.clone()),
+            Some(resolved_path.to_string()),
+            None, 0, 0, None,
+        );
+        Err(message)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1027,4 +1075,4 @@ impl std::fmt::Display for ImportResolutionStats {
             self.files_visited
         )
     }
-        }
+            }

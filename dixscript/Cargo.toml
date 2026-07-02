@@ -2,7 +2,11 @@
 name = "dixscript"
 version = "1.0.0"
 edition = "2021"
-rust-version = "1.70"
+# True floor as of the pure-Rust compressor migration: bzip2 0.6
+# (libbz2-rs-sys) needs 1.82, lzma-rust2 needs 1.85. The old "1.70" here
+# predated both and was silently wrong — cargo would refuse to build
+# regardless of what this field claimed.
+rust-version = "1.85"
 authors = ["MidManStudio"]
 description = "Config, code, and encryption in one file — a data interchange format with compile-time functions, AES-256/ChaCha20 built-in, and cross-platform FFI"
 license = "MIT"
@@ -51,25 +55,38 @@ hex              = "0.4"
 # reqwest: rustls-tls instead of the default native-tls backend.
 #   native-tls → OpenSSL → NDK cross-compile pain (the one confirmed Android risk).
 #   rustls is pure Rust; no C, no system SSL library, identical HTTP behaviour.
-reqwest     = { version = "0.11", default-features = false, features = ["json", "rustls-tls"], optional = true }
-# tokio: trimmed from "full" to only the runtime features actually used
-# (rt-multi-thread for block_on, macros for #[tokio::main] if needed, fs + time for
-# the cloud download path).  "full" pulled in every tokio sub-crate unnecessarily.
-tokio       = { version = "1", features = ["rt-multi-thread", "macros", "fs", "time"], optional = true }
-# async-trait and url are used outside the cloud path (cloud_storage_provider trait
-# definition; url crate used by cloud_file_cache for URL parsing), so they stay
-# unconditional.
+#
+# Both moved into the non-wasm32 target table on purpose: tokio's
+# "rt-multi-thread" and "fs" features hit a hard compile_error! on
+# wasm32-unknown-unknown ("Only features sync,macros,io-util,rt,time are
+# supported on wasm") — this isn't a runtime concern like rayon, it's an
+# immediate build failure. Gating the dependency itself (rather than relying
+# on every consumer remembering `default-features = false`) means a wasm
+# build simply never sees these crates, matching the pattern already used
+# below for rayon/hostname. The corresponding module gate lives in
+# ImportsResolution/mod.rs.
 async-trait = "0.1"
 url         = "2.5"
 
 # Compression backends
 bzip2       = { version = "0.6", optional = true }
-lzma-rs     = { version = "0.3.0", optional = true }
+# lzma-rust2: real LZMA2/XZ codec (ported from tukaani's xz-for-java), not a
+# liblzma C binding. Zero non-Rust deps (only optional pure-Rust `sha2` for
+# the XZ integrity checksum). `optimization` is deliberately left off — it's
+# sound per upstream, but disabling it guarantees 100% safe standard Rust
+# with zero hand-written-asm surface across every target, which matters more
+# here than the speed it buys back on x86_64/aarch64 hosts.
+lzma-rust2  = { version = "0.16", default-features = false, features = ["std", "encoder", "xz"], optional = true }
 
 # ── Non-WASM native deps ───────────────────────────────────────────────────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon    = "1.8"
 hostname = "0.3"
+reqwest  = { version = "0.11", default-features = false, features = ["json", "rustls-tls"], optional = true }
+# tokio: trimmed from "full" to only the runtime features actually used
+# (rt-multi-thread for block_on, macros for #[tokio::main] if needed, fs + time for
+# the cloud download path).  "full" pulled in every tokio sub-crate unnecessarily.
+tokio    = { version = "1", features = ["rt-multi-thread", "macros", "fs", "time"], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
@@ -139,4 +156,4 @@ harness = false
 default       = ["cloud-import", "bzip2-support", "xz-support"]
 cloud-import  = ["dep:reqwest", "dep:tokio"]
 bzip2-support = ["dep:bzip2"]
-xz-support    = ["dep:lzma-rs"]
+xz-support    = ["dep:lzma-rust2"]

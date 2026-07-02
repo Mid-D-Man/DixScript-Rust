@@ -30,4 +30,4 @@ pub trait ICompressor {
 
     /// Get priority (lower = earlier execution)
     fn priority(&self) -> i32;
-  }
+}

@@ -1,6 +1,10 @@
+// mdix-wasm/src/lib.rs
 mod builder;
 mod database;
 mod error;
+mod merge;
+mod schema;
+mod watch;
 
 use wasm_bindgen::prelude::*;
 
@@ -15,3 +19,6 @@ pub fn init() {
 
 pub use builder::MdixBuilder;
 pub use database::MdixDatabase;
+pub use merge::{merge_sources, merge_sources_weighted, MdixMergeOutcome};
+pub use schema::{MdixSchema, MdixValidationReport};
+pub use watch::{MdixWatcher, MdixWatchOutcome};

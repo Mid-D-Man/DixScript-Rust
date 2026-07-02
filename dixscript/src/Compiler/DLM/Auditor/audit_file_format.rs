@@ -1,4 +1,3 @@
-
 //! `.mdix.au` file format — writer and parser.
 //!
 //! ## File layout
@@ -16,7 +15,7 @@
 //!
 //! // ─── Compilation History ──────────────────────────────────────────────────
 //!
-//! compilation_1:
+//! @compilation(1)
 //!   index              -> 1,
 //!   compilation_id     -> "abc12345",
 //!   timestamp          -> "2025-01-01T00:00:01Z",
@@ -26,13 +25,14 @@
 //!   execution_time_ms  -> 45.23,
 //!   changes_summary    -> "none"
 //!
-//! compilation_2:
+//! @compilation(2)
 //!   ...
 //! ```
 //!
 //! Entries are appended. The `@AUDIT_CONFIG` section is closed; history entries
-//! are free-standing blocks below it — no wrapping section needed, so appending
-//! never requires rewriting the file.
+//! are free-standing blocks below it, each opened with `@compilation(N)` in the
+//! same section-call style as `@AUDIT_CONFIG` — no wrapping section needed, so
+//! appending never requires rewriting the file.
 
 use super::audit_file_data::{AuditEntryRecord, AuditFileConfig, AuditFileData};
 use std::collections::HashMap;
@@ -85,11 +85,11 @@ impl AuditFileWriter {
         out
     }
 
-    /// Produce a single `compilation_N: ...` block for one compilation entry.
+    /// Produce a single `@compilation(N) ...` block for one compilation entry.
     pub fn write_entry(entry: &AuditEntryRecord) -> String {
         let mut out = String::with_capacity(256);
 
-        out.push_str(&format!("compilation_{}:\n", entry.index));
+        out.push_str(&format!("@compilation({})\n", entry.index));
         Self::uint_entry_indented(&mut out, "index", entry.index);
         Self::str_entry_indented(&mut out, "compilation_id", &entry.compilation_id);
         Self::str_entry_indented(
@@ -180,13 +180,13 @@ impl AuditFileParser {
         Ok(AuditFileData { config, entries })
     }
 
-    /// Count `compilation_N:` blocks in file content.
+    /// Count `@compilation(N)` blocks in file content.
     ///
     /// Used by [`AuditFileManager`] to decide when to rotate.
     pub fn count_entries(content: &str) -> usize {
         let mut count  = 0;
         let mut search = content;
-        let marker     = "compilation_";
+        let marker     = "@compilation(";
 
         while let Some(pos) = search.find(marker) {
             let after  = &search[pos + marker.len()..];
@@ -194,8 +194,9 @@ impl AuditFileParser {
                 after.chars().take_while(|c| c.is_ascii_digit()).collect();
             if !digits.is_empty() {
                 let rest = &after[digits.len()..];
-                // Must be followed immediately by ':' (possibly with trailing whitespace on same line)
-                if rest.starts_with(':') || rest.starts_with(":\n") || rest.starts_with(":\r") {
+                // Must be closed immediately by ')' — @compilation(N) is a
+                // self-closing section call, not a wrapping section.
+                if rest.starts_with(')') {
                     count += 1;
                 }
             }
@@ -216,7 +217,7 @@ impl AuditFileParser {
         while i < lines.len() {
             let trimmed = lines[i].trim();
 
-            // Look for `compilation_N:` lines
+            // Look for `@compilation(N)` lines
             if Self::is_compilation_header(trimmed) {
                 // Collect lines belonging to this entry
                 let mut block_lines = Vec::new();
@@ -266,14 +267,15 @@ impl AuditFileParser {
         entries
     }
 
-    /// Returns true if `line` is a `compilation_N:` header.
+    /// Returns true if `line` is a `@compilation(N)` header.
     fn is_compilation_header(line: &str) -> bool {
-        if !line.starts_with("compilation_") { return false; }
-        let after  = &line["compilation_".len()..];
+        const PREFIX: &str = "@compilation(";
+        if !line.starts_with(PREFIX) { return false; }
+        let after  = &line[PREFIX.len()..];
         let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
         if digits.is_empty() { return false; }
         let rest = &after[digits.len()..];
-        rest == ":" || rest.starts_with(':')
+        rest == ")" || rest.starts_with(')')
     }
 
     // ── Private — section extraction ──────────────────────────────────────────
@@ -436,4 +438,12 @@ mod tests {
         let data = AuditFileParser::parse(&text).unwrap();
         assert!(data.entries[0].changes_summary.is_none());
     }
-                     }
+
+    #[test]
+    fn entry_header_uses_at_compilation_syntax() {
+        let entry = make_entry(7);
+        let text  = AuditFileWriter::write_entry(&entry);
+        assert!(text.starts_with("@compilation(7)\n"));
+        assert!(!text.contains("compilation_7:"));
+    }
+}

@@ -78,10 +78,10 @@ jobs:
           wasm-pack build mdix-wasm \
             --target bundler \
             --release \
-            --out-dir ../npm/wasm-pkg \
+            --out-dir ../wasm-pkg \
             --out-name mdix_wasm
           echo "wasm-pack bundler output:"
-          ls -lh npm/wasm-pkg/
+          ls -lh wasm-pkg/
 
       # ── Step 2: build web target for GitHub Pages playground ──────────
       # --target web produces JS that uses fetch() to load the .wasm file,
@@ -92,10 +92,10 @@ jobs:
           wasm-pack build mdix-wasm \
             --target web \
             --release \
-            --out-dir ../npm/wasm-web \
+            --out-dir ../wasm-web \
             --out-name mdix_wasm
           echo "wasm-pack web output:"
-          ls -lh npm/wasm-web/
+          ls -lh wasm-web/
 
       # ── Step 3: build the TypeScript wrapper ──────────────────────────
       - name: Setup Node.js
@@ -105,11 +105,11 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install TypeScript dependencies
-        run: mdix-npm install
+        run: npm install
         working-directory: mdix-npm
 
       - name: Build TypeScript wrapper
-        run: mdix-npm run build:ts
+        run: npm run build:ts
         working-directory: mdix-npm
 
       # ── Verify output ──────────────────────────────────────────────────
@@ -118,9 +118,9 @@ jobs:
           echo "dist/ contents:"
           ls -lh dist/ || echo "dist/ not found"
           echo "wasm-pkg/ (bundler) contents:"
-          ls -lh wasm-pkg/
+          ls -lh ../wasm-pkg/
           echo "wasm-web/ (web) contents:"
-          ls -lh wasm-web/
+          ls -lh ../wasm-web/
         working-directory: mdix-npm
 
       - name: Upload build artifacts
@@ -129,10 +129,10 @@ jobs:
         with:
           name: wasm-mdix-npm-build-${{ github.run_number }}
           path: |
-            npm/dist/
-            npm/wasm-pkg/
-            npm/wasm-web/
-            npm/package-lock.json
+            mdix-npm/dist/
+            wasm-pkg/
+            wasm-web/
+            mdix-npm/package-lock.json
           retention-days: 30
 
       # ── Publish to mdix-npm — only on release branches ──────────────────────
@@ -143,7 +143,7 @@ jobs:
           github.ref != 'refs/heads/develop' &&
           (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' ||
            github.ref == 'refs/heads/mdix-npm-wasm' || github.event_name == 'workflow_dispatch')
-        run: mdix-npm publish --access public
+        run: npm publish --access public
         working-directory: mdix-npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

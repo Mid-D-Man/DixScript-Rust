@@ -175,6 +175,8 @@ impl BinaryUnpacker {
             if self.context.debug_config.is_enabled {
                 let reason = if cfg!(target_arch = "wasm32") {
                     "(wasm32 — sequential only)"
+                } else if !cfg!(feature = "rayon-support") {
+                    "(rayon-support feature disabled)"
                 } else if !CONCURRENT_DESERIALIZATION_ENABLED {
                     "(CONCURRENT_DESERIALIZATION_ENABLED = false)"
                 } else {
@@ -200,7 +202,7 @@ impl BinaryUnpacker {
     }
 
     fn should_use_concurrent(&self, offsets: &[&SectionOffset]) -> bool {
-        if cfg!(target_arch = "wasm32") {
+        if cfg!(target_arch = "wasm32") || !cfg!(feature = "rayon-support") {
             return false;
         }
         offsets.len() >= 2 && !self.context.debug_config.is_verbose
@@ -211,7 +213,7 @@ impl BinaryUnpacker {
         data: &[u8],
         offsets: &[&SectionOffset],
     ) -> Result<Vec<(SectionId, SectionDecodeResult)>, BinarySerializationError> {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), feature = "rayon-support"))]
         {
             use rayon::prelude::*;
 
@@ -227,10 +229,11 @@ impl BinaryUnpacker {
             return self.collect_decode_results(results);
         }
 
-        // should_use_concurrent() always returns false on wasm32,
-        // so this is never reached at runtime. The cfg block above is
-        // compiled away on wasm32, leaving only this sequential fallback.
-        #[cfg(target_arch = "wasm32")]
+        // should_use_concurrent() always returns false on wasm32 or when
+        // rayon-support is disabled, so this is never reached at runtime
+        // in either of those cases. The cfg block above is compiled away
+        // there, leaving only this sequential fallback.
+        #[cfg(any(target_arch = "wasm32", not(feature = "rayon-support")))]
         self.decode_sections_sequential(data, offsets)
     }
 
@@ -392,4 +395,4 @@ fn extract_section_data<'a>(
 
 impl Default for BinaryUnpacker {
     fn default() -> Self { Self::new() }
-}
+            }

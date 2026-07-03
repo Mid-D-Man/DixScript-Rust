@@ -1,0 +1,39 @@
+# dixscript/fuzz/Cargo.toml
+#
+# Deliberately its own workspace root (the empty [workspace] table below) —
+# NOT a member of the main DixScript-Rust workspace. cargo-fuzz needs
+# nightly + libfuzzer, which has no business bleeding into the main
+# workspace's toolchain/dependency resolution for a normal `cargo build`.
+# Run this with `cargo fuzz run parse_mdix` from inside dixscript/, which
+# cargo-fuzz points at this directory automatically.
+
+[package]
+name = "dixscript-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.dixscript]
+path = ".."
+# Same reasoning as the main crate's rayon-support: keep the fuzz target
+# fast and deterministic. Cloud-import and the two optional compressors add
+# nothing to what this harness tests (parsing) and only slow iteration down.
+default-features = false
+
+[[bin]]
+name = "parse_mdix"
+path = "fuzz_targets/parse_mdix.rs"
+test = false
+doctest = false
+bench = false
+
+[profile.release]
+debug = 1
+
+[workspace]

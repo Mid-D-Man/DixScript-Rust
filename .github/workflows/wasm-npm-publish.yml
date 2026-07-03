@@ -78,10 +78,10 @@ jobs:
           wasm-pack build mdix-wasm \
             --target bundler \
             --release \
-            --out-dir ../wasm-pkg \
+            --out-dir "$GITHUB_WORKSPACE/mdix-npm/wasm-pkg" \
             --out-name mdix_wasm
           echo "wasm-pack bundler output:"
-          ls -lh wasm-pkg/
+          ls -lh mdix-npm/wasm-pkg/
 
       # ── Step 2: build web target for GitHub Pages playground ──────────
       # --target web produces JS that uses fetch() to load the .wasm file,
@@ -92,7 +92,7 @@ jobs:
           wasm-pack build mdix-wasm \
             --target web \
             --release \
-            --out-dir ../wasm-web \
+            --out-dir "$GITHUB_WORKSPACE/wasm-web" \
             --out-name mdix_wasm
           echo "wasm-pack web output:"
           ls -lh wasm-web/
@@ -118,7 +118,7 @@ jobs:
           echo "dist/ contents:"
           ls -lh dist/ || echo "dist/ not found"
           echo "wasm-pkg/ (bundler) contents:"
-          ls -lh ../wasm-pkg/
+          ls -lh wasm-pkg/
           echo "wasm-web/ (web) contents:"
           ls -lh ../wasm-web/
         working-directory: mdix-npm
@@ -130,7 +130,7 @@ jobs:
           name: wasm-mdix-npm-build-${{ github.run_number }}
           path: |
             mdix-npm/dist/
-            wasm-pkg/
+            mdix-npm/wasm-pkg/
             wasm-web/
             mdix-npm/package-lock.json
           retention-days: 30

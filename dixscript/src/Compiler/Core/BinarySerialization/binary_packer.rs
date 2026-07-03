@@ -102,6 +102,8 @@ impl BinaryPacker {
             if self.context.debug_config.is_enabled {
                 let reason = if cfg!(target_arch = "wasm32") {
                     "(wasm32 — sequential only)"
+                } else if !cfg!(feature = "rayon-support") {
+                    "(rayon-support feature disabled)"
                 } else if !CONCURRENT_SERIALIZATION_ENABLED {
                     "(CONCURRENT_SERIALIZATION_ENABLED = false)"
                 } else {
@@ -138,7 +140,7 @@ impl BinaryPacker {
     }
 
     fn should_use_concurrent(&self, sections: &[SectionId]) -> bool {
-        if cfg!(target_arch = "wasm32") {
+        if cfg!(target_arch = "wasm32") || !cfg!(feature = "rayon-support") {
             return false;
         }
         sections.len() >= 2 && !self.context.debug_config.is_verbose
@@ -149,7 +151,7 @@ impl BinaryPacker {
         ast: &DixScript,
         sections: &[SectionId],
     ) -> Result<Vec<(SectionId, Vec<u8>)>, BinarySerializationError> {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), feature = "rayon-support"))]
         {
             use rayon::prelude::*;
 
@@ -161,10 +163,11 @@ impl BinaryPacker {
             return self.collect_encode_results(results, sections);
         }
 
-        // should_use_concurrent() always returns false on wasm32,
-        // so this is never reached at runtime. The cfg block above is
-        // compiled away on wasm32, leaving only this sequential fallback.
-        #[cfg(target_arch = "wasm32")]
+        // should_use_concurrent() always returns false on wasm32 or when
+        // rayon-support is disabled, so this is never reached at runtime
+        // in either of those cases. The cfg block above is compiled away
+        // there, leaving only this sequential fallback.
+        #[cfg(any(target_arch = "wasm32", not(feature = "rayon-support")))]
         self.encode_sections_sequential(ast, sections)
     }
 
@@ -372,4 +375,4 @@ fn section_flag_for(id: SectionId) -> SectionFlags {
         SectionId::Security => SectionFlags::SECURITY,
         SectionId::Imports  => SectionFlags::IMPORTS,
     }
-}
+                     }

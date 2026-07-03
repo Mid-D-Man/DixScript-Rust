@@ -359,4 +359,17 @@ impl MdixDatabase {
         }
         self.inner.as_ref().ok_or_else(|| freed_err("MdixDatabase"))
     }
-            }
+}
+
+// Not part of the #[wasm_bindgen] impl block above on purpose: `DixData` is
+// a native Rust type with no wasm-bindgen binding of its own, so this isn't
+// (and can't be) exposed to JS directly — unlike load_str/from_json/
+// from_toml, which all parse from a JS-facing string. This exists purely
+// for other Rust modules in this crate (merge.rs) that already have a
+// DixData in hand — e.g. the result of merging two databases — and just
+// need to wrap it back into the JS-facing MdixDatabase type to return.
+impl MdixDatabase {
+    pub(crate) fn from_data(data: DixData) -> Self {
+        MdixDatabase { inner: Some(data) }
+    }
+}

@@ -16,6 +16,19 @@ keywords = ["config", "encryption", "serialization", "data-format", "gamedev"]
 # "config" is not a valid crates.io category slug — replaced with "development-tools"
 categories = ["development-tools", "encoding", "data-structures", "cryptography"]
 
+# Consumers of the crate never need any of this — dev-dependencies (criterion,
+# tempfile, bincode, rmp-serde, postcard, ciborium) already can't leak into
+# their build regardless, but the source files themselves would still ship
+# in the tarball without this. examples/ is deliberately NOT excluded — it's
+# small (12K, one file) and genuinely useful for anyone browsing usage on
+# docs.rs or running `cargo run --example`.
+exclude = [
+    "benches/",
+    "tests/",
+    "fuzz/",
+    ".github/",
+]
+
 [lib]
 name = "dixscript"
 crate-type = ["lib"]

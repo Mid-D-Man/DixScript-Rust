@@ -229,7 +229,7 @@ impl<'a> GeneralParser<'a> {
     // ── Section parsing internals ─────────────────────────────────────────────
 
     fn should_use_concurrent_parsing(&self, sections: &[SectionData]) -> bool {
-        if cfg!(target_arch = "wasm32") { return false; }
+        if cfg!(target_arch = "wasm32") || !cfg!(feature = "rayon-support") { return false; }
         CONCURRENT_PARSING_ENABLED
             && self.allow_concurrent
             && sections.len() >= 2
@@ -333,7 +333,7 @@ impl<'a> GeneralParser<'a> {
         sections: Vec<SectionData>,
         script:   &mut DixScript,
     ) -> Result<(), ParseException> {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), feature = "rayon-support"))]
         {
             use rayon::prelude::*;
             let results: Vec<(String, Result<ParsedSection, ParseException>)> = sections
@@ -351,7 +351,7 @@ impl<'a> GeneralParser<'a> {
             }
             return Ok(());
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(target_arch = "wasm32", not(feature = "rayon-support")))]
         self.parse_sections_sequential(sections, script)
     }
 
@@ -507,4 +507,4 @@ impl<'a> GeneralParser<'a> {
         )
     }
     #[inline] fn skip_non_meaningful_tokens(&mut self) {}
-}
+        }

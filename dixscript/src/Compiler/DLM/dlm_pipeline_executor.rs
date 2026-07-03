@@ -18,8 +18,10 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::fs;
 
-#[cfg(not(target_arch = "wasm32"))]
-use crate::Compiler::DLM::Compressor::{Bzip2Compressor, LzmaCompressor};
+#[cfg(feature = "bzip2-support")]
+use crate::Compiler::DLM::Compressor::Bzip2Compressor;
+#[cfg(feature = "xz-support")]
+use crate::Compiler::DLM::Compressor::LzmaCompressor;
 
 pub struct DLMPipelineExecutor {
     error_manager:    ErrorManager,
@@ -317,16 +319,26 @@ impl DLMPipelineExecutor {
         match subtype {
             Some(DLMModuleSubtype::Gzip) | None => Ok(Box::new(GzipCompressor::new())),
 
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(feature = "bzip2-support")]
             Some(DLMModuleSubtype::Bzip2) => Ok(Box::new(Bzip2Compressor::new())),
+            #[cfg(not(feature = "bzip2-support"))]
+            Some(DLMModuleSubtype::Bzip2) => Err(
+                "This file requires bzip2 compression (DCompressor.bzip2), but \
+                 this build of dixscript was compiled without the \
+                 'bzip2-support' feature. Rebuild with `--features \
+                 bzip2-support` (or default features) to read this file, or \
+                 use DCompressor.gzip in files you control.".to_string()
+            ),
 
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(feature = "xz-support")]
             Some(DLMModuleSubtype::Lzma) => Ok(Box::new(LzmaCompressor::new())),
-
-            #[cfg(target_arch = "wasm32")]
-            Some(DLMModuleSubtype::Bzip2) | Some(DLMModuleSubtype::Lzma) => Err(
-                "bzip2 and lzma are not supported in WebAssembly builds. \
-                 Use DCompressor.gzip instead.".to_string()
+            #[cfg(not(feature = "xz-support"))]
+            Some(DLMModuleSubtype::Lzma) => Err(
+                "This file requires XZ/LZMA compression (DCompressor.lzma), but \
+                 this build of dixscript was compiled without the 'xz-support' \
+                 feature. Rebuild with `--features xz-support` (or default \
+                 features) to read this file, or use DCompressor.gzip in \
+                 files you control.".to_string()
             ),
 
             Some(other) => Err(format!("Unknown compressor subtype: {:?}", other)),
@@ -457,4 +469,4 @@ impl DLMPipelineExecutor {
             .unwrap_or("unknown")
             .to_string()
     }
-}
+            }

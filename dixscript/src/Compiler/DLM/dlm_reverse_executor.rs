@@ -15,8 +15,10 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::fs;
 
-#[cfg(not(target_arch = "wasm32"))]
-use crate::Compiler::DLM::Compressor::{Bzip2Compressor, LzmaCompressor};
+#[cfg(feature = "bzip2-support")]
+use crate::Compiler::DLM::Compressor::Bzip2Compressor;
+#[cfg(feature = "xz-support")]
+use crate::Compiler::DLM::Compressor::LzmaCompressor;
 
 pub struct DLMReverseExecutor {
     error_manager:       ErrorManager,
@@ -409,23 +411,25 @@ impl DLMReverseExecutor {
         match algorithm.to_lowercase().as_str() {
             "gzip" => Ok(Box::new(GzipCompressor::new())),
 
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(feature = "bzip2-support")]
             "bzip2" => Ok(Box::new(Bzip2Compressor::new())),
+            #[cfg(not(feature = "bzip2-support"))]
+            "bzip2" => Err(
+                "This file was compressed with bzip2, but this build of \
+                 dixscript was compiled without the 'bzip2-support' feature. \
+                 Rebuild with `--features bzip2-support` (or default \
+                 features) to decompress it.".to_string()
+            ),
 
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(feature = "xz-support")]
             "lzma" => Ok(Box::new(LzmaCompressor::new())),
-
-            #[cfg(target_arch = "wasm32")]
-            "bzip2" | "lzma" => {
-                Err(format!(
-                    "Cannot decompress '{}' format in a WebAssembly context — \
-                     this .mdix.enc file was compressed with a C-based algorithm \
-                     unavailable in WASM builds. Decompress it using the native \
-                     @dixscript/cli or the .NET library first, then load the \
-                     resulting plain .mdix file.",
-                    algorithm
-                ))
-            }
+            #[cfg(not(feature = "xz-support"))]
+            "lzma" => Err(
+                "This file was compressed with XZ/LZMA, but this build of \
+                 dixscript was compiled without the 'xz-support' feature. \
+                 Rebuild with `--features xz-support` (or default features) \
+                 to decompress it.".to_string()
+            ),
 
             _ => {
                 let msg = format!(
@@ -482,4 +486,4 @@ impl DLMReverseExecutor {
             .unwrap_or("unknown")
             .to_string()
     }
-}
+    }

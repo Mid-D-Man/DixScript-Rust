@@ -15,7 +15,7 @@
 //!
 //! // ─── Compilation History ──────────────────────────────────────────────────
 //!
-//! @compilation(1)
+//! @compilation(
 //!   index              -> 1,
 //!   compilation_id     -> "abc12345",
 //!   timestamp          -> "2025-01-01T00:00:01Z",
@@ -23,21 +23,26 @@
 //!   status             -> "SUCCESS",
 //!   modules_executed   -> "DCompressor.gzip,DEncryptor.aes256",
 //!   execution_time_ms  -> 45.23,
-//!   changes_summary    -> "none"
+//!   changes_summary    -> "none",
+//! )
 //!
-//! @compilation(2)
+//! @compilation(
 //!   ...
+//! )
 //! ```
 //!
-//! Entries are appended. The `@AUDIT_CONFIG` section is closed; history entries
-//! are free-standing blocks below it, each opened with `@compilation(N)` in the
-//! same section-call style as `@AUDIT_CONFIG` — no wrapping section needed, so
-//! appending never requires rewriting the file.
+//! `@compilation` is a real section, same as `@AUDIT_CONFIG` — the index and
+//! every other field are key-value lines *inside* the parens, not an
+//! argument on the header. Entries are appended: each one is its own
+//! complete, self-closed `@compilation( ... )` block, so adding a new entry
+//! only ever adds text at the end of the file — no existing block, including
+//! its closing paren, needs to move.
 
 use super::audit_file_data::{AuditEntryRecord, AuditFileConfig, AuditFileData};
 use std::collections::HashMap;
 
 const SEC_AUDIT_CONFIG: &str = "@AUDIT_CONFIG";
+const SEC_COMPILATION:  &str = "@compilation";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Writer
@@ -85,38 +90,38 @@ impl AuditFileWriter {
         out
     }
 
-    /// Produce a single `@compilation(N) ...` block for one compilation entry.
+    /// Produce a single `@compilation( ... )` block for one compilation
+    /// entry — a real section, same shape as `@AUDIT_CONFIG`, not a bare
+    /// header with a free-standing body.
     pub fn write_entry(entry: &AuditEntryRecord) -> String {
         let mut out = String::with_capacity(256);
 
-        out.push_str(&format!("@compilation({})\n", entry.index));
-        Self::uint_entry_indented(&mut out, "index", entry.index);
-        Self::str_entry_indented(&mut out, "compilation_id", &entry.compilation_id);
-        Self::str_entry_indented(
+        out.push_str(SEC_COMPILATION);
+        out.push_str("(\n");
+        Self::uint_entry(&mut out, "index", entry.index);
+        Self::str_entry(&mut out, "compilation_id", &entry.compilation_id);
+        Self::str_entry(
             &mut out,
             "timestamp",
             &entry.timestamp.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         );
-        Self::str_entry_indented(&mut out, "source_checksum", &entry.source_checksum);
-        Self::str_entry_indented(&mut out, "status", &entry.status);
-        Self::str_entry_indented(
+        Self::str_entry(&mut out, "source_checksum", &entry.source_checksum);
+        Self::str_entry(&mut out, "status", &entry.status);
+        Self::str_entry(
             &mut out,
             "modules_executed",
             &entry.modules_executed.join(","),
         );
-
-        // f64 — no helper macro needed, just format
         out.push_str(&format!(
             "  execution_time_ms -> {:.2},\n",
             entry.execution_time_ms,
         ));
-
-        // Last field — no trailing comma
-        out.push_str(&format!(
-            "  changes_summary -> \"{}\"\n",
+        Self::str_entry(
+            &mut out,
+            "changes_summary",
             entry.changes_summary.as_deref().unwrap_or("none"),
-        ));
-        out.push('\n');
+        );
+        out.push_str(")\n\n");
 
         out
     }
@@ -132,16 +137,6 @@ impl AuditFileWriter {
     fn uint_entry(out: &mut String, key: &str, value: usize) {
         out.push_str(&format!("  {} -> {},\n", key, value));
     }
-
-    #[inline]
-    fn str_entry_indented(out: &mut String, key: &str, value: &str) {
-        out.push_str(&format!("  {} -> \"{}\",\n", key, value));
-    }
-
-    #[inline]
-    fn uint_entry_indented(out: &mut String, key: &str, value: usize) {
-        out.push_str(&format!("  {} -> {},\n", key, value));
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,8 +149,10 @@ pub struct AuditFileParser;
 impl AuditFileParser {
     /// Parse the full audit file content.
     pub fn parse(input: &str) -> Result<AuditFileData, String> {
-        // ── @AUDIT_CONFIG (required) ──────────────────────────────────────────
-        let config_content = Self::extract_section(input, SEC_AUDIT_CONFIG)
+        // ── @AUDIT_CONFIG (required, exactly one) ─────────────────────────────
+        let config_content = Self::extract_sections(input, SEC_AUDIT_CONFIG)
+            .into_iter()
+            .next()
             .ok_or("Missing @AUDIT_CONFIG section in audit file")?;
 
         let cfg_map = Self::parse_entries(&config_content);
@@ -174,65 +171,11 @@ impl AuditFileParser {
             }
         }
 
-        // ── Compilation entries (free-standing blocks) ────────────────────────
-        let entries = Self::parse_compilation_blocks(input);
-
-        Ok(AuditFileData { config, entries })
-    }
-
-    /// Count `@compilation(N)` blocks in file content.
-    ///
-    /// Used by [`AuditFileManager`] to decide when to rotate.
-    pub fn count_entries(content: &str) -> usize {
-        let mut count  = 0;
-        let mut search = content;
-        let marker     = "@compilation(";
-
-        while let Some(pos) = search.find(marker) {
-            let after  = &search[pos + marker.len()..];
-            let digits: String =
-                after.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if !digits.is_empty() {
-                let rest = &after[digits.len()..];
-                // Must be closed immediately by ')' — @compilation(N) is a
-                // self-closing section call, not a wrapping section.
-                if rest.starts_with(')') {
-                    count += 1;
-                }
-            }
-            // Advance past the marker to keep scanning
-            search = &search[pos + 1..];
-        }
-
-        count
-    }
-
-    // ── Private — history parsing ─────────────────────────────────────────────
-
-    fn parse_compilation_blocks(input: &str) -> Vec<AuditEntryRecord> {
-        let mut entries = Vec::new();
-        let lines: Vec<&str> = input.lines().collect();
-        let mut i = 0;
-
-        while i < lines.len() {
-            let trimmed = lines[i].trim();
-
-            // Look for `@compilation(N)` lines
-            if Self::is_compilation_header(trimmed) {
-                // Collect lines belonging to this entry
-                let mut block_lines = Vec::new();
-                i += 1;
-                while i < lines.len() {
-                    let next = lines[i].trim();
-                    if Self::is_compilation_header(next) {
-                        break;
-                    }
-                    block_lines.push(lines[i]);
-                    i += 1;
-                }
-
-                let block = block_lines.join("\n");
-                let map   = Self::parse_entries(&block);
+        // ── @compilation sections (zero or more) ──────────────────────────────
+        let entries = Self::extract_sections(input, SEC_COMPILATION)
+            .iter()
+            .map(|block| {
+                let map = Self::parse_entries(block);
 
                 let mut rec = AuditEntryRecord::new();
                 rec.index             = Self::opt_usize(&map, "index").unwrap_or(0);
@@ -258,58 +201,70 @@ impl AuditFileParser {
                         .collect();
                 }
 
-                entries.push(rec);
-            } else {
-                i += 1;
-            }
-        }
+                rec
+            })
+            .collect();
 
-        entries
+        Ok(AuditFileData { config, entries })
     }
 
-    /// Returns true if `line` is a `@compilation(N)` header.
-    fn is_compilation_header(line: &str) -> bool {
-        const PREFIX: &str = "@compilation(";
-        if !line.starts_with(PREFIX) { return false; }
-        let after  = &line[PREFIX.len()..];
-        let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if digits.is_empty() { return false; }
-        let rest = &after[digits.len()..];
-        rest == ")" || rest.starts_with(')')
+    /// Count `@compilation( ... )` blocks in file content.
+    ///
+    /// Used by [`AuditFileManager`] to decide when to rotate.
+    pub fn count_entries(content: &str) -> usize {
+        Self::extract_sections(content, SEC_COMPILATION).len()
     }
 
     // ── Private — section extraction ──────────────────────────────────────────
 
-    /// Find `@SECTION_NAME(...)` and return the content between the parens.
-    fn extract_section(input: &str, keyword: &str) -> Option<String> {
-        let start = input.find(keyword)?;
-        let after = &input[start + keyword.len()..];
-        let open  = after.find('(')?;
-        let body  = &after[open..]; // starts with '('
+    /// Find every `keyword( ... )` occurrence in `input` and return the
+    /// content between each pair of balanced parens, in order. Paren
+    /// depth-tracked and string-aware, so a `)` inside a `"..."` value
+    /// doesn't close the section early. Used for both the single
+    /// `@AUDIT_CONFIG` section and the repeated `@compilation` sections —
+    /// same extraction logic either way, just take one result or all of
+    /// them.
+    fn extract_sections(input: &str, keyword: &str) -> Vec<String> {
+        let mut results   = Vec::new();
+        let mut remaining = input;
 
-        let mut depth       = 0i32;
-        let mut in_string   = false;
-        let mut string_char = '\0';
-        let mut close_pos   = None;
+        while let Some(rel_start) = remaining.find(keyword) {
+            let after = &remaining[rel_start + keyword.len()..];
+            let Some(open_rel) = after.find('(') else { break; };
+            let body = &after[open_rel..]; // starts with '('
 
-        for (pos, ch) in body.char_indices() {
-            if in_string {
-                if ch == string_char { in_string = false; }
-                continue;
-            }
-            match ch {
-                '"' | '\'' => { in_string = true; string_char = ch; }
-                '('        => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 { close_pos = Some(pos); break; }
+            let mut depth       = 0i32;
+            let mut in_string   = false;
+            let mut string_char = '\0';
+            let mut close_pos   = None;
+
+            for (pos, ch) in body.char_indices() {
+                if in_string {
+                    if ch == string_char { in_string = false; }
+                    continue;
                 }
-                _ => {}
+                match ch {
+                    '"' | '\'' => { in_string = true; string_char = ch; }
+                    '('        => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 { close_pos = Some(pos); break; }
+                    }
+                    _ => {}
+                }
             }
+
+            // Malformed (unclosed) section — stop scanning rather than loop forever.
+            let Some(close) = close_pos else { break; };
+
+            results.push(body[1..close].to_string());
+
+            // Advance past this whole matched section to keep scanning for more.
+            let consumed = rel_start + keyword.len() + open_rel + close + 1;
+            remaining = &remaining[consumed..];
         }
 
-        let close = close_pos?;
-        Some(body[1..close].to_string())
+        results
     }
 
     // ── Private — key-value line parsing ─────────────────────────────────────
@@ -440,10 +395,26 @@ mod tests {
     }
 
     #[test]
-    fn entry_header_uses_at_compilation_syntax() {
+    fn entry_is_a_real_wrapping_section() {
         let entry = make_entry(7);
         let text  = AuditFileWriter::write_entry(&entry);
-        assert!(text.starts_with("@compilation(7)\n"));
-        assert!(!text.contains("compilation_7:"));
+        assert!(text.starts_with("@compilation(\n"));
+        // The index must be a key-value line inside the parens, not an
+        // argument on the header.
+        assert!(!text.starts_with("@compilation(7)"));
+        assert!(text.contains("index -> 7,"));
+        assert!(text.trim_end().ends_with(')'));
     }
-}
+
+    #[test]
+    fn closing_paren_inside_string_value_does_not_end_section_early() {
+        // A pathological but valid value containing a literal ')' — the
+        // depth/string-aware scanner must not stop at it.
+        let mut entry = make_entry(1);
+        entry.status = "OK (with parens)".to_string();
+        let text = AuditFileWriter::write_entry(&entry);
+        let blocks = AuditFileParser::extract_sections(&text, "@compilation");
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].contains("OK (with parens)"));
+    }
+        }

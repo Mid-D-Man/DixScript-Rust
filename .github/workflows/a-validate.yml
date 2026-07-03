@@ -1,0 +1,111 @@
+name: Validate dixscript
+
+# Build, test, wasm-target check, and a short fuzz smoke run all gate
+# normally (a red X here means something's actually broken). Clippy runs
+# separately and is deliberately informational-only — see that job for why.
+on:
+  push:
+    branches: [main, master, develop]
+    paths:
+      - 'dixscript/**'
+      - '.github/workflows/validate.yml'
+  pull_request:
+    paths:
+      - 'dixscript/**'
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build & test (native, default features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build -p dixscript --all-targets
+        working-directory: .
+
+      - name: Run tests
+        run: cargo test -p dixscript
+
+  build-minimal:
+    name: Build (no default features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Confirms the crate still builds with every optional feature off —
+      # catches an accidental hard dependency on cloud-import / a
+      # compressor / rayon-support leaking outside its feature gate.
+      - name: Build with no default features
+        run: cargo build -p dixscript --no-default-features
+
+  wasm-build:
+    name: Build (wasm32-unknown-unknown)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # Default features on purpose — this is what mdix-wasm actually builds
+      # with. Confirms cloud-import/bzip2-support/xz-support/rayon-support
+      # all resolve correctly (or gracefully no-op, for cloud-import) on the
+      # target that's historically been the fragile one all along.
+      - name: Build dixscript for wasm32
+        run: cargo build -p dixscript --target wasm32-unknown-unknown
+
+  fuzz-smoke-test:
+    name: Fuzz smoke test (60s — crash detection only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      # 60 seconds, not a real fuzzing campaign — just long enough to catch
+      # an obvious regression (a panic on some malformed input) before it
+      # ships. Run `cargo fuzz run parse_mdix` locally with a much longer
+      # budget (hours, overnight) for actual coverage; that's a manual /
+      # scheduled job, not something to run on every push.
+      - name: Fuzz parse_mdix
+        run: cargo fuzz run parse_mdix -- -max_total_time=60
+        working-directory: dixscript
+
+      - name: Upload crash artifacts (if any)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-${{ github.run_number }}
+          path: dixscript/fuzz/artifacts/
+          retention-days: 30
+
+  clippy:
+    name: Clippy (informational — does not block)
+    runs-on: ubuntu-latest
+    # This job can go red without blocking anything that depends on this
+    # workflow (e.g. a future branch-protection rule, or a publish gate).
+    # There's a real, not-yet-cleared backlog of warnings in the codebase —
+    # this job exists to make that backlog visible in CI output over time,
+    # not to force it to zero before anything can ship. Flip
+    # continue-on-error to false once the backlog's actually been worked
+    # through and you want it to start gating for real.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Run clippy
+        run: cargo clippy -p dixscript --all-targets -- -W clippy::all

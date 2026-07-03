@@ -4,7 +4,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/dixscript.svg)](https://crates.io/crates/dixscript)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
 [![CI](https://github.com/Mid-D-Man/DixScript-Rust/actions/workflows/dixscript-publish.yml/badge.svg)](https://github.com/Mid-D-Man/DixScript-Rust/actions)
 
 DixScript is a data interchange format with compile-time functions,
@@ -14,6 +14,7 @@ at compile time, and exposes a flat dotted-path API for reading the
 resulting data at runtime.
 
 > **Format documentation and language reference:**
+> [`DixScript-Docs.pages.dev`](https://dixscript-docs.pages.dev) ·
 > [`github.com/Mid-D-Man/DixScript-Rust`](https://github.com/Mid-D-Man/DixScript-Rust)
 >
 > **Module and API index for contributors:** see [`CATALOGUE.md`](./CATALOGUE.md)
@@ -556,21 +557,62 @@ time.
 
 ## Feature flags
 
-No optional features are required for the core use case. The crate
-compiles to a pure-Rust library with no system dependencies.
+```toml
+[dependencies]
+dixscript = "1.0.0"
+```
+pulls in everything below by default — existing behavior is unchanged if
+you don't touch this. To trim what you don't need:
+```toml
+dixscript = { version = "1.0.0", default-features = false, features = ["xz-support"] }
+```
 
-Platform notes:
-- `bzip2` and `lzma` compression are excluded on `wasm32` targets
-  (gzip remains available via the pure-Rust backend)
-- `rayon` parallel parsing is excluded on `wasm32`
-- All encryption algorithms (AES-128, AES-256, ChaCha20) work on all
-  targets including `wasm32` and Android
+| Feature | Default | What it adds |
+|---------|---------|---------------|
+| `cloud-import` | on | HTTP/HTTPS `@IMPORTS` resolution (reqwest + rustls-tls) |
+| `bzip2-support` | on | bzip2 compression for `@DLM(DCompressor.bzip2)` |
+| `xz-support` | on | XZ/LZMA compression for `@DLM(DCompressor.lzma)` |
+| `rayon-support` | on | Parallel section parsing/(de)serialization for large files |
+
+Building with a feature off and then loading a `.mdix` file that actually
+needs it (e.g. `xz-support` disabled but the file specifies
+`DCompressor.lzma`) returns a clear `Err` naming the missing feature —
+never a panic.
+
+### Platform notes
+
+- **gzip, bzip2, and XZ compression** all work identically on every
+  target — native, `wasm32-unknown-unknown`, and Android. All three
+  backends are pure Rust (bzip2 via `libbz2-rs-sys`, XZ via `lzma-rust2`,
+  a real ported encoder, not a "compiles but barely compresses"
+  placeholder) — no C toolchain, no NDK cross-compile pain, no wasm build
+  failures. This wasn't always true; the platform notes here used to say
+  bzip2/lzma were excluded on wasm32 — that was accurate for older
+  versions and is no longer accurate as of this release.
+- **All encryption algorithms** (AES-128, AES-256-GCM, ChaCha20-Poly1305)
+  work on every target including `wasm32` and Android — pure Rust
+  RustCrypto primitives throughout, no exceptions.
+- **`rayon-support`** parallelizes on native targets when enabled (on by
+  default) and always falls back to sequential processing on `wasm32`
+  regardless of the feature flag — there's no real thread pool available
+  there to parallelize onto in the first place.
+- **`cloud-import` does not actually fetch anything on `wasm32`.** There's
+  no way to make a real, safe synchronous network request from inside a
+  wasm module — the `@IMPORTS` cloud path returns a clear error on that
+  target instead of silently failing. The working pattern on wasm is: the
+  host (JS) does a normal `fetch()` itself, then seeds a cache the
+  synchronous resolver checks first — see `mdix-wasm`'s `prefetchImport()`
+  binding. Local (non-cloud) `@IMPORTS` file paths have the same
+  limitation on wasm32 for the same underlying reason (no real
+  filesystem) — the host is expected to hand fully-assembled source to
+  `loadStr()` rather than DixScript resolving imports itself.
 
 ---
 
 ## MSRV
 
-Rust **1.70** or later.
+Rust **1.85** or later. (`bzip2` 0.6's pure-Rust backend needs 1.82;
+`lzma-rust2` needs 1.85 — the higher of the two is the real floor.)
 
 ---
 

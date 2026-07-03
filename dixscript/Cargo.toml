@@ -80,7 +80,14 @@ lzma-rust2  = { version = "0.16", default-features = false, features = ["std", "
 
 # ── Non-WASM native deps ───────────────────────────────────────────────────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rayon    = "1.8"
+# Optional: only pulled in when `rayon-support` is enabled (on by default).
+# Used in exactly three places — general_parser.rs's section-level parsing,
+# and binary_packer.rs/binary_unpacker.rs's section-level (de)serialization —
+# all three already had a sequential fallback for wasm32 before this feature
+# existed; the feature just extends that same fallback to any native build
+# that wants to opt out too (smaller binary, no thread-pool spin-up, fully
+# deterministic single-threaded execution for debugging).
+rayon    = { version = "1.8", optional = true }
 hostname = "0.3"
 reqwest  = { version = "0.11", default-features = false, features = ["json", "rustls-tls"], optional = true }
 # tokio: trimmed from "full" to only the runtime features actually used
@@ -157,7 +164,8 @@ harness = false
 # To restore just one group:
 #   dixscript = { path = "...", default-features = false, features = ["cloud-import"] }
 [features]
-default       = ["cloud-import", "bzip2-support", "xz-support"]
-cloud-import  = ["dep:reqwest", "dep:tokio"]
-bzip2-support = ["dep:bzip2"]
-xz-support    = ["dep:lzma-rust2"]
+default        = ["cloud-import", "bzip2-support", "xz-support", "rayon-support"]
+cloud-import   = ["dep:reqwest", "dep:tokio"]
+bzip2-support  = ["dep:bzip2"]
+xz-support     = ["dep:lzma-rust2"]
+rayon-support  = ["dep:rayon"]

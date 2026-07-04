@@ -205,7 +205,7 @@ impl MdixSchemaBuilder {
             .ok_or_else(|| to_py_err("[mdix] MdixSchemaBuilder is in an invalid state"))
     }
 
-    fn borrow(&self) -> PyResult<&CoreSchemaBuilder> {
+    pub(crate) fn borrow(&self) -> PyResult<&CoreSchemaBuilder> {
         self.inner
             .as_ref()
             .ok_or_else(|| to_py_err("[mdix] MdixSchemaBuilder is in an invalid state"))
@@ -362,4 +362,4 @@ impl MdixSchemaBuilder {
         let data = db.data()?;
         Ok(MdixValidationReport::from_core(builder.validate(data)))
     }
-                            }
+            }

@@ -18,7 +18,7 @@ pub fn init() {
 }
 
 pub use builder::MdixBuilder;
-pub use database::MdixDatabase;
+pub use database::{MdixDatabase, prefetch_import};
 pub use merge::{merge_sources, merge_sources_weighted, MdixMergeOutcome};
 pub use schema::{MdixSchema, MdixValidationReport};
 pub use watch::{MdixWatcher, MdixWatchOutcome};

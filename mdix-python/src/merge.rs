@@ -20,7 +20,7 @@ use crate::result::MdixResult;
 
 // ── Strategy string parsing ─────────────────────────────────────────────────
 
-fn parse_merge_strategy(s: &str) -> PyResult<MdixMergeStrategy> {
+pub(crate) fn parse_merge_strategy(s: &str) -> PyResult<MdixMergeStrategy> {
     match s {
         "weighted_priority" => Ok(MdixMergeStrategy::WeightedPriority),
         "primary_wins"      => Ok(MdixMergeStrategy::PrimaryWins),
@@ -34,7 +34,7 @@ fn parse_merge_strategy(s: &str) -> PyResult<MdixMergeStrategy> {
     }
 }
 
-fn parse_array_strategy(s: &str) -> PyResult<ArrayMergeStrategy> {
+pub(crate) fn parse_array_strategy(s: &str) -> PyResult<ArrayMergeStrategy> {
     match s {
         "replace"      => Ok(ArrayMergeStrategy::Replace),
         "concat"       => Ok(ArrayMergeStrategy::Concat),
@@ -69,7 +69,7 @@ pub struct MdixMerger {
 
 // ── Non-pymethods helpers — plain impl block (same convention as database.rs) ──
 impl MdixMerger {
-    fn build_core(&self) -> CoreMerger {
+    pub(crate) fn build_core(&self) -> CoreMerger {
         CoreMerger::new()
             .with_strategy(self.strategy)
             .with_array_strategy(self.array_strategy)
@@ -114,7 +114,13 @@ impl MdixMerger {
         Ok(MdixDatabase::from_data_pub(data))
     }
 
-    fn merge_files_weighted_inner(&self, pairs: &[(String, f64)]) -> PyResult<MdixDatabase> {
+    /// Used directly by `MdixDatabase.merge_with` (via `build_core`, not
+    /// this method itself — `merge_with` has no per-database weight
+    /// parameter, so it goes through `merge_files` semantics: first path
+    /// wins ties, not an explicit weight). Kept `pub(crate)` alongside
+    /// `build_core` for that reason, even though only `merge_files_inner`
+    /// calls it directly within this file.
+    pub(crate) fn merge_files_weighted_inner(&self, pairs: &[(String, f64)]) -> PyResult<MdixDatabase> {
         let borrowed: Vec<(&str, f64)> = pairs.iter().map(|(p, w)| (p.as_str(), *w)).collect();
         let data = self
             .build_core()
@@ -239,4 +245,4 @@ impl MdixMerger {
             self.strategy, self.array_strategy
         )
     }
-            }
+                               }

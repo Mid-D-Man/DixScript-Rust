@@ -2,6 +2,7 @@
 //! MdixDatabase — loaded DixScript database with raising and railway access.
 
 use pyo3::prelude::*;
+use std::io::Write;
 use dixscript::Runtime::{
     DixConverter, DixData, DixFormatOptions, DixLoadOptions, DixLoader, DixValue,
 };
@@ -532,33 +533,94 @@ impl MdixDatabase {
         MdixDatabase::from_json(&json_str)
     }
 
-    /// Validates this database against a schema built with `MdixSchema()`.
-    /// Returns an `MdixValidationReport` — see schema.rs. Deliberately
-    /// calls `SchemaBuilder::validate(&self, ..)` directly rather than
-    /// `DixData::validate_schema(self, ..)`, since the latter takes the
-    /// schema by value and PyO3 only hands us a borrowed reference here.
-    fn validate_schema(&self, schema: &crate::schema::MdixSchema) -> PyResult<crate::schema::MdixValidationReport> {
+    /// Validates this database against a schema built with
+    /// `MdixSchemaBuilder()`. Returns an `MdixValidationReport` — see
+    /// schema.rs. Deliberately calls `SchemaBuilder::validate(&self, ..)`
+    /// directly rather than `DixData::validate_schema(self, ..)`, since the
+    /// latter takes the schema by value and PyO3 only hands us a borrowed
+    /// reference here.
+    fn validate_schema(&self, schema: &crate::schema::MdixSchemaBuilder) -> PyResult<crate::schema::MdixValidationReport> {
         let data = self.data()?;
-        let report = schema.as_builder()?.validate(data);
-        Ok(crate::schema::MdixValidationReport::new(report))
+        let report = schema.borrow()?.validate(data);
+        Ok(crate::schema::MdixValidationReport::from_core(report))
     }
 
     /// Merges this database with `other`. Returns `(database, conflicts)`
-    /// — see merge.rs for strategy names and the conflict dict shape.
-    /// Neither `self` nor `other` is mutated.
+    /// — see merge.rs for strategy names. Neither `self` nor `other` is
+    /// mutated.
     ///
     /// `temp_dir` overrides where the round-trip temp files get written —
     /// pass an app-writable cache directory on sandboxed targets where
-    /// the default system temp dir may not be writable. See merge.rs.
+    /// the default system temp dir may not be writable.
+    ///
+    /// Goes through the same source-text round-trip `merge_strings` uses
+    /// (`to_mdix_string` → temp file → the core's file-based merge) since
+    /// there's no explicit per-database weight here — unlike
+    /// `MdixMerger.merge_files_weighted`, this takes `self` as higher
+    /// priority and `other` as lower, matching plain `merge_files`
+    /// semantics (first argument wins ties).
+    ///
+    /// `conflicts` is always empty right now: the core's file/text-based
+    /// merge path (`MdixMerger::merge_files`) returns the merged data only,
+    /// not per-field conflict detail — that detail exists in the core
+    /// crate (`MergeConflict` / `MdixMergeResult::into_result`) but only
+    /// via the AST-input `MdixMerger::merge(MdixMergeInput, MdixMergeInput)`
+    /// path, which needs a `DixData -> DixScript` step this binding
+    /// doesn't have. The merge itself is real and correct; only the
+    /// conflict list is a known gap, not silently wrong data.
     #[pyo3(signature = (other, strategy = None, array_strategy = None, temp_dir = None))]
     fn merge_with(
         &self,
-        py: Python<'_>,
         other: &MdixDatabase,
         strategy: Option<String>,
         array_strategy: Option<String>,
         temp_dir: Option<String>,
     ) -> PyResult<(MdixDatabase, Vec<PyObject>)> {
-        crate::merge::merge_with(py, self, other, strategy, array_strategy, temp_dir)
+        use dixscript::Runtime::merge::MdixMerger as CoreMerger;
+
+        let strategy_enum = match strategy.as_deref() {
+            Some(s) => crate::merge::parse_merge_strategy(s)?,
+            None    => Default::default(),
+        };
+        let array_strategy_enum = match array_strategy.as_deref() {
+            Some(s) => crate::merge::parse_array_strategy(s)?,
+            None    => Default::default(),
+        };
+
+        let self_text  = self.to_mdix_string()?;
+        let other_text = other.to_mdix_string()?;
+
+        let make_temp = |text: &str| -> PyResult<tempfile::NamedTempFile> {
+            let mut tmp = match &temp_dir {
+                Some(dir) => tempfile::Builder::new().suffix(".mdix").tempfile_in(dir),
+                None      => tempfile::Builder::new().suffix(".mdix").tempfile(),
+            }
+            .map_err(|e| runtime_err("merge_with", format!("failed to create temp file: {}", e)))?;
+            tmp.write_all(text.as_bytes())
+                .map_err(|e| runtime_err("merge_with", format!("failed to write temp file: {}", e)))?;
+            Ok(tmp)
+        };
+
+        let self_tmp  = make_temp(&self_text)?;
+        let other_tmp = make_temp(&other_text)?;
+
+        let paths = [
+            self_tmp.path().to_string_lossy().to_string(),
+            other_tmp.path().to_string_lossy().to_string(),
+        ];
+
+        let merged = CoreMerger::new()
+            .with_strategy(strategy_enum)
+            .with_array_strategy(array_strategy_enum)
+            .merge_files(&paths)
+            .map_err(|e| runtime_err("merge_with", e))?;
+
+        // Explicit, not left to scope-end drop order — makes it clear the
+        // temp files are done with immediately after the merge completes,
+        // not held open any longer than necessary.
+        drop(self_tmp);
+        drop(other_tmp);
+
+        Ok((MdixDatabase::from_data_pub(merged), Vec::new()))
     }
-}
+        }

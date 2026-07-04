@@ -1,0 +1,272 @@
+name: MidManStudio.Mdix — WASM Tests
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  # ── 1. Check trigger ───────────────────────────────────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      run_wasm: ${{ steps.decide.outputs.run_wasm }}
+    steps:
+      - name: Decide whether to run WASM tests
+        id: decide
+        run: |
+          RUN=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            MSG="${{ github.event.pull_request.title }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-wasm\b' && RUN=true || true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-wasm\b' && RUN=true || true
+          fi
+
+          echo "run_wasm=$RUN" >> $GITHUB_OUTPUT
+          echo "Run WASM tests: $RUN"
+
+  # ── 2. Build + run wasm-bindgen-test in headless Chrome ─────────────────────
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_wasm == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-wasm-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-wasm-test-
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      # ubuntu-latest ships Chrome preinstalled; wasm-pack resolves a
+      # matching chromedriver itself. If this step ever starts failing on
+      # a driver/browser version mismatch, that's the first thing to check
+      # — this repo's other CI (wasm-npm-publish.yml) doesn't need a
+      # browser at all, so there's no precedent here to fall back on.
+      - name: Run wasm-bindgen tests (headless Chrome)
+        continue-on-error: true
+        run: |
+          cd mdix-wasm
+          wasm-pack test --headless --chrome 2>&1 | tee ../wasm-test-console.txt
+          echo "TEST_EXIT=${PIPESTATUS[0]:-$?}" >> $GITHUB_ENV
+
+      # ── Parse console output → CI-friendly JSON ─────────────────────────────
+      # No structured JSON report exists for wasm-bindgen-test the way
+      # pytest has one — this is a plain regex parse of the same
+      # "test X ... ok/FAILED" and "test result: ..." lines the console
+      # output already has. Cruder than the Python dashboard's per-suite
+      # breakdown, but honest about what's actually available.
+      - name: Parse test results
+        if: always()
+        env:
+          BUILD_NUM:  ${{ github.run_number }}
+          BRANCH:     ${{ github.ref_name }}
+          COMMIT:     ${{ github.sha }}
+          BUILD_DATE: ${{ github.event.head_commit.timestamp }}
+        run: |
+          python3 - << 'PYEOF'
+          import json, os, re
+
+          try:
+              with open("wasm-test-console.txt") as f:
+                  raw = f.read()
+          except FileNotFoundError:
+              raw = ""
+
+          test_lines = re.findall(r'^test (\S+) \.\.\. (ok|FAILED)', raw, re.MULTILINE)
+          summary_match = re.search(
+              r'test result: (ok|FAILED)\. (\d+) passed; (\d+) failed;.*?finished in ([\d.]+)s',
+              raw,
+          )
+
+          tests = [{"name": name, "status": "passed" if status == "ok" else "failed"} for name, status in test_lines]
+          passed = sum(1 for t in tests if t["status"] == "passed")
+          failed = sum(1 for t in tests if t["status"] == "failed")
+          duration_s = float(summary_match.group(4)) if summary_match else 0.0
+
+          out = {
+              "build":   os.environ.get("BUILD_NUM",  "0"),
+              "branch":  os.environ.get("BRANCH",     "unknown"),
+              "commit":  os.environ.get("COMMIT",     "")[:8],
+              "date":    os.environ.get("BUILD_DATE", ""),
+              "summary": {
+                  "total": len(tests), "passed": passed,
+                  "failed": failed, "duration_s": duration_s,
+              },
+              "tests": tests,
+          }
+
+          with open("wasm-test-output.json", "w") as f:
+              json.dump(out, f, indent=2)
+
+          print(f"Total:{len(tests)}  Passed:{passed}  Failed:{failed}  Duration:{duration_s}s")
+          if len(tests) == 0:
+              print("WARNING: no test lines matched — either every test failed before "
+                    "producing output, or the console format didn't match what this "
+                    "parser expects. Check wasm-test-console.txt directly.")
+          PYEOF
+
+      # ── Build HTML report ──────────────────────────────────────────────────
+      - name: Build HTML report
+        if: always()
+        run: |
+          python3 - << 'PYEOF'
+          import json, html
+
+          with open("wasm-test-output.json") as f:
+              data = json.load(f)
+
+          with open(".github/wasm-test-template.html") as f:
+              page = f.read()
+
+          rows = ""
+          for t in data["tests"]:
+              status_class = "ok" if t["status"] == "passed" else "failed"
+              status_text  = "PASS" if t["status"] == "passed" else "FAIL"
+              rows += (
+                  f'<div class="test-row"><span class="test-name">{html.escape(t["name"])}</span>'
+                  f'<span class="test-status {status_class}">{status_text}</span></div>\n'
+              )
+          if not rows:
+              rows = '<div class="test-row"><span class="test-name">No tests parsed — see raw output below.</span></div>'
+
+          with open("wasm-test-console.txt") as f:
+              raw_log = html.escape(f.read())
+
+          page = page.replace("TOTAL_PLACEHOLDER",    str(data["summary"]["total"]))
+          page = page.replace("PASSED_PLACEHOLDER",   str(data["summary"]["passed"]))
+          page = page.replace("FAILED_PLACEHOLDER",   str(data["summary"]["failed"]))
+          page = page.replace("DURATION_PLACEHOLDER", f'{data["summary"]["duration_s"]:.2f}s')
+          page = page.replace("BUILD_NUM_PLACEHOLDER", data["build"])
+          page = page.replace("BRANCH_PLACEHOLDER",    data["branch"])
+          page = page.replace("COMMIT_PLACEHOLDER",    data["commit"])
+          page = page.replace("DATE_PLACEHOLDER",      data["date"])
+          page = page.replace("<!-- TEST_ROWS_PLACEHOLDER -->", rows)
+          page = page.replace("RAW_LOG_PLACEHOLDER", raw_log)
+
+          with open("wasm-test-index.html", "w") as f:
+              f.write(page)
+          PYEOF
+
+      # ── Upload artifacts ───────────────────────────────────────────────────
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-test-results-${{ github.run_number }}
+          path: |
+            wasm-test-output.json
+            wasm-test-index.html
+            wasm-test-console.txt
+          retention-days: 30
+
+      - name: Fail the job if tests actually failed
+        if: always()
+        run: |
+          if [ "${TEST_EXIT:-0}" != "0" ]; then
+            echo "wasm-bindgen tests failed — see the Parse/Upload steps above for details."
+            exit 1
+          fi
+
+  # ── 3. Deploy to gh-pages ──────────────────────────────────────────────────
+  deploy-results:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test]
+    if: |
+      always() &&
+      needs.build-and-test.result == 'success' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' ||
+       github.event_name == 'workflow_dispatch')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-test-results-${{ github.run_number }}
+          path: deploy/
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/wasm" "$WORK/wasm/builds/build_${BUILD_NUM}"
+
+          cp deploy/wasm-test-output.json "$WORK/wasm/test-results.json"
+          cp deploy/wasm-test-index.html  "$WORK/wasm/index.html"
+          cp deploy/wasm-test-output.json "$WORK/wasm/builds/build_${BUILD_NUM}/test-results.json"
+          cp deploy/wasm-test-index.html  "$WORK/wasm/builds/build_${BUILD_NUM}/index.html"
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "WASM Tests — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+          echo "Deployed → https://mid-d-man.github.io/DixScript-Rust/wasm/"
+
+  # ── 4. Summary ─────────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test, deploy-results]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "============================================="
+          echo "  MidManStudio.Mdix — WASM Test Summary"
+          echo "============================================="
+          echo "Build:   #${{ github.run_number }}"
+          echo "Branch:  ${{ github.ref_name }}"
+          echo "Trigger: ${{ github.event_name }}"
+          echo "Tests:   ${{ needs.build-and-test.result  || 'skipped' }}"
+          echo "Deploy:  ${{ needs.deploy-results.result  || 'skipped' }}"
+          echo ""
+          if [ "${{ needs.parse-trigger.outputs.run_wasm }}" != "true" ]; then
+            echo "Skipped — commit message did not contain --mdix-wasm"
+          fi
+          echo ""
+          echo "Results → https://mid-d-man.github.io/DixScript-Rust/wasm/"

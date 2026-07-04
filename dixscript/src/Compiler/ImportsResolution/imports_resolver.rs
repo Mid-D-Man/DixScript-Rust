@@ -24,11 +24,13 @@ use crate::Compiler::Utilities::{FunctionSignature, ParameterInfo, QuickFunction
 use crate::Compiler::Utilities::symbol_table::ImportedNamespace;
 use crate::ErrorManager::{DebugConfig, ErrorManager, ImportsResolutionErrorType};
 use super::{HashVerifier, CloudFileCache};
-// Only referenced from the native variant of download_cloud_file_sync
-// below — gating the import too avoids an unused-import warning on
-// wasm32 (which the repo's clippy CI runs with -D warnings, turning that
-// warning into a hard failure).
-#[cfg(not(target_arch = "wasm32"))]
+// Only referenced from the native + cloud-import variant of
+// download_cloud_file_sync below — gating the import too avoids an
+// unused-import warning (clippy CI runs with -D warnings) on wasm32 *and*
+// on any native build with cloud-import disabled, since CloudProviderFactory
+// itself is only re-exported from ImportsResolution/mod.rs under that same
+// combined condition.
+#[cfg(all(not(target_arch = "wasm32"), feature = "cloud-import"))]
 use super::CloudProviderFactory;
 
 pub struct ImportsResolver<'a> {
@@ -778,7 +780,7 @@ impl<'a> ImportsResolver<'a> {
         Err(message)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "cloud-import"))]
     fn download_cloud_file_sync(
         &mut self,
         cloud_url: &str,
@@ -858,6 +860,44 @@ impl<'a> ImportsResolver<'a> {
              compiled to wasm32 — fetch the content yourself (e.g. JS fetch() \
              in a browser, or Node's fs/http) and load it with loadStr() or \
              mergeSources() instead. URL: {}",
+            cloud_url
+        );
+        self.error_manager.add_imports_resolution_error(
+            ImportsResolutionErrorType::CloudImportNotSupported,
+            message.clone(),
+            alias.to_string(),
+            Some(cloud_url.to_string()),
+            Some(cloud_url.to_string()),
+            None, 0, 0, None,
+        );
+        Err(message)
+    }
+
+    /// Native, but built without the `cloud-import` feature: the crate
+    /// compiles fine (this whole function only exists in this cfg
+    /// combination), but there's no `reqwest`/`tokio` in the dependency
+    /// graph to actually download anything with. `cloud_cache` is still a
+    /// plain data structure regardless of this feature (it's not gated by
+    /// `cloud-import` at all), so a previously-cached entry — from a build
+    /// that did have the feature on — still resolves here without error.
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "cloud-import")))]
+    fn download_cloud_file_sync(
+        &mut self,
+        cloud_url: &str,
+        alias:     &str,
+    ) -> Result<String, String> {
+        let url_for_cache = Self::strip_query_parameters(cloud_url);
+        if self.cloud_cache.is_cached(&url_for_cache) {
+            if let Some(content) = self.cloud_cache.get_cached_content(&url_for_cache) {
+                return Ok(content);
+            }
+        }
+
+        let message = format!(
+            "This file has a cloud (http/https) @IMPORTS reference, but this \
+             build of dixscript was compiled without the 'cloud-import' \
+             feature. Rebuild with `--features cloud-import` (or default \
+             features) to resolve it. URL: {}",
             cloud_url
         );
         self.error_manager.add_imports_resolution_error(
@@ -1075,4 +1115,4 @@ impl std::fmt::Display for ImportResolutionStats {
             self.files_visited
         )
     }
-            }
+        }

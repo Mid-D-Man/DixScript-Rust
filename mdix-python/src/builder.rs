@@ -301,7 +301,7 @@ impl MdixBuilder {
     /// ```
     fn add_enum(
         mut slf: PyRefMut<'_, Self>,
-        py: Python<'_>,
+        _py: Python<'_>,
         name: &str,
         fields: &Bound<'_, PyList>,
     ) -> PyResult<Py<Self>> {
@@ -485,7 +485,7 @@ impl MdixBuilder {
     /// ```
     fn set_array(
         mut slf: PyRefMut<'_, Self>,
-        py: Python<'_>,
+        _py: Python<'_>,
         path: &str,
         items: &Bound<'_, PyList>,
     ) -> PyResult<Py<Self>> {
@@ -696,4 +696,4 @@ fn _with_raw_table_properties(
         self.arrays.clear();
         self.has_grouped = false;
     }
-                    }
+            }

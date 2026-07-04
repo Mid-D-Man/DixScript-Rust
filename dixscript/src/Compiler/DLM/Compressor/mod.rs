@@ -10,10 +10,14 @@
 
 mod compressor_trait;
 mod gzip_compressor;
+#[cfg(feature = "bzip2-support")]
 mod bzip2_compressor;
+#[cfg(feature = "xz-support")]
 mod lzma_compressor;
 
 pub use compressor_trait::{ICompressor, CompressorResult};
 pub use gzip_compressor::{GzipCompressor, CompressionLevel};
+#[cfg(feature = "bzip2-support")]
 pub use bzip2_compressor::Bzip2Compressor;
+#[cfg(feature = "xz-support")]
 pub use lzma_compressor::LzmaCompressor;

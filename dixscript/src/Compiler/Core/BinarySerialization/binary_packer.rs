@@ -1,6 +1,6 @@
 //! Main binary serialization orchestrator — packs DixScript AST into binary format.
 
-use std::time::Instant;
+use web_time::Instant;
 use std::io::{Write, Cursor};
 use crate::Compiler::AST::DixScript;
 use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
@@ -375,4 +375,4 @@ fn section_flag_for(id: SectionId) -> SectionFlags {
         SectionId::Security => SectionFlags::SECURITY,
         SectionId::Imports  => SectionFlags::IMPORTS,
     }
-                     }
+        }

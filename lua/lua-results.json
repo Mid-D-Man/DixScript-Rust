@@ -1,0 +1,830 @@
+{
+  "branch": "master",
+  "build": "782",
+  "lua_version": "Lua 5.4",
+  "suites": [
+    {
+      "passed": 0,
+      "failed": 0,
+      "_start": 0.001193,
+      "duration_s": 0,
+      "name": "default",
+      "tests": {}
+    },
+    {
+      "passed": 9,
+      "failed": 0,
+      "_start": 0.002044,
+      "duration_s": 0.000741,
+      "name": "loading",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "load_str_valid_returns_db",
+          "duration_ms": 0.296
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "load_str_empty_raises",
+          "duration_ms": 0.063
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "load_str_whitespace_only_raises",
+          "duration_ms": 0.045
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "load_str_malformed_raises",
+          "duration_ms": 0.065
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "load_nonexistent_file_raises",
+          "duration_ms": 0.066
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "close_is_idempotent",
+          "duration_ms": 0.063
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "entry_count_positive",
+          "duration_ms": 0.053
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "tostring_shows_entry_count",
+          "duration_ms": 0.048
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "tostring_after_close_shows_closed",
+          "duration_ms": 0.042
+        }
+      ]
+    },
+    {
+      "passed": 7,
+      "failed": 0,
+      "_start": 0.002809,
+      "duration_s": 0.00042,
+      "name": "inspection",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "exists_present_returns_true",
+          "duration_ms": 0.068
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "exists_absent_returns_false",
+          "duration_ms": 0.058
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_type_int",
+          "duration_ms": 0.054
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_type_string",
+          "duration_ms": 0.051
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_type_bool",
+          "duration_ms": 0.07
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_type_unknown_for_missing",
+          "duration_ms": 0.057
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_keys_top_level_contains_name",
+          "duration_ms": 0.062
+        }
+      ]
+    },
+    {
+      "passed": 11,
+      "failed": 0,
+      "_start": 0.003247,
+      "duration_s": 0.000634,
+      "name": "typed_getters",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_string_known_path",
+          "duration_ms": 0.056
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_string_with_default_for_missing",
+          "duration_ms": 0.049
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_string_missing_no_default_raises",
+          "duration_ms": 0.111
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_int_known_path",
+          "duration_ms": 0.052
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_int_with_default",
+          "duration_ms": 0.059
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_bool_true",
+          "duration_ms": 0.053
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_number_float",
+          "duration_ms": 0.051
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_number_double",
+          "duration_ms": 0.05
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_auto_converts_int",
+          "duration_ms": 0.056
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_auto_converts_string",
+          "duration_ms": 0.049
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_auto_returns_nil_for_missing",
+          "duration_ms": 0.048
+        }
+      ]
+    },
+    {
+      "passed": 4,
+      "failed": 0,
+      "_start": 0.003905,
+      "duration_s": 0.000273,
+      "name": "nested_paths",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "nested_get_string",
+          "duration_ms": 0.069
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "nested_get_int",
+          "duration_ms": 0.065
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "nested_get_bool",
+          "duration_ms": 0.073
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "nested_keys_for_prefix",
+          "duration_ms": 0.066
+        }
+      ]
+    },
+    {
+      "passed": 5,
+      "failed": 0,
+      "_start": 0.00419,
+      "duration_s": 0.00032,
+      "name": "foreign_formats",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "from_json_valid_object",
+          "duration_ms": 0.07
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "from_json_empty_raises",
+          "duration_ms": 0.063
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "from_json_array_top_level_raises",
+          "duration_ms": 0.051
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "from_toml_valid",
+          "duration_ms": 0.086
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "from_toml_empty_raises",
+          "duration_ms": 0.05
+        }
+      ]
+    },
+    {
+      "passed": 6,
+      "failed": 0,
+      "_start": 0.004522,
+      "duration_s": 0.00055,
+      "name": "export",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "to_json_contains_values",
+          "duration_ms": 0.072
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "to_json_indented_has_newlines",
+          "duration_ms": 0.065
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "to_toml_contains_values",
+          "duration_ms": 0.072
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "to_mdix_contains_data_section",
+          "duration_ms": 0.062
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "roundtrip_json",
+          "duration_ms": 0.119
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "roundtrip_toml",
+          "duration_ms": 0.16
+        }
+      ]
+    },
+    {
+      "passed": 2,
+      "failed": 0,
+      "_start": 0.005088,
+      "duration_s": 1.2e-05,
+      "name": "source_utils",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "minify_source_reduces_size",
+          "duration_ms": 0.009
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "format_source_preserves_content",
+          "duration_ms": 0.003
+        }
+      ]
+    },
+    {
+      "passed": 0,
+      "failed": 6,
+      "_start": 0.005407,
+      "duration_s": 6.5e-05,
+      "name": "builder_two_tier",
+      "tests": [
+        {
+          "output": "mdix-lua/tests/test_builder.lua:13: attempt to index a nil value",
+          "status": "failed",
+          "name": "flat_before_grouped_is_valid",
+          "duration_ms": 0.037
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:21: expected error matching \"two%-tier\", got \"mdix-lua/tests/test_builder.lua:24: attempt to index a nil value\"",
+          "status": "failed",
+          "name": "flat_after_table_raises",
+          "duration_ms": 0.012
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:29: expected error matching \"two%-tier\", got \"mdix-lua/tests/test_builder.lua:32: attempt to index a nil value\"",
+          "status": "failed",
+          "name": "flat_after_array_raises",
+          "duration_ms": 0.008
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:38: attempt to index a nil value (local 'b')",
+          "status": "failed",
+          "name": "reset_grouped_allows_new_flat",
+          "duration_ms": 0.004
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:46: attempt to index a nil value",
+          "status": "failed",
+          "name": "reset_clears_all",
+          "duration_ms": 0.002
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:56: attempt to index a nil value",
+          "status": "failed",
+          "name": "reset_grouped_keeps_flat",
+          "duration_ms": 0.002
+        }
+      ]
+    },
+    {
+      "passed": 1,
+      "failed": 16,
+      "_start": 0.005485,
+      "duration_s": 0.000154,
+      "name": "builder_flat_setters",
+      "tests": [
+        {
+          "output": "mdix-lua/tests/test_builder.lua:67: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_string_roundtrip",
+          "duration_ms": 0.003
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:73: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_string_escapes_quotes",
+          "duration_ms": 0.003
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:78: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_int_roundtrip",
+          "duration_ms": 0.049
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:84: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_bool_true_roundtrip",
+          "duration_ms": 0.004
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:90: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_bool_false_roundtrip",
+          "duration_ms": 0.002
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:96: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_number_float_roundtrip",
+          "duration_ms": 0.004
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:102: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_date_appears_in_source",
+          "duration_ms": 0.002
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:107: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_hex_color_valid",
+          "duration_ms": 0.003
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "set_hex_color_no_hash_raises",
+          "duration_ms": 0.058
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:118: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_blob_appears_in_source",
+          "duration_ms": 0.003
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:124: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_regex_appears_in_source",
+          "duration_ms": 0.003
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:129: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_enum_produces_dot_notation",
+          "duration_ms": 0.004
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:134: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_auto_detects_int",
+          "duration_ms": 0.003
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:140: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_auto_detects_string",
+          "duration_ms": 0.003
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:146: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_auto_detects_bool",
+          "duration_ms": 0.002
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:152: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_auto_array",
+          "duration_ms": 0.004
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:157: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_auto_object",
+          "duration_ms": 0.004
+        }
+      ]
+    },
+    {
+      "passed": 3,
+      "failed": 4,
+      "_start": 0.00567,
+      "duration_s": 0.000169,
+      "name": "builder_grouped",
+      "tests": [
+        {
+          "output": "mdix-lua/tests/test_builder.lua:168: attempt to index a nil value",
+          "status": "failed",
+          "name": "with_table_roundtrip",
+          "duration_ms": 0.003
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "with_table_empty_raises",
+          "duration_ms": 0.055
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "with_table_empty_path_raises",
+          "duration_ms": 0.048
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:189: attempt to index a nil value",
+          "status": "failed",
+          "name": "with_array_scalars_roundtrip",
+          "duration_ms": 0.005
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:200: attempt to index a nil value",
+          "status": "failed",
+          "name": "with_array_objects",
+          "duration_ms": 0.007
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "with_array_empty_path_raises",
+          "duration_ms": 0.047
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:214: attempt to index a nil value",
+          "status": "failed",
+          "name": "multiple_tables_independent",
+          "duration_ms": 0.004
+        }
+      ]
+    },
+    {
+      "passed": 2,
+      "failed": 4,
+      "_start": 0.005851,
+      "duration_s": 0.000106,
+      "name": "builder_config_enums",
+      "tests": [
+        {
+          "output": "mdix-lua/tests/test_builder.lua:226: attempt to index a nil value",
+          "status": "failed",
+          "name": "set_config_appears_in_source",
+          "duration_ms": 0.002
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "set_config_empty_key_raises",
+          "duration_ms": 0.047
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:240: attempt to index a nil value",
+          "status": "failed",
+          "name": "add_enum_auto_increment",
+          "duration_ms": 0.004
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:248: attempt to index a nil value",
+          "status": "failed",
+          "name": "add_enum_explicit_values",
+          "duration_ms": 0.003
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "add_enum_empty_raises",
+          "duration_ms": 0.047
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:262: attempt to index a nil value",
+          "status": "failed",
+          "name": "section_order_config_enums_data",
+          "duration_ms": 0.003
+        }
+      ]
+    },
+    {
+      "passed": 1,
+      "failed": 4,
+      "_start": 0.005969,
+      "duration_s": 5.5e-05,
+      "name": "builder_finalize",
+      "tests": [
+        {
+          "output": "mdix-lua/tests/test_builder.lua:274: attempt to index a nil value",
+          "status": "failed",
+          "name": "serialize_produces_data_section",
+          "duration_ms": 0.002
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:282: attempt to index a nil value",
+          "status": "failed",
+          "name": "build_produces_readable_db",
+          "duration_ms": 0.002
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "build_empty_raises",
+          "duration_ms": 0.047
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:298: attempt to index a nil value",
+          "status": "failed",
+          "name": "tostring_shows_counts",
+          "duration_ms": 0.002
+        },
+        {
+          "output": "mdix-lua/tests/test_builder.lua:305: attempt to index a nil value",
+          "status": "failed",
+          "name": "flat_and_grouped_in_correct_tier_order",
+          "duration_ms": 0.002
+        }
+      ]
+    },
+    {
+      "passed": 8,
+      "failed": 0,
+      "_start": 0.006223,
+      "duration_s": 0.001212,
+      "name": "arrays",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "array_length_string_array",
+          "duration_ms": 0.716
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "array_length_int_array",
+          "duration_ms": 0.079
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "array_length_object_array",
+          "duration_ms": 0.095
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "array_element_by_index_string",
+          "duration_ms": 0.072
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "array_element_by_index_int",
+          "duration_ms": 0.068
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "array_get_returns_lua_table",
+          "duration_ms": 0.07
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "array_length_non_array_returns_minus_one",
+          "duration_ms": 0.044
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "object_array_element_field",
+          "duration_ms": 0.068
+        }
+      ]
+    },
+    {
+      "passed": 6,
+      "failed": 0,
+      "_start": 0.007458,
+      "duration_s": 0.000387,
+      "name": "enums",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "enum_get_returns_table",
+          "duration_ms": 0.081
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "enum_table_has_enum_name",
+          "duration_ms": 0.063
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "enum_table_has_field",
+          "duration_ms": 0.059
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "enum_table_has_integer_value",
+          "duration_ms": 0.062
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "enum_explicit_value",
+          "duration_ms": 0.062
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_type_reports_enum",
+          "duration_ms": 0.06
+        }
+      ]
+    },
+    {
+      "passed": 4,
+      "failed": 0,
+      "_start": 0.007862,
+      "duration_s": 0.000176,
+      "name": "special_types",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "hex_color_accessible_as_string",
+          "duration_ms": 0.046
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "date_accessible_as_string",
+          "duration_ms": 0.044
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "blob_type",
+          "duration_ms": 0.047
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "null_get_returns_nil",
+          "duration_ms": 0.039
+        }
+      ]
+    },
+    {
+      "passed": 3,
+      "failed": 0,
+      "_start": 0.008047,
+      "duration_s": 0.000214,
+      "name": "get_json",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_json_int_produces_json_number",
+          "duration_ms": 0.065
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_json_string_produces_quoted",
+          "duration_ms": 0.041
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "get_json_missing_path_raises",
+          "duration_ms": 0.108
+        }
+      ]
+    },
+    {
+      "passed": 3,
+      "failed": 0,
+      "_start": 0.00827,
+      "duration_s": 0.000666,
+      "name": "full_source",
+      "tests": [
+        {
+          "output": "",
+          "status": "passed",
+          "name": "full_source_flat_props",
+          "duration_ms": 0.363
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "full_source_nested_props",
+          "duration_ms": 0.158
+        },
+        {
+          "output": "",
+          "status": "passed",
+          "name": "full_source_array",
+          "duration_ms": 0.145
+        }
+      ]
+    }
+  ],
+  "commit": "d38f78ab",
+  "date": "",
+  "tests": {
+    "total": 109,
+    "passed": 75,
+    "failed": 34,
+    "duration_s": 0.006154
+  }
+}

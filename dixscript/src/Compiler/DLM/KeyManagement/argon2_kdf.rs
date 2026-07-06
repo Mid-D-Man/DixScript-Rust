@@ -162,7 +162,7 @@ impl Argon2KDF {
             );
         }
 
-        let start = std::time::Instant::now();
+        let start = web_time::Instant::now();
 
         let params = Params::new(
             self.memory_size_kb,
@@ -340,4 +340,4 @@ mod tests {
             .unwrap();
         assert_eq!(decoded, kdf.salt());
     }
-            }
+    }

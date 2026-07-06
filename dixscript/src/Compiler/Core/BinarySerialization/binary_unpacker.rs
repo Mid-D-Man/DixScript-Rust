@@ -1,6 +1,6 @@
 //! Main binary deserialization orchestrator — unpacks binary format into DixScript AST.
 
-use std::time::Instant;
+use web_time::Instant;
 use std::io::Cursor;
 use crate::Compiler::AST::DixScript;
 use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
@@ -395,4 +395,4 @@ fn extract_section_data<'a>(
 
 impl Default for BinaryUnpacker {
     fn default() -> Self { Self::new() }
-            }
+                }

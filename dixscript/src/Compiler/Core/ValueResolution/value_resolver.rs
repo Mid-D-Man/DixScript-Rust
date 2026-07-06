@@ -1,4 +1,3 @@
-
 //! Orchestrates compile-time value resolution across five phases.
 //!
 //! Phase 1: Enum pre-resolution — EnumValue/EnumAccess → Integer.
@@ -9,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Instant;
+use web_time::Instant;
 
 use chrono::Utc;
 use rustc_hash::FxHashMap;

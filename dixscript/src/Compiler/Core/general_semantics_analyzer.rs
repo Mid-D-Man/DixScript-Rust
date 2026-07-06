@@ -1,7 +1,7 @@
 //! Central semantic analysis orchestrator — runs all section analyzers in dependency order.
 
 use std::collections::HashMap;
-use std::time::Instant;
+use web_time::Instant;
 use crate::Compiler::AST::*;
 use crate::Compiler::Core::{
     ErrorHandlingStrategy,

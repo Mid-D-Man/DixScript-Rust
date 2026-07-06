@@ -37,6 +37,11 @@ crate-type = ["lib"]
 rand       = { version = "0.8", features = ["getrandom"] }
 uuid       = { version = "1.0", features = ["v4", "serde", "js"] }
 chrono     = { version = "0.4", features = ["serde"] }
+# std::time::Instant::now() panics ("time not implemented on this platform")
+# on wasm32-unknown-unknown. web-time is a drop-in replacement: std passthrough
+# on native, Performance.now() (via js-sys) on wasm32. Duration is untouched —
+# only Instant needed swapping. See the 8 `use web_time::Instant;` call sites.
+web-time   = "1.1"
 bitflags   = "2.4"
 
 serde      = { version = "1.0", features = ["derive"] }

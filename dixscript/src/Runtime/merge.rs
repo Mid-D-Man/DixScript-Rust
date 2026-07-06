@@ -316,7 +316,16 @@ impl MdixMerger {
         for (src_idx, section) in &present {
             for entry in &section.entries {
                 let key = entry.key.clone();
-                if let Some((existing_idx, _)) = key_map.get(&key) {
+                if let Some((existing_idx, existing_entry)) = key_map.get(&key) {
+                    // Identical value on both sides is not a real conflict — every
+                    // parsed file gets the same auto-populated minimal-config
+                    // defaults (version, debug_mode, ...) when the user never wrote
+                    // an explicit @CONFIG block, so this key collides on *every*
+                    // multi-source merge regardless of @DATA content. Without this
+                    // guard, ThrowOnConflict raised unconditionally on every merge.
+                    if existing_entry.value == entry.value {
+                        continue;
+                    }
                     match self.pick_winner(*src_idx, *existing_idx, sources) {
                         Ok(winner) => {
                             conflicts.push(MergeConflict {
@@ -481,8 +490,24 @@ impl MdixMerger {
         for (src_idx, section) in &present {
             for decl in &section.enums {
                 if enum_map.contains_key(&decl.name) {
-                    // Deep-merge: same enum name, merge fields.
                     let existing_src_idx = enum_map[&decl.name].0;
+                    let existing_fields  = enum_map[&decl.name].1.fields.clone();
+
+                    // Same enum name, and every field already carries the same
+                    // value on both sides — not a real conflict. Compare only
+                    // `.value` (like merge_enum_fields already does below), not
+                    // the whole EnumField, since each field's `position` will
+                    // always differ across two independently-parsed sources.
+                    let fields_identical = existing_fields.len() == decl.fields.len()
+                        && existing_fields.iter().all(|ef| {
+                            decl.fields.iter().any(|df| df.name == ef.name && df.value == ef.value)
+                        });
+
+                    if fields_identical {
+                        continue;
+                    }
+
+                    // Deep-merge: same enum name, merge fields.
                     let winner = match self.pick_winner(*src_idx, existing_src_idx, sources) {
                         Ok(w) => w,
                         Err(e) => { errors.push(e); continue; }
@@ -494,8 +519,6 @@ impl MdixMerger {
                         winning_label: sources[winner].label.clone(),
                     });
 
-                    // Clone what we need before mutating.
-                    let existing_fields = enum_map[&decl.name].1.fields.clone();
                     let merged_fields = self.merge_enum_fields(
                         &existing_fields, existing_src_idx,
                         &decl.fields, *src_idx,
@@ -607,7 +630,22 @@ impl MdixMerger {
 
         for (src_idx, section) in &present {
             for func in &section.functions {
-                if let Some((existing_idx, _)) = func_map.get(&func.name) {
+                if let Some((existing_idx, existing_func)) = func_map.get(&func.name) {
+                    // Identical signature + body on both sides is not a real
+                    // conflict. NOTE: unlike CONFIG/ENUMS above, this comparison
+                    // includes each QuickFuncStatement's own `position`, so in
+                    // practice this only dedups trivially-identical (e.g. empty
+                    // body) functions parsed from otherwise-different source
+                    // text — a real identical function body from two distinct
+                    // source files will still (correctly) be flagged, since we
+                    // can't cheaply prove text-identity without positions here.
+                    let identical = existing_func.return_type == func.return_type
+                        && existing_func.scope_list == func.scope_list
+                        && existing_func.parameters == func.parameters
+                        && existing_func.body == func.body;
+                    if identical {
+                        continue;
+                    }
                     match self.pick_winner(*src_idx, *existing_idx, sources) {
                         Ok(winner) => {
                             conflicts.push(MergeConflict {
@@ -805,7 +843,16 @@ impl MdixMerger {
         errors:    &mut Vec<String>,
         sources:   &[MdixMergeInput],
     ) {
-        if let Some((existing_idx, _)) = map.get(&key) {
+        if let Some((existing_idx, existing_entry)) = map.get(&key) {
+            // Identical value on both sides is not a real conflict. Only
+            // SimpleProperty is compared in full (via values_are_equal,
+            // Position-blind) — TableProperty/GroupArray/ObjectProperty fall
+            // through to "always a conflict" the same way values_are_equal's
+            // own catch-all treats complex types, since a full position-blind
+            // structural walk of those isn't worth the complexity here.
+            if data_entries_are_equal(existing_entry, &entry) {
+                return;
+            }
             match self.pick_winner(src_idx, *existing_idx, sources) {
                 Ok(winner) => {
                     conflicts.push(MergeConflict {
@@ -848,7 +895,16 @@ impl MdixMerger {
         }
 
         for prop in secondary_props {
-            if let Some((existing_src, _)) = prop_map.get(&prop.name) {
+            if let Some((existing_src, existing_prop)) = prop_map.get(&prop.name) {
+                // Identical value on both sides is not a real conflict. Uses
+                // values_are_equal (already defined below for merge_array_items'
+                // ConcatDedup strategy) rather than raw `==`, since Value's
+                // compound variants (Array/Object) embed their own per-source
+                // Position and would never derive-equal even when the content
+                // matches; values_are_equal already treats those conservatively.
+                if values_are_equal(&existing_prop.value, &prop.value) {
+                    continue;
+                }
                 let prop_winner =
                     match self.pick_winner(secondary_src, *existing_src, sources) {
                         Ok(w) => w,
@@ -939,12 +995,27 @@ impl MdixMerger {
             for entry in &section.entries {
                 let key = entry.block_key.clone();
                 if entry_map.contains_key(&key) {
-                    let existing_src = entry_map[&key].0;
+                    let existing_src    = entry_map[&key].0;
+                    let existing_fields = entry_map[&key].1.fields.clone();
+
+                    // Same block key, and every field already carries the same
+                    // value on both sides (via values_are_equal, see
+                    // merge_table_props above for why not raw `==`) — not a
+                    // real conflict.
+                    let fields_identical = existing_fields.len() == entry.fields.len()
+                        && existing_fields.iter().all(|ef| {
+                            entry.fields.iter().any(|df| {
+                                df.key == ef.key && values_are_equal(&df.value, &ef.value)
+                            })
+                        });
+                    if fields_identical {
+                        continue;
+                    }
+
                     let winner = match self.pick_winner(*src_idx, existing_src, sources) {
                         Ok(w) => w,
                         Err(e) => { errors.push(e); continue; }
                     };
-                    let existing_fields = entry_map[&key].1.fields.clone();
                     let merged_fields = self.merge_security_fields(
                         &existing_fields, existing_src,
                         &entry.fields, *src_idx,
@@ -996,7 +1067,11 @@ impl MdixMerger {
         }
 
         for field in secondary_fields {
-            if let Some((existing_src, _)) = field_map.get(&field.key) {
+            if let Some((existing_src, existing_field)) = field_map.get(&field.key) {
+                // Identical value on both sides is not a real conflict.
+                if values_are_equal(&existing_field.value, &field.value) {
+                    continue;
+                }
                 let field_winner =
                     match self.pick_winner(secondary_src, *existing_src, sources) {
                         Ok(w) => w,
@@ -1192,6 +1267,17 @@ fn dlm_module_type_key(t: DLMModuleType) -> u8 {
 /// Only primitive / leaf variants are compared.  Collection types (`Array`,
 /// `Object`, `NestedArray`, `PrefixedConstructor`) are always treated as
 /// non-equal so they are never silently dropped from a merged group array.
+/// Semantic equality for two top-level `@DATA` entries, ignoring Position.
+/// See the comment at its call site in `upsert_unique_entry` for scope.
+fn data_entries_are_equal(a: &DataEntry, b: &DataEntry) -> bool {
+    match (a, b) {
+        (DataEntry::SimpleProperty { value: v1, .. }, DataEntry::SimpleProperty { value: v2, .. }) => {
+            values_are_equal(v1, v2)
+        }
+        _ => false,
+    }
+}
+
 fn values_are_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Null { .. },      Value::Null { .. })      => true,
@@ -1631,4 +1717,4 @@ mod tests {
         let arr = Value::Array { values: vec![], position: Position::UNKNOWN };
         assert!(!values_are_equal(&arr, &arr));
     }
-  }
+    }

@@ -14,9 +14,9 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 const SAMPLE: &str = r#"
 @DATA(
-  app_name -> "DixScript WASM Test",
-  version  -> 1,
-  ready    -> true
+  app_name = "DixScript WASM Test",
+  version  = 1,
+  ready    = true
 )
 "#;
 

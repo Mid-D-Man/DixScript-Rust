@@ -17,7 +17,7 @@ use crate::Compiler::Core::{OperationalSettings, ErrorHandlingStrategy};
 use crate::Compiler::VersionControl::VersionConstraints;
 use crate::Compiler::Utilities::{SecurityUtilities, CommentFilter};
 use crate::ErrorManager::{ErrorManager, ParseException, DebugConfig};
-use std::time::Instant;
+use web_time::Instant;
 
 #[cfg(not(target_arch = "wasm32"))]
 const CONCURRENT_PARSING_ENABLED: bool = true;
@@ -507,4 +507,4 @@ impl<'a> GeneralParser<'a> {
         )
     }
     #[inline] fn skip_non_meaningful_tokens(&mut self) {}
-        }
+            }

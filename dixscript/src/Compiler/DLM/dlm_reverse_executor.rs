@@ -12,7 +12,7 @@ use crate::Compiler::DLM::{
 use crate::ErrorManager::{ErrorManager, DebugConfig, DlmErrorType, ErrorSeverity};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use web_time::Instant;
 use std::fs;
 
 #[cfg(feature = "bzip2-support")]

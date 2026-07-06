@@ -17,7 +17,7 @@ use crate::Compiler::Core::{
 };
 use crate::Compiler::Core::SectionEnhancers::QuickFunctionsAstEnhancer;
 use crate::ErrorManager::{DebugConfig, ErrorManager};
-use std::time::Instant;
+use web_time::Instant;
 
 pub struct GeneralAstEnhancer<'a> {
     operational_settings:    &'a OperationalSettings,
@@ -169,4 +169,4 @@ impl<'a> GeneralAstEnhancer<'a> {
 
         self.enhancement_result
     }
-}
+    }

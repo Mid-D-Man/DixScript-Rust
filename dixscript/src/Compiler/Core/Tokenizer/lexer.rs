@@ -408,9 +408,23 @@ impl<'src> Tokenizer<'src> {
         // Multi-char operators
         if let Some(t) = self.try_scan_multi_char_operator(state) { return Ok(Some(t)); }
 
-        // Prefixed constructors (b:, t:, r:)
+        // Prefixed constructors (b:(…), t:(…), r:(…))
+        //
+        // Must require the '(' immediately after the colon. Without it, a
+        // single-letter identifier named "b", "t", or "r" followed by "::"
+        // (a GroupArray/table-path separator, e.g. `b.child::`) or by a lone
+        // ':' (a TableProperty separator, e.g. `b: 5`) gets swallowed as the
+        // start of a constructor literal: the colon is consumed as the
+        // constructor's marker, leaving the second ':' of "::" (or nothing,
+        // for a single ':') stray in the stream and desyncing the parser.
+        // The real constructor grammar is always `<letter>:(...)` with the
+        // paren directly after the colon, so checking for it here is a safe,
+        // fully-disambiguating condition — it can never reject genuine
+        // constructor usage while correctly falling through to identifier
+        // scanning for `b::`/`b:`/`t::`/`r::` etc.
         if current.is_ascii_alphabetic()
             && state.peek_next(self.input) == ':'
+            && state.peek_at(self.input, 2) == '('
             && self.is_valid_prefixed_constructor(state)
         {
             return Ok(Some(self.scan_prefixed_constructor(state)));
@@ -1395,4 +1409,4 @@ pub struct StaticCallInfo {
     pub column:       usize,
     pub section:      SectionId,
     pub token_index:  usize,
-    }
+                        }

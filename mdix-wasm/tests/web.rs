@@ -7,8 +7,9 @@
 //! Node.js instead, where `web_sys::window()` (used by the localStorage
 //! cache backend) would be `None`.
 
+use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
-use mdix_wasm::MdixDatabase;
+use mdix_wasm::{MdixDatabase, merge_sources, merge_sources_weighted};
 
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -19,6 +20,8 @@ const SAMPLE: &str = r#"
   ready    = true
 )
 "#;
+
+// ── Core load / read ─────────────────────────────────────────────────────
 
 #[wasm_bindgen_test]
 fn load_str_parses_valid_source() {
@@ -83,6 +86,16 @@ fn entry_count_is_nonzero_for_valid_data() {
     assert!(count > 0, "a database with three fields should report a nonzero entry count");
 }
 
+// ── Cloud import (prefetch_import + localStorage cache) ─────────────────
+//
+// This only exercises resolution succeeding/failing, not the imported
+// content's actual effect (e.g. calling an imported quickfunc) — that
+// would need a fuller fixture and I haven't traced the namespace/quickfunc
+// resolution path closely enough to assert on it with confidence. Flag it
+// back if this doesn't behave as expected; the assertion here is
+// deliberately conservative (does resolution succeed at all) rather than
+// deeply verifying import semantics I can't run locally to confirm.
+
 #[wasm_bindgen_test]
 fn prefetch_import_does_not_panic() {
     // Doesn't assert cache behavior here (that's exercised properly by the
@@ -91,5 +104,207 @@ fn prefetch_import_does_not_panic() {
     // real browser without panicking, since it touches
     // web_sys::window().local_storage() which only exists in this
     // run_in_browser configuration, not under Node.
-    mdix_wasm::prefetch_import("https://example.com/fixture.mdix", "@DATA(x -> 1)");
-      }
+    mdix_wasm::prefetch_import("https://example.com/fixture.mdix", "@DATA(x = 1)");
+}
+
+#[wasm_bindgen_test]
+fn prefetch_import_then_cloud_import_resolves() {
+    let cloud_url     = "https://example.com/shared-fixture.mdix";
+    let cloud_content = r#"
+@QUICKFUNCS(
+  ~double<int>(_x) {
+    return _x * 2
+  }
+)
+"#;
+    mdix_wasm::prefetch_import(cloud_url, cloud_content);
+
+    let importing_source = format!(
+        r#"
+@IMPORTS(
+  shared from_cloud "{}"
+)
+@DATA(
+  x = 1
+)
+"#,
+        cloud_url
+    );
+
+    let result = MdixDatabase::load_str(&importing_source);
+    assert!(
+        result.is_ok(),
+        "a source importing a URL that was already prefetch_import()'d should resolve from \
+         the localStorage cache instead of erroring — got: {:?}",
+        result.err()
+    );
+}
+
+#[wasm_bindgen_test]
+fn cloud_import_without_prefetch_errors_cleanly() {
+    // No prefetch_import() call for this URL — the cache is empty, so this
+    // should fail with a clear resolution error rather than panicking or
+    // hanging on a network call wasm32 can't make from inside the module.
+    let importing_source = r#"
+@IMPORTS(
+  shared from_cloud "https://example.com/never-prefetched.mdix"
+)
+@DATA(
+  x = 1
+)
+"#;
+    let result = MdixDatabase::load_str(importing_source);
+    assert!(
+        result.is_err(),
+        "an unresolvable cloud import should error cleanly, not silently drop the import"
+    );
+}
+
+// ── Merging ───────────────────────────────────────────────────────────────
+
+#[wasm_bindgen_test]
+fn merge_sources_rejects_empty_list() {
+    let result = merge_sources(vec![], None, None);
+    assert!(result.is_err(), "merging an empty source list should error, not panic");
+}
+
+#[wasm_bindgen_test]
+fn merge_sources_combines_disjoint_data() {
+    let a = "@DATA(x = 1)".to_string();
+    let b = "@DATA(y = 2)".to_string();
+    let mut outcome = merge_sources(vec![a, b], None, None)
+        .expect("merging two disjoint sources should succeed");
+    let db = outcome.database().expect("database() should be consumable exactly once");
+    assert_eq!(db.get_int("x").unwrap(), 1);
+    assert_eq!(db.get_int("y").unwrap(), 2);
+}
+
+#[wasm_bindgen_test]
+fn merge_sources_throw_on_conflict_succeeds_for_disjoint_data() {
+    // Regression test: every parsed source gets identical auto-populated
+    // minimal @CONFIG defaults even when the user writes no @CONFIG block
+    // at all, which used to make merge_config flag a "conflict" on every
+    // multi-source merge regardless of @DATA content — ThrowOnConflict
+    // raised unconditionally even for these genuinely disjoint sources.
+    let a = "@DATA(x = 1)".to_string();
+    let b = "@DATA(y = 2)".to_string();
+    let result = merge_sources(vec![a, b], Some("throw_on_conflict".to_string()), None);
+    assert!(
+        result.is_ok(),
+        "disjoint @DATA keys with no explicit @CONFIG should not conflict under \
+         throw_on_conflict — got: {:?}",
+        result.err()
+    );
+}
+
+#[wasm_bindgen_test]
+fn merge_sources_throw_on_conflict_raises_for_real_conflict() {
+    let a = "@DATA(x = 1)".to_string();
+    let b = "@DATA(x = 2)".to_string();
+    let result = merge_sources(vec![a, b], Some("throw_on_conflict".to_string()), None);
+    assert!(
+        result.is_err(),
+        "a genuinely conflicting key (same key, different value) should still raise \
+         under throw_on_conflict"
+    );
+}
+
+#[wasm_bindgen_test]
+fn merge_sources_primary_wins_on_conflict() {
+    let a = "@DATA(x = 1)".to_string();
+    let b = "@DATA(x = 2)".to_string();
+    let mut outcome = merge_sources(vec![a, b], Some("primary_wins".to_string()), None)
+        .expect("primary_wins should never raise on conflict");
+    let db = outcome.database().unwrap();
+    assert_eq!(db.get_int("x").unwrap(), 1, "primary_wins should keep the first source's value");
+}
+
+#[wasm_bindgen_test]
+fn merge_sources_secondary_wins_on_conflict() {
+    let a = "@DATA(x = 1)".to_string();
+    let b = "@DATA(x = 2)".to_string();
+    let mut outcome = merge_sources(vec![a, b], Some("secondary_wins".to_string()), None)
+        .expect("secondary_wins should never raise on conflict");
+    let db = outcome.database().unwrap();
+    assert_eq!(db.get_int("x").unwrap(), 2, "secondary_wins should keep the second source's value");
+}
+
+#[wasm_bindgen_test]
+fn merge_sources_conflicts_report_has_the_expected_shape() {
+    let a = "@DATA(x = 1)".to_string();
+    let b = "@DATA(x = 2)".to_string();
+    let outcome = merge_sources(vec![a, b], Some("primary_wins".to_string()), None).unwrap();
+    let conflicts_value = outcome.conflicts().expect("conflicts() should return valid JSON");
+    let conflicts_array = js_sys::Array::from(&conflicts_value);
+    assert!(
+        conflicts_array.length() > 0,
+        "a genuine key conflict should show up in the conflicts report"
+    );
+    let first = conflicts_array.get(0);
+    assert!(
+        js_sys::Reflect::has(&first, &JsValue::from_str("path")).unwrap_or(false),
+        "each conflict entry should have a 'path' field"
+    );
+    assert!(
+        js_sys::Reflect::has(&first, &JsValue::from_str("winningSource")).unwrap_or(false),
+        "each conflict entry should have a 'winningSource' field"
+    );
+}
+
+#[wasm_bindgen_test]
+fn merge_sources_weighted_respects_explicit_weights() {
+    let pair_a = js_sys::Array::new();
+    pair_a.push(&JsValue::from_str("@DATA(x = 1)"));
+    pair_a.push(&JsValue::from_f64(0.9));
+
+    let pair_b = js_sys::Array::new();
+    pair_b.push(&JsValue::from_str("@DATA(x = 2)"));
+    pair_b.push(&JsValue::from_f64(0.1));
+
+    let entries: Vec<JsValue> = vec![pair_a.into(), pair_b.into()];
+
+    let mut outcome = merge_sources_weighted(entries, Some("weighted".to_string()), None)
+        .expect("weighted merge with explicit weights should succeed");
+    let db = outcome.database().unwrap();
+    assert_eq!(
+        db.get_int("x").unwrap(),
+        1,
+        "the higher-weighted source (0.9 vs 0.1) should win under the weighted strategy"
+    );
+}
+
+#[wasm_bindgen_test]
+fn merge_sources_weighted_rejects_empty_list() {
+    let result = merge_sources_weighted(vec![], None, None);
+    assert!(result.is_err(), "merging an empty weighted list should error, not panic");
+}
+
+#[wasm_bindgen_test]
+fn merge_with_merges_two_loaded_databases() {
+    // Regression test: MdixDatabase.mergeWith previously had no real
+    // wasm-bindgen binding at all — merge.rs's merge_with() was a plain
+    // Rust free function, never attached to the #[wasm_bindgen] impl block
+    // or re-exported from lib.rs, so this was unreachable from JS despite
+    // being documented at the top of merge.rs. This confirms it's wired up.
+    let primary   = MdixDatabase::load_str("@DATA(x = 1)").unwrap();
+    let secondary = MdixDatabase::load_str("@DATA(y = 2)").unwrap();
+
+    let mut outcome = primary
+        .merge_with(&secondary, None, None)
+        .expect("mergeWith should succeed for two valid, disjoint databases");
+    let merged = outcome.database().unwrap();
+    assert_eq!(merged.get_int("x").unwrap(), 1);
+    assert_eq!(merged.get_int("y").unwrap(), 2);
+}
+
+#[wasm_bindgen_test]
+fn merge_with_primary_wins_by_default_weighting() {
+    let primary   = MdixDatabase::load_str("@DATA(x = 1)").unwrap();
+    let secondary = MdixDatabase::load_str("@DATA(x = 2)").unwrap();
+
+    // mergeWith weights primary at 1.0 and secondary at 0.5, so under the
+    // default "weighted" strategy primary should win a genuine conflict.
+    let mut outcome = primary.merge_with(&secondary, None, None).unwrap();
+    let merged = outcome.database().unwrap();
+    assert_eq!(merged.get_int("x").unwrap(), 1);
+}

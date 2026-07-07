@@ -351,6 +351,29 @@ impl MdixDatabase {
             .map_err(|e| runtime_err("to_mdix serialize", e))
     }
 
+    /// Merges this database with `other` and returns a fresh
+    /// `MdixMergeOutcome` — leaves both original databases untouched.
+    ///
+    /// `strategy`: "weighted" (default) | "primary_wins" | "secondary_wins"
+    /// | "throw_on_conflict". `array_strategy`: "concat_dedup" (default) |
+    /// "replace" | "concat". `this` merges as the primary source
+    /// (weight 1.0), `other` as secondary (weight 0.5).
+    ///
+    /// NOTE: this method previously didn't exist as a real binding despite
+    /// being documented at the top of merge.rs — `crate::merge::merge_with`
+    /// was a plain Rust free function, never wired into a #[wasm_bindgen]
+    /// impl block or re-exported from lib.rs, so `MdixDatabase.mergeWith`
+    /// was unreachable from JS entirely. This is that wiring.
+    #[wasm_bindgen(js_name = mergeWith)]
+    pub fn merge_with(
+        &self,
+        other:          &MdixDatabase,
+        strategy:       Option<String>,
+        array_strategy: Option<String>,
+    ) -> Result<crate::merge::MdixMergeOutcome, JsValue> {
+        crate::merge::merge_with(self, other, strategy, array_strategy)
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────
 
     fn data(&self, path: &str) -> Result<&DixData, JsValue> {
@@ -360,6 +383,7 @@ impl MdixDatabase {
         self.inner.as_ref().ok_or_else(|| freed_err("MdixDatabase"))
     }
 }
+
 
 // Not part of the #[wasm_bindgen] impl block above on purpose: `DixData` is
 // a native Rust type with no wasm-bindgen binding of its own, so this isn't
@@ -372,4 +396,4 @@ impl MdixDatabase {
     pub(crate) fn from_data(data: DixData) -> Self {
         MdixDatabase { inner: Some(data) }
     }
-}
+    }

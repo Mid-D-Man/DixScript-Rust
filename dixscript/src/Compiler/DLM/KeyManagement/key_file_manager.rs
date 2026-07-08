@@ -29,29 +29,27 @@ impl KeyFileManager {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /// Build and write the `.mdix.key` file from module metadata.
-    ///
-    /// If a key file already exists it is unlocked, overwritten, then re-locked.
-    /// `sizes` is `(original_bytes, compressed_bytes, encrypted_bytes)`.
-    pub fn create_key_file(
+    /// Build the `.mdix.key` file's content and its intended path, without
+    /// touching the filesystem at all. `create_key_file` below is now a
+    /// thin wrapper: call this, then write the result to disk. Split out
+    /// specifically so wasm32 callers (no real filesystem) can get the key
+    /// content in memory the same way `result.processed_data` already
+    /// carries the encrypted bytes in memory regardless of whether the
+    /// `.mdix.enc` disk write succeeds.
+    pub fn build_key_file_content(
         &self,
         compiled_file_path:   &str,
         compression_metadata: Option<HashMap<String, String>>,
         encryption_metadata:  Option<HashMap<String, String>>,
         audit_metadata:       Option<HashMap<String, String>>,
         sizes:                (usize, usize, usize),
-    ) -> Result<String, String> {
+    ) -> Result<(String, String), String> {
         if self.base.is_debug_enabled() {
-            self.base.log_debug("Building .mdix.key file");
+            self.base.log_debug("Building .mdix.key file content");
         }
 
         let (original_size, compressed_size, encrypted_size) = sizes;
         let key_file_path = self.key_file_path(compiled_file_path);
-
-        if let Some(parent) = Path::new(&key_file_path).parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create key file directory: {}", e))?;
-        }
 
         let mut data = KeyFileData::new();
 
@@ -132,6 +130,34 @@ impl KeyFileManager {
         }
 
         let content = MdixKeyWriter::write(&data);
+
+        Ok((key_file_path, content))
+    }
+
+    /// Build and write the `.mdix.key` file from module metadata.
+    ///
+    /// If a key file already exists it is unlocked, overwritten, then re-locked.
+    /// `sizes` is `(original_bytes, compressed_bytes, encrypted_bytes)`.
+    pub fn create_key_file(
+        &self,
+        compiled_file_path:   &str,
+        compression_metadata: Option<HashMap<String, String>>,
+        encryption_metadata:  Option<HashMap<String, String>>,
+        audit_metadata:       Option<HashMap<String, String>>,
+        sizes:                (usize, usize, usize),
+    ) -> Result<String, String> {
+        let (key_file_path, content) = self.build_key_file_content(
+            compiled_file_path,
+            compression_metadata,
+            encryption_metadata,
+            audit_metadata,
+            sizes,
+        )?;
+
+        if let Some(parent) = Path::new(&key_file_path).parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create key file directory: {}", e))?;
+        }
 
         self.write_locked(&key_file_path, content.as_bytes())?;
 
@@ -293,4 +319,4 @@ impl KeyFileManager {
             .to_string_lossy()
             .to_string()
     }
-}
+    }

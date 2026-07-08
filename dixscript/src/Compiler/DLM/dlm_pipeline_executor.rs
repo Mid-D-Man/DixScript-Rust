@@ -410,11 +410,24 @@ impl DLMPipelineExecutor {
             .ok_or("Invalid source file name")?;
 
         let enc_path = self.output_directory.join(format!("{}.mdix.enc", base_name));
-
-        self.write_enc_file(&enc_path, &result.processed_data)?;
-
         let enc_path_str = enc_path.to_string_lossy().to_string();
-        self.error_manager.log_info(&format!("Output file: {}", enc_path.display()));
+
+        // Best-effort disk write — result.processed_data (set by execute()
+        // before this function ever runs) already has the real encrypted
+        // bytes in memory regardless of whether this succeeds, so a
+        // failure here (e.g. no real filesystem on wasm32) must not stop
+        // us from still building key_file_content below.
+        match self.write_enc_file(&enc_path, &result.processed_data) {
+            Ok(()) => {
+                self.error_manager.log_info(&format!("Output file: {}", enc_path.display()));
+                result.encrypted_file_path = Some(enc_path_str.clone());
+            }
+            Err(e) => {
+                self.error_manager.log_warning(&format!(
+                    "Encrypted data ready in memory but could not be written to disk: {}", e
+                ));
+            }
+        }
 
         let compressed_size = result.metadata
             .get("compressor")
@@ -427,7 +440,7 @@ impl DLMPipelineExecutor {
             self.output_directory.to_string_lossy().to_string(),
         );
 
-        let key_file_path = key_manager.create_key_file(
+        let (key_file_path, key_content) = key_manager.build_key_file_content(
             &enc_path_str,
             result.metadata.get("compressor").cloned(),
             result.metadata.get("encryptor").cloned(),
@@ -435,12 +448,47 @@ impl DLMPipelineExecutor {
             (original_size, compressed_size, result.processed_size),
         )?;
 
-        self.error_manager.log_info(&format!("Key file: {}", key_file_path));
+        // Always available in memory, same as result.processed_data — this
+        // is what a wasm32 caller (no real filesystem) reads directly
+        // instead of result.key_file_path, and what
+        // DLMReverseExecutor::execute_from_bytes expects as its
+        // key_file_content argument.
+        result.key_file_content = Some(key_content.clone());
 
-        result.encrypted_file_path = Some(enc_path_str);
-        result.key_file_path       = Some(key_file_path);
+        // Best-effort disk write. On wasm32 this will fail (no real
+        // filesystem) and result.key_file_path stays None — that's fine,
+        // it's a warning at the call site in execute(), not fatal, and
+        // result.key_file_content above already has what matters.
+        if let Some(parent) = Path::new(&key_file_path).parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        match self.write_key_file(&key_file_path, key_content.as_bytes()) {
+            Ok(()) => {
+                self.error_manager.log_info(&format!("Key file: {}", key_file_path));
+                result.key_file_path = Some(key_file_path);
+            }
+            Err(e) => {
+                self.error_manager.log_warning(&format!(
+                    "Key file content built in memory but could not be written to disk: {}", e
+                ));
+            }
+        }
 
         Ok(())
+    }
+
+    fn write_key_file(&self, path: &str, content: &[u8]) -> Result<(), String> {
+        let p = Path::new(path);
+        if p.exists() {
+            file_permissions::set_writable(p)
+                .map_err(|e| format!("Cannot unlock key file for writing: {}", e))?;
+        }
+        let result = fs::write(p, content)
+            .map_err(|e| format!("Failed to write key file: {}", e));
+        if let Err(e) = file_permissions::set_readonly(p) {
+            self.error_manager.log_warning(&format!("Could not lock key file read-only: {}", e));
+        }
+        result
     }
 
     fn write_enc_file(&self, path: &Path, data: &[u8]) -> Result<(), String> {
@@ -469,4 +517,4 @@ impl DLMPipelineExecutor {
             .unwrap_or("unknown")
             .to_string()
     }
-            }
+                   }

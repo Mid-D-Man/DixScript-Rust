@@ -436,3 +436,87 @@ fn merge_sources_group_array_same_id_twice_is_not_key_merged() {
          current (dumb-concat) behavior, not a bug"
     );
 }
+
+
+// ── DLM (compress / encrypt / audit) ─────────────────────────────────────
+
+use mdix_wasm::{compile_with_dlm, decompile_with_dlm};
+
+#[wasm_bindgen_test]
+fn compile_with_dlm_round_trips_with_compression_and_encryption() {
+    let source = r#"
+@DLM(DCompressor.gzip, DEncryptor.aes256)
+@DATA(
+  secret = "shh, this should survive compression and encryption",
+  count  = 42
+)
+"#;
+
+    let outcome = compile_with_dlm(source, "dlm-roundtrip-test")
+        .expect("compileWithDlm should succeed with gzip + aes256");
+
+    assert!(outcome.isSuccess(), "DLM pipeline should report success");
+    assert!(!outcome.processedData().is_empty(), "processedData should be non-empty");
+    assert!(
+        outcome.keyFileContent().is_some(),
+        "keyFileContent should be populated when DEncryptor ran"
+    );
+    let modules = outcome.executedModules();
+    assert!(
+        modules.iter().any(|m| m.to_lowercase().contains("compressor")),
+        "executedModules should mention the compressor: {:?}", modules
+    );
+    assert!(
+        modules.iter().any(|m| m.to_lowercase().contains("encryptor")),
+        "executedModules should mention the encryptor: {:?}", modules
+    );
+
+    let key_content = outcome.keyFileContent().unwrap();
+    let db = decompile_with_dlm(outcome.processedData(), &key_content, "dlm-roundtrip-test")
+        .expect("decompileWithDlm should reverse compileWithDlm's output");
+
+    assert_eq!(
+        db.get_string("secret").unwrap(),
+        "shh, this should survive compression and encryption"
+    );
+    assert_eq!(db.get_int("count").unwrap(), 42);
+}
+
+#[wasm_bindgen_test]
+fn compile_with_dlm_passthrough_when_no_dlm_section() {
+    // No @DLM section at all — should still succeed, just with nothing
+    // compressed or encrypted (mirrors the native
+    // determine_dlm_behavior's own has_compressor/has_encryptor guard).
+    let source = r#"@DATA(plain = "just plain data, no @DLM section")"#;
+
+    let outcome = compile_with_dlm(source, "dlm-passthrough-test")
+        .expect("compileWithDlm should succeed even with no @DLM section");
+
+    assert!(outcome.isSuccess());
+    assert!(!outcome.processedData().is_empty());
+    assert!(
+        outcome.keyFileContent().is_none(),
+        "keyFileContent should be absent when no DEncryptor ran"
+    );
+    assert!(outcome.executedModules().is_empty());
+
+    // Empty string key content signals decompileWithDlm to unpack
+    // directly instead of attempting decryption — the mirror image of
+    // the no-modules case above.
+    let db = decompile_with_dlm(outcome.processedData(), "", "dlm-passthrough-test")
+        .expect("decompileWithDlm should unpack plain (non-DLM) data directly");
+
+    assert_eq!(db.get_string("plain").unwrap(), "just plain data, no @DLM section");
+}
+
+#[wasm_bindgen_test]
+fn compile_with_dlm_rejects_empty_source() {
+    let result = compile_with_dlm("", "empty-test");
+    assert!(result.is_err(), "empty source should error, not panic");
+}
+
+#[wasm_bindgen_test]
+fn decompile_with_dlm_rejects_empty_data() {
+    let result = decompile_with_dlm(vec![], "", "empty-test");
+    assert!(result.is_err(), "empty data should error, not panic");
+      }

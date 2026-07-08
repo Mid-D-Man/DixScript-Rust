@@ -388,6 +388,21 @@ impl DLMPipelineExecutor {
 
             enc.set_password(password)
                 .map_err(|e| format!("Failed to initialise encryption password: {}", e))?;
+        } else {
+            // Keyfile mode: nothing derives a key from a password here, so the
+            // encryptor needs an explicit nudge to generate one before encrypt()
+            // is called — every IEncryptor::initialize() impl already generates
+            // a fresh random key when handed a config with no "key_data" entry
+            // (that's what lets the reverse pipeline load an existing key via
+            // the same method), so reuse that instead of adding a separate
+            // per-subtype key-generation entry point.
+            if self.debug_config.is_enabled {
+                self.error_manager.log_debug(
+                    "[DLMPipelineExecutor] Generating fresh key for keyfile-mode encryptor"
+                );
+            }
+
+            enc.initialize(std::collections::HashMap::new());
         }
 
         Ok(enc)
@@ -517,4 +532,4 @@ impl DLMPipelineExecutor {
             .unwrap_or("unknown")
             .to_string()
     }
-                   }
+    }

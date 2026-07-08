@@ -12,6 +12,9 @@ Full IDE support for DixScript `.mdix` files, powered by `mdix-lsp`.
 - Inlay type hints and parameter hints
 - Code actions / quick fixes (insert `@SECURITY`, replace weak `xor`, etc.)
 - Code lens for compile, convert to JSON/TOML, minify, and resolve
+- Inline hex color picker (native VS Code color swatches + picker on every `#RRGGBB`/`#RGB` literal)
+- 📅 Inline date/time picker — click the lens above any `Date`/`Timestamp` literal to edit it with a native date/datetime picker
+- ▶ Blob preview — click the lens above any `b:(...)` literal to preview it as an image, audio, video, text, or hex dump, based on sniffed content
 - Document formatting and folding
 
 ## Settings

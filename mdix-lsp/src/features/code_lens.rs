@@ -3,7 +3,7 @@ use std::panic;
 
 use tower_lsp::lsp_types::{CodeLens, Command, Position, Range};
 use serde_json::Value as JsonValue;
-use dixscript::Compiler::Core::Tokenizer::TokenType;
+use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 
 use crate::document::Document;
 
@@ -23,6 +23,18 @@ pub const ALL_COMMANDS: &[&str] = &[
     CMD_SHOW_AST,
     CMD_CREATE_RESOLVED,
 ];
+
+// ── Client-only commands ─────────────────────────────────────────────────────
+//
+// These are handled entirely inside the VS Code extension (registered via
+// `vscode.commands.registerCommand`, opening a Webview) and are deliberately
+// NOT added to `ALL_COMMANDS` / `execute_command` — same convention already
+// used by `dixscript.restartServer`. vscode-languageclient always checks for
+// a locally-registered command with this ID before forwarding a CodeLens
+// click to the server via `workspace/executeCommand`, so a local handler
+// intercepts these before the server ever sees them.
+pub const CMD_EDIT_DATETIME: &str = "mdix.editDateTime";
+pub const CMD_PREVIEW_BLOB:  &str = "mdix.previewBlob";
 
 pub fn provide(doc: Option<&Document>) -> Option<Vec<CodeLens>> {
     let result = panic::catch_unwind(panic::AssertUnwindSafe(|| provide_inner(doc)));
@@ -55,7 +67,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<CodeLens>> {
     lenses.push(make_lens(file_range, "⊞ Resolve", CMD_CREATE_RESOLVED, vec![uri_arg.clone()]));
     lenses.push(make_lens(file_range, "⚙ Compile", CMD_COMPILE,         vec![uri_arg.clone()]));
 
-    for token in &doc.tokens {
+    for (idx, token) in doc.tokens.iter().enumerate() {
         let is_data = matches!(token.token_type, TokenType::SectionData);
         let is_qf   = matches!(token.token_type, TokenType::SectionQuickFuncs);
 
@@ -81,9 +93,70 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<CodeLens>> {
                 ));
             }
         }
+
+        // ── Date / Timestamp literal → inline picker lens ────────────────────
+        let dt_kind = match &token.token_type {
+            TokenType::Date(_)      => Some("date"),
+            TokenType::Timestamp(_) => Some("timestamp"),
+            _                       => None,
+        };
+        if let Some(kind) = dt_kind {
+            let raw = token.get_token_value();
+            let line = token.line.saturating_sub(1) as u32;
+            let col  = token.column.saturating_sub(1) as u32;
+            let len  = raw.len() as u32;
+            let range = Range::new(Position::new(line, col), Position::new(line, col + len));
+            let range_json = serde_json::to_value(&range).unwrap_or(JsonValue::Null);
+
+            lenses.push(make_lens(
+                range,
+                "📅 Edit",
+                CMD_EDIT_DATETIME,
+                vec![
+                    uri_arg.clone(),
+                    range_json,
+                    JsonValue::String(raw),
+                    JsonValue::String(kind.to_string()),
+                ],
+            ));
+        }
+
+        // ── Blob constructor → preview lens ───────────────────────────────────
+        if matches!(token.token_type, TokenType::BlobConstructor(_)) {
+            if let Some(content) = find_blob_content(&doc.tokens, idx) {
+                let line = token.line.saturating_sub(1) as u32;
+                let col  = token.column.saturating_sub(1) as u32;
+                let point = Range::new(Position::new(line, col), Position::new(line, col));
+
+                lenses.push(make_lens(
+                    point,
+                    "▶ Preview blob",
+                    CMD_PREVIEW_BLOB,
+                    vec![uri_arg.clone(), JsonValue::String(content.to_string())],
+                ));
+            }
+        }
     }
 
     if lenses.is_empty() { None } else { Some(lenses) }
+}
+
+// A `b:(...)` constructs as: BlobConstructor  Symbol('(')  <content>  Symbol(')').
+// The content is almost always a String/StringSingle literal (base64 text);
+// `b:()` (empty blob) has no content token at all. Bounded lookahead (a
+// handful of tokens) keeps this cheap and safe against malformed input.
+fn find_blob_content(tokens: &[Token], blob_idx: usize) -> Option<String> {
+    let open_idx = blob_idx + 1;
+    match tokens.get(open_idx).map(|t| &t.token_type) {
+        Some(TokenType::Symbol('(')) => {}
+        _ => return None,
+    }
+
+    match tokens.get(open_idx + 1).map(|t| &t.token_type) {
+        Some(TokenType::String(s)) | Some(TokenType::StringSingle(s)) => Some(s.clone()),
+        Some(TokenType::Symbol(')')) => Some(String::new()), // b:() — empty blob
+        _ => None,
+    }
 }
 
 fn make_lens(range: Range, title: &str, command: &str, args: Vec<JsonValue>) -> CodeLens {
@@ -96,4 +169,4 @@ fn make_lens(range: Range, title: &str, command: &str, args: Vec<JsonValue>) -> 
         }),
         data: None,
     }
-                          }
+    }

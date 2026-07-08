@@ -18,6 +18,15 @@ pub struct DLMPipelineResult {
     pub encrypted_file_path: Option<String>,
     pub key_file_path: Option<String>,
     pub audit_file_path: Option<String>,
+
+    /// The `.mdix.key` file's content, built in memory regardless of
+    /// whether writing it to disk succeeded. On wasm32 (no real
+    /// filesystem) `key_file_path` will usually be `None` since the write
+    /// itself fails, but this is populated all the same — it's what
+    /// DLMReverseExecutor::execute_from_bytes expects as its
+    /// `key_file_content` argument for round-tripping without ever
+    /// touching disk.
+    pub key_file_content: Option<String>,
     
     // Statistics
     pub original_size: usize,
@@ -38,6 +47,7 @@ impl DLMPipelineResult {
             encrypted_file_path: None,
             key_file_path: None,
             audit_file_path: None,
+            key_file_content: None,
             original_size,
             processed_size: 0,
             compression_ratio: 0.0,
@@ -104,4 +114,4 @@ impl std::fmt::Display for DLMReverseResult {
             self.total_duration.as_millis()
         )
     }
-          }
+    }

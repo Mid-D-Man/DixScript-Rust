@@ -215,7 +215,7 @@ impl DixLoader {
             if !reverse_result.is_success {
                 return Err(format!("DLM reverse pipeline failed: {:?}", reverse_result.errors));
             }
-            reverse_result.processed_data
+            reverse_result.restored_data
         };
 
         let mut unpacker = BinaryUnpacker::new();

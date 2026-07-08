@@ -1,4 +1,3 @@
-
 //! Enhanced auditor — DixScript-formatted audit trail with smart AST diff.
 //! Uses AuditFileManager for permission-safe I/O (unlock → write → re-lock).
 
@@ -89,13 +88,15 @@ impl EnhancedAuditor {
             return;
         }
 
-        // Read raw content. Because the file is read-only we can open it
-        // normally — read permissions are never revoked.
-        let audit_file_path = manager.audit_file_path().to_string();
-        let content = match std::fs::read_to_string(&audit_file_path) {
-            Ok(c)  => c,
-            Err(e) => {
-                self.base.log_warning(&format!("Failed to load previous audit: {}", e));
+        // Read raw content through AuditFileManager rather than std::fs
+        // directly — the manager abstracts native-file vs
+        // wasm32-localStorage, and calling std::fs here would silently
+        // never find anything on wasm32 even though the localStorage
+        // backend has real content to read.
+        let content = match manager.read_raw() {
+            Some(c) => c,
+            None => {
+                self.base.log_warning("Failed to load previous audit content");
                 return;
             }
         };
@@ -567,4 +568,4 @@ impl IAuditor for EnhancedAuditor {
     fn priority(&self) -> i32 {
         self.base.priority()
     }
-}
+            }

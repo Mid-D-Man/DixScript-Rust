@@ -29,6 +29,10 @@ The C# prototype (`https://github.com/Mid-D-Man/DixScript`) remains the referenc
 
 ---
 
+## GitAds Sponsored
+[![Sponsored by GitAds](https://gitads.dev/v1/ad-serve?source=mid-d-man/dixscript-rust@github)](https://gitads.dev/v1/ad-track?source=mid-d-man/dixscript-rust@github)
+
+
 ## The Origin Story (Or: How Scope Creep Turned Into a Format)
 
 **Started as:** A quick hack to make a mobile game's remote config less painful.

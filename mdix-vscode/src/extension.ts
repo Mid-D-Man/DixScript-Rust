@@ -20,11 +20,17 @@ import {
   TransportKind,
 } from "vscode-languageclient/node";
 
+import { registerDateTimeEditor } from "./dateTimeEditor";
+import { registerBlobPreview }    from "./blobPreview";
+
 let client: LanguageClient | undefined;
 
 // ── Activate ──────────────────────────────────────────────────────────────────
 
 export function activate(context: ExtensionContext): void {
+  registerDateTimeEditor(context);
+  registerBlobPreview(context);
+
   const serverPath = resolveServerPath(context);
 
   if (!serverPath) {
@@ -156,4 +162,4 @@ function which(name: string): string | undefined {
   } catch {
     return undefined;
   }
-  }
+          }

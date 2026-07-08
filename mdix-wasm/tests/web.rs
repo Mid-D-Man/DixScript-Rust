@@ -308,3 +308,131 @@ fn merge_with_primary_wins_by_default_weighting() {
     let merged = outcome.database().unwrap();
     assert_eq!(merged.get_int("x").unwrap(), 1);
 }
+
+// ── GroupArray combine-by-source (the "camo configs" scenario) ──────────
+//
+// Three sources, each declaring ONE item under the SAME top-level GroupArray
+// path, each item identified by its own EquipableItemCamoClassId — same
+// shape as combining separate per-weapon-class camo config files into one
+// array. Confirms: (1) as long as the *source strings themselves* don't
+// collide on a SimpleProperty/TableProperty key, non-throwing strategies
+// combine the GroupArray items rather than replacing; (2) throw_on_conflict
+// specifically does NOT work for this, since any same-path GroupArray
+// collision routes through pick_winner regardless of array_strategy.
+
+const SMG_CAMOS: &str = r#"
+@DATA(
+  CamoConfigs:: {
+    EquipableItemCamoClassId = "ALL_LEGENDARY_SMG_CAMOS_CONFIG",
+    MainItemId = "1C_X39XX_HADES"
+  }
+)
+"#;
+
+const SNIPER_CAMOS: &str = r#"
+@DATA(
+  CamoConfigs:: {
+    EquipableItemCamoClassId = "ALL_LEGENDARY_SNIPER_CAMOS_CONFIG",
+    MainItemId = "1C_DRAGONBOLT_REDROSE"
+  }
+)
+"#;
+
+const SHOTGUN_CAMOS: &str = r#"
+@DATA(
+  CamoConfigs:: {
+    EquipableItemCamoClassId = "ALL_LEGENDARY_SHOTGUN_CAMOS_CONFIG",
+    MainItemId = "1C_WINFAUST88_DISCHARGE"
+  }
+)
+"#;
+
+#[wasm_bindgen_test]
+fn merge_sources_combines_non_conflicting_group_array_items() {
+    let sources = vec![
+        SMG_CAMOS.to_string(),
+        SNIPER_CAMOS.to_string(),
+        SHOTGUN_CAMOS.to_string(),
+    ];
+
+    // "weighted" (default strategy) + "concat_dedup" (default array
+    // strategy) is the "proper mode" for this: no key in any of the three
+    // sources collides with another (each has its own unique
+    // EquipableItemCamoClassId), so nothing here is a *real* conflict.
+    let mut outcome = merge_sources(sources, None, None)
+        .expect("three sources with non-conflicting GroupArray items should merge cleanly");
+    let db = outcome.database().unwrap();
+
+    let len = db.get_array_length("CamoConfigs")
+        .expect("CamoConfigs should exist as an array after merging");
+    assert_eq!(len, 3, "all three per-weapon-class configs should survive as separate array items");
+
+    // Order follows source order (SMG, Sniper, Shotgun) since ConcatDedup
+    // appends the loser's items after the winner's, and with default
+    // descending weights source[0] is always the winner here.
+    assert_eq!(
+        db.get_string("CamoConfigs[0].EquipableItemCamoClassId").unwrap(),
+        "ALL_LEGENDARY_SMG_CAMOS_CONFIG"
+    );
+    assert_eq!(
+        db.get_string("CamoConfigs[1].EquipableItemCamoClassId").unwrap(),
+        "ALL_LEGENDARY_SNIPER_CAMOS_CONFIG"
+    );
+    assert_eq!(
+        db.get_string("CamoConfigs[2].EquipableItemCamoClassId").unwrap(),
+        "ALL_LEGENDARY_SHOTGUN_CAMOS_CONFIG"
+    );
+}
+
+#[wasm_bindgen_test]
+fn merge_sources_group_array_combine_fails_under_throw_on_conflict() {
+    // Same three genuinely-non-conflicting sources as above, but with
+    // throw_on_conflict — documents the caveat from our discussion: ANY
+    // same-path GroupArray collision across sources calls pick_winner
+    // before array_strategy ever runs, so throw_on_conflict raises here
+    // even though nothing actually clashes. Use "weighted" /
+    // "primary_wins" / "secondary_wins" instead when you want combine
+    // behavior for a shared GroupArray key.
+    let sources = vec![SMG_CAMOS.to_string(), SNIPER_CAMOS.to_string()];
+    let result = merge_sources(sources, Some("throw_on_conflict".to_string()), None);
+    assert!(
+        result.is_err(),
+        "throw_on_conflict raises on ANY shared GroupArray path, even non-conflicting items — \
+         this is the caveat, not a bug in this test"
+    );
+}
+
+#[wasm_bindgen_test]
+fn merge_sources_group_array_same_id_twice_is_not_key_merged() {
+    // Documents the other caveat: array_strategy has no concept of
+    // EquipableItemCamoClassId being "the key" — ConcatDedup only skips an
+    // incoming item if it's a byte-for-byte duplicate of one already
+    // present. Two items sharing the same ID but different content both
+    // survive as SEPARATE entries, not deep-merged into one.
+    let a = r#"
+@DATA(
+  CamoConfigs:: {
+    EquipableItemCamoClassId = "ALL_LEGENDARY_SMG_CAMOS_CONFIG",
+    MainItemId = "1C_X39XX_HADES"
+  }
+)
+"#.to_string();
+    let b = r#"
+@DATA(
+  CamoConfigs:: {
+    EquipableItemCamoClassId = "ALL_LEGENDARY_SMG_CAMOS_CONFIG",
+    MainItemId = "1C_ALIYAHOO419_CRIMSONVORTEX"
+  }
+)
+"#.to_string();
+
+    let mut outcome = merge_sources(vec![a, b], None, None).unwrap();
+    let db = outcome.database().unwrap();
+    let len = db.get_array_length("CamoConfigs").unwrap();
+    assert_eq!(
+        len, 2,
+        "two items sharing an EquipableItemCamoClassId but different MainItemId are NOT \
+         key-merged into one — they survive as two separate array entries, which is the \
+         current (dumb-concat) behavior, not a bug"
+    );
+}

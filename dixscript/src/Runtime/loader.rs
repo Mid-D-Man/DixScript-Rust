@@ -1,4 +1,3 @@
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use chrono::Utc;
@@ -7,7 +6,7 @@ use crate::Compiler::Core::Config::{ConfigSectionHandler, DebugMode, Operational
 use crate::Compiler::Core::{GeneralParser, GeneralSemanticAnalyzer, GeneralAstEnhancer};
 use crate::Compiler::Core::BinarySerialization::{BinaryPacker, BinaryUnpacker};
 use crate::Compiler::Core::ValueResolution::ValueResolver;
-use crate::Compiler::DLM::{DLMPipelineExecutor, DLMReverseExecutor};
+use crate::Compiler::DLM::{DLMPipelineExecutor, DLMReverseExecutor, DLMPipelineResult};
 use crate::Compiler::DLM::KeyManagement::KeyFileManager;
 use crate::Compiler::DLM::Auditor::{IAuditor, DiyAuditor, EnhancedAuditor};
 use crate::Compiler::Utilities::SecurityUtilities;
@@ -110,6 +109,125 @@ impl DixLoader {
 
         Ok(DixData::from_ast(
             compiled_ast,
+            "1.0.0".to_string(),
+            Utc::now(),
+            false,
+            false,
+            vec![],
+        ))
+    }
+
+    /// Compile `source` and, if it declares an `@DLM(DCompressor...
+    /// DEncryptor...)` section, run the DLM pipeline (compress, encrypt,
+    /// audit) — entirely in memory, no filesystem access at all.
+    ///
+    /// `result.processed_data`/`result.key_file_content` are always
+    /// populated in memory when DLM modules ran, regardless of platform.
+    /// `result.encrypted_file_path`/`result.key_file_path` will be `None`
+    /// on wasm32 (no real filesystem to write to there) — check
+    /// `result.is_success`/`result.executed_modules`, not the path
+    /// fields, to see what actually happened.
+    ///
+    /// If `source` has no `@DLM(...)` section (or one with no
+    /// compressor/encryptor modules), `result.processed_data` is just the
+    /// plain binary-packed AST with no compression/encryption applied,
+    /// and `result.executed_modules` is empty — this mirrors exactly what
+    /// `determine_dlm_behavior`'s own has_compressor/has_encryptor guard
+    /// does for the file-based path, so a `source` with no DLM modules
+    /// still round-trips correctly through
+    /// `decompile_with_dlm_from_bytes` below (there's just nothing to
+    /// decrypt/decompress on the way back either).
+    pub fn compile_with_dlm_from_str(
+        &self,
+        source: &str,
+        source_label: &str,
+    ) -> Result<DLMPipelineResult, String> {
+        let ast = self.compile_source(source, source_label)?;
+
+        let mut ast_with_security = ast.clone();
+        ast_with_security.security = Some(
+            SecurityUtilities::ensure_valid_security_section(
+                ast_with_security.security,
+                ast_with_security.dlm.as_ref(),
+            ),
+        );
+
+        let mut packer = BinaryPacker::new();
+        let ser_result  = packer.pack(&ast_with_security);
+        if !ser_result.is_success {
+            return Err(format!("Binary serialization failed: {:?}", ser_result.errors));
+        }
+
+        let has_compressor_or_encryptor = ast_with_security.dlm.as_ref()
+            .map(|d| d.modules.iter().any(|m| {
+                m.module_type == DLMModuleType::DCompressor
+                    || m.module_type == DLMModuleType::DEncryptor
+            }))
+            .unwrap_or(false);
+
+        if !has_compressor_or_encryptor {
+            // Same guard determine_dlm_behavior applies for the file-based
+            // path — no compressor/encryptor modules means nothing for
+            // DLMPipelineExecutor to do, so don't call it at all; just
+            // hand back the plain packed bytes as-is.
+            let original_size = ser_result.binary_data.len();
+            let mut result = DLMPipelineResult::new(original_size);
+            result.is_success     = true;
+            result.processed_data = ser_result.binary_data;
+            result.processed_size = original_size;
+            result.original_size  = original_size;
+            return Ok(result);
+        }
+
+        let dlm_executor = DLMPipelineExecutor::new(source_label, "in-memory", DebugMode::Off);
+        Ok(dlm_executor.execute(&mut ast_with_security, ser_result.binary_data))
+    }
+
+    /// Reverse of `compile_with_dlm_from_str`: takes the (possibly
+    /// compressed+encrypted) bytes and the `.mdix.key` file content
+    /// directly, entirely in memory, and returns the reconstructed
+    /// `DixData`.
+    ///
+    /// `source_label` only feeds auditor/log labeling internally — it
+    /// doesn't need to point at a real file, pass anything descriptive
+    /// (e.g. `"in-memory"`).
+    ///
+    /// If `key_file_content` is empty, this assumes `data` is a plain
+    /// binary-packed AST with no DLM applied (the mirror image of
+    /// `compile_with_dlm_from_str`'s no-modules case) and unpacks it
+    /// directly rather than attempting decryption.
+    pub fn decompile_with_dlm_from_bytes(
+        &self,
+        data: Vec<u8>,
+        key_file_content: &str,
+        source_label: &str,
+    ) -> Result<DixData, String> {
+        let binary_data = if key_file_content.trim().is_empty() {
+            data
+        } else {
+            let reverse_executor = DLMReverseExecutor::new(
+                source_label,
+                format!("{}.key", source_label),
+                None,
+                DebugMode::Off,
+            );
+            let reverse_result = reverse_executor.execute_from_bytes(data, key_file_content);
+            if !reverse_result.is_success {
+                return Err(format!("DLM reverse pipeline failed: {:?}", reverse_result.errors));
+            }
+            reverse_result.processed_data
+        };
+
+        let mut unpacker = BinaryUnpacker::new();
+        let deser_result  = unpacker.unpack(&binary_data);
+        if !deser_result.is_success {
+            return Err(format!("Binary deserialization failed: {:?}", deser_result.errors));
+        }
+        let ast = deser_result.ast
+            .ok_or_else(|| "Binary deserialization produced no AST".to_string())?;
+
+        Ok(DixData::from_ast(
+            ast,
             "1.0.0".to_string(),
             Utc::now(),
             false,
@@ -771,4 +889,4 @@ mod tests {
         let errors = loader.error_manager.get_runtime_errors();
         assert_eq!(errors.len(), 1, "only the most recent load's error should remain");
     }
-           }
+    }

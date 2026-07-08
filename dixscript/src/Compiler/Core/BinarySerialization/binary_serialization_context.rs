@@ -21,7 +21,7 @@ pub struct BinarySerializationContext {
 
 impl BinarySerializationContext {
     pub fn new() -> Self {
-       Self::new_with_error_manager(ErrorManager::get_shared_instance())
+       Self::new_with_error_manager(ErrorManager::new_isolated())
     }
     pub fn new_with_error_manager(error_manager: ErrorManager) -> Self {
 
@@ -251,4 +251,4 @@ impl std::fmt::Display for BinaryDeserializationStatistics {
             self.total_sections, self.total_values, self.total_bytes
         )
     }
-            }
+        }

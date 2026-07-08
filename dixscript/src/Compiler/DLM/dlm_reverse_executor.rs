@@ -81,8 +81,6 @@ impl DLMReverseExecutor {
             }
         };
 
-        let mut result = DLMReverseResult::new(encrypted_data.len());
-
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
                 "[DLMReverseExecutor] Read {} bytes from encrypted file",
@@ -93,11 +91,62 @@ impl DLMReverseExecutor {
         let key_data = match self.load_key_file() {
             Ok(kd) => kd,
             Err(e) => {
+                let mut result = DLMReverseResult::new(encrypted_data.len());
                 result.errors.push(e);
                 result.total_duration = start_time.elapsed();
                 return result;
             }
         };
+
+        self.execute_with_data(encrypted_data, key_data)
+    }
+
+    /// Same pipeline as `execute()`, but takes the encrypted bytes and the
+    /// already-read `.mdix.key` file content directly instead of reading
+    /// either from disk — for wasm32 (no real filesystem) or any caller
+    /// that already has both in memory (e.g. from
+    /// `DLMPipelineResult::processed_data` /
+    /// `DLMPipelineResult::key_file_content` on the forward side, in the
+    /// same process or round-tripped over the network/localStorage).
+    ///
+    /// `self.encrypted_file_path` / `self.key_file_path` from `new(...)`
+    /// are still used for auditor/log labeling only in this path — they
+    /// don't need to point at real files. Pass placeholder strings (e.g.
+    /// `""` or `"in-memory"`) if there's nothing meaningful to put there.
+    pub fn execute_from_bytes(
+        &self,
+        encrypted_data:   Vec<u8>,
+        key_file_content: &str,
+    ) -> DLMReverseResult {
+        let key_data = match crate::Compiler::DLM::KeyManagement::MdixKeyParser::parse(key_file_content) {
+            Ok(kd) => kd,
+            Err(e) => {
+                let msg = format!("Failed to parse key file content: {}", e);
+                self.error_manager.add_dlm_error(
+                    DlmErrorType::InvocationFailed,
+                    msg.clone(),
+                    Some(self.file_label()),
+                    None,
+                    Some("Key content may be corrupted or from an incompatible version".to_string()),
+                    ErrorSeverity::Error,
+                );
+                let mut result = DLMReverseResult::new(encrypted_data.len());
+                result.errors.push(msg);
+                return result;
+            }
+        };
+
+        self.execute_with_data(encrypted_data, key_data)
+    }
+
+    fn execute_with_data(
+        &self,
+        encrypted_data: Vec<u8>,
+        key_data:       KeyFileData,
+    ) -> DLMReverseResult {
+        let start_time = Instant::now();
+
+        let mut result = DLMReverseResult::new(encrypted_data.len());
 
         let (mut encryptor, compressor, mut auditor) =
             match self.instantiate_modules(&key_data) {

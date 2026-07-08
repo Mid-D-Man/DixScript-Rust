@@ -10,7 +10,7 @@
 > — Mid-D-Man, Creator
 
 ---
-
+<!-- GitAds-Verify: YZXZH8RCNBZ1H2T4AKYE91PNIFVCNMFS -->
 ## ⚠️ Beta — Not Yet Production Battle-Tested
 
 **The Rust port is feature-complete but has not yet seen wide production use.** The API is stable and the compiler pipeline is fully implemented. Use it in your own projects, test it, and give feedback — but treat it as beta for anything mission-critical until v1.0.0 is officially published.

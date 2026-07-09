@@ -5,8 +5,7 @@
 Unity WebGL support for `com.midmanstudio.mdix`. Ships separately from the
 core package (see "Why a separate package" below) — install both.
 
-**Status: first vertical slice, not yet build-tested.** Claude cannot run or
-build Unity, so nothing below has been verified in a real WebGL build yet.
+**Status: first vertical slice, not yet build-tested.** so nothing below has been verified in a real WebGL build yet.
 Validate this slice for real before building anything further on top of it —
 see "What's next" at the bottom.
 

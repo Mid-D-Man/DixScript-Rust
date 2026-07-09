@@ -1,0 +1,20 @@
+{
+    "name": "MidManStudio.Mdix.WebGL.Runtime",
+    "rootNamespace": "MidManStudio.Mdix.WebGL",
+    "references": [
+        "MidManStudio.Mdix.Runtime"
+    ],
+    "includePlatforms": [
+        "WebGL"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "MidManStudio.Mdix.Core.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

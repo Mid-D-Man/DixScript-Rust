@@ -61,6 +61,12 @@ namespace MidManStudio.Mdix.Core
 
         #region Events
 
+        /// <summary>
+        /// Fires after a successful hot reload. The <see cref="MdixDatabase"/>
+        /// passed to the handler is always <c>this</c> same instance, mutated in
+        /// place -- you don't need to (and shouldn't) replace whatever reference
+        /// you're already holding.
+        /// </summary>
         public event Action<MdixDatabase>? OnReloaded;
         public event Action<MdixError>? OnReloadFailed;
 
@@ -86,6 +92,19 @@ namespace MidManStudio.Mdix.Core
             _safeHandle.Dispose();
         }
 
+        /// <summary>
+        /// Used by operational methods (EnableHotReload, Deserialize, AsDynamic,
+        /// Validate) that don't already return an MdixResult, where calling them
+        /// on a disposed instance is a programmer error worth surfacing loudly.
+        /// Value getters (GetString, GetInt, GetKeys, etc.) do NOT use this --
+        /// they go through TryGetRawHandle instead, which folds the disposed
+        /// check into the same MdixResult failure path as every other read
+        /// error, so callers checking IsFailure don't get blindsided by an
+        /// exception from what looks like every other Get* call. Both are
+        /// intentional; keep new methods in the category that matches their
+        /// existing return shape rather than picking whichever is more
+        /// convenient in the moment.
+        /// </summary>
         private void ThrowIfDisposed()
         {
             if (_disposed == 1)
@@ -183,15 +202,27 @@ namespace MidManStudio.Mdix.Core
             if (string.IsNullOrEmpty(encPath))  return MdixError.InvalidPath(encPath);
             if (string.IsNullOrEmpty(password)) return MdixError.NativeError("Password cannot be null or empty.");
 
-            fixed (byte* encPtr = MdixStringCache.GetUtf8Bytes(encPath))
-            fixed (byte* pwdPtr = MdixStringCache.EncodeTemporary(password))
+            // EncodeTemporary's own contract says these bytes "should not persist
+            // beyond the call site" -- assign to a local so we can actually zero
+            // it afterward, rather than letting the fixed-pinned buffer just sit
+            // in managed memory until GC eventually reclaims it.
+            var pwdBytes = MdixStringCache.EncodeTemporary(password);
+            try
             {
-                var handle = MdixNative.mdix_load_encrypted_password(encPtr, pwdPtr);
-                if (handle == null)
-                    return MdixError.NativeError(
-                        ReadLastError() ?? $"Failed to load encrypted file '{encPath}'.");
+                fixed (byte* encPtr = MdixStringCache.GetUtf8Bytes(encPath))
+                fixed (byte* pwdPtr = pwdBytes)
+                {
+                    var handle = MdixNative.mdix_load_encrypted_password(encPtr, pwdPtr);
+                    if (handle == null)
+                        return MdixError.NativeError(
+                            ReadLastError() ?? $"Failed to load encrypted file '{encPath}'.");
 
-                return MdixResult<MdixDatabase>.Ok(new MdixDatabase(handle, encPath));
+                    return MdixResult<MdixDatabase>.Ok(new MdixDatabase(handle, encPath));
+                }
+            }
+            finally
+            {
+                Array.Clear(pwdBytes, 0, pwdBytes.Length);
             }
         }
 
@@ -203,27 +234,35 @@ namespace MidManStudio.Mdix.Core
             if (data == null || data.Length == 0) return MdixError.NativeError("Encrypted byte array is null or empty.");
             if (string.IsNullOrEmpty(keyContent)) return MdixError.NativeError("Key file content is null or empty.");
 
-            fixed (byte* dataPtr = data)
-            fixed (byte* keyPtr  = MdixStringCache.GetUtf8Bytes(keyContent))
+            byte[]? pwdBytes = password != null ? MdixStringCache.EncodeTemporary(password) : null;
+            try
             {
-                void* handle;
-                if (password != null)
+                fixed (byte* dataPtr = data)
+                fixed (byte* keyPtr  = MdixStringCache.GetUtf8Bytes(keyContent))
                 {
-                    fixed (byte* pwdPtr = MdixStringCache.EncodeTemporary(password))
+                    void* handle;
+                    if (pwdBytes != null)
+                    {
+                        fixed (byte* pwdPtr = pwdBytes)
+                            handle = MdixNative.mdix_load_encrypted_bytes(
+                                dataPtr, data.Length, keyPtr, pwdPtr);
+                    }
+                    else
+                    {
                         handle = MdixNative.mdix_load_encrypted_bytes(
-                            dataPtr, data.Length, keyPtr, pwdPtr);
-                }
-                else
-                {
-                    handle = MdixNative.mdix_load_encrypted_bytes(
-                        dataPtr, data.Length, keyPtr, null);
-                }
+                            dataPtr, data.Length, keyPtr, null);
+                    }
 
-                if (handle == null)
-                    return MdixError.NativeError(
-                        ReadLastError() ?? "Failed to load from encrypted bytes.");
+                    if (handle == null)
+                        return MdixError.NativeError(
+                            ReadLastError() ?? "Failed to load from encrypted bytes.");
 
-                return MdixResult<MdixDatabase>.Ok(new MdixDatabase(handle));
+                    return MdixResult<MdixDatabase>.Ok(new MdixDatabase(handle));
+                }
+            }
+            finally
+            {
+                if (pwdBytes != null) Array.Clear(pwdBytes, 0, pwdBytes.Length);
             }
         }
 
@@ -489,7 +528,6 @@ namespace MidManStudio.Mdix.Core
 
         public MdixResult<string[]> GetKeys(string? prefix = null)
         {
-            ThrowIfDisposed();
             if (!TryGetRawHandle(out var h, out var err)) return err;
             try
             {
@@ -710,29 +748,91 @@ namespace MidManStudio.Mdix.Core
             }
         }
 
+        /// <summary>
+        /// Reloads this database's data from its source file, in place. On
+        /// success, <c>this</c> instance (the same reference you're already
+        /// holding, and the same one <see cref="EnableHotReload"/> is watching)
+        /// now reflects the new file contents -- it is also what
+        /// <see cref="MdixResult{T}.SuccessResult"/> and <see cref="OnReloaded"/>
+        /// hand back, so you never need to swap your own reference for a
+        /// different object. If the file fails to load (missing, malformed,
+        /// etc.), this instance's existing data is left completely untouched --
+        /// a failed reload can never leave you holding a half-updated database.
+        /// </summary>
         public MdixResult<MdixDatabase> Reload()
         {
             ThrowIfDisposed();
             if (_sourcePath == null)
                 return MdixError.InvalidPath("No source path available for reload.");
-            return Load(_sourcePath);
+
+            fixed (byte* pathPtr = MdixStringCache.GetUtf8Bytes(_sourcePath))
+            {
+                var newHandle = MdixNative.mdix_load(pathPtr);
+                if (newHandle == null)
+                    return MdixError.NativeError(
+                        ReadLastError() ?? $"Failed to reload '{_sourcePath}'.");
+
+                var oldSafeHandle = Interlocked.Exchange(ref _safeHandle, new MdixSafeHandle(newHandle));
+                // Frees once any call already in flight against the old handle
+                // (which acquired it via DangerousAddRef before this swap) finishes.
+                oldSafeHandle.Dispose();
+
+                if (_disposed == 1)
+                {
+                    // Dispose() raced in during the swap above and released the
+                    // handle we just replaced *before* our new one was installed --
+                    // it will never see this one, so we have to clean it up
+                    // ourselves instead of leaking it.
+                    _safeHandle.Dispose();
+                    return MdixError.Disposed(nameof(MdixDatabase));
+                }
+
+                return MdixResult<MdixDatabase>.Ok(this);
+            }
         }
 
         public Task<MdixResult<MdixDatabase>> ReloadAsync(CancellationToken ct = default) =>
             Task.Run(() => Reload(), ct);
 
-        private void HandleFileChanged(object sender, FileSystemEventArgs e)
+        private async void HandleFileChanged(object sender, FileSystemEventArgs e)
         {
-            var now  = DateTime.UtcNow.Ticks;
-            var last = Interlocked.Read(ref _lastReloadTick);
-            if (now - last < ReloadDebounceTicks) return;
-            Interlocked.Exchange(ref _lastReloadTick, now);
+            try
+            {
+                // Lock-free debounce via compare-and-swap: only the thread that
+                // successfully wins the exchange proceeds. The previous
+                // read-then-separately-exchange version had a window where two
+                // near-simultaneous FileSystemWatcher events (which genuinely
+                // happens -- FSW is known to fire more than once per logical
+                // save) could both pass the check before either updated the
+                // tick, triggering two reloads instead of one.
+                long last;
+                long now;
+                do
+                {
+                    now  = DateTime.UtcNow.Ticks;
+                    last = Interlocked.Read(ref _lastReloadTick);
+                    if (now - last < ReloadDebounceTicks) return;
+                }
+                while (Interlocked.CompareExchange(ref _lastReloadTick, now, last) != last);
 
-            Thread.Sleep(100);
+                // Give the writer a moment to finish flushing before we read --
+                // Task.Delay instead of Thread.Sleep so this doesn't tie up a
+                // thread-pool thread while it waits.
+                await Task.Delay(100).ConfigureAwait(false);
 
-            var result = Reload();
-            if (result.IsSuccess) OnReloaded?.Invoke(result.SuccessResult);
-            else                  OnReloadFailed?.Invoke(result.Error);
+                if (_disposed == 1) return; // disposed while we were waiting
+
+                var result = Reload();
+                if (result.IsSuccess) OnReloaded?.Invoke(result.SuccessResult);
+                else                  OnReloadFailed?.Invoke(result.Error);
+            }
+            catch (Exception ex)
+            {
+                // This is an async void event handler -- an exception escaping
+                // it would crash the process instead of being catchable by
+                // anyone. Route it through the normal failure event instead.
+                OnReloadFailed?.Invoke(MdixError.IoError($"Hot reload handler threw: {ex.Message}", ex));
+            }
         }
 
         private void HandleWatcherError(object sender, ErrorEventArgs e) =>

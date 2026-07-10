@@ -1,18 +1,33 @@
 name: Validate dixscript
 
-# Build, test, wasm-target check, and a short fuzz smoke run all gate
-# normally (a red X here means something's actually broken). Clippy runs
-# separately and is deliberately informational-only — see that job for why.
+# Build, test, wasm-target check, and a fuzz run all gate normally (a red X
+# here means something's actually broken). Clippy runs separately and is
+# deliberately informational-only — see that job for why.
+#
+# Fuzz duration: push/PR always run the 60s smoke test (crash-detection
+# only, not real coverage). For an actual pre-publish fuzzing campaign, run
+# this manually from the Actions tab ("Run workflow") and set fuzz_seconds
+# to something real (e.g. 3600 for an hour) — see the fuzz-smoke-test job.
 on:
   push:
     branches: [main, master, develop]
     paths:
       - 'dixscript/**'
-      - '.github/workflows/validate.yml'
+      - '.github/workflows/a-validate.yml'
   pull_request:
     paths:
       - 'dixscript/**'
   workflow_dispatch:
+    inputs:
+      fuzz_seconds:
+        description: >-
+          Fuzz duration in seconds. Only applies to manual runs (push/PR
+          always use 60s regardless of this value). 3600 = 1 hour,
+          21600 = 6 hours. Remember to also raise the job's timeout-minutes
+          below if you go past ~5 hours.
+        required: false
+        default: '60'
+        type: string
 
 jobs:
   build-and-test:
@@ -62,8 +77,12 @@ jobs:
         run: cargo build -p dixscript --target wasm32-unknown-unknown
 
   fuzz-smoke-test:
-    name: Fuzz smoke test (60s — crash detection only)
+    name: Fuzz parse_mdix
     runs-on: ubuntu-latest
+    # 60s (push/PR) needs a couple minutes total with build overhead; a
+    # manual multi-hour campaign needs real headroom. This is a ceiling, not
+    # a target — the job finishes as soon as -max_total_time elapses either way.
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
 
@@ -72,13 +91,30 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
 
-      # 60 seconds, not a real fuzzing campaign — just long enough to catch
-      # an obvious regression (a panic on some malformed input) before it
-      # ships. Run `cargo fuzz run parse_mdix` locally with a much longer
-      # budget (hours, overnight) for actual coverage; that's a manual /
-      # scheduled job, not something to run on every push.
+      # Corpus persists across runs instead of starting from empty every
+      # time, so a long manual campaign actually accumulates coverage
+      # instead of re-discovering the same inputs each run. restore-keys
+      # falls back to the most recent prior corpus on a cache miss for the
+      # exact key (which is always a miss, by design — see the key below —
+      # so a save always happens at the end of every run).
+      - name: Cache fuzz corpus
+        uses: actions/cache@v4
+        with:
+          path: dixscript/fuzz/corpus/parse_mdix
+          key: fuzz-corpus-parse_mdix-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-parse_mdix-
+
+      # Push/PR: fixed 60s smoke test, just long enough to catch an obvious
+      # regression (a panic on some malformed input) before it ships.
+      # Manual dispatch: whatever fuzz_seconds was set to, for an actual
+      # fuzzing campaign (real coverage, not a smoke test) ahead of a
+      # release. Either way this is still nowhere near exhaustive — cargo-fuzz
+      # is a "keep chipping away" tool, not a one-shot proof of correctness.
       - name: Fuzz parse_mdix
-        run: cargo fuzz run parse_mdix -- -max_total_time=60
+        run: >-
+          cargo fuzz run parse_mdix --
+          -max_total_time=${{ github.event_name == 'workflow_dispatch' && inputs.fuzz_seconds || 60 }}
         working-directory: dixscript
 
       - name: Upload crash artifacts (if any)

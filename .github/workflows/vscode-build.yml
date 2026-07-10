@@ -1,0 +1,126 @@
+name: DixScript — VS Code Extension Build
+
+on:
+  push:
+    branches: [master, main, develop]
+    paths:
+      - "mdix-vscode/**"
+      - "mdix-lsp/**"
+      - "dixscript/**"
+      - ".github/workflows/vscode-ext-build.yml"
+  pull_request:
+    branches: [master, main]
+    paths:
+      - "mdix-vscode/**"
+      - "mdix-lsp/**"
+      - "dixscript/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+
+  # ── 1. Gate ──────────────────────────────────────────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether to run
+        id: decide
+        run: |
+          # workflow_dispatch is always allowed, and push/pull_request are
+          # already scoped to mdix-vscode/mdix-lsp/dixscript by the `paths:`
+          # filters above, so any event that reaches this job should run.
+          echo "should_run=true" >> $GITHUB_OUTPUT
+
+  # ── 2. Build the mdix-lsp binary + package the .vsix, per platform ────────
+  build:
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.should_run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            vsce_target: linux-x64
+            bin_name: mdix-lsp
+          - os: macos-latest      # GitHub's current macos-latest is arm64
+            vsce_target: darwin-arm64
+            bin_name: mdix-lsp
+          - os: macos-13          # last Intel-based hosted macOS image
+            vsce_target: darwin-x64
+            bin_name: mdix-lsp
+          - os: windows-latest
+            vsce_target: win32-x64
+            bin_name: mdix-lsp.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ matrix.os }}-cargo-mdix-lsp-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ matrix.os }}-cargo-mdix-lsp-
+
+      - name: Build mdix-lsp (release)
+        run: cargo build -p mdix-lsp --release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install extension dependencies
+        working-directory: mdix-vscode
+        run: npm ci
+
+      # scripts/copy-binary.js reads target/release/<bin> and drops it into
+      # mdix-vscode/bin/<platform>/ -- this is the step that used to fail
+      # locally for you with "Binary not found" because nothing had built
+      # mdix-lsp yet. Here it's already built above.
+      - name: Compile + bundle binary (vscode:prepublish)
+        working-directory: mdix-vscode
+        run: npm run vscode:prepublish
+
+      - name: Package .vsix
+        working-directory: mdix-vscode
+        run: npx --yes @vscode/vsce package --target ${{ matrix.vsce_target }} --no-dependencies
+
+      - name: Upload .vsix
+        uses: actions/upload-artifact@v4
+        with:
+          name: dixscript-vscode-${{ matrix.vsce_target }}
+          path: mdix-vscode/*.vsix
+          retention-days: 30
+
+  # ── 3. Summary ──────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "======================================================="
+          echo "  DixScript — VS Code Extension Build Summary"
+          echo "======================================================="
+          echo "Build:  ${{ needs.build.result || 'skipped' }}"
+          echo ""
+          echo "Download from this run's Artifacts section (bottom of the"
+          echo "Actions run summary page) -- one .vsix per platform."
+          echo "Install locally with:"
+          echo "  code --install-extension dixscript-<platform>-1.0.0.vsix"

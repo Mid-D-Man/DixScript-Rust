@@ -23,6 +23,19 @@ namespace MidManStudio.Mdix.Core.Internal
         #region Public API
 
         /// <summary>
+        /// Soft cap on the number of unique strings held in the cache. If a
+        /// cache miss would push the count past this, the entire cache is
+        /// cleared first -- a full reset rather than LRU eviction, which keeps
+        /// this lock-free and correct under concurrent access without extra
+        /// bookkeeping. Static config paths in a typical app number in the
+        /// dozens to low hundreds; this only matters if paths get constructed
+        /// dynamically (e.g. a per-player or per-item key). Raise it if you
+        /// intentionally have many thousands of distinct static paths and want
+        /// them all to stay warm simultaneously.
+        /// </summary>
+        public static int MaxEntries { get; set; } = 4096;
+
+        /// <summary>
         /// Returns a null-terminated UTF-8 byte array for <paramref name="value"/>.
         /// The array is cached — the same instance is returned on repeated calls.
         /// </summary>
@@ -32,6 +45,14 @@ namespace MidManStudio.Mdix.Core.Internal
         public static byte[] GetUtf8Bytes(string value)
         {
             if (value is null) throw new ArgumentNullException(nameof(value));
+
+            // Fast path: this is the overwhelmingly common case once an app has
+            // warmed up (the same handful of paths get looked up over and over),
+            // and skips the size check entirely.
+            if (Cache.TryGetValue(value, out var cached)) return cached;
+
+            if (Cache.Count >= MaxEntries) Cache.Clear();
+
             return Cache.GetOrAdd(value, EncodeNullTerminated);
         }
 

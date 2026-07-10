@@ -1,6 +1,7 @@
 // mdix-ffi/src/lib.rs
 mod error;
 mod handle;
+mod merge;
 mod string_utils;
 
 use std::ffi::CString;
@@ -14,9 +15,11 @@ use dixscript::Runtime::{
 
 use error::{clear_last_error, get_last_error_ptr, set_last_error};
 use handle::{MdixBuilderHandle, MdixHandle};
+use merge::{read_source_array, run_merge};
 use string_utils::{
     c_str_to_str, free_c_char, free_c_char_array, str_to_c_char, string_vec_to_c_array,
 };
+
 
 // =============================================================================
 // TYPE DISCRIMINANTS
@@ -53,6 +56,40 @@ pub enum MdixFormatMode {
     Pretty   = 1,
     Compact  = 2,
     Minified = 3,
+}
+
+/// How to resolve a key defined by more than one source in mdix_merge_sources()
+/// / mdix_merge_sources_weighted(). Mirrors dixscript::Runtime::MdixMergeStrategy
+/// — kept as a separate, explicitly #[repr(i32)] local type (same pattern as
+/// MdixType / MdixFormatMode above) since the core enum's repr is not
+/// FFI-guaranteed and lives in a different crate. See merge.rs's to_core().
+#[repr(i32)]
+pub enum MdixMergeStrategy {
+    /// Each source's weight decides the winner; equal weights fall back to
+    /// the lower-indexed (primary) source. This is what mdix_merge_sources()
+    /// (no explicit weights) effectively resolves to, since it auto-assigns
+    /// descending weights — source 0 gets 1.0, the last source gets ~0.0.
+    WeightedPriority = 0,
+    /// The lower-indexed source always wins, regardless of weight.
+    PrimaryWins = 1,
+    /// The higher-indexed source always wins, regardless of weight.
+    SecondaryWins = 2,
+    /// Any key defined by more than one source is a hard error — the merge
+    /// fails and mdix_get_last_error() reports every conflicting path.
+    ThrowOnConflict = 3,
+}
+
+/// How to combine two array-valued entries (GroupArray, or an array-valued
+/// SimpleProperty) that share a path across sources.
+#[repr(i32)]
+pub enum ArrayMergeStrategy {
+    /// The winning source's array entirely replaces the losing one's.
+    Replace = 0,
+    /// Both arrays are concatenated, winner's items first.
+    Concat = 1,
+    /// Concatenated (winner first), with exact-duplicate primitive values
+    /// removed. Complex values (objects, nested arrays) are never deduped.
+    ConcatDedup = 2,
 }
 
 // =============================================================================
@@ -1224,6 +1261,121 @@ pub extern "C" fn mdix_from_toml(source: *const c_char) -> *mut c_void {
 }
 
 // =============================================================================
+// MERGE
+// =============================================================================
+
+/// Merge two or more .mdix source strings into a new handle using the real
+/// AST-level DixScript merger (dixscript::Runtime::MdixMerger) — full type
+/// fidelity (Long / Float / Double / HexColor / Blob / Regex / Date /
+/// Timestamp / Enum all survive exactly, unlike a JSON round-trip), a real
+/// per-key conflict report, and configurable array merge behavior. See
+/// merge.rs's module doc for why this takes source strings rather than
+/// existing handles or file paths.
+///
+/// Sources are weighted in descending order: sources[0] gets weight 1.0,
+/// sources[count-1] gets the lowest weight (only matters under
+/// MdixMergeStrategy::WeightedPriority). Use mdix_merge_sources_weighted for
+/// explicit per-source weights.
+///
+/// `out_conflicts_json`, if non-null, receives a heap string describing
+/// every conflict that was resolved:
+/// `[{"path":"...","winningSource":0,"winningLabel":"..."}, ...]`
+/// (`"[]"` when there were none). Caller must free it with mdix_free_string()
+/// — independently of whether the merge itself succeeded, except that on
+/// failure it is left null instead (matching every other out-param in this
+/// crate: check the pointer, don't assume it was written).
+///
+/// Returns a new opaque handle on success (caller must free with mdix_free),
+/// null on failure — check mdix_get_last_error().
+#[no_mangle]
+pub extern "C" fn mdix_merge_sources(
+    sources: *const *const c_char,
+    count: i32,
+    strategy: MdixMergeStrategy,
+    array_strategy: ArrayMergeStrategy,
+    out_conflicts_json: *mut *mut c_char,
+) -> *mut c_void {
+    clear_last_error();
+    if !out_conflicts_json.is_null() {
+        unsafe { *out_conflicts_json = std::ptr::null_mut(); }
+    }
+
+    let source_strings = match unsafe {
+        read_source_array(sources, count, "mdix_merge_sources")
+    } {
+        Ok(v) => v,
+        Err(e) => { set_last_error(&e); return std::ptr::null_mut(); }
+    };
+
+    match run_merge("mdix_merge_sources", source_strings, None, strategy, array_strategy) {
+        Ok((handle, conflicts_json)) => {
+            if !out_conflicts_json.is_null() {
+                unsafe { *out_conflicts_json = str_to_c_char(conflicts_json); }
+            }
+            handle
+        }
+        Err(e) => { set_last_error(&e); std::ptr::null_mut() }
+    }
+}
+
+/// Merge .mdix source strings with explicit per-source weights (`weights`
+/// must be the same length as `sources`). Higher weight wins under
+/// MdixMergeStrategy::WeightedPriority. See mdix_merge_sources for the
+/// shared semantics (fidelity, conflict report, error handling).
+#[no_mangle]
+pub extern "C" fn mdix_merge_sources_weighted(
+    sources: *const *const c_char,
+    weights: *const f64,
+    count: i32,
+    strategy: MdixMergeStrategy,
+    array_strategy: ArrayMergeStrategy,
+    out_conflicts_json: *mut *mut c_char,
+) -> *mut c_void {
+    clear_last_error();
+    if !out_conflicts_json.is_null() {
+        unsafe { *out_conflicts_json = std::ptr::null_mut(); }
+    }
+
+    if weights.is_null() {
+        set_last_error("mdix_merge_sources_weighted: weights is null");
+        return std::ptr::null_mut();
+    }
+
+    let source_strings = match unsafe {
+        read_source_array(sources, count, "mdix_merge_sources_weighted")
+    } {
+        Ok(v) => v,
+        Err(e) => { set_last_error(&e); return std::ptr::null_mut(); }
+    };
+
+    // read_source_array already rejected count <= 0, so `count as usize` is safe here.
+    let weight_vec = unsafe { std::slice::from_raw_parts(weights, count as usize) }.to_vec();
+    if weight_vec.len() != source_strings.len() {
+        set_last_error(&format!(
+            "mdix_merge_sources_weighted: weights length ({}) does not match sources length ({})",
+            weight_vec.len(), source_strings.len()
+        ));
+        return std::ptr::null_mut();
+    }
+
+    match run_merge(
+        "mdix_merge_sources_weighted",
+        source_strings,
+        Some(weight_vec),
+        strategy,
+        array_strategy,
+    ) {
+        Ok((handle, conflicts_json)) => {
+            if !out_conflicts_json.is_null() {
+                unsafe { *out_conflicts_json = str_to_c_char(conflicts_json); }
+            }
+            handle
+        }
+        Err(e) => { set_last_error(&e); std::ptr::null_mut() }
+    }
+}
+
+// =============================================================================
 // PRIVATE HELPERS
 // =============================================================================
 
@@ -1279,4 +1431,4 @@ fn format_mode_to_options(mode: MdixFormatMode) -> DixFormatOptions {
         MdixFormatMode::Compact  => DixFormatOptions::compact(),
         MdixFormatMode::Minified => DixFormatOptions::minified(),
     }
-            }
+                            }

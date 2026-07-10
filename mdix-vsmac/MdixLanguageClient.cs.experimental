@@ -1,0 +1,156 @@
+// ============================================================================
+// READ THIS BEFORE RENAMING THIS FILE TO .cs
+// ============================================================================
+//
+// This is NOT a drop-in fix for the old MdixLanguageClientProvider.cs. That
+// file's build errors weren't a version mismatch -- `MonoDevelop.Ide.Lsp.
+// LspLanguageClientProvider` doesn't exist in any version of MonoDevelop.Ide
+// or the VS4Mac SDK. I can't find any evidence that base class was ever real.
+//
+// The *real* way to add a custom LSP language client to a MonoDevelop/VS4Mac
+// -family IDE is a separate, third-party addin: mrward/monodevelop-language-
+// server-addin on GitHub, which defines its own `ILanguageClient` interface
+// (namespace Microsoft.VisualStudio.LanguageServer.Client, mirroring VS on
+// Windows' real extensibility API) that you implement via old-style MEF
+// ([Export], System.ComponentModel.Composition), not Mono.Addins'
+// [Extension] attribute. The shape below is copied faithfully from that
+// repo's own example (MonoDevelop.MockLanguageExtension).
+//
+// The catch, and why this file is quarantined with a non-.cs extension
+// instead of being wired into MdixAddin.csproj directly:
+//
+//   1. That addin's last commit is from February 2020 -- almost two years
+//      before Microsoft even announced the Cocoa/.NET rewrite that became
+//      VS 2022 for Mac. It was built against the old GTK-based IDE and
+//      references assemblies (Xwt, MonoDevelop.Refactoring, etc.) from that
+//      era. Nobody appears to have ported it to the 17.x/net7.0 generation.
+//   2. It isn't published as a NuGet package. To compile against
+//      ILanguageClient you need MonoDevelop.LanguageServer.Client.dll
+//      itself, and I don't have a verified source for that assembly against
+//      the 2022-era IDE -- it may not exist in a working form at all.
+//   3. Even if it compiles, whether VS 2022 for Mac's addin host still loads
+//      an addin built on old-style MEF composition is untested as far as I
+//      can find.
+//
+// Before investing more time here, the cheapest way to find out whether
+// this is viable on your actual install is to check whether the assembly
+// exists in your app bundle at all:
+//
+//   find "/Applications/Visual Studio.app" -iname "*LanguageServer*"
+//
+// If that comes up empty, treat full in-editor LSP support (diagnostics,
+// completions) for VS4Mac as not realistically achievable -- the mimetype /
+// icon / file-filter registration in Manifest.addin.xml (which does NOT
+// depend on any of this) is the safe, working baseline, and you can run
+// mdix-lsp standalone / rely on the VS Code and IntelliJ wrappers for full
+// LSP-backed editing in the meantime.
+// ============================================================================
+
+using Microsoft.VisualStudio.LanguageServer.Client;
+using Microsoft.VisualStudio.Threading;
+using Microsoft.VisualStudio.Utilities;
+using StreamJsonRpc;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.Composition;
+using System.Diagnostics;
+using System.IO;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace MidManStudio.Mdix
+{
+    // Maps the .mdix file extension to a content type, so the IDE knows this
+    // language client applies to DixScript files. Required companion piece
+    // alongside the client itself -- without it ActivateAsync never fires.
+    public static class MdixContentDefinition
+    {
+#pragma warning disable CS0649 // assigned by MEF at composition time, not by us
+        [Export]
+        [Name("mdix")]
+        [BaseDefinition(CodeRemoteContentDefinition.CodeRemoteContentTypeName)]
+        internal static ContentTypeDefinition? MdixContentTypeDefinition;
+
+        [Export]
+        [FileExtension(".mdix")]
+        [ContentType("mdix")]
+        internal static FileExtensionToContentTypeDefinition? MdixFileExtensionDefinition;
+#pragma warning restore CS0649
+    }
+
+    [ContentType("mdix")]
+    [Export(typeof(ILanguageClient))]
+    public class MdixLanguageClient : ILanguageClient
+    {
+        public event AsyncEventHandler<EventArgs>? StartAsync;
+
+#pragma warning disable CS0067 // required by ILanguageClient, unused here
+        public event AsyncEventHandler<EventArgs>? StopAsync;
+#pragma warning restore CS0067
+
+        public string Name => "DixScript Language Client";
+
+        public IEnumerable<string> ConfigurationSections
+        {
+            get { yield return "mdix"; }
+        }
+
+        public object? InitializationOptions => null;
+        public IEnumerable<string>? FilesToWatch => null;
+        public object? MiddleLayer => null;
+        public object? CustomMessageTarget => null;
+
+        public Task<Connection?> ActivateAsync(CancellationToken token)
+        {
+            var serverPath = ResolveServerPath();
+
+            var info = new ProcessStartInfo
+            {
+                FileName               = serverPath,
+                UseShellExecute        = false,
+                RedirectStandardInput  = true,
+                RedirectStandardOutput = true,
+                CreateNoWindow         = true,
+            };
+
+            var process = new Process { StartInfo = info };
+
+            Connection? connection = null;
+            if (process.Start())
+            {
+                connection = new Connection(
+                    process.StandardOutput.BaseStream,
+                    process.StandardInput.BaseStream);
+            }
+
+            return Task.FromResult(connection);
+        }
+
+        public async Task OnLoadedAsync()
+        {
+            if (StartAsync != null)
+                await StartAsync.InvokeAsync(this, EventArgs.Empty);
+        }
+
+        public Task OnServerInitializedAsync() => Task.CompletedTask;
+
+        public Task OnServerInitializeFailedAsync(Exception e) => Task.CompletedTask;
+
+        // Same resolution order as the VS Code / mdix-lsp wrappers: env
+        // override, then bundled binary next to this assembly, then PATH.
+        static string ResolveServerPath()
+        {
+            var env = Environment.GetEnvironmentVariable("MDIX_LSP_PATH");
+            if (!string.IsNullOrEmpty(env) && File.Exists(env))
+                return env;
+
+            var addinDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
+            var bundled  = Path.Combine(addinDir, "lsp", "mdix-lsp");
+            if (File.Exists(bundled))
+                return bundled;
+
+            return "mdix-lsp"; // fall back to PATH resolution by the shell
+        }
+    }
+}

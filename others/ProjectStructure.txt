@@ -1,7 +1,7 @@
 Project Structure Documentation - DixScript Rust Port
-Generated: Fri Jul 10 12:24:40 UTC 2026
+Generated: Fri Jul 10 12:25:41 UTC 2026
 Repository: Mid-D-Man/DixScript-Rust
-Commit: 4a9298a1969cd69cdd72d3dae9e5e6e66fa132b4
+Commit: f95f336518759fe214c7c493195c19e908fc6c8d
 Branch: master
 ==================================
 
@@ -458,6 +458,7 @@ GitHub Workflows:
   .github/workflows/python-publish.yml
   .github/workflows/update_project_structure.yml
   .github/workflows/vscode-build.yml
+  .github/workflows/vsmac-build.yml
   .github/workflows/wasm-npm-publish.yml
   .github/workflows/wasm-test.yml
 

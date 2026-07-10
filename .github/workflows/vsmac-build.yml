@@ -1,0 +1,133 @@
+name: DixScript — VS Mac Addin Build
+
+# IMPORTANT LIMITATION, read before relying on this:
+#
+# GitHub-hosted macOS runners do NOT have Visual Studio for Mac installed,
+# and Microsoft no longer offers it for fresh install (it was retired
+# Aug 31 2024 — see https://www.visualstudio.com/vs/mac/ and Microsoft's own
+# retirement announcement). That means `vstool setup pack` (the step that
+# produces the actual installable .mpack) cannot run on a hosted runner —
+# there's no app bundle for it to live inside.
+#
+# What this workflow CAN do, and does: compile MdixAddin.csproj against the
+# Microsoft.VisualStudioMac.Sdk NuGet package on a hosted runner, so you get
+# fast feedback on whether the C# even builds (catches exactly the kind of
+# errors you hit locally) without needing dotnet installed on your own
+# machine. It uploads the built DLL + dependencies as a downloadable
+# artifact. The last mile -- `vstool setup pack` -- still has to happen on
+# a Mac that actually has your legacy Visual Studio.app install, either
+# locally (scripts/pack-addin.sh --release) or on a self-hosted runner
+# registered from that same Mac (see the commented job at the bottom).
+
+on:
+  push:
+    branches: [master, main, develop]
+    paths:
+      - "mdix-vsmac/**"
+      - "mdix-lsp/**"
+      - "dixscript/**"
+      - ".github/workflows/vsmac-addin-build.yml"
+  pull_request:
+    branches: [master, main]
+    paths:
+      - "mdix-vsmac/**"
+      - "mdix-lsp/**"
+      - "dixscript/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+
+  compile-check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-latest-cargo-mdix-lsp-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-latest-cargo-mdix-lsp-
+
+      - name: Build mdix-lsp (release)
+        run: cargo build -p mdix-lsp --release
+
+      - name: Bundle mdix-lsp binary into the addin
+        working-directory: mdix-vsmac
+        run: bash scripts/copy-binary.sh --release
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "7.0.x"
+
+      - name: Build MdixAddin.csproj
+        working-directory: mdix-vsmac
+        run: dotnet build MdixAddin.csproj -c Release
+
+      - name: Locate build output
+        id: locate
+        working-directory: mdix-vsmac
+        run: |
+          DLL=$(find bin/Release -name 'MdixLanguageSupport.dll' | head -n1)
+          if [ -z "$DLL" ]; then
+            echo "MdixLanguageSupport.dll not found under bin/Release" >&2
+            find bin -maxdepth 3 >&2 || true
+            exit 1
+          fi
+          echo "Found: $DLL"
+          echo "outdir=$(dirname "$DLL")" >> $GITHUB_OUTPUT
+
+      - name: Upload compiled addin
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdix-vsmac-compiled-${{ github.run_number }}
+          path: mdix-vsmac/${{ steps.locate.outputs.outdir }}
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          echo "======================================================="
+          echo "  VS Mac Addin — compile-only check"
+          echo "======================================================="
+          echo "The C# compiled cleanly against Microsoft.VisualStudioMac.Sdk."
+          echo "This does NOT produce a .mpack -- hosted runners don't have"
+          echo "Visual Studio for Mac installed to pack against. Download the"
+          echo "artifact above, or pull this branch locally, and run:"
+          echo "  mdix-vsmac/scripts/pack-addin.sh --release"
+          echo "on a Mac with your legacy Visual Studio.app install to get"
+          echo "the actual installable .mpack."
+
+  # ── Optional: full .mpack build on a self-hosted runner ────────────────
+  # If you register a self-hosted runner FROM the Mac that still has
+  # Visual Studio 2022 for Mac installed (Settings -> Actions -> Runners in
+  # this repo, "New self-hosted runner", follow the setup script it gives
+  # you), you can uncomment this job to get the real .mpack out of CI too.
+  # Until then it's left commented out since `runs-on: [self-hosted, macos]`
+  # will just hang queued forever with no matching runner.
+  #
+  # pack-mpack:
+  #   runs-on: [self-hosted, macos]
+  #   needs: compile-check
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Build + pack
+  #       working-directory: mdix-vsmac
+  #       run: bash scripts/pack-addin.sh --release
+  #     - name: Upload .mpack
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: mdix-vsmac-mpack-${{ github.run_number }}
+  #         path: mdix-vsmac/dist/*.mpack
+  #         retention-days: 30

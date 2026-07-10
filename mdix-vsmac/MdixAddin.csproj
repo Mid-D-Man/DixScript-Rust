@@ -1,48 +1,91 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ROOT CAUSE OF YOUR BUILD ERRORS (#1):
+    The old csproj targeted net472 and referenced MonoDevelop.Ide.dll / Mono.Addins.dll
+    etc. via <Reference Include="..."><HintPath>...</HintPath></Reference> pointing into
+    the Visual Studio.app bundle's MonoBundle folder. That's the pre-2022 (Xamarin
+    Studio / "Visual Studio for Mac 8.x") way of doing it, back when the IDE itself ran
+    on Mono.
+
+    Visual Studio 2022 for Mac was a ground-up rewrite: the IDE host process itself moved
+    off Mono onto .NET 6/7 and the UI moved from GTK to native Cocoa. Addins for that
+    generation are built against the official SDK NuGet package instead, which pulls in
+    the correct assembly set and build targets for you. Source: Microsoft's own "extending
+    VS Mac" walkthrough (christianhelle.com/2023/03/extending-vsmac.html) and the package
+    page itself (nuget.org/packages/Microsoft.VisualStudioMac.Sdk).
+
+    Note: the package tops out at 17.5.0 even though the IDE itself shipped up to 17.6
+    before Microsoft retired it (EOL Aug 31 2024) — no 17.6-tagged SDK was ever published.
+    17.5.0 is the correct/last version to reference.
+  -->
   <PropertyGroup>
-    <TargetFramework>net472</TargetFramework>
+    <TargetFramework>net7.0</TargetFramework>
     <AssemblyName>MdixLanguageSupport</AssemblyName>
     <RootNamespace>MidManStudio.Mdix</RootNamespace>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- These DLLs live inside VS for Mac — adjust path if yours differs.
-         Legacy install path as of the final 17.6 release. -->
-    <Reference Include="MonoDevelop.Ide">
-      <HintPath>/Applications/Visual Studio.app/Contents/MonoBundle/MonoDevelop.Ide.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="MonoDevelop.Core">
-      <HintPath>/Applications/Visual Studio.app/Contents/MonoBundle/MonoDevelop.Core.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Mono.Addins">
-      <HintPath>/Applications/Visual Studio.app/Contents/MonoBundle/Mono.Addins.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
+    <PackageReference Include="Microsoft.VisualStudioMac.Sdk" Version="17.5.0" />
   </ItemGroup>
 
+  <!--
+    The manifest declares the addin's extensions (mimetypes, stock icons, file filters,
+    and — if you keep MdixLanguageClient.cs — the LSP client registration). It has to be
+    an embedded resource so Mono.Addins can find it when it scans this assembly.
+  -->
   <ItemGroup>
-    <!-- Embedded so Mono.Addins finds it via assembly reflection at
-         registration time — merged into the addin module declared by
-         the attributes in AddinInfo.cs. -->
     <EmbeddedResource Include="Manifest.addin.xml" />
   </ItemGroup>
 
+  <!--
+    ROOT CAUSE OF YOUR BUILD ERRORS (#2):
+    Manifest.addin.xml's <StockIcon> extension pointed at mdix-file-icon.svg /
+    mdix-file-icon-dark.svg, and the old csproj had <None Include="Resources\...svg">
+    entries for them — but no Resources folder, and no SVGs, ever actually existed in
+    mdix-vsmac. That's a guaranteed "file not found" at build time. I've added the two
+    files (copied over from mdix-vscode/icons, which already has light/dark variants)
+    to Resources/ alongside this fix — see mdix-vsmac/Resources/ in this same delivery.
+  -->
   <ItemGroup>
-    <None Include="Resources\mdix-file-icon.svg">
+    <None Include="Resources\mdix-file-icon.svg" Condition="Exists('Resources\mdix-file-icon.svg')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="Resources\mdix-file-icon-dark.svg">
+    <None Include="Resources\mdix-file-icon-dark.svg" Condition="Exists('Resources\mdix-file-icon-dark.svg')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 
+  <!--
+    The mdix-lsp binary, dropped in by scripts/copy-binary.sh before packing (same
+    bin/<platform>/mdix-lsp layout the VS Code extension uses). Condition guards it so a
+    plain `dotnet build` without having run the copy script first doesn't fail outright —
+    you'll just get an addin with no binary bundled, which copy-binary.sh + pack-addin.sh
+    fixes before packing.
+  -->
   <ItemGroup>
-    <!-- Bundled mdix-lsp binary — populated by scripts/copy-binary.sh.
-         Excluded from source control; see .gitignore. -->
-    <None Include="bin\**\mdix-lsp" Condition="Exists('bin')">
+    <None Include="bin\darwin-arm64\mdix-lsp" Condition="Exists('bin\darwin-arm64\mdix-lsp')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>lsp\mdix-lsp</Link>
+    </None>
+    <None Include="bin\darwin-x64\mdix-lsp" Condition="Exists('bin\darwin-x64\mdix-lsp')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>lsp\mdix-lsp</Link>
     </None>
   </ItemGroup>
+
+  <!--
+    Optional: lets you hit F5 / `dotnet run` from Rider or VS to launch a real VS4Mac
+    instance with this addin loaded for interactive testing, instead of reinstalling the
+    .mpack every time you change something. Harmless if you never use it.
+  -->
+  <PropertyGroup Condition=" '$(RunConfiguration)' == 'Default' ">
+    <StartAction>Program</StartAction>
+    <StartProgram>/Applications/Visual Studio.app/Contents/MacOS/VisualStudio</StartProgram>
+    <StartArguments>--no-redirect</StartArguments>
+    <ExternalConsole>true</ExternalConsole>
+  </PropertyGroup>
+
 </Project>

@@ -1,4 +1,3 @@
-// mdix-lsp/src/features/document_symbols.rs
 //! Document symbol provider — powers the outline panel / breadcrumb bar.
 //!
 //! Approach B: @CONFIG section position is read from the SectionConfig token

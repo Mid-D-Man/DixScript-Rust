@@ -1,4 +1,3 @@
-// mdix-lsp/src/server.rs
 
 use dashmap::DashMap;
 use std::sync::Arc;

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 use chrono::Utc;
 use crate::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
 use crate::Compiler::Core::Config::{ConfigSectionHandler, DebugMode, OperationalSettings};
@@ -11,7 +11,7 @@ use crate::Compiler::DLM::KeyManagement::KeyFileManager;
 use crate::Compiler::DLM::Auditor::{IAuditor, DiyAuditor, EnhancedAuditor};
 use crate::Compiler::Utilities::SecurityUtilities;
 use crate::Compiler::AST::{DixScript, DLMModuleType, DLMModuleSubtype};
-use crate::ErrorManager::{ErrorManager, RuntimeErrorType, ErrorSeverity};
+use crate::ErrorManager::{ErrorManager, RuntimeErrorType};
 use super::load_options::DixLoadOptions;
 use super::key_resolver::{KeyFileResolver, KeyFileResolution, KeyFileSource};
 use super::dix_data::DixData;

@@ -2,14 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
-using Mono.Addins;
-using MonoDevelop.Ide.Lsp;
 using MonoDevelop.Core;
+// Updated namespace to match the VS Mac Language Server Client Add-in
+// Use the 2022 native LSP namespaces
+using Microsoft.VisualStudio.LanguageServer.Client;
+using System.Runtime.CompilerServices;
 
 namespace MidManStudio.Mdix
 {
     [Extension]
-    public class MdixLanguageClientProvider : LspLanguageClientProvider
+    // If your specific VS Mac version uses ILanguageClient instead of a provider base class, 
+    // you may need to implement that interface directly instead.
+    public class MdixLanguageClientProvider : ILanguageClient
     {
         // File extensions this server handles.
         protected override IEnumerable<string> SupportedFileExtensions
@@ -25,10 +29,10 @@ namespace MidManStudio.Mdix
                 return env;
 
             // 2. Bundled binary next to the addin assembly
-            var addinDir  = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
-            var platform  = GetPlatformDir();
-            var binName   = "mdix-lsp";
-            var bundled   = Path.Combine(addinDir, "bin", platform, binName);
+            var addinDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
+            var platform = GetPlatformDir();
+            var binName = "mdix-lsp";
+            var bundled = Path.Combine(addinDir, "bin", platform, binName);
             if (File.Exists(bundled))
                 return bundled;
 
@@ -47,14 +51,14 @@ namespace MidManStudio.Mdix
 
         static string GetPlatformDir()
         {
-            var os   = Environment.OSVersion.Platform;
+            var os = Environment.OSVersion.Platform;
             var arch = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture;
             return (os, arch) switch
             {
                 (PlatformID.Unix, System.Runtime.InteropServices.Architecture.Arm64) => "darwin-arm64",
-                (PlatformID.Unix, System.Runtime.InteropServices.Architecture.X64)   => "darwin-x64",
-                (PlatformID.Win32NT, _)                                               => "win32-x64",
-                _                                                                     => "linux-x64",
+                (PlatformID.Unix, System.Runtime.InteropServices.Architecture.X64) => "darwin-x64",
+                (PlatformID.Win32NT, _) => "win32-x64",
+                _ => "linux-x64",
             };
         }
 
@@ -66,7 +70,7 @@ namespace MidManStudio.Mdix
                 {
                     StartInfo = new System.Diagnostics.ProcessStartInfo
                     {
-                        FileName  = "which",
+                        FileName = "which",
                         Arguments = name,
                         RedirectStandardOutput = true,
                         UseShellExecute = false,

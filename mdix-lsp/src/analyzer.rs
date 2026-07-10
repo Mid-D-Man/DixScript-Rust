@@ -1,4 +1,3 @@
-// mdix-lsp/src/analyzer.rs
 //! Pipeline runner — Approach B (tokenizer-first).
 //!
 //! Cloud import handling:

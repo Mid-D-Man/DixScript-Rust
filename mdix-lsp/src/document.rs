@@ -1,4 +1,3 @@
-// mdix-lsp/src/document.rs
 //! Per-document state for the LSP.
 //!
 //! `doc.tokens` holds the FULL token stream produced by the tokenizer on the
@@ -164,7 +163,7 @@ fn token_source_len(token: &Token) -> usize {
         TokenType::DoubleColon           => 2,
         TokenType::Arrow                 => 2,
         TokenType::SwitchCase            => 2,
-        TokenType::ControlFlowColon      => 1,
+
         TokenType::Bool(b)               => if *b { 4 } else { 5 },
         _ => {
             let v = token.get_token_value();

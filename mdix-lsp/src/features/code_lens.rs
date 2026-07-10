@@ -1,4 +1,3 @@
-// mdix-lsp/src/features/code_lens.rs
 use std::panic;
 
 use tower_lsp::lsp_types::{CodeLens, Command, Position, Range};

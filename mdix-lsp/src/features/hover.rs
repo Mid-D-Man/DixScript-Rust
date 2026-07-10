@@ -104,9 +104,6 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
             "**`{}`** — boolean literal\n\nType: `<bool>`.",
             if *b { "true" } else { "false" }
         )),
-        TokenType::EnumAccess { enum_name, value } => {
-            hover_enum_access(doc, enum_name, value)
-        }
         TokenType::Identifier(name) => {
             if token.section == SectionId::Config {
                 hover_config_key(name)
@@ -117,7 +114,7 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
         }
         TokenType::Date(d)       => hover_date(d),
         TokenType::Timestamp(ts) => hover_timestamp(ts),
-        TokenType::StaticFunction { class, method } => hover_static_method(class, method),
+
         TokenType::RegexConstructor(_)  => Some(hover_regex(&doc.tokens, index)),
         TokenType::BlobConstructor(_)   => Some(hover_blob(&doc.tokens, index)),
         TokenType::TupleConstructor(_)  => Some(concat!(
@@ -147,10 +144,7 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
             "**`{:e}`** — scientific notation (`<double>`)\n\nStored as IEEE 754 64-bit `f64`.",
             d
         )),
-        TokenType::HexLiteral(i) => Some(format!(
-            "**`0x{:X}`** — hexadecimal integer literal (`<hex>`, decimal: {})\n\nAdd `L` suffix for 64-bit: `0x{:X}L`",
-            i, i, i
-        )),
+
         TokenType::String(s) => Some(format!(
             "**String literal** (`<string>`)\n\nLength: {} characters\n\n```mdix\n\"{}\"\n```",
             s.len(), s
@@ -168,23 +162,12 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
         TokenType::ComparisonOp(op)       => hover_operator(op, "comparison"),
         TokenType::LogicalOp(op)          => hover_operator(op, "logical"),
         TokenType::BitwiseOp(op)          => hover_operator(op, "bitwise"),
-        TokenType::MultiCharSymbol(_)     => None,
+
         TokenType::DoubleColon            => Some("**`::`** — group array operator\n\n```mdix\ntags:: \"alpha\", \"beta\", \"v1\"\n```".to_string()),
         TokenType::Arrow                  => Some("**`=>`** — association / scope operator".to_string()),
         TokenType::SwitchCase             => Some("**`->`** — switch-case / association operator\n\n```mdix\nencryption -> { mode = \"password\" }\n```".to_string()),
         TokenType::Symbol('~')            => Some("**`~`** — QuickFunc declaration prefix\n\n```mdix\n~myFunc<int>(x<int>) { return x * 2 }\n```".to_string()),
-        TokenType::DataType(dt)           => hover_data_type(dt),
-        TokenType::ControlFlowColon       => Some("**`:`** — control flow separator\n\nUsed after `if`, `elif`, `chk`, `log`.".to_string()),
-        TokenType::ScopeDeclaration(s)    => Some(format!(
-            "**Scope declaration** `=> {}`\n\nRestricts this QuickFunc to the specified scope(s).", s
-        )),
-        TokenType::TablePath(p) => {
-            let path = p.clone();
-            hover_table_path_rich(doc, &path)
-                .or_else(|| Some(format!(
-                    "**`{path}`** — DATA table path\n\nDotted path to a nested data location.\n\nRuntime: `data.get(\"{path}.property\")`",
-                )))
-        }
+
         TokenType::Comment(_) => None,
         _ => None,
     }
@@ -245,8 +228,8 @@ fn infer_close_paren_dix_type(
     // Skip over a type annotation `<Type>` that may sit between name and '('
     let mut name_idx = open_idx - 1;
     if matches!(&tokens[name_idx].token_type,
-        TokenType::Symbol('>') | TokenType::DataType(_) | TokenType::Identifier(_)
-        if matches!(&tokens[name_idx].token_type, TokenType::Symbol('>') | TokenType::DataType(_))
+        TokenType::Symbol('>') | TokenType::Identifier(_)
+        if matches!(&tokens[name_idx].token_type, TokenType::Symbol('>') )
     ) {
         let mut angle = 0i32;
         let start = name_idx;
@@ -542,7 +525,7 @@ fn hover_imported_enum_field_at(
 fn infer_receiver_dix_type(doc: &Document, tok: &Token, section: SectionId) -> Option<DixType> {
     match &tok.token_type {
         TokenType::String(_) | TokenType::StringSingle(_) | TokenType::InterpolatedString(_) => Some(DixType::String),
-        TokenType::Integer(_) | TokenType::HexLiteral(_) => Some(DixType::Int),
+
         TokenType::Long(_)   => Some(DixType::Long),
         TokenType::Float(_)  => Some(DixType::Float),
         TokenType::Double(_) | TokenType::ScientificNotation(_) => Some(DixType::Double),
@@ -1036,7 +1019,7 @@ fn hover_table_path_rich(doc: &Document, path: &str) -> Option<String> {
     for (var_path, var) in &st.data_variables {
         if let Some(rest) = var_path.strip_prefix(&prefix_dot) {
             let seg = rest.split('.').next().and_then(|s| s.split('[').next()).unwrap_or(rest);
-            if !children.iter().any(|(n, _)| n == seg) {
+            if !children.iter().any(|(n, _)| *n == seg) {
                 children.push((seg.to_string(), var.effective_type()));
             }
         }
@@ -1156,7 +1139,7 @@ fn hover_identifier(
     // ── Priority 0: control-flow identifiers (log, if, elif, chk) ─────────────
     // These are emitted as Identifier tokens (not Keyword) followed by ControlFlowColon.
     let next_is_cf_colon = doc.tokens.get(token_index + 1)
-        .map(|t| matches!(t.token_type, TokenType::ControlFlowColon))
+        .map(|t| matches!(t.token_type, TokenType::Keyword("if") | TokenType::Keyword("elif") | TokenType::Keyword("else") | TokenType::Keyword("chk") | TokenType::Keyword("log")))
         .unwrap_or(false);
     if next_is_cf_colon {
         if let Some(kw) = hover_keyword(name) { return Some(kw); }
@@ -1549,7 +1532,7 @@ fn token_value_len(token: &Token) -> usize {
         TokenType::Comment(c)            => c.len() + 2,
         TokenType::Long(l)               => format!("{}L", l).len(),
         TokenType::Bool(b)               => if *b { 4 } else { 5 },
-        TokenType::EnumAccess { enum_name, value } => enum_name.len() + 1 + value.len(),
+
         TokenType::SectionConfig     => 7,
         TokenType::SectionImports    => 8,
         TokenType::SectionDLM        => 4,
@@ -1560,7 +1543,6 @@ fn token_value_len(token: &Token) -> usize {
         TokenType::DoubleColon       => 2,
         TokenType::Arrow             => 2,
         TokenType::SwitchCase        => 2,
-        TokenType::ControlFlowColon  => 1,
         _ => {
             let v = token.get_token_value();
             if v.is_empty() { 1 } else { v.len() }

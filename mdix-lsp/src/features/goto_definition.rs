@@ -131,21 +131,6 @@ fn definition_for(
             None
         }
 
-        // ── Enum access (EnumName.FIELD) — position-aware ────────────────────
-        TokenType::EnumAccess { enum_name, value } => {
-            let token_start_0 = token.column.saturating_sub(1);
-            let dot_offset    = enum_name.len();
-            let cursor_0      = pos.character as usize;
-            let on_value      = cursor_0 > token_start_0 + dot_offset;
-
-            if on_value {
-                find_enum_field_def(doc, enum_name, value)
-                    .or_else(|| find_enum_def(doc, enum_name))
-                    .map(GotoDefinitionResponse::Scalar)
-            } else {
-                find_enum_def(doc, enum_name).map(GotoDefinitionResponse::Scalar)
-            }
-        }
 
         // ── Interpolated string — navigate to identifier inside {expr} ────────
         TokenType::InterpolatedString(template) => {
@@ -173,10 +158,6 @@ fn definition_for(
             navigate_to_import_path(path, doc)
         }
 
-        // ── ConfigAccess — jump to the @CONFIG entry ──────────────────────────
-        TokenType::ConfigAccess(key) => {
-            find_config_entry_def(doc, key)
-        }
 
         // ── Section keywords → start of that section ─────────────────────────
         TokenType::SectionConfig     => section_loc(&doc.tokens, &doc.uri, SectionId::Config),
@@ -388,7 +369,7 @@ fn find_var_decl_in_stmts(
     for stmt in stmts {
         match stmt {
             QuickFuncStatement::VariableDeclaration { variable_name, position, .. }
-                if variable_name == name =>
+                if *variable_name == name =>
             {
                 if !position.is_valid() { continue; }
                 let line = position.line.saturating_sub(1) as u32;
@@ -700,7 +681,7 @@ fn find_data_var_def(doc: &Document, name: &str, section: SectionId) -> Option<L
     use dixscript::Compiler::AST::DataEntry;
     for entry in &data.entries {
         match entry {
-            DataEntry::SimpleProperty { name: n, position, .. } if n == name => {
+            DataEntry::SimpleProperty { name: n, position, .. } if *n == name => {
                 if !position.is_valid() { return None; }
                 let line = position.line.saturating_sub(1) as u32;
                 let col  = position.column.saturating_sub(1) as u32;
@@ -722,7 +703,7 @@ fn find_data_var_def(doc: &Document, name: &str, section: SectionId) -> Option<L
                 let col  = position.column.saturating_sub(1) as u32;
                 return Some(make_location(&doc.uri, line, col, line, col + name.len() as u32));
             }
-            DataEntry::ObjectProperty { name: n, position, .. } if n == name => {
+            DataEntry::ObjectProperty { name: n, position, .. } if *n == name => {
                 if !position.is_valid() { return None; }
                 let line = position.line.saturating_sub(1) as u32;
                 let col  = position.column.saturating_sub(1) as u32;

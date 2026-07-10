@@ -1,11 +1,8 @@
-// mdix-lsp/src/features/commands.rs
 //! Execute-command handler.
 
 use std::path::{Path, PathBuf};
 use dixscript::Runtime::{DixConverter, DixFormatOptions};
-use dixscript::Compiler::AST::{DixScript, DLMModuleType, DLMModuleSubtype};
-
-use crate::features::formatting::format_source;
+use dixscript::Compiler::AST::{DixScript, DLMModuleType};
 
 #[derive(Debug)]
 pub struct CommandResult {

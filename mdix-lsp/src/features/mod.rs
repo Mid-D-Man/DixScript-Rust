@@ -1,4 +1,4 @@
-// mdix-lsp/src/features/mod.rs
+
 pub mod code_actions;
 pub mod code_lens;
 pub mod call_hierarchy;

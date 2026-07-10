@@ -1,4 +1,3 @@
-// mdix-lsp/src/features/completions.rs
 //! Completion provider.
 
 use std::collections::HashMap;
@@ -661,7 +660,7 @@ fn make_field_completion(key: &str, detail: Option<&str>) -> CompletionItem {
     CompletionItem {
         label:              key.to_string(),
         kind:               Some(CompletionItemKind::FIELD),
-        detail:             detail.map(|s| s.to_string()),
+        detail:             detail.as_ref().map(|s| s.to_string()),
         documentation:      Some(Documentation::MarkupContent(MarkupContent {
             kind:  MarkupKind::Markdown,
             value: format!("**`{}`**{}", key,
@@ -695,7 +694,7 @@ fn object_user_properties_completions(doc: &Document, var_name: &str) -> Vec<Com
     if let Some(data) = doc.ast.as_ref().and_then(|a| a.data.as_ref()) {
         for entry in &data.entries {
             match entry {
-                DataEntry::ObjectProperty { name, object, .. } if name == var_name => {
+                DataEntry::ObjectProperty { name, object, .. } if *name == var_name => {
                     if let Value::Object { properties, .. } = object.as_ref() {
                         return properties.iter().map(|prop| {
                             let detail = infer_datatype_from_value_simple(&prop.value)
@@ -705,7 +704,7 @@ fn object_user_properties_completions(doc: &Document, var_name: &str) -> Vec<Com
                     }
                 }
                 // 3. @DATA SimpleProperty whose value is a QF call
-                DataEntry::SimpleProperty { name, value, .. } if name == var_name => {
+                DataEntry::SimpleProperty { name, value, .. } if *name == var_name => {
                     let qf_name = match value {
                         Value::QuickFuncCall { function_name, .. } => Some(function_name.clone()),
                         Value::Expression { expr, .. } => {
@@ -908,10 +907,10 @@ fn find_variable_object_fields(doc: &Document, var_name: &str) -> Option<Vec<Fie
     if let Some(data) = doc.ast.as_ref().and_then(|a| a.data.as_ref()) {
         for entry in &data.entries {
             match entry {
-                DataEntry::SimpleProperty { name, value, .. } if name == var_name => {
+                DataEntry::SimpleProperty { name, value, .. } if *name == var_name => {
                     return extract_object_fields_from_value(value, doc);
                 }
-                DataEntry::ObjectProperty { name, object, .. } if name == var_name => {
+                DataEntry::ObjectProperty { name, object, .. } if *name == var_name => {
                     if let Value::Object { properties, .. } = object.as_ref() {
                         return Some(
                             properties.iter()
@@ -1120,7 +1119,7 @@ fn get_token_dix_type_for_chain(tokens: &[Token], idx: usize, doc: &Document) ->
             completion_identifier_dix_type(&name, doc, tokens[idx].section),
         TokenType::String(_) | TokenType::StringSingle(_) | TokenType::InterpolatedString(_) =>
             Some(DixType::String),
-        TokenType::Integer(_) | TokenType::HexLiteral(_) => Some(DixType::Int),
+
         TokenType::Long(_)   => Some(DixType::Long),
         TokenType::Float(_)  => Some(DixType::Float),
         TokenType::Double(_) | TokenType::ScientificNotation(_) => Some(DixType::Double),
@@ -1133,13 +1132,6 @@ fn get_token_dix_type_for_chain(tokens: &[Token], idx: usize, doc: &Document) ->
         TokenType::TupleConstructor(_) => Some(DixType::Tuple),
         TokenType::BlobConstructor(_)  => Some(DixType::Blob),
         TokenType::RegexConstructor(_) => Some(DixType::Regex),
-        TokenType::PrefixedConstructor { prefix, .. } => match prefix.to_lowercase().as_str() {
-            "t" => Some(DixType::Tuple),
-            "b" => Some(DixType::Blob),
-            "r" => Some(DixType::Regex),
-            _   => None,
-        },
-        TokenType::EnumAccess { .. } => Some(DixType::Enum),
         _ => None,
     }
 }
@@ -1202,7 +1194,7 @@ fn dix_type_of_token(token: &Token, doc: &Document) -> Option<DixType> {
     match &token.token_type {
         TokenType::String(_) | TokenType::StringSingle(_) | TokenType::InterpolatedString(_) =>
             Some(DixType::String),
-        TokenType::Integer(_) | TokenType::HexLiteral(_) => Some(DixType::Int),
+
         TokenType::Long(_)    => Some(DixType::Long),
         TokenType::Float(_)   => Some(DixType::Float),
         TokenType::Double(_) | TokenType::ScientificNotation(_) => Some(DixType::Double),
@@ -1213,16 +1205,9 @@ fn dix_type_of_token(token: &Token, doc: &Document) -> Option<DixType> {
         TokenType::RegexConstructor(_) => Some(DixType::Regex),
         TokenType::BlobConstructor(_)  => Some(DixType::Blob),
         TokenType::TupleConstructor(_) => Some(DixType::Tuple),
-        TokenType::PrefixedConstructor { prefix, .. } => {
-            match prefix.to_lowercase().as_str() {
-                "t" => Some(DixType::Tuple),
-                "b" => Some(DixType::Blob),
-                "r" => Some(DixType::Regex),
-                _   => None,
-            }
-        }
+
         TokenType::Symbol(']') => Some(DixType::Array),
-        TokenType::EnumAccess { .. } => Some(DixType::Enum),
+
         TokenType::Identifier(name) =>
             completion_identifier_dix_type(name, doc, token.section),
         _ => None,

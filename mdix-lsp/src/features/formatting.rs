@@ -1,4 +1,3 @@
-// mdix-lsp/src/features/formatting.rs
 // Document formatting provider.
 //
 // Returns a single full-document TextEdit that replaces the source with a

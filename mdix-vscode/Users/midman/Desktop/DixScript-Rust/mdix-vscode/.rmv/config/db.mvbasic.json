@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "db": {
+    "host": "",
+    "userName": "",
+    "password": "",
+    "account": "",
+    "dataSource": "UNIVERSE",
+    "port": 31438
+  },
+  "accounts": [
+    {
+      "name": "",
+      "path": ""
+    }
+  ],
+  "catalog": {
+    "isSearchAllDirs": false,
+    "readServerInterval": 5,
+    "programDirs": [
+      {
+        "account": "",
+        "fileName": ""
+      }
+    ],
+    "programMapping": [
+      {
+        "catalogName": "",
+        "account": "",
+        "fileName": "",
+        "program": ""
+      }
+    ]
+  },
+  "includeMapping": [
+    {
+      "includeFile": "",
+      "account": "",
+      "fileName": ""
+    }
+  ]
+}

@@ -1,19 +1,4 @@
 <Addin>
-
-  <!--
-    Supplementary extension declarations for the DixScript addin.
-
-    Core addin metadata (id, version, name, description, author, host
-    dependency) is declared via assembly attributes in AddinInfo.cs.
-    Mono.Addins merges this file's <Extension> nodes into that same addin
-    module at registration time — this file must NOT declare its own
-    id/version/namespace on the <Addin> root, or Mono.Addins will treat
-    it as a second, conflicting addin definition.
-
-    This file is embedded as a resource in MdixAddin.csproj so Mono.Addins
-    finds it via assembly reflection, not as a loose file on disk.
-  -->
-
   <Extension path="/MonoDevelop/Core/MimeTypes">
     <MimeType
         id="text/x-mdix"
@@ -25,16 +10,10 @@
   </Extension>
 
   <Extension path="/MonoDevelop/Ide/StockIcons">
-    <!--
-      If your installed build can't rasterize SVG stock icons (older
-      Mono/GTK without a librsvg loader), drop a PNG of the same name
-      in Resources/ and point this at that filename instead.
-    -->
     <StockIcon stockid="md-mdix-file" resource="mdix-file-icon.svg" />
   </Extension>
 
   <Extension path="/MonoDevelop/Ide/FileFilters">
     <FileFilter id="Mdix" _label="DixScript Files" extensions="*.mdix" />
   </Extension>
-
 </Addin>

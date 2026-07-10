@@ -1,4 +1,4 @@
-// mdix-lsp/src/features/references.rs
+
 //! Find-all-references provider.
 //!
 //! Returns every location in the document where the symbol under the cursor
@@ -54,11 +54,7 @@ fn provide_inner(
             collect_identifier_locations(&doc.tokens, &name, is_param, uri)
         }
 
-        TokenType::EnumAccess { enum_name, value } => {
-            let en = enum_name.clone();
-            let v  = value.clone();
-            collect_enum_access_locations(&doc.tokens, &en, &v, uri)
-        }
+
 
         _ => return None,
     };
@@ -106,25 +102,6 @@ fn collect_identifier_locations(
         .collect()
 }
 
-fn collect_enum_access_locations(
-    tokens:    &[Token],
-    enum_name: &str,
-    value:     &str,
-    uri:       &Url,
-) -> Vec<Location> {
-    tokens
-        .iter()
-        .filter_map(|t| {
-            if let TokenType::EnumAccess { enum_name: en, value: v } = &t.token_type {
-                if en.as_str() == enum_name && v.as_str() == value {
-                    let len = en.len() + 1 + v.len();
-                    return Some(make_location(uri, t, len));
-                }
-            }
-            None
-        })
-        .collect()
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

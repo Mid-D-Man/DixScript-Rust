@@ -11,7 +11,7 @@
 //!   MDIX_LSP_LOG=/tmp/mdix-lsp.log  mdix-lsp
 
 use tower_lsp::{LspService, Server};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{ EnvFilter};
 
 mod analyzer;
 mod capabilities;

@@ -1,4 +1,3 @@
-// mdix-lsp/src/features/call_hierarchy.rs
 //! Call hierarchy provider for QuickFuncs.
 //!
 //! prepare        — identify the QuickFunc under cursor (works on definition
@@ -238,9 +237,6 @@ fn is_call_site_forward(tokens: &[Token], idx: usize) -> bool {
             TokenType::Symbol('>')         => { angle_depth -= 1; j += 1; }
             TokenType::BitwiseOp(op) if *op == ">>" => { angle_depth -= 2; j += 1; }
 
-            // Inside annotation — skip identifiers, data types, commas
-            TokenType::DataType(_) | TokenType::Identifier(_) | TokenType::Symbol(',')
-                if angle_depth > 0 => { j += 1; }
 
             // Scope declaration ` => global`
             TokenType::Arrow if angle_depth == 0 => {
@@ -387,7 +383,7 @@ mod tests {
         let tokens = vec![
             make(TokenType::Identifier("f".to_string())),    // 0
             make(TokenType::Symbol('<')),                      // 1
-            make(TokenType::DataType("object")),               // 2
+            make(TokenType::Keyword("object")),               // 2
             make(TokenType::Symbol('>')),                      // 3
             make(TokenType::Symbol('(')),                      // 4
         ];

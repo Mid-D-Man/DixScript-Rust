@@ -1,4 +1,3 @@
-// mdix-lsp/src/features/document_highlights.rs
 //! Document-highlight provider — highlights all occurrences of the symbol
 //! under the cursor within the current file.
 //!
@@ -58,11 +57,6 @@ fn provide_inner(doc: Option<&Document>, pos: Position) -> Option<Vec<DocumentHi
             }
         }
 
-        TokenType::EnumAccess { enum_name, value } => {
-            let en = enum_name.clone();
-            let v  = value.clone();
-            collect_enum_access_highlights(&doc.tokens, &en, &v)
-        }
 
         _ => return None,
     };
@@ -148,34 +142,6 @@ fn collect_identifier_highlights(tokens: &[Token], name: &str) -> Vec<DocumentHi
                     Position::new(line, col + name.len() as u32),
                 ),
                 kind: Some(kind),
-            })
-        })
-        .collect()
-}
-
-/// Highlight EnumAccess tokens (EnumName.FIELD) that match both parts.
-fn collect_enum_access_highlights(
-    tokens:    &[Token],
-    enum_name: &str,
-    value:     &str,
-) -> Vec<DocumentHighlight> {
-    tokens
-        .iter()
-        .filter_map(|t| {
-            let TokenType::EnumAccess { enum_name: en, value: v } = &t.token_type else {
-                return None;
-            };
-            if en.as_str() != enum_name || v.as_str() != value { return None; }
-
-            let len  = en.len() + 1 + v.len();
-            let line = t.line.saturating_sub(1) as u32;
-            let col  = t.column.saturating_sub(1) as u32;
-            Some(DocumentHighlight {
-                range: Range::new(
-                    Position::new(line, col),
-                    Position::new(line, col + len as u32),
-                ),
-                kind: Some(DocumentHighlightKind::READ),
             })
         })
         .collect()

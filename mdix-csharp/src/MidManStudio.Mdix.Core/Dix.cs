@@ -68,46 +68,74 @@ namespace MidManStudio.Mdix
 
         /// <summary>
         /// Merges <paramref name="secondary"/> into <paramref name="primary"/> and
-        /// returns a new combined database. Neither input is modified or disposed.
+        /// returns a new combined database plus a report of every key conflict
+        /// that was resolved. Neither input is modified or disposed.
         /// </summary>
-        public static Core.MdixResult<Core.MdixDatabase> Merge(
+        public static Core.MdixResult<Core.MdixMergeOutcome> Merge(
             Core.MdixDatabase primary,
             Core.MdixDatabase secondary,
-            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.PrimaryWins) =>
-            Core.MdixMerge.Merge(primary, secondary, strategy);
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.WeightedPriority,
+            Core.MdixArrayMergeStrategy arrayStrategy = Core.MdixArrayMergeStrategy.ConcatDedup) =>
+            Core.MdixMerge.Merge(primary, secondary, strategy, arrayStrategy);
 
         /// <summary>
-        /// Merges all databases left-to-right. First is the base; each subsequent
-        /// database is merged in using <paramref name="strategy"/>.
+        /// Merges all databases left-to-right, auto-weighted in descending order
+        /// (matches <see cref="MergeSources"/>). None of the input databases are
+        /// modified or disposed.
         /// </summary>
-        public static Core.MdixResult<Core.MdixDatabase> MergeAll(
+        public static Core.MdixResult<Core.MdixMergeOutcome> MergeAll(
             IEnumerable<Core.MdixDatabase> databases,
-            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.PrimaryWins) =>
-            Core.MdixMerge.MergeAll(databases, strategy);
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.WeightedPriority,
+            Core.MdixArrayMergeStrategy arrayStrategy = Core.MdixArrayMergeStrategy.ConcatDedup) =>
+            Core.MdixMerge.MergeAll(databases, strategy, arrayStrategy);
 
         /// <summary>
         /// Merges a raw JSON object string into an existing database.
         /// </summary>
-        public static Core.MdixResult<Core.MdixDatabase> MergeJson(
+        public static Core.MdixResult<Core.MdixMergeOutcome> MergeJson(
             Core.MdixDatabase primary,
             string secondaryJson,
-            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.PrimaryWins) =>
-            Core.MdixMerge.MergeJson(primary, secondaryJson, strategy);
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.WeightedPriority,
+            Core.MdixArrayMergeStrategy arrayStrategy = Core.MdixArrayMergeStrategy.ConcatDedup) =>
+            Core.MdixMerge.MergeJson(primary, secondaryJson, strategy, arrayStrategy);
+
+        /// <summary>
+        /// Merges two or more raw .mdix source strings directly into a new
+        /// database — no JSON round-trip, full type fidelity. Sources are
+        /// auto-weighted in descending order (first highest, last lowest).
+        /// </summary>
+        public static Core.MdixResult<Core.MdixMergeOutcome> MergeSources(
+            IReadOnlyList<string> sources,
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.WeightedPriority,
+            Core.MdixArrayMergeStrategy arrayStrategy = Core.MdixArrayMergeStrategy.ConcatDedup) =>
+            Core.MdixMerge.MergeSources(sources, strategy, arrayStrategy);
+
+        /// <summary>
+        /// Merges .mdix source strings with explicit per-source weights (higher
+        /// wins under <see cref="Core.MdixMergeStrategy.WeightedPriority"/>).
+        /// </summary>
+        public static Core.MdixResult<Core.MdixMergeOutcome> MergeSourcesWeighted(
+            IReadOnlyList<(string source, double weight)> sources,
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.WeightedPriority,
+            Core.MdixArrayMergeStrategy arrayStrategy = Core.MdixArrayMergeStrategy.ConcatDedup) =>
+            Core.MdixMerge.MergeSourcesWeighted(sources, strategy, arrayStrategy);
 
         // ── Async merging ─────────────────────────────────────────────────────
 
-        public static Task<Core.MdixResult<Core.MdixDatabase>> MergeAsync(
+        public static Task<Core.MdixResult<Core.MdixMergeOutcome>> MergeAsync(
             Core.MdixDatabase primary,
             Core.MdixDatabase secondary,
-            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.PrimaryWins,
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.WeightedPriority,
+            Core.MdixArrayMergeStrategy arrayStrategy = Core.MdixArrayMergeStrategy.ConcatDedup,
             CancellationToken ct = default) =>
-            Task.Run(() => Core.MdixMerge.Merge(primary, secondary, strategy), ct);
+            Task.Run(() => Core.MdixMerge.Merge(primary, secondary, strategy, arrayStrategy), ct);
 
-        public static Task<Core.MdixResult<Core.MdixDatabase>> MergeAllAsync(
+        public static Task<Core.MdixResult<Core.MdixMergeOutcome>> MergeAllAsync(
             IEnumerable<Core.MdixDatabase> databases,
-            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.PrimaryWins,
+            Core.MdixMergeStrategy strategy = Core.MdixMergeStrategy.WeightedPriority,
+            Core.MdixArrayMergeStrategy arrayStrategy = Core.MdixArrayMergeStrategy.ConcatDedup,
             CancellationToken ct = default) =>
-            Task.Run(() => Core.MdixMerge.MergeAll(databases, strategy), ct);
+            Task.Run(() => Core.MdixMerge.MergeAll(databases, strategy, arrayStrategy), ct);
 
         // ── POCO deserialization ──────────────────────────────────────────────
 

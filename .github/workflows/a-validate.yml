@@ -111,18 +111,39 @@ jobs:
       # fuzzing campaign (real coverage, not a smoke test) ahead of a
       # release. Either way this is still nowhere near exhaustive — cargo-fuzz
       # is a "keep chipping away" tool, not a one-shot proof of correctness.
+      #
+      # `set -o pipefail` + `tee` so the step's real pass/fail still gates
+      # normally on cargo-fuzz's actual exit code (this is NOT the
+      # continue-on-error pattern used elsewhere in this repo for reports
+      # that shouldn't block CI — a fuzz crash here should) while also
+      # keeping a copy of the raw output on disk for the extraction step
+      # below to read once the console log is a wall of expected
+      # Lexer/Parser noise.
       - name: Fuzz parse_mdix
-        run: >-
-          cargo fuzz run parse_mdix --
-          -max_total_time=${{ github.event_name == 'workflow_dispatch' && inputs.fuzz_seconds || 60 }}
+        run: |
+          set -o pipefail
+          cargo fuzz run parse_mdix -- \
+            -max_total_time=${{ github.event_name == 'workflow_dispatch' && inputs.fuzz_seconds || 60 }} \
+            2>&1 | tee fuzz-raw.txt
         working-directory: dixscript
+
+      # Only runs when the step above actually failed. Strips the expected
+      # per-iteration Lexer/Parser reject noise and surfaces whatever's
+      # left — a real panic/crash/timeout/OOM report if there is one — both
+      # in this step's own console output and in the Summary tab, instead
+      # of you having to download and hand-search a multi-hundred-MB log.
+      - name: Extract real fuzz errors
+        if: failure()
+        run: python3 scripts/extract_fuzz_crash.py dixscript/fuzz-raw.txt
 
       - name: Upload crash artifacts (if any)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-crashes-${{ github.run_number }}
-          path: dixscript/fuzz/artifacts/
+          path: |
+            dixscript/fuzz/artifacts/
+            dixscript/fuzz-raw.txt
           retention-days: 30
 
   clippy:

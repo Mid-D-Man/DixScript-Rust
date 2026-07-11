@@ -48,6 +48,17 @@ crate-type = ["cdylib", "staticlib"]
 # version field required for `cargo publish -p mdix-ffi` after dixscript lands on crates.io
 dixscript  = { path = "../dixscript", version = "1.0.0" }
 serde_json = "1.0"
+# merge.rs needs chrono::Utc::now() for DixData::from_ast() — previously only
+# reached transitively through dixscript, which isn't enough to `use` it
+# directly. "0.4" to match dixscript's own version requirement exactly.
+# wasmbind: mdix-ffi is native-only today (see the WebGL note in this file),
+# but chrono::Utc::now() panics outright on wasm32-unknown-unknown without
+# this feature (JS Date API backing instead of the native time syscalls it
+# tries by default) — this crate already hit that exact panic in dixscript
+# core once (fixed by adding wasmbind there too). Costs nothing on native
+# targets; keeps this crate from being a landmine if it's ever pointed at a
+# wasm32 build in the future.
+chrono     = { version = "0.4", features = ["wasmbind"] }
 
 [build-dependencies]
 # csbindgen → auto-generates MdixNative.cs (C# P/Invoke bindings for Unity/NuGet).

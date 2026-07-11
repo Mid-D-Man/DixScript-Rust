@@ -1,19 +1,6 @@
 name: DixScript — VS Code Extension Build
 
 on:
-  push:
-    branches: [master, main, develop]
-    paths:
-      - "mdix-vscode/**"
-      - "mdix-lsp/**"
-      - "dixscript/**"
-      - ".github/workflows/vscode-ext-build.yml"
-  pull_request:
-    branches: [master, main]
-    paths:
-      - "mdix-vscode/**"
-      - "mdix-lsp/**"
-      - "dixscript/**"
   workflow_dispatch:
 
 permissions:

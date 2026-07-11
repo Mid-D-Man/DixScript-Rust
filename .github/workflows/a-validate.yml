@@ -4,25 +4,16 @@ name: Validate dixscript
 # here means something's actually broken). Clippy runs separately and is
 # deliberately informational-only — see that job for why.
 #
-# Fuzz duration: push/PR always run the 60s smoke test (crash-detection
-# only, not real coverage). For an actual pre-publish fuzzing campaign, run
-# this manually from the Actions tab ("Run workflow") and set fuzz_seconds
-# to something real (e.g. 3600 for an hour) — see the fuzz-smoke-test job.
+# Manual only — run from the Actions tab ("Run workflow"). Set fuzz_seconds
+# to '60' for a quick crash-detection smoke test, or something real (e.g.
+# 3600 for an hour) for an actual pre-publish fuzzing campaign — see the
+# fuzz-smoke-test job.
 on:
-  push:
-    branches: [main, master, develop]
-    paths:
-      - 'dixscript/**'
-      - '.github/workflows/a-validate.yml'
-  pull_request:
-    paths:
-      - 'dixscript/**'
   workflow_dispatch:
     inputs:
       fuzz_seconds:
         description: >-
-          Fuzz duration in seconds. Only applies to manual runs (push/PR
-          always use 60s regardless of this value). 3600 = 1 hour,
+          Fuzz duration in seconds. 60 = quick smoke test, 3600 = 1 hour,
           21600 = 6 hours. Remember to also raise the job's timeout-minutes
           below if you go past ~5 hours.
         required: false
@@ -115,12 +106,12 @@ jobs:
           restore-keys: |
             fuzz-corpus-parse_mdix-
 
-      # Push/PR: fixed 60s smoke test, just long enough to catch an obvious
-      # regression (a panic on some malformed input) before it ships.
-      # Manual dispatch: whatever fuzz_seconds was set to, for an actual
-      # fuzzing campaign (real coverage, not a smoke test) ahead of a
-      # release. Either way this is still nowhere near exhaustive — cargo-fuzz
-      # is a "keep chipping away" tool, not a one-shot proof of correctness.
+      # Manual-only now, so this is always a workflow_dispatch run — the
+      # duration is simply whatever fuzz_seconds was set to (default '60'
+      # for a quick smoke test, or something real like 3600 for an actual
+      # pre-publish fuzzing campaign). This is still nowhere near exhaustive
+      # either way — cargo-fuzz is a "keep chipping away" tool, not a
+      # one-shot proof of correctness.
       #
       # `set -o pipefail` + `tee` so the step's real pass/fail still gates
       # normally on cargo-fuzz's actual exit code (this is NOT the
@@ -133,7 +124,7 @@ jobs:
         run: |
           set -o pipefail
           cargo fuzz run parse_mdix -- \
-            -max_total_time=${{ github.event_name == 'workflow_dispatch' && inputs.fuzz_seconds || 60 }} \
+            -max_total_time=${{ inputs.fuzz_seconds }} \
             2>&1 | tee fuzz-raw.txt
         working-directory: dixscript
 

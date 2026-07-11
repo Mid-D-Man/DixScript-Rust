@@ -1,10 +1,7 @@
 name: Publish dixscript to crates.io
 
-# Two ways to trigger:
-#   1. Manual (Actions tab -> Run workflow) — requires typing "publish" in
-#      the confirmation input, so this can't fire by an accidental click.
-#   2. Pushing a tag matching v*.*.* (e.g. v1.0.0) — for normal releases
-#      once you're past today's first manual one.
+# Manual only (Actions tab -> Run workflow) — requires typing "publish" in
+# the confirmation input, so this can't fire by an accidental click.
 #
 # Requires a CARGO_REGISTRY_TOKEN secret in this repo's settings
 # (Settings -> Secrets and variables -> Actions -> New repository secret).
@@ -16,9 +13,6 @@ on:
       confirm:
         description: 'Type "publish" to confirm. crates.io does not allow un-publishing a version once it is live — only yanking, which hides it from new dependents but does not remove it.'
         required: true
-  push:
-    tags:
-      - 'v*.*.*'
 
 jobs:
   publish:

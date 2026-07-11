@@ -46,22 +46,37 @@ def strip_ansi(text):
     return RE_ANSI.sub("", text)
 
 
-# A DixLoader structured error dump always starts with one of these two
-# header shapes and ends at the next blank line:
-#   [Error] [Lexer/Parser/...] [CODE] Fatal: ... at line N, column N
+# A DixLoader structured diagnostic block always starts with one of these
+# header shapes:
+#   [Error/Warning] [Lexer/Parser/...] [CODE] Fatal/Warning: ... at line N
 #   Error: 0:HH:MM:SS.mmm] [Error] [Lexer/Parser/...] ...   (GH Actions'
 #     truncated-timestamp rendering of the same line when it gets picked up
 #     as an annotation)
-# Everything between that header and the next blank line — Message/Source/
-# the raw garbage input line/the caret/Suggestion/Quick Fixes bullets — is
-# part of that one block and equally expected noise, so it's suppressed by
-# position, not by pattern.
+# Both severities use the identical multi-line schema (Message/Section/
+# Source/Location/Suggestion/Quick Fixes + exactly two "  - " bullets), so
+# one detector covers both — a `[Warning] [Semantic] ... DuplicateDefinition`
+# block is exactly as expected/benign as a `[Error] [Parser] ... Fatal`
+# one, just a different severity DixLoader chose to log it at.
 BLOCK_START_RE = re.compile(
-    r"\[Error\]\s*\[(Lexer|Parser|AstEnhancement|ValueResolution|Semantic|"
+    r"\[(Error|Warning)\]\s*\[(Lexer|Parser|AstEnhancement|ValueResolution|Semantic|"
     r"Imports|DLM|BinarySerialization|Config|General)\]"
 )
+# Every block schema seen ends with exactly two "  - reason" bullets under
+# "Quick Fixes:". Terminating on the 2nd bullet (rather than waiting for a
+# blank line) is what makes this robust to fuzzer-generated "source" content
+# that happens to itself be blank/whitespace-only — which would otherwise
+# end suppression several lines too early and leak the block's tail
+# (caret/Suggestion/Quick Fixes/bullets) through as false signal.
+BULLET_RE = re.compile(r"^\s*-\s+\S")
+MAX_BLOCK_LINES = 20  # safety valve if a block's shape ever doesn't match
 INFO_LINE_RE = re.compile(r"^\s*\[Info\]")
 BLANK_RE = re.compile(r"^\s*$")
+
+# A DixLoader summary/halt line: "[Error] DATA section parsing halted due to
+# errors" and similar — a single line, no [Category] sub-tag, no follow-up
+# block. Just restates that errors already reported above happened; not new
+# information, not a crash.
+STANDALONE_ERROR_RE = re.compile(r"\[Error\]\s+(?!\[)\S")
 
 # Lines that indicate the actual thing you're looking for. Checked first —
 # a signal line is never suppressed even mid-block.
@@ -99,6 +114,11 @@ OTHER_NOISE_PATTERNS = [
 ]
 OTHER_NOISE_RE = re.compile("|".join(f"(?:{p})" for p in OTHER_NOISE_PATTERNS))
 
+# libFuzzer's own periodic progress telemetry, printed continuously through
+# any run — crash or not (#execs REDUCE/NEW/pulse cov: ... ft: ... corp: ...
+# exec/s: ... rss: ...). Normal fuzzer housekeeping, never a crash signal.
+LIBFUZZER_STATS_RE = re.compile(r"^#\d+\s+\S+\s+cov:\s*\d+\s+ft:")
+
 # GitHub's own inline-viewer truncation notice — not part of the fuzz output
 # at all, but worth flagging explicitly rather than silently dropping, since
 # it's evidence in its own right (the step produced more log than GH will
@@ -130,6 +150,8 @@ def extract(text):
     noise_count = 0
     truncated_by_github = False
     in_error_block = False
+    block_line_count = 0
+    bullets_seen = 0
 
     for i, line in enumerate(lines):
         if GH_TRUNCATION_RE.search(line):
@@ -142,17 +164,44 @@ def extract(text):
             continue
 
         if in_error_block:
-            noise_count += 1
-            if BLANK_RE.match(line):
-                in_error_block = False
-            continue
+            if BULLET_RE.match(line):
+                noise_count += 1
+                block_line_count += 1
+                bullets_seen += 1
+                if bullets_seen >= 2:
+                    in_error_block = False
+                continue
+            if block_line_count < MAX_BLOCK_LINES:
+                # Still inside the block's free-form region (Message/
+                # Source/the raw fuzz-input dump/caret/Suggestion). That
+                # raw dump is fuzzer-controlled and can itself look like
+                # anything — including a blank line — so blank lines are
+                # deliberately NOT treated as a terminator here; only the
+                # schema's two "  - " bullets (or the safety valve below)
+                # end the block.
+                noise_count += 1
+                block_line_count += 1
+                continue
+            # Safety valve: shape didn't match what we expected within a
+            # reasonable number of lines. Stop suppressing and let this
+            # line be classified normally below instead of risking an
+            # unbounded/incorrect swallow.
+            in_error_block = False
 
         if BLOCK_START_RE.search(line):
             in_error_block = True
+            block_line_count = 0
+            bullets_seen = 0
             noise_count += 1
             continue
 
-        if INFO_LINE_RE.match(line) or OTHER_NOISE_RE.search(line) or BLANK_RE.match(line):
+        if (
+            INFO_LINE_RE.match(line)
+            or OTHER_NOISE_RE.search(line)
+            or LIBFUZZER_STATS_RE.match(line)
+            or STANDALONE_ERROR_RE.search(line)
+            or BLANK_RE.match(line)
+        ):
             noise_count += 1
             continue
 

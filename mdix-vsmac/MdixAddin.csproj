@@ -32,13 +32,17 @@
   </ItemGroup>
 
   <!--
-    The manifest declares the addin's extensions (mimetypes, stock icons, file filters,
-    and — if you keep MdixLanguageClient.cs — the LSP client registration). It has to be
-    an embedded resource so Mono.Addins can find it when it scans this assembly.
+    NOTE — do NOT add an explicit <EmbeddedResource Include="Manifest.addin.xml" />
+    item here. I had one in the first pass of this fix and it broke your build with
+    NETSDK1022 ("Duplicate 'EmbeddedResource' items were included"). Turns out
+    Microsoft.VisualStudioMac.Sdk's own build targets already glob *.addin.xml files
+    into EmbeddedResource by default (confirmed against the reference walkthrough's
+    final working csproj, which never adds one either) — Mono.Addins finds the
+    manifest at registration time without you doing anything extra. If you ever
+    genuinely need to turn default item inclusion off for something else, use
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+    rather than fighting it with an explicit duplicate item.
   -->
-  <ItemGroup>
-    <EmbeddedResource Include="Manifest.addin.xml" />
-  </ItemGroup>
 
   <!--
     ROOT CAUSE OF YOUR BUILD ERRORS (#2):
@@ -48,29 +52,35 @@
     mdix-vsmac. That's a guaranteed "file not found" at build time. I've added the two
     files (copied over from mdix-vscode/icons, which already has light/dark variants)
     to Resources/ alongside this fix — see mdix-vsmac/Resources/ in this same delivery.
+
+    Using Update= here, not Include=: the same default-item-globbing that bit the
+    Manifest.addin.xml EmbeddedResource item above also applies to None items — the SDK
+    auto-includes arbitrary files under the project directory (svg, json, extensionless
+    binaries, etc.) as None by default. Include= would double-declare them and throw the
+    same NETSDK1022 you just hit; Update= just attaches CopyToOutputDirectory metadata to
+    the item the SDK already added, without re-adding it.
   -->
   <ItemGroup>
-    <None Include="Resources\mdix-file-icon.svg" Condition="Exists('Resources\mdix-file-icon.svg')">
+    <None Update="Resources\mdix-file-icon.svg" Condition="Exists('Resources\mdix-file-icon.svg')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="Resources\mdix-file-icon-dark.svg" Condition="Exists('Resources\mdix-file-icon-dark.svg')">
+    <None Update="Resources\mdix-file-icon-dark.svg" Condition="Exists('Resources\mdix-file-icon-dark.svg')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 
   <!--
     The mdix-lsp binary, dropped in by scripts/copy-binary.sh before packing (same
-    bin/<platform>/mdix-lsp layout the VS Code extension uses). Condition guards it so a
-    plain `dotnet build` without having run the copy script first doesn't fail outright —
-    you'll just get an addin with no binary bundled, which copy-binary.sh + pack-addin.sh
-    fixes before packing.
+    bin/<platform>/mdix-lsp layout the VS Code extension uses). Update=, same reasoning
+    as above: these are default-included as None already once the file exists on disk.
+    Condition guards against the file not existing yet (before copy-binary.sh has run).
   -->
   <ItemGroup>
-    <None Include="bin\darwin-arm64\mdix-lsp" Condition="Exists('bin\darwin-arm64\mdix-lsp')">
+    <None Update="bin\darwin-arm64\mdix-lsp" Condition="Exists('bin\darwin-arm64\mdix-lsp')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>lsp\mdix-lsp</Link>
     </None>
-    <None Include="bin\darwin-x64\mdix-lsp" Condition="Exists('bin\darwin-x64\mdix-lsp')">
+    <None Update="bin\darwin-x64\mdix-lsp" Condition="Exists('bin\darwin-x64\mdix-lsp')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>lsp\mdix-lsp</Link>
     </None>

@@ -86,7 +86,13 @@ jobs:
 
       - name: Install extension dependencies
         working-directory: mdix-vscode
-        run: npm ci
+        # `npm ci` requires a committed package-lock.json, which mdix-vscode
+        # doesn't have (confirmed against the actual repo -- this is what
+        # broke the first version of this workflow). `npm install` works
+        # without one. If you want reproducible/cacheable CI installs later,
+        # run `npm install` locally once, commit the resulting
+        # package-lock.json, and switch this back to `npm ci`.
+        run: npm install
 
       # scripts/copy-binary.js reads target/release/<bin> and drops it into
       # mdix-vscode/bin/<platform>/ -- this is the step that used to fail

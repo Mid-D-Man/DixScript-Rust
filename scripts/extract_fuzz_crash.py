@@ -11,17 +11,30 @@ thousands of times and buries the one thing you actually want to know: did
 libFuzzer report a crash, a timeout, an OOM, or a Rust panic — and if so,
 where.
 
+Once a real crash IS found, cargo-fuzz's minimizer re-runs it dozens to
+hundreds of times while shrinking the input, printing a full panic/backtrace
+block on every single attempt. Those blocks are never suppressed as noise
+(that would risk hiding a real report) — instead they're grouped and
+deduplicated: each distinct crash is shown once, with a repeat count,
+instead of being printed in full every time it recurs.
+
 Usage:
-  python3 scripts/extract_fuzz_crash.py <raw_log_file>
+  python3 scripts/extract_fuzz_crash.py <raw_log_file> [output_file]
   cargo fuzz run parse_mdix -- -max_total_time=60 2>&1 | python3 scripts/extract_fuzz_crash.py
 
-Input:  raw_log_file (arg) or stdin — either a local `cargo fuzz run`
+Input:  raw_log_file (arg 1) or stdin — either a local `cargo fuzz run`
         capture or a downloaded GitHub Actions step log.
-Output: always printed to stdout. Additionally appended to
-        $GITHUB_STEP_SUMMARY when running in CI (falls back to stdout-only
-        for local use, same convention as generate_summary.py).
+Output:
+  - Full deduplicated report always written to output_file (arg 2, default
+    "fuzz-extracted.txt") — never size-capped, safe to upload as an artifact.
+  - A capped version printed to stdout (large console output has its own
+    problems — see the GH truncation notice this script watches for).
+  - A capped markdown version appended to $GITHUB_STEP_SUMMARY in CI
+    (GitHub hard-caps step summaries at 1024KB; this stays safely under
+    that regardless of how large the deduplicated report is).
 """
 
+import hashlib
 import os
 import re
 import sys
@@ -71,6 +84,10 @@ SIGNAL_PATTERNS = [
     r"error: process didn't exit successfully",
 ]
 SIGNAL_RE = re.compile("|".join(f"(?:{p})" for p in SIGNAL_PATTERNS))
+CRASH_MARKER_RE = re.compile(
+    r"panicked at|deadly signal|ERROR: libFuzzer|SUMMARY:|out-of-memory|"
+    r"timeout after|error: process didn't exit successfully"
+)
 
 OTHER_NOISE_PATTERNS = [
     r"Running AST enhancement",
@@ -88,8 +105,25 @@ OTHER_NOISE_RE = re.compile("|".join(f"(?:{p})" for p in OTHER_NOISE_PATTERNS))
 # even display).
 GH_TRUNCATION_RE = re.compile(r"This step has been truncated due to its large size")
 
+# Volatile bits that differ between otherwise-identical repeats of the same
+# crash: memory addresses, artifact filenames (a fresh hash every attempt),
+# thread/process ids, timestamps. Stripped before hashing a block so repeats
+# of the *same* crash dedupe even though these details differ each time.
+VOLATILE_RE = re.compile(
+    r"0x[0-9a-f]{4,}"                       # addresses
+    r"|crash-[0-9a-f]{16,}"                 # cargo-fuzz artifact filenames
+    r"|\b[0-9a-f]{32,}\b"                   # bare long hashes
+    r"|==\d+=="                             # pid-tagged sanitizer markers
+    r"|\d{2}:\d{2}:\d{2}\.\d+"              # timestamps
+)
+
+STDOUT_CHAR_CAP = 60_000
+SUMMARY_CHAR_CAP = 800_000  # GitHub hard-caps at 1024KB (1,048,576B); stay well clear
+
 
 def extract(text):
+    """First pass: split into (index, line) pairs of everything that isn't
+    expected DixLoader parse-reject noise."""
     lines = strip_ansi(text).splitlines()
 
     kept = []
@@ -124,20 +158,100 @@ def extract(text):
 
         kept.append((i, line))
 
-    real_crash = any(
-        re.search(
-            r"panicked at|deadly signal|ERROR: libFuzzer|SUMMARY:|out-of-memory|"
-            r"timeout after|error: process didn't exit successfully",
-            l,
-        )
-        for _, l in kept
-    )
-
+    real_crash = any(CRASH_MARKER_RE.search(l) for _, l in kept)
     return kept, noise_count, truncated_by_github, real_crash
 
 
-def render_report(kept, noise_count, truncated_by_github, real_crash):
+def group_into_blocks(kept):
+    """Second pass: group kept lines that are contiguous in the original
+    file (no noise line removed between them) into single blocks — a panic
+    + its backtrace prints as one uninterrupted run, so this reliably keeps
+    each crash report together as one unit for deduplication."""
+    blocks = []
+    current = []
+    prev_index = None
+
+    for i, line in kept:
+        if prev_index is not None and i != prev_index + 1:
+            blocks.append(current)
+            current = []
+        current.append((i, line))
+        prev_index = i
+
+    if current:
+        blocks.append(current)
+
+    return blocks
+
+
+def dedup_blocks(blocks):
+    """Third pass: collapse blocks that are the same crash recurring (e.g.
+    libFuzzer's minimizer re-triggering the same panic on every shrink
+    attempt) down to one representative occurrence + a repeat count."""
+    seen = {}
+    ordered = []
+
+    for block in blocks:
+        raw = "\n".join(line for _, line in block)
+        key = VOLATILE_RE.sub("#", raw)
+        digest = hashlib.sha1(key.encode("utf-8", errors="replace")).hexdigest()
+
+        if digest in seen:
+            seen[digest]["count"] += 1
+        else:
+            entry = {"block": block, "count": 1}
+            seen[digest] = entry
+            ordered.append(entry)
+
+    return ordered
+
+
+def render_blocks(entries, char_cap=None):
+    """Render deduplicated blocks as plain text, each preceded by its
+    original line-number range and, if it recurred, a repeat count. Stops
+    once char_cap is hit (if given) and notes how much was left out —
+    everything is still in the uncapped output file."""
+    out = []
+    omitted_blocks = 0
+    total_repeats_omitted = 0
+
+    for idx, entry in enumerate(entries):
+        block = entry["block"]
+        count = entry["count"]
+        piece_lines = [f"{i:>6}: {line}" for i, line in block]
+        if count > 1:
+            piece_lines.append(
+                f"        ... this exact block repeated {count} times total "
+                f"(deduplicated — see full output for every instance)"
+            )
+        piece = "\n".join(piece_lines)
+
+        if char_cap is not None and sum(len(p) for p in out) + len(piece) > char_cap:
+            omitted_blocks = len(entries) - idx
+            total_repeats_omitted = sum(e["count"] for e in entries[idx:])
+            break
+
+        out.append(piece)
+
+    text = "\n\n".join(out)
+    if omitted_blocks:
+        text += (
+            f"\n\n... {omitted_blocks} more distinct block(s) "
+            f"({total_repeats_omitted} occurrence(s) total) omitted here for size — "
+            f"see the full uncapped report in the uploaded artifact."
+        )
+    return text
+
+
+def render_report(entries, noise_count, truncated_by_github, real_crash, char_cap=None):
+    total_occurrences = sum(e["count"] for e in entries)
     out = [f"Suppressed {noise_count} expected parser/lexer noise lines."]
+    if len(entries) != total_occurrences:
+        out.append(
+            f"Deduplicated {total_occurrences} signal blocks down to "
+            f"{len(entries)} distinct one(s) — repeats are almost always the "
+            f"same crash re-triggered during cargo-fuzz's input minimization."
+        )
     if truncated_by_github:
         out.append(
             "NOTE: GitHub's inline log viewer truncated this step for size before "
@@ -147,14 +261,13 @@ def render_report(kept, noise_count, truncated_by_github, real_crash):
         )
     out.append("")
 
-    if not kept:
+    if not entries:
         out.append("No non-noise lines found — the whole log was expected parse-error chatter.")
-        return "\n".join(out), real_crash
+        return "\n".join(out)
 
-    out.append("Remaining lines (in original order):")
+    out.append("Distinct signal blocks (in first-seen order):")
     out.append("")
-    for i, line in kept:
-        out.append(f"{i:>6}: {line}")
+    out.append(render_blocks(entries, char_cap))
     out.append("")
 
     if real_crash:
@@ -166,17 +279,24 @@ def render_report(kept, noise_count, truncated_by_github, real_crash):
         out.append("         If the job still failed, check exit code / step timeout / log size")
         out.append("         truncation rather than assuming a parser Err is the cause.")
 
-    return "\n".join(out), real_crash
+    return "\n".join(out)
 
 
-def render_summary_markdown(kept, noise_count, truncated_by_github, real_crash):
+def render_summary_markdown(entries, noise_count, truncated_by_github, real_crash, char_cap):
+    total_occurrences = sum(e["count"] for e in entries)
     icon = "🐛" if real_crash else "❓"
     lines = [
         f"## {icon} Fuzz failure — extracted signal",
         "",
         f"Suppressed **{noise_count}** expected parser/lexer noise lines.",
-        "",
     ]
+    if len(entries) != total_occurrences:
+        lines.append(
+            f"Deduplicated **{total_occurrences}** signal blocks down to "
+            f"**{len(entries)}** distinct one(s) — repeats are almost always "
+            f"the same crash re-triggered during cargo-fuzz's input minimization."
+        )
+    lines.append("")
     if truncated_by_github:
         lines += [
             "> ⚠️ GitHub's inline log viewer truncated this step before reaching the "
@@ -184,20 +304,18 @@ def render_summary_markdown(kept, noise_count, truncated_by_github, real_crash):
             "",
         ]
 
-    if not kept:
+    if not entries:
         lines.append("No non-noise lines found — the whole log was expected parse-error chatter.")
         return "\n".join(lines) + "\n"
 
-    lines += ["```text"]
-    for i, line in kept:
-        lines.append(f"{i:>6}: {line}")
-    lines += ["```", ""]
+    lines += ["```text", render_blocks(entries, char_cap), "```", ""]
 
     if real_crash:
         lines += [
             "**Verdict:** genuine libFuzzer crash/timeout/OOM/panic report above. "
             "Reproduce locally with `cargo fuzz run parse_mdix <path-to-artifact>` "
-            "using the artifact path libFuzzer printed.",
+            "using the artifact path libFuzzer printed. Full, non-deduplicated, "
+            "non-truncated output is in the uploaded `fuzz-extracted.txt` artifact.",
         ]
     else:
         lines += [
@@ -216,16 +334,32 @@ def main():
     else:
         text = sys.stdin.read()
 
-    kept, noise_count, truncated_by_github, real_crash = extract(text)
+    output_file = sys.argv[2] if len(sys.argv) > 2 else "fuzz-extracted.txt"
 
-    report, _ = render_report(kept, noise_count, truncated_by_github, real_crash)
-    print(report)
+    kept, noise_count, truncated_by_github, real_crash = extract(text)
+    blocks = group_into_blocks(kept)
+    entries = dedup_blocks(blocks)
+
+    # Full, uncapped report -> always written to disk. This is the one to
+    # trust completely; stdout/summary below are deliberately capped copies.
+    full_report = render_report(entries, noise_count, truncated_by_github, real_crash)
+    with open(output_file, "w", encoding="utf-8") as fh:
+        fh.write(full_report + "\n")
+    print(f"Full extracted report written -> {output_file} ({len(full_report)} chars)")
+
+    console_report = render_report(
+        entries, noise_count, truncated_by_github, real_crash, char_cap=STDOUT_CHAR_CAP
+    )
+    print(console_report)
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
+        markdown = render_summary_markdown(
+            entries, noise_count, truncated_by_github, real_crash, char_cap=SUMMARY_CHAR_CAP
+        )
         with open(summary_path, "a", encoding="utf-8") as fh:
-            fh.write(render_summary_markdown(kept, noise_count, truncated_by_github, real_crash))
-        print(f"\nStep summary appended -> {summary_path}")
+            fh.write(markdown)
+        print(f"\nStep summary appended -> {summary_path} ({len(markdown)} chars)")
 
 
 if __name__ == "__main__":

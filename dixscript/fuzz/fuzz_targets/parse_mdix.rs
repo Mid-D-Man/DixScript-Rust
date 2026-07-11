@@ -11,7 +11,15 @@ fuzz_target!(|data: &[u8]| {
     // dead ends deep in the corpus.
     let Ok(source) = std::str::from_utf8(data) else { return; };
 
-    let loader = DixLoader::new();
+    // `new_silent()` — not `new()` — because the default loader eprintln!s
+    // an Info line plus one line per Lexer/Parser/AstEnhancement error on
+    // *every* call. At libFuzzer throughput (thousands of execs/sec) that
+    // unbuffered stderr writing was the actual reason a 60s `-max_total_time`
+    // smoke test was taking 8+ minutes in CI — not slow fuzzing, I/O-blocked
+    // logging. Silencing it doesn't change what's under test: parsing
+    // behavior and returned Results are identical, panics are still caught
+    // and reported by libFuzzer exactly as before.
+    let loader = DixLoader::new_silent();
 
     // The only property under test: parsing arbitrary text must never
     // panic — not on malformed sections, truncated tokens, deeply nested

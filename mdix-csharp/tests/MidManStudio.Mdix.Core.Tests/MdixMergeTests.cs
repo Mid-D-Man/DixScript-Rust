@@ -35,7 +35,8 @@ namespace MidManStudio.Mdix.Core.Tests
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             merged.GetString("host").OrThrow().Should().Be("localhost");
             merged.GetInt("port").OrThrow().Should().Be(8080);
             merged.GetInt("timeout").OrThrow().Should().Be(5000);
@@ -52,7 +53,8 @@ namespace MidManStudio.Mdix.Core.Tests
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             var port = merged.GetInt("port").OrThrow();
             _out.WriteLine($"Port (expect 8080): {port}");
             port.Should().Be(8080);
@@ -68,7 +70,8 @@ namespace MidManStudio.Mdix.Core.Tests
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             var port = merged.GetInt("port").OrThrow();
             _out.WriteLine($"Port (expect 9090): {port}");
             port.Should().Be(9090);
@@ -86,7 +89,7 @@ namespace MidManStudio.Mdix.Core.Tests
             _out.WriteLine($"Error: {(result.IsFailure ? result.Error.Message : "none")}");
 
             result.IsFailure.Should().BeTrue();
-            result.Error.Message.Should().Contain("conflict");
+            result.Error.Message.Should().Contain("Conflict");
         }
 
         [Fact]
@@ -100,7 +103,8 @@ namespace MidManStudio.Mdix.Core.Tests
             _out.WriteLine($"IsSuccess: {result.IsSuccess}");
 
             result.IsSuccess.Should().BeTrue();
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             merged.GetString("host").OrThrow().Should().Be("localhost");
             merged.GetInt("port").OrThrow().Should().Be(8080);
         }
@@ -117,7 +121,8 @@ namespace MidManStudio.Mdix.Core.Tests
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             merged.GetInt("port").OrThrow().Should().Be(8080);
             merged.GetString("host").OrThrow().Should().Be("db.local");
             merged.GetBool("ssl").OrThrow().Should().BeFalse();
@@ -138,7 +143,8 @@ namespace MidManStudio.Mdix.Core.Tests
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             _out.WriteLine($"server.host: {merged.GetString("server.host").UnwrapOr("NOT FOUND")}");
             _out.WriteLine($"server.port: {merged.GetInt("server.port").UnwrapOr(-1)}");
             _out.WriteLine($"server.timeout: {merged.GetInt("server.timeout").UnwrapOr(-1)}");
@@ -158,7 +164,8 @@ namespace MidManStudio.Mdix.Core.Tests
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             merged.GetString("server.host").OrThrow().Should().Be("secondary.local");
             merged.GetInt("server.port").OrThrow().Should().Be(8080);
             merged.GetInt("server.timeout").OrThrow().Should().Be(5000);
@@ -167,34 +174,66 @@ namespace MidManStudio.Mdix.Core.Tests
         // ── Dix.Merge — arrays are atomic ─────────────────────────────────────
 
         [Fact]
-        public void Merge_ArrayConflict_PrimaryWins_KeepsPrimaryArray()
+        public void Merge_ArrayConflict_PrimaryWins_ReplaceStrategy_KeepsPrimaryArray()
         {
             using var primary   = Load("@DATA( tags:: \"alpha\", \"beta\" )");
             using var secondary = Load("@DATA( tags:: \"gamma\", \"delta\", \"epsilon\" )");
 
-            var result = Dix.Merge(primary, secondary, MdixMergeStrategy.PrimaryWins);
+            // Array strategy now defaults to ConcatDedup (matches the real Rust
+            // core's own default) -- explicit Replace here to test the atomic
+            // "winner's array entirely replaces the loser's" behavior specifically.
+            var result = Dix.Merge(
+                primary, secondary,
+                MdixMergeStrategy.PrimaryWins,
+                MdixArrayMergeStrategy.Replace);
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             var len = merged.GetArrayLength("tags").OrThrow();
             _out.WriteLine($"Array length (expect 2): {len}");
             len.Should().Be(2);
         }
 
         [Fact]
-        public void Merge_ArrayConflict_SecondaryWins_KeepsSecondaryArray()
+        public void Merge_ArrayConflict_SecondaryWins_ReplaceStrategy_KeepsSecondaryArray()
         {
             using var primary   = Load("@DATA( tags:: \"alpha\", \"beta\" )");
             using var secondary = Load("@DATA( tags:: \"gamma\", \"delta\", \"epsilon\" )");
 
-            var result = Dix.Merge(primary, secondary, MdixMergeStrategy.SecondaryWins);
+            var result = Dix.Merge(
+                primary, secondary,
+                MdixMergeStrategy.SecondaryWins,
+                MdixArrayMergeStrategy.Replace);
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             var len = merged.GetArrayLength("tags").OrThrow();
             _out.WriteLine($"Array length (expect 3): {len}");
+            len.Should().Be(3);
+        }
+
+        [Fact]
+        public void Merge_ArrayConflict_DefaultStrategy_ConcatDedupsBothArrays()
+        {
+            using var primary   = Load("@DATA( tags:: \"alpha\", \"beta\" )");
+            using var secondary = Load("@DATA( tags:: \"beta\", \"gamma\" )");
+
+            // No explicit array strategy -- exercises the new default
+            // (ConcatDedup): winner's items first, loser's items appended,
+            // exact-duplicate primitives removed. "beta" appears in both, so
+            // the combined array should have 3 entries, not 4.
+            var result = Dix.Merge(primary, secondary, MdixMergeStrategy.PrimaryWins);
+
+            result.IsSuccess.Should().BeTrue();
+
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
+            var len = merged.GetArrayLength("tags").OrThrow();
+            _out.WriteLine($"Array length (expect 3, deduped): {len}");
             len.Should().Be(3);
         }
 
@@ -214,7 +253,8 @@ namespace MidManStudio.Mdix.Core.Tests
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             merged.GetInt("a").OrThrow().Should().Be(1);
             merged.GetInt("b").OrThrow().Should().Be(2);
             merged.GetInt("c").OrThrow().Should().Be(3);
@@ -233,7 +273,8 @@ namespace MidManStudio.Mdix.Core.Tests
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             var port = merged.GetInt("port").OrThrow();
             _out.WriteLine($"Port (expect 1111): {port}");
             port.Should().Be(1111);
@@ -252,7 +293,8 @@ namespace MidManStudio.Mdix.Core.Tests
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             var port = merged.GetInt("port").OrThrow();
             _out.WriteLine($"Port (expect 3333): {port}");
             port.Should().Be(3333);
@@ -267,7 +309,8 @@ namespace MidManStudio.Mdix.Core.Tests
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             merged.GetInt("x").OrThrow().Should().Be(42);
             merged.GetString("name").OrThrow().Should().Be("Solo");
         }
@@ -299,7 +342,8 @@ namespace MidManStudio.Mdix.Core.Tests
 
             result.IsSuccess.Should().BeTrue();
 
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             merged.GetInt("port").OrThrow().Should().Be(8080);
             merged.GetString("host").OrThrow().Should().Be("localhost");
             merged.GetInt("timeout").OrThrow().Should().Be(5000);
@@ -315,7 +359,8 @@ namespace MidManStudio.Mdix.Core.Tests
             var result = Dix.MergeJson(primary, json, MdixMergeStrategy.PrimaryWins);
 
             result.IsSuccess.Should().BeTrue();
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             merged.GetInt("port").OrThrow().Should().Be(8080);
         }
 
@@ -381,7 +426,8 @@ namespace MidManStudio.Mdix.Core.Tests
             _out.WriteLine($"IsSuccess: {result.IsSuccess}");
 
             result.IsSuccess.Should().BeTrue();
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             merged.GetInt("a").OrThrow().Should().Be(1);
             merged.GetInt("b").OrThrow().Should().Be(2);
         }
@@ -396,7 +442,8 @@ namespace MidManStudio.Mdix.Core.Tests
             var result = await Dix.MergeAllAsync(new[] { db1, db2, db3 });
 
             result.IsSuccess.Should().BeTrue();
-            using var merged = result.SuccessResult;
+            using var mergedOutcome = result.SuccessResult;
+            var merged = mergedOutcome.Database;
             merged.GetInt("x").OrThrow().Should().Be(10);
             merged.GetInt("y").OrThrow().Should().Be(20);
             merged.GetInt("z").OrThrow().Should().Be(30);

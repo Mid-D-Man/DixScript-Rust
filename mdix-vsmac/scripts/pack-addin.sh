@@ -10,10 +10,18 @@
 # christianhelle.com/2023/03/extending-vsmac.html (the current, VS2022-era
 # walkthrough for building third-party VS4Mac addins).
 #
-# If this chokes on assembly resolution, open MdixAddin.csproj directly
-# inside VS for Mac instead and use Tools -> Package Add-in — vstool and
-# the IDE share the same underlying packer, so that GUI path hits the same
-# code either way.
+# UPDATE after your CI runs kept failing with "Could not resolve addin
+# reference 'MonoDevelop.Core'/'MonoDevelop.Ide'": that error is NOT
+# reproducible with a correct local setup like yours. It happens on GitHub's
+# hosted macOS runners because GitHub quietly dropped Visual Studio for Mac
+# from the hosted images after Microsoft retired the product (confirmed via
+# actions/runner-images discussion #8212 — their own answer as of April 2025
+# was "migrate away from it", not "here's how to keep using it"). Without
+# the real app on disk, there's no MonoDevelop.Core.dll/MonoDevelop.Ide.dll
+# to resolve against, full stop -- no csproj or AddinInfo.cs fix changes
+# that. This script, run locally on your actual VS4Mac machine, doesn't hit
+# that problem. See the CI workflow file for the self-hosted-runner path if
+# you want this in CI too.
 #
 # Usage: scripts/pack-addin.sh [--release]
 
@@ -49,7 +57,22 @@ echo "==> Bundling mdix-lsp binary"
 "$SCRIPT_DIR/copy-binary.sh" $COPY_RELEASE_FLAG
 
 echo "==> Building MdixAddin ($PROFILE)"
-dotnet build "$ADDIN_DIR/MdixAddin.csproj" -c "$PROFILE"
+# Using `vstool build`, not `dotnet build`. This is the actual root cause of
+# "Could not resolve addin reference 'MonoDevelop.Core'/'MonoDevelop.Ide'" --
+# it's not (only) a namespace-qualifier bug in AddinInfo.cs (I fixed a real
+# one of those too, worth keeping), it's that `dotnet build` alone doesn't
+# reliably resolve addin references against your installed IDE the way
+# `vstool build` does. Straight from Microsoft MVP Christian Helle's own
+# VS4Mac CI guide (christianhelle.com/2023/03/build-vsmac-extensions-using-
+# github-actions.html): "dotnet build -c Release ... works fine if you have
+# previously built a Visual Studio for mac extension on the machine you're
+# working on, but if you are building it in a new machine that has
+# previously never built a Visual Studio for Mac extension then you most
+# likely will need to run the Visual Studio Tool Runner". Since your Mac is
+# the one you use VS4Mac on daily, plain `dotnet build` might genuinely work
+# for you -- but `vstool build` is the documented reliable path, so that's
+# what this script uses.
+"$VS_APP/Contents/MacOS/vstool" build --configuration:"$PROFILE" "$ADDIN_DIR/MdixAddin.csproj"
 
 # net7.0, not net472 -- the SDK-style csproj (Microsoft.VisualStudioMac.Sdk)
 # outputs under a TargetFramework-named folder, and the addin now targets

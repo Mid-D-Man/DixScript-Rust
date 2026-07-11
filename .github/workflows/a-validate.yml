@@ -38,6 +38,16 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Fast, authoritative signal before the heavier Build/test steps below —
+      # `cargo check` skips codegen so it's much quicker to fail on, and it's
+      # the real compiler's borrow checker, not an IDE's approximation of it.
+      # Added specifically so a real E0382 (or any other compile error) shows
+      # up here in CI regardless of what rust-analyzer's diagnostics say
+      # locally — if this step is green, any "value moved after being used"
+      # squiggle in an editor for this crate is IDE noise, not a real error.
+      - name: Type check (cargo check)
+        run: cargo check -p dixscript --all-targets
+
       - name: Build
         run: cargo build -p dixscript --all-targets
         working-directory: .
@@ -128,13 +138,17 @@ jobs:
         working-directory: dixscript
 
       # Only runs when the step above actually failed. Strips the expected
-      # per-iteration Lexer/Parser reject noise and surfaces whatever's
-      # left — a real panic/crash/timeout/OOM report if there is one — both
-      # in this step's own console output and in the Summary tab, instead
-      # of you having to download and hand-search a multi-hundred-MB log.
+      # per-iteration Lexer/Parser reject noise and deduplicates repeated
+      # crash blocks (cargo-fuzz's minimizer re-triggers the same panic
+      # dozens/hundreds of times while shrinking the input — a real crash
+      # can otherwise balloon into tens of MB of near-identical output,
+      # which is exactly what blew past GitHub's 1024KB step-summary limit
+      # here). The deduplicated result goes to this step's console, the
+      # Summary tab, and — always uncapped, regardless of size — the
+      # fuzz-extracted.txt file uploaded below.
       - name: Extract real fuzz errors
         if: failure()
-        run: python3 scripts/extract_fuzz_crash.py dixscript/fuzz-raw.txt
+        run: python3 scripts/extract_fuzz_crash.py dixscript/fuzz-raw.txt dixscript/fuzz-extracted.txt
 
       - name: Upload crash artifacts (if any)
         if: failure()
@@ -144,6 +158,7 @@ jobs:
           path: |
             dixscript/fuzz/artifacts/
             dixscript/fuzz-raw.txt
+            dixscript/fuzz-extracted.txt
           retention-days: 30
 
   clippy:

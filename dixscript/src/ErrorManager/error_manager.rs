@@ -183,6 +183,26 @@ impl ErrorManager {
         }
     }
 
+    /// Same as `new_isolated`, but with `eprintln!` log output disabled from
+    /// construction — no Info/Warning/Error line is ever written to stderr.
+    ///
+    /// Error state is still collected exactly as normal (`get_log_contents()`,
+    /// `has_errors()`, the `*_errors()` getters all behave identically); this
+    /// only silences the `write_log` side effect.
+    ///
+    /// Intended for hot-loop / high-frequency callers — fuzzing harnesses,
+    /// benchmarks, or any embedding context calling `load_from_str` thousands
+    /// of times a second — where unbuffered per-call `eprintln!` would
+    /// dominate wall-clock time and flood the surrounding log capture. A
+    /// fresh `ErrorManagerInner` otherwise defaults `log_level_filter` to
+    /// `LogLevel::Info`, so even `DebugMode::Off` still prints Info-and-above
+    /// lines; this is the only way to fully silence output short of that.
+    pub fn new_isolated_silent() -> Self {
+        let manager = Self::new_isolated();
+        manager.set_log_enabled(false);
+        manager
+    }
+
     /// Stub retained for API compatibility.
     ///
     /// `OnceLock` cannot be reset in stable Rust.  For test isolation use
@@ -699,6 +719,15 @@ impl ErrorManager {
     pub fn log_error(&self, message: &str) {
         let mut inner = self.inner.lock().unwrap();
         inner.write_log(LogLevel::Error, message);
+    }
+
+    /// Turns `eprintln!` log output on/off without touching error collection
+    /// (`log_buffer` still accumulates lines regardless — this only gates the
+    /// `write_log` side effect). See `new_isolated_silent` for the common
+    /// case of wanting this off from construction.
+    pub fn set_log_enabled(&self, enabled: bool) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.log_enabled = enabled;
     }
 }
 
@@ -1318,4 +1347,4 @@ impl ErrorManagerInner {
                 .map_err(|e| format!("JSON serialization error: {}", e))
         }
     }
-}
+    }

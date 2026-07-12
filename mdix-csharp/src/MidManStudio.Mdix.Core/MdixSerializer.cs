@@ -4,6 +4,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 
@@ -55,8 +56,12 @@ namespace MidManStudio.Mdix.Core
         public MdixTransformAttribute(Type transformerType, string methodName)
         {
             var m = transformerType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
-            if (m != null)
-                Transform = obj => m.Invoke(null, new[] { obj })!;
+            if (m == null)
+                throw new InvalidOperationException(
+                    $"[MdixTransform] could not find a public static method named " +
+                    $"'{methodName}' on '{transformerType.Name}'. Check the method name for " +
+                    "typos, and that it's public and static.");
+            Transform = obj => m.Invoke(null, new[] { obj })!;
         }
     }
 
@@ -68,8 +73,12 @@ namespace MidManStudio.Mdix.Core
         public MdixValidationAttribute(Type validatorType, string methodName)
         {
             var m = validatorType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
-            if (m != null)
-                Validator = obj => (bool)m.Invoke(null, new[] { obj })!;
+            if (m == null)
+                throw new InvalidOperationException(
+                    $"[MdixValidation] could not find a public static method named " +
+                    $"'{methodName}' on '{validatorType.Name}'. Check the method name for " +
+                    "typos, and that it's public and static.");
+            Validator = obj => (bool)m.Invoke(null, new[] { obj })!;
         }
     }
 
@@ -100,17 +109,54 @@ namespace MidManStudio.Mdix.Core
         private static readonly Dictionary<Type, TypeSerializationInfo> _cache = new();
         private static readonly object _cacheLock = new();
 
+        // A self-referential or cyclic POCO graph (Node.Parent: Node, or
+        // A.B: B / B.A: A) would otherwise recurse forever here -- an unfound
+        // *optional* property isn't a failure, it just keeps the type's
+        // default value, so nothing about a missing "parent.parent.parent..."
+        // path in the actual data ever stops the recursion on its own.
+        // StackOverflowException is not catchable in .NET; by the time that
+        // would fire, the whole process is already gone. Two independent
+        // guards below: a hard depth ceiling (catches everything, including
+        // pathological-but-technically-acyclic nesting), and explicit type
+        // cycle detection (gives a far more actionable error message for the
+        // common case -- "X refers back to itself" instead of "hit a limit").
+        private const int MaxNestingDepth = 32;
+
         // ── Deserialization ───────────────────────────────────────────────────
 
-        internal MdixResult<T> Deserialize<T>(MdixDatabase db, string? prefix = null)
+        internal MdixResult<T> Deserialize<T>(
+            MdixDatabase db, string? prefix = null,
+            HashSet<Type>? typeStack = null, int depth = 0)
         {
+            typeStack ??= new HashSet<Type>();
+
+            if (depth > MaxNestingDepth)
+                return MdixError.NativeError(
+                    $"Deserialize<{typeof(T).Name}>: nesting depth exceeded {MaxNestingDepth} " +
+                    "levels. This almost always means a self-referential or cyclic type graph " +
+                    "(a type whose property chain eventually refers back to itself) -- mark the " +
+                    "back-reference [MdixIgnore], or restructure so Mdix doesn't need to " +
+                    "represent it. If this is a genuinely, intentionally deep (but non-cyclic) " +
+                    "object graph, this ceiling is a constant in MdixSerializer.cs.");
+
+            // Value types can't directly contain a field of their own type (the
+            // compiler already rejects that as an unbounded-size type), so only
+            // reference types need cycle tracking here.
+            bool tracksCycle = !typeof(T).IsValueType && typeStack.Add(typeof(T));
+            if (!tracksCycle && !typeof(T).IsValueType)
+                return MdixError.NativeError(
+                    $"Deserialize<{typeof(T).Name}>: cyclic type graph detected -- " +
+                    $"'{typeof(T).Name}' already appears earlier in its own property chain " +
+                    "(directly or through another type). Mark the back-reference [MdixIgnore], " +
+                    "or restructure the type graph so it doesn't need to round-trip through Mdix.");
+
             try
             {
                 var typeInfo        = GetOrBuildTypeInfo(typeof(T));
                 var effectivePrefix = prefix ?? typeInfo.ClassPrefix ?? string.Empty;
 
                 if (typeInfo.PrimaryConstructor != null)
-                    return DeserializeViaCtor<T>(db, typeInfo, effectivePrefix);
+                    return DeserializeViaCtor<T>(db, typeInfo, effectivePrefix, typeStack, depth);
 
                 if (!typeof(T).IsValueType && !HasParameterlessCtor(typeof(T)))
                     return MdixError.NativeError(
@@ -120,7 +166,7 @@ namespace MidManStudio.Mdix.Core
                 var instance = Activator.CreateInstance<T>();
                 object boxed = instance!;
 
-                var err = FillProperties(db, typeInfo, effectivePrefix, ref boxed, null);
+                var err = FillProperties(db, typeInfo, effectivePrefix, ref boxed, null, typeStack, depth);
                 if (err.HasValue) return MdixResult<T>.Err(err.Value);
 
                 return MdixResult<T>.Ok((T)boxed);
@@ -129,10 +175,15 @@ namespace MidManStudio.Mdix.Core
             {
                 return MdixError.NativeError($"Deserialize<{typeof(T).Name}> failed: {ex.Message}");
             }
+            finally
+            {
+                if (tracksCycle) typeStack.Remove(typeof(T));
+            }
         }
 
         private MdixResult<T> DeserializeViaCtor<T>(
-            MdixDatabase db, TypeSerializationInfo typeInfo, string prefix)
+            MdixDatabase db, TypeSerializationInfo typeInfo, string prefix,
+            HashSet<Type> typeStack, int depth)
         {
             var ctor       = typeInfo.PrimaryConstructor!;
             var parameters = ctor.GetParameters();
@@ -150,7 +201,8 @@ namespace MidManStudio.Mdix.Core
                     continue;
                 }
 
-                var (found, value) = TryResolvePaths(db, param.ParameterType, pInfo.Paths, prefix);
+                var (found, value) = TryResolvePaths(
+                    db, param.ParameterType, pInfo.Paths, prefix, typeStack, depth);
                 if (found)
                 {
                     values[i] = value;
@@ -179,7 +231,7 @@ namespace MidManStudio.Mdix.Core
                 StringComparer.OrdinalIgnoreCase);
 
             object boxed = instance!;
-            var err = FillProperties(db, typeInfo, prefix, ref boxed, ctorNames);
+            var err = FillProperties(db, typeInfo, prefix, ref boxed, ctorNames, typeStack, depth);
             if (err.HasValue) return MdixResult<T>.Err(err.Value);
 
             return MdixResult<T>.Ok((T)boxed);
@@ -190,7 +242,9 @@ namespace MidManStudio.Mdix.Core
             TypeSerializationInfo typeInfo,
             string                prefix,
             ref object            boxed,
-            HashSet<string>?      skipNames)
+            HashSet<string>?      skipNames,
+            HashSet<Type>         typeStack,
+            int                   depth)
         {
             foreach (var prop in typeInfo.Properties)
             {
@@ -198,7 +252,8 @@ namespace MidManStudio.Mdix.Core
                 if (!prop.PropInfo.CanWrite) continue;
                 if (skipNames != null && skipNames.Contains(prop.PropInfo.Name)) continue;
 
-                var (found, value) = TryResolvePaths(db, prop.PropInfo.PropertyType, prop.Paths, prefix);
+                var (found, value) = TryResolvePaths(
+                    db, prop.PropInfo.PropertyType, prop.Paths, prefix, typeStack, depth);
 
                 if (found)
                 {
@@ -228,7 +283,8 @@ namespace MidManStudio.Mdix.Core
         // ── Path resolution ───────────────────────────────────────────────────
 
         private (bool found, object? value) TryResolvePaths(
-            MdixDatabase db, Type targetType, List<string> paths, string prefix)
+            MdixDatabase db, Type targetType, List<string> paths, string prefix,
+            HashSet<Type> typeStack, int depth)
         {
             foreach (var rawPath in paths)
             {
@@ -236,7 +292,7 @@ namespace MidManStudio.Mdix.Core
 
                 if (IsComplexType(targetType))
                 {
-                    var nested = DeserializeNested(db, targetType, fullPath);
+                    var nested = DeserializeNested(db, targetType, fullPath, typeStack, depth);
                     if (nested != null) return (true, nested);
                     continue;
                 }
@@ -438,10 +494,12 @@ namespace MidManStudio.Mdix.Core
 
         // ── Nested complex-type deserialization ───────────────────────────────
 
-        private object? DeserializeNested(MdixDatabase db, Type targetType, string prefix)
+        private object? DeserializeNested(
+            MdixDatabase db, Type targetType, string prefix,
+            HashSet<Type> typeStack, int depth)
         {
             var method = _deserializeMethod.MakeGenericMethod(targetType);
-            var result = method.Invoke(this, new object?[] { db, prefix });
+            var result = method.Invoke(this, new object?[] { db, prefix, typeStack, depth + 1 });
             if (result == null) return null;
 
             var resultType = result.GetType();
@@ -465,7 +523,18 @@ namespace MidManStudio.Mdix.Core
                 var effectivePrefix = prefix ?? typeInfo.ClassPrefix ?? string.Empty;
 
                 var pairs = new List<(string path, object? value)>();
-                CollectPairs(obj, typeInfo, effectivePrefix, pairs);
+                // Reference-identity tracking, not type tracking: the same
+                // *type* legitimately appearing twice in sibling positions
+                // (Team.Captain and Team.ViceCaptain, two different Player
+                // instances) is fine -- only the same *instance* recurring in
+                // its own ancestor chain (a real runtime reference cycle,
+                // e.g. child.Parent == parent while parent.Children contains
+                // child, an entirely ordinary pattern) is the problem. See
+                // Deserialize<T>'s matching guard for why this exists at all
+                // -- same uncatchable-StackOverflowException risk, this side
+                // just walks real instances instead of freshly building them.
+                var visited = new HashSet<object>(IdentityComparer.Instance);
+                CollectPairs(obj, typeInfo, effectivePrefix, pairs, visited, 0);
 
                 var flat    = pairs.Where(p => !p.path.Contains('.')).ToList();
                 var grouped = pairs.Where(p =>  p.path.Contains('.'))
@@ -498,24 +567,48 @@ namespace MidManStudio.Mdix.Core
 
         private void CollectPairs(
             object obj, TypeSerializationInfo typeInfo, string prefix,
-            List<(string, object?)> pairs)
+            List<(string, object?)> pairs, HashSet<object> visited, int depth)
         {
-            foreach (var prop in typeInfo.Properties)
+            if (depth > MaxNestingDepth)
+                throw new InvalidOperationException(
+                    $"Serialize: nesting depth exceeded {MaxNestingDepth} levels at path " +
+                    $"'{prefix}'. This almost always means a cyclic object graph (an instance " +
+                    "that eventually refers back to itself through its own properties) -- mark " +
+                    "the back-reference [MdixIgnore], or break the cycle before serializing.");
+
+            if (!visited.Add(obj))
+                throw new InvalidOperationException(
+                    $"Serialize: reference cycle detected at path '{prefix}' -- this object " +
+                    "already appears earlier in its own property chain. Mark the " +
+                    "back-reference [MdixIgnore], or break the cycle before serializing.");
+
+            try
             {
-                if (prop.IsIgnored) continue;
-
-                var value    = prop.PropInfo.GetValue(obj);
-                var propPath = BuildFullPath(prefix, prop.Paths[0]);
-
-                if (IsComplexType(prop.PropInfo.PropertyType) && value != null)
+                foreach (var prop in typeInfo.Properties)
                 {
-                    var nested = GetOrBuildTypeInfo(prop.PropInfo.PropertyType);
-                    CollectPairs(value, nested, propPath, pairs);
+                    if (prop.IsIgnored) continue;
+
+                    var value    = prop.PropInfo.GetValue(obj);
+                    var propPath = BuildFullPath(prefix, prop.Paths[0]);
+
+                    if (IsComplexType(prop.PropInfo.PropertyType) && value != null)
+                    {
+                        var nested = GetOrBuildTypeInfo(prop.PropInfo.PropertyType);
+                        CollectPairs(value, nested, propPath, pairs, visited, depth + 1);
+                    }
+                    else
+                    {
+                        pairs.Add((propPath, value));
+                    }
                 }
-                else
-                {
-                    pairs.Add((propPath, value));
-                }
+            }
+            finally
+            {
+                // Only removes what *this* call added -- a sibling branch
+                // reusing the same instance (not an ancestor cycle, e.g. two
+                // different lists both holding a shared reference) is fine
+                // and should be visitable again once this branch is done.
+                visited.Remove(obj);
             }
         }
 
@@ -655,6 +748,26 @@ namespace MidManStudio.Mdix.Core
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Reference-identity comparer for Serialize's cycle-detection set.
+        /// Hand-rolled rather than System.Collections.Generic.ReferenceEqualityComparer
+        /// -- that type was only added in .NET 5, and this project targets
+        /// netstandard2.1. RuntimeHelpers.GetHashCode always gives an
+        /// identity-based hash regardless of whether the object overrides
+        /// GetHashCode/Equals itself, which is exactly what's needed here
+        /// (some POCOs may reasonably define value-style equality that would
+        /// otherwise make two genuinely-different instances look identical to
+        /// this set).
+        /// </summary>
+        private sealed class IdentityComparer : IEqualityComparer<object>
+        {
+            internal static readonly IdentityComparer Instance = new();
+            private IdentityComparer() { }
+
+            public new bool Equals(object? x, object? y) => ReferenceEquals(x, y);
+            public int GetHashCode(object obj) => RuntimeHelpers.GetHashCode(obj);
+        }
 
         private static string BuildFullPath(string prefix, string path)
         {

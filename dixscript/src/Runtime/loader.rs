@@ -1,5 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+use std::sync::Mutex;
+use std::collections::HashMap;
 use chrono::Utc;
 use crate::Compiler::Core::Tokenizer::{Tokenizer, split_config_tokens};
 use crate::Compiler::Core::Config::{ConfigSectionHandler, DebugMode, OperationalSettings};
@@ -20,10 +23,57 @@ use super::array_homogenizer::homogenize_data_section;
 /// Internal loader for DixScript files.
 ///
 /// Each `DixLoader` owns an isolated `ErrorManager` so loading multiple
-/// files never mixes error state between calls.
+/// files never mixes error state between calls. `load_cache` is likewise
+/// per-instance for the same reason — see `DixLoadOptions.enable_caching`
+/// and `load_text`'s use of it.
 pub struct DixLoader {
     error_manager: ErrorManager,
     key_resolver:  KeyFileResolver,
+    // Keyed by file path -> (mtime at cache time, the loaded result).
+    // Mutex because load_text takes &self, not &mut self (DixLoader is
+    // typically held behind a shared reference — see hot_reload.rs, which
+    // calls load_text repeatedly through one long-lived instance).
+    load_cache: Mutex<HashMap<String, (SystemTime, DixData)>>,
+}
+
+/// Soft cap on distinct cached file paths before a full reset -- same
+/// bounded-cache pattern used elsewhere in this codebase (MdixStringCache,
+/// MdixRegex's compiled-pattern cache on the C# side). Realistically an
+/// app loads a small, fixed set of distinct paths, so this is generous
+/// headroom rather than an expected steady-state size.
+const MAX_CACHED_FILES: usize = 256;
+
+/// Bridges `DixLoadOptions.compatibility_mode`
+/// (`Compiler::VersionControl::CompatibilityMode`: Strict/Tolerant/BestEffort)
+/// to the type `OperationalSettings` actually holds
+/// (`Compiler::AST::data_types::CompatibilityMode`: Strict/BestEffort/Permissive).
+/// These are two distinct enums with overlapping names in different modules,
+/// not the same type reused across the crate — Rust won't implicitly
+/// coerce between them, and conflating them by name alone would be wrong.
+/// Strict and BestEffort map across 1:1 by name; `Tolerant` ("warn but
+/// continue", per its own doc comment) has no exact same-named counterpart
+/// on the AST side, so it maps to `Permissive` as the closest available
+/// match. Revisit this mapping if the two enums' intended distinctions
+/// ever get reconciled into one type.
+///
+/// Separately worth knowing: as of this writing, `OperationalSettings.
+/// compatibility_mode` itself is only ever read for `Debug`-formatting
+/// into log lines (general_parser.rs, general_semantics_analyzer.rs) — it
+/// doesn't yet gate any actual parsing/analysis behavior anywhere in the
+/// compiler, regardless of how it's set (this was already true of the
+/// `@CONFIG(compatibility_mode: ...)` source-level setting before this
+/// change; this function only makes `DixLoadOptions.compatibility_mode`
+/// as "live" as that already-decorative path, not more).
+fn to_ast_compatibility_mode(
+    mode: crate::Compiler::VersionControl::CompatibilityMode,
+) -> crate::Compiler::AST::data_types::CompatibilityMode {
+    use crate::Compiler::VersionControl::CompatibilityMode as LoadMode;
+    use crate::Compiler::AST::data_types::CompatibilityMode as AstMode;
+    match mode {
+        LoadMode::Strict     => AstMode::Strict,
+        LoadMode::BestEffort => AstMode::BestEffort,
+        LoadMode::Tolerant   => AstMode::Permissive,
+    }
 }
 
 impl DixLoader {
@@ -31,25 +81,7 @@ impl DixLoader {
         DixLoader {
             error_manager: ErrorManager::new_isolated(),
             key_resolver:  KeyFileResolver::new(),
-        }
-    }
-
-    /// Same as `new`, but suppresses all `eprintln!` log output (Info lines,
-    /// per-error Lexer/Parser/AstEnhancement diagnostics, etc.) for every
-    /// call made through this loader.
-    ///
-    /// Use this for fuzzing harnesses, benchmarks, or any other hot-loop
-    /// caller invoking `load_from_str`/`load_text` at high frequency — the
-    /// default loader logs unconditionally on every call (even with no
-    /// `@CONFIG` debug settings in the source), and at fuzzing throughput
-    /// that unbuffered stderr writing dominates wall-clock time and floods
-    /// whatever is capturing output (a CI log, a terminal). Parsing behavior
-    /// and returned `Result`s are identical either way — this only silences
-    /// the logging side effect.
-    pub fn new_silent() -> Self {
-        DixLoader {
-            error_manager: ErrorManager::new_isolated_silent(),
-            key_resolver:  KeyFileResolver::new(),
+            load_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -75,6 +107,32 @@ impl DixLoader {
             return Err(msg);
         }
 
+        // enable_caching: "cache loaded data for hot-reload scenarios" (per
+        // its own doc comment) -- if the file's mtime matches what it was
+        // the last time *this* DixLoader instance loaded it, skip the
+        // read+compile+DLM pipeline entirely and hand back a clone of the
+        // cached result. A cache miss (new path, or mtime changed) just
+        // falls through to the normal load below, so this can only ever
+        // return stale-but-self-consistent data if the file changes inside
+        // the narrow window between this mtime read and the read below --
+        // and even then, the *next* call's mtime check would no longer
+        // match and would correctly miss, not compound the staleness.
+        let current_mtime = fs::metadata(mdix_path).ok().and_then(|m| m.modified().ok());
+
+        if options.enable_caching {
+            if let Some(mtime) = current_mtime {
+                if let Ok(cache) = self.load_cache.lock() {
+                    if let Some((cached_mtime, cached_data)) = cache.get(mdix_path) {
+                        if *cached_mtime == mtime {
+                            self.error_manager.log_info(
+                                "Serving cached load (enable_caching, file unchanged)");
+                            return Ok(cached_data.clone());
+                        }
+                    }
+                }
+            }
+        }
+
         let source_text = fs::read_to_string(mdix_path).map_err(|e| {
             let msg = format!("Failed to read file {}: {}", mdix_path, e);
             self.error_manager.add_runtime_error(
@@ -86,20 +144,54 @@ impl DixLoader {
             msg
         })?;
 
-        let compiled_ast = self.compile_source(&source_text, mdix_path)?;
-        let file_gen     = self.determine_dlm_behavior(&compiled_ast, mdix_path, options)?;
+        let compiled_ast = self.compile_source(
+            &source_text, mdix_path, to_ast_compatibility_mode(options.compatibility_mode),
+        )?;
+
+        // throw_on_missing_sections: "expected section" has no crate-wide
+        // definition (every DixScript section is independently optional by
+        // design), so this checks specifically for @DATA -- the one
+        // section nearly every real .mdix file has, and whose total
+        // absence is far more likely to mean "wrong/corrupt/truncated
+        // file" than "intentionally data-free file". If that's not the
+        // section you meant, this is the one place to adjust.
+        if options.throw_on_missing_sections && compiled_ast.data.is_none() {
+            let msg = format!("Expected @DATA section not found in '{}'", mdix_path);
+            self.error_manager.add_runtime_error(
+                RuntimeErrorType::ResourceNotFound,
+                msg.clone(),
+                Some("DixLoader.load_text".to_string()),
+                0, 0, vec![],
+                Some("Add an @DATA(...) section, or set \
+                      throw_on_missing_sections = false".to_string()),
+            );
+            return Err(msg);
+        }
+
+        let file_gen = self.determine_dlm_behavior(&compiled_ast, mdix_path, options)?;
 
         self.log_generated_files(&file_gen);
         self.error_manager.log_info("Text file loaded successfully");
 
-        Ok(DixData::from_ast(
+        let data = DixData::from_ast(
             file_gen.resolved_ast,
             "1.0.0".to_string(),
             Utc::now(),
             file_gen.is_encrypted,
             file_gen.is_compressed,
             file_gen.applied_modules,
-        ))
+        );
+
+        if options.enable_caching {
+            if let Some(mtime) = current_mtime {
+                if let Ok(mut cache) = self.load_cache.lock() {
+                    if cache.len() >= MAX_CACHED_FILES { cache.clear(); }
+                    cache.insert(mdix_path.to_string(), (mtime, data.clone()));
+                }
+            }
+        }
+
+        Ok(data)
     }
 
     pub fn load_from_str(
@@ -122,7 +214,22 @@ impl DixLoader {
             return Err(msg);
         }
 
-        let compiled_ast = self.compile_source(source, "<string_input>")?;
+        let compiled_ast = self.compile_source(
+            source, "<string_input>", to_ast_compatibility_mode(options.compatibility_mode),
+        )?;
+
+        if options.throw_on_missing_sections && compiled_ast.data.is_none() {
+            let msg = "Expected @DATA section not found in source string".to_string();
+            self.error_manager.add_runtime_error(
+                RuntimeErrorType::ResourceNotFound,
+                msg.clone(),
+                Some("DixLoader.load_from_str".to_string()),
+                0, 0, vec![],
+                Some("Add an @DATA(...) section, or set \
+                      throw_on_missing_sections = false".to_string()),
+            );
+            return Err(msg);
+        }
 
         self.error_manager.log_info("String source loaded successfully");
 
@@ -161,7 +268,9 @@ impl DixLoader {
         source: &str,
         source_label: &str,
     ) -> Result<DLMPipelineResult, String> {
-        let ast = self.compile_source(source, source_label)?;
+        let ast = self.compile_source(
+            source, source_label, crate::Compiler::AST::data_types::CompatibilityMode::Strict,
+        )?;
 
         let mut ast_with_security = ast.clone();
         ast_with_security.security = Some(
@@ -381,7 +490,9 @@ impl DixLoader {
         let source_text = fs::read_to_string(file_path)
             .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
 
-        self.compile_source(&source_text, file_path)
+        self.compile_source(
+            &source_text, file_path, crate::Compiler::AST::data_types::CompatibilityMode::Strict,
+        )
     }
 
     /// String-based sibling of `compile_to_resolved_ast` — same pipeline
@@ -403,7 +514,9 @@ impl DixLoader {
             return Err(format!("'{}': source is empty", label));
         }
 
-        self.compile_source(source, label)
+        self.compile_source(
+            source, label, crate::Compiler::AST::data_types::CompatibilityMode::Strict,
+        )
     }
 
     // ── Shared decryption + deserialization ───────────────────────────────────
@@ -480,10 +593,12 @@ impl DixLoader {
         &self,
         source_text: &str,
         source_file_path: &str,
+        compatibility_mode: crate::Compiler::AST::data_types::CompatibilityMode,
     ) -> Result<DixScript, String> {
         // Stage 1: tokenize the full source with minimal initial settings.
         let initial_settings = OperationalSettings {
             source_file_path: Some(source_file_path.to_string()),
+            compatibility_mode,
             ..OperationalSettings::default()
         };
 
@@ -908,4 +1023,4 @@ mod tests {
         let errors = loader.error_manager.get_runtime_errors();
         assert_eq!(errors.len(), 1, "only the most recent load's error should remain");
     }
-        }
+                }

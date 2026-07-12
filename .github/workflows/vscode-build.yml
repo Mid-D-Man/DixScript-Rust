@@ -1,6 +1,19 @@
 name: DixScript — VS Code Extension Build
 
 on:
+  push:
+    branches: [master, main, develop]
+    paths:
+      - "mdix-vscode/**"
+      - "mdix-lsp/**"
+      - "dixscript/**"
+      - ".github/workflows/vscode-ext-build.yml"
+  pull_request:
+    branches: [master, main]
+    paths:
+      - "mdix-vscode/**"
+      - "mdix-lsp/**"
+      - "dixscript/**"
   workflow_dispatch:
 
 permissions:
@@ -37,7 +50,11 @@ jobs:
           - os: macos-latest      # GitHub's current macos-latest is arm64
             vsce_target: darwin-arm64
             bin_name: mdix-lsp
-          - os: macos-13          # last Intel-based hosted macOS image
+          - os: macos-15-intel    # macos-13 was fully retired Dec 2025 (see
+                                   # github.blog/changelog/2025-09-19-github-
+                                   # actions-macos-13-runner-image-is-closing-
+                                   # down) -- macos-15-intel is GitHub's
+                                   # current label for hosted Intel macOS
             vsce_target: darwin-x64
             bin_name: mdix-lsp
           - os: windows-latest

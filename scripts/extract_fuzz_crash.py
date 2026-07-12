@@ -91,8 +91,8 @@ SIGNAL_PATTERNS = [
     r"Test unit written to",
     r"artifact_prefix",
     r"deadly signal",
-    r"out-of-memory",
-    r"timeout after",
+    r"ERROR: libFuzzer: out-of-memory",
+    r"ERROR: libFuzzer: timeout after",
     r"^==\d+==",
     r"^cargo-fuzz:",
     r"^thread '.*' panicked",
@@ -100,8 +100,8 @@ SIGNAL_PATTERNS = [
 ]
 SIGNAL_RE = re.compile("|".join(f"(?:{p})" for p in SIGNAL_PATTERNS))
 CRASH_MARKER_RE = re.compile(
-    r"panicked at|deadly signal|ERROR: libFuzzer|SUMMARY:|out-of-memory|"
-    r"timeout after|error: process didn't exit successfully"
+    r"panicked at|deadly signal|ERROR: libFuzzer|SUMMARY:\s*(AddressSanitizer|libFuzzer)|"
+    r"error: process didn't exit successfully"
 )
 
 OTHER_NOISE_PATTERNS = [
@@ -152,46 +152,80 @@ def extract(text):
     in_error_block = False
     block_line_count = 0
     bullets_seen = 0
+    seen_source_label = False
+    raw_dump_consumed = False
 
     for i, line in enumerate(lines):
         if GH_TRUNCATION_RE.search(line):
             truncated_by_github = True
             continue
 
-        if SIGNAL_RE.search(line):
-            kept.append((i, line))
-            in_error_block = False
-            continue
-
+        # Block-suppression state is checked BEFORE signal detection, not
+        # after. This matters: a DixLoader diagnostic block's "Source:"
+        # section echoes the raw fuzz-generated input verbatim, and
+        # libFuzzer's dictionary mutator (the "DE:" entries in its own
+        # progress lines) literally lifts string constants out of the
+        # compiled binary — including error-message text like "...timeout
+        # after {}s..." from cloud_storage_provider.rs — and splices
+        # fragments of them into future inputs. That garbage can and does
+        # coincidentally contain substrings like "timeout after" or
+        # something matching the backtrace-frame pattern. If SIGNAL_RE were
+        # checked against that echoed content, it would (and did) produce
+        # false "genuine crash" verdicts. So: once we're inside a
+        # recognized block, we trust nothing in it — not even a line that
+        # looks like a crash signal — until the block's own (DixLoader-
+        # authored, trustworthy) structure says it's over.
         if in_error_block:
+            block_line_count += 1
+            noise_count += 1
+
+            if seen_source_label and not raw_dump_consumed:
+                # This is the ONE line immediately after "Source:" — the
+                # raw fuzz-input dump. Blindly consumed, no pattern checks
+                # of any kind: it is Byzantine, fuzzer-controlled content
+                # and cannot be trusted to mean anything it looks like it
+                # means, including "blank" (fuzzers explore empty/
+                # whitespace-only inputs too) or "this looks like a panic".
+                raw_dump_consumed = True
+                continue
+
+            if line.strip() == "Source:":
+                seen_source_label = True
+                continue
+
             if BULLET_RE.match(line):
-                noise_count += 1
-                block_line_count += 1
                 bullets_seen += 1
                 if bullets_seen >= 2:
                     in_error_block = False
                 continue
-            if block_line_count < MAX_BLOCK_LINES:
-                # Still inside the block's free-form region (Message/
-                # Source/the raw fuzz-input dump/caret/Suggestion). That
-                # raw dump is fuzzer-controlled and can itself look like
-                # anything — including a blank line — so blank lines are
-                # deliberately NOT treated as a terminator here; only the
-                # schema's two "  - " bullets (or the safety valve below)
-                # end the block.
-                noise_count += 1
-                block_line_count += 1
+
+            if (not seen_source_label or raw_dump_consumed) and BLANK_RE.match(line):
+                # Safe to trust a blank line as "block over" here: either
+                # we never had a Source: section at all (the short
+                # header+Message-only block shape), or we're past the one
+                # untrusted raw-dump line and back to DixLoader-authored
+                # text (caret/Suggestion/Quick Fixes).
+                in_error_block = False
                 continue
-            # Safety valve: shape didn't match what we expected within a
-            # reasonable number of lines. Stop suppressing and let this
-            # line be classified normally below instead of risking an
-            # unbounded/incorrect swallow.
+
+            if block_line_count < MAX_BLOCK_LINES:
+                continue
+
+            # Safety valve: shape didn't resolve within a sane number of
+            # lines. Stop suppressing and let this same line be classified
+            # normally below instead of risking an unbounded swallow.
             in_error_block = False
+
+        if SIGNAL_RE.search(line):
+            kept.append((i, line))
+            continue
 
         if BLOCK_START_RE.search(line):
             in_error_block = True
             block_line_count = 0
             bullets_seen = 0
+            seen_source_label = False
+            raw_dump_consumed = False
             noise_count += 1
             continue
 

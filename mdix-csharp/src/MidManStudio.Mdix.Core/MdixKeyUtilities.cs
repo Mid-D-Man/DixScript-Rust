@@ -320,14 +320,20 @@ namespace MidManStudio.Mdix.Core
 
             try
             {
-                using var client  = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-                var content = await client.GetStringAsync(url
-#if NETCOREAPP3_0_OR_GREATER || NETSTANDARD2_1
-                    // CancellationToken overload available on newer runtimes only
-#endif
-                ).ConfigureAwait(false);
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
 
-                ct.ThrowIfCancellationRequested();
+                // HttpClient.GetStringAsync's CancellationToken overload isn't
+                // available pre-.NET 5 (this project targets netstandard2.1),
+                // so this goes through GetAsync(url, ct) instead -- that
+                // overload has existed since HttpClient's introduction, and
+                // with the default HttpCompletionOption (ResponseContentRead)
+                // it awaits the full body as part of the same cancellable
+                // task, not just the response headers, so ct actually aborts
+                // the whole operation early instead of only being checked
+                // after the fact.
+                using var response = await client.GetAsync(url, ct).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+                var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
                 var validationResult = ValidateKeyFileContent(content);
                 return validationResult.IsFailure

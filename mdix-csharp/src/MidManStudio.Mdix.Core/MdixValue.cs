@@ -194,8 +194,17 @@ namespace MidManStudio.Mdix.Core
     public readonly struct MdixRegex : IEquatable<MdixRegex>
     {
         // Compiled instances are expensive — cache them keyed by pattern.
+        // Soft-capped the same way MdixStringCache is (full reset on
+        // overflow, not LRU) -- arguably more important here than there,
+        // since RegexOptions.Compiled generates real dynamic IL per unique
+        // pattern, heavier per-entry than a cached byte array. Only matters
+        // if pattern strings themselves get constructed dynamically; static
+        // config patterns (the common case) never come close to this.
         private static readonly ConcurrentDictionary<string, Regex> CompiledCache =
             new ConcurrentDictionary<string, Regex>();
+
+        /// <summary>Soft cap on distinct cached compiled patterns before a full reset.</summary>
+        public static int MaxCachedPatterns { get; set; } = 512;
 
         /// <summary>The raw pattern string as stored in the data.</summary>
         public string Pattern { get; }
@@ -214,6 +223,11 @@ namespace MidManStudio.Mdix.Core
         {
             try
             {
+                if (CompiledCache.TryGetValue(Pattern, out var existing))
+                    return MdixResult<Regex>.Ok(existing);
+
+                if (CompiledCache.Count >= MaxCachedPatterns) CompiledCache.Clear();
+
                 var compiled = CompiledCache.GetOrAdd(
                     Pattern,
                     p => new Regex(p, RegexOptions.Compiled, TimeSpan.FromSeconds(5)));

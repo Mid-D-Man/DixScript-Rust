@@ -85,6 +85,26 @@ impl DixLoader {
         }
     }
 
+    /// Same as `new`, but suppresses all `eprintln!` log output (Info lines,
+    /// per-error Lexer/Parser/AstEnhancement diagnostics, etc.) for every
+    /// call made through this loader.
+    ///
+    /// Use this for fuzzing harnesses, benchmarks, or any other hot-loop
+    /// caller invoking `load_from_str`/`load_text` at high frequency — the
+    /// default loader logs unconditionally on every call (even with no
+    /// `@CONFIG` debug settings in the source), and at fuzzing throughput
+    /// that unbuffered stderr writing dominates wall-clock time and floods
+    /// whatever is capturing output (a CI log, a terminal). Parsing behavior
+    /// and returned `Result`s are identical either way — this only silences
+    /// the logging side effect.
+    pub fn new_silent() -> Self {
+        DixLoader {
+            error_manager: ErrorManager::new_isolated_silent(),
+            key_resolver:  KeyFileResolver::new(),
+            load_cache: Mutex::new(HashMap::new()),
+        }
+    }
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     pub fn load_text(
@@ -1023,4 +1043,4 @@ mod tests {
         let errors = loader.error_manager.get_runtime_errors();
         assert_eq!(errors.len(), 1, "only the most recent load's error should remain");
     }
-                }
+        }

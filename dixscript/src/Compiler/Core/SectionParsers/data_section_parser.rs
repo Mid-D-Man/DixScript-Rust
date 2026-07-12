@@ -33,13 +33,18 @@ pub struct DataSectionParser<'a> {
     iteration_count: usize,
     max_iterations: usize,
     has_seen_grouped_data: bool,
-    current_object_nesting_depth: usize,
+    current_container_nesting_depth: usize,
     current_function_call_depth: usize,
     pending_angle: bool,
     pending_equal: bool, // set when '=' was consumed as part of a '>>=' token
 }
 
-const MAX_OBJECT_NESTING_DEPTH: usize = 64;
+// Shared between object literals ({...}) and array literals ([...]) --
+// they can nest into each other (`{a:[{a:[...]}]}`), so a single shared
+// counter is what actually bounds combined depth. Two separate per-kind
+// counters would each individually cap at this value while still letting
+// alternating object/array nesting recurse to roughly double the depth.
+const MAX_CONTAINER_NESTING_DEPTH: usize = 64;
 const MAX_FUNCTION_CALL_DEPTH: usize = 10;
 const MAX_ITERATIONS_PER_TOKEN: usize = 3;
 const ABSOLUTE_MAX_ITERATIONS: usize = 500_000;
@@ -82,7 +87,7 @@ pub fn new_with_error_manager(
         iteration_count: 0,
         max_iterations,
         has_seen_grouped_data: false,
-        current_object_nesting_depth: 0,
+        current_container_nesting_depth: 0,
         current_function_call_depth: 0,
         pending_angle: false,
         pending_equal: false,
@@ -175,7 +180,7 @@ fn reset_parse_state(&mut self) {
     self.stuck_count = 0;
     self.iteration_count = 0;
     self.has_seen_grouped_data = false;
-    self.current_object_nesting_depth = 0;
+    self.current_container_nesting_depth = 0;
     self.current_function_call_depth = 0;
     self.pending_angle = false;
     self.pending_equal = false;
@@ -2046,33 +2051,33 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
     }
 
     fn parse_object_literal(&mut self) -> Option<Value> {
-        self.current_object_nesting_depth += 1;
+        self.current_container_nesting_depth += 1;
 
         let obj_pos = Position::from_token(self.current());
 
-        if self.current_object_nesting_depth > MAX_OBJECT_NESTING_DEPTH {
+        if self.current_container_nesting_depth > MAX_CONTAINER_NESTING_DEPTH {
             let current = self.current().clone();
             self.handle_parse_error(
                 ParseErrorType::SectionSyntaxError,
                 &format!(
-                    "Maximum object nesting depth ({}) exceeded. Consider flattening your data structure.",
-                    MAX_OBJECT_NESTING_DEPTH
+                    "Maximum nesting depth ({}) exceeded. Consider flattening your data structure.",
+                    MAX_CONTAINER_NESTING_DEPTH
                 ),
                 &current,
             );
-            self.current_object_nesting_depth -= 1;
+            self.current_container_nesting_depth -= 1;
             return None;
         }
 
         if self.debug_config.is_verbose {
             self.error_manager.log_info(&format!(
                 "Parsing object literal — depth {}/{}",
-                self.current_object_nesting_depth, MAX_OBJECT_NESTING_DEPTH
+                self.current_container_nesting_depth, MAX_CONTAINER_NESTING_DEPTH
             ));
         }
 
         if !self.match_and_consume_symbol('{') {
-            self.current_object_nesting_depth -= 1;
+            self.current_container_nesting_depth -= 1;
             return None;
         }
 
@@ -2090,7 +2095,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
 
             let object_property = self.parse_object_property();
             if object_property.is_none() && self.should_halt_section() {
-                self.current_object_nesting_depth -= 1;
+                self.current_container_nesting_depth -= 1;
                 return None;
             }
 
@@ -2110,7 +2115,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                     &current,
                 );
                 if self.should_halt_section() {
-                    self.current_object_nesting_depth -= 1;
+                    self.current_container_nesting_depth -= 1;
                     return None;
                 }
                 self.ensure_progress();
@@ -2125,12 +2130,12 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 &current,
             );
             if self.should_halt_section() {
-                self.current_object_nesting_depth -= 1;
+                self.current_container_nesting_depth -= 1;
                 return None;
             }
         }
 
-        self.current_object_nesting_depth -= 1;
+        self.current_container_nesting_depth -= 1;
         self.log_verbose("Successfully parsed object literal");
         Some(Value::Object {
             properties: object_properties,
@@ -2252,11 +2257,27 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
 }
 
     fn parse_array_literal(&mut self) -> Option<Value> {
+        self.current_container_nesting_depth += 1;
         self.log_verbose("Parsing array literal");
 
         let array_pos = Position::from_token(self.current());
 
+        if self.current_container_nesting_depth > MAX_CONTAINER_NESTING_DEPTH {
+            let current = self.current().clone();
+            self.handle_parse_error(
+                ParseErrorType::SectionSyntaxError,
+                &format!(
+                    "Maximum nesting depth ({}) exceeded. Consider flattening your data structure.",
+                    MAX_CONTAINER_NESTING_DEPTH
+                ),
+                &current,
+            );
+            self.current_container_nesting_depth -= 1;
+            return None;
+        }
+
         if !self.match_and_consume_symbol('[') {
+            self.current_container_nesting_depth -= 1;
             return None;
         }
 
@@ -2274,6 +2295,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
 
             let array_value = self.parse_property_value();
             if array_value.is_none() && self.should_halt_section() {
+                self.current_container_nesting_depth -= 1;
                 return None;
             }
 
@@ -2287,6 +2309,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                     &current,
                 );
                 if self.should_halt_section() {
+                    self.current_container_nesting_depth -= 1;
                     return None;
                 }
                 while !self.is_at_end()
@@ -2309,6 +2332,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                     &current,
                 );
                 if self.should_halt_section() {
+                    self.current_container_nesting_depth -= 1;
                     return None;
                 }
                 self.ensure_progress();
@@ -2323,10 +2347,12 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 &current,
             );
             if self.should_halt_section() {
+                self.current_container_nesting_depth -= 1;
                 return None;
             }
         }
 
+        self.current_container_nesting_depth -= 1;
         self.log_verbose("Successfully parsed array literal");
         Some(Value::Array {
             values: array_values,
@@ -3293,4 +3319,4 @@ enum DataEntryType {
     TableProperty,
     GroupArray,
     ObjectProperty,
-}
+                }

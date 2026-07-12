@@ -1,4 +1,3 @@
-
 //!  Parser for the `@QuickFunctions(...)`
 //! ```text,no_run
 //! SPEC (BENF grammar):
@@ -30,6 +29,12 @@ use std::collections::HashMap;
 const MAX_ITERATIONS_PER_TOKEN: usize = 3;
 const ABSOLUTE_MAX_ITERATIONS: usize = 1_000_000;
 const MAX_STUCK_COUNT: usize = 3;
+// Same guard, same limit, as data_section_parser.rs's MAX_CONTAINER_NESTING_DEPTH
+// -- this parser has its own entirely separate parse_array_literal /
+// parse_object_literal (not shared with the DATA section parser), so it
+// needed its own separate depth guard too. See parse_array_literal's own
+// comment for why this file needed one at all.
+const MAX_CONTAINER_NESTING_DEPTH: usize = 64;
 
 lazy_static::lazy_static! {
     static ref OPERATOR_PRECEDENCE: HashMap<&'static str, (i32, bool)> = {
@@ -83,6 +88,7 @@ pub struct QuickFuncsSectionParser<'a> {
     iteration_count: usize,
     pending_angle: bool,
     pending_equal: bool, // set when '=' was consumed as part of a '>>=' token
+    current_container_nesting_depth: usize,
 }
 
 // =============================================================================
@@ -119,6 +125,7 @@ impl<'a> QuickFuncsSectionParser<'a> {
         iteration_count: 0,
         pending_angle: false,
         pending_equal: false,
+        current_container_nesting_depth: 0,
     }
 }
 
@@ -1247,6 +1254,41 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             };
         }
 
+        // Ternary chains (a?b:a?b:a?b:...) and right-associative operator
+        // chains both recurse here with real, linear call-stack depth --
+        // unlike a long *left*-associative chain (1+1+1+1+...), where each
+        // recursive call for the right-hand side returns immediately (its
+        // own min_precedence check rejects the next same-precedence
+        // operator), so the outer while loop absorbs the whole chain
+        // iteratively without the stack ever growing. This guard only
+        // trips on genuine depth, not on chain length -- verified that
+        // distinction by hand-tracing both cases before adding this.
+        //
+        // Neither of those two paths touches a bracket/paren/function-call
+        // at all, so they were completely unprotected by the guards
+        // already added to parse_array_literal / parse_object_literal /
+        // the '(' arm in parse_primary_base / parse_function_arguments --
+        // this is the one chokepoint that actually covers everything,
+        // those other guards are now redundant-but-harmless defense in depth.
+        self.current_container_nesting_depth += 1;
+        if self.current_container_nesting_depth > MAX_CONTAINER_NESTING_DEPTH {
+            let cur = self.current().clone();
+            self.error_manager.add_parse_error(
+                ParseErrorType::UnexpectedToken,
+                format!(
+                    "Maximum nesting depth ({}) exceeded. Consider flattening this expression.",
+                    MAX_CONTAINER_NESTING_DEPTH
+                ),
+                cur.line, cur.column, None,
+                self.get_source_line(&cur),
+            );
+            self.current_container_nesting_depth -= 1;
+            return Expression::Value {
+                value: Value::Null { position: Position::UNKNOWN },
+                position: Position::UNKNOWN,
+            };
+        }
+
         let mut left = self.parse_unary_or_primary();
         self.skip_whitespace();
 
@@ -1277,6 +1319,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                         None,
                         self.get_source_line(&cur),
                     );
+                    self.current_container_nesting_depth -= 1;
                     return left;
                 }
 
@@ -1315,6 +1358,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
             self.skip_whitespace();
         }
 
+        self.current_container_nesting_depth -= 1;
         left
     }
 
@@ -1813,7 +1857,29 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                 self.position = saved;
                 self.advance();
                 self.skip_whitespace();
+
+                self.current_container_nesting_depth += 1;
+                if self.current_container_nesting_depth > MAX_CONTAINER_NESTING_DEPTH {
+                    let cur = self.current().clone();
+                    self.error_manager.add_parse_error(
+                        ParseErrorType::UnexpectedToken,
+                        format!(
+                            "Maximum nesting depth ({}) exceeded. Consider flattening this expression.",
+                            MAX_CONTAINER_NESTING_DEPTH
+                        ),
+                        cur.line, cur.column, None,
+                        self.get_source_line(&cur),
+                    );
+                    self.current_container_nesting_depth -= 1;
+                    return Expression::Value {
+                        value: Value::Null { position: tok_pos },
+                        position: tok_pos,
+                    };
+                }
+
                 let inner = self.parse_expression(0);
+                self.current_container_nesting_depth -= 1;
+
                 self.skip_whitespace();
                 if !self.expect_symbol(')') {
                     return Expression::Value {
@@ -1976,7 +2042,24 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
     fn parse_array_literal(&mut self) -> Value {
         let arr_pos = Position::from_token(self.current());
 
+        self.current_container_nesting_depth += 1;
+        if self.current_container_nesting_depth > MAX_CONTAINER_NESTING_DEPTH {
+            let cur = self.current().clone();
+            self.error_manager.add_parse_error(
+                ParseErrorType::UnexpectedToken,
+                format!(
+                    "Maximum nesting depth ({}) exceeded. Consider flattening your data structure.",
+                    MAX_CONTAINER_NESTING_DEPTH
+                ),
+                cur.line, cur.column, None,
+                self.get_source_line(&cur),
+            );
+            self.current_container_nesting_depth -= 1;
+            return Value::Array { values: Vec::new(), position: arr_pos };
+        }
+
         if !self.expect_symbol('[') {
+            self.current_container_nesting_depth -= 1;
             return Value::Array { values: Vec::new(), position: arr_pos };
         }
 
@@ -2006,13 +2089,31 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
 
         if self.check_symbol(']') { self.advance(); }
 
+        self.current_container_nesting_depth -= 1;
         Value::Array { values: items, position: arr_pos }
     }
 
     fn parse_object_literal(&mut self) -> Value {
     let obj_pos = Position::from_token(self.current());
 
+    self.current_container_nesting_depth += 1;
+    if self.current_container_nesting_depth > MAX_CONTAINER_NESTING_DEPTH {
+        let cur = self.current().clone();
+        self.error_manager.add_parse_error(
+            ParseErrorType::UnexpectedToken,
+            format!(
+                "Maximum nesting depth ({}) exceeded. Consider flattening your data structure.",
+                MAX_CONTAINER_NESTING_DEPTH
+            ),
+            cur.line, cur.column, None,
+            self.get_source_line(&cur),
+        );
+        self.current_container_nesting_depth -= 1;
+        return Value::Object { properties: Vec::new(), position: obj_pos };
+    }
+
     if !self.expect_symbol('{') {
+        self.current_container_nesting_depth -= 1;
         return Value::Object { properties: Vec::new(), position: obj_pos };
     }
 
@@ -2109,6 +2210,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
 
     if self.check_symbol('}') { self.advance(); }
 
+    self.current_container_nesting_depth -= 1;
     Value::Object { properties, position: obj_pos }
 }
     fn parse_tuple_constructor(&mut self) -> Expression {
@@ -2336,6 +2438,22 @@ fn parse_blob_constructor(&mut self) -> Expression {
             return args;
         }
 
+        self.current_container_nesting_depth += 1;
+        if self.current_container_nesting_depth > MAX_CONTAINER_NESTING_DEPTH {
+            let cur = self.current().clone();
+            self.error_manager.add_parse_error(
+                ParseErrorType::UnexpectedToken,
+                format!(
+                    "Maximum nesting depth ({}) exceeded. Consider flattening this call chain.",
+                    MAX_CONTAINER_NESTING_DEPTH
+                ),
+                cur.line, cur.column, None,
+                self.get_source_line(&cur),
+            );
+            self.current_container_nesting_depth -= 1;
+            return args;
+        }
+
         loop {
             self.skip_whitespace();
             args.push(self.parse_expression(0));
@@ -2369,6 +2487,7 @@ fn parse_blob_constructor(&mut self) -> Expression {
             );
         }
 
+        self.current_container_nesting_depth -= 1;
         args
     }
 
@@ -3237,4 +3356,4 @@ fn parse_interpolated_sub_expr(
     );
 
     sub_parser.parse_expression(0)
-}
+    }

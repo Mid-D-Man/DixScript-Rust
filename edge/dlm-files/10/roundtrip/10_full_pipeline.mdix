@@ -1,0 +1,23 @@
+@CONFIG(
+  author -> "DLM Test — Full Pipeline: GZip + AES-256 + Enhanced Audit",
+  compatibility_mode -> "strict",
+  created -> "2026-07-13T11:04:18+00:00",
+  debug_mode -> "off",
+  encoding -> "utf-8",
+  error_handling -> "halt",
+  features -> "advanced",
+  version -> "1.0.0"
+)
+
+@DATA(
+  active = true,
+  app_name = "DLMTestApp",
+  environment = "test",
+  note = "full_pipeline_gzip_aes256_audit",
+  port = 8443,
+  score = 9.87654321,
+  version = "1.0.0",
+
+  server: host = "dlm.test.internal", ssl = true, timeout = 30,
+  endpoints:: "https://api.test/v1/health", "https://api.test/v1/status", "https://api.test/v1/metrics"
+)

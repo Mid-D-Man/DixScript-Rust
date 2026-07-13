@@ -1,0 +1,23 @@
+@CONFIG(
+  author -> "DLM Test — GZip Compression then AES-256 Encryption",
+  compatibility_mode -> "strict",
+  created -> "2026-07-13T11:04:14+00:00",
+  debug_mode -> "off",
+  encoding -> "utf-8",
+  error_handling -> "halt",
+  features -> "advanced",
+  version -> "1.0.0"
+)
+
+@DATA(
+  active = true,
+  app_name = "DLMTestApp",
+  environment = "test",
+  note = "gzip_then_aes256_password_mode",
+  port = 8443,
+  score = 9.87654321,
+  version = "1.0.0",
+
+  server: host = "dlm.test.internal", ssl = true, timeout = 30,
+  endpoints:: "https://api.test/v1/health", "https://api.test/v1/status", "https://api.test/v1/metrics"
+)

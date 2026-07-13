@@ -1,23 +1,24 @@
 // DixScript Audit File v1.0.0
-// Generated: 2026-03-24T08:39:41Z
+// Generated: 2026-07-13T11:04:14Z
 // Source: 07_diy_audit.mdix
 
 @AUDIT_CONFIG(
   source_file -> "07_diy_audit.mdix",
   max_entries -> 100,
   format -> "structured",
-  created -> "2026-03-24T08:39:41Z",
+  created -> "2026-07-13T11:04:14Z",
 )
 
 // ─── Compilation History ────────────────────────────────────────────────────
 
-compilation_1:
+@compilation(
   index -> 1,
-  compilation_id -> "e889789a",
-  timestamp -> "2026-03-24T08:39:41Z",
+  compilation_id -> "3cbd75ff",
+  timestamp -> "2026-07-13T11:04:14Z",
   source_checksum -> "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   status -> "SUCCESS",
   modules_executed -> "",
   execution_time_ms -> 0.00,
-  changes_summary -> "none"
+  changes_summary -> "none",
+)
 

@@ -616,20 +616,50 @@ impl DixLoader {
         compatibility_mode: crate::Compiler::AST::data_types::CompatibilityMode,
     ) -> Result<DixScript, String> {
         // Stage 1: tokenize the full source with minimal initial settings.
+        //
+        // `new_with_error_manager` — same reasoning as every other stage in
+        // this function: `new()` defaults to the process-wide shared
+        // singleton instead of this loader's own scoped instance.
         let initial_settings = OperationalSettings {
             source_file_path: Some(source_file_path.to_string()),
             compatibility_mode,
             ..OperationalSettings::default()
         };
 
-        let tokenizer  = Tokenizer::new(source_text, &initial_settings);
+        let tokenizer  = Tokenizer::new_with_error_manager(
+            source_text,
+            &initial_settings,
+            self.error_manager.clone(),
+        );
         let tok_result = tokenizer.tokenize();
 
         // Stage 2: split @CONFIG tokens from the rest of the stream.
         let split = split_config_tokens(tok_result.tokens);
 
         // Stage 3: process @CONFIG to derive real operational settings.
-        let mut config_handler = ConfigSectionHandler::new(None);
+        //
+        // `new_with_error_manager(None, self.error_manager.clone())` — not
+        // `new(None)`. The latter falls back to `ErrorManager::get_shared_instance()`,
+        // a process-wide `OnceLock` singleton created once and reused for the
+        // life of the process, completely bypassing this loader's own scoped
+        // `self.error_manager` (including whether it was constructed via
+        // `new_silent()`). Every `compile_source` call — i.e. every single
+        // fuzz iteration, every hot-loop `load_from_str` call — was writing
+        // into that same never-cleared singleton's internal error/log
+        // collections, which only ever grow, never reset, for as long as the
+        // process lives. Over a long-running fuzzing campaign (or any other
+        // sustained hot-loop caller) that's an unbounded leak: cargo-fuzz
+        // found exactly this via its `-rss_limit_mb` OOM detector, with an
+        // allocation profile spread across millions of small, never-freed
+        // chunks rather than one large one — the signature of a slow,
+        // session-wide accumulation rather than a single malicious input.
+        // `self.error_manager` is already a fresh, per-`DixLoader` instance
+        // (dropped along with the loader, cleanly bounded), exactly like
+        // `ImportsResolution/imports_resolver.rs` already does it correctly.
+        let mut config_handler = ConfigSectionHandler::new_with_error_manager(
+            None,
+            self.error_manager.clone(),
+        );
         let config_result      = config_handler.process_config_tokens(&split.config_tokens);
 
         let mut operational_settings = config_result.operational_settings;
@@ -637,17 +667,39 @@ impl DixLoader {
         self.error_manager.update_settings(operational_settings.clone());
 
         // Stage 4: parse the rest of the token stream.
-        let parser = GeneralParser::new(
+        //
+        // `new_for_lsp(..., self.error_manager.clone())` — not `new(...)`.
+        // Same reasoning as the ConfigSectionHandler fix above: `new()` uses
+        // the process-wide `ErrorManager::get_shared_instance()` singleton
+        // and — per general_parser.rs's own doc comment — with
+        // `propagate_error_manager = false` every section sub-parser
+        // (Dlm/Security/Data/Imports/Enums/QuickFuncs) *also* independently
+        // falls back to that same singleton rather than sharing one scoped
+        // instance. `new_for_lsp` was already built for exactly this
+        // "long-lived process, many parses, want isolated per-call error
+        // state" scenario (that's what LSP needs too) — it sets
+        // `propagate_error_manager = true`, which makes every sub-parser use
+        // `self.error_manager.clone()` instead. `DixLoader` has the same
+        // shape of requirement as the LSP here, just for fuzzing/embedding
+        // rather than editor diagnostics, so it gets the same fix.
+        let parser = GeneralParser::new_for_lsp(
             split.rest_tokens,
             &config_result.config_section,
             &operational_settings,
+            self.error_manager.clone(),
         ).map_err(|e| format!("Parser init failed: {}", e.message()))?;
 
         let ast = parser.parse()
             .map_err(|e| format!("Parse failed: {}", e.message()))?;
 
         // Stage 5: semantic analysis.
-        let semantic_analyzer = GeneralSemanticAnalyzer::new(&ast, &operational_settings);
+        //
+        // `new_with_error_manager` — same reasoning as stages 3 and 4 above.
+        let semantic_analyzer = GeneralSemanticAnalyzer::new_with_error_manager(
+            &ast,
+            &operational_settings,
+            self.error_manager.clone(),
+        );
         let semantic_result   = semantic_analyzer.analyze();
 
         if !semantic_result.is_success {
@@ -659,7 +711,10 @@ impl DixLoader {
 
         // Stage 6: AST enhancement.
         self.error_manager.log_info("Running AST enhancement");
-        let enhancer           = GeneralAstEnhancer::new(&operational_settings);
+        let enhancer           = GeneralAstEnhancer::new_with_error_manager(
+            &operational_settings,
+            self.error_manager.clone(),
+        );
         let enhancement_result = enhancer.enhance(&ast, Some(&semantic_result));
 
         if !enhancement_result.is_success {
@@ -689,10 +744,11 @@ impl DixLoader {
         {
             self.error_manager.log_info("Starting value resolution");
 
-            let value_resolver = ValueResolver::new(
+            let value_resolver = ValueResolver::new_with_error_manager(
                 resolved_ast,
                 semantic_result.symbol_table.as_ref().unwrap(),
                 operational_settings.debug_mode,
+                self.error_manager.clone(),
             );
 
             let resolution_result = value_resolver.resolve();
@@ -1043,4 +1099,4 @@ mod tests {
         let errors = loader.error_manager.get_runtime_errors();
         assert_eq!(errors.len(), 1, "only the most recent load's error should remain");
     }
-        }
+            }

@@ -269,12 +269,11 @@ impl ValueDecoder {
         reader.read_exact(&mut buf)?;
         let ticks   = i64::from_le_bytes(buf);
         let seconds = ticks / 10_000_000;
-        use chrono::{DateTime, Utc, NaiveDateTime};
-        let naive = NaiveDateTime::from_timestamp_opt(seconds, 0)
+        use chrono::{DateTime, Utc};
+        let datetime = DateTime::<Utc>::from_timestamp(seconds, 0)
             .ok_or_else(|| std::io::Error::new(
                 std::io::ErrorKind::InvalidData, "Invalid date timestamp",
             ))?;
-        let datetime = DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc);
         Ok(Value::Date { value: datetime.format("%Y-%m-%d").to_string(), position: Position::UNKNOWN })
     }
 
@@ -288,12 +287,11 @@ impl ValueDecoder {
         reader.read_exact(&mut buf)?;
         let ticks   = i64::from_le_bytes(buf);
         let seconds = ticks / 10_000_000;
-        use chrono::{DateTime, Utc, NaiveDateTime};
-        let naive = NaiveDateTime::from_timestamp_opt(seconds, 0)
+        use chrono::{DateTime, Utc};
+        let datetime = DateTime::<Utc>::from_timestamp(seconds, 0)
             .ok_or_else(|| std::io::Error::new(
                 std::io::ErrorKind::InvalidData, "Invalid timestamp",
             ))?;
-        let datetime = DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc);
         Ok(Value::Timestamp { value: datetime.to_rfc3339(), position: Position::UNKNOWN })
     }
 
@@ -369,4 +367,4 @@ impl ValueDecoder {
 
 impl Default for ValueDecoder {
     fn default() -> Self { Self::new() }
-}
+            }

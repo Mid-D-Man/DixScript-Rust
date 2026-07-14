@@ -801,7 +801,7 @@ impl<'a> ImportsResolver<'a> {
 
         let provider =
             CloudProviderFactory::get_provider(cloud_url, &self.error_manager)
-                .map_err(|e| {
+                .inspect_err(|e| {
                     self.error_manager.add_imports_resolution_error(
                         ImportsResolutionErrorType::CloudImportNotSupported,
                         e.clone(),
@@ -810,7 +810,6 @@ impl<'a> ImportsResolver<'a> {
                         Some(cloud_url.to_string()),
                         None, 0, 0, None,
                     );
-                    e
                 })?;
 
         let content = tokio::runtime::Runtime::new()

@@ -503,11 +503,10 @@ fn ensure_initialized() {
 pub fn determine_call_type(call_expression: &str) -> CallType {
     if call_expression.contains('.') {
         let parts: Vec<&str> = call_expression.split('.').collect();
-        if parts.len() >= 2 && !parts[0].is_empty() {
-            if parts[0].chars().next().map_or(false, |c| c.is_uppercase()) {
+        if parts.len() >= 2 && !parts[0].is_empty()
+            && parts[0].chars().next().is_some_and(|c| c.is_uppercase()) {
                 return CallType::Static;
             }
-        }
     }
     CallType::Instance
 }

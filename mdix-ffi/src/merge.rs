@@ -1,5 +1,3 @@
-// mdix-ffi/src/merge.rs
-//
 // C ABI merge support — thin wrapper over dixscript::Runtime::merge's
 // MdixMerger, mirroring mdix-wasm/src/merge.rs (mergeSources /
 // mergeSourcesWeighted) as closely as the C ABI allows. Exists so

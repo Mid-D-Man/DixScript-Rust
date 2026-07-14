@@ -1,4 +1,3 @@
-
 //! Code action / quick-fix provider.
 //!
 //! ## Actions provided

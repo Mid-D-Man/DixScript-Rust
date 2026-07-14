@@ -267,7 +267,7 @@ impl DLMPipelineExecutor {
         let mut compressor: Option<Box<dyn ICompressor>> = None;
         let mut encryptor:  Option<Box<dyn IEncryptor>>  = None;
 
-        let modules: Vec<_> = dlm.modules.iter().cloned().collect();
+        let modules: Vec<_> = dlm.modules.to_vec();
 
         for module in &modules {
             match module.module_type {

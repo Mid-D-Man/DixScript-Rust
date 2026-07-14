@@ -1,4 +1,3 @@
-// mdix-ffi/src/lib.rs
 mod error;
 mod handle;
 mod merge;

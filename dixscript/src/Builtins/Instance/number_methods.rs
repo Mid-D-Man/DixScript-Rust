@@ -2,7 +2,7 @@
 //! Number instance methods for DixScript (Int, Long, Float, Double)
 
 use crate::Builtins::Core::{
-    DixType, DixValue, IBuiltinMethod, BuiltinMethod, validation_helpers,
+    DixType, DixValue, IBuiltinMethod, BuiltinMethod,
 };
 use std::collections::HashMap;
 

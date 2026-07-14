@@ -1,5 +1,3 @@
-// mdix-ffi/src/handle.rs
-//
 // Opaque handle types that live on the Rust heap.
 //
 // C# receives these as IntPtr — it never inspects the internals.

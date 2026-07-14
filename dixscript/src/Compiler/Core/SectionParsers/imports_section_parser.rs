@@ -206,11 +206,10 @@ impl<'a> ImportsSectionParser<'a> {
 
         let alias = self.parse_identifier("Expected import alias identifier")?;
 
-        if !self.validate_alias(&alias) {
-            if self.should_halt_section() {
+        if !self.validate_alias(&alias)
+            && self.should_halt_section() {
                 return None;
             }
-        }
 
         let is_cloud = if self.check_keyword("from_cloud") {
             self.advance();

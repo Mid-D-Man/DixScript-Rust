@@ -1,4 +1,3 @@
-// benches/config_throughput.rs
 //! Config Section Benchmark — updated for token-based pipeline (v1.0.0+)
 //!
 //! Loader pipeline order:
@@ -13,7 +12,7 @@
 //!   C. stage_breakdown    — per-stage incremental cost on the large input
 //!   D. strategy_comparison— halt vs continue on clean input (stage 3 only)
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use dixscript::Compiler::Core::Config::{ConfigSectionHandler, OperationalSettings};
 use dixscript::Compiler::Core::Tokenizer::{split_config_tokens, Tokenizer};
 use std::time::Duration;
@@ -190,10 +189,8 @@ fn benchmark_config_section(c: &mut Criterion) {
     // Verifies that strategy selection adds negligible overhead on valid input.
     // =========================================================================
 
-    let halt_src = format!(
-        "@CONFIG(\n    version -> \"1.0.0\",\n    encoding -> \"utf-8\",\n    \
-         error_handling -> \"halt\"\n)\n@DATA(x = 1)"
-    );
+    let halt_src = "@CONFIG(\n    version -> \"1.0.0\",\n    encoding -> \"utf-8\",\n    \
+         error_handling -> \"halt\"\n)\n@DATA(x = 1)".to_string();
     let continue_src = halt_src.replace("\"halt\"", "\"continue\"");
 
     let halt_config_tokens = {

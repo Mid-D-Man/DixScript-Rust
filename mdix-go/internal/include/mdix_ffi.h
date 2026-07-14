@@ -10,6 +10,19 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+// How to combine two array-valued entries (GroupArray, or an array-valued
+// SimpleProperty) that share a path across sources.
+enum ArrayMergeStrategy {
+    // The winning source's array entirely replaces the losing one's.
+    ARRAY_MERGE_STRATEGY_REPLACE = 0,
+    // Both arrays are concatenated, winner's items first.
+    ARRAY_MERGE_STRATEGY_CONCAT = 1,
+    // Concatenated (winner first), with exact-duplicate primitive values
+    // removed. Complex values (objects, nested arrays) are never deduped.
+    ARRAY_MERGE_STRATEGY_CONCAT_DEDUP = 2,
+};
+typedef int32_t ArrayMergeStrategy;
+
 // Output format mode for mdix_to_mdix() and mdix_format_source().
 enum MdixFormatMode {
     MDIX_FORMAT_MODE_DEFAULT = 0,
@@ -18,6 +31,27 @@ enum MdixFormatMode {
     MDIX_FORMAT_MODE_MINIFIED = 3,
 };
 typedef int32_t MdixFormatMode;
+
+// How to resolve a key defined by more than one source in mdix_merge_sources()
+// / mdix_merge_sources_weighted(). Mirrors dixscript::Runtime::MdixMergeStrategy
+// — kept as a separate, explicitly #[repr(i32)] local type (same pattern as
+// MdixType / MdixFormatMode above) since the core enum's repr is not
+// FFI-guaranteed and lives in a different crate. See merge.rs's to_core().
+enum MdixMergeStrategy {
+    // Each source's weight decides the winner; equal weights fall back to
+    // the lower-indexed (primary) source. This is what mdix_merge_sources()
+    // (no explicit weights) effectively resolves to, since it auto-assigns
+    // descending weights — source 0 gets 1.0, the last source gets ~0.0.
+    MDIX_MERGE_STRATEGY_WEIGHTED_PRIORITY = 0,
+    // The lower-indexed source always wins, regardless of weight.
+    MDIX_MERGE_STRATEGY_PRIMARY_WINS = 1,
+    // The higher-indexed source always wins, regardless of weight.
+    MDIX_MERGE_STRATEGY_SECONDARY_WINS = 2,
+    // Any key defined by more than one source is a hard error — the merge
+    // fails and mdix_get_last_error() reports every conflicting path.
+    MDIX_MERGE_STRATEGY_THROW_ON_CONFLICT = 3,
+};
+typedef int32_t MdixMergeStrategy;
 
 // Type discriminants returned by mdix_get_type().
 // Values are stable — the C# MdixValueType enum MUST match exactly.
@@ -306,5 +340,49 @@ void *mdix_load_encrypted_bytes(const uint8_t *encrypted_bytes,
 // Parse a TOML string and load it as a DixData handle.
 // Caller must free with mdix_free when done.
  void *mdix_from_toml(const char *source) ;
+
+// Merge two or more .mdix source strings into a new handle using the real
+// AST-level DixScript merger (dixscript::Runtime::MdixMerger) — full type
+// fidelity (Long / Float / Double / HexColor / Blob / Regex / Date /
+// Timestamp / Enum all survive exactly, unlike a JSON round-trip), a real
+// per-key conflict report, and configurable array merge behavior. See
+// merge.rs's module doc for why this takes source strings rather than
+// existing handles or file paths.
+//
+// Sources are weighted in descending order: sources[0] gets weight 1.0,
+// sources[count-1] gets the lowest weight (only matters under
+// MdixMergeStrategy::WeightedPriority). Use mdix_merge_sources_weighted for
+// explicit per-source weights.
+//
+// `out_conflicts_json`, if non-null, receives a heap string describing
+// every conflict that was resolved:
+// `[{"path":"...","winningSource":0,"winningLabel":"..."}, ...]`
+// (`"[]"` when there were none). Caller must free it with mdix_free_string()
+// — independently of whether the merge itself succeeded, except that on
+// failure it is left null instead (matching every other out-param in this
+// crate: check the pointer, don't assume it was written).
+//
+// Returns a new opaque handle on success (caller must free with mdix_free),
+// null on failure — check mdix_get_last_error().
+
+void *mdix_merge_sources(const char *const *sources,
+                         int32_t count,
+                         MdixMergeStrategy strategy,
+                         ArrayMergeStrategy array_strategy,
+                         char **out_conflicts_json)
+;
+
+// Merge .mdix source strings with explicit per-source weights (`weights`
+// must be the same length as `sources`). Higher weight wins under
+// MdixMergeStrategy::WeightedPriority. See mdix_merge_sources for the
+// shared semantics (fidelity, conflict report, error handling).
+
+void *mdix_merge_sources_weighted(const char *const *sources,
+                                  const double *weights,
+                                  int32_t count,
+                                  MdixMergeStrategy strategy,
+                                  ArrayMergeStrategy array_strategy,
+                                  char **out_conflicts_json)
+;
 
 #endif /* MDIX_FFI_H */

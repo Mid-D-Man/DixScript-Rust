@@ -1,4 +1,3 @@
-# tools/cli_test_server.ps1
 # Build the CLI (debug) then start the test server.
 # Usage:  .\tools\cli_test_server.ps1
 

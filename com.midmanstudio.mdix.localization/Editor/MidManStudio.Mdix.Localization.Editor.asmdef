@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.localization/Editor/MidManStudio.Mdix.Localization.Editor.asmdef
 {
     "name": "MidManStudio.Mdix.Localization.Editor",
     "rootNamespace": "MidManStudio.Mdix.Localization.Editor",

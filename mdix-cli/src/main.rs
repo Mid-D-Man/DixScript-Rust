@@ -1,4 +1,4 @@
-// mdix-cli/src/main.rs
+
 mod commands;
 mod config;
 mod output;

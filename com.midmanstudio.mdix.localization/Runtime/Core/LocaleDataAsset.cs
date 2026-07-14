@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.localization/Runtime/Core/LocaleDataAsset.cs
 using System;
 using UnityEngine;
 

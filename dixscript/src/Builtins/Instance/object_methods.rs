@@ -2,7 +2,7 @@
 //! Instance methods for the Object (HashMap) type in DixScript.
 
 use crate::Builtins::Core::{
-    DixType, DixValue, BuiltinMethod, IBuiltinMethod, validation_helpers,
+    DixType, DixValue, BuiltinMethod, IBuiltinMethod,
 };
 use std::collections::HashMap;
 

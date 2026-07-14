@@ -111,12 +111,12 @@ impl InstanceMethodRegistry {
 
         self.type_methods
             .entry(DixType::Timestamp)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .extend(datetime_instance_methods::get_timestamp_methods());
 
         self.type_methods
             .entry(DixType::Date)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .extend(datetime_instance_methods::get_date_methods());
     }
 
@@ -128,7 +128,7 @@ impl InstanceMethodRegistry {
     fn register_object_methods(&mut self) {
         self.type_methods
             .entry(DixType::Object)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .extend(object_methods::get_methods());
     }
 
@@ -145,16 +145,14 @@ impl InstanceMethodRegistry {
             let type_methods = self
                 .type_methods
                 .entry(dix_type)
-                .or_insert_with(HashMap::new);
+                .or_default();
 
             // Get a fresh copy for this type (each Box needs an independent owner)
             let universal_for_type = universal_methods::get_methods();
 
             for (name, method) in universal_for_type {
                 // Don't overwrite type-specific methods with the universal version
-                if !type_methods.contains_key(&name) {
-                    type_methods.insert(name, method);
-                }
+                type_methods.entry(name).or_insert(method);
             }
         }
     }
@@ -378,7 +376,7 @@ pub fn generate_documentation() -> String {
 
             for method_name in names {
                 if let Some(method) = methods.get(method_name) {
-                    let extra_params = (method.parameter_count() as i32 - 1).max(0) as usize;
+                    let extra_params = (method.parameter_count() - 1).max(0) as usize;
                     let param_str = if extra_params > 0 {
                         (1..=extra_params)
                             .map(|i| format!("arg{}", i))

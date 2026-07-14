@@ -1995,7 +1995,7 @@ fn parse_parameters(&mut self) -> Vec<QuickFuncParam> {
                                 self.advance();
                             }
                             TokenType::Keyword(kw)
-                            if Keywords::can_be_identifier_in_context(&kw, "QUICKFUNCS") =>
+                            if Keywords::can_be_identifier_in_context(kw, "QUICKFUNCS") =>
                                 {
                                     segments.push(kw.to_string());
                                     self.advance();
@@ -3081,7 +3081,7 @@ fn skip_nested_angle_content(&mut self) {
             }
 
             // ">=" — one closing angle plus '=' fused by the tokenizer (no space).
-            TokenType::ComparisonOp(ref op) if *op == ">=" => {
+            TokenType::ComparisonOp(op) if op == ">=" => {
                 if depth == 0 {
                     // The '>' belongs outside our scope — do not consume.
                     break;
@@ -3097,7 +3097,7 @@ fn skip_nested_angle_content(&mut self) {
             }
 
             // ">>" — two closing angles fused by the tokenizer.
-            TokenType::BitwiseOp(ref op) if *op == ">>" => {
+            TokenType::BitwiseOp(op) if op == ">>" => {
                 match depth {
                     0 => {
                         // Both angles are outside our scope — do not consume.
@@ -3121,7 +3121,7 @@ fn skip_nested_angle_content(&mut self) {
             }
 
             // ">>=" — two closing angles plus assignment fused by the tokenizer.
-            TokenType::BitwiseOp(ref op) if *op == ">>=" => {
+            TokenType::BitwiseOp(op) if op == ">>=" => {
                 match depth {
                     0 => {
                         // All three chars are outside our scope — do not consume.
@@ -3208,15 +3208,13 @@ fn match_and_consume_closing_angle(&mut self) -> bool {
             return true;
         }
         // Two-symbol fallback: '-' '>'
-        if matches!(self.current().token_type, TokenType::Symbol('-')) {
-            if self.position + 1 < self.tokens.len() {
-                if matches!(self.tokens[self.position + 1].token_type, TokenType::Symbol('>')) {
+        if matches!(self.current().token_type, TokenType::Symbol('-'))
+            && self.position + 1 < self.tokens.len()
+                && matches!(self.tokens[self.position + 1].token_type, TokenType::Symbol('>')) {
                     self.advance();
                     self.advance();
                     return true;
                 }
-            }
-        }
         false
     }
 

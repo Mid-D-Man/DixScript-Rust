@@ -346,14 +346,13 @@ impl MdixKeyParser {
         key: &str,
         section: &str,
     ) -> Result<String, String> {
-        map.get(key)
-            .map(|v| v.clone())
+        map.get(key).cloned()
             .ok_or_else(|| format!("Missing required field '{}' in {}", key, section))
     }
 
     #[inline]
     fn opt_string(map: &HashMap<String, String>, key: &str) -> Option<String> {
-        map.get(key).map(|v| v.clone())
+        map.get(key).cloned()
     }
 
     #[inline]

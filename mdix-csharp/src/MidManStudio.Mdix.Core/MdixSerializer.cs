@@ -1,4 +1,3 @@
-// mdix-csharp/src/MidManStudio.Mdix.Core/MdixSerializer.cs
 using System;
 using System.Collections;
 using System.Collections.Generic;

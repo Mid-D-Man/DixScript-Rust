@@ -1,5 +1,3 @@
-// mdix-lua/src/database.rs
-//
 // MdixDatabase — a loaded, read-only DixScript database.
 // Wraps DixData with Lua UserData so Lua scripts can call typed getters,
 // inspect structure, and export to JSON / TOML / .mdix.

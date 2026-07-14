@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 use std::sync::Mutex;
 use std::collections::HashMap;
@@ -14,7 +14,7 @@ use crate::Compiler::DLM::KeyManagement::KeyFileManager;
 use crate::Compiler::DLM::Auditor::{IAuditor, DiyAuditor, EnhancedAuditor};
 use crate::Compiler::Utilities::SecurityUtilities;
 use crate::Compiler::AST::{DixScript, DLMModuleType, DLMModuleSubtype};
-use crate::ErrorManager::{ErrorManager, RuntimeErrorType, ErrorSeverity};
+use crate::ErrorManager::{ErrorManager, RuntimeErrorType};
 use super::load_options::DixLoadOptions;
 use super::key_resolver::{KeyFileResolver, KeyFileResolution, KeyFileSource};
 use super::dix_data::DixData;
@@ -754,7 +754,7 @@ impl DixLoader {
             let resolution_result = value_resolver.resolve();
 
             if !resolution_result.is_success {
-                let msgs: Vec<String> = resolution_result.errors.iter().cloned().collect();
+                let msgs: Vec<String> = resolution_result.errors.to_vec();
                 return Err(format!("Value resolution failed: {:?}", msgs));
             }
 

@@ -1,4 +1,3 @@
-// mdix-python/src/database.rs
 //! MdixDatabase — loaded DixScript database with raising and railway access.
 
 use pyo3::prelude::*;

@@ -1,4 +1,3 @@
-// mdix-cli/tests/validate_tests.rs
 
 mod helpers;
 

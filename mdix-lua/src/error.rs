@@ -1,5 +1,3 @@
-// mdix-lua/src/error.rs
-
 use mlua::Error as LuaError;
 
 /// Wrap a runtime error with a [mdix:context] prefix.

@@ -411,10 +411,8 @@ impl<'a> TypeInferenceVisitor<'a> {
 
                     if TUPLE_DYNAMIC_ELEMENT_METHODS.contains(&second_part.as_str()) {
                         if let DataType::TypedTuple(arr) = *var_type {
-                            for slot in &arr {
-                                if let Some(elem) = slot {
-                                    return Some(elem.to_data_type());
-                                }
+                            if let Some(elem) = arr.iter().flatten().next() {
+                                return Some(elem.to_data_type());
                             }
                         }
                         return None;
@@ -632,7 +630,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             // Verify remaining args share the same type
                             let all_match = arguments[1..].iter().all(|arg| {
                                 self.infer_type_from_expression(arg)
-                                    .and_then(|dt| ElemType::from_data_type(dt))
+                                    .and_then(ElemType::from_data_type)
                                     .map(|e| e == et)
                                     .unwrap_or(true) // unknown = tolerate
                             });
@@ -778,10 +776,8 @@ impl<'a> TypeInferenceVisitor<'a> {
             if TUPLE_DYNAMIC_ELEMENT_METHODS.contains(&method_name) {
                 if let DataType::TypedTuple(arr) = instance_data_type {
                     // Use the first defined slot as best approximation.
-                    for slot in &arr {
-                        if let Some(elem) = slot {
-                            return Some(elem.to_data_type());
-                        }
+                    if let Some(elem) = arr.iter().flatten().next() {
+                        return Some(elem.to_data_type());
                     }
                 }
                 return self.infer_element_type_from_expression(instance);

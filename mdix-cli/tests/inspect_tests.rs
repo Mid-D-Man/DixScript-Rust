@@ -1,4 +1,3 @@
-// mdix-cli/tests/inspect_tests.rs
 
 mod helpers;
 

@@ -1,5 +1,3 @@
-// mdix-ffi/src/string_utils.rs
-//
 // CStr / String conversion utilities used throughout the FFI surface.
 //
 // Every FFI function that accepts *const c_char goes through c_str_to_str.

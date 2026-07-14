@@ -1,4 +1,3 @@
-// mdix-cli/tests/format_tests.rs
 
 mod helpers;
 

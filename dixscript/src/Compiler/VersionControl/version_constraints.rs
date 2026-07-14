@@ -363,15 +363,12 @@ impl VersionConstraints {
                     ConfigValue::Features(ref features) => {
                         if features.len() == 1 {
                             let f = features[0].to_lowercase();
-                            if f != "advanced" && f != "basic" {
-                                if !self.is_valid_section_list(&features.join(",")) {
+                            if f != "advanced" && f != "basic"
+                                && !self.is_valid_section_list(&features.join(",")) {
                                     errors.push("Invalid feature list".to_string());
                                 }
-                            }
-                        } else {
-                            if !self.is_valid_section_list(&features.join(",")) {
-                                errors.push("Invalid feature list".to_string());
-                            }
+                        } else if !self.is_valid_section_list(&features.join(",")) {
+                            errors.push("Invalid feature list".to_string());
                         }
                     }
                     _ => {

@@ -1,4 +1,3 @@
-// mdix-cli/src/commands/debug_tokens.rs
 //! `mdix debug-tokens <file>` — print the full token stream with positions,
 //! section tags, and optional grouping by line.
 //!

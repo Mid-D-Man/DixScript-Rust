@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.localization/Editor/UI/MdixLocalizationEditorWindow.cs
 using System;
 using System.IO;
 using System.Collections.Generic;

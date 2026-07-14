@@ -1,4 +1,3 @@
-// mdix-cli/src/commands/debug_symbols.rs
 //! `mdix debug-symbols <file>` — dump the symbol table produced by semantic analysis.
 //!
 //! Uses Approach B (tokenizer-first): tokenize full source → split @CONFIG

@@ -1,4 +1,3 @@
-// benches/stress_test_benchmark.rs
 //! Stress Test Benchmark — DixScript compiler limits
 //!
 //! Generates large .mdix inputs entirely in memory and measures how well the

@@ -272,7 +272,7 @@ fn array_slice(args: &[DixValue]) -> Result<DixValue, String> {
     let array = args[0].as_array();
     let len = array.len() as i32;
     let mut start = args[1].as_int().max(0);
-    let mut end   = args[2].as_int().min(len);
+    let end   = args[2].as_int().min(len);
     if start > end { start = end; }
     Ok(DixValue::from_array(array[start as usize..end as usize].to_vec()))
 }
@@ -291,7 +291,7 @@ fn array_reverse(args: &[DixValue]) -> Result<DixValue, String> {
 
 fn array_sort(args: &[DixValue]) -> Result<DixValue, String> {
     let mut sorted = args[0].as_array().clone();
-    sorted.sort_by(|a, b| a.as_string().cmp(&b.as_string()));
+    sorted.sort_by_key(|a| a.as_string());
     Ok(DixValue::from_array(sorted))
 }
 

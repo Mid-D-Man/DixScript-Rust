@@ -1,5 +1,3 @@
-// mdix-ffi/src/error.rs
-//
 // Thread-local error storage for the FFI layer.
 //
 // FFI functions cannot throw exceptions across the C boundary.

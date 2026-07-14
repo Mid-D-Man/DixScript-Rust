@@ -210,7 +210,7 @@ mod tests {
         let parts = "a,b,c".Split(',');
         assert_eq!(parts, vec!["a", "b", "c"]);
 
-        assert_eq!(str::Join(",", &vec!["a".to_string(), "b".to_string()]), "a,b");
+        assert_eq!(str::Join(",", &["a".to_string(), "b".to_string()]), "a,b");
 
         assert_eq!("hello".Substring(1, Some(3)), "ell");
         assert_eq!("hello".IndexOf("ll"), Some(2));

@@ -1,4 +1,4 @@
-// Database.java
+
 package com.midmanstudio.dixscript;
 
 import com.midmanstudio.dixscript.internal.MdixNative;

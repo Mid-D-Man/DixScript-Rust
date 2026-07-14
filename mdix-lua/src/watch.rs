@@ -1,5 +1,3 @@
-// mdix-lua/src/watch.rs
-//
 // Hot reload for Lua — thin binding over dixscript::Runtime::HotReloadWatcher.
 // See dixscript/src/Runtime/hot_reload.rs for why this is poll-based rather
 // than OS-event-based.

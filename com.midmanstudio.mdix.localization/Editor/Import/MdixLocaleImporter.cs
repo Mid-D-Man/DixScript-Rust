@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.localization/Editor/Import/MdixLocaleImporter.cs
 using System;
 using System.Collections.Generic;
 using System.IO;

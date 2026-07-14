@@ -51,9 +51,9 @@ pub fn set_writable(path: &Path) -> Result<(), String> {
 pub fn is_readonly(path: &Path) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        return std::fs::metadata(path)
+        std::fs::metadata(path)
             .map(|m| m.permissions().readonly())
-            .unwrap_or(false);
+            .unwrap_or(false)
     }
     #[cfg(target_arch = "wasm32")]
     {

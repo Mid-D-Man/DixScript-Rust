@@ -8,7 +8,7 @@
 //! - More idiomatic Rust patterns
 
 use crate::Compiler::AST::*;
-use crate::ErrorManager::{ErrorManager, GeneralErrorType};
+use crate::ErrorManager::ErrorManager;
 
 /// Security utilities for validating and auto-generating security configurations
 pub struct SecurityUtilities;

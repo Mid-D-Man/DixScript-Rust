@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.localization/Runtime/Components/MdixLocalizedString.cs
 using System;
 using TMPro;
 using UnityEngine;

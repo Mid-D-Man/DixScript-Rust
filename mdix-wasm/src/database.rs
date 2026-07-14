@@ -1,4 +1,3 @@
-// mdix-wasm/src/database.rs
 
 use crate::error::{freed_err, invalid_path_err, runtime_err};
 use dixscript::Runtime::{DixData, DixLoadOptions, DixLoader, DixValue};

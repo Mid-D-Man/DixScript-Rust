@@ -1,4 +1,3 @@
-// mdix-cli/tests/helpers/mod.rs
 //! Shared helpers for CLI integration tests.
 
 use std::path::{Path, PathBuf};

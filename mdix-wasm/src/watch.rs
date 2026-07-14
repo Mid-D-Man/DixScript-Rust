@@ -1,5 +1,3 @@
-// mdix-wasm/src/watch.rs
-//
 // MdixWatcher — "hot reload" for JS/TS, content-hash based.
 //
 // This is deliberately NOT the same mechanism as

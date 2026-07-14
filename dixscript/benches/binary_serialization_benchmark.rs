@@ -1,4 +1,3 @@
-// benches/binary_serialization_benchmark.rs
 //! Binary Serialization Benchmark — DixScript v1.0.0
 //!
 //! Compares DixScript's custom binary format against bincode, postcard, and
@@ -368,7 +367,7 @@ fn bench_serialization_speed(c: &mut Criterion) {
             group.throughput(Throughput::Bytes(SMALL_MDIX.len() as u64));
             group.bench_function("dixscript_custom_small", |b| {
                 b.iter_batched(
-                    || BinaryPacker::new(),
+                    BinaryPacker::new,
                     |mut packer| black_box(packer.pack(black_box(ast_small))),
                     BatchSize::SmallInput,
                 );

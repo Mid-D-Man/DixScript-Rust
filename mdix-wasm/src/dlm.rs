@@ -1,5 +1,3 @@
-// mdix-wasm/src/dlm.rs
-//
 // DLM (compress / encrypt / audit) support for JS/TS — thin bindings over
 // dixscript::Runtime::DixLoader::compile_with_dlm_from_str /
 // decompile_with_dlm_from_bytes.

@@ -11,7 +11,7 @@ pub mod folding;
 pub mod formatting;
 pub mod goto_definition;
 pub mod hover;
-pub mod hover_data;          // ← signature tables extracted from hover.rs
+pub mod hover_data;
 pub mod inlay_hints;
 pub mod references;
 pub mod rename;

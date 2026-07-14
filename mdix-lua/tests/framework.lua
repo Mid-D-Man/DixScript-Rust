@@ -1,4 +1,3 @@
--- mdix-lua/tests/framework.lua
 -- Minimal test framework for mdix-lua CI.
 -- Collects pass/fail per suite and outputs a single JSON blob to stdout.
 

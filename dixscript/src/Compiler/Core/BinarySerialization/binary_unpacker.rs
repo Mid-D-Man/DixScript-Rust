@@ -3,7 +3,6 @@
 use web_time::Instant;
 use std::io::Cursor;
 use crate::Compiler::AST::DixScript;
-use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
 use super::{
     binary_format::{HEADER_SIZE, FOOTER_SIZE, SectionFlags, SectionId},
     binary_header::BinaryHeader,
@@ -226,7 +225,7 @@ impl BinaryUnpacker {
                 })
                 .collect();
 
-            return self.collect_decode_results(results);
+            self.collect_decode_results(results)
         }
 
         // should_use_concurrent() always returns false on wasm32 or when

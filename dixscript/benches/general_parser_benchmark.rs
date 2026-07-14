@@ -1,4 +1,3 @@
-// benches/general_parser_benchmark.rs
 //! General Parser Benchmark — DixScript v1.0.0 (token-based pipeline)
 //!
 //! Pipeline order (mirroring DixLoader::compile_source):

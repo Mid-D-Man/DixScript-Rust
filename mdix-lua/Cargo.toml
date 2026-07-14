@@ -1,4 +1,3 @@
-# mdix-lua/Cargo.toml
 [package]
 name        = "mdix-lua"
 version     = "1.0.0"

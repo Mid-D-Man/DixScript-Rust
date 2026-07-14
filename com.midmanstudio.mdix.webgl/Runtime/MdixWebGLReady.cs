@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.webgl/Runtime/MdixWebGLReady.cs
 using System.Collections;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -12,7 +11,7 @@ namespace MidManStudio.Mdix.WebGL
     /// That bridge needs the mdix-wasm module to finish an async load before any
     /// Dix.LoadStr() call can succeed — this class is how you wait for that.
     ///
-    /// REQUIRED SETUP: this alone does nothing. Your WebGL template's index.html
+    /// REQUIRED SETUP: this alone does nothing. Za WebGL template's index.html
     /// must load mdix-bootstrap.js (see Runtime/WebGLTemplate/mdix-bootstrap.js
     /// in this package) before the Unity loader script runs. Without it,
     /// IsReady never becomes true and WaitUntilReady() will time out.

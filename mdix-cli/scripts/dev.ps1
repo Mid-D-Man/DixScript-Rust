@@ -1,4 +1,3 @@
-# scripts/dev.ps1
 # Windows equivalent of dev.sh — rebuilds and runs any mdix command.
 #
 # Usage:

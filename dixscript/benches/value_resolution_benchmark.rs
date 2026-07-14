@@ -1,4 +1,3 @@
-// benches/value_resolution_benchmark.rs
 //! Value Resolution Benchmark — DixScript v1.0.0
 //!
 //! Three benchmark groups:

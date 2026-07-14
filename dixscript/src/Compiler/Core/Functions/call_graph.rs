@@ -32,7 +32,7 @@ impl CallGraph {
     /// Register a function in the graph (even if it makes no calls)
     pub fn add_function(&mut self, function_name: String) {
         self.all_functions.insert(function_name.clone());
-        self.adjacency_list.entry(function_name).or_insert_with(HashSet::new);
+        self.adjacency_list.entry(function_name).or_default();
     }
     
     /// Add an edge: function 'caller' calls function 'callee'
@@ -50,7 +50,7 @@ impl CallGraph {
         // Track call site for error reporting
         self.call_sites
             .entry(caller.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(CallSite::new(caller, callee, position));
     }
     
@@ -109,7 +109,7 @@ impl CallGraph {
                 } else if recursion_stack.contains(neighbor) {
                     // CYCLE DETECTED!
                     // Find where the cycle starts in our current path
-                    if let Some(cycle_start_index) = current_path.iter().position(|n| n.to_string() == neighbor.to_string()) {
+                    if let Some(cycle_start_index) = current_path.iter().position(|n| *n == *neighbor) {
                         // Extract the cycle
                         let mut cycle = current_path[cycle_start_index..].to_vec();
                         
@@ -138,7 +138,7 @@ impl CallGraph {
         self.adjacency_list
             .get(function_name)
             .map(|set| set.iter().map(|s| s.as_str()).collect())
-            .unwrap_or_else(Vec::new)
+            .unwrap_or_default()
     }
     
     /// Get all functions that call the specified function (reverse dependencies)
@@ -167,7 +167,7 @@ impl CallGraph {
                     .filter(|cs| cs.callee == callee)
                     .collect()
             })
-            .unwrap_or_else(Vec::new)
+            .unwrap_or_default()
     }
     
     /// Get all call sites for a specific caller
@@ -175,7 +175,7 @@ impl CallGraph {
         self.call_sites
             .get(caller)
             .map(|sites| sites.iter().collect())
-            .unwrap_or_else(Vec::new)
+            .unwrap_or_default()
     }
     
     /// Get topological sort of the call graph (if acyclic)
@@ -194,7 +194,7 @@ impl CallGraph {
             in_degree.insert(func.clone(), 0);
         }
         
-        for (_, callees) in &self.adjacency_list {
+        for callees in self.adjacency_list.values() {
             for callee in callees {
                 *in_degree.get_mut(callee).unwrap() += 1;
             }

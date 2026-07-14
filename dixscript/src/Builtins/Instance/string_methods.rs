@@ -3,8 +3,7 @@
 //! Provides methods like toUpper, toLower, trim, substring, etc.
 
 use crate::Builtins::Core::{
-    DixType, DixValue, IBuiltinMethod, BuiltinMethod,
-    BuiltinMethodException, validation_helpers,
+    DixType, DixValue, IBuiltinMethod, BuiltinMethod, validation_helpers,
 };
 use std::collections::HashMap;
 

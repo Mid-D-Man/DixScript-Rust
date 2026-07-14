@@ -1,4 +1,3 @@
-// mdix-cli/tests/convert_tests.rs
 
 mod helpers;
 

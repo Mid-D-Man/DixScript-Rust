@@ -1,5 +1,3 @@
-// mdix-lua/src/builder.rs
-//
 // MdixBuilder — builds .mdix source programmatically and loads it.
 //
 // Two-tier DATA ordering is enforced: all set_* (flat tier-1) calls must come

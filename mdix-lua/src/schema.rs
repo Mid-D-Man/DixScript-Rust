@@ -1,5 +1,3 @@
-// mdix-lua/src/schema.rs
-//
 // Schema validation for Lua — thin bindings over dixscript::Runtime::schema.
 //
 //   local schema = mdix.schema()

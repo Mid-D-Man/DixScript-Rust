@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.localization/Runtime/Core/BakedLocaleTable.cs
 using System;
 using System.Collections.Generic;
 

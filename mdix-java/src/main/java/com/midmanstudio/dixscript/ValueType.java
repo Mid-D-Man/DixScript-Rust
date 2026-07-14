@@ -1,4 +1,4 @@
-// ValueType.java
+
 package com.midmanstudio.dixscript;
 
 /**

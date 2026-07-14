@@ -229,7 +229,7 @@ pub fn new_with_error_manager(
 
 
         let cycle_validator = CycleDetectionValidator::new_with_error_manager(
-            &self.operational_settings,   self.error_manager.clone(),
+            self.operational_settings,   self.error_manager.clone(),
 
         );
         if !cycle_validator.validate_function_calls(section) {
@@ -3076,7 +3076,7 @@ fn reset_with_params(&mut self, func_parameters: &[QuickFuncParam]) {
 
     #[inline]
     fn is_const(&self, name: &str) -> bool {
-        self.variables.get(name).map_or(false, |v| v.is_const)
+        self.variables.get(name).is_some_and(|v| v.is_const)
     }
 
     #[inline]

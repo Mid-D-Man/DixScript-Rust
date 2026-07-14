@@ -1,4 +1,3 @@
-// mdix-wasm/src/error.rs
 use wasm_bindgen::JsValue;
 
 /// Converts any string message into a proper JS Error object.

@@ -343,7 +343,7 @@ pub fn new_with_error_manager(
 
     self.short_name_to_full_paths
         .entry(name.to_string())
-        .or_insert_with(Vec::new)
+        .or_default()
         .push(full_path.clone());
 
     if let Some(inf) = inferred_type {
@@ -497,7 +497,7 @@ pub fn new_with_error_manager(
 
         self.short_name_to_full_paths
             .entry(assignment.name.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(prop_path.clone());
 
         if let Some(inf) = inferred_type {
@@ -573,7 +573,7 @@ pub fn new_with_error_manager(
                             PathBuilder::build_array_item_property(&full_path, i, &prop.key);
                         self.short_name_to_full_paths
                             .entry(prop.key.clone())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(item_path.clone());
 
                         if self.debug_config.is_verbose {
@@ -636,7 +636,7 @@ pub fn new_with_error_manager(
     let full_path = PathBuilder::build(&[name]);
     self.short_name_to_full_paths
         .entry(name.to_string())
-        .or_insert_with(Vec::new)
+        .or_default()
         .push(full_path.clone());
 
     let object_type = declared_type.unwrap_or(DataType::Object);
@@ -849,7 +849,7 @@ pub fn new_with_error_manager(
             if let Some(full_path) = opt_path {
                 self.short_name_to_full_paths
                     .entry(prop.key.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(full_path.clone());
 
                 if let Some(pt) = property_type {

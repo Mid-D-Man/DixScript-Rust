@@ -1,4 +1,3 @@
-// mdix-python/src/lib.rs
 //! MidManStudio.Mdix — Python extension module (PyO3).
 
 mod builder;

@@ -388,7 +388,7 @@ fn to_json_string(value: &DixValue) -> String {
         DixType::Long      => {
             let l = value.as_long();
             // Emit as number when safe, string otherwise (preserves precision)
-            if l >= JS_SAFE_MIN && l <= JS_SAFE_MAX {
+            if (JS_SAFE_MIN..=JS_SAFE_MAX).contains(&l) {
                 l.to_string()
             } else {
                 format!("\"{}\"", l)

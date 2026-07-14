@@ -2519,7 +2519,7 @@ fn try_value_to_dix(value: &Value) -> Option<DixValue> {
                     let items: Option<Vec<DixValue>> = arguments
                         .iter()
                         .take(6)
-                        .map(|a| Self::try_value_to_dix(a))
+                        .map(Self::try_value_to_dix)
                         .collect();
                     items.map(DixValue::from_tuple)
                 }
@@ -2529,14 +2529,14 @@ fn try_value_to_dix(value: &Value) -> Option<DixValue> {
 
         Value::Array { values, .. } => {
             let items: Option<Vec<DixValue>> =
-                values.iter().map(|v| Self::try_value_to_dix(v)).collect();
+                values.iter().map(Self::try_value_to_dix).collect();
             items.map(DixValue::from_array)
         }
 
         // NestedArray ([[1,2],[3,4]]) — same treatment as Array.
         Value::NestedArray { values, .. } => {
             let items: Option<Vec<DixValue>> =
-                values.iter().map(|v| Self::try_value_to_dix(v)).collect();
+                values.iter().map(Self::try_value_to_dix).collect();
             items.map(DixValue::from_array)
         }
 

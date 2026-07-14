@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix/Editor/MdixEditorWindow.cs
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -56,7 +55,7 @@ namespace MidManStudio.Mdix.Unity.Editor
 
         // ── Menu and entry points ─────────────────────────────────────────────
 
-        [MenuItem("Window/MDIX Studio")]
+        [MenuItem("MidManStudio/MDIX Studio")]
         public static void Open()
         {
             var window = GetWindow<MdixEditorWindow>("MDIX Studio");

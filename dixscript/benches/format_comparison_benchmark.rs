@@ -381,9 +381,7 @@ fn bench_scaled_payloads(c: &mut Criterion) {
 
     for &n in &scales {
         // Build scaled DixScript
-        let mut mdix_src = format!(
-            "@CONFIG(version -> \"1.0.0\")\n@DATA(\n"
-        );
+        let mut mdix_src = "@CONFIG(version -> \"1.0.0\")\n@DATA(\n".to_string();
         for i in 0..n {
             mdix_src.push_str(&base_data_block.replace("ScaledApp", &format!("App{}", i)));
         }

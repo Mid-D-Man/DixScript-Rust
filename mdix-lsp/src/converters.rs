@@ -1,4 +1,3 @@
-
 //! Converts DixScript compiler errors into LSP diagnostics.
 //!
 //! All DixScript positions are 1-based; LSP expects 0-based.

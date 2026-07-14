@@ -1,4 +1,3 @@
-
 //! Hover provider.
 //!
 //! ## Changes from previous version

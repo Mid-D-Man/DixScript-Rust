@@ -1,9 +1,9 @@
 //! Encodes DixScript AST values to binary format
 
 use std::io::{Write, Result as IoResult};
-use crate::Compiler::AST::{Value, DataType};
+use crate::Compiler::AST::Value;
 use crate::ErrorManager::ErrorManager;
-use super::binary_format::{ValueTypeTag, BlobEncoding, MAX_STRING_LENGTH};
+use super::binary_format::{ValueTypeTag, BlobEncoding};
 use super::binary_serialization_context::BinarySerializationContext;
 use super::binary_serialization_error::BinarySerializationError;
 
@@ -259,7 +259,7 @@ impl ValueEncoder {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let count = values.len();
-        if count < 1 || count > 6 {
+        if !(1..=6).contains(&count) {
             let err = BinarySerializationError::new(
                 crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::InvalidFormat,
                 format!("Tuple must have 1-6 elements, got {}", count),

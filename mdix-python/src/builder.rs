@@ -1,4 +1,3 @@
-// mdix-python/src/builder.rs
 //! MdixBuilder — programmatic .mdix builder with two-tier ordering enforcement.
 
 use pyo3::prelude::*;

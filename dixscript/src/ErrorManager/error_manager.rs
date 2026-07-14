@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::Compiler::Core::{DebugMode, ErrorHandlingStrategy, OperationalSettings};
 use crate::ErrorManager::ErrorTypes::*;
-use crate::ErrorManager::Helpers::*;
 use crate::Utilities::mid_logger::LogLevel;
 
 // =============================================================================

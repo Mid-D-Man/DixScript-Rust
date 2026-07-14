@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.localization/Runtime/Core/MdixLocaleMetadata.cs
 namespace MidManStudio.Mdix.Localization
 {
     /// <summary>

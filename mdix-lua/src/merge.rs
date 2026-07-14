@@ -1,5 +1,3 @@
-// mdix-lua/src/merge.rs
-//
 // Merge support for Lua — thin bindings over dixscript::Runtime::merge.
 //
 // This does NOT reimplement merging the way MidManStudio.Mdix.Core's

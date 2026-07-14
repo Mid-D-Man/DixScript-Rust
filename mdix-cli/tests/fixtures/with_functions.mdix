@@ -30,6 +30,7 @@
     makeServer("primary.local", 8080),
     makeServer("replica.local", 8081)
 
+  limits:
   free_limit       = tierLimit(Tier.FREE)
   pro_limit        = tierLimit(Tier.PRO)
   enterprise_limit = tierLimit(Tier.ENTERPRISE)

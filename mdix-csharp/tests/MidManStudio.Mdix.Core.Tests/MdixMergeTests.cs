@@ -1,4 +1,3 @@
-// csharp/tests/MidManStudio.Mdix.Core.Tests/MdixMergeTests.cs
 using System.Collections.Generic;
 using FluentAssertions;
 using MidManStudio.Mdix;

@@ -1,4 +1,3 @@
--- mdix-lua/tests/test_basic.lua
 -- Tests: loading, reading, type inspection, export, error handling.
 
 return function(fw, mdix)

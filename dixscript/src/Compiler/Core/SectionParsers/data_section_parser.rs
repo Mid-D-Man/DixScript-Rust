@@ -147,11 +147,10 @@ pub fn new_with_error_manager(
                 }
             }
 
-            if !self.handle_data_entry_comma_separation() {
-                if self.should_halt_section() {
+            if !self.handle_data_entry_comma_separation()
+                && self.should_halt_section() {
                     return self.handle_section_failure(section_start_pos);
                 }
-            }
         }
 
         if !self.match_and_consume_symbol(')') {
@@ -897,7 +896,9 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         let current_token = self.current();
         let value_pos = Position::from_token(current_token);
 
-        let result = match &current_token.token_type {
+        
+
+        match &current_token.token_type {
             TokenType::Integer(i) => {
                 let val = *i;
                 self.advance();
@@ -957,9 +958,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
                 let token_clone = current_token.clone();
                 self.parse_complex_property_value(&token_clone, value_pos)
             }
-        };
-
-        result
+        }
     }
 
     fn parse_complex_property_value(&mut self, current_token: &Token, pos: Position) -> Option<Value> {
@@ -1691,7 +1690,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
 
         // ArithmeticOp now holds &'static str; copy it before re-borrowing current_token.
         if let TokenType::ArithmeticOp(op) = &current_token.token_type {
-            let op_str: &'static str = *op;
+            let op_str: &'static str = op;
             let current_clone = current_token.clone();
             self.handle_parse_error(
                 ParseErrorType::SectionSyntaxError,
@@ -2617,7 +2616,7 @@ fn parse_table_property(&mut self) -> Option<DataEntry> {
         _           => None,
     };
 
-    if base.is_none() { return None; }
+    base?;
 
     self.advance(); // consume the base type keyword
 
@@ -3087,7 +3086,7 @@ fn skip_nested_angle_content(&mut self) {
             }
 
             // ">=" — one closing angle plus '=' fused by the tokenizer (no space).
-            TokenType::ComparisonOp(ref op) if *op == ">=" => {
+            TokenType::ComparisonOp(op) if op == ">=" => {
                 if depth == 0 {
                     // The '>' belongs outside our scope — do not consume.
                     break;
@@ -3103,7 +3102,7 @@ fn skip_nested_angle_content(&mut self) {
             }
 
             // ">>" — two closing angles fused by the tokenizer.
-            TokenType::BitwiseOp(ref op) if *op == ">>" => {
+            TokenType::BitwiseOp(op) if op == ">>" => {
                 match depth {
                     0 => {
                         // Both angles are outside our scope — do not consume.
@@ -3127,7 +3126,7 @@ fn skip_nested_angle_content(&mut self) {
             }
 
             // ">>=" — two closing angles plus assignment fused by the tokenizer.
-            TokenType::BitwiseOp(ref op) if *op == ">>=" => {
+            TokenType::BitwiseOp(op) if op == ">>=" => {
                 match depth {
                     0 => {
                         // All three chars are outside our scope — do not consume.

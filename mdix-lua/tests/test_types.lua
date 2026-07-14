@@ -1,4 +1,3 @@
--- mdix-lua/tests/test_types.lua
 -- Tests: DixValue types, arrays, enums, nested structures, get_json.
 
 return function(fw, mdix)

@@ -1,4 +1,3 @@
-// benches/runtime_benchmark.rs
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use dixscript::Runtime::{
@@ -316,7 +315,7 @@ fn bench_data_builder(c: &mut Criterion) {
             let mut builder = DixDataBuilder::new();
             builder = builder.data(|d| {
                 for i in 0..100 {
-                    d.with_int(&format!("key_{}", i), i);
+                    d.with_int(format!("key_{}", i), i);
                 }
             });
             builder.build().expect("must build")
@@ -481,7 +480,7 @@ fn bench_dix_value(c: &mut Criterion) {
 
     group.bench_function("create_array_10", |b| {
         b.iter(|| {
-            let items: Vec<DixValue> = (0..10).map(|i| DixValue::Int(i)).collect();
+            let items: Vec<DixValue> = (0..10).map(DixValue::Int).collect();
             black_box(DixValue::array(items))
         })
     });

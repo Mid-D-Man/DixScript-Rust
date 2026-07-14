@@ -1,4 +1,3 @@
-// mdix-csharp/src/MidManStudio.Mdix.Core/MdixBuilder.cs
 using System;
 using System.Collections.Generic;
 using System.Globalization;

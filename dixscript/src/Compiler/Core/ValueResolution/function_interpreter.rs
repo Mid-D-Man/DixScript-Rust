@@ -493,7 +493,7 @@ impl<'a> FunctionInterpreter<'a> {
         let suffix = format!(".{}", name);
         let data_ctx = self.data_context.borrow();
         for (key, value) in data_ctx.iter() {
-            if key.to_string() == name.to_string() || key.ends_with(&suffix) {
+            if *key == name || key.ends_with(&suffix) {
                 return Some(value.clone());
             }
         }
@@ -1989,7 +1989,7 @@ fn evaluate_unary_op(
                 obj.as_object()
                     .get(&key)
                     .cloned()
-                    .ok_or_else(|| InterpreterError::PropertyNotFound {
+                    .ok_or(InterpreterError::PropertyNotFound {
                         property: key,
                         position,
                     })

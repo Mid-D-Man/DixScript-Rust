@@ -1,4 +1,3 @@
--- mdix-lua/tests/run_tests.lua
 -- Master test runner.  Outputs a single JSON blob to stdout.
 -- All other output goes to stderr so the CI runner can capture JSON cleanly.
 --

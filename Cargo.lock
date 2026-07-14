@@ -1680,6 +1680,7 @@ name = "mdix-ffi"
 version = "1.0.0"
 dependencies = [
  "cbindgen",
+ "chrono",
  "csbindgen",
  "dixscript",
  "serde_json",

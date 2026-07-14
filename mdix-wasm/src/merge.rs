@@ -1,5 +1,3 @@
-// mdix-wasm/src/merge.rs
-//
 // Merge support for JS/TS — thin bindings over dixscript::Runtime::merge.
 //
 // Same rationale as mdix-lua's and mdix-python's merge.rs: this does NOT

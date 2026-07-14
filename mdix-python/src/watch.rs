@@ -1,4 +1,3 @@
-// mdix-python/src/watch.rs
 //! MdixWatcher — hot reload for Python.
 //!
 //! Thin binding over dixscript::Runtime::HotReloadWatcher — see

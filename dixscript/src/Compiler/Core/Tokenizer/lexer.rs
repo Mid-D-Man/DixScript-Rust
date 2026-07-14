@@ -33,7 +33,6 @@ use super::char_tables::{DIGIT, HEX_DIGIT, IDENT_CONT, IDENT_START};
 use super::platform;
 use crate::ErrorManager::{ErrorManager, LexicalErrorType, DebugConfig};
 use crate::Compiler::Core::Config::OperationalSettings;
-use crate::Compiler::Core::Config::operational_settings::ErrorHandlingStrategy;
 use crate::Compiler::VersionControl::VersionManager;
 
 const INITIAL_TOKEN_POOL_SIZE: usize = 256;
@@ -251,7 +250,7 @@ impl<'src> Tokenizer<'src> {
         if newline_count == 0 {
             state.column += end - start;
         } else {
-            let last_nl_offset = memchr::memchr_iter(b'\n', ws_slice).last().unwrap();
+            let last_nl_offset = memchr::memchr_iter(b'\n', ws_slice).next_back().unwrap();
             state.line  += newline_count;
             state.column = end - (start + last_nl_offset);
         }
@@ -473,7 +472,7 @@ impl<'src> Tokenizer<'src> {
 
             if newline_count > 0 {
                 state.line += newline_count;
-                let last_nl = memchr::memchr_iter(b'\n', comment_bytes).last().unwrap_or(0);
+                let last_nl = memchr::memchr_iter(b'\n', comment_bytes).next_back().unwrap_or(0);
                 state.column = (end_abs - (comment_start + last_nl)) + 2;
             } else {
                 state.column += (end_abs - comment_start) + 2;

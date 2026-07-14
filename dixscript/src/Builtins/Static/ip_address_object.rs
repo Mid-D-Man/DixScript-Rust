@@ -307,7 +307,7 @@ fn is_link_local(ip: &IpAddr) -> bool {
         }
         IpAddr::V6(ipv6) => {
             let octets = ipv6.octets();
-            (octets[0] & 0xFF) == 0xFE && (octets[1] & 0xC0) == 0x80
+            octets[0] == 0xFE && (octets[1] & 0xC0) == 0x80
         }
     }
 }

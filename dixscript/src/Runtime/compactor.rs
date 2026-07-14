@@ -346,13 +346,12 @@ impl DixCompactor {
             // When a comma immediately precedes a table-property or group-array
             // header, drop it and schedule a forced space.  The parser rejects
             // commas in this position; a space keeps tokens properly separated.
-            if matches!(token.token_type, TokenType::Symbol(',')) {
-                if is_next_grouped_entry(tokens, i + 1) {
+            if matches!(token.token_type, TokenType::Symbol(','))
+                && is_next_grouped_entry(tokens, i + 1) {
                     force_space = true;
                     i += 1;
                     continue;
                 }
-            }
 
             // ── Proactive space before grouped-entry head (no-comma case) ─────
             // When the current token is the first identifier of a grouped-entry

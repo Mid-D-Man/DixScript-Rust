@@ -1,4 +1,3 @@
-// benches/ast_enhancement_benchmark.rs
 //! AST Enhancement Benchmark — DixScript (token-based pipeline)
 //!
 //! Pipeline order:

@@ -2,10 +2,6 @@
 name = "dixscript"
 version = "1.0.0"
 edition = "2021"
-# True floor as of the pure-Rust compressor migration: bzip2 0.6
-# (libbz2-rs-sys) needs 1.82, lzma-rust2 needs 1.85. The old "1.70" here
-# predated both and was silently wrong — cargo would refuse to build
-# regardless of what this field claimed.
 rust-version = "1.85"
 authors = ["MidManStudio"]
 description = "Config, code, and encryption in one file — a data interchange format with compile-time functions, AES-256/ChaCha20 built-in, and cross-platform FFI"
@@ -13,14 +9,11 @@ license = "MIT"
 readme = "README.md"
 repository = "https://github.com/Mid-D-Man/DixScript-Rust"
 keywords = ["config", "encryption", "serialization", "data-format", "gamedev"]
-# "config" is not a valid crates.io category slug — replaced with "development-tools"
 categories = ["development-tools", "encoding", "data-structures", "cryptography"]
 
 # Consumers of the crate never need any of this — dev-dependencies (criterion,
-# tempfile, bincode, rmp-serde, postcard, ciborium) already can't leak into
-# their build regardless, but the source files themselves would still ship
-# in the tarball without this. examples/ is deliberately NOT excluded — it's
-# small (12K, one file) and genuinely useful for anyone browsing usage on
+# examples/ is deliberately NOT excluded — it's
+#  for anyone browsing usage on
 # docs.rs or running `cargo run --example`.
 exclude = [
     "benches/",
@@ -67,26 +60,12 @@ hex              = "0.4"
 
 # ── Cloud import deps ──────────────────────────────────────────────────────────
 # Both optional — activated via the `cloud-import` feature (on by default).
-# Consumers that don't need HTTP imports (e.g. embedded / Android brush engine)
 # can opt out with  default-features = false  in their dependency declaration.
-#
-# reqwest: rustls-tls instead of the default native-tls backend.
-#   native-tls → OpenSSL → NDK cross-compile pain (the one confirmed Android risk).
-#   rustls is pure Rust; no C, no system SSL library, identical HTTP behaviour.
-#
-# Both moved into the non-wasm32 target table on purpose: tokio's
-# "rt-multi-thread" and "fs" features hit a hard compile_error! on
-# wasm32-unknown-unknown ("Only features sync,macros,io-util,rt,time are
-# supported on wasm") — this isn't a runtime concern like rayon, it's an
-# immediate build failure. Gating the dependency itself (rather than relying
-# on every consumer remembering `default-features = false`) means a wasm
-# build simply never sees these crates, matching the pattern already used
-# below for rayon/hostname. The corresponding module gate lives in
-# ImportsResolution/mod.rs.
+
 async-trait = "0.1"
 url         = "2.5"
 
-# Compression backends
+# --- Compression backends ──────────────────────────────────────────────────────────
 bzip2       = { version = "0.6", optional = true }
 # lzma-rust2: real LZMA2/XZ codec (ported from tukaani's xz-for-java), not a
 # liblzma C binding. Zero non-Rust deps (only optional pure-Rust `sha2` for

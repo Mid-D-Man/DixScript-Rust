@@ -204,7 +204,7 @@ impl SymbolTable {
     /// Check if builtin static object exists
     pub fn is_builtin_static_object(&self, object_name: &str) -> bool {
         self.builtin_static_objects.iter()
-            .any(|obj| obj.to_string() == object_name)
+            .any(|obj| *obj == object_name)
     }
 
     /// Add Dix function

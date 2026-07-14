@@ -1,5 +1,3 @@
-// com.midmanstudio.mdix.webgl/Runtime/Plugins/WebGL/MdixWeb.jslib
-//
 // ── WHY THIS FILE EXISTS ─────────────────────────────────────────────────────
 // mdix-ffi (the native P/Invoke backend used by MdixDatabase.cs on every other
 // platform) cannot be built for Unity WebGL: Unity WebGL statically links the

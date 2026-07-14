@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.localization/Runtime/Manager/MdixLocalizationManager.cs
 using System;
 using System.Collections.Generic;
 using MidManStudio.Mdix.Core;

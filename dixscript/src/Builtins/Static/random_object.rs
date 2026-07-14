@@ -390,7 +390,7 @@ mod tests {
             DixValue::from_int(10),
         ]).unwrap();
         let v = result.as_int();
-        assert!(v >= 1 && v <= 10);
+        assert!((1..=10).contains(&v));
     }
 
     #[test]
@@ -433,7 +433,7 @@ mod tests {
         let result = obj.call_method("nextFloat", &[]).unwrap();
         assert_eq!(result.get_type(), DixType::Float);
         let v = result.as_float();
-        assert!(v >= 0.0 && v < 1.0);
+        assert!((0.0..1.0).contains(&v));
     }
 
     #[test]
@@ -442,7 +442,7 @@ mod tests {
         let result = obj.call_method("nextDouble", &[]).unwrap();
         assert_eq!(result.get_type(), DixType::Double);
         let v = result.as_double();
-        assert!(v >= 0.0 && v < 1.0);
+        assert!((0.0..1.0).contains(&v));
     }
 
     #[test]

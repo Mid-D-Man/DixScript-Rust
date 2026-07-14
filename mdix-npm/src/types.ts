@@ -1,4 +1,3 @@
-// mdix-npm/src/types.ts
 
 /** Mirrors MdixValueType from the C# layer. */
 export type MdixValueType =

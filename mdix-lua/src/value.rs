@@ -1,5 +1,3 @@
-// mdix-lua/src/value.rs
-//
 // Conversions between DixValue (Rust) and Lua values, plus a formatter that
 // turns Lua values into DixScript literal strings for use in @DATA source.
 

@@ -57,9 +57,11 @@ use crate::Compiler::AST::{
 
 /// How to pick the winner when two sources define the same key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum MdixMergeStrategy {
     /// The source with the highest `weight` wins.  Equal-weight ties go to
     /// the source with the lower index (primary).
+    #[default]
     WeightedPriority,
     /// The source with the lower index (earliest added) always wins.
     PrimaryWins,
@@ -69,14 +71,10 @@ pub enum MdixMergeStrategy {
     ThrowOnConflict,
 }
 
-impl Default for MdixMergeStrategy {
-    fn default() -> Self {
-        MdixMergeStrategy::WeightedPriority
-    }
-}
 
 /// How to combine two `GroupArray` (or array-valued) entries that share a path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ArrayMergeStrategy {
     /// Winner's array entirely replaces the loser's.
     Replace,
@@ -84,14 +82,10 @@ pub enum ArrayMergeStrategy {
     Concat,
     /// Both arrays are concatenated (winner first); exact-duplicate primitive
     /// values are removed.  Complex values (Object, Array) are never deduped.
+    #[default]
     ConcatDedup,
 }
 
-impl Default for ArrayMergeStrategy {
-    fn default() -> Self {
-        ArrayMergeStrategy::ConcatDedup
-    }
-}
 
 // ── Input / output types ──────────────────────────────────────────────────────
 

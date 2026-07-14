@@ -1,5 +1,3 @@
-// mdix-ffi/build.rs
-//
 // Two code-generation steps run on every `cargo build -p mdix-ffi`:
 //
 // 1. csbindgen  → mdix-csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs

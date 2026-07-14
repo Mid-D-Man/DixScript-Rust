@@ -1,5 +1,3 @@
-// tests/runtime_tests.rs
-//
 // Integration tests that mirror every benchmark group in benches/runtime_benchmark.rs.
 // Unlike benchmarks, tests print timing + diagnostic info so you can see exactly
 // what is (or isn't) working and why.
@@ -548,7 +546,7 @@ fn data_builder_large_flat_100_keys() {
     let mut builder = DixDataBuilder::new();
     builder = builder.data(|d| {
         for i in 0..100_i32 {
-            d.with_int(&format!("key_{}", i), i);
+            d.with_int(format!("key_{}", i), i);
         }
     });
     let result = builder.build();
@@ -1076,7 +1074,7 @@ fn integration_builder_then_flatten_then_access() {
 
     assert_eq!(data.get::<String>("app_name").unwrap(), "IntegrationApp");
     assert_eq!(data.get::<i32>("port").unwrap(), 7777);
-    assert_eq!(data.get::<bool>("tls").unwrap(), true);
+    assert!(data.get::<bool>("tls").unwrap());
     assert_eq!(data.get::<String>("db.host").unwrap(), "pg.local");
     assert_eq!(data.get::<i32>("db.port").unwrap(), 5432);
     assert!(data.exists("tags"));

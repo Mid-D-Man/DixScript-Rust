@@ -3,7 +3,7 @@
 //! Provides pattern matching and string manipulation via regex
 
 use crate::Builtins::Core::{
-    DixType, DixValue, IBuiltinMethod, BuiltinMethod, validation_helpers,
+    DixType, DixValue, IBuiltinMethod, BuiltinMethod,
 };
 use regex::Regex;
 use std::collections::HashMap;
@@ -241,7 +241,7 @@ mod tests {
         let text = DixValue::from_string("abc123def".to_string());
 
         let result = test_impl(&[pattern, text]).unwrap();
-        assert_eq!(result.as_bool(), true);
+        assert!(result.as_bool());
     }
 
     #[test]
@@ -301,7 +301,7 @@ mod tests {
     fn test_regex_is_valid() {
         let valid_pattern = DixValue::from_regex(r"\d+".to_string()).unwrap();
         let result = is_valid_impl(&[valid_pattern]).unwrap();
-        assert_eq!(result.as_bool(), true);
+        assert!(result.as_bool());
 
         // Test with invalid pattern stored as string (bypassing from_regex validation)
         let invalid_pattern = DixValue::new(
@@ -309,6 +309,6 @@ mod tests {
             DixType::Regex,
         );
         let result = is_valid_impl(&[invalid_pattern]).unwrap();
-        assert_eq!(result.as_bool(), false);
+        assert!(!result.as_bool());
     }
 }

@@ -186,7 +186,7 @@ impl ArrayObject {
             DixType::Array,
             |args| {
                 let array = args[0].as_array();
-                let mut reversed: Vec<DixValue> = array.iter().rev().cloned().collect();
+                let reversed: Vec<DixValue> = array.iter().rev().cloned().collect();
                 Ok(DixValue::from_array(reversed))
             },
             "Creates a reversed copy of the array".to_string(),
@@ -201,7 +201,7 @@ impl ArrayObject {
             |args| {
                 let array = args[0].as_array();
                 let mut sorted: Vec<DixValue> = array.to_vec();
-                sorted.sort_by(|a, b| a.as_string().cmp(&b.as_string()));
+                sorted.sort_by_key(|a| a.as_string());
                 Ok(DixValue::from_array(sorted))
             },
             "Creates a sorted copy of the array".to_string(),

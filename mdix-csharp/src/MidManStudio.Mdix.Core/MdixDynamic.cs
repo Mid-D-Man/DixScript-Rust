@@ -1,4 +1,3 @@
-// mdix-csharp/src/MidManStudio.Mdix.Core/MdixDynamic.cs
 using System;
 using System.Dynamic;
 

@@ -1,4 +1,3 @@
-// mdix-cli/tests/create_tests.rs
 
 mod helpers;
 

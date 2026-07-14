@@ -1,4 +1,3 @@
-
 //! Rename provider.
 //!
 //! Implements prepareRename (validates the symbol under the cursor can be renamed)

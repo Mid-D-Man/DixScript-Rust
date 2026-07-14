@@ -207,7 +207,7 @@ impl DateTimeObject {
             |args| {
                 let year  = args[0].as_int();
                 let month = args[1].as_int() as u32;
-                if month < 1 || month > 12 {
+                if !(1..=12).contains(&month) {
                     return Err(format!("Invalid month: {}", month));
                 }
                 let next_month = if month == 12 { 1 } else { month + 1 };

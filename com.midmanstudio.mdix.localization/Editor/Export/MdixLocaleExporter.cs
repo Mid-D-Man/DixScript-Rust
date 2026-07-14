@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.localization/Editor/Export/MdixLocaleExporter.cs
 using System;
 using System.Collections.Generic;
 using System.Text;

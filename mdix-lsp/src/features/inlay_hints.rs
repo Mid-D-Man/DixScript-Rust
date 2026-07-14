@@ -1,4 +1,3 @@
-// mdix-lsp/src/features/inlay_hints.rs
 use std::panic;
 use std::collections::HashMap;
 

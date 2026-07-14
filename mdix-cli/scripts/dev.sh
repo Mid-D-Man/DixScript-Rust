@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# scripts/dev.sh
-#
 # Development helper — rebuilds the CLI in debug mode and runs any command
 # against it, equivalent to the C# project's dix-dev symlink workflow.
 #

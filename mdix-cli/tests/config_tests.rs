@@ -1,5 +1,4 @@
-// mdix-cli/tests/config_tests.rs
-//
+
 // Each test runs against an isolated config directory: a fresh TempDir is
 // injected via the MDIX_CONFIG_DIR environment variable that ConfigManager
 // checks before falling back to ~/.dixscript. Previously every test shared

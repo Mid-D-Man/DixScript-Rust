@@ -1,4 +1,3 @@
-// mdix-cli/src/commands/mod.rs
 //! Shared command types and the CliError enum.
 
 pub mod compact;

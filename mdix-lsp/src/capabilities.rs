@@ -1,4 +1,3 @@
-// mdix-lsp/src/capabilities.rs
 use tower_lsp::lsp_types::*;
 use crate::features::code_lens::ALL_COMMANDS;
 

@@ -3,7 +3,6 @@
 use web_time::Instant;
 use std::io::{Write, Cursor};
 use crate::Compiler::AST::DixScript;
-use crate::ErrorManager::ErrorTypes::BinarySerializationErrorType;
 use super::{
     binary_format::{HEADER_SIZE, SectionFlags, SectionId},
     binary_header::BinaryHeader,
@@ -160,7 +159,7 @@ impl BinaryPacker {
                 .map(|&id| (id, Self::encode_single_section(id, ast)))
                 .collect();
 
-            return self.collect_encode_results(results, sections);
+            self.collect_encode_results(results, sections)
         }
 
         // should_use_concurrent() always returns false on wasm32 or when
@@ -288,7 +287,7 @@ impl BinaryPacker {
         let mut buffer = Cursor::new(Vec::with_capacity(estimated_cap));
 
         buffer
-            .write_all(&vec![0u8; HEADER_SIZE])
+            .write_all(&[0u8; HEADER_SIZE])
             .map_err(|e| BinarySerializationError::write_error(e.to_string(), "Header"))?;
 
         let mut header          = BinaryHeader::new();

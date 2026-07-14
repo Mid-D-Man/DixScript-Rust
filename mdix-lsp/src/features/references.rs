@@ -1,4 +1,3 @@
-
 //! Find-all-references provider.
 //!
 //! Returns every location in the document where the symbol under the cursor

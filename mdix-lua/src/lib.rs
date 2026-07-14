@@ -1,5 +1,3 @@
-// mdix-lua/src/lib.rs
-//
 // Lua 5.4 module entrypoint — called by Lua's require("mdix").
 //
 // Primary deployment target: a Rust host process that embeds Lua itself

@@ -1,4 +1,3 @@
-
 //! Static signature tables for hover documentation.
 //! Extracted from hover.rs so the data is easy to edit independently.
 //!

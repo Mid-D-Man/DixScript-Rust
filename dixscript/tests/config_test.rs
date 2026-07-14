@@ -1,6 +1,3 @@
-// dixscript/tests/config_test.rs
-// Approach B: tokenise → split_config_tokens → process_config_tokens
-// (mirrors DixLoader and the LSP analyser pipeline exactly)
 
 use dixscript::Compiler::Core::Config::{
     ConfigSchema,

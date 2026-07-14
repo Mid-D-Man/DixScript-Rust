@@ -1,5 +1,3 @@
-// mdix-java/src/lib.rs
-//
 // JNI bridge between the JVM and the DixScript runtime.
 //
 // Naming convention (mandatory for JNI):

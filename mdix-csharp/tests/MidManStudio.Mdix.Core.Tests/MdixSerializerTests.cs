@@ -1,4 +1,3 @@
-// csharp/tests/MidManStudio.Mdix.Core.Tests/MdixSerializerTests.cs
 
 using System;
 using FluentAssertions;

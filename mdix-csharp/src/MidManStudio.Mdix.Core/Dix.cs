@@ -1,4 +1,3 @@
-// csharp/src/MidManStudio.Mdix.Core/Dix.cs
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;

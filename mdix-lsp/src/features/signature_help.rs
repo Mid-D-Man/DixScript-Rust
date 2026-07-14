@@ -1,4 +1,3 @@
-
 //! Signature-help provider — shows parameter hints when inside a function call.
 //!
 //! Triggered by `(` and `,`. Scans backwards through the token stream from

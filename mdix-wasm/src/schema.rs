@@ -1,5 +1,3 @@
-// mdix-wasm/src/schema.rs
-//
 // MdixSchema / MdixValidationReport — schema validation for JS/TS.
 //
 // Thin bindings over dixscript::Runtime::schema, the same core module

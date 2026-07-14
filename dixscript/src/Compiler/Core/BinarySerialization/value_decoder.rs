@@ -234,7 +234,7 @@ impl ValueDecoder {
         let mut count_buf = [0u8; 1];
         reader.read_exact(&mut count_buf)?;
         let count = count_buf[0] as usize;
-        if count < 1 || count > 6 {
+        if !(1..=6).contains(&count) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Invalid tuple count: {} (must be 1-6)", count),

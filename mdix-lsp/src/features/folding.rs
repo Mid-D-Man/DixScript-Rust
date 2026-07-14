@@ -1,5 +1,3 @@
-
-//!
 //! Fold regions:
 //! 1. Outer section fold for every @SECTION(...) — paren-depth tracking
 //! 2. Enum bodies            — collect_brace_folds_in_range on @ENUMS tokens

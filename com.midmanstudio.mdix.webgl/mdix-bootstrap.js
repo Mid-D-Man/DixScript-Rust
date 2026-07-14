@@ -1,5 +1,3 @@
-// mdix-bootstrap.js
-//
 // Loads the mdix-wasm "--target web" build and publishes it globally so
 // MdixWeb.jslib's plain (non-module) Emscripten library functions can reach
 // it via `window.__mdixWasm`, and so C# (MdixWebGLReady.IsReady /

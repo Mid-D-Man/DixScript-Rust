@@ -1,5 +1,3 @@
-
-//!
 //! ## Token coloring scheme
 //! - `TT_NAMESPACE`   — static object receivers (Math, DateTime, …) & import aliases
 //! - `TT_FUNCTION`    — QuickFunc declarations, direct calls, static method calls (+MOD_STATIC)

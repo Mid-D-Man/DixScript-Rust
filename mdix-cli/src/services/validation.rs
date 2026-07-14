@@ -1,6 +1,4 @@
 //! Wraps the dixscript compilation pipeline up to semantic analysis.
-//! Uses Approach B (tokenizer-first): tokenize full source → split @CONFIG
-//! → process config tokens → parse rest tokens → semantic analysis.
 
 use std::path::Path;
 use std::time::Instant;

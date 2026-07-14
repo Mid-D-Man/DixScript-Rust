@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.localization/Runtime/Core/ILocaleTable.cs
 using System;
 
 namespace MidManStudio.Mdix.Localization

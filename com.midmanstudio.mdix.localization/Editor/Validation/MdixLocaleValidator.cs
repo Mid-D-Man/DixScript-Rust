@@ -1,4 +1,3 @@
-// com.midmanstudio.mdix.localization/Editor/Validation/MdixLocaleValidator.cs
 using System;
 using System.Collections.Generic;
 using System.Linq;

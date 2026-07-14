@@ -349,7 +349,7 @@ impl<'a> GeneralParser<'a> {
                     Err(e)     => self.handle_section_error(&name, e)?,
                 }
             }
-            return Ok(());
+            Ok(())
         }
         #[cfg(any(target_arch = "wasm32", not(feature = "rayon-support")))]
         self.parse_sections_sequential(sections, script)

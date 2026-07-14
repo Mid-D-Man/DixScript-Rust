@@ -1,4 +1,3 @@
-use super::position::Position;
 use super::config::ConfigSection;
 use super::imports::ImportsSection;
 use super::dlm::DLMSection;

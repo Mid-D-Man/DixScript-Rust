@@ -242,7 +242,7 @@ impl IdentifierPatternAnalyzer {
         let after_second = Self::peek_ahead(tokens, current_position, 3);
 
         // STATIC METHOD: ClassName.method() (uppercase first letter)
-        if first_identifier.chars().next().map_or(false, |c| c.is_uppercase()) {
+        if first_identifier.chars().next().is_some_and(|c| c.is_uppercase()) {
             if let Some(token) = after_second {
                 if let TokenType::Symbol(sym) = &token.token_type {
                     if *sym == '(' {
@@ -262,7 +262,7 @@ impl IdentifierPatternAnalyzer {
         }
 
         // IMPORTED FUNCTION: namespace.function() (lowercase first letter)
-        if first_identifier.chars().next().map_or(false, |c| c.is_lowercase()) {
+        if first_identifier.chars().next().is_some_and(|c| c.is_lowercase()) {
             if let Some(token) = after_second {
                 if let TokenType::Symbol(sym) = &token.token_type {
                     if *sym == '(' {
@@ -292,7 +292,7 @@ impl IdentifierPatternAnalyzer {
                             let after_third = Self::peek_ahead(tokens, current_position, 5);
 
                             // Make sure it's NOT followed by '('
-                            let is_not_call = after_third.map_or(true, |t| {
+                            let is_not_call = after_third.is_none_or(|t| {
                                 !matches!(&t.token_type, TokenType::Symbol(s) if *s == '(')
                             });
 
@@ -319,7 +319,7 @@ impl IdentifierPatternAnalyzer {
         }
 
         // LOCAL ENUM: EnumName.VALUE (2 parts, no parens)
-        let is_not_call = after_second.map_or(true, |t| {
+        let is_not_call = after_second.is_none_or(|t| {
             !matches!(&t.token_type, TokenType::Symbol(s) if *s == '(')
         });
 

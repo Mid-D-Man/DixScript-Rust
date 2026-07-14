@@ -1,4 +1,3 @@
--- mdix-lua/tests/test_builder.lua
 -- Tests: MdixBuilder — two-tier ordering, all value types, finalization.
 
 return function(fw, mdix)

@@ -1,5 +1,3 @@
-//! mdix-wasm/tests/web.rs
-//!
 //! Runs in a real headless browser via `wasm-pack test --headless
 //! --chrome` (see .github/workflows/wasm-tests.yml) — not just a compile
 //! check. wasm_bindgen_test_configure!(run_in_browser) below is what makes

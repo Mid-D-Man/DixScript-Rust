@@ -1,4 +1,3 @@
-// mdix-cli/src/commands/debug_ast.rs
 //! `mdix debug-ast <file>` — print the parsed AST structure.
 //!
 //! Uses Approach B (tokenizer-first): tokenize full source → split @CONFIG

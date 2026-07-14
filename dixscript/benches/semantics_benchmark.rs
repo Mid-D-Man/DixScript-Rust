@@ -1,4 +1,3 @@
-// benches/semantics_benchmark.rs
 //! Semantic Analysis Benchmark — DixScript (token-based pipeline)
 //!
 //! Pipeline order:

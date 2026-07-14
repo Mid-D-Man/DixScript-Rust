@@ -1,4 +1,3 @@
-// mdix-lsp/src/features/goto_definition.rs
 //! Go-to-definition provider.
 //!
 //! Handles:

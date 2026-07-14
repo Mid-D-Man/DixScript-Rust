@@ -1,4 +1,4 @@
-# Cargo.toml
+# Root workspace and stuff
 [workspace]
 members = [
     "dixscript",
@@ -10,7 +10,7 @@ members = [
     "mdix-java",
     "mdix-lua",
 ]
-# Keep the bare `cargo build` / `cargo test` / `cargo bench` (no -p flag)
+#  the bare `cargo build` / `cargo test` / `cargo bench` (no -p flag)
 # scoped to exactly what it covered before this change. The 5 binding
 # crates below are now real members (fixes `cargo build -p mdix-ffi` /
 # `-p mdix-java` / `-p mdix-lua`, and `--manifest-path mdix-python/Cargo.toml`,

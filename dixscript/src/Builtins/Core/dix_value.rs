@@ -1,5 +1,6 @@
-
 use super::dix_type::DixType;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::cmp::Ordering;
@@ -32,7 +33,7 @@ pub(crate) enum ValueData {
 impl DixValue {
     // ── Constructors ──────────────────────────────────────────────────────────
 
-    pub fn new(value: ValueData, dix_type: DixType) -> Self {
+    pub(crate) fn new(value: ValueData, dix_type: DixType) -> Self {
         DixValue { value, dix_type }
     }
 
@@ -87,7 +88,7 @@ impl DixValue {
     }
 
     pub fn from_blob(base64_data: String) -> Result<Self, String> {
-        base64::decode(&base64_data).map_err(|e| format!("Invalid base64 blob data: {}", e))?;
+        STANDARD.decode(&base64_data).map_err(|e| format!("Invalid base64 blob data: {}", e))?;
         Ok(DixValue { value: ValueData::Blob(base64_data), dix_type: DixType::Blob })
     }
 
@@ -364,7 +365,7 @@ impl DixValue {
 
     pub fn as_blob_bytes(&self) -> Result<Vec<u8>, String> {
         match &self.value {
-            ValueData::Blob(b) => base64::decode(b).map_err(|e| format!("Failed to decode blob: {}", e)),
+            ValueData::Blob(b) => STANDARD.decode(b).map_err(|e| format!("Failed to decode blob: {}", e)),
             _ => Err(format!("Cannot convert {:?} to byte array", self.dix_type)),
         }
     }
@@ -377,7 +378,7 @@ impl DixValue {
     pub fn get_blob_metadata(&self) -> Result<(String, usize, Vec<u8>), String> {
         match &self.value {
             ValueData::Blob(b) => {
-                let bytes = base64::decode(b)
+                let bytes = STANDARD.decode(b)
                     .map_err(|e| format!("Failed to decode blob: {}", e))?;
                 let size = bytes.len();
                 Ok(("application/octet-stream".to_string(), size, bytes))
@@ -489,4 +490,4 @@ mod tests {
         assert_eq!(size, 5);
         assert_eq!(bytes, b"hello");
     }
-}
+                      }

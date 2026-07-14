@@ -298,7 +298,7 @@ impl ValueEncoder {
                 std::io::ErrorKind::InvalidData,
                 format!("Invalid date format: {}", e),
             ))?;
-        let ticks = date.and_hms_opt(0, 0, 0).unwrap().timestamp() * 10_000_000;
+        let ticks = date.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp() * 10_000_000;
         writer.write_all(&[ValueTypeTag::Date as u8])?;
         writer.write_all(&ticks.to_le_bytes())?;
         Ok(())

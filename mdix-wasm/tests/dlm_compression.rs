@@ -1,14 +1,14 @@
 //! DLM compressor coverage — all three `DCompressor` subtypes (gzip,
-//! bzip2, xz/lzma), each round-tripped standalone AND paired with an
+//! bzip2, lzma), each round-tripped standalone AND paired with an
 //! encryptor, specifically on the wasm32 target.
 //!
 //! tests/web.rs has exactly one DLM compression test
 //! (`compile_with_dlm_round_trips_with_compression_and_encryption`), and
-//! it only ever exercises `DCompressor.gzip`. bzip2 and xz have zero
+//! it only ever exercises `DCompressor.gzip`. bzip2 and lzma have zero
 //! wasm32 coverage, despite `Compiler/DLM/Compressor/mod.rs` explicitly
 //! documenting all three as pure Rust and building "on every target:
 //! wasm32-unknown-unknown, wasm32-wasip2, Android, iOS, Windows." Both
-//! are feature-gated on the dixscript side (`bzip2-support`, `xz-support`)
+//! are feature-gated on the dixscript side (`bzip2-support`, `xz-support` -- the Cargo feature is still named xz-support, only the @DLM source keyword is `lzma`)
 //! — both happen to be in dixscript's `default` feature set already, so
 //! mdix-wasm gets them for free via the plain `dixscript = { path =
 //! "../dixscript" }` dependency with no extra feature wiring needed — but
@@ -74,8 +74,8 @@ fn bzip2_alone_round_trips() {
 }
 
 #[wasm_bindgen_test]
-fn xz_alone_round_trips() {
-    assert_compressor_round_trips("xz", &repeated_payload(50));
+fn lzma_alone_round_trips() {
+    assert_compressor_round_trips("lzma", &repeated_payload(50));
 }
 
 // ── compression + encryption paired — mirrors web.rs's existing gzip
@@ -119,8 +119,8 @@ fn bzip2_plus_encryption_round_trips() {
 }
 
 #[wasm_bindgen_test]
-fn xz_plus_encryption_round_trips() {
-    assert_compressor_round_trips_with_encryption("xz", &repeated_payload(50));
+fn lzma_plus_encryption_round_trips() {
+    assert_compressor_round_trips_with_encryption("lzma", &repeated_payload(50));
 }
 
 // ── sanity check: compression should actually shrink the data, not just
@@ -135,7 +135,7 @@ fn each_compressor_actually_shrinks_the_packed_data() {
         .expect("compileWithDlm should succeed with no @DLM section");
     let baseline_len = baseline.processedData().len();
 
-    for module_name in ["gzip", "bzip2", "xz"] {
+    for module_name in ["gzip", "bzip2", "lzma"] {
         let source = format!("@DLM(DCompressor.{module_name})\n@DATA(secret = \"{payload}\")\n");
         let outcome = compile_with_dlm(&source, &format!("dlm-{module_name}-shrink-test"))
             .unwrap_or_else(|_| panic!("compileWithDlm should succeed with {module_name}"));
@@ -185,4 +185,4 @@ fn top_level_and_nested_fields_still_resolve_correctly_under_compression() {
     assert_eq!(db.get_int("user.status").unwrap(), 1);
     assert_eq!(db.get_enum_field("user.permissions[0].role").unwrap(), "EDITOR");
     assert_eq!(db.get_string("user.permissions[1].scope").unwrap(), "global");
-  }
+    }

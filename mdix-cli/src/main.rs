@@ -6,10 +6,10 @@ mod services;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    compact::CompactArgs, compile::CompileArgs, config::ConfigArgs,
+    audit::AuditArgs, compact::CompactArgs, compile::CompileArgs, completions::CompletionsArgs, config::ConfigArgs,
     convert::ConvertArgs, create::CreateArgs, debug_ast::DebugAstArgs,
     debug_symbols::DebugSymbolsArgs, debug_tokens::DebugTokensArgs,
-    decrypt::DecryptArgs, format::FormatArgs,
+    decrypt::DecryptArgs, diff::DiffArgs, format::FormatArgs,
     inspect::InspectArgs, key::KeyArgs, merge::MergeArgs, validate::ValidateArgs,
 };
 
@@ -41,6 +41,8 @@ pub enum Commands {
     Convert(ConvertArgs),
     /// Merge two or more .mdix databases into one
     Merge(MergeArgs),
+    /// Preview what a merge would need to resolve, without writing output
+    Diff(DiffArgs),
     /// Create a new .mdix file from a template
     Create(CreateArgs),
     /// Format a .mdix file in-place
@@ -51,36 +53,50 @@ pub enum Commands {
     Inspect(InspectArgs),
     /// Key file management
     Key(KeyArgs),
+    /// Inspect a .mdix.au audit trail file
+    Audit(AuditArgs),
     /// CLI configuration
     Config(ConfigArgs),
+    /// Generate a shell completion script (bash, zsh, fish, powershell, elvish)
+    Completions(CompletionsArgs),
 
     // ── Debug commands ──────────────────────────────────────────────────────
+    // Deliberately NOT hidden — these stay fully visible and grouped under
+    // their own heading (rather than `#[command(hide = true)]`) so they're
+    // unmistakably "not one of the everyday commands" without actually
+    // making them undiscoverable. Anyone doing LSP/tooling/plugin work on
+    // top of dixscript genuinely wants these findable.
     /// [DEBUG] Print the token stream with positions and section tags
     ///
     /// Verifies @CONFIG is NOT in the token stream, section stamps are correct,
     /// and diagnoses hover/folding/completion bugs.
     ///
+    /// Output format is internal and NOT guaranteed stable across versions.
+    ///
     ///   mdix debug-tokens config.mdix
     ///   mdix debug-tokens config.mdix --section-filter DATA
-    #[command(name = "debug-tokens")]
+    #[command(name = "debug-tokens", next_help_heading = "Debug commands (internal, output format not guaranteed stable)")]
     DebugTokens(DebugTokensArgs),
 
     /// [DEBUG] Print the parsed (and optionally enhanced) AST
     ///
+    /// Output format is internal and NOT guaranteed stable across versions.
+    ///
     ///   mdix debug-ast config.mdix
     ///   mdix debug-ast config.mdix --section DATA
-    #[command(name = "debug-ast")]
+    #[command(name = "debug-ast", next_help_heading = "Debug commands (internal, output format not guaranteed stable)")]
     DebugAst(DebugAstArgs),
 
     /// [DEBUG] Print the symbol table produced by semantic analysis
     ///
     /// Shows all registered enums, QuickFuncs, DATA variables, namespaces,
     /// and builtin statics. Use to verify semantic analysis output.
+    /// Output format is internal and NOT guaranteed stable across versions.
     ///
     ///   mdix debug-symbols config.mdix
     ///   mdix debug-symbols config.mdix --section ENUMS
     ///   mdix debug-symbols config.mdix --section DATA --verbose
-    #[command(name = "debug-symbols")]
+    #[command(name = "debug-symbols", next_help_heading = "Debug commands (internal, output format not guaranteed stable)")]
     DebugSymbols(DebugSymbolsArgs),
 }
 
@@ -103,12 +119,15 @@ fn main() {
         Commands::Decrypt(args)      => commands::decrypt::run(args, &global),
         Commands::Convert(args)      => commands::convert::run(args, &global),
         Commands::Merge(args)        => commands::merge::run(args, &global),
+        Commands::Diff(args)         => commands::diff::run(args, &global),
         Commands::Create(args)       => commands::create::run(args, &global),
         Commands::Format(args)       => commands::format::run(args, &global),
         Commands::Compact(args)      => commands::compact::run(args, &global),
         Commands::Inspect(args)      => commands::inspect::run(args, &global),
         Commands::Key(args)          => commands::key::run(args, &global),
+        Commands::Audit(args)        => commands::audit::run(args, &global),
         Commands::Config(args)       => commands::config::run(args, &global),
+        Commands::Completions(args)  => commands::completions::run(args, &global),
         Commands::DebugTokens(args)  => commands::debug_tokens::run(args, &global),
         Commands::DebugAst(args)     => commands::debug_ast::run(args, &global),
         Commands::DebugSymbols(args) => commands::debug_symbols::run(args, &global),

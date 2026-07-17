@@ -1,0 +1,25 @@
+@CONFIG(
+  version -> "1.0.0"
+  author  -> "DLM Test — Enhanced Auditor (produces .mdix.au)"
+)
+
+@DLM(
+  DAuditor.enhanced
+)
+
+@DATA(
+  app_name    = "DLMTestApp"
+  version     = "1.0.0"
+  environment = "test"
+  note        = "audited_enhanced_mode"
+  port<int>   = 8443
+  active<bool> = true
+  score<double> = 9.87654321
+  testAddition<string> = "we Added this"
+  server: host = "dlm.test.internal", ssl = true, timeout<int> = 30
+
+  endpoints::
+    "https://api.test/v1/health",
+    "https://api.test/v1/status",
+    "https://api.test/v1/metrics"
+)

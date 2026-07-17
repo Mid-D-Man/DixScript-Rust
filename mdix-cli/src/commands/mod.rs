@@ -1,7 +1,9 @@
 //! Shared command types and the CliError enum.
 
+pub mod audit;
 pub mod compact;
 pub mod compile;
+pub mod completions;
 pub mod config;
 pub mod convert;
 pub mod create;
@@ -9,6 +11,7 @@ pub mod debug_ast;
 pub mod debug_symbols;
 pub mod debug_tokens;
 pub mod decrypt;
+pub mod diff;
 pub mod format;
 pub mod inspect;
 pub mod key;

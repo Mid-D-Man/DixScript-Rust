@@ -1,0 +1,40 @@
+name: Apply replacements
+
+on:
+  workflow_dispatch:
+    inputs:
+      template:
+        description: 'Path to .mdix replacements manifest'
+        required: false
+        default: '.mdix/replacements/replacements.mdix'
+      dry_run:
+        description: 'true = preview only. false = actually write + commit.'
+        required: false
+        type: choice
+        default: 'true'
+        options:
+          - 'true'
+          - 'false'
+      file_strategy:
+        description: 'How to handle files that already exist at the resolved target'
+        required: false
+        type: choice
+        default: 'overwrite'
+        options:
+          - 'overwrite'
+          - 'skip'
+          - 'backup'
+          - 'rename'
+  push:
+    paths:
+      - '.mdix/replacements/**'
+
+jobs:
+  replace:
+    uses: Mid-D-Man/mdix-scaffold/.github/workflows/generate-structure.yml@main
+    permissions:
+      contents: write
+    with:
+      template:      ${{ inputs.template || '.mdix/replacements/replacements.mdix' }}
+      dry_run:       ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'true' }}
+      file_strategy: ${{ inputs.file_strategy || 'overwrite' }}

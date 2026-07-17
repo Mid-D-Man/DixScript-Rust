@@ -67,13 +67,37 @@ impl ValueEncoder {
                 }
             }
 
-            // EnumValue should be resolved to integers before serialization
-            Value::EnumValue { enum_name, value, .. } => {
-                self.error_manager.log_warning(&format!(
-                    "EnumValue {}.{} encountered during serialization — should be resolved",
-                    enum_name, value
-                ));
-                self.encode_int32(writer, 0, context)
+            // EnumValue must be resolved to an integer before it reaches the
+            // encoder — this layer has no enums table to resolve against, so
+            // it cannot do that itself. Resolution happens upstream, in
+            // ValueResolver::resolve_all_enum_values() (Runtime/loader.rs
+            // Stage 7), before BinaryPacker::pack() is ever called.
+            //
+            // BUGFIX: this used to log a warning and silently write a
+            // hardcoded `Int32(0)` here — no enum tag, indistinguishable from
+            // a real value of 0. That masked the Stage 7 gating bug (enums
+            // used with no QuickFuncs in scope never got pre-resolved) as
+            // silent data corruption instead of a caught error. Now that
+            // Stage 7 always runs whenever enums are in scope, this arm
+            // should be unreachable in normal operation — hard-failing here
+            // instead is defense-in-depth: if some future code path ever
+            // constructs an AST and hands it to BinaryPacker without going
+            // through DixLoader::compile_source's resolution stage, this
+            // fails the whole pack() call loudly instead of quietly writing
+            // wrong bytes.
+            Value::EnumValue { enum_name, value, position } => {
+                let err = BinarySerializationError::with_position(
+                    crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::EncodingError,
+                    format!(
+                        "EnumValue {}.{} reached the binary encoder unresolved — enum \
+                         pre-resolution should have converted this to an Integer before \
+                         serialization. This AST was not fully resolved before packing.",
+                        enum_name, value
+                    ),
+                    context.get_current_scope(),
+                    *position,
+                );
+                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, err))
             }
 
             _ => {
@@ -481,4 +505,4 @@ impl ValueEncoder {
 
 impl Default for ValueEncoder {
     fn default() -> Self { Self::new() }
-                            }
+                                    }

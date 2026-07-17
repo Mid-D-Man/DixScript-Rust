@@ -731,14 +731,47 @@ impl DixLoader {
 
         let mut resolved_ast = enhancement_result.enhanced_ast;
 
-        // Stage 7: value resolution (only when there are functions and data).
+        // Stage 7: value resolution (whenever there are functions, enums, or
+        // data to resolve against).
+        //
+        // BUGFIX: this gate used to only check for QuickFuncs (local or
+        // imported), on the assumption that a file with no functions has
+        // nothing for ValueResolver to do. That's wrong: ValueResolver::resolve()
+        // always runs Phase 1 (`resolve_all_enum_values`) first, unconditionally
+        // pre-resolving every `Value::EnumValue` node — local AND imported — to
+        // a plain `Value::Integer`, completely independent of whether any
+        // QuickFunc call exists anywhere in scope. Skipping this stage left raw,
+        // unresolved `Value::EnumValue` nodes in the AST for any @DATA section
+        // that used enums but had zero QuickFuncs (local or imported) in scope.
+        //
+        // Every downstream consumer of "the resolved AST" then either silently
+        // mis-handled that leftover node (BinaryPacker's `value_encoder.rs`
+        // hardcoded a bare `0`, no enum tag — see the fix there too) or, for the
+        // plain non-DLM `DixData::from_ast` path, resolved only *local* enums
+        // via its own fallback table (`extract_enums_section` reads only
+        // `ast.enums`, this file's own `@ENUMS` section — it has no visibility
+        // into an imported namespace's enums). So an *imported* enum used
+        // without any QuickFuncs anywhere in scope silently resolved to 0
+        // through that path too, even for files that otherwise "worked".
+        //
+        // Gating on "has any enum in scope" as well as "has any function in
+        // scope" closes both holes: whenever this stage runs at all,
+        // `resolve_all_enum_values()` resolves every enum reference (local or
+        // imported) against the real symbol table before anything downstream
+        // ever sees it, so neither blind spot above ever gets exercised.
         let has_local_functions    = resolved_ast.quick_functions.is_some();
         let has_imported_functions = semantic_result.symbol_table.as_ref()
             .map(|st| st.namespaces.values().any(|ns| !ns.functions.is_empty()))
             .unwrap_or(false);
+        let has_local_enums    = resolved_ast.enums.as_ref()
+            .map(|e| !e.enums.is_empty())
+            .unwrap_or(false);
+        let has_imported_enums = semantic_result.symbol_table.as_ref()
+            .map(|st| st.namespaces.values().any(|ns| !ns.enums.is_empty()))
+            .unwrap_or(false);
         let has_data_section = resolved_ast.data.is_some();
 
-        if (has_local_functions || has_imported_functions)
+        if (has_local_functions || has_imported_functions || has_local_enums || has_imported_enums)
             && has_data_section
             && semantic_result.symbol_table.is_some()
         {
@@ -767,7 +800,9 @@ impl DixLoader {
                 .resolved_ast
                 .ok_or_else(|| "Resolution succeeded but AST is None".to_string())?;
         } else {
-            self.error_manager.log_info("Skipping value resolution (no functions or no data)");
+            self.error_manager.log_info(
+                "Skipping value resolution (no functions, no enums, or no data)"
+            );
         }
 
         // Stage 8: numeric array homogenization.
@@ -1099,4 +1134,4 @@ mod tests {
         let errors = loader.error_manager.get_runtime_errors();
         assert_eq!(errors.len(), 1, "only the most recent load's error should remain");
     }
-            }
+    }

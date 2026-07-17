@@ -37,7 +37,7 @@ The C# prototype (`https://github.com/Mid-D-Man/DixScript`) remains the referenc
 
 **Started as:** A quick hack to make a mobile game's remote config less painful.
 
-**The Problem:** The game had weapons, camos, attainment missions, and shop data spread across Unity Remote Config as massive nested JSON blobs. Adding a single new field to a camo definition meant updating it in dozens of places. One typo and suddenly every weapon in the game was broken at runtime — with no error until the player hit that screen.
+**The Problem:** My game had weapons, camos, attainment missions, and shop data spread across Unity Remote Config as massive nested JSON blobs. Adding a single new field to a camo definition meant updating it in dozens of places. One typo and suddenly every weapon in the game was broken at runtime — with no error until the player hit that screen.
 
 Here's a real slice of what that looked like:
 ```json

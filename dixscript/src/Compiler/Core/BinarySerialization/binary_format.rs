@@ -97,6 +97,7 @@ impl SectionId {
 ///   0x0D  Tuple      — 1-byte count (1-6) + elements
 ///   0x0E  Blob       — encoding byte + length + data
 ///   0x0F  Regex      — length-prefixed UTF-8 pattern
+///   0x10  Enum       — length-prefixed enum_name + length-prefixed field_name + 4-byte resolved i32
 ///   0xFF  Invalid
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +117,7 @@ pub enum ValueTypeTag {
     Tuple     = 0x0D,
     Blob      = 0x0E,
     Regex     = 0x0F,
+    Enum      = 0x10,
     Invalid   = 0xFF,
 }
 
@@ -137,6 +139,7 @@ impl ValueTypeTag {
             ValueTypeTag::Hex       => "hex",
             ValueTypeTag::Blob      => "blob",
             ValueTypeTag::Regex     => "regex",
+            ValueTypeTag::Enum      => "enum",
             ValueTypeTag::Invalid   => "invalid",
         }
     }
@@ -158,6 +161,7 @@ impl ValueTypeTag {
             0x0D => Some(ValueTypeTag::Tuple),
             0x0E => Some(ValueTypeTag::Blob),
             0x0F => Some(ValueTypeTag::Regex),
+            0x10 => Some(ValueTypeTag::Enum),
             0xFF => Some(ValueTypeTag::Invalid),
             _    => None,
         }
@@ -179,6 +183,7 @@ impl ValueTypeTag {
             DataType::Hex       => ValueTypeTag::Hex,
             DataType::Blob      => ValueTypeTag::Blob,
             DataType::Regex     => ValueTypeTag::Regex,
+            DataType::Enum      => ValueTypeTag::Enum,
             _                   => ValueTypeTag::Invalid,
         }
     }

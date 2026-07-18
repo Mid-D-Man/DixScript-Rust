@@ -734,31 +734,32 @@ impl DixLoader {
         // Stage 7: value resolution (whenever there are functions, enums, or
         // data to resolve against).
         //
-        // BUGFIX: this gate used to only check for QuickFuncs (local or
-        // imported), on the assumption that a file with no functions has
-        // nothing for ValueResolver to do. That's wrong: ValueResolver::resolve()
-        // always runs Phase 1 (`resolve_all_enum_values`) first, unconditionally
-        // pre-resolving every `Value::EnumValue` node — local AND imported — to
-        // a plain `Value::Integer`, completely independent of whether any
-        // QuickFunc call exists anywhere in scope. Skipping this stage left raw,
-        // unresolved `Value::EnumValue` nodes in the AST for any @DATA section
-        // that used enums but had zero QuickFuncs (local or imported) in scope.
+        // History: this gate used to be functions-only. A first attempt to
+        // fix the "enums don't resolve with no QuickFuncs" bug expanded it to
+        // include enum presence -- correct in spirit, but it exposed that
+        // ValueResolver's Phase 1 (resolve_all_enum_values) collapsed every
+        // Value::EnumValue into a bare Value::Integer, discarding
+        // enum_name/field_name. That broke DixData::from_ast's independent
+        // EnumValue-aware construction of DixValue::Enum for any file this
+        // gate now touched -- confirmed against mdix-python's `enums_db`
+        // fixture, whose TestEnumGetters suite depends on seeing an intact
+        // EnumValue node.
         //
-        // Every downstream consumer of "the resolved AST" then either silently
-        // mis-handled that leftover node (BinaryPacker's `value_encoder.rs`
-        // hardcoded a bare `0`, no enum tag — see the fix there too) or, for the
-        // plain non-DLM `DixData::from_ast` path, resolved only *local* enums
-        // via its own fallback table (`extract_enums_section` reads only
-        // `ast.enums`, this file's own `@ENUMS` section — it has no visibility
-        // into an imported namespace's enums). So an *imported* enum used
-        // without any QuickFuncs anywhere in scope silently resolved to 0
-        // through that path too, even for files that otherwise "worked".
-        //
-        // Gating on "has any enum in scope" as well as "has any function in
-        // scope" closes both holes: whenever this stage runs at all,
-        // `resolve_all_enum_values()` resolves every enum reference (local or
-        // imported) against the real symbol table before anything downstream
-        // ever sees it, so neither blind spot above ever gets exercised.
+        // The actual fix was in Phase 1 itself (see resolve_enums_in_value's
+        // Value::EnumValue arm, Compiler/Core/ValueResolution/value_resolver.rs):
+        // it now validates the enum+field reference but leaves the node
+        // untouched at leaf/data positions (a bare `Enum.FIELD` sitting as a
+        // field's value) -- only genuine computation contexts (QuickFunc call
+        // arguments, arithmetic, conditionals), which route through the
+        // entirely separate resolve_enums_in_expr / Expression::EnumAccess
+        // path, still collapse to a concrete int, because those still
+        // genuinely need one. With that fixed, running this stage no longer
+        // destroys anything from_ast needs, so gating on enum presence here
+        // is safe again -- and worth doing, since it's the only place with
+        // symbol_table access to actually validate a namespace-qualified
+        // (imported) enum reference; from_ast's own fallback has no
+        // visibility into imported namespaces and would silently default an
+        // unresolvable reference to 0 rather than erroring.
         let has_local_functions    = resolved_ast.quick_functions.is_some();
         let has_imported_functions = semantic_result.symbol_table.as_ref()
             .map(|st| st.namespaces.values().any(|ns| !ns.functions.is_empty()))
@@ -1134,4 +1135,4 @@ mod tests {
         let errors = loader.error_manager.get_runtime_errors();
         assert_eq!(errors.len(), 1, "only the most recent load's error should remain");
     }
-    }
+            }

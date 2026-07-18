@@ -58,6 +58,7 @@ impl ValueDecoder {
             ValueTypeTag::Hex       => self.decode_hex(reader, context)?,
             ValueTypeTag::Blob      => self.decode_blob(reader, context)?,
             ValueTypeTag::Regex     => self.decode_regex(reader, context)?,
+            ValueTypeTag::Enum      => self.decode_enum(reader, context)?,
             ValueTypeTag::Invalid   => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -362,6 +363,48 @@ impl ValueDecoder {
             arguments: vec![Value::String { value: pattern, position: Position::UNKNOWN }],
             position:  Position::UNKNOWN,
         })
+    }
+
+    /// Decode Enum: [enum_name: 4-byte len + UTF-8][field_name: 4-byte len + UTF-8][4-byte i32 resolved value]
+    ///
+    /// Reconstructs a real `Value::EnumValue` AST node — the exact shape the
+    /// parser already produces for a literal `Enum.FIELD` reference — so
+    /// `DixData::from_ast`'s existing `ast_value_to_dix_value` branch builds a
+    /// proper `DixValue::Enum` from decoded binary data with no changes needed
+    /// on that side. The resolved i32 travels alongside the names on the wire
+    /// (see `encode_enum` in value_encoder.rs) since data_section_reader.rs has
+    /// no access to the @ENUMS table at decode time — self-contained, no
+    /// cross-section lookup required.
+    fn decode_enum<R: Read>(
+        &mut self,
+        reader:  &mut R,
+        context: &mut BinarySerializationContext,
+    ) -> IoResult<Value> {
+        let read_len_prefixed_string = |reader: &mut R, context: &mut BinarySerializationContext| -> IoResult<String> {
+            let mut len_buf = [0u8; 4];
+            reader.read_exact(&mut len_buf)?;
+            let length = i32::from_le_bytes(len_buf) as usize;
+            context.validate_string_length(length)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let mut bytes = vec![0u8; length];
+            reader.read_exact(&mut bytes)?;
+            String::from_utf8(bytes)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        };
+
+        let enum_name  = read_len_prefixed_string(reader, context)?;
+        let field_name = read_len_prefixed_string(reader, context)?;
+
+        // The resolved i32 isn't carried by Value::EnumValue itself (that AST
+        // node only has enum_name/value/position — see Compiler/AST/values.rs).
+        // We still need to consume these 4 bytes off the wire since we wrote
+        // them (see encode_enum); the resolved int is redundant here because
+        // from_ast re-derives it from @ENUMS via enum_name+field_name anyway,
+        // the same way it does for a freshly-parsed source file.
+        let mut resolved_buf = [0u8; 4];
+        reader.read_exact(&mut resolved_buf)?;
+
+        Ok(Value::EnumValue { enum_name, value: field_name, position: Position::UNKNOWN })
     }
 }
 

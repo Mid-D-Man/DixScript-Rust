@@ -456,7 +456,35 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
         value: &Value,
     ) -> Result<(Value, usize, usize), ResolverError> {
         match value {
-            // Direct enum value reference.
+            // Direct enum value reference at a leaf/data position (a bare
+            // `Enum.FIELD` sitting as a field's value, table property, group
+            // array item, or array element -- resolve_enums_in_entry calls
+            // this function directly on those). Validate the reference
+            // exactly as before (same lookups, same error paths for a bad
+            // namespace/enum/field), but do NOT collapse to Value::Integer.
+            //
+            // BUGFIX: this used to always return Value::Integer here,
+            // discarding enum_name/field_name. That's correct for enums used
+            // in actual *computation* (arithmetic, QuickFunc call arguments)
+            // where a concrete int is genuinely needed -- but those go
+            // through the separate Expression::EnumAccess arms in
+            // resolve_enums_in_expr below, not this one. This arm only ever
+            // fires for enums sitting as plain data, where collapsing to a
+            // bare Integer meant every downstream consumer that cares about
+            // enum identity (DixData::from_ast's DixValue::Enum
+            // construction, the mdix-ffi mdix_get_enum_name/
+            // mdix_get_enum_field FFI exports, Runtime/schema.rs's
+            // ExpectedValueType::Enum validation) silently stopped working
+            // for any file whose Stage 7 (Runtime/loader.rs) happened to run
+            // -- which is any file with a QuickFunc anywhere in scope,
+            // whether or not that QuickFunc has anything to do with the enum
+            // field in question. Leaving the node intact here means all of
+            // those consumers see real enum identity again, and
+            // Compiler/Core/BinarySerialization/value_encoder.rs's
+            // ValueTypeTag::Enum wire format (see encode_enum) can actually
+            // tag it correctly in binary output too, instead of it having
+            // already been silently flattened to a plain int before the
+            // encoder ever saw it.
             Value::EnumValue { enum_name, value: enum_field, position } => {
                 if let Some(dot) = enum_name.find('.') {
                     let ns_name = &enum_name[..dot];
@@ -476,25 +504,24 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
                             position: *position,
                         }
                     })?;
-                    let int_val = fields.get(enum_field.as_str()).ok_or_else(|| {
+                    fields.get(enum_field.as_str()).ok_or_else(|| {
                         ResolverError::InvalidEnumAccess {
                             location: format!("{}.{}.{}", ns_name, actual_enum, enum_field),
                             message: format!("Field '{}' not found", enum_field),
                             position: *position,
                         }
                     })?;
-                    return Ok((Value::Integer { value: *int_val, position: *position }, 0, 1));
+                    return Ok((value.clone(), 0, 1));
                 }
 
-                let int_val = self
-                    .symbol_table
+                self.symbol_table
                     .try_get_enum_field_value(enum_name, enum_field)
                     .ok_or_else(|| ResolverError::InvalidEnumAccess {
                         location: format!("{}.{}", enum_name, enum_field),
                         message: format!("Enum field '{}' not found", enum_field),
                         position: *position,
                     })?;
-                Ok((Value::Integer { value: int_val, position: *position }, 1, 0))
+                Ok((value.clone(), 1, 0))
             }
 
             // Expression wrapper — delegate to resolve_enums_in_expr for full recursion.

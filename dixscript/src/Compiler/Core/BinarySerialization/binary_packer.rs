@@ -254,7 +254,8 @@ impl BinaryPacker {
                         "DATA section absent during encoding", "DataSection",
                     )
                 })?;
-                let mut enc = ValueEncoder::new();
+                let mut enc = ValueEncoder::new()
+                    .with_enums(ValueEncoder::build_local_enums(ast.enums.as_ref()));
                 DataSectionWriter::new(&mut ctx, &mut enc)
                     .write_section(&mut buf, data)?;
             }

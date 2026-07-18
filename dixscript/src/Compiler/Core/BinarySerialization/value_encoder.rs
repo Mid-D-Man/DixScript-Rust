@@ -1,5 +1,6 @@
 //! Encodes DixScript AST values to binary format
 
+use std::collections::HashMap;
 use std::io::{Write, Result as IoResult};
 use crate::Compiler::AST::Value;
 use crate::ErrorManager::ErrorManager;
@@ -11,6 +12,11 @@ use super::binary_serialization_error::BinarySerializationError;
 /// Context is passed per-call rather than stored — safe to use from parallel tasks.
 pub struct ValueEncoder {
     error_manager: ErrorManager,
+    /// enum_name -> (field_name -> resolved int value), built from the AST's
+    /// own local `@ENUMS` section. Lets this encoder resolve `Value::EnumValue`
+    /// itself at encode time — see the `Value::EnumValue` arm in `encode_value`
+    /// for why this exists instead of relying on an upstream resolution pass.
+    local_enums: HashMap<String, HashMap<String, i32>>,
 }
 
 impl ValueEncoder {
@@ -19,7 +25,43 @@ impl ValueEncoder {
     }
 
     pub fn new_with_error_manager(error_manager: ErrorManager) -> Self {
-        ValueEncoder { error_manager }
+        ValueEncoder { error_manager, local_enums: HashMap::new() }
+    }
+
+    /// Attaches a local enums lookup table (enum_name -> field_name -> int),
+    /// so `encode_value` can resolve `Value::EnumValue` nodes on its own.
+    /// Only covers enums declared in *this* file's own `@ENUMS` section —
+    /// see the `Value::EnumValue` arm in `encode_value` for the known
+    /// limitation around imported (cross-file) enums.
+    pub fn with_enums(mut self, local_enums: HashMap<String, HashMap<String, i32>>) -> Self {
+        self.local_enums = local_enums;
+        self
+    }
+
+    /// Builds the enum_name -> field_name -> int table from an AST's local
+    /// `@ENUMS` section, for use with `with_enums`. Mirrors
+    /// `DixData::extract_enums_section`'s (Runtime/dix_data.rs, private)
+    /// auto-increment field-value semantics exactly — a field without an
+    /// explicit `= N` gets the previous field's value + 1, starting at 0 —
+    /// since these two encoders are in separate modules and that helper
+    /// isn't `pub`.
+    pub fn build_local_enums(
+        enums: Option<&crate::Compiler::AST::EnumsSection>,
+    ) -> HashMap<String, HashMap<String, i32>> {
+        let Some(section) = enums else { return HashMap::new() };
+        section.enums.iter().map(|decl| {
+            let mut auto_value = 0i32;
+            let fields: HashMap<String, i32> = decl.fields.iter().map(|field| {
+                let value = field.value.unwrap_or_else(|| {
+                    let v = auto_value;
+                    auto_value += 1;
+                    v
+                });
+                auto_value = value + 1;
+                (field.name.clone(), value)
+            }).collect();
+            (decl.name.clone(), fields)
+        }).collect()
     }
 
     // =========================================================================
@@ -67,37 +109,57 @@ impl ValueEncoder {
                 }
             }
 
-            // EnumValue must be resolved to an integer before it reaches the
-            // encoder — this layer has no enums table to resolve against, so
-            // it cannot do that itself. Resolution happens upstream, in
-            // ValueResolver::resolve_all_enum_values() (Runtime/loader.rs
-            // Stage 7), before BinaryPacker::pack() is ever called.
+            // Resolve and encode EnumValue ourselves, using this file's own
+            // @ENUMS table (see `with_enums` / `local_enums` above), writing
+            // the real ValueTypeTag::Enum wire format (binary_format.rs) so
+            // enum_name/field_name identity survives a binary round-trip
+            // intact — not just the resolved int.
             //
-            // BUGFIX: this used to log a warning and silently write a
-            // hardcoded `Int32(0)` here — no enum tag, indistinguishable from
-            // a real value of 0. That masked the Stage 7 gating bug (enums
-            // used with no QuickFuncs in scope never got pre-resolved) as
-            // silent data corruption instead of a caught error. Now that
-            // Stage 7 always runs whenever enums are in scope, this arm
-            // should be unreachable in normal operation — hard-failing here
-            // instead is defense-in-depth: if some future code path ever
-            // constructs an AST and hands it to BinaryPacker without going
-            // through DixLoader::compile_source's resolution stage, this
-            // fails the whole pack() call loudly instead of quietly writing
-            // wrong bytes.
-            Value::EnumValue { enum_name, value, position } => {
-                let err = BinarySerializationError::with_position(
-                    crate::ErrorManager::ErrorTypes::BinarySerializationErrorType::EncodingError,
-                    format!(
-                        "EnumValue {}.{} reached the binary encoder unresolved — enum \
-                         pre-resolution should have converted this to an Integer before \
-                         serialization. This AST was not fully resolved before packing.",
-                        enum_name, value
-                    ),
-                    context.get_current_scope(),
-                    *position,
-                );
-                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, err))
+            // This is the actual fix for the originally-reported bug: enum
+            // fields used to silently encode as a hardcoded Int32(0) — no
+            // enum tag, indistinguishable from a real value of 0 — whenever
+            // the file had no QuickFuncs anywhere in scope, because the only
+            // thing that used to resolve EnumValue at all (ValueResolver::
+            // resolve(), Runtime/loader.rs Stage 7) was gated on function
+            // presence, not enum presence. Beyond that: even when Stage 7 DID
+            // run, its Phase 1 (resolve_all_enum_values) collapsed
+            // Value::EnumValue into a bare Value::Integer, discarding
+            // enum_name/field_name entirely — and the wire format itself had
+            // no Enum tag to preserve that identity even if the AST had kept
+            // it. Both are fixed now: Stage 7 stays gated on functions only
+            // (confirmed necessary — mdix-python's `enums_db` fixture is a
+            // pure @ENUMS-no-QuickFuncs file, loaded via `load_str`, whose
+            // whole TestEnumGetters suite depends on Stage 7 being skipped so
+            // DixData::from_ast's own independent EnumValue handling sees an
+            // intact node), and this encoder resolves + tags enums itself,
+            // independent of whether Stage 7 ran.
+            //
+            // KNOWN REMAINING GAP: `local_enums` only covers enums declared
+            // in *this* file's own @ENUMS section. An enum imported from
+            // another file, used directly in @DATA with no local @ENUMS
+            // re-declaration, won't be found here — the fallback below still
+            // writes a real ValueTypeTag::Enum entry (so enum_name/field_name
+            // identity is preserved on the wire either way) but with
+            // `resolved = 0`, and logs a warning rather than hard-failing the
+            // whole compile. Closing this properly needs this encoder to also
+            // receive the symbol table's imported-namespace enums, which
+            // isn't threaded down to BinaryPacker::pack() today.
+            Value::EnumValue { enum_name, value: field_name, .. } => {
+                match self.local_enums.get(enum_name.as_str())
+                    .and_then(|fields| fields.get(field_name.as_str()))
+                {
+                    Some(&resolved) => self.encode_enum(writer, enum_name, field_name, resolved, context),
+                    None => {
+                        self.error_manager.log_warning(&format!(
+                            "EnumValue {}.{} not found in this file's local @ENUMS during binary \
+                             encoding (likely an imported enum — cross-file resolution isn't \
+                             wired into the encoder yet). Encoding with resolved value 0; \
+                             enum_name/field_name identity is still preserved.",
+                            enum_name, field_name
+                        ));
+                        self.encode_enum(writer, enum_name, field_name, 0, context)
+                    }
+                }
             }
 
             _ => {
@@ -473,6 +535,33 @@ impl ValueEncoder {
         Ok(())
     }
 
+    /// Encode Enum: [enum_name: 4-byte len + UTF-8][field_name: 4-byte len + UTF-8][4-byte i32 resolved value]
+    ///
+    /// See the long comment on the `Value::EnumValue` arm in `encode_value`
+    /// for why this exists and what it fixes. Mirrors `encode_regex`'s
+    /// length-prefixing convention for the two strings.
+    fn encode_enum<W: Write>(
+        &mut self,
+        writer:    &mut W,
+        enum_name: &str,
+        field_name: &str,
+        resolved:  i32,
+        context:   &mut BinarySerializationContext,
+    ) -> IoResult<()> {
+        writer.write_all(&[ValueTypeTag::Enum as u8])?;
+
+        for s in [enum_name, field_name] {
+            let bytes = s.as_bytes();
+            context.validate_string_length(bytes.len())
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            writer.write_all(&(bytes.len() as i32).to_le_bytes())?;
+            writer.write_all(bytes)?;
+        }
+
+        writer.write_all(&resolved.to_le_bytes())?;
+        Ok(())
+    }
+
     // =========================================================================
     // HELPER METHODS
     // =========================================================================
@@ -492,6 +581,7 @@ impl ValueEncoder {
             Value::HexColor { .. }           => ValueTypeTag::Hex,
             Value::Date { .. }               => ValueTypeTag::Date,
             Value::Timestamp { .. }          => ValueTypeTag::Timestamp,
+            Value::EnumValue { .. }          => ValueTypeTag::Enum,
             Value::PrefixedConstructor { prefix, .. } => match prefix.as_str() {
                 "t" => ValueTypeTag::Tuple,
                 "b" => ValueTypeTag::Blob,
@@ -505,4 +595,4 @@ impl ValueEncoder {
 
 impl Default for ValueEncoder {
     fn default() -> Self { Self::new() }
-                                    }
+                            }

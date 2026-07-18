@@ -44,7 +44,7 @@ down so it doesn't get re-attempted by accident:
 `MidManStudio.Mdix.Core.dll` (the DLL `com.midmanstudio.mdix`'s `.asmdef`
 references via `precompiledReferences`) is built **once**, generically, by
 `.github/workflows/build-upm.yml`'s `build-core-dll` job — a plain
-`dotnet build csharp/src/MidManStudio.Mdix.Core/MidManStudio.Mdix.Core.csproj`
+`dotnet build mdix-csharp/src/MidManStudio.Mdix.Core/MidManStudio.Mdix.Core.csproj`
 with no `-p:DefineConstants`. `UNITY_WEBGL`, `UNITY_EDITOR`, `UNITY_IOS` etc.
 are symbols Unity's *own* compiler defines when it compiles a project's
 `Assets`/package `Runtime` folders directly — `dotnet build` has never heard

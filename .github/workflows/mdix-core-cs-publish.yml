@@ -83,7 +83,7 @@ jobs:
 
       - name: Build solution
         run: |
-          dotnet build csharp/MidManStudio.Mdix.sln \
+          dotnet build mdix-csharp/MidManStudio.Mdix.sln \
             --no-restore \
             --configuration Release
 
@@ -93,7 +93,7 @@ jobs:
       # so copying it there is the most reliable placement.
       - name: Copy libmdix_ffi.so to test output directory
         run: |
-          TEST_OUT="csharp/tests/MidManStudio.Mdix.Core.Tests/bin/Release/net7.0"
+          TEST_OUT="mdix-csharp/tests/MidManStudio.Mdix.Core.Tests/bin/Release/net7.0"
           echo "Copying libmdix_ffi.so to $TEST_OUT"
           cp target/release/libmdix_ffi.so "$TEST_OUT/libmdix_ffi.so"
           # Some Linux distros also probe without the lib prefix
@@ -104,7 +104,7 @@ jobs:
       - name: Run tests
         continue-on-error: true
         run: |
-          dotnet test csharp/MidManStudio.Mdix.sln \
+          dotnet test mdix-csharp/MidManStudio.Mdix.sln \
             --no-build \
             --configuration Release \
             --logger "trx;LogFileName=results.trx" \

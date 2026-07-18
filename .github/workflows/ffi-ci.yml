@@ -73,7 +73,7 @@ jobs:
           ls -lh target/release/libmdix_ffi.so 2>/dev/null || echo "libmdix_ffi.so not found"
           ls -lh target/release/libmdix_ffi.a  2>/dev/null || echo "libmdix_ffi.a not found"
           echo "=== Generated MdixNative.cs ==="
-          ls -lh csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs 2>/dev/null || echo "MdixNative.cs not found"
+          ls -lh mdix-csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs 2>/dev/null || echo "MdixNative.cs not found"
           exit $BUILD_EXIT
 
       - name: Collect result

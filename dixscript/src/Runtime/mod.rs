@@ -65,6 +65,24 @@
 //! assert!(report.is_valid());
 //! ```
 //!
+//! ## Querying
+//!
+//! LINQ-style chaining over an array field's elements. `query(path)`
+//! covers a plain `Array` literal or a `GroupArray`'s items alike;
+//! `query_many(pattern)` matches across sibling paths that share shape
+//! via a wildcarded segment (see `query` module docs for the difference).
+//!
+//! ```rust,ignore
+//! use dixscript::Runtime::DixValue;
+//!
+//! let filtered = data.query("tasks")
+//!     .expect("tasks should be an array")
+//!     .where_(|v| v.field("priority").and_then(DixValue::as_int) == Some(3))
+//!     .order_by_desc(|v| v.field("priority").and_then(DixValue::as_int).unwrap_or(0));
+//!
+//! let names: Vec<Option<&str>> = filtered.select(|v| v.field("name").and_then(DixValue::as_string));
+//! ```
+//!
 //! ## Merging
 //!
 //! ```rust,ignore
@@ -119,6 +137,7 @@ pub mod key_resolver;
 pub mod load_options;
 pub mod loader;
 pub mod merge;
+pub mod query;
 pub mod schema;
 
 // ── Core types ────────────────────────────────────────────────────────────────
@@ -190,6 +209,10 @@ pub use schema::{
     ValidationErrorKind,
     ValidationReport,
 };
+
+// ── Querying ──────────────────────────────────────────────────────────────────
+
+pub use query::DixQuery;
 
 // ── Merging ───────────────────────────────────────────────────────────────────
 

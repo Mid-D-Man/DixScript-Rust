@@ -1,0 +1,21 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Import Test 11 — Imported Enums Only, Zero Functions Anywhere In Scope"
+  features -> "advanced"
+)
+
+@IMPORTS(
+  Types from "enum_only_types.mdix"
+)
+
+@DATA(
+  test_name = "11_enum_only_import_no_funcs"
+
+  ticket_priority<enum> = Types.Priority.HIGH
+  fallback_priority<enum> = Types.Priority.LOW
+  deploy_region<enum> = Types.Region.EU
+
+  incidents::
+    { priority<enum> = Types.Priority.CRITICAL, region<enum> = Types.Region.APAC },
+    { priority<enum> = Types.Priority.MEDIUM,   region<enum> = Types.Region.NA }
+)

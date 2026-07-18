@@ -1,0 +1,10 @@
+@CONFIG(
+  version  -> "1.0.0"
+  author   -> "Importable — Enum-Only Library (deliberately has zero QuickFuncs)"
+  features -> "advanced"
+)
+
+@ENUMS(
+  Priority { LOW = 0, MEDIUM = 1, HIGH = 2, CRITICAL = 3 }
+  Region   { NA = 1, EU = 2, APAC = 3, LATAM = 4 }
+)

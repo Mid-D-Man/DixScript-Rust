@@ -42,9 +42,28 @@ fn assert_compressor_round_trips(module_name: &str, payload: &str) {
 
     assert!(outcome.isSuccess(), "{module_name}: DLM pipeline should report success");
     assert!(!outcome.processedData().is_empty(), "{module_name}: processedData should be non-empty");
+
+    // NOT `.is_none()` -- easy to assume, wrong. `dlm_pipeline_executor.rs`'s
+    // `generate_output_files()` only early-returns when `result.metadata` is
+    // completely empty, and Phase 2 (compress) populates
+    // `result.metadata["compressor"]` on its own, with no dependency on
+    // whether an encryptor also ran. So `keyFileContent()` is `Some(...)`
+    // for compression alone too -- it's really "DLM pipeline metadata
+    // sidecar content", not strictly "the encryption key", despite the
+    // name. The wasm `dlm.rs` doc comment's "`undefined` when source had no
+    // `@DLM` modules" is about the `@DLM` section being absent entirely,
+    // not about "`@DLM` present but no `DEncryptor`" -- two different
+    // scenarios. Passing `""` here when a real, non-empty `keyFileContent`
+    // is expected means the reverse pipeline's `instantiate_modules()` sees
+    // no compression config in the (empty) key data, skips decompression
+    // entirely, and tries to checksum-validate still-compressed bytes as if
+    // they were the final AST bytes -- a checksum-mismatch failure that
+    // only stays hidden for payloads with no enum fields to expose it.
+    let key_content = outcome.keyFileContent().unwrap_or_default();
     assert!(
-        outcome.keyFileContent().is_none(),
-        "{module_name}: no DEncryptor ran, keyFileContent should stay undefined"
+        !key_content.is_empty(),
+        "{module_name}: a compressor ran, so keyFileContent should be populated \
+         (with compression metadata, even though no DEncryptor ran)"
     );
 
     let modules = outcome.executedModules();
@@ -54,9 +73,7 @@ fn assert_compressor_round_trips(module_name: &str, payload: &str) {
         modules
     );
 
-    // Compression-only round trip decompiles with an empty keyFileContent,
-    // per decompile_with_dlm's own documented contract for "no encryptor".
-    let db = decompile_with_dlm(outcome.processedData(), "", &format!("dlm-{module_name}-only-test"))
+    let db = decompile_with_dlm(outcome.processedData(), &key_content, &format!("dlm-{module_name}-only-test"))
         .unwrap_or_else(|_| panic!("decompileWithDlm should reverse {module_name}-only compression"));
 
     assert_eq!(db.get_string("secret").unwrap(), payload);
@@ -152,12 +169,37 @@ fn each_compressor_actually_shrinks_the_packed_data() {
 
 #[wasm_bindgen_test]
 fn top_level_and_nested_fields_still_resolve_correctly_under_compression() {
-    // Regression guard: compression sits between the AST and the bytes
-    // that get shipped around, so this is the spot a subtle
-    // compress/decompress bug (off-by-one in a length prefix, a corrupted
-    // dictionary reset, etc.) would surface as silently wrong data rather
-    // than a hard error.
+    // Regression guard for a real bug found and fixed while adding this
+    // test suite: this fixture has @DATA fields typed <enum> but zero
+    // QuickFuncs anywhere in scope (no @QUICKFUNCS section, no imports).
+    //
+    // DixLoader::compile_source's Stage 7 (Runtime/loader.rs) used to only
+    // run ValueResolver::resolve() -- which pre-resolves every
+    // Value::EnumValue node to a plain integer -- when the AST had
+    // QuickFuncs (local or imported). A file using enums with no QuickFuncs
+    // anywhere skipped that stage entirely, so every enum field reached
+    // BinaryPacker::pack() still as a raw, unresolved Value::EnumValue.
+    // Compiler/Core/BinarySerialization/value_encoder.rs had no enums table
+    // to resolve against at that point, so it logged a warning and silently
+    // wrote a hardcoded Int32(0) -- no enum tag, indistinguishable from a
+    // real value of 0 -- and get_enum_field() below would have correctly
+    // rejected the round-tripped data, because by that point it genuinely
+    // wasn't an enum anymore.
+    //
+    // Fixed in two places:
+    //  - Runtime/loader.rs: Stage 7 now also gates on "has any enum in
+    //    scope" (local or imported), not just "has any function in scope",
+    //    so resolve_all_enum_values() always runs before packing whenever
+    //    there's an enum to resolve.
+    //  - Compiler/Core/BinarySerialization/value_encoder.rs: the
+    //    EnumValue-reaches-the-encoder-unresolved case is now a hard
+    //    error instead of a silent Int32(0) fallback, as defense-in-depth
+    //    against this ever silently recurring through some other caller.
     let source = r#"
+@ENUMS(
+  Status { ACTIVE = 1, INACTIVE = 0 }
+  Role   { ADMIN = 0, EDITOR = 1, VIEWER = 2 }
+)
 @DLM(DCompressor.bzip2)
 @DATA(
   user:
@@ -168,16 +210,17 @@ fn top_level_and_nested_fields_still_resolve_correctly_under_compression() {
     { role<enum> = Role.EDITOR, scope = "team" },
     { role<enum> = Role.ADMIN,  scope = "global" }
 )
-
-@ENUMS(
-  Status { ACTIVE = 1, INACTIVE = 0 }
-  Role   { ADMIN = 0, EDITOR = 1, VIEWER = 2 }
-)
 "#;
 
     let outcome = compile_with_dlm(source, "dlm-bzip2-nested-test")
         .expect("compileWithDlm should succeed with bzip2 over nested + enum data");
-    let db = decompile_with_dlm(outcome.processedData(), "", "dlm-bzip2-nested-test")
+
+    // See the long comment in assert_compressor_round_trips() above --
+    // compression alone still populates keyFileContent (it's pipeline
+    // metadata, not strictly an encryption key), and decompile_with_dlm
+    // needs that real value here, not "".
+    let key_content = outcome.keyFileContent().unwrap_or_default();
+    let db = decompile_with_dlm(outcome.processedData(), &key_content, "dlm-bzip2-nested-test")
         .expect("decompileWithDlm should reverse bzip2 compression over nested + enum data");
 
     assert_eq!(db.get_string("user.name").unwrap(), "Alice");

@@ -33,7 +33,7 @@ jobs:
           echo "run_unity=$RUN" >> $GITHUB_OUTPUT
           echo "Run Unity build: $RUN"
 
-  # ── 2. Build FFI — Linux x64 + Windows x64 + Android arm64 ───────────────
+  # ── 2. Build FFI — Linux x64 + Windows x64 + Android (3 ABIs) ────────────
   build-ffi-ubuntu:
     runs-on: ubuntu-latest
     needs: parse-trigger
@@ -49,6 +49,8 @@ jobs:
             x86_64-unknown-linux-gnu
             x86_64-pc-windows-gnu
             aarch64-linux-android
+            armv7-linux-androideabi
+            x86_64-linux-android
 
       - uses: actions/cache@v3
         with:
@@ -68,20 +70,19 @@ jobs:
             gcc-mingw-w64-x86-64 \
             gcc-aarch64-linux-gnu
 
-      - name: Install Android NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r25c
-          add-to-path: true
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version "^3" --locked
 
-      - name: Configure Android linker
+      # ubuntu-latest ships an Android SDK + NDK preinstalled — no need for a
+      # third-party setup action, same as MidManStudio_Unity's own
+      # build-audio-libs.yml / build-projectile-rust-libs.yml.
+      - name: Locate Android NDK
         run: |
-          mkdir -p ~/.cargo
-          cat >> ~/.cargo/config.toml << 'EOF'
-          [target.aarch64-linux-android]
-          linker = "${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
-          EOF
+          NDK="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}"
+          [ -z "$NDK" ] && NDK=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -1)
+          [ -z "$NDK" ] && { echo "❌ Android NDK not found on runner"; exit 1; }
+          echo "ANDROID_NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "Using NDK: $NDK"
 
       - name: Build FFI — Linux x64
         run: cargo build -p mdix-ffi --release --target x86_64-unknown-linux-gnu
@@ -89,22 +90,67 @@ jobs:
       - name: Build FFI — Windows x64
         run: cargo build -p mdix-ffi --release --target x86_64-pc-windows-gnu
 
-      # cc-rs looks for CC_<target> (underscores) to find the C compiler when
-      # cross-compiling. Without these vars it falls back to the bare triple
-      # name "aarch64-linux-android-clang" which doesn't exist in the NDK;
-      # the NDK ships versioned names like aarch64-linux-android21-clang.
-      - name: Build FFI — Android arm64
-        env:
-          CC_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
-          CXX_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++
-          AR_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
-        run: cargo build -p mdix-ffi --release --target aarch64-linux-android
+      # BUGFIX: this used to build only arm64-v8a, via a hand-rolled
+      # linker + CC_/CXX_/AR_ env var setup that would have needed
+      # tripling (with three different versioned clang paths) to cover
+      # the other two ABIs. mdix-ffi/Cargo.toml's own doc comment already
+      # specified cargo-ndk across arm64-v8a + armeabi-v7a + x86_64 as the
+      # intended Android build — CI just never matched it. cargo-ndk wires
+      # up the correct per-ABI linker/CC/CXX/AR itself, so this is the
+      # same three `cargo ndk -t <abi> ...` invocations
+      # MidManStudio_Unity's mid_audio and projectile_core libs already use
+      # successfully in this same organization's other CI.
+      - name: Build FFI — Android (arm64-v8a, armeabi-v7a, x86_64)
+        working-directory: mdix-ffi
+        run: |
+          set -e
+          cargo ndk -t arm64-v8a   -o ./android-out build --release
+          cargo ndk -t armeabi-v7a -o ./android-out build --release
+          cargo ndk -t x86_64      -o ./android-out build --release
+
+      - name: Verify Android ABI outputs (present, non-truncated, identical symbol set)
+        working-directory: mdix-ffi
+        run: |
+          set -e
+          MIN_BYTES=500
+          FAIL=0
+          declare -A SYMSETS
+
+          for ABI in arm64-v8a armeabi-v7a x86_64; do
+            F="android-out/$ABI/libmdix_ffi.so"
+            if [ ! -f "$F" ]; then
+              echo "❌ MISSING: $ABI — libmdix_ffi.so was not produced"
+              FAIL=1; continue
+            fi
+            SIZE=$(stat -c%s "$F")
+            echo "  $ABI: ${SIZE} bytes"
+            if [ "$SIZE" -lt "$MIN_BYTES" ]; then
+              echo "❌ TRUNCATED/EMPTY: $ABI ($SIZE bytes)"
+              FAIL=1; continue
+            fi
+            SYMSETS[$ABI]=$(nm -D --defined-only "$F" 2>/dev/null | awk '{print $3}' | sort)
+          done
+
+          # All three ABIs should export the same C ABI surface — a
+          # divergent symbol set is what actually distinguishes "small but
+          # correct" from "silently built a stub for this ABI".
+          if [ -n "${SYMSETS[arm64-v8a]:-}" ] && [ -n "${SYMSETS[armeabi-v7a]:-}" ]; then
+            [ "${SYMSETS[arm64-v8a]}" = "${SYMSETS[armeabi-v7a]}" ] || { echo "❌ arm64-v8a/armeabi-v7a export different symbol sets"; FAIL=1; }
+          fi
+          if [ -n "${SYMSETS[arm64-v8a]:-}" ] && [ -n "${SYMSETS[x86_64]:-}" ]; then
+            [ "${SYMSETS[arm64-v8a]}" = "${SYMSETS[x86_64]}" ] || { echo "❌ arm64-v8a/x86_64 export different symbol sets"; FAIL=1; }
+          fi
+
+          [ "$FAIL" = "1" ] && { echo "❌ Android artifact verification failed."; exit 1; }
+          echo "✅ All 3 ABIs present, export the identical symbol set."
 
       - name: Collect ubuntu artifacts
         run: |
           mkdir -p ffi-ubuntu/linux-x64
           mkdir -p ffi-ubuntu/windows-x64
-          mkdir -p ffi-ubuntu/android-arm64
+          mkdir -p ffi-ubuntu/android-arm64-v8a
+          mkdir -p ffi-ubuntu/android-armeabi-v7a
+          mkdir -p ffi-ubuntu/android-x86_64
 
           cp target/x86_64-unknown-linux-gnu/release/libmdix_ffi.so \
              ffi-ubuntu/linux-x64/libmdix_ffi.so
@@ -112,8 +158,14 @@ jobs:
           cp target/x86_64-pc-windows-gnu/release/mdix_ffi.dll \
              ffi-ubuntu/windows-x64/mdix_ffi.dll
 
-          cp target/aarch64-linux-android/release/libmdix_ffi.so \
-             ffi-ubuntu/android-arm64/libmdix_ffi.so
+          cp mdix-ffi/android-out/arm64-v8a/libmdix_ffi.so \
+             ffi-ubuntu/android-arm64-v8a/libmdix_ffi.so
+
+          cp mdix-ffi/android-out/armeabi-v7a/libmdix_ffi.so \
+             ffi-ubuntu/android-armeabi-v7a/libmdix_ffi.so
+
+          cp mdix-ffi/android-out/x86_64/libmdix_ffi.so \
+             ffi-ubuntu/android-x86_64/libmdix_ffi.so
 
           echo "Built files:"
           find ffi-ubuntu -type f -exec ls -lh {} \;
@@ -244,7 +296,7 @@ jobs:
 
       - name: Verify MdixNative.cs was generated
         run: |
-          FILE="csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs"
+          FILE="mdix-csharp/src/MidManStudio.Mdix.Core/Generated/MdixNative.cs"
           if [ ! -f "$FILE" ]; then
             echo "ERROR: MdixNative.cs not generated by build.rs"
             exit 1
@@ -263,7 +315,7 @@ jobs:
       - name: Build Core.dll (Release)
         run: |
           dotnet build \
-            csharp/src/MidManStudio.Mdix.Core/MidManStudio.Mdix.Core.csproj \
+            mdix-csharp/src/MidManStudio.Mdix.Core/MidManStudio.Mdix.Core.csproj \
             --configuration Release \
             --no-restore \
             -o dll-output/
@@ -323,10 +375,18 @@ jobs:
           cp ffi-ubuntu/windows-x64/mdix_ffi.dll \
              "$PKG/Runtime/Plugins/Windows/x86_64/mdix_ffi.dll"
 
-          # ── Native — Android arm64 ─────────────────────────────────────────
+          # ── Native — Android (arm64-v8a, armeabi-v7a, x86_64) ──────────────
           mkdir -p "$PKG/Runtime/Plugins/Android/arm64-v8a"
-          cp ffi-ubuntu/android-arm64/libmdix_ffi.so \
+          cp ffi-ubuntu/android-arm64-v8a/libmdix_ffi.so \
              "$PKG/Runtime/Plugins/Android/arm64-v8a/libmdix_ffi.so"
+
+          mkdir -p "$PKG/Runtime/Plugins/Android/armeabi-v7a"
+          cp ffi-ubuntu/android-armeabi-v7a/libmdix_ffi.so \
+             "$PKG/Runtime/Plugins/Android/armeabi-v7a/libmdix_ffi.so"
+
+          mkdir -p "$PKG/Runtime/Plugins/Android/x86_64"
+          cp ffi-ubuntu/android-x86_64/libmdix_ffi.so \
+             "$PKG/Runtime/Plugins/Android/x86_64/libmdix_ffi.so"
 
           # ── Native — macOS universal ───────────────────────────────────────
           mkdir -p "$PKG/Runtime/Plugins/macOS"
@@ -351,6 +411,8 @@ jobs:
             "Runtime/Plugins/Linux/x86_64/libmdix_ffi.so"
             "Runtime/Plugins/Windows/x86_64/mdix_ffi.dll"
             "Runtime/Plugins/Android/arm64-v8a/libmdix_ffi.so"
+            "Runtime/Plugins/Android/armeabi-v7a/libmdix_ffi.so"
+            "Runtime/Plugins/Android/x86_64/libmdix_ffi.so"
             "Runtime/Plugins/macOS/libmdix_ffi.dylib"
             "Runtime/Plugins/iOS/libmdix_ffi.a"
             "Runtime/MdixAsset.cs"

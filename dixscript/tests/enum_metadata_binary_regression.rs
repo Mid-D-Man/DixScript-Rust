@@ -110,12 +110,11 @@ fn nested_enum_in_group_array_survives_binary_round_trip() {
 )
 
 @DATA(
-        greeting = greet("hi")
   team::
     { username = "alice", role<enum> = Role.ADMIN },
     { username = "bob",   role<enum> = Role.VIEWER }
 
-  
+  greeting = greet("hi")
 )
 "#;
     let data = pack_and_unpack(source, "enum-in-group-array");
@@ -185,3 +184,39 @@ fn schema_require_enum_accepts_a_real_enum_field() {
         report.errors
     );
 }
+
+/// Regression guard for the Option B follow-up (see
+/// `enum_resolution_regression.rs`'s module doc comment for the full
+/// writeup): an *imported* enum, through the full binary pack/unpack path,
+/// alongside a local QuickFunc unrelated to it. `resolve_all_enum_values`
+/// merges `Types.Priority`'s declaration into this file's own `ast.enums`
+/// once it's referenced, so `value_encoder.rs`'s `local_enums` table (built
+/// from `ast.enums` at encode time) resolves it to the correct int instead
+/// of falling back to 0 -- and the binary's own `@ENUMS` section round-trips
+/// that synthesized declaration through decode the same as any other.
+#[test]
+fn imported_enum_survives_binary_round_trip_via_merged_declaration() {
+    let types_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../mdix_files/tests/imports/enum_only_types.mdix");
+    let source = format!(
+        r#"
+@IMPORTS(
+  Types from "{types_path}"
+)
+
+@QUICKFUNCS(
+  ~identity<int>(x) {{
+    return x
+  }}
+)
+
+@DATA(
+  region<enum> = Types.Region.LATAM
+  touch = identity(0)
+)
+"#
+    );
+
+    let data = pack_and_unpack(&source, "imported-enum-binary-roundtrip");
+
+    assert_enum_field(&data, "region", "LATAM", 4);
+    }

@@ -31,11 +31,11 @@ pub struct DebugTokensArgs {
     pub output: Option<String>,
 
     /// Show which section each token belongs to (SectionId stamp)
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     pub sections: bool,
 
     /// Show line:column position for each token
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     pub positions: bool,
 
     /// Filter to only show tokens from this section (e.g. DATA, QUICKFUNCS, CONFIG)
@@ -47,7 +47,7 @@ pub struct DebugTokensArgs {
     pub type_filter: Option<String>,
 }
 
-pub fn run(args: DebugTokensArgs, _global: &GlobalOpts) -> i32 {
+pub fn run(args: DebugTokensArgs, global: &GlobalOpts) -> i32 {
     let source = match file_io::read_file(&args.file) {
         Ok(s) => s,
         Err(e) => {
@@ -114,10 +114,14 @@ pub fn run(args: DebugTokensArgs, _global: &GlobalOpts) -> i32 {
                 eprintln!("Failed to write output: {}", e);
                 return 1;
             }
-            println!("Token debug written to: {}", path);
+            if !global.quiet {
+                println!("Token debug written to: {}", path);
+            }
         }
         None => {
-            print!("{}", output_content);
+            if !global.quiet {
+                print!("{}", output_content);
+            }
         }
     }
 
@@ -176,4 +180,4 @@ fn format_tokens(
     }
 
     out
-}
+              }

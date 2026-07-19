@@ -28,15 +28,20 @@ fn debug_tokens_with_enums_exits_zero() {
 }
 
 #[test]
-fn debug_tokens_does_not_emit_a_config_token() {
-    // Per hover.rs / the lexer's own contract, @CONFIG is stripped before
-    // tokenization -- the token stream should never contain a literal
-    // "CONFIG" section token, even though basic.mdix declares one.
+fn debug_tokens_shows_config_section_token() {
+    // debug-tokens' whole design intent (see its own module doc comment)
+    // is Approach B: tokenize the *full* source exactly once, so @CONFIG
+    // tokens ARE in the stream with a real SectionId::Config stamp --
+    // unlike debug-ast/the parser proper, which splits @CONFIG out and
+    // processes it separately. That's what makes debug-tokens useful for
+    // diagnosing tokenizer-level bugs (e.g. hover/folding) independent of
+    // anything downstream -- so basic.mdix's explicit @CONFIG block must
+    // show up as a real token, not be silently stripped.
     mdix()
         .args(["debug-tokens", &helpers::fixture("basic.mdix")])
         .assert()
         .success()
-        .stdout(predicate::str::contains("CONFIG").not());
+        .stdout(predicate::str::contains("SectionConfig"));
 }
 
 #[test]
@@ -109,4 +114,4 @@ fn debug_tokens_quiet_suppresses_stdout() {
         .assert()
         .success()
         .stdout(predicate::str::is_empty());
-}
+    }

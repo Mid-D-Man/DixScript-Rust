@@ -7,6 +7,7 @@
 //! Phase 5: Remaining Identifier reference resolution.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use web_time::Instant;
 
@@ -16,8 +17,8 @@ use rustc_hash::FxHashMap;
 use crate::Builtins::Core::{DixType, DixValue};
 use crate::Builtins::Resolver;
 use crate::Compiler::AST::{
-    DataEntry, DataSection, DixScript, Expression, ObjectProperty, Position,
-    PropertyAssignment, Value,
+    DataEntry, DataSection, DixScript, EnumDeclaration, EnumField, EnumsSection, Expression,
+    ObjectProperty, Position, PropertyAssignment, Value,
 };
 use crate::Compiler::Core::DebugMode;
 use crate::Compiler::Utilities::{PathBuilder, SymbolTable, ImportedNamespace};
@@ -130,6 +131,16 @@ pub struct ValueResolver<'a> {
     resolution_history: Vec<ResolutionRecord>,
     start_time: Instant,
     error_manager: ErrorManager,
+    /// Imported (cross-file) enums actually referenced during Phase 1,
+    /// keyed by qualified name exactly as it appears in `Value::EnumValue.
+    /// enum_name` (e.g. "Types.Priority") -> field_name -> resolved int.
+    /// Merged into `self.ast.enums` at the end of `resolve_all_enum_values`
+    /// so `DixData::from_ast` and `value_encoder.rs`'s local-only enums
+    /// table both pick up imported enums for free, without either of them
+    /// needing symbol_table access themselves. `RefCell` because
+    /// `resolve_enums_in_value` is `&self` (part of a read-only recursive
+    /// descent over `&self.ast`), not `&mut self`.
+    imported_enum_usages: RefCell<FxHashMap<String, HashMap<String, i32>>>,
 }
 
 impl<'a> ValueResolver<'a> {
@@ -204,6 +215,7 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             resolution_history: Vec::new(),
             start_time: Instant::now(),
             error_manager,
+            imported_enum_usages: RefCell::new(FxHashMap::default()),
         }
     }
     // ==================== MAIN ORCHESTRATION ====================
@@ -326,6 +338,60 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
             entries: new_entries,
             position: section_position,
         });
+
+        // Merge any imported enums actually referenced above into this
+        // file's own @ENUMS section, so DixData::from_ast's
+        // extract_enums_section and value_encoder.rs's local_enums table --
+        // neither of which has symbol_table access -- see them too. Keyed
+        // by the full qualified name ("Types.Priority"), which can never
+        // collide with a local enum's bare name ("Priority"), so this is
+        // additive only and never shadows a real local declaration.
+        let imported_enums: Vec<(String, HashMap<String, i32>)> = self
+            .imported_enum_usages
+            .borrow()
+            .iter()
+            .map(|(name, fields)| (name.clone(), fields.clone()))
+            .collect();
+
+        if !imported_enums.is_empty() {
+            let section = self.ast.enums.get_or_insert_with(|| EnumsSection {
+                enums: Vec::new(),
+                position: Position::UNKNOWN,
+            });
+
+            let mut merged_count = 0usize;
+            for (qualified_name, fields) in imported_enums {
+                if section.enums.iter().any(|d| d.name == qualified_name) {
+                    continue; // already merged (e.g. resolve() called more than once)
+                }
+
+                let mut field_list: Vec<EnumField> = fields
+                    .into_iter()
+                    .map(|(field_name, field_value)| {
+                        EnumField::new(field_name, Some(field_value), Position::UNKNOWN)
+                    })
+                    .collect();
+                // Cosmetic only (affects declaration order if this synthesized
+                // section is ever introspected/serialized back to source) --
+                // lookups are by name, not position, so this has no effect on
+                // correctness either way.
+                field_list.sort_by_key(|f| f.value.unwrap_or(0));
+
+                section.enums.push(EnumDeclaration::new(
+                    qualified_name,
+                    field_list,
+                    Position::UNKNOWN,
+                ));
+                merged_count += 1;
+            }
+
+            if self.debug_config.is_enabled {
+                self.error_manager.log_info(&format!(
+                    "Merged {} imported enum declaration(s) into local @ENUMS",
+                    merged_count
+                ));
+            }
+        }
 
         if self.debug_config.is_enabled {
             self.error_manager.log_info(&format!(
@@ -511,6 +577,19 @@ Self::new_with_error_manager(ast,symbol_table,debug_mode,error_manager)
                             position: *position,
                         }
                     })?;
+
+                    // Record the full enum (all fields, not just this one) so
+                    // it can be merged into self.ast.enums once the whole
+                    // walk finishes -- see resolve_all_enum_values and the
+                    // `imported_enum_usages` field doc comment. Keyed by the
+                    // full qualified name ("Types.Priority") exactly as it
+                    // appears here, so it can never collide with a local
+                    // enum's bare name.
+                    self.imported_enum_usages
+                        .borrow_mut()
+                        .entry(enum_name.clone())
+                        .or_insert_with(|| fields.clone());
+
                     return Ok((value.clone(), 0, 1));
                 }
 

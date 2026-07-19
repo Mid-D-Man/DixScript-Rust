@@ -31,12 +31,20 @@ fn diff_identical_file_against_itself_reports_no_conflicts() {
 #[test]
 fn diff_genuinely_conflicting_files_reports_conflicts() {
     // basic.mdix and with_enums.mdix both declare app_name/port with
-    // different values -- real, detectable conflicts.
+    // different values -- real, detectable conflicts. Checks for the
+    // actual conflicting key and the "potential conflict(s)" header, not
+    // just the substring "conflict" -- that also appears inside the
+    // success message "No conflicts...", which let this test pass even
+    // when MdixMerger::pick_winner's ThrowOnConflict path silently
+    // dropped every real conflict (see merge.rs's resolve_conflict).
     mdix()
         .args(["diff", &helpers::fixture("basic.mdix"), &helpers::fixture("with_enums.mdix")])
         .assert()
         .success()
-        .stdout(predicate::str::contains("conflict"));
+        .stdout(
+            predicate::str::contains("potential conflict")
+                .and(predicate::str::contains("app_name")),
+        );
 }
 
 #[test]
@@ -185,4 +193,4 @@ fn diff_quiet_suppresses_stdout() {
         .assert()
         .success()
         .stdout(predicate::str::is_empty());
-}
+    }

@@ -320,18 +320,14 @@ impl MdixMerger {
                     if existing_entry.value == entry.value {
                         continue;
                     }
-                    match self.pick_winner(*src_idx, *existing_idx, sources) {
-                        Ok(winner) => {
-                            conflicts.push(MergeConflict {
-                                path: format!("CONFIG.{}", key),
-                                winning_source: winner,
-                                winning_label: sources[winner].label.clone(),
-                            });
-                            if winner == *src_idx {
-                                key_map.insert(key, (*src_idx, entry.clone()));
-                            }
+                    let existing_idx = *existing_idx;
+                    if let Some(winner) = self.resolve_conflict(
+                        format!("CONFIG.{}", key),
+                        *src_idx, existing_idx, sources, conflicts, errors,
+                    ) {
+                        if winner == *src_idx {
+                            key_map.insert(key, (*src_idx, entry.clone()));
                         }
-                        Err(e) => errors.push(e),
                     }
                 } else {
                     key_order.push(key.clone());
@@ -387,18 +383,14 @@ impl MdixMerger {
                         continue;
                     }
                     // Different target — real conflict.
-                    match self.pick_winner(*src_idx, *existing_idx, sources) {
-                        Ok(winner) => {
-                            conflicts.push(MergeConflict {
-                                path: format!("IMPORTS.{}", alias),
-                                winning_source: winner,
-                                winning_label: sources[winner].label.clone(),
-                            });
-                            if winner == *src_idx {
-                                alias_map.insert(alias, (*src_idx, import.clone()));
-                            }
+                    let existing_idx = *existing_idx;
+                    if let Some(winner) = self.resolve_conflict(
+                        format!("IMPORTS.{}", alias),
+                        *src_idx, existing_idx, sources, conflicts, errors,
+                    ) {
+                        if winner == *src_idx {
+                            alias_map.insert(alias, (*src_idx, import.clone()));
                         }
-                        Err(e) => errors.push(e),
                     }
                 } else {
                     alias_order.push(alias.clone());
@@ -502,16 +494,10 @@ impl MdixMerger {
                     }
 
                     // Deep-merge: same enum name, merge fields.
-                    let winner = match self.pick_winner(*src_idx, existing_src_idx, sources) {
-                        Ok(w) => w,
-                        Err(e) => { errors.push(e); continue; }
-                    };
-
-                    conflicts.push(MergeConflict {
-                        path: format!("ENUMS.{}", decl.name),
-                        winning_source: winner,
-                        winning_label: sources[winner].label.clone(),
-                    });
+                    let Some(winner) = self.resolve_conflict(
+                        format!("ENUMS.{}", decl.name),
+                        *src_idx, existing_src_idx, sources, conflicts, errors,
+                    ) else { continue; };
 
                     let merged_fields = self.merge_enum_fields(
                         &existing_fields, existing_src_idx,
@@ -569,18 +555,14 @@ impl MdixMerger {
             if let Some((existing_src, existing_field)) = field_map.get(&field.name) {
                 // Only a conflict if the integer values differ.
                 if existing_field.value != field.value {
-                    let field_winner =
-                        match self.pick_winner(secondary_src, *existing_src, sources) {
-                            Ok(w) => w,
-                            Err(e) => { errors.push(e); continue; }
-                        };
-                    conflicts.push(MergeConflict {
-                        path: format!("ENUMS.{}.{}", enum_name, field.name),
-                        winning_source: field_winner,
-                        winning_label: sources[field_winner].label.clone(),
-                    });
-                    if field_winner == secondary_src {
-                        field_map.insert(field.name.clone(), (secondary_src, field.clone()));
+                    let existing_src = *existing_src;
+                    if let Some(field_winner) = self.resolve_conflict(
+                        format!("ENUMS.{}.{}", enum_name, field.name),
+                        secondary_src, existing_src, sources, conflicts, errors,
+                    ) {
+                        if field_winner == secondary_src {
+                            field_map.insert(field.name.clone(), (secondary_src, field.clone()));
+                        }
                     }
                 }
                 // Identical value → silent dedup, no conflict recorded.
@@ -640,18 +622,14 @@ impl MdixMerger {
                     if identical {
                         continue;
                     }
-                    match self.pick_winner(*src_idx, *existing_idx, sources) {
-                        Ok(winner) => {
-                            conflicts.push(MergeConflict {
-                                path: format!("QUICKFUNCS.{}", func.name),
-                                winning_source: winner,
-                                winning_label: sources[winner].label.clone(),
-                            });
-                            if winner == *src_idx {
-                                func_map.insert(func.name.clone(), (*src_idx, func.clone()));
-                            }
+                    match self.resolve_conflict(
+                        format!("QUICKFUNCS.{}", func.name),
+                        *src_idx, *existing_idx, sources, conflicts, errors,
+                    ) {
+                        Some(winner) if winner == *src_idx => {
+                            func_map.insert(func.name.clone(), (*src_idx, func.clone()));
                         }
-                        Err(e) => errors.push(e),
+                        _ => {}
                     }
                 } else {
                     func_order.push(func.name.clone());
@@ -728,10 +706,10 @@ impl MdixMerger {
                         let key = path.to_string();
                         if table_map.contains_key(&key) {
                             let existing_src = table_map[&key].0;
-                            let winner = match self.pick_winner(*src_idx, existing_src, sources) {
-                                Ok(w) => w,
-                                Err(e) => { errors.push(e); continue; }
-                            };
+                            let Some(winner) = self.resolve_conflict(
+                                format!("DATA.{}", key),
+                                *src_idx, existing_src, sources, conflicts, errors,
+                            ) else { continue; };
                             let existing_props = table_map[&key].1.clone();
                             let merged = self.merge_table_props(
                                 &existing_props, existing_src,
@@ -752,15 +730,10 @@ impl MdixMerger {
                         let key = path.to_string();
                         if array_map.contains_key(&key) {
                             let existing_src = array_map[&key].0;
-                            let winner = match self.pick_winner(*src_idx, existing_src, sources) {
-                                Ok(w) => w,
-                                Err(e) => { errors.push(e); continue; }
-                            };
-                            conflicts.push(MergeConflict {
-                                path: format!("DATA.{}", key),
-                                winning_source: winner,
-                                winning_label: sources[winner].label.clone(),
-                            });
+                            let Some(winner) = self.resolve_conflict(
+                                format!("DATA.{}", key),
+                                *src_idx, existing_src, sources, conflicts, errors,
+                            ) else { continue; };
                             let existing_items = array_map[&key].1.clone();
                             let merged_items = self.merge_array_items(
                                 &existing_items, existing_src,
@@ -847,19 +820,15 @@ impl MdixMerger {
             if data_entries_are_equal(existing_entry, &entry) {
                 return;
             }
-            match self.pick_winner(src_idx, *existing_idx, sources) {
-                Ok(winner) => {
-                    conflicts.push(MergeConflict {
-                        path: format!("{}.{}", section, key),
-                        winning_source: winner,
-                        winning_label: sources[winner].label.clone(),
-                    });
-                    if winner == src_idx {
-                        map.insert(key, (src_idx, entry));
-                        // key is already in `order`
-                    }
+            let existing_idx = *existing_idx;
+            if let Some(winner) = self.resolve_conflict(
+                format!("{}.{}", section, key),
+                src_idx, existing_idx, sources, conflicts, errors,
+            ) {
+                if winner == src_idx {
+                    map.insert(key, (src_idx, entry));
+                    // key is already in `order`
                 }
-                Err(e) => errors.push(e),
             }
         } else {
             order.push(key.clone());
@@ -899,18 +868,14 @@ impl MdixMerger {
                 if values_are_equal(&existing_prop.value, &prop.value) {
                     continue;
                 }
-                let prop_winner =
-                    match self.pick_winner(secondary_src, *existing_src, sources) {
-                        Ok(w) => w,
-                        Err(e) => { errors.push(e); continue; }
-                    };
-                conflicts.push(MergeConflict {
-                    path: format!("{}.{}", path_label, prop.name),
-                    winning_source: prop_winner,
-                    winning_label: sources[prop_winner].label.clone(),
-                });
-                if prop_winner == secondary_src {
-                    prop_map.insert(prop.name.clone(), (secondary_src, prop.clone()));
+                let existing_src = *existing_src;
+                if let Some(prop_winner) = self.resolve_conflict(
+                    format!("{}.{}", path_label, prop.name),
+                    secondary_src, existing_src, sources, conflicts, errors,
+                ) {
+                    if prop_winner == secondary_src {
+                        prop_map.insert(prop.name.clone(), (secondary_src, prop.clone()));
+                    }
                 }
             } else {
                 prop_order.push(prop.name.clone());
@@ -1006,10 +971,10 @@ impl MdixMerger {
                         continue;
                     }
 
-                    let winner = match self.pick_winner(*src_idx, existing_src, sources) {
-                        Ok(w) => w,
-                        Err(e) => { errors.push(e); continue; }
-                    };
+                    let Some(winner) = self.resolve_conflict(
+                        format!("SECURITY.{}", key),
+                        *src_idx, existing_src, sources, conflicts, errors,
+                    ) else { continue; };
                     let merged_fields = self.merge_security_fields(
                         &existing_fields, existing_src,
                         &entry.fields, *src_idx,
@@ -1066,18 +1031,14 @@ impl MdixMerger {
                 if values_are_equal(&existing_field.value, &field.value) {
                     continue;
                 }
-                let field_winner =
-                    match self.pick_winner(secondary_src, *existing_src, sources) {
-                        Ok(w) => w,
-                        Err(e) => { errors.push(e); continue; }
-                    };
-                conflicts.push(MergeConflict {
-                    path: format!("{}.{}", block_label, field.key),
-                    winning_source: field_winner,
-                    winning_label: sources[field_winner].label.clone(),
-                });
-                if field_winner == secondary_src {
-                    field_map.insert(field.key.clone(), (secondary_src, field.clone()));
+                let existing_src = *existing_src;
+                if let Some(field_winner) = self.resolve_conflict(
+                    format!("{}.{}", block_label, field.key),
+                    secondary_src, existing_src, sources, conflicts, errors,
+                ) {
+                    if field_winner == secondary_src {
+                        field_map.insert(field.key.clone(), (secondary_src, field.clone()));
+                    }
                 }
             } else {
                 field_order.push(field.key.clone());
@@ -1095,6 +1056,65 @@ impl MdixMerger {
     }
 
     // ── Conflict resolution ───────────────────────────────────────────────────
+
+    /// Resolve a conflict between `challenger` (new) and `existing` (already
+    /// stored) for a given reporting `path`, and — unlike calling
+    /// `pick_winner` directly — always record a `MergeConflict` for it,
+    /// regardless of whether a winner could actually be picked.
+    ///
+    /// Every call site used to push to `conflicts` only from inside
+    /// `pick_winner`'s `Ok` arm, which `ThrowOnConflict` never returns (it's
+    /// `Err` unconditionally, by design — see `pick_winner`). That meant
+    /// `result.conflicts` came back empty under `ThrowOnConflict` even when
+    /// real, detected disagreements existed, which silently broke `mdix
+    /// diff` (`mdix-cli/src/services/diff_service.rs`): it runs merges
+    /// under `ThrowOnConflict` specifically to *list* every disagreement
+    /// without picking a winner, so an always-empty `conflicts` made every
+    /// diff report "no conflicts" no matter what.
+    ///
+    /// Under `ThrowOnConflict` there's no real winner to apply to the
+    /// merged output — `winning_source`/`winning_label` on that conflict
+    /// describe `challenger` purely as a reference point for display, the
+    /// same way `SecondaryWins` would report it. Nothing is actually
+    /// applied to the merged AST for it either way, since the caller's
+    /// `errors` (pushed here too, exactly as `pick_winner` already did) is
+    /// non-empty afterward, which already makes the overall merge
+    /// `is_success: false` — callers that only care about a successful
+    /// merge (e.g. `mdix merge`) bail out on that before ever looking at
+    /// `conflicts`, so this doesn't change their behavior.
+    ///
+    /// Returns `Some(winner)` when a winner was actually selected and
+    /// should be applied to the merged output, or `None` when the strategy
+    /// refused (the error has already been pushed to `errors`).
+    fn resolve_conflict(
+        &self,
+        path:       String,
+        challenger: usize,
+        existing:   usize,
+        sources:    &[MdixMergeInput],
+        conflicts:  &mut Vec<MergeConflict>,
+        errors:     &mut Vec<String>,
+    ) -> Option<usize> {
+        match self.pick_winner(challenger, existing, sources) {
+            Ok(winner) => {
+                conflicts.push(MergeConflict {
+                    path,
+                    winning_source: winner,
+                    winning_label: sources[winner].label.clone(),
+                });
+                Some(winner)
+            }
+            Err(e) => {
+                conflicts.push(MergeConflict {
+                    path,
+                    winning_source: challenger,
+                    winning_label: sources.get(challenger).and_then(|s| s.label.clone()),
+                });
+                errors.push(e);
+                None
+            }
+        }
+    }
 
     /// Returns the index of the winner between `challenger` (new) and `existing`
     /// (already stored).  Returns `Err` under `ThrowOnConflict`.

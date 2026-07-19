@@ -27,11 +27,11 @@ pub struct DebugAstArgs {
     pub output: Option<String>,
 
     /// Show AST node positions (line:col)
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     pub positions: bool,
 
     /// Run semantic analysis and enhancement before printing
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     pub enhanced: bool,
 
     /// Which section to show: CONFIG, IMPORTS, DLM, ENUMS, QUICKFUNCS, DATA, SECURITY, ALL
@@ -332,4 +332,4 @@ fn truncate(s: &str, max: usize) -> String {
     } else {
         format!("{}…", &s[..max])
     }
-}
+                                                    }

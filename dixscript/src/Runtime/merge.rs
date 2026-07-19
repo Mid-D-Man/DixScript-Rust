@@ -706,11 +706,20 @@ impl MdixMerger {
                         let key = path.to_string();
                         if table_map.contains_key(&key) {
                             let existing_src = table_map[&key].0;
+                            let existing_props = table_map[&key].1.clone();
+                            // Same key existing on both sides isn't a conflict
+                            // by itself -- only differing content is. Without
+                            // this, re-diffing/re-merging identical content
+                            // (e.g. `mdix diff file.mdix file.mdix`) reported
+                            // every TableProperty as conflicting purely
+                            // because the key was present twice.
+                            if table_props_are_equal(&existing_props, properties) {
+                                continue;
+                            }
                             let Some(winner) = self.resolve_conflict(
                                 format!("DATA.{}", key),
                                 *src_idx, existing_src, sources, conflicts, errors,
                             ) else { continue; };
-                            let existing_props = table_map[&key].1.clone();
                             let merged = self.merge_table_props(
                                 &existing_props, existing_src,
                                 properties, *src_idx,
@@ -730,11 +739,16 @@ impl MdixMerger {
                         let key = path.to_string();
                         if array_map.contains_key(&key) {
                             let existing_src = array_map[&key].0;
+                            let existing_items = array_map[&key].1.clone();
+                            // Same guard as TableProperty above -- identical
+                            // items on both sides isn't a real conflict.
+                            if array_items_are_equal(&existing_items, items) {
+                                continue;
+                            }
                             let Some(winner) = self.resolve_conflict(
                                 format!("DATA.{}", key),
                                 *src_idx, existing_src, sources, conflicts, errors,
                             ) else { continue; };
-                            let existing_items = array_map[&key].1.clone();
                             let merged_items = self.merge_array_items(
                                 &existing_items, existing_src,
                                 items, *src_idx,
@@ -1283,6 +1297,33 @@ fn dlm_module_type_key(t: DLMModuleType) -> u8 {
 /// non-equal so they are never silently dropped from a merged group array.
 /// Semantic equality for two top-level `@DATA` entries, ignoring Position.
 /// See the comment at its call site in `upsert_unique_entry` for scope.
+/// Whether two `TableProperty` property lists are equal enough that
+/// there's no real conflict to report at all -- same length, and every
+/// side-a property has a same-named, `values_are_equal` counterpart on
+/// side b. Table properties aren't semantically ordered (`host = ...,
+/// port = ...` means the same thing in any order), so this compares as an
+/// unordered set of (name, value) pairs, not positionally.
+///
+/// Mirrors the per-property short-circuit `merge_table_props` already does
+/// once it's inside a table conflict (`values_are_equal(&existing_prop.
+/// value, &prop.value)`) -- this is that same check applied one level up,
+/// so a `TableProperty` whose key merely repeats across sources with
+/// identical contents (e.g. diffing a file against itself) never gets
+/// treated as a conflict in the first place.
+fn table_props_are_equal(a: &[PropertyAssignment], b: &[PropertyAssignment]) -> bool {
+    a.len() == b.len()
+        && a.iter().all(|pa| {
+            b.iter().any(|pb| pa.name == pb.name && values_are_equal(&pa.value, &pb.value))
+        })
+}
+
+/// Whether two `GroupArray` item lists are equal enough that there's no
+/// real conflict to report. Unlike table properties, array items *are*
+/// ordered, so this compares positionally rather than as a set.
+fn array_items_are_equal(a: &[Value], b: &[Value]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| values_are_equal(x, y))
+}
+
 fn data_entries_are_equal(a: &DataEntry, b: &DataEntry) -> bool {
     match (a, b) {
         (DataEntry::SimpleProperty { value: v1, .. }, DataEntry::SimpleProperty { value: v2, .. }) => {
@@ -1731,4 +1772,4 @@ mod tests {
         let arr = Value::Array { values: vec![], position: Position::UNKNOWN };
         assert!(!values_are_equal(&arr, &arr));
     }
-    }
+            }

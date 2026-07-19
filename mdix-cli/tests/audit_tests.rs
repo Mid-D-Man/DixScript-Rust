@@ -2,24 +2,57 @@ mod helpers;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn mdix() -> Command {
     Command::cargo_bin("mdix").unwrap()
 }
 
-/// Compiles the given DLM-auditor fixture into `results_dir("audit")` and
-/// returns the resulting `.mdix.au` path.
+/// Stage a private copy of `fixture_name` inside a directory unique to
+/// `test_name` and return that directory.
+///
+/// `Compiler/DLM/Auditor/auditor_utilities.rs`'s
+/// `AuditorPathUtils::resolve_audit_file_path` intentionally keeps
+/// `.mdix.au` next to the *source* file being compiled, not in whatever
+/// `-o` directory a given run happens to pass -- that's what lets the
+/// audit trail for one source file stay continuous across multiple
+/// compiles to different output locations. That means every test here
+/// needs its own private copy of the fixture (not the one shared from
+/// `tests/fixtures/`) so its audit file can never collide with another
+/// test's, whether or not `cargo test` happens to run them concurrently.
+fn staged_test_dir(test_name: &str, fixture_name: &str) -> PathBuf {
+    let dir = helpers::results_dir(&format!("audit/{test_name}"));
+    let source = dir.join(fixture_name);
+    std::fs::copy(helpers::fixture(fixture_name), &source).unwrap_or_else(|e| {
+        panic!("failed to stage fixture '{fixture_name}' for test '{test_name}': {e}")
+    });
+    dir
+}
+
+/// Compiles the given DLM-auditor fixture (staged into its own per-test
+/// directory first -- see `staged_test_dir`) and returns the resulting
+/// `.mdix.au` path.
+///
+/// `test_name` must be unique per test -- pass the test function's own
+/// name -- so each test gets a private staged source and therefore a
+/// private, collision-free audit file. `-o` is pointed at the same
+/// directory as the staged source, so "source dir" (where
+/// `AuditorPathUtils` actually writes `.mdix.au`) and "`-o` dir" line up,
+/// which is also why the naming-convention path below
+/// (`dir.join(fixture_name + ".au")`) matches reality -- see
+/// `staged_test_dir`.
 ///
 /// Same caveat as decrypt_tests.rs's compile_encrypted_fixture(): compile's
 /// JSON `generated_files` currently echoes `modules_applied` rather than
 /// real paths (services/compilation.rs ~line 56), so this builds the
-/// expected path by naming convention (`<source-file-name>.au`) instead of
-/// trusting that field.
-fn compile_audited_fixture(fixture_name: &str) -> String {
-    let dir = helpers::results_dir("audit");
+/// expected `.au` path by naming convention instead of trusting that
+/// field.
+fn compile_audited_fixture(test_name: &str, fixture_name: &str) -> String {
+    let dir = staged_test_dir(test_name, fixture_name);
+    let source = dir.join(fixture_name);
+
     mdix()
-        .args(["compile", &helpers::fixture(fixture_name), "-o", dir.to_str().unwrap()])
+        .args(["compile", source.to_str().unwrap(), "-o", dir.to_str().unwrap()])
         .assert()
         .success();
 
@@ -30,13 +63,19 @@ fn compile_audited_fixture(fixture_name: &str) -> String {
 
 #[test]
 fn compiling_the_diy_audit_fixture_produces_an_au_file() {
-    let au = compile_audited_fixture("07_diy_audit.mdix");
+    let au = compile_audited_fixture(
+        "compiling_the_diy_audit_fixture_produces_an_au_file",
+        "07_diy_audit.mdix",
+    );
     assert!(Path::new(&au).exists(), "compile should produce a .mdix.au file: {au}");
 }
 
 #[test]
 fn compiling_the_enhanced_audit_fixture_produces_an_au_file() {
-    let au = compile_audited_fixture("08_enhanced_audit.mdix");
+    let au = compile_audited_fixture(
+        "compiling_the_enhanced_audit_fixture_produces_an_au_file",
+        "08_enhanced_audit.mdix",
+    );
     assert!(Path::new(&au).exists(), "compile should produce a .mdix.au file: {au}");
 }
 
@@ -45,10 +84,12 @@ fn compiling_twice_appends_a_second_entry_not_a_second_file() {
     // AuditFileManager::append_entry -- recompiling the same source should
     // grow the entry count in the same .mdix.au, not silently overwrite it
     // or spawn a second file.
-    let au = compile_audited_fixture("07_diy_audit.mdix");
-    let dir = helpers::results_dir("audit");
+    let test_name = "compiling_twice_appends_a_second_entry_not_a_second_file";
+    let au = compile_audited_fixture(test_name, "07_diy_audit.mdix");
+    let dir = helpers::results_dir(&format!("audit/{test_name}"));
+    let source = dir.join("07_diy_audit.mdix");
     mdix()
-        .args(["compile", &helpers::fixture("07_diy_audit.mdix"), "-o", dir.to_str().unwrap()])
+        .args(["compile", source.to_str().unwrap(), "-o", dir.to_str().unwrap()])
         .assert()
         .success();
 
@@ -63,13 +104,13 @@ fn compiling_twice_appends_a_second_entry_not_a_second_file() {
 
 #[test]
 fn audit_info_exits_zero() {
-    let au = compile_audited_fixture("07_diy_audit.mdix");
+    let au = compile_audited_fixture("audit_info_exits_zero", "07_diy_audit.mdix");
     mdix().args(["audit", "info", &au]).assert().success().code(0);
 }
 
 #[test]
 fn audit_info_shows_source_file() {
-    let au = compile_audited_fixture("07_diy_audit.mdix");
+    let au = compile_audited_fixture("audit_info_shows_source_file", "07_diy_audit.mdix");
     mdix()
         .args(["audit", "info", &au])
         .assert()
@@ -79,7 +120,7 @@ fn audit_info_shows_source_file() {
 
 #[test]
 fn audit_info_json_has_expected_fields() {
-    let au = compile_audited_fixture("08_enhanced_audit.mdix");
+    let au = compile_audited_fixture("audit_info_json_has_expected_fields", "08_enhanced_audit.mdix");
     let output = mdix().args(["audit", "info", "--json", &au]).output().unwrap();
 
     assert!(output.status.success());
@@ -123,13 +164,13 @@ fn audit_info_on_non_au_file_fails_with_parse_error_not_a_panic() {
 
 #[test]
 fn audit_view_exits_zero() {
-    let au = compile_audited_fixture("07_diy_audit.mdix");
+    let au = compile_audited_fixture("audit_view_exits_zero", "07_diy_audit.mdix");
     mdix().args(["audit", "view", &au]).assert().success().code(0);
 }
 
 #[test]
 fn audit_view_shows_at_least_one_entry() {
-    let au = compile_audited_fixture("07_diy_audit.mdix");
+    let au = compile_audited_fixture("audit_view_shows_at_least_one_entry", "07_diy_audit.mdix");
     mdix()
         .args(["audit", "view", &au])
         .assert()
@@ -139,7 +180,7 @@ fn audit_view_shows_at_least_one_entry() {
 
 #[test]
 fn audit_view_enhanced_shows_success_status() {
-    let au = compile_audited_fixture("08_enhanced_audit.mdix");
+    let au = compile_audited_fixture("audit_view_enhanced_shows_success_status", "08_enhanced_audit.mdix");
     mdix()
         .args(["audit", "view", &au])
         .assert()
@@ -152,7 +193,7 @@ fn audit_view_enhanced_shows_success_status() {
 
 #[test]
 fn audit_view_json_entries_have_expected_shape() {
-    let au = compile_audited_fixture("07_diy_audit.mdix");
+    let au = compile_audited_fixture("audit_view_json_entries_have_expected_shape", "07_diy_audit.mdix");
     let output = mdix().args(["audit", "view", "--json", &au]).output().unwrap();
 
     assert!(output.status.success());
@@ -177,10 +218,11 @@ fn audit_view_json_entries_have_expected_shape() {
 fn audit_view_tail_limits_entries() {
     // Compile three times, then --tail 2 should return exactly 2 entries
     // even though 3 were recorded.
-    let dir = helpers::results_dir("audit_tail");
+    let dir = staged_test_dir("audit_view_tail_limits_entries", "07_diy_audit.mdix");
+    let source = dir.join("07_diy_audit.mdix");
     for _ in 0..3 {
         mdix()
-            .args(["compile", &helpers::fixture("07_diy_audit.mdix"), "-o", dir.to_str().unwrap()])
+            .args(["compile", source.to_str().unwrap(), "-o", dir.to_str().unwrap()])
             .assert()
             .success();
     }
@@ -209,7 +251,7 @@ fn audit_view_missing_file_exits_two() {
 
 #[test]
 fn audit_archives_on_a_fresh_file_reports_none() {
-    let au = compile_audited_fixture("07_diy_audit.mdix");
+    let au = compile_audited_fixture("audit_archives_on_a_fresh_file_reports_none", "07_diy_audit.mdix");
     mdix()
         .args(["audit", "archives", &au])
         .assert()
@@ -219,7 +261,7 @@ fn audit_archives_on_a_fresh_file_reports_none() {
 
 #[test]
 fn audit_archives_json_is_an_array() {
-    let au = compile_audited_fixture("07_diy_audit.mdix");
+    let au = compile_audited_fixture("audit_archives_json_is_an_array", "07_diy_audit.mdix");
     let output = mdix().args(["audit", "archives", "--json", &au]).output().unwrap();
 
     assert!(output.status.success());
@@ -232,7 +274,7 @@ fn audit_archives_json_is_an_array() {
 
 #[test]
 fn audit_info_quiet_suppresses_stdout() {
-    let au = compile_audited_fixture("07_diy_audit.mdix");
+    let au = compile_audited_fixture("audit_info_quiet_suppresses_stdout", "07_diy_audit.mdix");
     mdix()
         .args(["audit", "--quiet", "info", &au])
         .assert()

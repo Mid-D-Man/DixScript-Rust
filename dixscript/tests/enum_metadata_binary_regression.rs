@@ -110,11 +110,11 @@ fn nested_enum_in_group_array_survives_binary_round_trip() {
 )
 
 @DATA(
+  greeting = greet("hi")
+
   team::
     { username = "alice", role<enum> = Role.ADMIN },
     { username = "bob",   role<enum> = Role.VIEWER }
-
-  greeting = greet("hi")
 )
 "#;
     let data = pack_and_unpack(source, "enum-in-group-array");

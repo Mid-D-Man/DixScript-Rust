@@ -42,7 +42,7 @@ namespace MidManStudio.Mdix.Core
 
     #endregion
 
-    public sealed unsafe class MdixDatabase : IDisposable
+    public sealed unsafe partial class MdixDatabase : IDisposable
     {
         #region Fields
 
@@ -793,52 +793,9 @@ namespace MidManStudio.Mdix.Core
         public Task<MdixResult<MdixDatabase>> ReloadAsync(CancellationToken ct = default) =>
             Task.Run(() => Reload(), ct);
 
-        private async void HandleFileChanged(object sender, FileSystemEventArgs e)
-        {
-            try
-            {
-                // Lock-free debounce via compare-and-swap: only the thread that
-                // successfully wins the exchange proceeds. The previous
-                // read-then-separately-exchange version had a window where two
-                // near-simultaneous FileSystemWatcher events (which genuinely
-                // happens -- FSW is known to fire more than once per logical
-                // save) could both pass the check before either updated the
-                // tick, triggering two reloads instead of one.
-                long last;
-                long now;
-                do
-                {
-                    now  = DateTime.UtcNow.Ticks;
-                    last = Interlocked.Read(ref _lastReloadTick);
-                    if (now - last < ReloadDebounceTicks) return;
-                }
-                while (Interlocked.CompareExchange(ref _lastReloadTick, now, last) != last);
-
-                // Give the writer a moment to finish flushing before we read --
-                // Task.Delay instead of Thread.Sleep so this doesn't tie up a
-                // thread-pool thread while it waits.
-                await Task.Delay(100).ConfigureAwait(false);
-
-                if (_disposed == 1) return; // disposed while we were waiting
-
-                var result = Reload();
-                if (result.IsSuccess) OnReloaded?.Invoke(result.SuccessResult);
-                else                  OnReloadFailed?.Invoke(result.Error);
-            }
-            catch (Exception ex)
-            {
-                // This is an async void event handler -- an exception escaping
-                // it would crash the process instead of being catchable by
-                // anyone. Route it through the normal failure event instead.
-                OnReloadFailed?.Invoke(MdixError.IoError($"Hot reload handler threw: {ex.Message}", ex));
-            }
-        }
-
-        private void HandleWatcherError(object sender, ErrorEventArgs e) =>
-            OnReloadFailed?.Invoke(
-                MdixError.IoError(
-                    $"File watcher error: {e.GetException()?.Message}",
-                    e.GetException()));
+        // HandleFileChanged / HandleWatcherError moved to the non-unsafe
+        // partial class declaration at the bottom of this file — see the
+        // comment there for why.
 
         #endregion
 
@@ -1087,5 +1044,76 @@ namespace MidManStudio.Mdix.Core
         }
 
         #endregion
+    }
+
+    // Second partial declaration, deliberately NOT `unsafe`.
+    //
+    // BUGFIX (CS4004 "Cannot await in an unsafe context"): the main
+    // MdixDatabase declaration above is `unsafe class MdixDatabase` because
+    // most of its methods use `fixed`/`void*` to marshal UTF-8 buffers
+    // across the native FFI boundary. In C#, `unsafe` on a type declaration
+    // makes *every* member textually inside that declaration an unsafe
+    // context -- including HandleFileChanged, which never touches a pointer
+    // itself but used `await Task.Delay(...)`, and the compiler rejects
+    // `await` anywhere inside an unsafe context regardless of whether that
+    // specific method is the one using pointers.
+    //
+    // `unsafe` on a partial class only applies to the code within that
+    // specific partial declaration, not to the combined type -- so moving
+    // these two handlers into a second, plain (non-unsafe) `partial class
+    // MdixDatabase` block resolves it without scoping `unsafe` down
+    // per-method across the ~25 other members that genuinely need it.
+    // Private fields/methods/events declared in either part (`_disposed`,
+    // `_lastReloadTick`, `ReloadDebounceTicks`, `Reload()`, `OnReloaded`,
+    // `OnReloadFailed`) are visible from both, since partial declarations
+    // are the same type at compile time.
+    public sealed partial class MdixDatabase
+    {
+        private async void HandleFileChanged(object sender, FileSystemEventArgs e)
+        {
+            try
+            {
+                // Lock-free debounce via compare-and-swap: only the thread that
+                // successfully wins the exchange proceeds. The previous
+                // read-then-separately-exchange version had a window where two
+                // near-simultaneous FileSystemWatcher events (which genuinely
+                // happens -- FSW is known to fire more than once per logical
+                // save) could both pass the check before either updated the
+                // tick, triggering two reloads instead of one.
+                long last;
+                long now;
+                do
+                {
+                    now  = DateTime.UtcNow.Ticks;
+                    last = Interlocked.Read(ref _lastReloadTick);
+                    if (now - last < ReloadDebounceTicks) return;
+                }
+                while (Interlocked.CompareExchange(ref _lastReloadTick, now, last) != last);
+
+                // Give the writer a moment to finish flushing before we read --
+                // Task.Delay instead of Thread.Sleep so this doesn't tie up a
+                // thread-pool thread while it waits.
+                await Task.Delay(100).ConfigureAwait(false);
+
+                if (_disposed == 1) return; // disposed while we were waiting
+
+                var result = Reload();
+                if (result.IsSuccess) OnReloaded?.Invoke(result.SuccessResult);
+                else                  OnReloadFailed?.Invoke(result.Error);
+            }
+            catch (Exception ex)
+            {
+                // This is an async void event handler -- an exception escaping
+                // it would crash the process instead of being catchable by
+                // anyone. Route it through the normal failure event instead.
+                OnReloadFailed?.Invoke(MdixError.IoError($"Hot reload handler threw: {ex.Message}", ex));
+            }
+        }
+
+        private void HandleWatcherError(object sender, ErrorEventArgs e) =>
+            OnReloadFailed?.Invoke(
+                MdixError.IoError(
+                    $"File watcher error: {e.GetException()?.Message}",
+                    e.GetException()));
     }
 }

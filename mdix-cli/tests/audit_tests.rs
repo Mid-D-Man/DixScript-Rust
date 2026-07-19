@@ -170,12 +170,16 @@ fn audit_view_exits_zero() {
 
 #[test]
 fn audit_view_shows_at_least_one_entry() {
+    // AuditFileManager assigns 1-based indices (audit_file_data.rs: "1-based
+    // index within this audit file"; audit_file_format.rs's own unit test
+    // asserts entries[0].index == 1) -- the very first entry in a fresh
+    // file is "#1", never "#0".
     let au = compile_audited_fixture("audit_view_shows_at_least_one_entry", "07_diy_audit.mdix");
     mdix()
         .args(["audit", "view", &au])
         .assert()
         .success()
-        .stdout(predicate::str::contains("#0"));
+        .stdout(predicate::str::contains("#1"));
 }
 
 #[test]

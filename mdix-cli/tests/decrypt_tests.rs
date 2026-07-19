@@ -9,8 +9,20 @@ fn mdix() -> Command {
 }
 
 /// Compiles `security_01_keyfile_aes256.mdix` (real DLM fixture: keyfile-mode
-/// AES-256, no password) into `results_dir("decrypt")` and returns the
-/// resulting (.mdix.enc, .mdix.key) paths.
+/// AES-256, no password) into a directory private to `test_name` and
+/// returns the resulting (.mdix.enc, .mdix.key) paths.
+///
+/// Every test in this file compiles the *same* source fixture -- unlike
+/// audit's `.mdix.au` (which `AuditorPathUtils` deliberately keeps next to
+/// the *source* file regardless of `-o` -- see audit_tests.rs), DLM's
+/// Encryptor output genuinely respects `-o` (see the naming-convention
+/// note below), so giving each test its own private `-o` subdirectory is
+/// enough on its own to stop concurrent `cargo test` runs from colliding
+/// on the same `.enc`/`.key` files the way they used to when every test
+/// shared `results_dir("decrypt")` directly.
+///
+/// `test_name` must be unique per test -- pass the test function's own
+/// name.
 ///
 /// NOTE: `mdix compile`'s JSON `generated_files` field currently echoes back
 /// `modules_applied` (e.g. "DEncryptor.aes256") instead of real output
@@ -20,8 +32,8 @@ fn mdix() -> Command {
 /// comment (`<stem>.mdix.enc` / `<stem>.mdix.key` next to the output dir)
 /// rather than trusting that JSON field. Once that's fixed, this can read
 /// the real paths straight out of `generated_files` instead.
-fn compile_encrypted_fixture() -> (String, String) {
-    let dir = helpers::results_dir("decrypt");
+fn compile_encrypted_fixture(test_name: &str) -> (String, String) {
+    let dir = helpers::results_dir(&format!("decrypt/{test_name}"));
     mdix()
         .args([
             "compile",
@@ -40,7 +52,7 @@ fn compile_encrypted_fixture() -> (String, String) {
 
 #[test]
 fn compiling_the_keyfile_fixture_produces_enc_and_key_files() {
-    let (enc, key) = compile_encrypted_fixture();
+    let (enc, key) = compile_encrypted_fixture("compiling_the_keyfile_fixture_produces_enc_and_key_files");
     assert!(Path::new(&enc).exists(), "compile should produce a .mdix.enc file: {enc}");
     assert!(Path::new(&key).exists(), "compile should produce a .mdix.key file: {key}");
 }
@@ -49,7 +61,7 @@ fn compiling_the_keyfile_fixture_produces_enc_and_key_files() {
 
 #[test]
 fn decrypt_with_explicit_key_exits_zero() {
-    let (enc, key) = compile_encrypted_fixture();
+    let (enc, key) = compile_encrypted_fixture("decrypt_with_explicit_key_exits_zero");
     mdix()
         .args(["decrypt", &enc, "--key", &key])
         .assert()
@@ -62,7 +74,7 @@ fn decrypt_auto_detects_key_next_to_enc_file() {
     // No --key given -- compilation.rs's auto-detect strips ".mdix.enc"
     // and looks for "<stem>.mdix.key" in the same directory, which is
     // exactly what compile_encrypted_fixture() just produced.
-    let (enc, _key) = compile_encrypted_fixture();
+    let (enc, _key) = compile_encrypted_fixture("decrypt_auto_detects_key_next_to_enc_file");
     mdix()
         .args(["decrypt", &enc])
         .assert()
@@ -72,8 +84,9 @@ fn decrypt_auto_detects_key_next_to_enc_file() {
 
 #[test]
 fn decrypt_writes_plaintext_mdix_output() {
-    let (enc, key) = compile_encrypted_fixture();
-    let out_dir = helpers::results_dir("decrypt");
+    let test_name = "decrypt_writes_plaintext_mdix_output";
+    let (enc, key) = compile_encrypted_fixture(test_name);
+    let out_dir = helpers::results_dir(&format!("decrypt/{test_name}"));
     mdix()
         .args(["decrypt", &enc, "--key", &key, "-o", out_dir.to_str().unwrap()])
         .assert()
@@ -89,8 +102,9 @@ fn decrypt_writes_plaintext_mdix_output() {
 
 #[test]
 fn decrypted_output_preserves_data() {
-    let (enc, key) = compile_encrypted_fixture();
-    let out_dir = helpers::results_dir("decrypt");
+    let test_name = "decrypted_output_preserves_data";
+    let (enc, key) = compile_encrypted_fixture(test_name);
+    let out_dir = helpers::results_dir(&format!("decrypt/{test_name}"));
     mdix()
         .args(["decrypt", &enc, "--key", &key, "-o", out_dir.to_str().unwrap()])
         .assert()
@@ -124,8 +138,9 @@ fn decrypt_missing_enc_file_exits_two() {
 fn decrypt_without_key_and_none_discoverable_fails() {
     // Copy just the .enc file into an otherwise-empty dir so auto-detect
     // has nothing to find.
-    let (enc, _key) = compile_encrypted_fixture();
-    let isolated_dir = helpers::results_dir("decrypt_isolated");
+    let test_name = "decrypt_without_key_and_none_discoverable_fails";
+    let (enc, _key) = compile_encrypted_fixture(test_name);
+    let isolated_dir = helpers::results_dir(&format!("decrypt/{test_name}/isolated"));
     let isolated_enc = isolated_dir.join("orphaned.mdix.enc");
     std::fs::copy(&enc, &isolated_enc).unwrap();
 
@@ -137,11 +152,15 @@ fn decrypt_without_key_and_none_discoverable_fails() {
 
 #[test]
 fn decrypt_with_wrong_key_fails() {
-    let (enc, _key) = compile_encrypted_fixture();
+    let test_name = "decrypt_with_wrong_key_fails";
+    let (enc, _key) = compile_encrypted_fixture(test_name);
 
     // Generate an unrelated key of the same algorithm -- wrong key
     // material, should not decrypt data encrypted under a different key.
-    let wrong_key = helpers::results_file("decrypt", "wrong.mdix.key");
+    let wrong_key = helpers::results_dir(&format!("decrypt/{test_name}"))
+        .join("wrong.mdix.key")
+        .to_string_lossy()
+        .to_string();
     mdix()
         .args(["key", "generate", "--output", &wrong_key, "--algorithm", "aes256"])
         .assert()
@@ -157,7 +176,8 @@ fn decrypt_with_wrong_key_fails() {
 
 #[test]
 fn decrypt_json_flag_produces_valid_json() {
-    let (enc, key) = compile_encrypted_fixture();
+    let test_name = "decrypt_json_flag_produces_valid_json";
+    let (enc, key) = compile_encrypted_fixture(test_name);
     let output = mdix()
         .args(["decrypt", "--json", &enc, "--key", &key])
         .output()
@@ -170,7 +190,10 @@ fn decrypt_json_flag_produces_valid_json() {
     assert_eq!(parsed["success"], true);
     assert!(parsed["data"]["output_path"].is_string());
 
-    let result_file = helpers::results_file("decrypt", "decrypt_result.json");
+    let result_file = helpers::results_dir(&format!("decrypt/{test_name}"))
+        .join("decrypt_result.json")
+        .to_string_lossy()
+        .to_string();
     std::fs::write(result_file, &stdout).ok();
 }
 
@@ -178,7 +201,7 @@ fn decrypt_json_flag_produces_valid_json() {
 
 #[test]
 fn decrypt_quiet_suppresses_stdout() {
-    let (enc, key) = compile_encrypted_fixture();
+    let (enc, key) = compile_encrypted_fixture("decrypt_quiet_suppresses_stdout");
     mdix()
         .args(["decrypt", "--quiet", &enc, "--key", &key])
         .assert()

@@ -27,6 +27,20 @@
 //!     another file and uses its enums... within the file data section but
 //!     it itself lacks those sections".
 //!
+//! The second fixture also pins down a *follow-up* fix (Option B from the
+//! design discussion): `DixData::from_ast` only ever reads `ast.enums` --
+//! this file's own local `@ENUMS` -- and has no `symbol_table` access, so
+//! an imported enum used with no local re-declaration used to get the right
+//! `field_name` but a `value` that silently fell back to 0. Rather than
+//! threading `symbol_table` into `from_ast` (a public API with ~25 call
+//! sites across 4 crates), `resolve_all_enum_values` (Phase 1's driver) now
+//! collects every imported enum actually referenced during the walk and
+//! merges a synthesized declaration for it into `self.ast.enums`, keyed by
+//! its full qualified name ("Types.Priority") so it can never collide with
+//! a local enum's bare name. `from_ast` and `value_encoder.rs`'s
+//! `local_enums` table both just read `ast.enums` either way, so this fixes
+//! both the plain-load and binary paths without touching either of them.
+//!
 //! Run with:
 //!   cargo test --test enum_resolution_regression -- --nocapture
 
@@ -65,19 +79,6 @@ fn assert_enum_field(data: &dixscript::Runtime::DixData, path: &str, expected_fi
     }
 }
 
-/// Only checks field_name identity, not the resolved int -- see the long
-/// comment on `imported_enum_only_with_zero_functions_anywhere_resolves`
-/// below for why the int specifically is still a known, separate gap for
-/// imported enums on this code path.
-fn assert_enum_field_name_only(data: &dixscript::Runtime::DixData, path: &str, expected_field: &str) {
-    match data.get_value(path) {
-        Some(DixValue::Enum { field_name, .. }) => {
-            assert_eq!(field_name, expected_field, "{path}: expected enum field '{expected_field}', got '{field_name}'");
-        }
-        other => panic!("{path}: expected DixValue::Enum, got {:?}", other),
-    }
-}
-
 #[test]
 fn local_enum_alone_with_no_quickfuncs_resolves() {
     let loader = DixLoader::new();
@@ -99,24 +100,11 @@ fn local_enum_alone_with_no_quickfuncs_resolves() {
 /// has_imported_enums is true). Before the loader.rs fix, Stage 7 never ran
 /// for this file at all.
 ///
-/// KNOWN REMAINING GAP, precisely scoped: Phase 1 now validates this
-/// reference correctly (via symbol_table, which has full visibility into
-/// imported namespaces) and leaves the `Value::EnumValue` node intact --
-/// field_name identity is correct below. But `DixData::from_ast` (the
-/// consumer that turns the resolved AST into the final `DixValue::Enum`)
-/// re-derives the *integer* independently via its own `extract_enums_section`,
-/// which only ever reads `ast.enums` -- this file's own local `@ENUMS`
-/// section. It has no access to the symbol table, so it can't see
-/// `enum_only_types.mdix`'s declarations, and its lookup falls back to 0 for
-/// any enum that isn't locally declared. Closing this needs `from_ast` to
-/// receive the symbol table too, which cascades to ~25 call sites across 4
-/// crates (dixscript's own internal tests, loader.rs, data_builder.rs,
-/// merge.rs, and mdix-wasm/mdix-lua/mdix-ffi's own merge.rs each) -- too
-/// invasive to change without the ability to compile-check it here.
-/// value_encoder.rs's `local_enums` table has the identical blind spot for
-/// the same reason (see its own doc comment) and degrades the same way:
-/// name preserved, resolved int falls back to 0 with a logged warning
-/// rather than silently or hard-failing.
+/// This is also the regression guard for the Option B follow-up (see the
+/// module doc comment above): all seven assertions check the resolved
+/// *int*, not just field_name identity -- a regression back to "field name
+/// right, value silently 0" (the state before the resolve_all_enum_values
+/// merge existed) would fail loudly here, not just look slightly off.
 #[test]
 fn imported_enum_only_with_zero_functions_anywhere_resolves() {
     let loader = DixLoader::new();
@@ -127,11 +115,51 @@ fn imported_enum_only_with_zero_functions_anywhere_resolves() {
         .load_text(fixture_path, &DixLoadOptions::new())
         .expect("should compile: imported enum-only module, zero QuickFuncs anywhere in scope");
 
-    assert_enum_field_name_only(&result, "ticket_priority", "HIGH");
-    assert_enum_field_name_only(&result, "fallback_priority", "LOW");
-    assert_enum_field_name_only(&result, "deploy_region", "EU");
-    assert_enum_field_name_only(&result, "incidents[0].priority", "CRITICAL");
-    assert_enum_field_name_only(&result, "incidents[0].region", "APAC");
-    assert_enum_field_name_only(&result, "incidents[1].priority", "MEDIUM");
-    assert_enum_field_name_only(&result, "incidents[1].region", "NA");
+    assert_enum_field(&result, "ticket_priority", "HIGH", 2);
+    assert_enum_field(&result, "fallback_priority", "LOW", 0);
+    assert_enum_field(&result, "deploy_region", "EU", 2);
+
+    // Nested inside a group array -- exercises the same recursive resolution
+    // path as top-level scalar fields, not just SimpleProperty.
+    assert_enum_field(&result, "incidents[0].priority", "CRITICAL", 3);
+    assert_enum_field(&result, "incidents[0].region", "APAC", 3);
+    assert_enum_field(&result, "incidents[1].priority", "MEDIUM", 1);
+    assert_enum_field(&result, "incidents[1].region", "NA", 1);
 }
+
+/// Directly exercises the Option B merge itself: two *different* imported
+/// enums referenced by two *different* fields, from a file with a local
+/// @QUICKFUNCS unrelated to either of them (so Stage 7 would have run
+/// regardless of the enum-presence gate -- this isolates the merge fix from
+/// the gating fix, which is already covered by the two tests above).
+#[test]
+fn multiple_distinct_imported_enums_all_merge_correctly() {
+    let loader = DixLoader::new();
+    let source = format!(
+        r#"
+@IMPORTS(
+  Types from "{}"
+)
+
+@QUICKFUNCS(
+  ~identity<int>(x) {{
+    return x
+  }}
+)
+
+@DATA(
+  a<enum> = Types.Priority.MEDIUM
+  b<enum> = Types.Region.LATAM
+  touch = identity(0)
+)
+"#,
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../mdix_files/tests/imports/enum_only_types.mdix")
+    );
+
+    let result = loader
+        .load_from_str(&source, &DixLoadOptions::new())
+        .expect("should compile: two distinct imported enums alongside a local QuickFunc");
+
+    assert_enum_field(&result, "a", "MEDIUM", 1);
+    assert_enum_field(&result, "b", "LATAM", 4);
+  }

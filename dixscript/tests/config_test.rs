@@ -46,13 +46,7 @@ fn test_validate_rejects_bad_version() {
     assert_eq!(result.get("version").unwrap().as_str(), "1.0.0");
 }
 
-#[test]
-fn test_validate_accepts_good_version() {
-    let mut config = std::collections::HashMap::new();
-    config.insert("version".to_string(), "1.0.0".to_string());
-    let result = ConfigSchema::validate_and_enhance_config(config).unwrap();
-    assert_eq!(result.get("version").unwrap().as_str(), "1.0.0");
-}
+
 
 #[test]
 fn test_validate_rejects_bad_encoding() {

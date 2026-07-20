@@ -17,7 +17,7 @@
 //! gzip's had a test proving the second one.
 
 use wasm_bindgen_test::*;
-use mdix_wasm::{compile_with_dlm, decompile_with_dlm};
+use mdix_wasm::{compile_with_dlm, decompile_with_dlm, MdixDatabase};
 
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -229,3 +229,95 @@ fn top_level_and_nested_fields_still_resolve_correctly_under_compression() {
     assert_eq!(db.get_enum_field("user.permissions[0].role").unwrap(), "EDITOR");
     assert_eq!(db.get_string("user.permissions[1].scope").unwrap(), "global");
 }
+
+// ── enum-ONLY @DATA (no strings/ints/other primitives at all, zero
+//    @QUICKFUNCS anywhere) through each DLM combination — the test above
+//    mixes an enum field in with a plain "name" string and a QuickFunc-free
+//    but otherwise ordinary fixture; this isolates the narrower "enums are
+//    literally the only @DATA content" shape that's the exact trigger for
+//    the Stage-7 bug this file's long comment above describes. Mirrors the
+//    fixtures generated for mdix-csharp (MdixEnumDlmTests.cs) and
+//    mdix-python (test_enum_dlm.py) via
+//    scripts/generate_enum_dlm_fixtures.sh from
+//    mdix_files/tests/dlm/11..13_enum_only_*.mdix, so the exact same
+//    source shape and assertions are exercised on all three bindings —
+//    this one just gets to build its fixture in-memory instead of needing
+//    a pre-compiled binary, since compile_with_dlm exists here and not on
+//    the other two ────────────────────────────────────────────────────────
+
+const ENUM_ONLY_SOURCE_BODY: &str = r#"
+@ENUMS(
+  Status { ACTIVE = 1, INACTIVE = 0, PENDING = 2, ARCHIVED = 3 }
+  Role   { ADMIN = 0, EDITOR = 1, VIEWER = 2 }
+)
+@DATA(
+  status<enum> = Status.PENDING
+  role<enum>   = Role.EDITOR
+
+  assignments::
+    { role<enum> = Role.ADMIN  },
+    { role<enum> = Role.VIEWER }
+)
+"#;
+
+fn assert_enum_only_data_resolves_correctly(db: &MdixDatabase) {
+    assert_eq!(db.get_enum_name("status").unwrap(), "Status");
+    assert_eq!(db.get_enum_field("status").unwrap(), "PENDING");
+    // PENDING is declared as 2. A silent enum-table lookup-miss falls back
+    // to 0, which happens to be a different, valid-looking variant
+    // (ACTIVE) -- this is the assertion that would actually catch that.
+    assert_eq!(db.get_int("status").unwrap(), 2);
+
+    assert_eq!(db.get_enum_name("role").unwrap(), "Role");
+    assert_eq!(db.get_enum_field("role").unwrap(), "EDITOR");
+    assert_eq!(db.get_int("role").unwrap(), 1);
+
+    // Nested inside a GroupArray -- the exact spot nested-path resolution
+    // has broken before (mdix-scaffold GroupArray regression), now
+    // combined with the DLM round trip too.
+    assert_eq!(db.get_enum_field("assignments[0].role").unwrap(), "ADMIN");
+    assert_eq!(db.get_int("assignments[0].role").unwrap(), 0);
+    assert_eq!(db.get_enum_field("assignments[1].role").unwrap(), "VIEWER");
+    assert_eq!(db.get_int("assignments[1].role").unwrap(), 2);
+}
+
+#[wasm_bindgen_test]
+fn enum_only_data_survives_compression_alone() {
+    let source = format!("@DLM(DCompressor.gzip)\n{ENUM_ONLY_SOURCE_BODY}");
+
+    let outcome = compile_with_dlm(&source, "dlm-enum-only-gzip-test")
+        .expect("compileWithDlm should succeed with enum-only data + gzip");
+    let key_content = outcome.keyFileContent().unwrap_or_default();
+    let db = decompile_with_dlm(outcome.processedData(), &key_content, "dlm-enum-only-gzip-test")
+        .expect("decompileWithDlm should reverse gzip compression over enum-only data");
+
+    assert_enum_only_data_resolves_correctly(&db);
+}
+
+#[wasm_bindgen_test]
+fn enum_only_data_survives_encryption_alone() {
+    let source = format!("@DLM(DEncryptor.aes256)\n{ENUM_ONLY_SOURCE_BODY}");
+
+    let outcome = compile_with_dlm(&source, "dlm-enum-only-aes256-test")
+        .expect("compileWithDlm should succeed with enum-only data + aes256");
+    let key_content = outcome.keyFileContent()
+        .expect("keyFileContent should be populated when DEncryptor ran");
+    let db = decompile_with_dlm(outcome.processedData(), &key_content, "dlm-enum-only-aes256-test")
+        .expect("decompileWithDlm should reverse aes256 encryption over enum-only data");
+
+    assert_enum_only_data_resolves_correctly(&db);
+}
+
+#[wasm_bindgen_test]
+fn enum_only_data_survives_compression_and_encryption_together() {
+    let source = format!("@DLM(DCompressor.gzip, DEncryptor.aes256)\n{ENUM_ONLY_SOURCE_BODY}");
+
+    let outcome = compile_with_dlm(&source, "dlm-enum-only-gzip-aes256-test")
+        .expect("compileWithDlm should succeed with enum-only data + gzip + aes256");
+    let key_content = outcome.keyFileContent()
+        .expect("keyFileContent should be populated when DEncryptor ran");
+    let db = decompile_with_dlm(outcome.processedData(), &key_content, "dlm-enum-only-gzip-aes256-test")
+        .expect("decompileWithDlm should reverse gzip+aes256 over enum-only data");
+
+    assert_enum_only_data_resolves_correctly(&db);
+        }

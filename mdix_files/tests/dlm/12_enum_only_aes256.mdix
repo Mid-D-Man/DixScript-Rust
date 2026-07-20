@@ -1,0 +1,40 @@
+// Test: enum-only @DATA (no strings/ints/other primitives at all) through
+// DLM encryption alone, no compression. Keyfile mode (no password needed
+// at load time), same as security_01_keyfile_aes256.mdix.
+// Compile: mdix compile 12_enum_only_aes256.mdix -o ./output
+// Decrypt: mdix decrypt ./output/12_enum_only_aes256.mdix.enc --key ./output/12_enum_only_aes256.mdix.key
+//
+// See 11_enum_only_gzip.mdix's header comment for why this fixture shape
+// (enum fields only, zero QuickFuncs, zero non-enum @DATA entries)
+// specifically matters. This variant covers the encryption-only DLM path
+// instead of compression-only.
+
+@CONFIG(
+  version -> "1.0.0"
+  author  -> "DLM Test — Enum-Only Data, AES-256 Encryption Only"
+)
+
+@ENUMS(
+  Status { ACTIVE = 1, INACTIVE = 0, PENDING = 2, ARCHIVED = 3 }
+  Role   { ADMIN = 0, EDITOR = 1, VIEWER = 2 }
+)
+
+@DLM(
+  DEncryptor.aes256
+)
+
+@DATA(
+  status<enum> = Status.PENDING
+  role<enum>   = Role.EDITOR
+
+  assignments::
+    { role<enum> = Role.ADMIN  },
+    { role<enum> = Role.VIEWER }
+)
+
+@SECURITY(
+  encryption -> {
+    mode      = "keyfile",
+    algorithm = "aes256-gcm"
+  }
+)

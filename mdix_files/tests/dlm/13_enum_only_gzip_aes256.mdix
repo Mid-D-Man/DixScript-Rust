@@ -1,0 +1,42 @@
+// Test: enum-only @DATA (no strings/ints/other primitives at all) through
+// the full DLM pipeline -- GZip compression THEN AES-256 encryption
+// (keyfile mode, no password needed at load time), together.
+// Compile: mdix compile 13_enum_only_gzip_aes256.mdix -o ./output
+// Decrypt: mdix decrypt ./output/13_enum_only_gzip_aes256.mdix.enc --key ./output/13_enum_only_gzip_aes256.mdix.key
+//
+// See 11_enum_only_gzip.mdix's header comment for why this fixture shape
+// (enum fields only, zero QuickFuncs, zero non-enum @DATA entries)
+// specifically matters. This variant is the combined case: 09_gzip_aes256
+// .mdix already covers compression+encryption together for mixed data, but
+// nothing until this file covered it for enum-only data specifically.
+
+@CONFIG(
+  version -> "1.0.0"
+  author  -> "DLM Test — Enum-Only Data, GZip Compression then AES-256 Encryption"
+)
+
+@ENUMS(
+  Status { ACTIVE = 1, INACTIVE = 0, PENDING = 2, ARCHIVED = 3 }
+  Role   { ADMIN = 0, EDITOR = 1, VIEWER = 2 }
+)
+
+@DLM(
+  DCompressor.gzip
+  DEncryptor.aes256
+)
+
+@DATA(
+  status<enum> = Status.PENDING
+  role<enum>   = Role.EDITOR
+
+  assignments::
+    { role<enum> = Role.ADMIN  },
+    { role<enum> = Role.VIEWER }
+)
+
+@SECURITY(
+  encryption -> {
+    mode      = "keyfile",
+    algorithm = "aes256-gcm"
+  }
+)

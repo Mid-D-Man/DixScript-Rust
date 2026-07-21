@@ -1,0 +1,152 @@
+name: Publish midmanstudio-mdix to PyPI
+
+# Manual only (Actions tab -> Run workflow) — requires typing "publish" in
+# the confirmation input, so this can't fire by an accidental click, same
+# gating a-publish-dixscript-crate.yml already uses for crates.io and
+# mdix-core-cs-nuget-publish.yml uses for NuGet.
+#
+# Requires a PYPI_API_TOKEN secret in this repo's settings
+# (Settings -> Secrets and variables -> Actions -> New repository secret).
+# Generate the token at https://pypi.org/manage/account/token/, scoped to
+# the midmanstudio-mdix project (or "entire account" the first time, since
+# a project-scoped token can't be created before the project exists on
+# PyPI — narrow it to the project once this first publish succeeds).
+#
+# Builds wheels on all 3 OSes maturin/pyo3 need a real build environment
+# for (can't cross-compile a compiled-extension wheel from Linux alone the
+# way mdix-ffi's cdylib can be cross-compiled) — mirrors
+# mdix-core-cs-nuget-publish.yml's linux-x64/win-x64/osx-arm64 split.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm. PyPI does not allow re-uploading the same version once it is live — only yanking, which hides it from new installs but does not remove it. Bump version in mdix-python/pyproject.toml first if this is a new release.'
+        required: true
+
+jobs:
+  confirm-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm manual trigger
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "publish" ]; then
+            echo "Confirmation text did not match 'publish' — aborting."
+            exit 1
+          fi
+
+  build-wheel:
+    needs: confirm-trigger
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: wheel-linux-x64
+          - os: windows-latest
+            artifact: wheel-win-x64
+          - os: macos-latest
+            artifact: wheel-osx-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Build wheel (release)
+        run: |
+          maturin build --release --out dist --manifest-path mdix-python/Cargo.toml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  test-before-publish:
+    needs: confirm-trigger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-py-publish-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-py-publish-test-
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # Same reasoning as python-publish.yml's identical step: needed for
+      # test_enum_dlm.py, must run before pytest below. Belt-and-suspenders
+      # here too -- python-publish.yml already runs the full suite on every
+      # push, but this re-checks the exact commit about to be published.
+      - name: Build mdix-cli
+        run: cargo build -p mdix-cli --release
+
+      - name: Generate enum-only DLM test fixtures
+        run: |
+          set -e
+          MDIX="target/release/mdix"
+          SRC="mdix_files/tests/dlm"
+          OUT="$(mktemp -d)"
+          DST="mdix-python/tests/fixtures/enum_dlm"
+          mkdir -p "$DST"
+          for name in 11_enum_only_gzip 12_enum_only_aes256 13_enum_only_gzip_aes256; do
+            "$MDIX" compile "$SRC/$name.mdix" -o "$OUT"
+            cp "$OUT/$name.mdix.enc" "$DST/"
+            cp "$OUT/$name.mdix.key" "$DST/"
+          done
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Build + install wheel for testing
+        run: |
+          maturin build --release --out dist --manifest-path mdix-python/Cargo.toml
+          pip install dist/midmanstudio_mdix-*.whl
+          pip install pytest>=7.0 numpy>=1.21 pandas>=1.3
+
+      - name: Run pytest
+        run: python -m pytest mdix-python/tests/ -v
+
+  publish:
+    needs: [confirm-trigger, build-wheel, test-before-publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: List wheels to publish
+        run: ls -lh dist/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install twine
+        run: pip install twine
+
+      - name: Verify wheel metadata (still no upload yet)
+        run: twine check dist/*.whl
+
+      - name: Upload to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: twine upload --skip-existing dist/*.whl

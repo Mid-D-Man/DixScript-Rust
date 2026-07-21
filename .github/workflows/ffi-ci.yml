@@ -186,6 +186,206 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+  # BUGFIX: this job didn't exist at all before -- ffi-ci.yml only ever
+  # validated Linux + macOS, so a change that broke the Android or Windows
+  # build wouldn't surface until someone manually ran the much heavier
+  # build-upm.yml Unity-packaging workflow (or, worse, not until a real
+  # device build failed). build-upm.yml already has this exact, working
+  # cargo-ndk setup -- see its own comment there for the history -- this is
+  # the same three `cargo ndk -t <abi> ...` invocations plus the same
+  # symbol-set verification, just wired into this workflow's
+  # status/size_bytes/duration_s output convention so it shows up on the
+  # regular FFI dashboard instead of only the Unity package one.
+  build-ffi-android:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.should_run == 'true'
+    outputs:
+      status:     ${{ steps.result.outputs.status }}
+      size_bytes: ${{ steps.result.outputs.size_bytes }}
+      duration_s: ${{ steps.result.outputs.duration_s }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-ffi-android-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-ffi-android-
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version "^3" --locked
+
+      # ubuntu-latest ships an Android SDK + NDK preinstalled -- no need for
+      # a third-party setup action, same as build-upm.yml /
+      # MidManStudio_Unity's build-audio-libs.yml / build-projectile-rust-libs.yml.
+      - name: Locate Android NDK
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}"
+          [ -z "$NDK" ] && NDK=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -1)
+          [ -z "$NDK" ] && { echo "❌ Android NDK not found on runner"; exit 1; }
+          echo "ANDROID_NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "Using NDK: $NDK"
+
+      - name: Build mdix-ffi — Android (arm64-v8a, armeabi-v7a, x86_64)
+        id: build
+        working-directory: mdix-ffi
+        run: |
+          START=$(date +%s)
+          set -e
+          cargo ndk -t arm64-v8a   -o ./android-out build --release
+          cargo ndk -t armeabi-v7a -o ./android-out build --release
+          cargo ndk -t x86_64      -o ./android-out build --release
+          END=$(date +%s)
+          echo "DURATION_S=$((END - START))" >> $GITHUB_ENV
+
+      - name: Verify Android ABI outputs (present, non-truncated, identical symbol set)
+        id: result
+        if: always()
+        working-directory: mdix-ffi
+        run: |
+          DUR="${DURATION_S:-0}"
+          MIN_BYTES=500
+          FAIL=0
+          TOTAL_SIZE=0
+          declare -A SYMSETS
+
+          for ABI in arm64-v8a armeabi-v7a x86_64; do
+            F="android-out/$ABI/libmdix_ffi.so"
+            if [ ! -f "$F" ]; then
+              echo "❌ MISSING: $ABI — libmdix_ffi.so was not produced"
+              FAIL=1; continue
+            fi
+            SIZE=$(stat -c%s "$F")
+            TOTAL_SIZE=$((TOTAL_SIZE + SIZE))
+            echo "  $ABI: ${SIZE} bytes"
+            if [ "$SIZE" -lt "$MIN_BYTES" ]; then
+              echo "❌ TRUNCATED/EMPTY: $ABI ($SIZE bytes)"
+              FAIL=1; continue
+            fi
+            SYMSETS[$ABI]=$(nm -D --defined-only "$F" 2>/dev/null | awk '{print $3}' | sort)
+          done
+
+          # All three ABIs should export the same C ABI surface -- a
+          # divergent symbol set is what actually distinguishes "small but
+          # correct" from "silently built a stub for this ABI".
+          if [ -n "${SYMSETS[arm64-v8a]:-}" ] && [ -n "${SYMSETS[armeabi-v7a]:-}" ]; then
+            [ "${SYMSETS[arm64-v8a]}" = "${SYMSETS[armeabi-v7a]}" ] || { echo "❌ arm64-v8a/armeabi-v7a export different symbol sets"; FAIL=1; }
+          fi
+          if [ -n "${SYMSETS[arm64-v8a]:-}" ] && [ -n "${SYMSETS[x86_64]:-}" ]; then
+            [ "${SYMSETS[arm64-v8a]}" = "${SYMSETS[x86_64]}" ] || { echo "❌ arm64-v8a/x86_64 export different symbol sets"; FAIL=1; }
+          fi
+
+          if [ "$FAIL" = "1" ]; then
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "size_bytes=0"  >> $GITHUB_OUTPUT
+          else
+            echo "status=success"        >> $GITHUB_OUTPUT
+            echo "size_bytes=$TOTAL_SIZE" >> $GITHUB_OUTPUT
+            echo "✅ All 3 ABIs present, export the identical symbol set."
+          fi
+          echo "duration_s=$DUR" >> $GITHUB_OUTPUT
+
+      - name: Upload Android artifacts
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmdix-ffi-android-${{ github.run_number }}
+          path: mdix-ffi/android-out/
+          retention-days: 30
+          if-no-files-found: warn
+
+  # BUGFIX: same gap as Android above -- no Windows job existed here either,
+  # only in build-upm.yml. Same mingw cross-compile MidManStudio_Unity's own
+  # build-projectile-rust-libs.yml uses for projectile_core's Windows build.
+  build-ffi-windows:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.should_run == 'true'
+    outputs:
+      status:     ${{ steps.result.outputs.status }}
+      size_bytes: ${{ steps.result.outputs.size_bytes }}
+      duration_s: ${{ steps.result.outputs.duration_s }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-gnu
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-ffi-windows-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-ffi-windows-
+
+      - name: Install mingw-w64
+        run: sudo apt-get update -q && sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      - name: Configure mingw linker
+        run: |
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml << 'EOF'
+          [target.x86_64-pc-windows-gnu]
+          linker = "x86_64-w64-mingw32-gcc"
+          EOF
+
+      - name: Build mdix-ffi (Windows x64)
+        id: build
+        run: |
+          START=$(date +%s)
+          set -o pipefail
+          cargo build -p mdix-ffi --release --target x86_64-pc-windows-gnu 2>&1 | tee build.log
+          BUILD_EXIT=$?
+          END=$(date +%s)
+          echo "DURATION_S=$((END - START))" >> $GITHUB_ENV
+          echo "=== Artifact size ==="
+          ls -lh target/x86_64-pc-windows-gnu/release/mdix_ffi.dll 2>/dev/null || echo "mdix_ffi.dll not found"
+          exit $BUILD_EXIT
+
+      - name: Collect result
+        id: result
+        if: always()
+        run: |
+          DUR="${DURATION_S:-0}"
+          F="target/x86_64-pc-windows-gnu/release/mdix_ffi.dll"
+          if [ -f "$F" ]; then
+            SIZE=$(stat -c%s "$F")
+            echo "status=success"   >> $GITHUB_OUTPUT
+            echo "size_bytes=$SIZE" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed"    >> $GITHUB_OUTPUT
+            echo "size_bytes=0"     >> $GITHUB_OUTPUT
+          fi
+          echo "duration_s=$DUR" >> $GITHUB_OUTPUT
+
+      - name: Upload Windows artifact
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmdix-ffi-windows-${{ github.run_number }}
+          path: target/x86_64-pc-windows-gnu/release/mdix_ffi.dll
+          retention-days: 30
+          if-no-files-found: warn
+
   test-core:
     runs-on: ubuntu-latest
     needs: parse-trigger
@@ -282,13 +482,15 @@ jobs:
 
   collect-and-deploy:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, build-ffi-linux, build-ffi-macos, test-core]
+    needs: [parse-trigger, build-ffi-linux, build-ffi-macos, build-ffi-android, build-ffi-windows, test-core]
     if: |
       always() &&
       needs.parse-trigger.outputs.should_run == 'true' &&
-      (needs.build-ffi-linux.result != 'skipped' ||
-       needs.build-ffi-macos.result != 'skipped' ||
-       needs.test-core.result       != 'skipped')
+      (needs.build-ffi-linux.result   != 'skipped' ||
+       needs.build-ffi-macos.result   != 'skipped' ||
+       needs.build-ffi-android.result != 'skipped' ||
+       needs.build-ffi-windows.result != 'skipped' ||
+       needs.test-core.result         != 'skipped')
 
     steps:
       - uses: actions/checkout@v4
@@ -318,6 +520,12 @@ jobs:
           MAC_STATUS:        ${{ needs.build-ffi-macos.outputs.status      || 'skipped' }}
           MAC_SIZE:          ${{ needs.build-ffi-macos.outputs.size_bytes   || '0' }}
           MAC_DUR:           ${{ needs.build-ffi-macos.outputs.duration_s   || '0' }}
+          ANDROID_STATUS:    ${{ needs.build-ffi-android.outputs.status     || 'skipped' }}
+          ANDROID_SIZE:      ${{ needs.build-ffi-android.outputs.size_bytes || '0' }}
+          ANDROID_DUR:       ${{ needs.build-ffi-android.outputs.duration_s || '0' }}
+          WINDOWS_STATUS:    ${{ needs.build-ffi-windows.outputs.status     || 'skipped' }}
+          WINDOWS_SIZE:      ${{ needs.build-ffi-windows.outputs.size_bytes || '0' }}
+          WINDOWS_DUR:       ${{ needs.build-ffi-windows.outputs.duration_s || '0' }}
           TEST_STATUS:       ${{ needs.test-core.outputs.status             || 'skipped' }}
           TEST_TOTAL:        ${{ needs.test-core.outputs.total              || '0' }}
           TEST_PASSED:       ${{ needs.test-core.outputs.passed             || '0' }}
@@ -361,6 +569,22 @@ jobs:
                       "status":     os.environ.get("MAC_STATUS", "skipped"),
                       "size_bytes": int_env("MAC_SIZE"),
                       "duration_s": int_env("MAC_DUR"),
+                  },
+                  {
+                      "platform":   "android",
+                      "runner":     "ubuntu-latest (cargo-ndk: arm64-v8a+armeabi-v7a+x86_64)",
+                      "artifact":   "libmdix_ffi.so (x3 ABIs)",
+                      "status":     os.environ.get("ANDROID_STATUS", "skipped"),
+                      "size_bytes": int_env("ANDROID_SIZE"),
+                      "duration_s": int_env("ANDROID_DUR"),
+                  },
+                  {
+                      "platform":   "windows",
+                      "runner":     "ubuntu-latest (mingw-w64 cross-compile)",
+                      "artifact":   "mdix_ffi.dll",
+                      "status":     os.environ.get("WINDOWS_STATUS", "skipped"),
+                      "size_bytes": int_env("WINDOWS_SIZE"),
+                      "duration_s": int_env("WINDOWS_DUR"),
                   },
               ],
               "tests": {
@@ -434,7 +658,7 @@ jobs:
 
   summary:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, build-ffi-linux, build-ffi-macos, test-core, collect-and-deploy]
+    needs: [parse-trigger, build-ffi-linux, build-ffi-macos, build-ffi-android, build-ffi-windows, test-core, collect-and-deploy]
     if: always()
     steps:
       - name: Print summary
@@ -446,6 +670,8 @@ jobs:
           echo "Branch:  ${{ github.ref_name }}"
           echo "Linux:   ${{ needs.build-ffi-linux.result   || 'skipped' }}"
           echo "macOS:   ${{ needs.build-ffi-macos.result   || 'skipped' }}"
+          echo "Android: ${{ needs.build-ffi-android.result || 'skipped' }}"
+          echo "Windows: ${{ needs.build-ffi-windows.result || 'skipped' }}"
           echo "Tests:   ${{ needs.test-core.result         || 'skipped' }}"
           echo "Deploy:  ${{ needs.collect-and-deploy.result || 'skipped' }}"
           echo ""

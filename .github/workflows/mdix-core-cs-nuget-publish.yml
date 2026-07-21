@@ -1,0 +1,210 @@
+name: Publish MidManStudio.Mdix to NuGet
+
+# Manual only (Actions tab -> Run workflow) — requires typing "publish" in
+# the confirmation input, so this can't fire by an accidental click, same
+# gating a-publish-dixscript-crate.yml already uses for crates.io.
+#
+# Requires a NUGET_API_KEY secret in this repo's settings
+# (Settings -> Secrets and variables -> Actions -> New repository secret).
+# Generate the key at https://www.nuget.org/account/apikeys with push
+# scope for the MidManStudio.Mdix package (or "*" while it's still new).
+#
+# Builds native mdix-ffi for the 3 RIDs the .csproj/.targets already
+# support end to end (linux-x64, win-x64, osx-arm64 -- see
+# MidManStudio.Mdix.Core.csproj's runtimes/ ItemGroup and
+# build/MidManStudio.Mdix.targets, both already complete). win-x86,
+# linux-arm64, osx-x64 and android-arm64 are also wired up in the .csproj
+# with Exists() guards, so the pack step will succeed either way -- add a
+# build job for any of those later and it starts shipping automatically,
+# no packaging changes needed.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm. NuGet does not allow re-uploading the same version once it is live — only unlisting, which hides it from search but does not remove it. Bump <Version> in MidManStudio.Mdix.Core.csproj first if this is a new release.'
+        required: true
+
+jobs:
+  confirm-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm manual trigger
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "publish" ]; then
+            echo "Confirmation text did not match 'publish' — aborting."
+            exit 1
+          fi
+
+  build-native-linux-x64:
+    needs: confirm-trigger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-ffi-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-ffi-
+      - name: Build mdix-ffi (linux-x64)
+        run: cargo build -p mdix-ffi --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-linux-x64
+          path: target/release/libmdix_ffi.so
+          if-no-files-found: error
+
+  build-native-win-x64:
+    needs: confirm-trigger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-gnu
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-ffi-windows-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-ffi-windows-
+      - name: Install mingw-w64
+        run: sudo apt-get update -q && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Configure mingw linker
+        run: |
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml << 'EOF'
+          [target.x86_64-pc-windows-gnu]
+          linker = "x86_64-w64-mingw32-gcc"
+          EOF
+      - name: Build mdix-ffi (win-x64)
+        run: cargo build -p mdix-ffi --release --target x86_64-pc-windows-gnu
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-win-x64
+          path: target/x86_64-pc-windows-gnu/release/mdix_ffi.dll
+          if-no-files-found: error
+
+  build-native-osx-arm64:
+    needs: confirm-trigger
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-latest-cargo-ffi-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-latest-cargo-ffi-
+      - name: Build mdix-ffi (osx-arm64)
+        run: cargo build -p mdix-ffi --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-osx-arm64
+          path: target/release/libmdix_ffi.dylib
+          if-no-files-found: error
+
+  pack-test-and-publish:
+    needs: [confirm-trigger, build-native-linux-x64, build-native-win-x64, build-native-osx-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # cargo build -p mdix-ffi (host/linux) also regenerates
+      # Core/Generated/MdixNative.cs -- `dotnet build`/`dotnet pack` below
+      # can't compile without it, same prerequisite
+      # mdix-core-cs-publish.yml already relies on.
+      - name: Build mdix-ffi (regenerates Core/Generated/MdixNative.cs)
+        run: cargo build -p mdix-ffi --release
+
+      # ── Build mdix-cli + generate enum-only DLM test fixtures ──────────────
+      # Same reasoning as mdix-core-cs-publish.yml's identical step: needed
+      # for MdixEnumDlmTests.cs, must run before `dotnet test`/`dotnet
+      # build` below.
+      - name: Build mdix-cli
+        run: cargo build -p mdix-cli --release
+
+      - name: Generate enum-only DLM test fixtures
+        run: |
+          set -e
+          MDIX="target/release/mdix"
+          SRC="mdix_files/tests/dlm"
+          OUT="$(mktemp -d)"
+          DST="mdix-csharp/tests/MidManStudio.Mdix.Core.Tests/fixtures/enum_dlm"
+          mkdir -p "$DST"
+          for name in 11_enum_only_gzip 12_enum_only_aes256 13_enum_only_gzip_aes256; do
+            "$MDIX" compile "$SRC/$name.mdix" -o "$OUT"
+            cp "$OUT/$name.mdix.enc" "$DST/"
+            cp "$OUT/$name.mdix.key" "$DST/"
+          done
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '7.0.x'
+
+      # Belt-and-suspenders: mdix-core-cs-publish.yml already runs the full
+      # test suite on every push, but a publish that skips its own
+      # last-minute check on exactly the commit being packed is how "CI was
+      # green three commits ago" ends up on a registry that doesn't support
+      # un-publishing.
+      - name: Run tests before packaging
+        run: |
+          dotnet restore mdix-csharp/MidManStudio.Mdix.sln
+          dotnet test mdix-csharp/MidManStudio.Mdix.sln --configuration Release
+
+      - name: Download native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: native-artifacts
+
+      - name: Assemble runtimes/ folder
+        run: |
+          set -e
+          CORE=mdix-csharp/src/MidManStudio.Mdix.Core
+          mkdir -p "$CORE/runtimes/linux-x64/native"
+          mkdir -p "$CORE/runtimes/win-x64/native"
+          mkdir -p "$CORE/runtimes/osx-arm64/native"
+          cp native-artifacts/native-linux-x64/libmdix_ffi.so    "$CORE/runtimes/linux-x64/native/"
+          cp native-artifacts/native-win-x64/mdix_ffi.dll        "$CORE/runtimes/win-x64/native/"
+          cp native-artifacts/native-osx-arm64/libmdix_ffi.dylib "$CORE/runtimes/osx-arm64/native/"
+          echo "runtimes/ assembled:"
+          find "$CORE/runtimes" -type f -exec ls -lh {} \;
+
+      - name: dotnet pack
+        run: |
+          dotnet pack mdix-csharp/src/MidManStudio.Mdix.Core/MidManStudio.Mdix.Core.csproj \
+            --configuration Release \
+            --output ./nupkg
+
+      - name: Verify package contents (still no push yet)
+        run: |
+          set -e
+          PKG=$(ls ./nupkg/*.nupkg | head -1)
+          echo "Package: $PKG"
+          unzip -l "$PKG"
+          for rid in linux-x64 win-x64 osx-arm64; do
+            unzip -l "$PKG" | grep -q "runtimes/$rid/native/" || { echo "❌ missing $rid native lib in package"; exit 1; }
+          done
+          unzip -l "$PKG" | grep -q "build/MidManStudio.Mdix.targets" || { echo "❌ missing build/MidManStudio.Mdix.targets in package"; exit 1; }
+          echo "✅ All 3 native RIDs + the .targets file are present in the package."
+
+      - name: Push to NuGet.org
+        run: |
+          dotnet nuget push ./nupkg/*.nupkg \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --skip-duplicate

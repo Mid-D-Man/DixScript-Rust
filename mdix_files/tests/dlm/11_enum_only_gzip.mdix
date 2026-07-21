@@ -1,0 +1,43 @@
+// Test: enum-only @DATA (no strings/ints/other primitives at all) through
+// DLM compression alone, no encryption.
+// Compile: mdix compile 11_enum_only_gzip.mdix -o ./output
+// Decrypt: mdix decrypt ./output/11_enum_only_gzip.mdix.enc --key ./output/11_enum_only_gzip.mdix.key
+//
+// Why this fixture exists: Runtime/loader.rs's Stage 7
+// (resolve_all_enum_values) used to only run when the AST had QuickFuncs
+// in scope (local or imported) -- a file using enums with zero QuickFuncs
+// anywhere skipped that stage entirely, so every enum field reached
+// BinaryPacker::pack() still as a raw, unresolved Value::EnumValue and
+// silently got packed as Int32(0) with no enum tag (see
+// Compiler/Core/BinarySerialization/value_encoder.rs). Every other DLM
+// fixture in this directory mixes enums in with strings/objects/QuickFuncs,
+// which never exercised the "has enums, has NOTHING else" path. This one
+// deliberately has @DATA containing enum-typed fields ONLY (flat and
+// nested in a GroupArray), no @QUICKFUNCS section, no non-enum @DATA
+// entries -- the exact shape that let the bug through in dixscript itself,
+// now mirrored across the mdix-csharp / mdix-python / mdix-wasm wrapper
+// test suites so a regression there gets caught on every binding, not
+// just the one it happened to be found on.
+
+@CONFIG(
+  version -> "1.0.0"
+  author  -> "DLM Test — Enum-Only Data, GZip Compression Only"
+)
+
+@ENUMS(
+  Status { ACTIVE = 1, INACTIVE = 0, PENDING = 2, ARCHIVED = 3 }
+  Role   { ADMIN = 0, EDITOR = 1, VIEWER = 2 }
+)
+
+@DLM(
+  DCompressor.gzip
+)
+
+@DATA(
+  status<enum> = Status.PENDING
+  role<enum>   = Role.EDITOR
+
+  assignments::
+    { role<enum> = Role.ADMIN  },
+    { role<enum> = Role.VIEWER }
+)

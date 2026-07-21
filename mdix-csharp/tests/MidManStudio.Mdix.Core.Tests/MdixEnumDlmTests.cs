@@ -13,7 +13,7 @@ namespace MidManStudio.Mdix.Core.Tests
     ///
     /// MdixEnumMixedDataTests.cs covers enum fields sitting alongside
     /// ordinary sibling data via LoadStr -- direct source parsing, no DLM
-    /// at all. This file closes the gap that left: this project has zero
+    /// at all. This file closes the gap that left: this project had zero
     /// DLM coverage of any kind before this, let alone the specific
     /// "enum(s) are the *only* @DATA content" shape that let a real bug
     /// through in dixscript's core (see the header comment in
@@ -28,12 +28,15 @@ namespace MidManStudio.Mdix.Core.Tests
     /// load-only -- MdixDatabase.cs never wraps a "compile" entry point,
     /// only LoadEncrypted / LoadEncryptedPassword / LoadEncryptedBytes.
     /// So these fixtures are pre-compiled binaries
-    /// (fixtures/enum_dlm/*.mdix.enc + *.mdix.key), generated from the
-    /// source .mdix files in mdix_files/tests/dlm/ by
-    /// scripts/generate_enum_dlm_fixtures.sh, and checked in rather than
-    /// produced at test time. Re-run that script after any change to
-    /// those source files, or after any fix that touches DLM/enum
-    /// resolution, so these binaries stay current.
+    /// (fixtures/enum_dlm/*.mdix.enc + *.mdix.key). CI generates them fresh
+    /// on every run -- see the "Build mdix-cli" / "Generate enum-only DLM
+    /// test fixtures" steps in .github/workflows/mdix-core-cs-publish.yml,
+    /// which compile mdix_files/tests/dlm/11..13_enum_only_*.mdix with
+    /// whatever mdix-cli/dixscript that run just built, before `dotnet
+    /// build` picks them up via the .csproj's CopyToOutputDirectory item.
+    /// Nothing is checked in and nothing needs to be run locally; running
+    /// these tests outside CI (e.g. in an IDE) requires populating
+    /// fixtures/enum_dlm/ the same way first.
     /// </summary>
     public class MdixEnumDlmTests
     {

@@ -1,0 +1,12 @@
+@IMPORTS(
+  EnumMan from "/Users/midman/Desktop/DixScript-Rust/mdix_files/advanced/EnumWithCompressionAndOrEnc.mdix"
+)
+@DLM(
+  DCompressor.gzip
+)
+@DATA(
+ seee = "lk"
+ timer:
+  uop = EnumMan.Suka.Crack
+
+)

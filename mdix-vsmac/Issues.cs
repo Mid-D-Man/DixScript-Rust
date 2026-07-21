@@ -1,0 +1,25 @@
+﻿/*
+
+/Users/midman/.nuget/packages/microsoft.visualstudiomac.sdk/17.5.0/build/Microsoft.VisualStudioMac.Sdk.targets(5,5): Warning: The add-in 'VisualStudio.ViewInspector,0.9.1' could not be updated because some of its dependencies are missing or not compatible:
+  required: MonoDevelop.Core,17.4, found: MonoDevelop.Core,17.6.10
+  required: MonoDevelop.Ide,17.4, found: MonoDevelop.Ide,17.6.10 (MdixAddin)
+/usr/local/share/dotnet/sdk/8.0.401/Microsoft.Common.CurrentVersion.targets(5,5): Warning MSB3243: No way to resolve conflict between "System.Security.Cryptography.Pkcs, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" and "System.Security.Cryptography.Pkcs, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a". Choosing "System.Security.Cryptography.Pkcs, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" arbitrarily. (MSB3243) (MdixAddin)
+/usr/local/share/dotnet/sdk/8.0.401/Microsoft.Common.CurrentVersion.targets(5,5): Warning MSB3243: No way to resolve conflict between "System.Security.Cryptography.Xml, Version=7.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51" and "System.Security.Cryptography.Xml, Version=6.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51". Choosing "System.Security.Cryptography.Xml, Version=7.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51" arbitrarily. (MSB3243) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(6,6): Error CS1112: Do not use 'System.Runtime.CompilerServices.ExtensionAttribute'. Use the 'this' keyword instead. (CS1112) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(48,48): Error CS0115: 'MdixLanguageClientProvider.SupportedFileExtensions': no suitable method found to override (CS0115) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(35,35): Error CS0115: 'MdixLanguageClientProvider.LanguageId': no suitable method found to override (CS0115) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(35,35): Error CS0115: 'MdixLanguageClientProvider.GetServerPath()': no suitable method found to override (CS0115) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(47,47): Error CS0535: 'MdixLanguageClientProvider' does not implement interface member 'ILanguageClient.OnLoadedAsync()' (CS0535) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(47,47): Error CS0535: 'MdixLanguageClientProvider' does not implement interface member 'ILanguageClient.OnServerInitializedAsync()' (CS0535) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(47,47): Error CS0535: 'MdixLanguageClientProvider' does not implement interface member 'ILanguageClient.ActivateAsync(CancellationToken)' (CS0535) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(47,47): Error CS0535: 'MdixLanguageClientProvider' does not implement interface member 'ILanguageClient.OnServerInitializeFailedAsync(ILanguageClientInitializationInfo)' (CS0535) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(47,47): Error CS0535: 'MdixLanguageClientProvider' does not implement interface member 'ILanguageClient.Name' (CS0535) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(47,47): Error CS0535: 'MdixLanguageClientProvider' does not implement interface member 'ILanguageClient.ConfigurationSections' (CS0535) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(47,47): Error CS0535: 'MdixLanguageClientProvider' does not implement interface member 'ILanguageClient.InitializationOptions' (CS0535) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(47,47): Error CS0535: 'MdixLanguageClientProvider' does not implement interface member 'ILanguageClient.FilesToWatch' (CS0535) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(47,47): Error CS0535: 'MdixLanguageClientProvider' does not implement interface member 'ILanguageClient.ShowNotificationOnInitializeFailed' (CS0535) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(47,47): Error CS0535: 'MdixLanguageClientProvider' does not implement interface member 'ILanguageClient.StartAsync' (CS0535) (MdixAddin)
+/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixLanguageClientProvider.cs(47,47): Error CS0535: 'MdixLanguageClientProvider' does not implement interface member 'ILanguageClient.StopAsync' (CS0535) (MdixAddin)
+
+
+ */

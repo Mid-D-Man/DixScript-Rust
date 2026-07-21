@@ -1,0 +1,25 @@
+
+
+@ENUMS(
+  Suka { Booliat = 0, Zabania = 1, Crack =9 }
+)
+
+@DATA(
+ something = 12
+
+ atable:
+  diam = Suka.Booliat,
+  dub = Suka.Crack
+)
+
+@SECURITY(
+  // mode: "keyfile"  → compiler auto-generates a .mdix.key file
+  // mode: "password" → compiler prompts for a password at compile time
+  encryption -> {
+    mode      = "keyfile",
+    algorithm = "aes256-gcm"
+  }
+  keystore -> {
+    auto_generate = true
+  }
+)

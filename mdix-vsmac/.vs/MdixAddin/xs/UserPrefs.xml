@@ -1,3 +1,31 @@
-﻿<Properties>
+﻿<Properties StartupConfiguration="{9FBBC633-2FF2-4909-85CC-B8697A7FCC3E}|Default">
+  <MonoDevelop.Ide.ItemProperties.MdixAddin PreferredExecutionTarget="MonoDevelop.Default" />
+  <MonoDevelop.Ide.Workbench ActiveDocument="MdixLanguageClientProvider.cs">
+    <Files>
+      <File FileName="../../../../../usr/local/share/dotnet/sdk/8.0.401/Sdks/Microsoft.NET.Sdk/targets/Microsoft.PackageDependencyResolution.targets" Line="266" Column="5" />
+      <File FileName="../../../.nuget/NuGet/NuGet.Config" Line="1" Column="1" />
+      <File FileName="MdixLanguageClientProvider.cs" Line="7" Column="13" />
+    </Files>
+    <Pads>
+      <Pad Id="ProjectPad">
+        <State name="__root__">
+          <Node name="MdixAddin">
+            <Node name="NuGet.Config files" expanded="True" />
+            <Node name="MdixAddin" selected="True">
+              <Node name="Dependencies" expanded="True">
+                <Node name="SdkDependencies" expanded="True" />
+              </Node>
+              <Node name="scripts" expanded="True" />
+            </Node>
+          </Node>
+        </State>
+      </Pad>
+    </Pads>
+  </MonoDevelop.Ide.Workbench>
+  <MonoDevelop.Ide.DebuggingService.Breakpoints>
+    <BreakpointStore />
+  </MonoDevelop.Ide.DebuggingService.Breakpoints>
+  <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug" />
+  <MonoDevelop.Ide.DebuggingService.PinnedWatches />
   <MultiItemStartupConfigurations />
 </Properties>

@@ -5,7 +5,7 @@ encryption alone, and both together.
 
 test_enum_mixed_data.py covers enum fields sitting alongside ordinary
 sibling data via load_str -- direct source parsing, no DLM at all. This
-file closes the gap that left: this project has zero DLM coverage of any
+file closes the gap that left: this project had zero DLM coverage of any
 kind before this, let alone the specific "enum(s) are the *only* @DATA
 content" shape that let a real bug through in dixscript's core (see the
 header comment in mdix_files/tests/dlm/11_enum_only_gzip.mdix for the full
@@ -19,11 +19,13 @@ fixtures in-memory at test time), this binding's exposed surface is
 load-only -- MdixDatabase never wraps a "compile" entry point, only
 load_encrypted / load_encrypted_password / load_encrypted_bytes. So these
 fixtures are pre-compiled binaries (fixtures/enum_dlm/*.mdix.enc +
-*.mdix.key), generated from the source .mdix files in
-mdix_files/tests/dlm/ by scripts/generate_enum_dlm_fixtures.sh, and
-checked in rather than produced at test time. Re-run that script after any
-change to those source files, or after any fix that touches DLM/enum
-resolution, so these binaries stay current.
+*.mdix.key). CI generates them fresh on every run -- see the "Build
+mdix-cli" / "Generate enum-only DLM test fixtures" steps in
+.github/workflows/python-publish.yml, which compile
+mdix_files/tests/dlm/11..13_enum_only_*.mdix with whatever
+mdix-cli/dixscript that run just built, before maturin/pytest run. Nothing
+is checked in and nothing needs to be run locally; running these tests
+outside CI requires populating fixtures/enum_dlm/ the same way first.
 
 Adjust the import path below if `midmanstudio.mdix` differs from what's
 actually installed in your environment.

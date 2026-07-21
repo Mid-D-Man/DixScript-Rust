@@ -10,7 +10,7 @@ readme = "README.md"
 repository = "https://github.com/Mid-D-Man/DixScript-Rust"
 keywords = ["config", "encryption", "serialization", "data-format", "gamedev"]
 categories = ["development-tools", "encoding", "data-structures", "cryptography"]
-
+homepage = "https://dixscript-docs.pages.dev"
 # Consumers of the crate never need any of this — dev-dependencies (criterion,
 # examples/ is deliberately NOT excluded — it's
 #  for anyone browsing usage on

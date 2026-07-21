@@ -9,7 +9,7 @@
 
 @DATA(
   // Dark theme token colors
-  dark.keyword   = #569CD6
+  darkkeyword   = #569CD6
   dark.string    = #CE9178
   dark.number    = #B5CEA8
   dark.function  = #DCDCAA

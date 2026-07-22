@@ -76,6 +76,23 @@ fn provide_inner(
                 return Some(CompletionResponse::Array(security_block_key_completions()));
             }
 
+            // @DLM
+            if section == SectionId::Dlm {
+                let dlm_items = dlm_completions_at(&d.source, pos);
+                if !dlm_items.is_empty() {
+                    return Some(CompletionResponse::Array(dlm_items));
+                }
+                let word = word_before_cursor(&d.source, pos);
+                let mut items = dlm_module_type_completions();
+                if !word.is_empty() {
+                    let lower = word.to_lowercase();
+                    items.retain(|item| item.label.to_lowercase().contains(&lower));
+                }
+                if !items.is_empty() {
+                    return Some(CompletionResponse::Array(items));
+                }
+            }
+
             if section == SectionId::None {
                 if line_looks_like_config_entry(&d.source, pos) {
                     let config_items = config_completions_at(&d.source, pos);
@@ -395,6 +412,89 @@ fn security_field_value_completions(field_name: &str) -> Vec<CompletionItem> {
     }).collect()
 }
 
+// ── @DLM section completions ──────────────────────────────────────────────────
+//
+// `@DLM(...)` entries are `ModuleType ("." ModuleSubtype)?` — see
+// dlm_section_parser.rs. There are exactly three module types, and each one
+// only accepts a specific subset of subtypes (checked against the actual
+// Auditor/Compressor/Encryptor implementations, not just the parser's shared
+// subtype token list):
+//   DCompressor -> gzip | bzip2 | lzma
+//   DEncryptor  -> xor | aes128 | aes256 | chacha20
+//   DAuditor    -> diy | enhanced
+//
+// Previously there was no dedicated completion path for this section at all,
+// so typing inside `@DLM(` fell through to `general_completions`, and typing
+// `DAuditor.` fell through to `dot_completions`'s word-based fallback chain —
+// neither of which knows about DLM modules, so nothing useful ever appeared.
+
+fn dlm_completions_at(source: &str, pos: Position) -> Vec<CompletionItem> {
+    if char_before_cursor(source, pos) == '.' {
+        let module_name = word_before_dot(source, pos);
+        let items = dlm_subtype_completions(&module_name);
+        if !items.is_empty() {
+            return items;
+        }
+    }
+    vec![]
+}
+
+fn dlm_module_type_completions() -> Vec<CompletionItem> {
+    let modules: &[(&str, &str)] = &[
+        ("DCompressor", "DLM compression module — subtypes: gzip, bzip2, lzma"),
+        ("DEncryptor",  "DLM encryption module — subtypes: xor, aes128, aes256, chacha20"),
+        ("DAuditor",    "DLM audit module — subtypes: diy, enhanced"),
+    ];
+    modules.iter().map(|(name, detail)| CompletionItem {
+        label:              name.to_string(),
+        kind:               Some(CompletionItemKind::CLASS),
+        detail:             Some(detail.to_string()),
+        documentation:      Some(Documentation::MarkupContent(MarkupContent {
+            kind:  MarkupKind::Markdown,
+            value: format!("**`{}`** — DLM module type\n\n{}", name, detail),
+        })),
+        insert_text:        Some(name.to_string()),
+        insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+        filter_text:        None,
+        sort_text:          Some(format!("0_{}", name)),
+        ..Default::default()
+    }).collect()
+}
+
+fn dlm_subtype_completions(module_name: &str) -> Vec<CompletionItem> {
+    let subtypes: &[(&str, &str)] = match module_name {
+        "DCompressor" => &[
+            ("gzip",  "DEFLATE-based compression — default balance of speed/ratio"),
+            ("bzip2", "Block-sorting compression — higher ratio, slower"),
+            ("lzma",  "Highest compression ratio, slowest"),
+        ],
+        "DEncryptor" => &[
+            ("xor",      "XOR cipher — fast, NOT cryptographically secure"),
+            ("aes128",   "AES-128 symmetric encryption, 128-bit key"),
+            ("aes256",   "AES-256 symmetric encryption, 256-bit key (recommended)"),
+            ("chacha20", "ChaCha20 stream cipher"),
+        ],
+        "DAuditor" => &[
+            ("diy",      "Minimal/custom audit trail format"),
+            ("enhanced", "Full structured audit trail with richer metadata"),
+        ],
+        _ => return vec![],
+    };
+    subtypes.iter().map(|(name, detail)| CompletionItem {
+        label:              name.to_string(),
+        kind:               Some(CompletionItemKind::ENUM_MEMBER),
+        detail:             Some(detail.to_string()),
+        documentation:      Some(Documentation::MarkupContent(MarkupContent {
+            kind:  MarkupKind::Markdown,
+            value: format!("**`{}.{}`**\n\n{}", module_name, name, detail),
+        })),
+        insert_text:        Some(name.to_string()),
+        insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+        filter_text:        None,
+        ..Default::default()
+    }).collect()
+}
+
 // ── Section snippets ──────────────────────────────────────────────────────────
 
 fn section_snippet_completions() -> Vec<CompletionItem> {
@@ -623,6 +723,19 @@ fn find_object_literal_for_var<'a>(
                 if *variable == var_name =>
             {
                 return extract_object_value(value);
+            }
+            // `object: Value` here (not `Expression`), unlike Assignment/
+            // VariableDeclaration above — the parser doesn't currently emit
+            // this variant, but every other AST pass (semantic analyzer,
+            // interpreter, call collector) already treats it as live, so we
+            // handle it defensively too rather than silently dropping it.
+            QuickFuncStatement::ObjectCreation { variable, object, .. }
+                if *variable == var_name =>
+            {
+                return match object {
+                    Value::Object { .. } => Some(object),
+                    _ => None,
+                };
             }
             QuickFuncStatement::If { then_branch, else_branch, .. } => {
                 if let Some(v) = find_object_literal_for_var(then_branch, var_name) { return Some(v); }
@@ -885,9 +998,26 @@ fn get_object_fields(
     }
 }
 
+/// Bound on identifier-alias chasing (`let a = b` where `b` is itself an
+/// object elsewhere). Purely a safety net against pathological/circular
+/// aliases (`@DATA a = b`, `@DATA b = a`) — real code never nests this deep.
+const MAX_ALIAS_DEPTH: u8 = 8;
+
 /// Find the object fields of `var_name` by searching QuickFunc bodies and
 /// `@DATA` entries.
 fn find_variable_object_fields(doc: &Document, var_name: &str) -> Option<Vec<FieldInfo>> {
+    find_variable_object_fields_bounded(doc, var_name, MAX_ALIAS_DEPTH)
+}
+
+fn find_variable_object_fields_bounded(
+    doc:      &Document,
+    var_name: &str,
+    depth:    u8,
+) -> Option<Vec<FieldInfo>> {
+    if depth == 0 {
+        return None;
+    }
+
     // 1. QuickFunc local variable (let / assignment to an object literal)
     if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
         for func in &qf.functions {
@@ -908,7 +1038,7 @@ fn find_variable_object_fields(doc: &Document, var_name: &str) -> Option<Vec<Fie
         for entry in &data.entries {
             match entry {
                 DataEntry::SimpleProperty { name, value, .. } if *name == var_name => {
-                    return extract_object_fields_from_value(value, doc);
+                    return extract_object_fields_from_value_bounded(value, doc, depth - 1);
                 }
                 DataEntry::ObjectProperty { name, object, .. } if *name == var_name => {
                     if let Value::Object { properties, .. } = object.as_ref() {
@@ -973,6 +1103,17 @@ fn find_return_object_fields_in_stmts(stmts: &[QuickFuncStatement]) -> Option<Ve
 
 /// If `value` is (or delegates to) an object, return its field list.
 fn extract_object_fields_from_value(value: &Value, doc: &Document) -> Option<Vec<FieldInfo>> {
+    extract_object_fields_from_value_bounded(value, doc, MAX_ALIAS_DEPTH)
+}
+
+fn extract_object_fields_from_value_bounded(
+    value: &Value,
+    doc:   &Document,
+    depth: u8,
+) -> Option<Vec<FieldInfo>> {
+    if depth == 0 {
+        return None;
+    }
     match value {
         Value::Object { properties, .. } => Some(
             properties.iter()
@@ -982,11 +1123,19 @@ fn extract_object_fields_from_value(value: &Value, doc: &Document) -> Option<Vec
         Value::QuickFuncCall { function_name, .. } => {
             find_quickfunc_return_fields(doc, function_name)
         }
+        // Alias: the property's value is itself just a reference to another
+        // variable, e.g. `{ user = otherVar }`. Chase it so `thing.user.`
+        // still offers `otherVar`'s shape instead of dead-ending here.
+        Value::Identifier { value: name, .. } => {
+            find_variable_object_fields_bounded(doc, name, depth - 1)
+        }
         Value::Expression { expr, .. } => {
-            if let Expression::QuickFuncCall { name, .. } = expr.as_ref() {
-                find_quickfunc_return_fields(doc, name)
-            } else {
-                None
+            match expr.as_ref() {
+                Expression::QuickFuncCall { name, .. } => find_quickfunc_return_fields(doc, name),
+                Expression::Identifier { name, .. } => {
+                    find_variable_object_fields_bounded(doc, name, depth - 1)
+                }
+                _ => None,
             }
         }
         _ => None,
@@ -1479,11 +1628,30 @@ fn dot_completions(doc: &Document, pos: Position) -> Vec<CompletionItem> {
     // ── Step 6: static objects, enums, namespaces (word-based) ───────────────
     let word_before = word_before_dot(&doc.source, pos);
     if !word_before.is_empty() {
-        // Enum field completions
+        // Enum field completions (local file's own @ENUMS section)
         if let Some(ast) = &doc.ast {
             let enum_items = enum_value_completions(ast, &word_before);
             if !enum_items.is_empty() {
                 let mut merged = enum_items;
+                merged.extend(items);
+                return merged;
+            }
+        }
+
+        // Imported (namespaced) enum field completions — `Namespace.EnumName.`
+        //
+        // Mirrors the compiler's own resolution rule for qualified identifiers
+        // (see QualifiedIdentifierType::ImportedEnumAccess in
+        // quickfuncs_section_analyzer.rs): a 3-part chain `ns.enum.value` is
+        // only an enum access once `ns` is a confirmed imported namespace.
+        // `word_before` here is just "EnumName" — we walk back through the
+        // token stream to confirm it's actually `Namespace.EnumName.` and not
+        // a bare `EnumName.` before trusting the namespace lookup.
+        if let Some((_, recv_idx)) = receiver_with_idx.as_ref() {
+            let imported_enum_items =
+                imported_enum_value_completions(doc, &doc.tokens, *recv_idx, &word_before);
+            if !imported_enum_items.is_empty() {
+                let mut merged = imported_enum_items;
                 merged.extend(items);
                 return merged;
             }
@@ -1577,6 +1745,80 @@ fn enum_value_completions(ast: &DixScript, enum_name: &str) -> Vec<CompletionIte
         }
     }
     vec![]
+}
+
+/// Enum value completions for an **imported** (namespaced) enum, e.g.
+/// `Namespace.Color.` — the third level that plain `enum_value_completions`
+/// can't reach because it only looks at the local file's own `@ENUMS`.
+///
+/// `enum_recv_idx` is the token index of the enum-name identifier itself
+/// (i.e. the receiver just before the trigger dot — "Color" in
+/// `Namespace.Color.`). We walk back two tokens to confirm the chain is
+/// actually `Namespace . Color .` and that `Namespace` resolves to a real
+/// imported namespace in the symbol table before trusting the lookup —
+/// otherwise `Foo.Bar.` where `Bar` merely happens to share a name with some
+/// unrelated imported enum would incorrectly surface completions.
+fn imported_enum_value_completions(
+    doc:           &Document,
+    tokens:        &[Token],
+    enum_recv_idx: usize,
+    enum_name:     &str,
+) -> Vec<CompletionItem> {
+    if enum_recv_idx < 2 {
+        return vec![];
+    }
+
+    let dot_idx = enum_recv_idx - 1;
+    let is_dot = tokens.get(dot_idx)
+        .map(|t| matches!(t.token_type, TokenType::Symbol('.')))
+        .unwrap_or(false);
+    if !is_dot {
+        return vec![];
+    }
+
+    let ns_idx = enum_recv_idx - 2;
+    let ns_token = match tokens.get(ns_idx) {
+        Some(t) => t,
+        None => return vec![],
+    };
+    // All three tokens (namespace, dot, enum name) must be on the same
+    // source line to be a genuine chain rather than coincidental adjacency.
+    if ns_token.line != tokens[enum_recv_idx].line {
+        return vec![];
+    }
+    let ns_alias = match &ns_token.token_type {
+        TokenType::Identifier(name) => name.clone(),
+        _ => return vec![],
+    };
+
+    let st = match doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref()) {
+        Some(st) => st,
+        None => return vec![],
+    };
+    let fields = match st.get_namespaced_enum(&ns_alias, enum_name) {
+        Some(f) => f,
+        None => return vec![],
+    };
+
+    let mut sorted: Vec<(&String, &i32)> = fields.iter().collect();
+    sorted.sort_by_key(|(_, v)| **v);
+
+    sorted.into_iter().map(|(field_name, value)| CompletionItem {
+        label:              field_name.clone(),
+        kind:               Some(CompletionItemKind::ENUM_MEMBER),
+        detail:             Some(format!("= {}", value)),
+        documentation:      Some(Documentation::MarkupContent(MarkupContent {
+            kind:  MarkupKind::Markdown,
+            value: format!(
+                "**{ns}.{enum_name}.{field}**\n\nUsage: `{ns}.{enum_name}.{field}`\n\nImported from `{ns}`.",
+                ns = ns_alias, enum_name = enum_name, field = field_name,
+            ),
+        })),
+        insert_text:        Some(field_name.clone()),
+        insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+        filter_text:        None,
+        ..Default::default()
+    }).collect()
 }
 
 // ── Static method completions ─────────────────────────────────────────────────
@@ -2084,4 +2326,4 @@ fn word_before_dot(source: &str, pos: Position) -> String {
         .last()
         .unwrap_or("")
         .to_string()
-                }
+            }

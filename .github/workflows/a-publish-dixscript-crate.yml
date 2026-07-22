@@ -7,12 +7,21 @@ name: Publish dixscript to crates.io
 # (Settings -> Secrets and variables -> Actions -> New repository secret).
 # Generate the token at https://crates.io/settings/tokens with publish
 # scope for the dixscript crate.
+#
+# Also creates a GitHub Release, tagged "dixscript-v<version>" (not just
+# "v<version>") -- this is a monorepo publishing several independently-
+# versioned packages (mdix-cli, the NuGet/PyPI wrappers, ...), each of
+# which will eventually want its own tagged release, so the crate name
+# stays in the tag to avoid collisions down the line.
 on:
   workflow_dispatch:
     inputs:
       confirm:
         description: 'Type "publish" to confirm. crates.io does not allow un-publishing a version once it is live — only yanking, which hides it from new dependents but does not remove it.'
         required: true
+
+permissions:
+  contents: write   # needed to create the tag + GitHub Release below
 
 jobs:
   publish:
@@ -48,3 +57,52 @@ jobs:
         run: cargo publish -p dixscript
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # ── GitHub Release ──────────────────────────────────────────────────────
+      # crates.io and GitHub Releases are entirely separate systems --
+      # `cargo publish` above only pushes to the registry. This makes the
+      # release visible/discoverable on the repo itself and gives it a
+      # permanent, browsable changelog entry, tag, and download bundle.
+      - name: Read crate version
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version' dixscript/Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing dixscript v$VERSION"
+
+      - name: Extract changelog section for this version
+        id: notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Pulls everything between this version's "## [x.y.z]" heading and
+          # the next "## " heading (or EOF) out of CHANGELOG.md, so the
+          # GitHub Release body matches what's actually documented there
+          # instead of duplicating it by hand.
+          #
+          # Uses index()-based substring matching, not a regex `~` match --
+          # "[x.y.z]" contains regex-special characters ([, ], .) that would
+          # need escaping to mean literal brackets/dot rather than "any one
+          # of these characters"/"any character"; index() sidesteps that
+          # entirely by doing a plain substring search.
+          HEADING="## [$VERSION]"
+          awk -v heading="$HEADING" '
+            index($0, heading) == 1 { found=1; print; next }
+            found && index($0, "## ") == 1 { exit }
+            found { print }
+          ' dixscript/CHANGELOG.md > release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            echo "::warning::No CHANGELOG.md section found for version $VERSION -- falling back to a generic note. Add a \"## [$VERSION]\" entry to dixscript/CHANGELOG.md before running this again for future releases."
+            echo "dixscript v$VERSION — see [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/master/dixscript/CHANGELOG.md) for details." > release-notes.md
+          fi
+
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "dixscript-v${{ steps.version.outputs.version }}" \
+            --title "dixscript v${{ steps.version.outputs.version }}" \
+            --notes-file release-notes.md \
+            --target "${{ github.sha }}"

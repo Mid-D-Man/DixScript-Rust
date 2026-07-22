@@ -871,8 +871,9 @@ impl<'src> Tokenizer<'src> {
     // Accepts underscore separators: 0xFF_FF_FF_FF
     // Accepts L suffix (with lookahead guard): 0xDEAD_BEEFL → Long
     // Produces Integer for i32-range values, Long for overflow or explicit L.
-    // Note: TokenType::HexLiteral exists in the enum but is intentionally not
-    // emitted here — hex integer notation is semantically an integer value.
+    // Note: there is no dedicated TokenType::HexLiteral — hex integer
+    // notation is semantically an integer value, so it's emitted as
+    // TokenType::Integer/Long like any other numeric literal.
     // Use #RRGGBB notation for hex color values (produces TokenType::HexColor).
 
     fn scan_hex_literal(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
@@ -1408,4 +1409,4 @@ pub struct StaticCallInfo {
     pub column:       usize,
     pub section:      SectionId,
     pub token_index:  usize,
-                        }
+}

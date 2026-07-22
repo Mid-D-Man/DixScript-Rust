@@ -627,5 +627,6 @@ MIT — see [LICENSE](../LICENSE).
 - [Format reference & language spec](https://github.com/Mid-D-Man/DixScript-Rust)
 - [C# reference implementation](https://github.com/Mid-D-Man/DixScript)
 - [Module & API catalogue](./CATALOGUE.md)
+- [Changelog](./CHANGELOG.md)
 - [CI results & benchmarks](https://mid-d-man.github.io/DixScript-Rust/)
 - [mdix-cli](https://crates.io/crates/mdix-cli) — command-line toolchain

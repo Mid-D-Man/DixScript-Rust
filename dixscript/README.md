@@ -17,7 +17,7 @@ resulting data at runtime.
 > [`DixScript-Docs.pages.dev`](https://dixscript-docs.pages.dev) ·
 > [`github.com/Mid-D-Man/DixScript-Rust`](https://github.com/Mid-D-Man/DixScript-Rust)
 >
-> **Module and API index for contributors:** see [`CATALOGUE.md`](./CATALOGUE.md)
+> **Module and API index for contributors:** see [`APICATALOG.md`](./APICATALOG.md)
 
 ---
 
@@ -53,6 +53,11 @@ server: host = "api.example.com", port = 443, ssl = true
 | `Runtime::DixData` | O(1) flat dotted-path access to loaded data |
 | `Runtime::DixValue` | Runtime value type — 15 variants covering all DixScript types |
 | `Runtime::DixDataBuilder` | Fluent builder for creating save data at runtime without a template |
+| `Runtime::DixSerialize` / `DixDeserialize` | Convert between `DixData` and plain Rust structs directly, no intermediate hashmap |
+| `Runtime::SchemaBuilder` | Validate loaded data against an expected shape, collecting every violation instead of stopping at the first |
+| `Runtime::DixQuery` | LINQ-style `where_`/`order_by`/`select` chaining over array fields |
+| `Runtime::MdixMerger` | AST-level merge of multiple sources — weight-based or strict conflict resolution |
+| `Runtime::HotReloadWatcher` | Poll-based file-change watcher for reloading config without a restart |
 | `Runtime::DixConverter` | Convert between DixScript, JSON, TOML, and `HashMap<String, DixValue>` — see [`from_dix_data` vs `from_hashmap`](#from_dix_data-vs-from_hashmap) below for which one to reach for |
 | `Runtime::DixCompactor` | Minify and compact `.mdix` source text |
 | `Runtime::DixLoadOptions` | Configure loading: passwords, key files, output directories |
@@ -267,6 +272,178 @@ let vol:  i32    = data.get("settings.volume")?;
 etc.) must be added before any table properties or group arrays. Adding
 a flat property after grouped data returns `Err` from `build()` with a
 descriptive message — it does not panic.
+
+---
+
+## Struct (de)serialization
+
+Convert between `DixData` and plain Rust structs directly, without an
+intermediate `HashMap` round-trip. Implement `DixDeserialize`/
+`DixSerialize` once per struct and reuse it everywhere `DixData` shows up.
+
+```rust
+use dixscript::Runtime::{
+    DixData, DataBuilder, DixDataBuilder,
+    DixDeserialize, DixSerialize,
+    dix_get, dix_set_str, dix_set_int,
+};
+
+struct ServerConfig {
+    host: String,
+    port: i32,
+}
+
+impl DixDeserialize for ServerConfig {
+    fn from_dix(data: &DixData, prefix: &str) -> Result<Self, String> {
+        Ok(ServerConfig {
+            host: dix_get(data, prefix, "host")?,
+            port: dix_get(data, prefix, "port")?,
+        })
+    }
+}
+
+impl DixSerialize for ServerConfig {
+    fn to_dix(&self, d: &mut DataBuilder, prefix: &str) -> Result<(), String> {
+        dix_set_str(d, prefix, "host", &self.host);
+        dix_set_int(d, prefix, "port", self.port);
+        Ok(())
+    }
+}
+
+// Deserialize a nested table straight into a struct.
+let config: ServerConfig = data.deserialize_at("server")?;
+
+// Serialize a struct back into a fresh DixData.
+let rebuilt = DixDataBuilder::new()
+    .serialize_at("server", &config)
+    .build()?;
+```
+
+---
+
+## Schema validation
+
+Validate a loaded `DixData` against an expected shape without stopping at
+the first violation — `ValidationReport` collects everything wrong in one
+pass, which matters when the input might be a modder-supplied or
+hand-edited config: better to report every problem at once than make
+someone fix-and-rerun repeatedly.
+
+```rust
+use dixscript::Runtime::SchemaBuilder;
+
+let report = data.validate_schema(
+    SchemaBuilder::new()
+        .require_string("server.host")
+        .require_int("server.port")
+        .require_bool("server.ssl"),
+);
+
+if !report.is_valid() {
+    for error in &report.errors {
+        eprintln!("{}: expected {}, got {}", error.path, error.expected, error.actual);
+    }
+}
+```
+
+---
+
+## Querying
+
+LINQ-style chaining over an array field's elements — filter, sort, and
+project without hand-writing the loop. `query(path)` covers a plain
+`Array` literal or a `GroupArray`'s items alike; `query_many(pattern)`
+matches across sibling paths that share shape via a wildcarded segment.
+
+```dixscript
+@DATA(
+  tasks::
+    { name = "Fix bug",    priority = 3 },
+    { name = "Write docs", priority = 1 },
+    { name = "Ship it",    priority = 3 }
+)
+```
+```rust
+use dixscript::Runtime::DixValue;
+
+let high_priority = data.query("tasks")
+    .expect("tasks should be an array")
+    .where_(|v| v.field("priority").and_then(DixValue::as_int) == Some(3))
+    .order_by_desc(|v| v.field("priority").and_then(DixValue::as_int).unwrap_or(0));
+
+let names: Vec<Option<&str>> = high_priority
+    .select(|v| v.field("name").and_then(DixValue::as_string));
+// → ["Fix bug", "Ship it"]
+```
+
+---
+
+## Merging
+
+AST-level merge of two or more DixScript sources — combine a base config
+with environment overrides, or a shipped default with a player's local
+save, without hand-rolling a deep merge over `HashMap`s. Conflicts (the
+same key present in more than one source with a different value) are
+resolved per the chosen `MdixMergeStrategy`; `MergeConflict` records
+exactly what was decided, and why.
+
+```rust
+use dixscript::Runtime::merge::{MdixMerger, MdixMergeInput, MdixMergeStrategy};
+
+// File-path convenience — loads, compiles, merges, returns DixData directly.
+let data = MdixMerger::new().merge_files(&["base.mdix", "overrides.mdix"])?;
+
+// Explicit per-file weights — higher weight wins on conflict.
+let data = MdixMerger::new().merge_files_weighted(&[
+    ("base.mdix",      1.0),
+    ("overrides.mdix", 0.8),
+    ("local.mdix",     0.5),
+])?;
+
+// Full control: pre-parsed ASTs, labels for readable conflict reports, and
+// a strategy that refuses to silently pick a winner.
+let result = MdixMerger::new()
+    .with_strategy(MdixMergeStrategy::ThrowOnConflict)
+    .merge_all(vec![
+        MdixMergeInput::new(ast_base).with_weight(1.0).with_label("base"),
+        MdixMergeInput::new(ast_patch).with_weight(0.8).with_label("patch"),
+    ]);
+
+for conflict in &result.conflicts {
+    println!("{conflict}");  // "[Conflict] 'DATA.server.port' → source[1] ('patch') won"
+}
+```
+
+`mdix diff` (in `mdix-cli`) is built directly on this — it runs
+`ThrowOnConflict` specifically to enumerate every disagreement between
+files without picking a winner, then reports `result.conflicts` as-is.
+
+---
+
+## Hot reload
+
+A poll-based file-change watcher for Rust consumers — call
+`check_and_reload()` once per game loop tick / server poll cycle; it only
+does real work (re-reading and re-compiling the file) when the
+modification time has actually changed.
+
+```rust
+use dixscript::Runtime::HotReloadWatcher;
+
+let mut watcher = HotReloadWatcher::new("config.mdix");
+
+// in your game loop / tick / update:
+match watcher.check_and_reload() {
+    Ok(Some(data)) => apply_new_config(data),  // file changed, reloaded
+    Ok(None)       => {}                       // unchanged, nothing to do
+    Err(e)         => eprintln!("hot reload failed: {e}"),
+}
+```
+
+Each language binding (WASM/Python/C#/...) implements its own native
+filesystem-event mechanism instead (inotify, FSEvents,
+ReadDirectoryChangesW) rather than polling — this Rust-only watcher is
+the simple, dependency-free default for direct `dixscript` consumers.
 
 ---
 
@@ -626,7 +803,7 @@ MIT — see [LICENSE](../LICENSE).
 
 - [Format reference & language spec](https://github.com/Mid-D-Man/DixScript-Rust)
 - [C# reference implementation](https://github.com/Mid-D-Man/DixScript)
-- [Module & API catalogue](./CATALOGUE.md)
+- [Module & API catalogue](./APICATALOG.md)
 - [Changelog](./CHANGELOG.md)
 - [CI results & benchmarks](https://mid-d-man.github.io/DixScript-Rust/)
 - [mdix-cli](https://crates.io/crates/mdix-cli) — command-line toolchain

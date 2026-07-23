@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
 For a snapshot of the *current* public API shape (not a log of changes to
-it), see [`CATALOGUE.md`](./CATALOGUE.md) instead.
+it), see [`APICATALOG.md`](./APICATALOG.md) instead.
 
 This covers the `dixscript` core crate only. The CLI (`mdix-cli`), FFI
 bindings, and per-language wrappers (WASM/Python/C#/Go/Java/Lua/PHP) are

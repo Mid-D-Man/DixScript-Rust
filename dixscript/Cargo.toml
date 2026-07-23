@@ -9,7 +9,7 @@ license = "MIT"
 readme = "README.md"
 repository = "https://github.com/Mid-D-Man/DixScript-Rust"
 keywords = ["config", "encryption", "serialization", "data-format", "gamedev"]
-categories = ["development-tools", "encoding", "data-structures", "cryptography"]
+categories = ["config", "parser-implementations", "encoding", "data-structures", "cryptography"]
 homepage = "https://dixscript-docs.pages.dev"
 # Consumers of the crate never need any of this: dev-dependencies (criterion
 # for benches, proptest/fuzz harnesses) only apply to these directories, and

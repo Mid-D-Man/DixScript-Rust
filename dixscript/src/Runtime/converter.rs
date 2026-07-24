@@ -28,6 +28,58 @@ fn is_child_path(key: &str, parent: &str) -> bool {
         && matches!(key.as_bytes()[parent.len()], b'.' | b'[')
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// `.mdix` enum-name sanitization for `to_mdix`
+// ─────────────────────────────────────────────────────────────────────────────
+// `ValueResolver::resolve_all_enum_values` (Compiler/Core/ValueResolution/
+// value_resolver.rs) synthesizes an `EnumDeclaration` for every *imported*
+// enum a file actually uses, named with the full qualified form
+// ("EnumMan.Suka") so it can never collide with a real local declaration.
+// That's the right key for in-memory lookups (`extract_enums`,
+// `ast_value_to_dix_value`), but a `.mdix` enum declaration name is a plain
+// identifier -- `.mdix` grammar has no syntax for a dot inside one. Writing
+// `decl.name` straight into `@ENUMS(...)` (as this file used to) produced
+// text like `EnumMan.Suka { ... }`, which fails to re-parse, and the
+// matching `@DATA` value (`format_value_for_mdix`'s `Value::EnumValue` arm)
+// wrote the equally-unparseable 3-part `EnumMan.Suka.Crack`. Since a
+// round-tripped `.mdix` file (via `mdix format`, `mdix decrypt`, or
+// `to_mdix` with `DixFormatOptions::minify`) never carries the original
+// `@IMPORTS` forward, there's no namespace left to qualify against anyway --
+// so the only sane fix is to flatten the qualified name into a genuinely
+// local declaration: replace "." with "_" (a valid identifier is what's
+// left), dedupe against every other enum name already in play so two
+// different imports can never collide into the same flattened name or
+// shadow an unrelated local enum that already has that name, and rewrite
+// the corresponding `@DATA` reference from the 3-part imported form down to
+// the 2-part local form (`EnumMan_Suka.Crack`). This keeps the enum
+// identity (name + field) alive in the output file -- just as a real local
+// enum instead of a dangling cross-file reference with nothing left to
+// resolve it.
+fn build_enum_rename_map_for_mdix(enums: &EnumsSection) -> HashMap<String, String> {
+    let mut rename_map = HashMap::new();
+    let mut taken: std::collections::HashSet<String> =
+        enums.enums.iter().map(|d| d.name.clone()).collect();
+
+    for decl in &enums.enums {
+        if !decl.name.contains('.') {
+            continue;
+        }
+
+        let base = decl.name.replace('.', "_");
+        let mut candidate = base.clone();
+        let mut suffix = 2u32;
+        while taken.contains(&candidate) {
+            candidate = format!("{}_{}", base, suffix);
+            suffix += 1;
+        }
+
+        taken.insert(candidate.clone());
+        rename_map.insert(decl.name.clone(), candidate);
+    }
+
+    rename_map
+}
+
 fn filter_structural_keys(map: &HashMap<String, DixValue>) -> HashMap<String, DixValue> {
     let keys: Vec<&String> = map.keys().collect();
     map.iter()
@@ -201,12 +253,19 @@ impl DixConverter {
             }
         }
 
+        let enum_rename_map: HashMap<String, String> = ast
+            .enums
+            .as_ref()
+            .map(build_enum_rename_map_for_mdix)
+            .unwrap_or_default();
+
         if let Some(ref enums) = ast.enums {
             output.push_str("@ENUMS(");
             output.push_str(nl);
             for decl in &enums.enums {
                 output.push_str(&indent);
-                output.push_str(&decl.name);
+                let written_name = enum_rename_map.get(&decl.name).unwrap_or(&decl.name);
+                output.push_str(written_name);
                 output.push_str(sp);
                 output.push('{');
                 output.push_str(nl);
@@ -246,7 +305,7 @@ impl DixConverter {
                     output.push_str(sp);
                     output.push('=');
                     output.push_str(sp);
-                    output.push_str(&self.format_value_for_mdix(value, opts));
+                    output.push_str(&self.format_value_for_mdix(value, opts, &enum_rename_map));
                 }
             }
 
@@ -276,7 +335,7 @@ impl DixConverter {
                         output.push_str(sp);
                         output.push('=');
                         output.push_str(sp);
-                        output.push_str(&self.format_value_for_mdix(&prop.value, opts));
+                        output.push_str(&self.format_value_for_mdix(&prop.value, opts, &enum_rename_map));
                     }
                 }
                 grouped_index += 1;
@@ -294,7 +353,7 @@ impl DixConverter {
                     output.push_str(sp);
                     for (i, item) in items.iter().enumerate() {
                         if i > 0 { output.push(','); output.push_str(sp); }
-                        output.push_str(&self.format_value_for_mdix(item, opts));
+                        output.push_str(&self.format_value_for_mdix(item, opts, &enum_rename_map));
                     }
                 }
                 grouped_index += 1;
@@ -1010,7 +1069,12 @@ impl DixConverter {
         }
     }
 
-    fn format_value_for_mdix(&self, value: &Value, opts: &DixFormatOptions) -> String {
+    fn format_value_for_mdix(
+        &self,
+        value: &Value,
+        opts: &DixFormatOptions,
+        enum_rename_map: &HashMap<String, String>,
+    ) -> String {
         let sp = opts.get_space();
         match value {
             Value::Null { .. }              => "null".to_string(),
@@ -1029,24 +1093,36 @@ impl DixConverter {
             Value::HexColor { value: c, .. } => c.clone(),
             Value::Array { values, .. } | Value::NestedArray { values, .. } => {
                 let items: Vec<String> = values.iter()
-                    .map(|v| self.format_value_for_mdix(v, opts))
+                    .map(|v| self.format_value_for_mdix(v, opts, enum_rename_map))
                     .collect();
                 format!("[{}]", items.join(&format!(",{}", sp)))
             }
             Value::Object { properties, .. } => {
                 let pairs: Vec<String> = properties.iter()
-                    .map(|p| format!("{}{}={}{}", p.key, sp, sp, self.format_value_for_mdix(&p.value, opts)))
+                    .map(|p| format!("{}{}={}{}", p.key, sp, sp, self.format_value_for_mdix(&p.value, opts, enum_rename_map)))
                     .collect();
                 format!("{{{}}}", pairs.join(&format!(",{}", sp)))
             }
             Value::PrefixedConstructor { prefix, arguments, .. } => {
                 let args: Vec<String> = arguments.iter()
-                    .map(|v| self.format_value_for_mdix(v, opts))
+                    .map(|v| self.format_value_for_mdix(v, opts, enum_rename_map))
                     .collect();
                 format!("{}:({})", prefix, args.join(&format!(",{}", sp)))
             }
             Value::EnumValue { enum_name, value: field_value, .. } => {
-                format!("{}.{}", enum_name, field_value)
+                // For a local enum, `enum_name` is already a valid bare
+                // identifier and never appears in the rename map. For an
+                // imported enum, `enum_name` is the synthesized qualified
+                // form ("EnumMan.Suka") -- write the flattened local name
+                // `build_enum_rename_map_for_mdix` assigned it instead, so
+                // this stays a valid 2-part local enum reference in the
+                // output file instead of an unparseable 3-part one with no
+                // `@IMPORTS` left to back it.
+                let written_name = enum_rename_map
+                    .get(enum_name)
+                    .map(String::as_str)
+                    .unwrap_or(enum_name.as_str());
+                format!("{}.{}", written_name, field_value)
             }
             _ => String::new(),
         }
@@ -1446,4 +1522,4 @@ mod tests {
             "empty array must stay Array"
         );
     }
-            }
+}

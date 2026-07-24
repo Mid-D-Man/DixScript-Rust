@@ -8,7 +8,7 @@
 [![CI](https://github.com/Mid-D-Man/DixScript-Rust/actions/workflows/dixscript-publish.yml/badge.svg)](https://github.com/Mid-D-Man/DixScript-Rust/actions)
 
 DixScript is a data interchange format with compile-time functions,
-built-in AES-256 encryption, and optional compression. This crate is
+built-in capabilities for  AES-256 encryption, and optional compression. This crate is
 the Rust runtime: it compiles `.mdix` source, resolves all QuickFuncs
 at compile time, and exposes a flat dotted-path API for reading the
 resulting data at runtime.

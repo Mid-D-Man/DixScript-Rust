@@ -1,7 +1,7 @@
 
 
 @ENUMS(
-  Suka { Booliat = 0, Zabania = 1, Crack =9 }
+  Suka { Booliat = 0, Zabania = 1, Crack = 9 }
 )
 
 @DATA(

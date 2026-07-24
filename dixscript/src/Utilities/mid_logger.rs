@@ -1,7 +1,7 @@
 use chrono::Local;
 use std::fmt::Write as FmtWrite;
 use std::sync::{Arc, Mutex};
-
+///! Depricated
 /// Log levels for the logger
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {

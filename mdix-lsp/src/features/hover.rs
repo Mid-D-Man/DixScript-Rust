@@ -95,7 +95,7 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
         TokenType::SectionSecurity => Some(section_hover("@SECURITY",
             "Encryption configuration.",
             "@SECURITY(\n  encryption -> {\n    mode = \"keyfile\",\n    algorithm = \"aes256-gcm\"\n  }\n)",
-            "**Modes:** `\"password\"` (user-supplied at compile time), `\"keyfile\"` (auto-generated `.key` file)\n\n**Algorithms:** `\"aes256-gcm\"`, `\"aes128-gcm\"`, `\"chacha20-poly1305\"`\n\nCompile: `mdix compile secrets.mdix --password`"
+            "**Modes:** `\"keyfile\"` (auto-generated `.key` file), `\"password\"` (prompted at compile time), `\"manual\"` (you supply `key`/`iv` — ⚠️ plaintext in source)\n\n**Algorithms:** `\"aes256-gcm\"`, `\"aes128-gcm\"`, `\"chacha20-poly1305\"`, `\"aes256\"`, `\"aes128\"`, `\"chacha20\"`, `\"xor\"` (⚠️ obfuscation only)\n\n**Blocks:** `encryption`, `validation`, `keystore`, `override`, `metadata`\n\nCompile: `mdix compile secrets.mdix --password`"
         )),
 
         TokenType::Keyword(kw) => hover_keyword(kw),
@@ -106,6 +106,9 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
         TokenType::Identifier(name) => {
             if token.section == SectionId::Config {
                 hover_config_key(name)
+                    .or_else(|| hover_identifier(doc, name, token.section, index))
+            } else if token.section == SectionId::Security {
+                hover_security_identifier(&doc.tokens, index, name)
                     .or_else(|| hover_identifier(doc, name, token.section, index))
             } else {
                 hover_identifier(doc, name, token.section, index)
@@ -144,14 +147,28 @@ fn hover_content_for(token: &Token, index: usize, doc: &Document) -> Option<Stri
             d
         )),
 
-        TokenType::String(s) => Some(format!(
-            "**String literal** (`<string>`)\n\nLength: {} characters\n\n```mdix\n\"{}\"\n```",
-            s.len(), s
-        )),
-        TokenType::StringSingle(s) => Some(format!(
-            "**String literal** (`<string>`, single-quoted)\n\nLength: {} characters",
-            s.len()
-        )),
+        TokenType::String(s) => {
+            if token.section == SectionId::Security {
+                if let Some(content) = hover_security_value_at(&doc.tokens, index, s) {
+                    return Some(content);
+                }
+            }
+            Some(format!(
+                "**String literal** (`<string>`)\n\nLength: {} characters\n\n```mdix\n\"{}\"\n```",
+                s.len(), s
+            ))
+        }
+        TokenType::StringSingle(s) => {
+            if token.section == SectionId::Security {
+                if let Some(content) = hover_security_value_at(&doc.tokens, index, s) {
+                    return Some(content);
+                }
+            }
+            Some(format!(
+                "**String literal** (`<string>`, single-quoted)\n\nLength: {} characters",
+                s.len()
+            ))
+        }
         TokenType::InterpolatedString(s) => Some(format!(
             "**Interpolated string** (`<string>`)\n\nUse `{{expr}}` to embed expressions at compile time.\n\n```mdix\n$\"{}\"\n```",
             s
@@ -824,6 +841,166 @@ fn hover_dlm_subtype(name: &str) -> Option<String> {
         "enhanced" => Some("**`enhanced`** — Built-in checksum audit.\n\nUsage: `DAuditor.enhanced`".to_string()),
         _ => None,
     }
+}
+
+// ── SECURITY hover ─────────────────────────────────────────────────────────────
+//
+// Ground truth cross-checked against two independent sources so completions
+// and hover can't quietly drift apart again:
+//   - security_section_analyzer.rs (what the compiler actually validates/warns on)
+//   - security_utilities.rs        (what the compiler auto-generates as defaults)
+// `metadata` is deliberately freeform — no fixed field set exists for it.
+
+/// Disambiguate an Identifier token inside `@SECURITY`: a block key is
+/// followed by `->`, a field key is followed by `=`.
+fn hover_security_identifier(tokens: &[Token], index: usize, name: &str) -> Option<String> {
+    let next = tokens.get(index + 1)?;
+    if matches!(next.token_type, TokenType::SwitchCase) {
+        return hover_security_block_key(name);
+    }
+    if matches!(next.token_type, TokenType::Symbol('=')) {
+        return hover_security_field_key(name);
+    }
+    None
+}
+
+fn hover_security_block_key(name: &str) -> Option<String> {
+    let content = match name.to_lowercase().as_str() {
+        "encryption" => concat!(
+            "**`encryption`** — @SECURITY block\n\n",
+            "Configures how the encryption key is supplied. Required when `@DLM` includes a `DEncryptor` module.\n\n",
+            "**Fields:** `mode`, `algorithm`, `key_length`, `kdf`*, `kdf_memory`*, `kdf_iterations`*, `kdf_parallelism`* — *password mode only. `key`†, `iv`† — †manual mode only.\n\n",
+            "```mdix\nencryption -> {\n  mode      = \"keyfile\",\n  algorithm = \"aes256-gcm\"\n}\n```",
+        ),
+        "validation" => concat!(
+            "**`validation`** — @SECURITY block\n\n",
+            "Content-integrity and authentication-tag settings.\n\n",
+            "**Fields:** `checksum_algorithm`, `auth_tag_length`, `hmac_algorithm`\n\n",
+            "```mdix\nvalidation -> {\n  checksum_algorithm = \"sha256\"\n}\n```",
+        ),
+        "keystore" => concat!(
+            "**`keystore`** — @SECURITY block\n\n",
+            "Key-file management, relevant when `mode = \"keyfile\"`.\n\n",
+            "**Fields:** `auto_generate`, `backup_count`, `backup_naming`\n\n",
+            "```mdix\nkeystore -> {\n  auto_generate = true,\n  backup_count  = 3\n}\n```",
+        ),
+        "override" => concat!(
+            "**`override`** — @SECURITY block\n\n",
+            "Only meaningful with `encryption -> { mode = \"manual\" }`.\n\n",
+            "**Fields:** `manual_key_warning_accepted`\n\n",
+            "```mdix\noverride -> {\n  manual_key_warning_accepted = true\n}\n```\n\n",
+            "⚠️ Manual mode stores the encryption key in **PLAINTEXT** in source.",
+        ),
+        "metadata" => concat!(
+            "**`metadata`** — @SECURITY block\n\n",
+            "Freeform key/value metadata. Not validated against a fixed field set — any keys are accepted.\n\n",
+            "```mdix\nmetadata -> {\n  owner = \"team-name\"\n}\n```",
+        ),
+        _ => return None,
+    };
+    Some(content.to_string())
+}
+
+fn hover_security_field_key(name: &str) -> Option<String> {
+    let (block, desc): (&str, &str) = match name {
+        "mode" => (
+            "encryption",
+            "How the encryption key is supplied.\n\n**Values:** `\"keyfile\"` *(default)*, `\"password\"`, `\"manual\"`",
+        ),
+        "algorithm" => (
+            "encryption",
+            "Encryption algorithm.\n\n**Values:** `\"aes256-gcm\"` *(default)*, `\"aes128-gcm\"`, `\"chacha20-poly1305\"`, `\"aes256\"`, `\"aes128\"`, `\"chacha20\"`, `\"xor\"` (⚠️ obfuscation only)",
+        ),
+        "key_length" => (
+            "encryption",
+            "Key length in bytes. Auto-derived from `algorithm` if omitted (xor→32, aes128→16, aes256/chacha20→32).",
+        ),
+        "kdf" => (
+            "encryption",
+            "Key derivation function — only used when `mode = \"password\"`.\n\n**Values:** `\"argon2id\"` *(default)*, `\"pbkdf2\"`",
+        ),
+        "kdf_memory"      => ("encryption", "Argon2 memory cost in KiB. Recommended minimum: `65536`."),
+        "kdf_iterations"  => ("encryption", "Argon2 iteration count. Recommended minimum: `3`."),
+        "kdf_parallelism" => ("encryption", "Argon2 parallelism factor. Recommended minimum: `4`."),
+        "key" => (
+            "encryption",
+            "**CRITICAL**: the raw encryption key, stored in PLAINTEXT in source. Required (with `iv`) when `mode = \"manual\"`.",
+        ),
+        "iv" => (
+            "encryption",
+            "Initialization vector. Required (with `key`) when `mode = \"manual\"`.",
+        ),
+        "checksum_algorithm" => (
+            "validation",
+            "Hash algorithm for content-integrity checks.\n\n**Values:** `\"sha256\"` *(default)*, `\"sha512\"`, `\"hmac-sha256\"`, `\"hmac-sha512\"`",
+        ),
+        "auth_tag_length" => ("validation", "Authentication tag length in bits. Default: `128`."),
+        "hmac_algorithm" => (
+            "validation",
+            "HMAC algorithm for message authentication.\n\n**Values:** `\"hmac-sha256\"` *(default)*, `\"hmac-sha512\"`",
+        ),
+        "auto_generate" => ("keystore", "When `true` *(default)*, the compiler auto-generates a `.mdix.key` file."),
+        "backup_count"  => ("keystore", "Number of previous key-file backups to retain. Range `0`-`10`, default `3`."),
+        "backup_naming" => (
+            "keystore",
+            "Naming convention for backup key files.\n\n**Values:** `\"timestamp\"` *(default)*, `\"sequence\"`",
+        ),
+        "manual_key_warning_accepted" => (
+            "override",
+            "**Required** for `mode = \"manual\"`. Explicitly acknowledges the key is stored in PLAINTEXT in source.",
+        ),
+        _ => return None,
+    };
+    Some(format!("**`{}`** — `{}` field\n\n{}", name, block, desc))
+}
+
+/// Hover for the *value* token of a `field = "value"` security entry.
+/// Walks back through `=` to the field-key identifier to know which value
+/// table to look the literal up in.
+fn hover_security_value_at(tokens: &[Token], index: usize, value: &str) -> Option<String> {
+    if index < 2 { return None; }
+    let eq_tok = tokens.get(index - 1)?;
+    if !matches!(eq_tok.token_type, TokenType::Symbol('=')) { return None; }
+    let field_tok = tokens.get(index - 2)?;
+    let field_name = match &field_tok.token_type {
+        TokenType::Identifier(n) => n.as_str(),
+        TokenType::Keyword(k)    => k.as_str(),
+        _ => return None,
+    };
+    hover_security_value(field_name, value)
+}
+
+fn hover_security_value(field_name: &str, value: &str) -> Option<String> {
+    let desc = match (field_name, value) {
+        ("mode", "keyfile")  => "Compiler auto-generates a `.mdix.key` file — recommended.",
+        ("mode", "password") => "Compiler prompts for a passphrase at compile time.",
+        ("mode", "manual")   => "You supply `key`/`iv` directly.\n\n⚠️ **CRITICAL:** stored in PLAINTEXT in source.",
+
+        ("algorithm", "aes256-gcm")        => "AES-256-GCM — recommended.",
+        ("algorithm", "aes128-gcm")        => "AES-128-GCM — faster, slightly smaller keys.",
+        ("algorithm", "chacha20-poly1305") => "ChaCha20-Poly1305 — excellent on mobile/ARM.",
+        ("algorithm", "aes256")            => "AES-256, non-AEAD variant.",
+        ("algorithm", "aes128")            => "AES-128, non-AEAD variant.",
+        ("algorithm", "chacha20")          => "ChaCha20, non-AEAD variant.",
+        ("algorithm", "xor")               => "⚠️ Obfuscation only — NOT cryptographically secure.",
+
+        ("kdf", "argon2id") => "Argon2id — recommended.",
+        ("kdf", "pbkdf2")   => "PBKDF2.",
+
+        ("checksum_algorithm", "sha256")      => "SHA-256 — recommended.",
+        ("checksum_algorithm", "sha512")      => "SHA-512 — stronger, larger output.",
+        ("checksum_algorithm", "hmac-sha256") => "HMAC-SHA256 — keyed integrity check.",
+        ("checksum_algorithm", "hmac-sha512") => "HMAC-SHA512 — keyed integrity check, stronger.",
+
+        ("hmac_algorithm", "hmac-sha256") => "HMAC-SHA256 — recommended.",
+        ("hmac_algorithm", "hmac-sha512") => "HMAC-SHA512.",
+
+        ("backup_naming", "timestamp") => "Embed a timestamp in the backup key filename.",
+        ("backup_naming", "sequence")  => "Use an incrementing sequence number.",
+
+        _ => return None,
+    };
+    Some(format!("**`\"{}\"`** — `{}` value\n\n{}", value, field_name, desc))
 }
 
 // ── CONFIG key hover ──────────────────────────────────────────────────────────
@@ -1590,10 +1767,25 @@ fn extract_doc_comment_for_func(tokens: &[Token], func_def_line: usize) -> Optio
 
     let raw = collected.join("\n").trim().to_string();
     let cleaned: String = raw.lines()
-        .map(|l| l.trim_start_matches('/').trim_start())
+        .map(clean_doc_comment_line)
         .collect::<Vec<_>>()
         .join("\n");
     Some(cleaned)
+}
+
+/// Strip a single line's leading comment-marker remnant after the lexer has
+/// already consumed the comment's own opening `//`:
+///   `///  text` → token content `/  text` → strip leading `/` → `text`
+///   `//!  text` → token content `!  text` → strip leading `!` → `text`
+///
+/// Only ever strips from the very start of the line, so fenced ```code```
+/// examples inside the doc comment (division, paths, nested `//` comments,
+/// etc.) are untouched unless they themselves happen to open with a stray
+/// `/` or `!` immediately after the doc marker.
+fn clean_doc_comment_line(l: &str) -> &str {
+    let l = l.trim_start_matches('/').trim_start();
+    let l = l.strip_prefix('!').unwrap_or(l);
+    l.trim_start()
 }
 
 fn hover_config_line(doc: &Document, pos: Position) -> Option<Hover> {
@@ -1654,4 +1846,4 @@ fn ordinal_suffix(d: u32) -> &'static str {
         n if n % 10 == 3     => "rd",
         _                    => "th",
     }
-}
+                           }

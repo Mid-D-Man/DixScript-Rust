@@ -277,7 +277,7 @@ fn security_block_key_completions() -> Vec<CompletionItem> {
             "encryption",
             concat!(
                 "encryption -> {\n",
-                "  mode      = \"${1|keyfile,password|}\",\n",
+                "  mode      = \"${1|keyfile,password,manual|}\",\n",
                 "  algorithm = \"${2|aes256-gcm,aes128-gcm,chacha20-poly1305|}\"\n",
                 "}"
             ),
@@ -305,6 +305,24 @@ fn security_block_key_completions() -> Vec<CompletionItem> {
             ),
             "Key file management. Set `auto_generate = true` so the compiler produces a `.mdix.key` file.",
         ),
+        (
+            "override",
+            concat!(
+                "override -> {\n",
+                "  manual_key_warning_accepted = ${1:true}\n",
+                "}"
+            ),
+            "Only meaningful with `encryption -> { mode = \"manual\" }`. Explicitly acknowledges the key is stored in **PLAINTEXT** in source — required to accept manual mode.",
+        ),
+        (
+            "metadata",
+            concat!(
+                "metadata -> {\n",
+                "  ${1:key} = \"${2:value}\"\n",
+                "}"
+            ),
+            "Freeform key/value metadata. Not validated against a fixed field set — any keys are accepted.",
+        ),
     ];
 
     blocks.iter().map(|(key, snippet, doc)| CompletionItem {
@@ -326,23 +344,32 @@ fn security_block_key_completions() -> Vec<CompletionItem> {
 fn security_field_key_completions(block_name: &str) -> Vec<CompletionItem> {
     let fields: &[(&str, &str, &str)] = match block_name.to_lowercase().as_str() {
         "encryption" => &[
-            ("mode",            "\"${1|keyfile,password|}\"",               "How the key is supplied."),
-            ("algorithm",       "\"${1|aes256-gcm,aes128-gcm,chacha20-poly1305,xor|}\"", "Encryption algorithm."),
+            ("mode",            "\"${1|keyfile,password,manual|}\"",        "How the key is supplied."),
+            ("algorithm",       "\"${1|aes256-gcm,aes128-gcm,chacha20-poly1305,aes256,aes128,chacha20,xor|}\"", "Encryption algorithm."),
             ("key_length",      "${1:32}",                                  "Key length in bytes."),
-            ("kdf",             "\"${1|argon2id,argon2i,argon2d|}\"",       "Key derivation function."),
-            ("kdf_memory",      "${1:65536}",                               "Argon2 memory cost in KiB."),
-            ("kdf_iterations",  "${1:3}",                                   "Argon2 iteration count."),
-            ("kdf_parallelism", "${1:4}",                                   "Argon2 parallelism factor."),
+            ("kdf",             "\"${1|argon2id,pbkdf2|}\"",                "Key derivation function — password mode only."),
+            ("kdf_memory",      "${1:65536}",                               "Argon2 memory cost in KiB (min 65536)."),
+            ("kdf_iterations",  "${1:3}",                                   "Argon2 iteration count (min 3)."),
+            ("kdf_parallelism", "${1:4}",                                   "Argon2 parallelism factor (min 4)."),
+            ("key",             "\"${1:}\"",                                "**CRITICAL**: raw encryption key, stored in PLAINTEXT in source. Required for `mode = \"manual\"`."),
+            ("iv",              "\"${1:}\"",                                "Initialization vector. Required for `mode = \"manual\"`."),
         ],
         "validation" => &[
-            ("checksum_algorithm", "\"${1|sha256,sha512|}\"",              "Hash algorithm for content-integrity check."),
+            ("checksum_algorithm", "\"${1|sha256,sha512,hmac-sha256,hmac-sha512|}\"", "Hash algorithm for content-integrity check."),
             ("auth_tag_length",    "${1:128}",                              "Authentication tag length in bits."),
             ("hmac_algorithm",     "\"${1|hmac-sha256,hmac-sha512|}\"",    "HMAC algorithm for message authentication."),
         ],
         "keystore" => &[
             ("auto_generate", "${1:true}",                                  "When `true`, auto-generates a `.mdix.key` file."),
-            ("backup_count",  "${1:3}",                                     "Number of previous key file backups to retain."),
+            ("backup_count",  "${1:3}",                                     "Number of previous key file backups to retain (0-10)."),
             ("backup_naming", "\"${1|timestamp,sequence|}\"",               "Naming convention for backup key files."),
+        ],
+        "override" => &[
+            (
+                "manual_key_warning_accepted",
+                "${1:true}",
+                "**Required** for `mode = \"manual\"`. Explicitly acknowledges the key is stored in PLAINTEXT in source.",
+            ),
         ],
         _ => &[],
     };
@@ -370,25 +397,33 @@ fn security_field_value_completions(field_name: &str) -> Vec<CompletionItem> {
         "mode" => &[
             ("keyfile",  "Compiler auto-generates a `.mdix.key` file — recommended"),
             ("password", "Compiler prompts for a passphrase at compile time"),
+            ("manual",   "You supply `key`/`iv` directly — CRITICAL: stored in PLAINTEXT in source"),
         ],
         "algorithm" => &[
             ("aes256-gcm",        "AES-256-GCM — recommended"),
             ("aes128-gcm",        "AES-128-GCM — faster, slightly smaller keys"),
             ("chacha20-poly1305", "ChaCha20-Poly1305 — excellent on mobile / ARM"),
+            ("aes256",            "AES-256, non-AEAD variant"),
+            ("aes128",            "AES-128, non-AEAD variant"),
+            ("chacha20",          "ChaCha20, non-AEAD variant"),
             ("xor",               "XOR — obfuscation only, NOT cryptographically secure"),
         ],
+        // Only argon2id and pbkdf2 are recognized — argon2i/argon2d are NOT
+        // valid here (there is no Argon2 variant selector in this language;
+        // "argon2id" always means the Argon2id variant).
         "kdf" => &[
             ("argon2id", "Argon2id — recommended"),
-            ("argon2i",  "Argon2i"),
-            ("argon2d",  "Argon2d"),
+            ("pbkdf2",   "PBKDF2"),
         ],
         "backup_naming" => &[
             ("timestamp", "Embed a timestamp in the backup key filename"),
             ("sequence",  "Use an incrementing sequence number"),
         ],
         "checksum_algorithm" => &[
-            ("sha256", "SHA-256 — recommended"),
-            ("sha512", "SHA-512 — stronger, larger output"),
+            ("sha256",      "SHA-256 — recommended"),
+            ("sha512",      "SHA-512 — stronger, larger output"),
+            ("hmac-sha256", "HMAC-SHA256 — keyed integrity check"),
+            ("hmac-sha512", "HMAC-SHA512 — keyed integrity check, stronger"),
         ],
         "hmac_algorithm" => &[
             ("hmac-sha256", "HMAC-SHA256 — recommended"),
@@ -397,6 +432,10 @@ fn security_field_value_completions(field_name: &str) -> Vec<CompletionItem> {
         "auto_generate" => &[
             ("true",  "Automatically write `.mdix.key` during compilation"),
             ("false", "Require the key file to exist already"),
+        ],
+        "manual_key_warning_accepted" => &[
+            ("true",  "Acknowledged — key will be stored in PLAINTEXT in source"),
+            ("false", "Not acknowledged — manual mode will emit a warning"),
         ],
         _ => &[],
     };
@@ -2326,4 +2365,4 @@ fn word_before_dot(source: &str, pos: Position) -> String {
         .last()
         .unwrap_or("")
         .to_string()
-            }
+    }

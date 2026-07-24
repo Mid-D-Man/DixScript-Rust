@@ -32,6 +32,14 @@ pub struct GeneralSemanticAnalyzer<'a> {
     has_quickfuncs_enabled: bool,
     has_dlm_enabled:        bool,
     propagate_error_manager: bool,
+    /// True only when this analyzer was constructed via
+    /// `new_with_seed_namespaces` — i.e. it's analyzing an *imported* file
+    /// on behalf of `ImportsResolver`, nested inside some outer file's own
+    /// `analyze()` call. Used to gate `register_enums_with_builtin_system()`
+    /// so the process-global enum registry (`enum_object::DIXSCRIPT_ENUMS`)
+    /// is only cleared/repopulated once, by the outermost compile, instead
+    /// of once per file in the import tree. See that function for details.
+    is_nested_import_analysis: bool,
 }
 
 impl<'a> GeneralSemanticAnalyzer<'a> {
@@ -94,6 +102,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             has_quickfuncs_enabled,
             has_dlm_enabled,
             propagate_error_manager: true,
+            is_nested_import_analysis: true,
         }
     }
 
@@ -123,6 +132,7 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             has_quickfuncs_enabled,
             has_dlm_enabled,
             propagate_error_manager: true,
+            is_nested_import_analysis: false,
         }
     }
 
@@ -163,7 +173,21 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
             return self.finalize_result();
         }
 
-        self.register_enums_with_builtin_system();
+        // Only the outermost compile touches the process-global enum
+        // registry. `ImportsResolver` recursively runs a full `analyze()`
+        // on every imported file (see `new_with_seed_namespaces`); if each
+        // of those nested calls also cleared+repopulated the registry, the
+        // last file processed in the import tree would wipe out every enum
+        // registered by files processed earlier in the SAME compile — which
+        // is exactly what was making `Enum.*` builtin calls fail to find
+        // imported enums. The outermost call (this branch) runs last in
+        // program order relative to its own imports (Phase 3 already
+        // finished above) and has full transitive knowledge of both its own
+        // local enums *and* every imported namespace's enums, so it alone
+        // is responsible for the registry's contents.
+        if !self.is_nested_import_analysis {
+            self.register_enums_with_builtin_system();
+        }
 
         if !self.analyze_phase5_functions() && self.should_terminate() {
             return self.finalize_result();
@@ -468,15 +492,51 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.add_section_result("SECURITY", result);
     }
 
+    /// Populates the process-global `enum_object::DIXSCRIPT_ENUMS` registry
+    /// that backs the `Enum.*` builtin static object (`Enum.getValues`,
+    /// `Enum.getValue`, `Enum.getName`, etc.) for this compile.
+    ///
+    /// MUST only run from the outermost (non-nested) `analyze()` call — see
+    /// the `is_nested_import_analysis` gate at the call site. `clear_enums()`
+    /// still runs unconditionally first, exactly like before: that's what
+    /// keeps a stale registry from a *previous, unrelated* compile from
+    /// leaking into this one (the fix that made repeated/fuzz compiles in
+    /// the same process safe). What changed is WHEN this runs (once per
+    /// compile, not once per file in the import tree) and WHAT it registers.
+    ///
+    /// Two kinds of enums go in, under two different naming schemes:
+    /// - This file's own local `@ENUMS` entries, under their bare name
+    ///   (`"Status"`), matching how they're written in this file's own DATA
+    ///   section and QUICKFUNCS.
+    /// - Every imported namespace's enums, under their qualified
+    ///   `"Alias.EnumName"` form (`"EnumMan.Suka"`), matching the exact
+    ///   qualification the parser gives `Value::EnumValue.enum_name` for
+    ///   `Namespace.Enum.FIELD` data literals and that `ValueResolver`'s
+    ///   import merge uses. Keeping both sides of the compiler agreeing on
+    ///   one naming scheme is the whole point — an imported enum is *not*
+    ///   the same symbol as a local one with the same short name, so it
+    ///   can't share a bare-name slot in the registry.
     fn register_enums_with_builtin_system(&mut self) {
         enum_object::clear_enums();
+
         for (name, fields) in &self.symbol_table.enums {
             enum_object::register_enum(name.clone(), fields.clone());
         }
+
+        let mut imported_count = 0usize;
+        for ns in self.symbol_table.namespaces.values() {
+            for (enum_name, fields) in &ns.enums {
+                let qualified = format!("{}.{}", ns.alias, enum_name);
+                enum_object::register_enum(qualified, fields.clone());
+                imported_count += 1;
+            }
+        }
+
         if self.debug_config.is_enabled {
             self.error_manager.log_debug(&format!(
-                "Registered {} enums with builtin system",
-                self.symbol_table.enums.len()
+                "Registered {} local + {} imported enum(s) with builtin system",
+                self.symbol_table.enums.len(),
+                imported_count
             ));
         }
     }
@@ -508,4 +568,4 @@ impl<'a> GeneralSemanticAnalyzer<'a> {
         self.analysis_result.symbol_table      = Some(self.symbol_table);
         self.analysis_result
     }
-            }
+                          }

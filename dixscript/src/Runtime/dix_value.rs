@@ -1,4 +1,3 @@
-
 use std::collections::HashMap;
 use serde::Serialize;
 
@@ -48,6 +47,11 @@ impl DixValue {
             DixValue::Long(l)   => Some(*l as i32),
             DixValue::Float(f)  => Some(*f as i32),
             DixValue::Double(d) => Some(*d as i32),
+            // An enum IS its underlying int as far as ergonomic/dynamic-style
+            // access is concerned (config["status"].as_int()) -- callers who
+            // specifically need the name/field back use the Enum match arm
+            // directly instead of this accessor.
+            DixValue::Enum { value, .. } => Some(*value),
             _ => None,
         }
     }
@@ -93,6 +97,17 @@ impl DixValue {
         match self { DixValue::Object(obj) => Some(obj), _ => None }
     }
 
+    /// The `(enum_name, field_name, value)` triple, when this is an Enum.
+    /// Prefer `as_int()` when you only care about the value.
+    pub fn as_enum(&self) -> Option<(&str, &str, i32)> {
+        match self {
+            DixValue::Enum { enum_name, field_name, value } => {
+                Some((enum_name.as_str(), field_name.as_str(), *value))
+            }
+            _ => None,
+        }
+    }
+
     pub fn type_name(&self) -> &'static str {
         match self {
             DixValue::Null         => "null",
@@ -111,6 +126,45 @@ impl DixValue {
             DixValue::Object(_)    => "object",
             DixValue::Tuple(_)     => "tuple",
             DixValue::Enum { .. }  => "enum",
+        }
+    }
+}
+
+// ── Dynamic-style access ─────────────────────────────────────────────────────
+//
+// `DixValue` is already the tagged-union "dynamic value" type for this
+// codebase (see the `Enum`/`Object`/`Array` variants above) -- this is the
+// chainable-access layer on top of it, the closest stable-Rust equivalent to
+// C#'s `dynamic` member-chain feel: `config["timer"]["uop"].as_int()`.
+//
+// `std::ops::Index` must return a `&Self::Output` -- it can't return
+// `Option<&DixValue>` or build a value on the fly, so a missing key/index
+// can't just be `None` here the way `as_int()` etc. can be. Same trick
+// `serde_json::Value` uses: index into a non-object/array, or index with a
+// key/position that isn't there, and you get back a reference to a shared
+// `Null` instead of a panic. Chains stay unwind-free through any number of
+// missing links -- `config["nope"]["also_nope"][3].as_int()` is `None`, not
+// a crash -- and the failure only becomes visible at the terminal `as_*()`
+// call, exactly where a C# `dynamic` chain would throw at its first invalid
+// member instead.
+pub(crate) static DIX_NULL: DixValue = DixValue::Null;
+
+impl std::ops::Index<&str> for DixValue {
+    type Output = DixValue;
+    fn index(&self, key: &str) -> &DixValue {
+        match self {
+            DixValue::Object(map) => map.get(key).unwrap_or(&DIX_NULL),
+            _ => &DIX_NULL,
+        }
+    }
+}
+
+impl std::ops::Index<usize> for DixValue {
+    type Output = DixValue;
+    fn index(&self, i: usize) -> &DixValue {
+        match self {
+            DixValue::Array(items) | DixValue::Tuple(items) => items.get(i).unwrap_or(&DIX_NULL),
+            _ => &DIX_NULL,
         }
     }
 }
@@ -265,4 +319,4 @@ pub(crate) fn ast_value_to_dix_value(
 
         _ => None,
     }
-                }
+            }            }

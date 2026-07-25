@@ -319,4 +319,4 @@ pub(crate) fn ast_value_to_dix_value(
 
         _ => None,
     }
-            }            }
+            }

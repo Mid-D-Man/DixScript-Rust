@@ -1,4 +1,3 @@
-
 /// Formatting options for DixScript conversion and export
 /// 
 /// Controls how DixData is serialized to MDIX format:
@@ -41,6 +40,24 @@ pub struct DixFormatOptions {
     
     /// Generate version information (default: true)
     pub include_version: bool,
+
+    /// How `to_mdix` writes enum values (default: false — keep identity).
+    ///
+    /// `false` (default): an imported enum's synthesized qualified
+    /// declaration (`"Namespace.EnumName"`) gets flattened to a valid local
+    /// identifier (`Namespace_EnumName`) and `@ENUMS` is written alongside
+    /// `@DATA`, so the output is a real, self-contained, re-compilable
+    /// `.mdix` file with the enum's name/field identity intact — this is
+    /// what a normal `mdix format` / `DixFormatOptions::minified()` file
+    /// should look like.
+    ///
+    /// `true`: every enum reference in `@DATA` is replaced by the literal
+    /// integer it resolves to, and `@ENUMS` is omitted entirely, since
+    /// nothing in `@DATA` references it anymore. Use this for output that's
+    /// meant to be read as pure resolved values with no compiler metadata
+    /// attached — e.g. a throwaway snapshot, not something you intend to
+    /// keep editing as `.mdix` source.
+    pub inline_enum_values: bool,
 }
 
 impl DixFormatOptions {
@@ -58,6 +75,7 @@ impl DixFormatOptions {
             max_line_length: 0,
             include_config_section: true,
             include_version: true,
+            inline_enum_values: false,
         }
     }
     
@@ -177,4 +195,4 @@ mod tests {
         };
         assert_eq!(tabs.get_indentation(1), "\t");
     }
-}
+        }

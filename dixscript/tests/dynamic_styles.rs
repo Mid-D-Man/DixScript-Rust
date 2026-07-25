@@ -35,7 +35,7 @@ fn dixvalue_index_chains_through_nested_object() {
     // "timer" is the aggregate key -> DixValue::Object
     let timer = &data["timer"];
     assert_eq!(timer["uop"].as_int(), Some(9));
-    assert_eq!(timer["label"].as_str(), Some("crack"));
+    assert_eq!(timer["label"].as_string(), Some("crack"));
 
     // Chained straight off DixData: data["timer"]["uop"]
     assert_eq!(data["timer"]["uop"].as_int(), Some(9));

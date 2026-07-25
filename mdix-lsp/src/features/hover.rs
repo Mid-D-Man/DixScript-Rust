@@ -964,7 +964,7 @@ fn hover_security_value_at(tokens: &[Token], index: usize, value: &str) -> Optio
     let field_tok = tokens.get(index - 2)?;
     let field_name = match &field_tok.token_type {
         TokenType::Identifier(n) => n.as_str(),
-        TokenType::Keyword(k)    => k.as_str(),
+        TokenType::Keyword(k)    => *k,
         _ => return None,
     };
     hover_security_value(field_name, value)

@@ -110,8 +110,30 @@ fn resolve_ast_owned(
         .and_then(|sr| sr.symbol_table.as_ref())
         .map(|st| st.namespaces.values().any(|ns| !ns.functions.is_empty()))
         .unwrap_or(false);
+    // These two were missing entirely until now. Without them, a file with
+    // ONLY an imported enum reference and no @QUICKFUNCS anywhere (nothing
+    // else to trip has_local_fns/has_imported_fns) hit the early return
+    // below and got handed back completely unresolved: ValueResolver's
+    // Phase 1 enum merge never ran, so `ast.enums` never picked up the
+    // synthesized "Namespace.EnumName" declaration for the imported enum,
+    // and every DixConverter call downstream (convert-to-json/toml, minify)
+    // fell through `ast_value_to_dix_value`'s `.unwrap_or(0)` for every
+    // single enum reference. Adding a QuickFunc call anywhere "fixed" it
+    // only as a side effect of flipping has_local_fns true, which happened
+    // to defeat the early return for an unrelated reason. This mirrors the
+    // exact fix `loader.rs`'s Stage 7 gate already has for
+    // `compile_to_resolved_ast` -- that copy was fixed; this LSP-local
+    // duplicate of the same gate was not.
+    let has_local_enums = ast.enums.as_ref()
+        .map(|e| !e.enums.is_empty()).unwrap_or(false);
+    let has_imported_enums = semantic_result.as_ref()
+        .and_then(|sr| sr.symbol_table.as_ref())
+        .map(|st| st.namespaces.values().any(|ns| !ns.enums.is_empty()))
+        .unwrap_or(false);
 
-    if (!has_local_fns && !has_imported_fns) || ast.data.is_none() {
+    if (!has_local_fns && !has_imported_fns && !has_local_enums && !has_imported_enums)
+        || ast.data.is_none()
+    {
         return Some(ast);
     }
 
@@ -634,4 +656,4 @@ impl LanguageServer for Backend {
 
         Ok(None)
     }
-}
+                }

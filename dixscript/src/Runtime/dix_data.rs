@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Utc};
 use crate::Compiler::AST::DixScript;
-use super::dix_value::DixValue;
+use super::dix_value::{DixValue, DIX_NULL};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Structural hashmap helpers
@@ -475,6 +475,23 @@ impl DixData {
             ConfigValue::Compatibility(cm) => cm.to_string(),
             ConfigValue::Debug(dm)         => dm.to_string(),
         }
+    }
+}
+
+// ── Dynamic-style access ─────────────────────────────────────────────────────
+//
+// `flattened_data` carries both aggregate keys ("timer" -> Object) and their
+// dotted child paths ("timer.uop" -> Int) side by side (see
+// `DixConverter::to_hashmap`'s doc comment for why) -- so a single lookup
+// here already covers both a full dotted path in one shot (`data["timer.uop"]`)
+// and the first step of a chain into a nested `DixValue::Object`
+// (`data["timer"]["uop"]`, the second `["uop"]` handled by `DixValue`'s own
+// `Index<&str>` impl). Same missing-key behavior as `DixValue`'s impl: a
+// path that isn't there returns `Null`, never panics.
+impl std::ops::Index<&str> for DixData {
+    type Output = DixValue;
+    fn index(&self, path: &str) -> &DixValue {
+        self.flattened_data.get(path).unwrap_or(&DIX_NULL)
     }
 }
 
@@ -1046,4 +1063,4 @@ mod tests {
         assert_eq!(cfg.get("compatibility").map(String::as_str), Some("best_effort"));
         assert_eq!(cfg.get("debug").map(String::as_str), Some("verbose"));
     }
-}
+                                                }

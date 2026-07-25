@@ -105,6 +105,128 @@ impl DixConverter {
         DixConverter { default_options: options }
     }
 
+    // ── Enum inlining ────────────────────────────────────────────────────────
+    //
+    // Shared by `to_mdix` (when `DixFormatOptions::inline_enum_values` is
+    // set) and by anything else — the LSP's "Create Resolved" command, most
+    // notably — that wants a `DataSection` with every `Value::EnumValue`
+    // swapped for the literal `Value::Integer` it resolves to. This is the
+    // one place that logic lives; nothing else should reimplement it.
+    //
+    // Looks up `enums` the same way `extract_enums`/`ast_value_to_dix_value`
+    // do: by exact `EnumDeclaration.name` match, which for an imported enum
+    // is the qualified `"Namespace.EnumName"` form `ValueResolver`'s Phase 1
+    // merge already put into `ast.enums` — so this sees the exact same table
+    // `DixConverter`'s own JSON/TOML output does, imported enums included.
+
+    /// Resolve a single `enum_name` + `field_name` pair to its declared
+    /// integer value. Returns `None` if the enum or field can't be found —
+    /// callers should treat that as "leave it alone", not "assume 0"; it
+    /// shouldn't happen for anything that made it through compilation, but a
+    /// silent wrong zero is worse than a value that stays symbolic.
+    pub fn resolve_enum_field_value(
+        &self,
+        enums: Option<&EnumsSection>,
+        enum_name: &str,
+        field_name: &str,
+    ) -> Option<i32> {
+        enums?
+            .enums
+            .iter()
+            .find(|decl| decl.name == enum_name)?
+            .fields
+            .iter()
+            .find(|f| f.name == field_name)?
+            .value
+    }
+
+    /// Return a clone of `data` with every `Value::EnumValue` anywhere in it
+    /// (top-level properties, table properties, group arrays, and nested
+    /// arrays/objects/prefixed constructors) replaced by the `Value::Integer`
+    /// it resolves to via `enums`. Anything that isn't an enum value passes
+    /// through unchanged.
+    pub fn inline_enum_values(&self, data: &DataSection, enums: Option<&EnumsSection>) -> DataSection {
+        let entries = data.entries.iter().map(|entry| self.inline_enum_values_in_entry(entry, enums)).collect();
+        DataSection { entries, position: data.position }
+    }
+
+    fn inline_enum_values_in_entry(&self, entry: &DataEntry, enums: Option<&EnumsSection>) -> DataEntry {
+        // An explicit `<enum>` annotation stops meaning anything once its
+        // value becomes a plain Value::Integer -- downgrade it to `<int>` so
+        // the type annotation still matches what's actually there. Any other
+        // annotation (including "no annotation") passes through untouched.
+        fn inlined_data_type(dt: &Option<crate::Compiler::AST::DataType>) -> Option<crate::Compiler::AST::DataType> {
+            match dt {
+                Some(crate::Compiler::AST::DataType::Enum) => Some(crate::Compiler::AST::DataType::Int),
+                other => other.clone(),
+            }
+        }
+
+        match entry {
+            DataEntry::SimpleProperty { name, data_type, value, position } => DataEntry::SimpleProperty {
+                name: name.clone(),
+                data_type: inlined_data_type(data_type),
+                value: self.inline_enum_values_in_value(value, enums),
+                position: *position,
+            },
+            DataEntry::TableProperty { path, properties, position } => DataEntry::TableProperty {
+                path: path.clone(),
+                properties: properties.iter().map(|p| PropertyAssignment {
+                    name: p.name.clone(),
+                    data_type: inlined_data_type(&p.data_type),
+                    value: self.inline_enum_values_in_value(&p.value, enums),
+                    position: p.position,
+                }).collect(),
+                position: *position,
+            },
+            DataEntry::GroupArray { path, items, position } => DataEntry::GroupArray {
+                path: path.clone(),
+                items: items.iter().map(|v| self.inline_enum_values_in_value(v, enums)).collect(),
+                position: *position,
+            },
+            DataEntry::ObjectProperty { name, data_type, object, position } => DataEntry::ObjectProperty {
+                name: name.clone(),
+                data_type: inlined_data_type(data_type),
+                object: Box::new(self.inline_enum_values_in_value(object, enums)),
+                position: *position,
+            },
+        }
+    }
+
+    fn inline_enum_values_in_value(&self, value: &Value, enums: Option<&EnumsSection>) -> Value {
+        match value {
+            Value::EnumValue { enum_name, value: field_name, position } => {
+                match self.resolve_enum_field_value(enums, enum_name, field_name) {
+                    Some(int_value) => Value::Integer { value: int_value, position: *position },
+                    None => value.clone(),
+                }
+            }
+            Value::Array { values, position } => Value::Array {
+                values: values.iter().map(|v| self.inline_enum_values_in_value(v, enums)).collect(),
+                position: *position,
+            },
+            Value::NestedArray { values, level, position } => Value::NestedArray {
+                values: values.iter().map(|v| self.inline_enum_values_in_value(v, enums)).collect(),
+                level: *level,
+                position: *position,
+            },
+            Value::Object { properties, position } => Value::Object {
+                properties: properties.iter().map(|p| ObjectProperty {
+                    key: p.key.clone(),
+                    value: self.inline_enum_values_in_value(&p.value, enums),
+                    position: p.position,
+                }).collect(),
+                position: *position,
+            },
+            Value::PrefixedConstructor { prefix, arguments, position } => Value::PrefixedConstructor {
+                prefix: prefix.clone(),
+                arguments: arguments.iter().map(|v| self.inline_enum_values_in_value(v, enums)).collect(),
+                position: *position,
+            },
+            other => other.clone(),
+        }
+    }
+
     // ── from_hashmap ──────────────────────────────────────────────────────────
 
     /// Build a `DixScript` AST from a bare `HashMap<String, DixValue>` — the
@@ -259,7 +381,11 @@ impl DixConverter {
             .map(build_enum_rename_map_for_mdix)
             .unwrap_or_default();
 
+        // When inlining, @DATA no longer references any enum declaration at
+        // all (every Value::EnumValue became a literal Value::Integer below),
+        // so writing @ENUMS here would just be dead, unreferenced output.
         if let Some(ref enums) = ast.enums {
+            if !opts.inline_enum_values {
             output.push_str("@ENUMS(");
             output.push_str(nl);
             for decl in &enums.enums {
@@ -288,9 +414,22 @@ impl DixConverter {
             output.push(')');
             output.push_str(nl);
             output.push_str(nl);
+            }
         }
 
-        if let Some(ref data) = ast.data {
+        // Only actually clones/rewrites the data when inline_enum_values is
+        // set; otherwise this is the same data the rest of this function
+        // always worked on, just given a name so both branches share the
+        // block below unchanged.
+        let effective_data: Option<DataSection> = ast.data.as_ref().map(|d| {
+            if opts.inline_enum_values {
+                self.inline_enum_values(d, ast.enums.as_ref())
+            } else {
+                d.clone()
+            }
+        });
+
+        if let Some(ref data) = effective_data {
             output.push_str("@DATA(");
             output.push_str(nl);
 
@@ -1522,4 +1661,4 @@ mod tests {
             "empty array must stay Array"
         );
     }
-}
+    }

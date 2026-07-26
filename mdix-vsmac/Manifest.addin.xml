@@ -1,4 +1,25 @@
 <Addin>
+  <!--
+    Tells VS4Mac's MEF container to scan this addin's own assembly for
+    [Export] components: specifically MdixLanguageClient (implements
+    ILanguageClient) and MdixContentDefinition's exports, both in
+    MdixLanguageClient.cs. Without this, the host's Mono.Addins loader picks
+    the assembly up fine, but MEF composition (a separate mechanism layered
+    on top, not something Mono.Addins does for you automatically) never
+    finds those exports, so ILanguageClient never activates for .mdix files
+    even though the addin itself loads without error.
+
+    File name matches AssemblyName in MdixAddin.csproj, namely "MdixLanguageSupport" —
+    not the class name "MdixLanguageClient" or the project name "MdixAddin".
+
+    Source: Matt Ward's own VS4Mac LSP walkthrough (lastexitcode.com,
+    "Language Server Protocol support in Visual Studio for Mac 7.4"),
+    "Enabling Managed Extensibility Framework Support" section.
+  -->
+  <Extension path="/MonoDevelop/Ide/Composition">
+    <Assembly file="MdixLanguageSupport.dll" />
+  </Extension>
+
   <Extension path="/MonoDevelop/Core/MimeTypes">
     <MimeType
         id="text/x-mdix"

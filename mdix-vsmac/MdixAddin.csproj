@@ -27,6 +27,19 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!--
+    Safety net, not a substitute for actually deleting the file: as of this
+    change MdixLanguageClientProvider.cs is replaced by MdixLanguageClient.cs
+    (implements the real ILanguageClient, not a nonexistent base class — see
+    that file's own header for the full story). Delete
+    MdixLanguageClientProvider.cs from disk when you pull this in. This
+    exclusion just means the build doesn't silently regress back to the same
+    CS0115/CS0535 pile if it's ever left lying around by accident.
+  -->
+  <ItemGroup>
+    <Compile Remove="MdixLanguageClientProvider.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.VisualStudioMac.Sdk" Version="17.5.0" />
   </ItemGroup>

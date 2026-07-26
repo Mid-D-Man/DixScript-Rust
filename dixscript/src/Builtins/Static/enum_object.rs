@@ -5,10 +5,32 @@
 use crate::Builtins::Core::{BuiltinMethod, DixType, DixValue, IBuiltinMethod};
 use crate::Builtins::Static::{IStaticObject, StaticObjectBase};
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 
 /// Global registry for DixScript enums defined in @ENUMS section
 static DIXSCRIPT_ENUMS: RwLock<Option<HashMap<String, HashMap<String, i32>>>> = RwLock::new(None);
+
+/// Serializes the "register this compile's enums, then later consult them"
+/// window that spans `GeneralSemanticAnalyzer::analyze()` (which populates
+/// `DIXSCRIPT_ENUMS` via `register_enums_with_builtin_system`) through
+/// `ValueResolver::resolve()` (which is what actually calls `Enum.*`
+/// builtin methods that read it back) — see `Runtime/loader.rs::compile_source`,
+/// which is the only place this gets locked.
+///
+/// `DIXSCRIPT_ENUMS` itself is process-wide, not per-compile — `clear_enums()`
+/// at the start of every top-level (non-nested-import) `analyze()` call is
+/// what keeps a *previous, already-finished* compile's enums from leaking
+/// into a new one, but it does nothing to stop *two compiles running at the
+/// same time on different threads* from interleaving: thread A registers,
+/// thread B's own registration clears the registry out from under thread A
+/// before thread A's Stage 7 gets to consult it, and thread A sees "Enum
+/// 'X' not found" for an enum that is very much declared, just not there
+/// anymore by the time it's needed. This lock closes that window — it's a
+/// pure coordination primitive (guards `()`, not the data itself, which is
+/// still the `RwLock` above), so a panic while holding it doesn't leave
+/// anything in a torn state worth failing subsequent compiles over; callers
+/// recover from poisoning rather than propagating it.
+pub static ENUM_REGISTRY_LOCK: Mutex<()> = Mutex::new(());
 
 /// Enum static object implementation
 pub struct EnumObject {
@@ -529,4 +551,4 @@ mod tests {
             .unwrap();
         assert_eq!(result.as_int(), 3);
     }
-}
+                   }

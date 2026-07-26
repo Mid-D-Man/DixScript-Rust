@@ -299,7 +299,7 @@ impl<'src> Tokenizer<'src> {
             if matches!(current, ';' | ',' | '}' | ')' | ']') {
                 state.advance(self.input); return true;
             }
-            if current.is_alphanumeric() || matches!(current, '"' | '\'' | '@') { return true; }
+            if current.is_alphanumeric() || matches!(current, '"' | '\'' | '`' | '@') { return true; }
             state.advance(self.input);
         }
         !state.is_at_end()
@@ -310,7 +310,7 @@ impl<'src> Tokenizer<'src> {
             let current = state.peek(self.input);
             if current.is_whitespace() { self.skip_whitespace(state); return true; }
             if current.is_alphanumeric()
-                || matches!(current, '"' | '\'' | '@' | '{' | '[') { return true; }
+                || matches!(current, '"' | '\'' | '`' | '@' | '{' | '[') { return true; }
             state.advance(self.input);
         }
         false
@@ -377,6 +377,15 @@ impl<'src> Tokenizer<'src> {
         // String literals
         if current == '"' || current == '\'' {
             return self.scan_string_literal(state);
+        }
+
+        // Raw / verbatim strings — `...`. May contain literal newlines and
+        // embedded quote characters; no escape processing at all. Emits the
+        // same TokenType::String(content) as "..." so every existing parser,
+        // LSP feature, and the compactor already handle it correctly with no
+        // further changes — the delimiter is purely a lexer-level concern.
+        if current == '`' {
+            return self.scan_raw_string(state);
         }
 
         // Interpolated strings
@@ -602,6 +611,69 @@ impl<'src> Tokenizer<'src> {
         state.position = bytes.len();
         let token_type = if quote == b'\'' { TokenType::StringSingle(partial) } else { TokenType::String(partial) };
         Ok(Some(Token::new(token_type, start_line, start_column, self.current_section)))
+    }
+
+    /// Raw / verbatim string: `` `...` ``.
+    ///
+    /// No escape processing — a backslash is a literal backslash, and both
+    /// `"` and `'` may appear unescaped inside. The only terminator is the
+    /// next backtick, so a literal backtick cannot appear in the content
+    /// (same single-character-delimiter tradeoff `"`/`'` already have for
+    /// their own quote char). Unlike `scan_string_literal`, an embedded raw
+    /// newline is content, not an error — that's the entire point of this
+    /// literal form.
+    ///
+    /// Emits `TokenType::String(content)`, the same variant `"..."` produces.
+    /// Deliberately not a new token variant: every parser, the compactor, and
+    /// every LSP feature already treat `TokenType::String` correctly, so
+    /// reusing it means this literal form works everywhere immediately with
+    /// zero downstream changes. The tradeoff is re-serialization (compactor
+    /// minification): a raw string whose content contains a literal newline
+    /// or an unescaped `"` will not currently round-trip correctly if
+    /// minified, since `render_token` in compactor.rs naively rewraps
+    /// `TokenType::String` content in `"..."` without re-escaping. Fixing
+    /// that is a separate, isolated compactor.rs change — it does not block
+    /// lexing, parsing, or any LSP feature, since none of them re-emit
+    /// source text.
+    fn scan_raw_string(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
+        let start_line   = state.line;
+        let start_column = state.column;
+        state.advance(self.input); // consume opening `
+
+        let bytes         = self.input.as_bytes();
+        let content_start = state.position;
+
+        if let Some(offset) = memchr::memchr(b'`', &bytes[state.position..]) {
+            let end_abs       = state.position + offset;
+            let content_bytes = &bytes[content_start..end_abs];
+            let newline_count = memchr::memchr_iter(b'\n', content_bytes).count();
+            let content        = std::str::from_utf8(content_bytes).unwrap_or("").to_string();
+
+            if newline_count > 0 {
+                state.line += newline_count;
+                let last_nl  = memchr::memchr_iter(b'\n', content_bytes).next_back().unwrap_or(0);
+                state.column = (end_abs - (content_start + last_nl)) + 1;
+            } else {
+                state.column += (end_abs - content_start) + 1;
+            }
+            state.position = end_abs + 1;
+
+            return Ok(Some(Token::new(
+                TokenType::String(content), start_line, start_column, self.current_section,
+            )));
+        }
+
+        self.error_manager.add_lexical_error(
+            LexicalErrorType::UnterminatedString,
+            "Unterminated raw string literal".to_string(),
+            start_line, start_column, None, None,
+        );
+        if self.should_terminate() {
+            return Err(format!("Unterminated raw string at line {}, col {}", start_line, start_column));
+        }
+        let partial = state.slice(self.input, content_start, bytes.len() - content_start).to_string();
+        state.position = bytes.len();
+        Ok(Some(Token::new(TokenType::String(partial), start_line, start_column, self.current_section)))
     }
 
     fn scan_interpolated_string(&self, state: &mut TokenizerState) -> Result<Option<Token>, String> {
@@ -1409,4 +1481,4 @@ pub struct StaticCallInfo {
     pub column:       usize,
     pub section:      SectionId,
     pub token_index:  usize,
-}
+    }

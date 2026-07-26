@@ -692,6 +692,25 @@ impl DixLoader {
         let ast = parser.parse()
             .map_err(|e| format!("Parse failed: {}", e.message()))?;
 
+        // Acquire the enum-registry lock before touching anything that reads
+        // or writes `enum_object::DIXSCRIPT_ENUMS`. Stage 5 (semantic
+        // analysis, right below) is what populates it via
+        // `register_enums_with_builtin_system`; Stage 7 (value resolution,
+        // further down) is what actually calls `Enum.*` builtin methods that
+        // read it back. Held through Stage 8 too rather than narrowed
+        // further — that stage doesn't touch the registry and is fast, so
+        // there's nothing to gain by releasing early, only more code paths
+        // that could accidentally miss re-acquiring it later. See
+        // `ENUM_REGISTRY_LOCK`'s own doc comment in `enum_object.rs` for why
+        // this exists at all: without it, two `compile_source` calls running
+        // concurrently on different threads can interleave their
+        // register-then-consult windows and see "Enum 'X' not found" for an
+        // enum that's declared just fine, just not there anymore by the time
+        // it's needed.
+        let _enum_registry_guard = crate::Builtins::Static::enum_object::ENUM_REGISTRY_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
         // Stage 5: semantic analysis.
         //
         // `new_with_error_manager` — same reasoning as stages 3 and 4 above.

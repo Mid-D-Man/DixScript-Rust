@@ -3,10 +3,23 @@ name: Publish dixscript to crates.io
 # Manual only (Actions tab -> Run workflow) — requires typing "publish" in
 # the confirmation input, so this can't fire by an accidental click.
 #
-# Requires a CARGO_REGISTRY_TOKEN secret in this repo's settings
-# (Settings -> Secrets and variables -> Actions -> New repository secret).
-# Generate the token at https://crates.io/settings/tokens with publish
-# scope for the dixscript crate.
+# ── Trusted Publishing (OIDC) — NOT usable for the very first publish ──────
+# crates.io can only trust a GitHub repo/workflow for a crate that already
+# exists in the registry — there is no way to pre-authorize a name that has
+# never been published. So:
+#   1. First-ever publish of `dixscript`: use the ORIGINAL token-based
+#      workflow (CARGO_REGISTRY_TOKEN secret) — this file will fail with an
+#      auth error if you run it before that.
+#   2. Once that succeeds, go to https://crates.io/crates/dixscript/settings
+#      -> Trusted Publishing -> add a GitHub Actions publisher with:
+#        Repository owner: Mid-D-Man
+#        Repository name:  DixScript-Rust
+#        Workflow filename: a-publish-dixscript-crate.yml
+#        Environment: (leave blank unless you add one below)
+#   3. From then on, use THIS workflow for every publish. No
+#      CARGO_REGISTRY_TOKEN secret needed or read at all — you can delete
+#      that repo secret once this is confirmed working, or leave it as a
+#      fallback (it's simply unused by this file either way).
 #
 # Also creates a GitHub Release, tagged "dixscript-v<version>" (not just
 # "v<version>") -- this is a monorepo publishing several independently-
@@ -22,11 +35,20 @@ on:
 
 permissions:
   contents: write   # needed to create the tag + GitHub Release below
+  id-token: write   # needed to request the OIDC token that authenticates
+                     # this workflow run to crates.io's Trusted Publishing —
+                     # this replaces CARGO_REGISTRY_TOKEN entirely
 
 jobs:
   publish:
     name: Publish dixscript
     runs-on: ubuntu-latest
+    # Optional extra hardening: create a "release" Environment under repo
+    # Settings -> Environments, require a reviewer on it, and uncomment the
+    # line below. crates.io's Trusted Publisher config can also be scoped to
+    # a specific environment name if you want to require this workflow only
+    # ever publish from within it.
+    # environment: release
     steps:
       - name: Confirm manual trigger
         if: github.event_name == 'workflow_dispatch'
@@ -53,10 +75,17 @@ jobs:
       - name: Verify package (dry run)
         run: cargo publish -p dixscript --dry-run
 
+      # Exchanges this workflow run's GitHub OIDC identity for a short-lived
+      # (well under an hour) crates.io publish token — nothing to store as a
+      # secret, nothing that outlives this job.
+      - name: Authenticate to crates.io (Trusted Publishing)
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
       - name: Publish to crates.io
         run: cargo publish -p dixscript
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
       # ── GitHub Release ──────────────────────────────────────────────────────
       # crates.io and GitHub Releases are entirely separate systems --

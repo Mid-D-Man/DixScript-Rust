@@ -2,10 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use dixscript::Runtime::{DixConverter, DixFormatOptions};
-use dixscript::Compiler::AST::{
-    DixScript, DLMModuleType, DataSection, DataEntry, PropertyAssignment, Value, EnumsSection,
-    ObjectProperty,
-};
+use dixscript::Compiler::AST::{DixScript, DLMModuleType};
 
 #[derive(Debug)]
 pub struct CommandResult {
@@ -150,111 +147,13 @@ fn sanitize_resolved_mdix(raw: &str) -> String {
 // `DixData` still report the enum's name/field alongside its value. But this
 // command only ever emits @DATA, by design ("QuickFuncs / imports are
 // compile-time artefacts and are not useful in the resolved output" below),
-// with no @ENUMS and no @IMPORTS to back a symbolic reference — the same
-// class of problem `to_mdix` had before it started flattening imported enum
-// *declarations* to valid local ones. There's no declaration to flatten TO
-// here at all, so the only output that means anything on its own is the
-// literal resolved value. `flatten_enum_values_for_resolved_output` swaps
-// every `Value::EnumValue` for the `Value::Integer` it already resolved to,
-// via the same `ast.enums` table (including the merged-in qualified imports)
-// that `DixConverter` reads from — so a plain literal like `9` comes out
-// instead of the unusable qualified identifier the AST's generic `Display`
-// impl would otherwise print (`Value::Display` is intentionally left
-// printing the symbolic form globally -- that's correct for debug/hover
-// output elsewhere in the LSP; this is a local, purpose-specific transform,
-// not a change to that shared impl).
-
-fn resolve_enum_int(enums: Option<&EnumsSection>, enum_name: &str, field_name: &str) -> Option<i32> {
-    enums?
-        .enums
-        .iter()
-        .find(|decl| decl.name == enum_name)?
-        .fields
-        .iter()
-        .find(|f| f.name == field_name)?
-        .value
-}
-
-fn flatten_value(value: &Value, enums: Option<&EnumsSection>) -> Value {
-    match value {
-        Value::EnumValue { enum_name, value: field_name, position } => {
-            match resolve_enum_int(enums, enum_name, field_name) {
-                Some(int_value) => Value::Integer { value: int_value, position: *position },
-                // Shouldn't happen -- compilation already validated every
-                // enum reference -- but leave it symbolic rather than
-                // silently emitting a wrong number if it ever does.
-                None => value.clone(),
-            }
-        }
-        Value::Array { values, position } => Value::Array {
-            values: values.iter().map(|v| flatten_value(v, enums)).collect(),
-            position: *position,
-        },
-        Value::NestedArray { values, level, position } => Value::NestedArray {
-            values: values.iter().map(|v| flatten_value(v, enums)).collect(),
-            level: *level,
-            position: *position,
-        },
-        Value::Object { properties, position } => Value::Object {
-            properties: properties
-                .iter()
-                .map(|p| ObjectProperty {
-                    key: p.key.clone(),
-                    value: flatten_value(&p.value, enums),
-                    position: p.position,
-                })
-                .collect(),
-            position: *position,
-        },
-        Value::PrefixedConstructor { prefix, arguments, position } => Value::PrefixedConstructor {
-            prefix: prefix.clone(),
-            arguments: arguments.iter().map(|v| flatten_value(v, enums)).collect(),
-            position: *position,
-        },
-        other => other.clone(),
-    }
-}
-
-fn flatten_enum_values_for_resolved_output(data: &DataSection, enums: Option<&EnumsSection>) -> DataSection {
-    let entries = data
-        .entries
-        .iter()
-        .map(|entry| match entry {
-            DataEntry::SimpleProperty { name, data_type, value, position } => DataEntry::SimpleProperty {
-                name: name.clone(),
-                data_type: data_type.clone(),
-                value: flatten_value(value, enums),
-                position: *position,
-            },
-            DataEntry::TableProperty { path, properties, position } => DataEntry::TableProperty {
-                path: path.clone(),
-                properties: properties
-                    .iter()
-                    .map(|p| PropertyAssignment {
-                        name: p.name.clone(),
-                        data_type: p.data_type.clone(),
-                        value: flatten_value(&p.value, enums),
-                        position: p.position,
-                    })
-                    .collect(),
-                position: *position,
-            },
-            DataEntry::GroupArray { path, items, position } => DataEntry::GroupArray {
-                path: path.clone(),
-                items: items.iter().map(|v| flatten_value(v, enums)).collect(),
-                position: *position,
-            },
-            DataEntry::ObjectProperty { name, data_type, object, position } => DataEntry::ObjectProperty {
-                name: name.clone(),
-                data_type: data_type.clone(),
-                object: Box::new(flatten_value(object, enums)),
-                position: *position,
-            },
-        })
-        .collect();
-
-    DataSection { entries, position: data.position }
-}
+// with no @ENUMS and no @IMPORTS to back a symbolic reference. There's no
+// declaration to point it at here, so the only output that means anything on
+// its own is the literal resolved value -- the same call
+// `DixFormatOptions::inline_enum_values` makes `to_mdix` do. Both go through
+// `DixConverter::inline_enum_values` now, so there's exactly one
+// implementation of "resolve every Value::EnumValue to the literal it stands
+// for" in the whole codebase, not a copy per call site.
 
 pub fn run_create_resolved(ast: &DixScript, source_path: Option<&Path>) -> CommandResult {
     // Only output the resolved @DATA section — QuickFuncs / imports are
@@ -263,7 +162,8 @@ pub fn run_create_resolved(ast: &DixScript, source_path: Option<&Path>) -> Comma
         Some(d) => d,
         None    => return CommandResult::err("⊞ No @DATA section found in the resolved AST."),
     };
-    let flattened = flatten_enum_values_for_resolved_output(data_section, ast.enums.as_ref());
+    let converter = DixConverter::new();
+    let flattened = converter.inline_enum_values(data_section, ast.enums.as_ref());
 
     // Generate the raw Display output then strip the trailing commas that the
     // DataSection Display implementation appends after every entry (including

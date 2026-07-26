@@ -1,9 +1,9 @@
 @IMPORTS(
   EnumMan from "/Users/midman/Desktop/DixScript-Rust/mdix_files/advanced/EnumWithCompressionAndOrEnc.mdix"
 )
+
 @DATA(
- seee = "lk"
- timer:
+
   uop = EnumMan.Suka.Crack,
   ds = EnumMan.Suka.Zabania
 )

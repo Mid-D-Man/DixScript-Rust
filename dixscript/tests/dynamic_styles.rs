@@ -84,7 +84,7 @@ fn index_on_dixvalue_directly_not_just_dixdata() {
         r#"
 @DATA(
   outer:
-    inner:: 1, 2, 3
+    inner = [1, 2, 3]
 )
 "#,
     );
@@ -133,4 +133,4 @@ fn full_path_string_still_works_alongside_indexing() {
     assert_eq!(data.get_value("timer.uop"), Some(&DixValue::Int(9)));
     assert_eq!(data["timer.uop"].as_int(), Some(9));
     assert_eq!(data["timer"]["uop"].as_int(), Some(9));
-}
+        }

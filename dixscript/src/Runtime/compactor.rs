@@ -227,9 +227,26 @@ fn is_next_grouped_entry(tokens: &[Token], from: usize) -> bool {
 ///   inner content with **no surrounding quotes**, so `"Hello World"` minified
 ///   to `Hello World` — a SEVERE bug: it changes the token stream from a single
 ///   String token into multiple Identifier tokens on re-lex. We restore the
-///   `"..."` / `'...'` delimiters.
+///   `"..."` / `'...'` delimiters — and, critically, re-escape the content
+///   first (see [`escape_for_reserialization`]). Restoring delimiters without
+///   re-escaping is itself unsound: any content containing a literal newline,
+///   NUL byte, backslash, or an unescaped instance of the *chosen* delimiter
+///   character produces text that does not re-lex back to the same token —
+///   an embedded raw newline hits `scan_string_literal`'s unterminated-string
+///   error path, and an embedded unescaped `"` (e.g. from a backtick raw
+///   string, or a `'...'` string containing `"`) prematurely closes the
+///   re-emitted literal and desyncs everything after it. Content can contain
+///   any of these today: `\n`/`\t`/`\r`/`\\`/`\"`/`\'`/`\0` escapes in the
+///   original source already decode to the literal character by the time the
+///   token holds it, and backtick raw strings (`` `...` ``, see lexer.rs
+///   `scan_raw_string`) admit literal newlines and unescaped quotes by design
+///   — they lex to a plain `String` token, so they flow through this same arm.
 ///
-/// * `InterpolatedString(s)` — same issue; restore the `$"..."` wrapper.
+/// * `InterpolatedString(s)` — same issue; restore the `$"..."` wrapper and
+///   re-escape with the same helper. `{`/`}` are left untouched (they are
+///   never escaped away in the stored content — see `scan_interpolated_string`
+///   in lexer.rs — so leaving them alone here is what preserves interpolation
+///   boundaries on re-lex, not a gap).
 ///
 /// * `SectionConfig` / `SectionImports` / `SectionDLM` / `SectionEnums` /
 ///   `SectionQuickFuncs` / `SectionData` / `SectionSecurity` — these have no
@@ -254,12 +271,16 @@ fn render_token(token: &Token) -> String {
             format!("{}f", f)
         }
 
-        // FIX: restore quote delimiters — get_token_value() strips them.
-        TokenType::String(s) => format!("\"{}\"", s),
-        TokenType::StringSingle(s) => format!("'{}'", s),
+        // FIX: restore quote delimiters AND re-escape — get_token_value()
+        // strips delimiters, and the content itself may contain characters
+        // (literal newline, NUL, backslash, the delimiter char itself) that
+        // are only safe unescaped in their *original* delimiter context, not
+        // necessarily in this one. See doc comment above.
+        TokenType::String(s) => format!("\"{}\"", escape_for_reserialization(s, '"')),
+        TokenType::StringSingle(s) => format!("'{}'", escape_for_reserialization(s, '\'')),
 
-        // FIX: restore the `$"..."` interpolation wrapper.
-        TokenType::InterpolatedString(s) => format!("$\"{}\"", s),
+        // FIX: restore the `$"..."` interpolation wrapper, same re-escaping.
+        TokenType::InterpolatedString(s) => format!("$\"{}\"", escape_for_reserialization(s, '"')),
 
         // FIX: render the actual `@SECTION` keyword, not the Display fallback.
         TokenType::SectionConfig     => "@CONFIG".to_string(),
@@ -278,6 +299,40 @@ fn render_token(token: &Token) -> String {
         // All other tokens: use the canonical rendering already in Token.
         _ => token.get_token_value(),
     }
+}
+
+/// Re-escapes decoded string content so it can be safely wrapped in `quote`
+/// and re-lexed back to the identical content.
+///
+/// This exactly reverses `process_escape_sequence` in lexer.rs: that function
+/// decodes `\n \t \r \\ \" \' \0` (plus a no-op passthrough for `\{`/`\}`) to
+/// their literal characters while lexing. This function does the inverse at
+/// render time, escaping only what is unsafe to leave bare inside `quote`:
+///
+/// - `\\`, newline, CR, tab, NUL are always escaped, regardless of delimiter
+///   — a raw newline or NUL is never valid unescaped inside `"..."`/`'...'`.
+/// - The `quote` character itself is escaped only when it matches — a `'`
+///   inside a `"`-delimited render (or vice versa) is left bare, since it
+///   needs no escaping there and over-escaping would just be noise.
+/// - `{` / `}` are never touched. They are not part of `process_escape_sequence`'s
+///   escape set in any way that changes re-lexing here — interpolated-string
+///   brace tracking in `scan_interpolated_string` works on literal brace
+///   characters, so leaving them as-is is what keeps `{expr}` boundaries
+///   intact on re-lex.
+fn escape_for_reserialization(s: &str, quote: char) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n'  => out.push_str("\\n"),
+            '\r'  => out.push_str("\\r"),
+            '\t'  => out.push_str("\\t"),
+            '\0'  => out.push_str("\\0"),
+            c if c == quote => { out.push('\\'); out.push(c); }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -1011,4 +1066,4 @@ mod tests {
         let s = "abc";
         assert_eq!(DixCompactor::get_compression_ratio(s, s), 0.0);
     }
-}
+                                       }

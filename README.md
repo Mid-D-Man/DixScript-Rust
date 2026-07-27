@@ -3,7 +3,7 @@
 **Config, Code, and Crypto in One `.mdix` File**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
 [![Crates.io](https://img.shields.io/crates/v/dixscript.svg)](https://crates.io/crates/dixscript)
 [![docs.rs](https://img.shields.io/docsrs/dixscript)](https://docs.rs/dixscript)
 [![Downloads](https://img.shields.io/crates/d/dixscript.svg)](https://crates.io/crates/dixscript)

@@ -9,7 +9,7 @@ npm install @dixscript/core
 ```
 ## Docs
 
-dixscript-docs.pages.dev 
+https://dixscript-docs.pages.dev 
 
 
 ## Quick start

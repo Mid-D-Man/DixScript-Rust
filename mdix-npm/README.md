@@ -5,8 +5,12 @@ Node.js, and any bundler that supports WASM (Vite, webpack, Rollup).
 
 ## Installation
 ```bash
-mdix-npm install @dixscript/core
+npm install @dixscript/core
 ```
+## Docs
+
+dixscript-docs.pages.dev 
+
 
 ## Quick start
 ```typescript

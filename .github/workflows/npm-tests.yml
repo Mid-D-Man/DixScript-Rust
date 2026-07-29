@@ -59,10 +59,34 @@ jobs:
       # mdix-npm/src/index.ts imports directly from ../wasm-pkg/mdix_wasm.js
       # — has to exist before `npm run build:ts` (and therefore before the
       # tests, which import from the built dist/) can succeed.
-      - name: Build WASM crate — bundler target
+      #
+      # --target nodejs, NOT --target bundler, deliberately diverges from
+      # mdix-npm/package.json's own `build:wasm` script and from
+      # wasm-npm-publish.yml's "Step 1" build — both of those build
+      # --target bundler because that's what actually ships in the
+      # published tarball. --target bundler's glue does a static
+      # `import * as wasm from './mdix_wasm_bg.wasm'`, which only a real
+      # bundler (webpack/vite/rollup) can resolve — plain Node has no
+      # loader for `.wasm` as an ES module and throws
+      # ERR_UNKNOWN_FILE_EXTENSION trying (that's the failure this fixes).
+      # --target nodejs emits CommonJS glue that reads the .wasm file via
+      # `fs.readFileSync` at require-time instead, which plain `node --test`
+      # can load with no bundler involved — and Node's ESM loader can still
+      # pull named exports (MdixDatabase, tryGet's dependencies, etc.) out
+      # of that CJS module via static analysis, so index.ts's
+      # `import { ... } from "../wasm-pkg/mdix_wasm.js"` doesn't need to
+      # change. The .d.ts shape wasm-bindgen emits is the same regardless
+      # of target, so `npm run build:ts` type-checks identically either way.
+      #
+      # This only affects the throwaway wasm-pkg/ built inside this job —
+      # it never touches what gets published. See the "final overview"
+      # writeup for the separate, unresolved question of whether the
+      # actual --target bundler package needs a Node-compatible build too
+      # before a plain (non-bundler) Node consumer can use it at all.
+      - name: Build WASM crate — nodejs target (test-only, NOT what gets published)
         run: |
           wasm-pack build mdix-wasm \
-            --target bundler \
+            --target nodejs \
             --release \
             --out-dir "$GITHUB_WORKSPACE/mdix-npm/wasm-pkg" \
             --out-name mdix_wasm

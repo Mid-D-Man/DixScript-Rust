@@ -517,4 +517,69 @@ fn compile_with_dlm_rejects_empty_source() {
 fn decompile_with_dlm_rejects_empty_data() {
     let result = decompile_with_dlm(vec![], "", "empty-test");
     assert!(result.is_err(), "empty data should error, not panic");
-      }
+}
+
+// ── Schema validation ────────────────────────────────────────────────────
+//
+// Regression test: MdixDatabase.validateSchema had no real wasm-bindgen
+// binding at all — MdixSchema and MdixValidationReport both existed and
+// schema.rs's own module doc comment demonstrated `db.validateSchema(schema)`,
+// but nothing in database.rs's #[wasm_bindgen] impl block ever called
+// SchemaBuilder::validate(&self, data), so this was unreachable from JS
+// entirely — the same shape of miss as the mergeWith regression above.
+// This confirms it's wired up.
+
+use mdix_wasm::MdixSchema;
+
+#[wasm_bindgen_test]
+fn validate_schema_passes_for_matching_data() {
+    let db = MdixDatabase::load_str(r#"@DATA(
+        app_name = "MyApp",
+        port     = 8080
+    )"#).unwrap();
+
+    let schema = MdixSchema::new()
+        .require_string("app_name")
+        .require_int("port");
+
+    let report = db.validate_schema(&schema).expect("validateSchema should succeed");
+    assert!(report.is_valid());
+    assert_eq!(report.error_count(), 0);
+}
+
+#[wasm_bindgen_test]
+fn validate_schema_reports_missing_field() {
+    let db = MdixDatabase::load_str(r#"@DATA(app_name = "MyApp")"#).unwrap();
+
+    let schema = MdixSchema::new()
+        .require_string("app_name")
+        .require_int("port");
+
+    let report = db.validate_schema(&schema).unwrap();
+    assert!(!report.is_valid());
+    assert_eq!(report.error_count(), 1);
+    assert_eq!(report.failed_paths(), vec!["port".to_string()]);
+}
+
+#[wasm_bindgen_test]
+fn validate_schema_reports_wrong_type() {
+    let db = MdixDatabase::load_str(r#"@DATA(port = "not-a-number")"#).unwrap();
+
+    let schema = MdixSchema::new().require_int("port");
+
+    let report = db.validate_schema(&schema).unwrap();
+    assert!(!report.is_valid());
+}
+
+#[wasm_bindgen_test]
+fn validate_schema_can_be_reused_across_databases() {
+    // MdixSchema is borrowed (not consumed) by validateSchema, so the same
+    // schema instance must be able to validate more than one database.
+    let schema = MdixSchema::new().require_string("name");
+
+    let db_a = MdixDatabase::load_str(r#"@DATA(name = "Alice")"#).unwrap();
+    let db_b = MdixDatabase::load_str(r#"@DATA(name = "Bob")"#).unwrap();
+
+    assert!(db_a.validate_schema(&schema).unwrap().is_valid());
+    assert!(db_b.validate_schema(&schema).unwrap().is_valid());
+}

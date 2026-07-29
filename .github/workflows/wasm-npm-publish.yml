@@ -21,14 +21,15 @@ name: MidManStudio.Mdix — WASM mdix-npm publish
 # nowhere to go in CI and will just hang.
 #
 # ── What this actually publishes ────────────────────────────────────────
-# @dixscript/core's mdix-npm/src/index.ts currently re-exports only
-# MdixDatabase/MdixBuilder from the compiled WASM. mdix-wasm/src/lib.rs
-# also exports DLM compile/decompile, AST merge, schema validation, and
-# a file watcher — none of those are re-exported here yet, so they aren't
-# part of this package's public API even though the WASM binary itself
-# contains them either way. Flagged here, not changed here — confirm
-# that's the intended v1.0.0 scope for a package literally named "core"
-# before running this for real.
+# @dixscript/core's mdix-npm/src/index.ts re-exports the full mdix-wasm/
+# src/lib.rs surface: MdixDatabase, MdixBuilder, DLM compile/decompile,
+# AST merge (mergeSources/mergeSourcesWeighted/mergeWith), schema
+# validation (MdixSchema/validateSchema), and the content-hash watcher
+# (MdixWatcher). This was previously re-exporting only MdixDatabase/
+# MdixBuilder, flagged-not-fixed right here — that gap is closed now
+# (including wiring MdixDatabase.validateSchema itself, which had no
+# real wasm-bindgen binding at all despite being documented in
+# schema.rs). See mdix-npm/README.md for the full API with examples.
 #
 # ── Fixed from the previous version of this file ────────────────────────
 # - Added this confirm gate (previously none).
@@ -182,8 +183,14 @@ jobs:
       # This is the layer that's actually unique to the npm package (the
       # tryGet/unwrap Result-wrapping helpers) — mdix-wasm's own tests
       # above already cover the underlying WASM getters directly.
+      #
+      # No trailing path here on purpose — `node --test tests/` (a bare
+      # directory as a positional arg) throws "Cannot find module" and
+      # fails before running anything, verified directly. Node's test
+      # runner already auto-discovers *.test.mjs recursively from cwd with
+      # no path argument at all; that's the form that actually works.
       - name: Run mdix-npm test suite
-        run: node --test tests/
+        run: node --test --test-reporter=tap
         working-directory: mdix-npm
 
       - name: Upload build artifacts

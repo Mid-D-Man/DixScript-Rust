@@ -373,6 +373,31 @@ impl MdixDatabase {
         crate::merge::merge_with(self, other, strategy, array_strategy)
     }
 
+    // ── Schema validation ─────────────────────────────────────────────────
+
+    /// Validates this database against `schema` and returns a
+    /// `MdixValidationReport`.
+    ///
+    /// `schema` is borrowed, not consumed — the same `MdixSchema` instance
+    /// can validate multiple databases (mirrors the underlying
+    /// `SchemaBuilder::validate(&self, ..)` in dixscript core, and the same
+    /// pattern mdix-python's `MdixDatabase.validate_schema` already uses).
+    ///
+    /// NOTE: this method was documented at the top of schema.rs
+    /// (`db.validateSchema(schema)`) but was never actually wired up here —
+    /// `MdixSchema` and `MdixValidationReport` existed with no way to reach
+    /// them from `MdixDatabase` at all. Same shape of bug as `mergeWith`
+    /// above (see the regression test docs on that one); this is that
+    /// wiring for schema.rs.
+    #[wasm_bindgen(js_name = validateSchema)]
+    pub fn validate_schema(
+        &self,
+        schema: &crate::schema::MdixSchema,
+    ) -> Result<crate::schema::MdixValidationReport, JsValue> {
+        let data = self.inner.as_ref().ok_or_else(|| freed_err("MdixDatabase"))?;
+        Ok(crate::schema::MdixValidationReport::new(schema.inner.validate(data)))
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────
 
     fn data(&self, path: &str) -> Result<&DixData, JsValue> {

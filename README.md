@@ -3,22 +3,24 @@
 **Config, Code, and Crypto in One `.mdix` File**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
-[![Status](https://img.shields.io/badge/status-beta-blue.svg)]()
+[![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
+[![Crates.io](https://img.shields.io/crates/v/dixscript.svg)](https://crates.io/crates/dixscript)
+[![docs.rs](https://img.shields.io/docsrs/dixscript)](https://docs.rs/dixscript)
+[![Downloads](https://img.shields.io/crates/d/dixscript.svg)](https://crates.io/crates/dixscript)
 
 > **"I built this because I was tired of copy-pasting the same JSON config blocks 500 times. Turns out other people hate that too."**  
 > — Mid-D-Man, Creator
 
 ---
 <!-- GitAds-Verify: YZXZH8RCNBZ1H2T4AKYE91PNIFVCNMFS -->
-## ⚠️ Beta — Not Yet Production Battle-Tested
+## 🎉 `dixscript` v1.0.0 Is Live on crates.io
 
-**The Rust port is feature-complete but has not yet seen wide production use.** The API is stable and the compiler pipeline is fully implemented. Use it in your own projects, test it, and give feedback — but treat it as beta for anything mission-critical until v1.0.0 is officially published.
+**The Rust port is feature-complete, API stable, and `dixscript` v1.0.0 is now published.** It's a fresh release with no real-world mileage yet — install it, use it in your own projects, and file issues for anything you hit. `mdix-cli` and the language wrappers below are still build-from-source until they get their own publish pass.
 
 | Package | Status |
 |---------|--------|
-| `dixscript` (core Rust library) | ✅ Feature-complete, API stable |
-| `mdix-cli` | ✅ All commands implemented |
+| `dixscript` (core Rust library) | ✅ **Published on crates.io** — [`dixscript = "1.0"`](https://crates.io/crates/dixscript) |
+| `mdix-cli` | ✅ All commands implemented — build from source |
 | `mdix-ffi` / C# bindings | ⏳ Bindings generated, packaging pending |
 | `mdix-go` | ⏳ Header generated, Go wrapper pending |
 | `mdix-java` / `mdix-python` | ⏳ Pending runtime wrappers |
@@ -377,18 +379,15 @@ All wrappers bind to the Rust runtime via FFI. The core is complete — wrappers
 ---
 
 ## Getting Started
-```bash
-# Build from source (crates.io publish coming soon)
-git clone https://github.com/Mid-D-Man/DixScript-Rust
-cd DixScript-Rust
-cargo build -p mdix-cli --release
 
-# Basic usage
-mdix validate config.mdix
-mdix compile config.mdix
-mdix compile secrets.mdix --password
-mdix convert config.json --to mdix
-mdix inspect config.mdix --keys
+### As a library
+```bash
+cargo add dixscript
+```
+or in `Cargo.toml`:
+```toml
+[dependencies]
+dixscript = "1.0"
 ```
 ```rust
 use dixscript::Runtime::DixLoader;
@@ -400,6 +399,20 @@ fn main() {
     let port: i32 = data.get("server.port").unwrap_or(8080);
     println!("Server on port {}", port);
 }
+```
+
+### CLI (`mdix-cli`)
+Not yet published to crates.io — build from source:
+```bash
+git clone https://github.com/Mid-D-Man/DixScript-Rust
+cd DixScript-Rust
+cargo build -p mdix-cli --release
+
+mdix validate config.mdix
+mdix compile config.mdix
+mdix compile secrets.mdix --password
+mdix convert config.json --to mdix
+mdix inspect config.mdix --keys
 ```
 
 ---
@@ -424,6 +437,7 @@ Contributions welcome. The Rust port is feature-complete — areas where help is
 
 ## Documentation
 
+- API docs: `https://docs.rs/dixscript`
 - Grammar spec: `others/midx.ebnf`
 - C# reference implementation: `https://github.com/Mid-D-Man/DixScript`
 - CI results: `https://mid-d-man.github.io/DixScript-Rust/`

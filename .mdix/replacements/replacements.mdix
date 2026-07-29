@@ -1,29 +1,49 @@
 // Brought to u by MidManStudio
 // =============================================================================
-// DIFF / COMPLETIONS / AUDIT COMMANDS + CLI TEST COVERAGE  ·  DixScript v1.0.0
+// NPM/WASM PUBLISH READINESS  ·  DixScript v1.0.0 (dixscript crate, published)
 // =============================================================================
-// Everything mdix-cli gained from the "diff command" work onward:
-//   1. New commands: `mdix diff`, `mdix completions`, `mdix audit`
-//      (audit is read-only over .mdix.au — info / view / archives)
-//   2. main.rs + commands/mod.rs + Cargo.toml updated to wire all three in
-//   3. debug-tokens / debug-ast / debug-symbols grouped under their own
-//      "Debug commands" help heading (still fully visible, not hidden)
-//   4. Integration test coverage for: merge, decrypt, debug-tokens,
-//      debug-ast, debug-symbols, diff, completions, audit -- all 8 had
-//      zero tests before this
-//   5. Three real DLM fixtures pulled from mdix_files/tests/dlm/ (keyfile
-//      AES-256, diy audit, enhanced audit) for the decrypt/audit tests
-//   6. mdix-wasm/tests/dlm_compression.rs -- gzip/bzip2/lzma coverage,
-//      standalone + paired with encryption (web.rs only ever tested gzip)
+// Everything from the "get npm + wasm ready to publish" pass:
+//   1. dixscript path deps in mdix-wasm / mdix-python / mdix-java / mdix-lua
+//      now carry version = "1.0.0" too -- a bare path dep can't be
+//      cargo-published, crates.io rejects it outright. mdix-cli/mdix-lsp/
+//      mdix-ffi already had this right, left untouched here.
+//   2. mdix-wasm: MdixDatabase.validateSchema wired up for real -- it was
+//      documented at the top of schema.rs but never attached to the
+//      #[wasm_bindgen] impl block, so it was unreachable from JS entirely.
+//      Same shape of miss as the mergeWith regression (already fixed,
+//      already tested) -- this is that same wiring for schema.rs.
+//   3. mdix-wasm/tests/web.rs -- 4 new regression tests for validateSchema
+//      (passes on matching data, reports a missing field, reports a wrong
+//      type, confirms one MdixSchema instance validates multiple databases)
+//   4. mdix-npm: index.ts now re-exports the FULL mdix-wasm surface --
+//      DLM compile/decompile, merge, schema validation, watch. Previously
+//      only MdixDatabase/MdixBuilder were exported: 11 of 13 lib.rs
+//      bindings were invisible from npm despite being fully implemented
+//      in the compiled wasm binary either way.
+//   5. mdix-npm/src/types.ts -- added MdixMergeStrategy, MdixArrayMergeStrategy,
+//      MdixMergeConflict, MdixValidationError(Kind) so the JSON-shaped
+//      conflicts()/errors() returns aren't just `any`.
+//   6. mdix-npm/tests/dlm-merge-schema-watch.test.mjs -- new file, 16 tests
+//      covering all four newly-exposed features end to end (node:test,
+//      same convention as the existing enum-mixed-data test).
+//   7. mdix-npm/README.md -- documents Merging / Schema validation /
+//      Hot reload / DLM, each with a working example. Docs link kept to
+//      the one verified URL, https://dixscript-docs.pages.dev.
+//   8. .github/workflows/wasm-npm-publish.yml -- updated the header
+//      comment that flagged this exact export gap; it's closed now, so
+//      the "flagged, not fixed" wording would've been stale otherwise.
 //
 // NOT included here on purpose:
-//   - enum-plus-mixed-data tests (test_enum_mixed_data.py, the wasm/C#/npm
-//     equivalents) -- already applied separately
-//   - any .github/workflows/*.yml -- deliberately left out of this package
+//   - rust-version bump. All 7 dixscript-dependent crates still claim
+//     rust-version = "1.70", but dixscript itself declares "1.85" -- that's
+//     a real mismatch (false MSRV metadata), flagged, wanted a go-ahead
+//     before touching it across seven files.
 //
 // Every replacement file below is a NESTED archive entry, so each one
 // resolves straight to target_root + its own path -- no overrides:: block
-// needed, nothing here shares a basename with anything ambiguous.
+// needed, nothing here is ambiguous even with 4 separate Cargo.toml's
+// bundled in the same archive (that's the whole point of nesting them --
+// see MDIX_SCAFFOLD_SKILL.md, "Replacements Templates").
 // =============================================================================
 
 @CONFIG(
@@ -33,6 +53,6 @@
 )
 
 @DATA(
-  description = "diff/completions/audit commands + full CLI test coverage (post-diff-command work, enum tests and workflow files excluded)"
+  description = "cargo.toml versioned-dixscript fix + wasm validateSchema bugfix + full npm re-export/types/tests/README for npm+wasm publish readiness"
   target_root = "."
 )

@@ -13,7 +13,11 @@ name = "mdix_python"
 crate-type = ["cdylib"]
 
 [dependencies]
-dixscript  = { path = "../dixscript" }
+# See mdix-wasm/Cargo.toml for the full reasoning — same fix, same logic:
+# this is also cdylib-only (PyO3 boundary instead of wasm-bindgen), so
+# resolving dixscript from crates.io instead of the local path carries the
+# same no-risk / same-benefit tradeoff.
+dixscript  = "1.0.0"
 serde_json = "1.0"
 pyo3       = { version = "0.21", features = ["extension-module", "abi3-py38"] }
 tempfile   = "3"

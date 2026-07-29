@@ -75,17 +75,29 @@ jobs:
       - name: Verify package (dry run)
         run: cargo publish -p dixscript --dry-run
 
-      # Exchanges this workflow run's GitHub OIDC identity for a short-lived
-      # (well under an hour) crates.io publish token — nothing to store as a
-      # secret, nothing that outlives this job.
+      # ══ BOOTSTRAP ONLY ══════════════════════════════════════════════════
+      # Trusted Publishing can't authorize a crate that doesn't exist on
+      # crates.io yet — this step is skipped for the very first publish and
+      # the plain-token step below is used instead. Once `dixscript` exists
+      # and you've configured Trusted Publishing at
+      # https://crates.io/crates/dixscript/settings, DELETE this `if: false`
+      # step and the one after it, and UNCOMMENT the two steps below them —
+      # i.e. revert this file back to its normal committed state.
       - name: Authenticate to crates.io (Trusted Publishing)
+        if: false
         uses: rust-lang/crates-io-auth-action@v1
         id: auth
 
-      - name: Publish to crates.io
+      - name: "BOOTSTRAP: Publish to crates.io (plain token, first publish only)"
         run: cargo publish -p dixscript
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # - name: Publish to crates.io
+      #   run: cargo publish -p dixscript
+      #   env:
+      #     CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      # ══ END BOOTSTRAP ═══════════════════════════════════════════════════
 
       # ── GitHub Release ──────────────────────────────────────────────────────
       # crates.io and GitHub Releases are entirely separate systems --

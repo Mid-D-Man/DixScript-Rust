@@ -36,6 +36,9 @@
     "type": "git",
     "url": "https://github.com/Mid-D-Man/DixScript-Rust.git"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "typescript": "^5.4.0"
   }

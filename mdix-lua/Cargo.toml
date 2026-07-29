@@ -15,7 +15,7 @@ name       = "mdix"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-dixscript   = { path = "../dixscript" }
+dixscript   = { path = "../dixscript", version = "1.0.0" }
 # "module" and "vendored" are mutually exclusive — and the choice here is
 # load-bearing, not stylistic. This crate is meant to be require()'d from
 # inside a HOST process that embeds its own Lua interpreter (typically via

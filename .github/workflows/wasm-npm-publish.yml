@@ -1,7 +1,63 @@
 name: MidManStudio.Mdix — WASM mdix-npm publish
 
+# Manual only (Actions tab -> Run workflow) — requires typing "publish" in
+# the confirmation input, same gating a-publish-dixscript-crate.yml uses
+# for crates.io, mdix-core-cs-nuget-publish.yml uses for NuGet, and
+# mdix-python-pypi-publish.yml uses for PyPI. The previous version of
+# this file had no confirmation input at all — workflow_dispatch would
+# go straight to `npm publish` with nothing to stop an accidental click.
+#
+# ── Before the very first run ───────────────────────────────────────────
+# @dixscript/core is a SCOPED package. As of writing, nothing has ever
+# been published under the "dixscript" scope (registry.npmjs.org has no
+# entry for it at all) — which means the "dixscript" npm user or
+# Organization needs to already exist on npmjs.com, and NPM_TOKEN
+# (Settings -> Secrets and variables -> Actions -> New repository secret)
+# needs to belong to an account with publish rights to it, or the publish
+# step below fails on its very first real run with a permissions/
+# scope-not-found error rather than a build error. Generate the token as
+# an "Automation" type specifically (npmjs.com -> your avatar -> Access
+# Tokens) — a "Publish" token can prompt for a 2FA one-time code that has
+# nowhere to go in CI and will just hang.
+#
+# ── What this actually publishes ────────────────────────────────────────
+# @dixscript/core's mdix-npm/src/index.ts currently re-exports only
+# MdixDatabase/MdixBuilder from the compiled WASM. mdix-wasm/src/lib.rs
+# also exports DLM compile/decompile, AST merge, schema validation, and
+# a file watcher — none of those are re-exported here yet, so they aren't
+# part of this package's public API even though the WASM binary itself
+# contains them either way. Flagged here, not changed here — confirm
+# that's the intended v1.0.0 scope for a package literally named "core"
+# before running this for real.
+#
+# ── Fixed from the previous version of this file ────────────────────────
+# - Added this confirm gate (previously none).
+# - The publish step no longer has `continue-on-error: true` with nothing
+#   downstream checking it — that combination meant a failed `npm
+#   publish` (auth, scope, version-already-exists, whatever) would still
+#   leave the job's overall result as "success", which is exactly what
+#   silently un-published a real release would look like.
+# - Added an actual test-before-publish step for both mdix-wasm
+#   (wasm-pack test) and mdix-npm (node --test), matching the pattern
+#   mdix-python-pypi-publish.yml already uses.
+# - Added a `npm publish --dry-run` verification step, matching
+#   `cargo publish --dry-run` in a-publish-dixscript-crate.yml.
+# - Added GitHub Release creation after a successful publish, matching
+#   a-publish-dixscript-crate.yml's tag/release step (no per-package
+#   CHANGELOG.md exists yet for mdix-npm, so the release notes here are
+#   a generic note + npm link rather than a changelog excerpt — add
+#   mdix-npm/CHANGELOG.md later and this can be upgraded the same way).
+# - Removed the branch-name / commit-message trigger-parsing logic — the
+#   `on:` block below only ever declares workflow_dispatch, so that
+#   parsing was dead code that could never actually fire from a push or
+#   PR event; it's replaced by the confirm-trigger gate below.
+
 on:
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm. npm does not allow re-publishing the same version once it is live — only deprecating or unpublishing under a strict time limit. Bump the version in mdix-npm/package.json first if this is a new release.'
+        required: true
 
 permissions:
   contents: write
@@ -9,42 +65,24 @@ permissions:
 
 jobs:
 
-  # ── 1. Check trigger ───────────────────────────────────────────────────
-  parse-trigger:
+  # ── 1. Confirm trigger ─────────────────────────────────────────────────
+  confirm-trigger:
     runs-on: ubuntu-latest
-    outputs:
-      run_wasm: ${{ steps.decide.outputs.run_wasm }}
     steps:
-      - name: Decide whether to run WASM build
-        id: decide
+      - name: Confirm manual trigger
         run: |
-          RUN=false
-
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            RUN=true
-          elif [ "${{ github.ref }}" = "refs/heads/npm-wasm" ]; then
-            RUN=true
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            MSG="${{ github.event.pull_request.title }}"
-            echo "$MSG" | grep -qiE '\-\-mdix-wasm' && RUN=true || true
-          else
-            MSG="${{ github.event.head_commit.message }}"
-            echo "$MSG" | grep -qiE '\-\-mdix-wasm' && RUN=true || true
+          if [ "${{ github.event.inputs.confirm }}" != "publish" ]; then
+            echo "Confirmation text did not match 'publish' — aborting."
+            exit 1
           fi
 
-          echo "run_wasm=$RUN" >> $GITHUB_OUTPUT
-          echo "Run WASM build: $RUN"
-
-  # ── 2. Build WASM then mdix-npm package ────────────────────────────────────
-  build-and-publish:
+  # ── 2. Build, test, then publish ───────────────────────────────────────
+  build-test-and-publish:
     runs-on: ubuntu-latest
-    needs: parse-trigger
-    if: needs.parse-trigger.outputs.run_wasm == 'true'
-
+    needs: confirm-trigger
     steps:
       - uses: actions/checkout@v4
 
-      # ── Rust + wasm-pack ───────────────────────────────────────────────
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
@@ -68,7 +106,29 @@ jobs:
           fi
           wasm-pack --version
 
-      # ── Step 1: build bundler target for mdix-npm ──────────────────────────
+      # ── mdix-wasm's own wasm-bindgen-test suite (headless Chrome), run
+      # before anything is built for publishing — same reasoning as
+      # mdix-python-pypi-publish.yml's test-before-publish job re-checking
+      # the exact commit about to ship. continue-on-error + an explicit
+      # follow-up check (not a blanket mask) — same pattern wasm-test.yml
+      # already uses, so a slow/flaky Chrome step doesn't kill the whole
+      # job before its own console output is captured.
+      - name: Run mdix-wasm test suite (headless Chrome)
+        continue-on-error: true
+        run: |
+          cd mdix-wasm
+          wasm-pack test --headless --chrome 2>&1 | tee ../wasm-test-console.txt
+          echo "TEST_EXIT=${PIPESTATUS[0]:-$?}" >> $GITHUB_ENV
+
+      - name: Fail if mdix-wasm tests actually failed
+        if: always()
+        run: |
+          if [ "${TEST_EXIT:-0}" != "0" ]; then
+            echo "::error::mdix-wasm test suite failed — see the previous step's log. Nothing has been published."
+            exit 1
+          fi
+
+      # ── Step 1: build bundler target for mdix-npm ──────────────────────
       - name: Build WASM crate — bundler target (for mdix-npm)
         run: |
           wasm-pack build mdix-wasm \
@@ -108,7 +168,6 @@ jobs:
         run: npm run build:ts
         working-directory: mdix-npm
 
-      # ── Verify output ──────────────────────────────────────────────────
       - name: Verify package contents
         run: |
           echo "dist/ contents:"
@@ -117,6 +176,14 @@ jobs:
           ls -lh wasm-pkg/
           echo "wasm-web/ (web) contents:"
           ls -lh ../wasm-web/
+        working-directory: mdix-npm
+
+      # ── mdix-npm's own test suite, against the just-built dist/ output.
+      # This is the layer that's actually unique to the npm package (the
+      # tryGet/unwrap Result-wrapping helpers) — mdix-wasm's own tests
+      # above already cover the underlying WASM getters directly.
+      - name: Run mdix-npm test suite
+        run: node --test tests/
         working-directory: mdix-npm
 
       - name: Upload build artifacts
@@ -131,29 +198,47 @@ jobs:
             mdix-npm/package-lock.json
           retention-days: 30
 
-      # ── Publish to mdix-npm — only on release branches ──────────────────────
-      - name: Publish to mdix-npm
-        continue-on-error: true
-        if: |
-          github.event_name != 'pull_request' &&
-          github.ref != 'refs/heads/develop' &&
-          (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' ||
-           github.ref == 'refs/heads/mdix-npm-wasm' || github.event_name == 'workflow_dispatch')
+      # Packages the tarball exactly as it would be uploaded and reports
+      # exactly what would go in it, without touching the registry — same
+      # purpose as a-publish-dixscript-crate.yml's `cargo publish
+      # --dry-run` step.
+      - name: Verify npm package (dry run)
+        run: npm publish --access public --dry-run
+        working-directory: mdix-npm
+
+      - name: Publish to npm
         run: npm publish --access public
         working-directory: mdix-npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # ── 3. Deploy to gh-pages ──────────────────────────────────────────────
+      # ── GitHub Release ──────────────────────────────────────────────────
+      # npm and GitHub Releases are entirely separate systems — `npm
+      # publish` above only pushes to the registry. This makes the release
+      # visible/discoverable on the repo itself, same reasoning as
+      # a-publish-dixscript-crate.yml's release step.
+      - name: Read package version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Published @dixscript/core v$VERSION"
+        working-directory: mdix-npm
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "dixscript-core-v${{ steps.version.outputs.version }}" \
+            --title "@dixscript/core v${{ steps.version.outputs.version }}" \
+            --notes "@dixscript/core v${{ steps.version.outputs.version }} — published to npm: https://www.npmjs.com/package/@dixscript/core/v/${{ steps.version.outputs.version }}" \
+            --target "${{ github.sha }}"
+
+  # ── 3. Deploy playground to gh-pages ─────────────────────────────────────
   deploy-wasm-page:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, build-and-publish]
-    if: |
-      always() &&
-      needs.build-and-publish.result == 'success' &&
-      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' ||
-       github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/mdix-npm-wasm' ||
-       github.event_name == 'workflow_dispatch')
+    needs: [confirm-trigger, build-test-and-publish]
+    if: always() && needs.build-test-and-publish.result == 'success'
 
     steps:
       - uses: actions/checkout@v4
@@ -229,7 +314,7 @@ jobs:
   # ── 4. Summary ─────────────────────────────────────────────────────────
   summary:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, build-and-publish, deploy-wasm-page]
+    needs: [confirm-trigger, build-test-and-publish, deploy-wasm-page]
     if: always()
     steps:
       - name: Print summary
@@ -240,15 +325,11 @@ jobs:
           echo "Build:   #${{ github.run_number }}"
           echo "Branch:  ${{ github.ref_name }}"
           echo "Trigger: ${{ github.event_name }}"
-          echo "Build:   ${{ needs.build-and-publish.result  || 'skipped' }}"
-          echo "Deploy:  ${{ needs.deploy-wasm-page.result   || 'skipped' }}"
-          echo ""
-          if [ "${{ needs.parse-trigger.outputs.run_wasm }}" != "true" ]; then
-            echo "Skipped — commit message did not contain --mdix-wasm"
-          fi
+          echo "Build/Publish: ${{ needs.build-test-and-publish.result || 'skipped' }}"
+          echo "Deploy:        ${{ needs.deploy-wasm-page.result || 'skipped' }}"
           echo ""
           echo "npm package uses:  --target bundler (wasm-pkg/)"
           echo "playground uses:   --target web     (wasm-web/)"
           echo ""
           echo "Playground → https://mid-d-man.github.io/DixScript-Rust/wasm/"
-          echo "NOTE: npm publish is blocked on develop branch."
+          echo "Package    → https://www.npmjs.com/package/@dixscript/core"

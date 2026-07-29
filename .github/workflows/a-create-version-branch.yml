@@ -1,0 +1,218 @@
+name: Create version branch
+
+# Manual only (Actions tab -> Run workflow). Dynamic on purpose: pass any
+# version number and it cuts a new branch for it. This one file covers
+# 1.0.1, 1.1.0, 2.0.0, and every release after that -- nothing to edit
+# per-version.
+#
+# On mobile: Actions tab -> "Create version branch" (left sidebar) ->
+# "Run workflow" dropdown (top right of the runs list) -> fill in the
+# inputs -> Run workflow.
+#
+# ── Safety tiering ──────────────────────────────────────────────────────
+# This is a reversible operation (a branch can just be deleted), so it's
+# gated by a dry_run toggle, same as mdix-scaffold's run-structure.yml /
+# run-patch.yml / run-replacements.yml -- NOT the "type publish to
+# confirm" pattern this repo reserves for irreversible ops
+# (a-publish-dixscript-crate.yml, mdix-core-cs-nuget-publish.yml,
+# mdix-python-pypi-publish.yml). dry_run defaults to 'true': the first
+# run against any new version always previews before anything is pushed.
+#
+# All workflow_dispatch inputs are threaded through step-level `env:`
+# blocks rather than interpolated straight into `run:` scripts with
+# ${{ }}. That's deliberate -- an input substituted directly into a
+# shell script is standard GitHub Actions script-injection territory
+# (whatever text someone types becomes literal shell code). Going
+# through env keeps every input as inert data.
+#
+# ── bump_workspace_versions scope ───────────────────────────────────────
+# When enabled, this bumps `version = "..."` in the Cargo.toml of every
+# crate listed under this repo's root [workspace] members (read
+# dynamically from Cargo.toml, so adding/removing a workspace crate
+# later needs no edit here). Today that's: dixscript, mdix-cli, mdix-lsp,
+# mdix-ffi, mdix-wasm, mdix-python, mdix-java, mdix-lua.
+#
+# It deliberately does NOT touch anything outside that list --
+# mdix-csharp's .csproj, the npm/VS Code/IntelliJ manifests, or the
+# Unity packages. Those are independently versioned (e.g.
+# com.midmanstudio.mdix.localization is on 2.0.0 and
+# com.midmanstudio.mdix.webgl is on 0.1.0 while the core sits on 1.0.0)
+# -- bumping them automatically alongside the core would just be wrong.
+# The "Checklist" step below prints every other version-bearing file it
+# finds, with its current value, so nothing gets missed by hand.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New version number, e.g. 1.0.1 (no leading "v" -- one is added for you in the branch name and in any bumped Cargo.toml files)'
+        required: true
+      base_branch:
+        description: 'Branch to cut the new version branch from'
+        required: false
+        default: 'master'
+      branch_name:
+        description: 'Override the branch name entirely. Leave blank to use "release/v<version>".'
+        required: false
+      bump_workspace_versions:
+        description: 'Bump version = "..." in the core Rust workspace Cargo.toml files to the new version (see notes above -- independently-versioned packages are never touched)'
+        required: false
+        type: choice
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
+      dry_run:
+        description: 'true = preview only, nothing pushed. false = actually create + push the branch.'
+        required: false
+        type: choice
+        default: 'true'
+        options:
+          - 'true'
+          - 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  create-branch:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      BASE_BRANCH: ${{ inputs.base_branch }}
+      BRANCH_OVERRIDE: ${{ inputs.branch_name }}
+      BUMP_VERSIONS: ${{ inputs.bump_workspace_versions }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Validate version format
+        run: |
+          set -euo pipefail
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$VERSION' doesn't look like a semantic version (expected e.g. 1.0.1 or 1.1.0-beta.1)."
+            exit 1
+          fi
+          if [[ "$VERSION" == v* ]]; then
+            echo "::error::Pass the version without a leading 'v' (e.g. 1.0.1, not v1.0.1)."
+            exit 1
+          fi
+
+      - name: Compute branch name
+        id: branch
+        run: |
+          set -euo pipefail
+          NAME="$BRANCH_OVERRIDE"
+          if [ -z "$NAME" ]; then
+            NAME="release/v${VERSION}"
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "Branch name resolved to: $NAME"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base_branch }}
+          fetch-depth: 0
+
+      - name: Ensure branch does not already exist
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
+            echo "::error::Branch '$BRANCH_NAME' already exists on origin. Delete it first (or pass a different branch_name) if you want to recreate it."
+            exit 1
+          fi
+
+      - name: Create branch
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          git checkout -b "$BRANCH_NAME"
+
+      - name: Bump core workspace versions
+        if: inputs.bump_workspace_versions == 'true'
+        run: |
+          set -euo pipefail
+
+          # Read [workspace] members straight out of the root Cargo.toml
+          # instead of a hardcoded list, so a future crate addition/removal
+          # doesn't require touching this workflow.
+          MEMBERS=$(awk '
+            /^members *= *\[/ { inblock=1; next }
+            inblock && /\]/ { inblock=0 }
+            inblock { gsub(/[",]/, ""); print $1 }
+          ' Cargo.toml)
+
+          if [ -z "$MEMBERS" ]; then
+            echo "::warning::Could not find [workspace] members in Cargo.toml (format may have changed) -- skipping version bump. Bump manually for this release."
+            exit 0
+          fi
+
+          echo "Workspace members detected: $MEMBERS"
+
+          for member in $MEMBERS; do
+            TOML="$member/Cargo.toml"
+            if [ ! -f "$TOML" ]; then
+              echo "::warning::$TOML not found, skipping"
+              continue
+            fi
+            if grep -qE '^version[[:space:]]*=' "$TOML"; then
+              # First occurrence only (0,/re/ range) -- this is always the
+              # crate's own [package] version, never a dependency's
+              # version further down the file.
+              sed -i "0,/^version[[:space:]]*=.*/{s//version = \"$VERSION\"/}" "$TOML"
+              echo "Bumped $TOML -> $VERSION"
+            else
+              echo "::warning::No top-level 'version =' line found in $TOML, skipping"
+            fi
+          done
+
+      - name: Checklist -- other version-bearing files not touched
+        run: |
+          set -euo pipefail
+          echo "The following also carry version numbers and were left alone (independently versioned -- bump by hand if this release needs them):"
+          echo
+          grep -rn '"version"' --include="package.json" . 2>/dev/null | grep -v node_modules || true
+          grep -rn '<Version>' --include="*.csproj" . 2>/dev/null || true
+          grep -rn '<version>' --include="plugin.xml" . 2>/dev/null || true
+          grep -rn 'pluginVersion' --include="gradle.properties" . 2>/dev/null || true
+
+      - name: Commit version bump
+        if: inputs.bump_workspace_versions == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            git add -A
+            git commit -m "chore: bump core workspace version to ${VERSION}"
+          else
+            echo "No changes to commit (versions already matched, or no workspace Cargo.toml files were found)."
+          fi
+
+      - name: Job summary
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Version branch summary"
+            echo "- New branch: \`$BRANCH_NAME\`"
+            echo "- Base branch: \`$BASE_BRANCH\`"
+            echo "- Version: \`$VERSION\`"
+            echo "- Workspace versions bumped: \`$BUMP_VERSIONS\`"
+            echo "- Dry run: \`$DRY_RUN\`"
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "- **Nothing was pushed.** Re-run with dry_run=false to actually create the branch."
+            else
+              echo "- Branch pushed to origin."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push branch
+        if: inputs.dry_run == 'false'
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          git push origin "$BRANCH_NAME"

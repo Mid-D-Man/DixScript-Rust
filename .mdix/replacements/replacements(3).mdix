@@ -1,0 +1,38 @@
+// Brought to u by MidManStudio
+// =============================================================================
+// NPM CI TESTER — NON-WORKFLOW FILES ONLY  ·  DixScript v1.0.0
+// =============================================================================
+// Corrected from the previous drop of the same name: that one had
+// .github/workflows/npm-test.yml and .github/workflows/wasm-npm-publish.yml
+// in it. Workflow files can NEVER go through this Action -- apply-replacements.yml
+// grants the underlying job only `permissions: contents: write`, not
+// `workflows: write`, and generate-structure.yml (mdix-scaffold, the
+// reusable workflow that actually does the `git push`) caps at the same
+// `contents: write` on its own end too -- so even granting workflows:
+// write on the caller side here wouldn't be enough on its own; the callee
+// would need it too, and that's a different repo. GitHub's server-side
+// push protection rejects the WHOLE commit if any file in it touches
+// .github/workflows/, which means the two harmless files below would have
+// failed to land as well, dragged down by the same push. Confirmed by
+// reading both workflows directly, not guessed.
+//
+// The 2 workflow files (new npm-test.yml + the wasm-npm-publish.yml fix)
+// are delivered separately as plain files instead -- paste those directly
+// through GitHub's own web file editor. A human editing through the
+// website has full permissions regardless of this restriction; it only
+// applies to automated pushes using the Actions-issued GITHUB_TOKEN.
+//
+// Only 2 files here, both non-yml, both nested (.github/...) -- no
+// overrides:: needed.
+// =============================================================================
+
+@CONFIG(
+  version    -> "1.0.0"
+  author     -> "MidManStudio"
+  debug_mode -> "off"
+)
+
+@DATA(
+  description = "npm-test-template.html + landing-index.html (npm card) only -- the 2 workflow files from this same batch are delivered separately as plain files, not through this Action"
+  target_root = "."
+)

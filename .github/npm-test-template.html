@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript npm — Test Results</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117; color: #e6edf3;
+      min-height: 100vh; padding: 40px 24px;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    a { color: #39d353; }
+    .back-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 0.82rem; color: #8b949e; margin-bottom: 20px;
+      text-decoration: none;
+    }
+    .back-link:hover { color: #39d353; }
+    h1 { font-size: 1.6rem; color: #e6edf3; margin-bottom: 6px; }
+    .subtitle { font-size: 0.8rem; color: #484f58; margin-bottom: 28px; }
+
+    .summary-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+      margin-bottom: 24px;
+    }
+    .stat {
+      background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+      padding: 16px; text-align: center;
+    }
+    .stat-value { font-size: 1.6rem; font-weight: 700; }
+    .stat-label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+    .stat.passed .stat-value { color: #3fb950; }
+    .stat.failed .stat-value { color: #f85149; }
+    .stat.total  .stat-value { color: #e6edf3; }
+    .stat.duration .stat-value { color: #8b949e; font-size: 1.1rem; }
+
+    .meta-row {
+      display: flex; gap: 16px; flex-wrap: wrap;
+      font-size: 0.72rem; color: #484f58; margin-bottom: 24px;
+    }
+    .meta-row strong { color: #8b949e; }
+
+    .panel {
+      background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+      overflow: hidden; margin-bottom: 16px;
+    }
+    .panel-header {
+      padding: 10px 16px; font-size: 0.78rem; font-weight: 600;
+      background: #1c2128; border-bottom: 1px solid #30363d; color: #8b949e;
+    }
+    .test-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 16px; font-size: 0.82rem; font-family: 'Cascadia Code', 'Fira Code', monospace;
+      border-bottom: 1px solid #21262d;
+    }
+    .test-row:last-child { border-bottom: none; }
+    .test-name { color: #e6edf3; }
+    .test-status { font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+    .test-status.ok     { background: #0f2d1a; color: #3fb950; border: 1px solid #1a5c33; }
+    .test-status.failed { background: #2a0f0f; color: #f85149; border: 1px solid #5c1a1a; }
+
+    .raw-log {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 10px;
+      padding: 16px; font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 0.76rem; color: #8b949e; white-space: pre-wrap;
+      max-height: 400px; overflow-y: auto;
+    }
+    .note {
+      font-size: 0.75rem; color: #484f58; margin: 16px 0; line-height: 1.5;
+    }
+    footer { margin-top: 32px; font-size: 0.72rem; color: #484f58; text-align: center; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <a class="back-link" href="../">&larr; Back to dashboard</a>
+  <h1>DixScript npm — Test Results</h1>
+  <p class="subtitle">node:test · tap reporter · @dixscript/core</p>
+
+  <div class="summary-grid">
+    <div class="stat total">
+      <div class="stat-value" id="stat-total">TOTAL_PLACEHOLDER</div>
+      <div class="stat-label">Total</div>
+    </div>
+    <div class="stat passed">
+      <div class="stat-value" id="stat-passed">PASSED_PLACEHOLDER</div>
+      <div class="stat-label">Passed</div>
+    </div>
+    <div class="stat failed">
+      <div class="stat-value" id="stat-failed">FAILED_PLACEHOLDER</div>
+      <div class="stat-label">Failed</div>
+    </div>
+    <div class="stat duration">
+      <div class="stat-value" id="stat-duration">DURATION_PLACEHOLDER</div>
+      <div class="stat-label">Duration</div>
+    </div>
+  </div>
+
+  <div class="meta-row">
+    <span><strong>Build</strong>&nbsp;#BUILD_NUM_PLACEHOLDER</span>
+    <span><strong>Branch</strong>&nbsp;BRANCH_PLACEHOLDER</span>
+    <span><strong>Commit</strong>&nbsp;COMMIT_PLACEHOLDER</span>
+    <span><strong>Date</strong>&nbsp;DATE_PLACEHOLDER</span>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">Individual tests</div>
+    <div id="test-rows">
+      <!-- TEST_ROWS_PLACEHOLDER -->
+    </div>
+  </div>
+
+  <p class="note">
+    Parsed from node:test's <code>tap</code> reporter output — a stable,
+    documented format (unlike wasm-bindgen-test, which has no structured
+    report at all). Raw output below for anything the parse missed.
+  </p>
+
+  <div class="panel">
+    <div class="panel-header">Raw output</div>
+    <div class="raw-log" id="raw-log">RAW_LOG_PLACEHOLDER</div>
+  </div>
+
+  <footer>
+    <a href="https://github.com/Mid-D-Man/DixScript-Rust">github.com/Mid-D-Man/DixScript-Rust</a>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -80,7 +80,8 @@
                 return $"{len}";
             }
             -> "reverse" {
-                let rev = tup.reverse();
+                let rev<tuple> = tup.reverse();
+
                 return "reversed";
             }
             -> miss {

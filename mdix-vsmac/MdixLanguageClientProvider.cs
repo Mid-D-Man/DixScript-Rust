@@ -20,7 +20,7 @@ namespace MidManStudio.Mdix
             => new[] { ".mdix" };
 
         protected override string LanguageId => "mdix";
-
+        
         protected override string GetServerPath()
         {
             // 1. Env override (useful during development)

@@ -158,7 +158,7 @@ namespace MidManStudio.Mdix
 
         public Task OnServerInitializeFailedAsync(ILanguageClientInitializationInfo initializationState)
             => Task.CompletedTask;
-
+      
         // Same resolution order as the VS Code / mdix-lsp wrappers: env
         // override, then bundled binary next to this assembly, then PATH.
         static string ResolveServerPath()
@@ -173,6 +173,11 @@ namespace MidManStudio.Mdix
                 return bundled;
 
             return "mdix-lsp"; // fall back to PATH resolution by the shell
+        }
+
+        Task<InitializationFailureContext?> ILanguageClient.OnServerInitializeFailedAsync(ILanguageClientInitializationInfo initializationState)
+        {
+            return default;
         }
     }
 }

@@ -8,5 +8,11 @@
  something = 12
  atable:
   diam = Suka.Booliat,
-  dub = Suka.Crack
+  dub = Suka.Crack,
+   bigString = `
+ggf
+vggg
+ththt
+jjgjgj
+`
 )

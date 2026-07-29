@@ -136,5 +136,12 @@
   test_chk_lower = testStringInChk("lower", "HELLO WORLD"),
   test_chk_trim = testStringInChk("trim", "  spaces  "),
   test_chk_length = testStringInChk("length", "test"),
-  test_chk_miss = testStringInChk("unknown", "test")
+  test_chk_miss = testStringInChk("unknown", "test"),
+  ABigBoy = `Array
+  Big
+  Boy
+  Sees
+  The world as a popim the sakarize
+  suares
+  `
 )

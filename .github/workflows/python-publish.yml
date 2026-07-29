@@ -241,6 +241,21 @@ jobs:
             dist/
           retention-days: 30
 
+      # continue-on-error on "Run pytest" above exists so Parse/Report/
+      # Upload still run (and get uploaded) even on a failing suite — same
+      # reason wasm-test.yml uses the identical pattern. That pattern only
+      # works with this explicit re-check at the very end, after everything
+      # else has had its `if: always()` chance to run: without it, TEST_EXIT
+      # is captured and never read, and a real pytest failure still reports
+      # this job — and this whole workflow run — as successful.
+      - name: Fail if pytest actually failed
+        if: always()
+        run: |
+          if [ "${TEST_EXIT:-0}" != "0" ]; then
+            echo "::error::pytest failed — see py-test-console.txt in the uploaded artifacts, or the 'Run pytest' step's log above."
+            exit 1
+          fi
+
   # ── 3. Deploy to gh-pages ──────────────────────────────────────────────────
   deploy-results:
     runs-on: ubuntu-latest

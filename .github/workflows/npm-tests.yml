@@ -1,36 +1,82 @@
 name: MidManStudio.Mdix — npm Tests
 
-# Manual only (Actions tab -> Run workflow). This is deliberately separate
-# from wasm-npm-publish.yml: that workflow's own "Run mdix-npm test suite"
-# step only ever runs when someone types "publish" and means it. This one
-# is meant to be run often — after any change to mdix-npm/src or
-# mdix-npm/tests — without needing to go anywhere near the publish gate.
-# Same idea as wasm-test.yml (tests mdix-wasm's Rust/wasm-bindgen layer)
-# and python-publish.yml (tests mdix-python) already give their bindings —
-# mdix-npm was the one wrapper with no CI path to its own tests that
-# didn't also mean "and then actually publish if it passes."
-#
-# Scope: this only runs mdix-npm's own test suite (currently just
-# tests/enum-mixed-data.test.mjs, exercising the tryGet/unwrap
-# Result-wrapping layer that's actually unique to this package) against a
-# freshly built dist/. It does NOT re-run mdix-wasm's own
-# #[wasm_bindgen_test] suite — that's wasm-test.yml's job, and duplicating
-# a headless-Chrome run here for code this workflow doesn't touch would
-# just slow this down for no benefit.
-#
-# Reporting is deliberately lighter than wasm-test.yml/python-publish.yml's
-# JSON + HTML-dashboard + gh-pages-deploy treatment — a plain pass/fail
-# job summary and the raw log as an artifact. Happy to add the same
-# dashboard treatment later if it's actually wanted; this covers the
-# "nothing tests mdix-npm on its own" gap without inventing a new
-# `.github/npm-test-template.html` nobody asked for yet.
+# Previously the ONLY way to run mdix-npm's test suite at all was inside
+# wasm-npm-publish.yml — which requires typing "publish" to trigger, needs
+# NPM_TOKEN, and ends in a REAL `npm publish` a few steps later. There was
+# no safe, side-effect-free way to just check "do the tests pass" without
+# risking an actual release. This workflow is that missing safe path —
+# same trigger convention as wasm-test.yml (--mdix-npm keyword, or manual
+# dispatch), no token needed, nothing published, nothing to confirm.
 
 on:
   workflow_dispatch:
+  pull_request:
+  push:
+
+permissions:
+  contents: write
+  actions: read
 
 jobs:
+
+  # ── 1. Check trigger ───────────────────────────────────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      run_npm: ${{ steps.decide.outputs.run_npm }}
+    steps:
+      - name: Decide whether to run npm tests
+        id: decide
+        run: |
+          RUN=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            MSG="${{ github.event.pull_request.title }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-npm\b' && RUN=true || true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-npm\b' && RUN=true || true
+          fi
+
+          echo "run_npm=$RUN" >> $GITHUB_OUTPUT
+          echo "Run npm tests: $RUN"
+
+  # ── 2. Verify mdix-wasm resolves dixscript from crates.io, not the local
+  #      workspace path ──────────────────────────────────────────────────────
+  # `dixscript = { path = "../dixscript", version = "1.0.0" }` makes cargo
+  # ALWAYS prefer the local path for ordinary builds (cargo build/test,
+  # wasm-pack build, etc.) — that's correct workspace behavior, not a bug,
+  # and it's why the wasm-test.yml console output shows "Compiling dixscript
+  # v1.0.0 (/home/runner/.../dixscript)" even after the version field was
+  # added. The version requirement is only actually *exercised* — path
+  # stripped, forced to resolve for real against the registry — by `cargo
+  # publish` (dry-run or not), which packages the crate and rebuilds it in
+  # an isolated temp directory outside the workspace. That's exactly what
+  # this job does for mdix-wasm specifically, same command shape as
+  # a-publish-dixscript-crate.yml's `cargo publish -p dixscript --dry-run`
+  # for the main crate. No CARGO_REGISTRY_TOKEN needed — --dry-run never
+  # reaches the authenticated upload step, confirmed from that same file
+  # (its dry-run step has no token env set either, only its real publish
+  # step does).
+  verify-crates-io-resolution:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_npm == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify mdix-wasm packages and builds against published dixscript (dry run)
+        run: cargo publish -p mdix-wasm --dry-run
+
+  # ── 3. Build + run node:test with the tap reporter ──────────────────────
   build-and-test:
     runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.run_npm == 'true'
+
     steps:
       - uses: actions/checkout@v4
 
@@ -50,43 +96,12 @@ jobs:
           restore-keys: ubuntu-npm-test-
 
       - name: Install wasm-pack
-        run: |
-          if ! command -v wasm-pack &> /dev/null; then
-            curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-          fi
-          wasm-pack --version
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      # mdix-npm/src/index.ts imports directly from ../wasm-pkg/mdix_wasm.js
-      # — has to exist before `npm run build:ts` (and therefore before the
-      # tests, which import from the built dist/) can succeed.
-      #
-      # --target nodejs, NOT --target bundler, deliberately diverges from
-      # mdix-npm/package.json's own `build:wasm` script and from
-      # wasm-npm-publish.yml's "Step 1" build — both of those build
-      # --target bundler because that's what actually ships in the
-      # published tarball. --target bundler's glue does a static
-      # `import * as wasm from './mdix_wasm_bg.wasm'`, which only a real
-      # bundler (webpack/vite/rollup) can resolve — plain Node has no
-      # loader for `.wasm` as an ES module and throws
-      # ERR_UNKNOWN_FILE_EXTENSION trying (that's the failure this fixes).
-      # --target nodejs emits CommonJS glue that reads the .wasm file via
-      # `fs.readFileSync` at require-time instead, which plain `node --test`
-      # can load with no bundler involved — and Node's ESM loader can still
-      # pull named exports (MdixDatabase, tryGet's dependencies, etc.) out
-      # of that CJS module via static analysis, so index.ts's
-      # `import { ... } from "../wasm-pkg/mdix_wasm.js"` doesn't need to
-      # change. The .d.ts shape wasm-bindgen emits is the same regardless
-      # of target, so `npm run build:ts` type-checks identically either way.
-      #
-      # This only affects the throwaway wasm-pkg/ built inside this job —
-      # it never touches what gets published. See the "final overview"
-      # writeup for the separate, unresolved question of whether the
-      # actual --target bundler package needs a Node-compatible build too
-      # before a plain (non-bundler) Node consumer can use it at all.
-      - name: Build WASM crate — nodejs target (test-only, NOT what gets published)
+      - name: Build WASM crate — bundler target (for mdix-npm)
         run: |
           wasm-pack build mdix-wasm \
-            --target nodejs \
+            --target bundler \
             --release \
             --out-dir "$GITHUB_WORKSPACE/mdix-npm/wasm-pkg" \
             --out-name mdix_wasm
@@ -103,24 +118,36 @@ jobs:
         run: npm run build:ts
         working-directory: mdix-npm
 
-      # Node picks the TAP reporter automatically on a non-TTY stdout (which
-      # CI always is), but it's requested explicitly here anyway — this is
-      # the one thing the pass/fail summary below actually parses, so it
-      # shouldn't depend on an auto-detection default silently changing
-      # out from under it in some future Node version.
-      - name: Run mdix-npm test suite
+      # No trailing path here on purpose — `node --test tests/` (a bare
+      # directory as a positional arg) throws "Cannot find module" and
+      # fails before running anything, verified directly. Node's test
+      # runner already auto-discovers *.test.mjs recursively from cwd with
+      # no path argument at all; that's the form that actually works. Same
+      # fix applied to wasm-npm-publish.yml's equivalent step.
+      - name: Run node:test (tap reporter)
         continue-on-error: true
         run: |
-          node --test --test-reporter=tap --test-reporter-destination=stdout tests/ \
-            2>&1 | tee ../npm-test-console.txt
-          echo "TEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          node --test --test-reporter=tap 2>&1 | tee ../npm-test-console.txt
+          echo "TEST_EXIT=${PIPESTATUS[0]:-$?}" >> $GITHUB_ENV
         working-directory: mdix-npm
 
-      - name: Parse TAP output and write job summary
+      # ── Parse TAP output → CI-friendly JSON ─────────────────────────────
+      # node:test's tap reporter is a stable, documented format (unlike
+      # wasm-bindgen-test, which has no structured output at all) — this
+      # is a straightforward regex over `ok N - name` / `not ok N - name`
+      # lines. Diagnostic YAML blocks (---/...  and everything between)
+      # are all indented; result lines never are, so the `^` anchor alone
+      # already excludes them without needing to strip the blocks first.
+      - name: Parse test results
         if: always()
+        env:
+          BUILD_NUM:  ${{ github.run_number }}
+          BRANCH:     ${{ github.ref_name }}
+          COMMIT:     ${{ github.sha }}
+          BUILD_DATE: ${{ github.event.head_commit.timestamp }}
         run: |
           python3 - << 'PYEOF'
-          import re
+          import json, os, re
 
           try:
               with open("npm-test-console.txt") as f:
@@ -128,45 +155,78 @@ jobs:
           except FileNotFoundError:
               raw = ""
 
-          # Node nests each individual test() under its file as an indented
-          # TAP subtest, so plain ^ok/^not ok lines (no leading whitespace)
-          # only ever catch the file-level wrapper, not the actual cases.
-          # The "# tests/# pass/# fail" comment lines are Node's own final
-          # rollup, always unindented, always present once at the very end
-          # of a full run — that's what's actually counted here. The
-          # indented "not ok" lines are only used below to list names.
-          total_match  = re.search(r'^# tests (\d+)$', raw, re.MULTILINE)
-          pass_match   = re.search(r'^# pass (\d+)$',  raw, re.MULTILINE)
-          fail_match   = re.search(r'^# fail (\d+)$',  raw, re.MULTILINE)
-          not_ok_lines = re.findall(r'^\s*not ok \d+ - (.+)$', raw, re.MULTILINE)
+          test_lines = re.findall(r'^(ok|not ok) \d+ - (.+)$', raw, re.MULTILINE)
+          summary_match = re.search(
+              r'^# tests (\d+)\n# suites \d+\n# pass (\d+)\n# fail (\d+).*?# duration_ms ([\d.]+)',
+              raw, re.MULTILINE | re.DOTALL,
+          )
 
-          total  = int(total_match.group(1)) if total_match else 0
-          passed = int(pass_match.group(1))  if pass_match  else 0
-          failed = int(fail_match.group(1))  if fail_match  else len(not_ok_lines)
+          tests = [{"name": name, "status": "passed" if status == "ok" else "failed"} for status, name in test_lines]
+          passed = sum(1 for t in tests if t["status"] == "passed")
+          failed = sum(1 for t in tests if t["status"] == "failed")
+          duration_s = float(summary_match.group(4)) / 1000 if summary_match else 0.0
 
-          lines = ["## mdix-npm test summary", ""]
-          lines.append(f"- Total: {total}")
-          lines.append(f"- Passed: {passed}")
-          lines.append(f"- Failed: {failed}")
-          lines.append("")
+          out = {
+              "build":   os.environ.get("BUILD_NUM",  "0"),
+              "branch":  os.environ.get("BRANCH",     "unknown"),
+              "commit":  os.environ.get("COMMIT",     "")[:8],
+              "date":    os.environ.get("BUILD_DATE", ""),
+              "summary": {
+                  "total": len(tests), "passed": passed,
+                  "failed": failed, "duration_s": duration_s,
+              },
+              "tests": tests,
+          }
 
-          if not_ok_lines:
-              lines.append("**Failed:**")
-              for name in not_ok_lines:
-                  lines.append(f"- {name}")
-          elif total == 0:
-              lines.append("No TAP result lines parsed — see the raw console output in the uploaded artifact; either every test failed before producing output, or the reporter format didn't match what this parser expects.")
-          else:
-              lines.append("All tests passed.")
+          with open("npm-test-output.json", "w") as f:
+              json.dump(out, f, indent=2)
 
-          with open("npm-test-summary.md", "w") as f:
-              f.write("\n".join(lines))
-          print("\n".join(lines))
+          print(f"Total:{len(tests)}  Passed:{passed}  Failed:{failed}  Duration:{duration_s}s")
+          if len(tests) == 0:
+              print("WARNING: no test lines matched — check npm-test-console.txt directly.")
           PYEOF
 
-      - name: Write to job summary
+      # ── Build HTML report ──────────────────────────────────────────────────
+      - name: Build HTML report
         if: always()
-        run: cat npm-test-summary.md >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          python3 - << 'PYEOF'
+          import json, html
+
+          with open("npm-test-output.json") as f:
+              data = json.load(f)
+
+          with open(".github/npm-test-template.html") as f:
+              page = f.read()
+
+          rows = ""
+          for t in data["tests"]:
+              status_class = "ok" if t["status"] == "passed" else "failed"
+              status_text  = "PASS" if t["status"] == "passed" else "FAIL"
+              rows += (
+                  f'<div class="test-row"><span class="test-name">{html.escape(t["name"])}</span>'
+                  f'<span class="test-status {status_class}">{status_text}</span></div>\n'
+              )
+          if not rows:
+              rows = '<div class="test-row"><span class="test-name">No tests parsed — see raw output below.</span></div>'
+
+          with open("npm-test-console.txt") as f:
+              raw_log = html.escape(f.read())
+
+          page = page.replace("TOTAL_PLACEHOLDER",    str(data["summary"]["total"]))
+          page = page.replace("PASSED_PLACEHOLDER",   str(data["summary"]["passed"]))
+          page = page.replace("FAILED_PLACEHOLDER",   str(data["summary"]["failed"]))
+          page = page.replace("DURATION_PLACEHOLDER", f'{data["summary"]["duration_s"]:.2f}s')
+          page = page.replace("BUILD_NUM_PLACEHOLDER", data["build"])
+          page = page.replace("BRANCH_PLACEHOLDER",    data["branch"])
+          page = page.replace("COMMIT_PLACEHOLDER",    data["commit"])
+          page = page.replace("DATE_PLACEHOLDER",      data["date"])
+          page = page.replace("<!-- TEST_ROWS_PLACEHOLDER -->", rows)
+          page = page.replace("RAW_LOG_PLACEHOLDER", raw_log)
+
+          with open("npm-test-index.html", "w") as f:
+              f.write(page)
+          PYEOF
 
       - name: Upload artifacts
         if: always()
@@ -174,18 +234,93 @@ jobs:
         with:
           name: npm-test-results-${{ github.run_number }}
           path: |
+            npm-test-output.json
+            npm-test-index.html
             npm-test-console.txt
-            npm-test-summary.md
           retention-days: 30
 
-      # Same reasoning as wasm-test.yml / python-publish.yml's identical
-      # final step: continue-on-error above exists so the parse/summary/
-      # upload steps still run on a failing suite; this re-check at the
-      # end is what actually turns that back into a real job failure.
-      - name: Fail if the test suite actually failed
+      - name: Fail the job if tests actually failed
         if: always()
         run: |
           if [ "${TEST_EXIT:-0}" != "0" ]; then
-            echo "::error::mdix-npm test suite failed — see the job summary or npm-test-console.txt in the uploaded artifacts."
+            echo "node:test failed — see the Parse/Upload steps above for details."
             exit 1
           fi
+
+  # ── 4. Deploy to gh-pages ──────────────────────────────────────────────────
+  deploy-results:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test]
+    if: |
+      always() &&
+      needs.build-and-test.result == 'success' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' ||
+       github.event_name == 'workflow_dispatch')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-test-results-${{ github.run_number }}
+          path: deploy/
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/npm" "$WORK/npm/builds/build_${BUILD_NUM}"
+
+          cp deploy/npm-test-output.json "$WORK/npm/test-results.json"
+          cp deploy/npm-test-index.html  "$WORK/npm/index.html"
+          cp deploy/npm-test-output.json "$WORK/npm/builds/build_${BUILD_NUM}/test-results.json"
+          cp deploy/npm-test-index.html  "$WORK/npm/builds/build_${BUILD_NUM}/index.html"
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "npm Tests — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+          echo "Deployed → https://mid-d-man.github.io/DixScript-Rust/npm/"
+
+  # ── 5. Summary ─────────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, verify-crates-io-resolution, build-and-test, deploy-results]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "============================================="
+          echo "  MidManStudio.Mdix — npm Test Summary"
+          echo "============================================="
+          echo "Build:   #${{ github.run_number }}"
+          echo "Branch:  ${{ github.ref_name }}"
+          echo "Trigger: ${{ github.event_name }}"
+          echo "crates.io resolution check: ${{ needs.verify-crates-io-resolution.result || 'skipped' }}"
+          echo "Tests:   ${{ needs.build-and-test.result  || 'skipped' }}"
+          echo "Deploy:  ${{ needs.deploy-results.result  || 'skipped' }}"
+          echo ""
+          if [ "${{ needs.parse-trigger.outputs.run_npm }}" != "true" ]; then
+            echo "Skipped — commit message did not contain --mdix-npm"
+          fi
+          echo ""
+          echo "Results → https://mid-d-man.github.io/DixScript-Rust/npm/"

@@ -1,0 +1,102 @@
+{
+  "build": "15",
+  "branch": "master",
+  "commit": "18bd931c",
+  "date": "",
+  "summary": {
+    "total": 22,
+    "passed": 22,
+    "failed": 0,
+    "duration_s": 0.517465595
+  },
+  "tests": [
+    {
+      "name": "compileWithDlm passes through cleanly when source has no @DLM section",
+      "status": "passed"
+    },
+    {
+      "name": "compileWithDlm rejects empty source",
+      "status": "passed"
+    },
+    {
+      "name": "decompileWithDlm rejects empty data",
+      "status": "passed"
+    },
+    {
+      "name": "mergeSources combines disjoint data from two sources",
+      "status": "passed"
+    },
+    {
+      "name": "mergeSources primary_wins keeps the first source's value on conflict",
+      "status": "passed"
+    },
+    {
+      "name": "mergeSources secondary_wins keeps the second source's value on conflict",
+      "status": "passed"
+    },
+    {
+      "name": "mergeSources conflicts() reports the winning source and path",
+      "status": "passed"
+    },
+    {
+      "name": "mergeSources rejects an empty source list",
+      "status": "passed"
+    },
+    {
+      "name": "mergeSourcesWeighted respects explicit per-source weights",
+      "status": "passed"
+    },
+    {
+      "name": "MdixDatabase.mergeWith merges two already-loaded databases",
+      "status": "passed"
+    },
+    {
+      "name": "validateSchema passes for data matching every required field",
+      "status": "passed"
+    },
+    {
+      "name": "validateSchema reports a missing required field",
+      "status": "passed"
+    },
+    {
+      "name": "validateSchema errors() returns a typed, inspectable array",
+      "status": "passed"
+    },
+    {
+      "name": "the same MdixSchema instance can validate more than one database",
+      "status": "passed"
+    },
+    {
+      "name": "MdixWatcher reports unchanged on repeated identical content",
+      "status": "passed"
+    },
+    {
+      "name": "MdixWatcher reports changed when content differs",
+      "status": "passed"
+    },
+    {
+      "name": "MdixWatcher.hasChanged is a cheap pre-check that doesn't update state",
+      "status": "passed"
+    },
+    {
+      "name": "MdixWatcher.reset forgets previously seen content",
+      "status": "passed"
+    },
+    {
+      "name": "sibling fields are unaffected by the enum field",
+      "status": "passed"
+    },
+    {
+      "name": "enum field resolves name, field, and value together",
+      "status": "passed"
+    },
+    {
+      "name": "group array elements resolve their enum fields independently",
+      "status": "passed"
+    },
+    {
+      "name": "a failed read comes back through tryGet as an error, not a throw",
+      "status": "passed"
+    }
+  ]
+}

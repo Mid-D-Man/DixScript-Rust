@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript npm — Test Results</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117; color: #e6edf3;
+      min-height: 100vh; padding: 40px 24px;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    a { color: #39d353; }
+    .back-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 0.82rem; color: #8b949e; margin-bottom: 20px;
+      text-decoration: none;
+    }
+    .back-link:hover { color: #39d353; }
+    h1 { font-size: 1.6rem; color: #e6edf3; margin-bottom: 6px; }
+    .subtitle { font-size: 0.8rem; color: #484f58; margin-bottom: 28px; }
+
+    .summary-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+      margin-bottom: 24px;
+    }
+    .stat {
+      background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+      padding: 16px; text-align: center;
+    }
+    .stat-value { font-size: 1.6rem; font-weight: 700; }
+    .stat-label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+    .stat.passed .stat-value { color: #3fb950; }
+    .stat.failed .stat-value { color: #f85149; }
+    .stat.total  .stat-value { color: #e6edf3; }
+    .stat.duration .stat-value { color: #8b949e; font-size: 1.1rem; }
+
+    .meta-row {
+      display: flex; gap: 16px; flex-wrap: wrap;
+      font-size: 0.72rem; color: #484f58; margin-bottom: 24px;
+    }
+    .meta-row strong { color: #8b949e; }
+
+    .panel {
+      background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+      overflow: hidden; margin-bottom: 16px;
+    }
+    .panel-header {
+      padding: 10px 16px; font-size: 0.78rem; font-weight: 600;
+      background: #1c2128; border-bottom: 1px solid #30363d; color: #8b949e;
+    }
+    .test-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 16px; font-size: 0.82rem; font-family: 'Cascadia Code', 'Fira Code', monospace;
+      border-bottom: 1px solid #21262d;
+    }
+    .test-row:last-child { border-bottom: none; }
+    .test-name { color: #e6edf3; }
+    .test-status { font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+    .test-status.ok     { background: #0f2d1a; color: #3fb950; border: 1px solid #1a5c33; }
+    .test-status.failed { background: #2a0f0f; color: #f85149; border: 1px solid #5c1a1a; }
+
+    .raw-log {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 10px;
+      padding: 16px; font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 0.76rem; color: #8b949e; white-space: pre-wrap;
+      max-height: 400px; overflow-y: auto;
+    }
+    .note {
+      font-size: 0.75rem; color: #484f58; margin: 16px 0; line-height: 1.5;
+    }
+    footer { margin-top: 32px; font-size: 0.72rem; color: #484f58; text-align: center; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <a class="back-link" href="../">&larr; Back to dashboard</a>
+  <h1>DixScript npm — Test Results</h1>
+  <p class="subtitle">node:test · tap reporter · @dixscript/core</p>
+
+  <div class="summary-grid">
+    <div class="stat total">
+      <div class="stat-value" id="stat-total">22</div>
+      <div class="stat-label">Total</div>
+    </div>
+    <div class="stat passed">
+      <div class="stat-value" id="stat-passed">22</div>
+      <div class="stat-label">Passed</div>
+    </div>
+    <div class="stat failed">
+      <div class="stat-value" id="stat-failed">0</div>
+      <div class="stat-label">Failed</div>
+    </div>
+    <div class="stat duration">
+      <div class="stat-value" id="stat-duration">0.52s</div>
+      <div class="stat-label">Duration</div>
+    </div>
+  </div>
+
+  <div class="meta-row">
+    <span><strong>Build</strong>&nbsp;#15</span>
+    <span><strong>Branch</strong>&nbsp;master</span>
+    <span><strong>Commit</strong>&nbsp;18bd931c</span>
+    <span><strong>Date</strong>&nbsp;</span>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">Individual tests</div>
+    <div id="test-rows">
+      <div class="test-row"><span class="test-name">compileWithDlm passes through cleanly when source has no @DLM section</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">compileWithDlm rejects empty source</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">decompileWithDlm rejects empty data</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">mergeSources combines disjoint data from two sources</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">mergeSources primary_wins keeps the first source&#x27;s value on conflict</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">mergeSources secondary_wins keeps the second source&#x27;s value on conflict</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">mergeSources conflicts() reports the winning source and path</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">mergeSources rejects an empty source list</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">mergeSourcesWeighted respects explicit per-source weights</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">MdixDatabase.mergeWith merges two already-loaded databases</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">validateSchema passes for data matching every required field</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">validateSchema reports a missing required field</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">validateSchema errors() returns a typed, inspectable array</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">the same MdixSchema instance can validate more than one database</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">MdixWatcher reports unchanged on repeated identical content</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">MdixWatcher reports changed when content differs</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">MdixWatcher.hasChanged is a cheap pre-check that doesn&#x27;t update state</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">MdixWatcher.reset forgets previously seen content</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">sibling fields are unaffected by the enum field</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">enum field resolves name, field, and value together</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">group array elements resolve their enum fields independently</span><span class="test-status ok">PASS</span></div>
+<div class="test-row"><span class="test-name">a failed read comes back through tryGet as an error, not a throw</span><span class="test-status ok">PASS</span></div>
+
+    </div>
+  </div>
+
+  <p class="note">
+    Parsed from node:test's <code>tap</code> reporter output — a stable,
+    documented format (unlike wasm-bindgen-test, which has no structured
+    report at all). Raw output below for anything the parse missed.
+  </p>
+
+  <div class="panel">
+    <div class="panel-header">Raw output</div>
+    <div class="raw-log" id="raw-log">TAP version 13
+# Subtest: compileWithDlm passes through cleanly when source has no @DLM section
+ok 1 - compileWithDlm passes through cleanly when source has no @DLM section
+  ---
+  duration_ms: 49.016165
+  ...
+# Subtest: compileWithDlm rejects empty source
+ok 2 - compileWithDlm rejects empty source
+  ---
+  duration_ms: 0.526943
+  ...
+# Subtest: decompileWithDlm rejects empty data
+ok 3 - decompileWithDlm rejects empty data
+  ---
+  duration_ms: 0.271997
+  ...
+# Subtest: mergeSources combines disjoint data from two sources
+ok 4 - mergeSources combines disjoint data from two sources
+  ---
+  duration_ms: 8.177039
+  ...
+# Subtest: mergeSources primary_wins keeps the first source&#x27;s value on conflict
+ok 5 - mergeSources primary_wins keeps the first source&#x27;s value on conflict
+  ---
+  duration_ms: 1.451234
+  ...
+# Subtest: mergeSources secondary_wins keeps the second source&#x27;s value on conflict
+ok 6 - mergeSources secondary_wins keeps the second source&#x27;s value on conflict
+  ---
+  duration_ms: 0.440282
+  ...
+# Subtest: mergeSources conflicts() reports the winning source and path
+ok 7 - mergeSources conflicts() reports the winning source and path
+  ---
+  duration_ms: 8.667209
+  ...
+# Subtest: mergeSources rejects an empty source list
+ok 8 - mergeSources rejects an empty source list
+  ---
+  duration_ms: 0.26804
+  ...
+# Subtest: mergeSourcesWeighted respects explicit per-source weights
+ok 9 - mergeSourcesWeighted respects explicit per-source weights
+  ---
+  duration_ms: 1.052564
+  ...
+# Subtest: MdixDatabase.mergeWith merges two already-loaded databases
+ok 10 - MdixDatabase.mergeWith merges two already-loaded databases
+  ---
+  duration_ms: 16.249385
+  ...
+# Subtest: validateSchema passes for data matching every required field
+ok 11 - validateSchema passes for data matching every required field
+  ---
+  duration_ms: 1.15272
+  ...
+# Subtest: validateSchema reports a missing required field
+ok 12 - validateSchema reports a missing required field
+  ---
+  duration_ms: 1.34582
+  ...
+# Subtest: validateSchema errors() returns a typed, inspectable array
+ok 13 - validateSchema errors() returns a typed, inspectable array
+  ---
+  duration_ms: 0.708642
+  ...
+# Subtest: the same MdixSchema instance can validate more than one database
+ok 14 - the same MdixSchema instance can validate more than one database
+  ---
+  duration_ms: 0.61612
+  ...
+# Subtest: MdixWatcher reports unchanged on repeated identical content
+ok 15 - MdixWatcher reports unchanged on repeated identical content
+  ---
+  duration_ms: 0.764286
+  ...
+# Subtest: MdixWatcher reports changed when content differs
+ok 16 - MdixWatcher reports changed when content differs
+  ---
+  duration_ms: 0.563702
+  ...
+# Subtest: MdixWatcher.hasChanged is a cheap pre-check that doesn&#x27;t update state
+ok 17 - MdixWatcher.hasChanged is a cheap pre-check that doesn&#x27;t update state
+  ---
+  duration_ms: 6.593101
+  ...
+# Subtest: MdixWatcher.reset forgets previously seen content
+ok 18 - MdixWatcher.reset forgets previously seen content
+  ---
+  duration_ms: 0.55231
+  ...
+# Subtest: sibling fields are unaffected by the enum field
+ok 19 - sibling fields are unaffected by the enum field
+  ---
+  duration_ms: 135.401135
+  ...
+# Subtest: enum field resolves name, field, and value together
+ok 20 - enum field resolves name, field, and value together
+  ---
+  duration_ms: 1.417995
+  ...
+# Subtest: group array elements resolve their enum fields independently
+ok 21 - group array elements resolve their enum fields independently
+  ---
+  duration_ms: 1.252767
+  ...
+# Subtest: a failed read comes back through tryGet as an error, not a throw
+ok 22 - a failed read comes back through tryGet as an error, not a throw
+  ---
+  duration_ms: 0.975279
+  ...
+1..22
+# tests 22
+# suites 0
+# pass 22
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 517.465595
+</div>
+  </div>
+
+  <footer>
+    <a href="https://github.com/Mid-D-Man/DixScript-Rust">github.com/Mid-D-Man/DixScript-Rust</a>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -10,6 +10,16 @@
 // have been run first — this imports from the built output, not src/.
 //
 // Run with: node --test tests/
+//
+// Imports from dist/index.node.js, not dist/index.js: the latter is the
+// --target bundler build, which contains a raw `.wasm` ESM import only an
+// actual bundler knows how to resolve -- plain `node --test` throws
+// ERR_UNKNOWN_FILE_EXTENSION on it before this file's own code even runs
+// (confirmed directly). dist/index.node.js is the --target nodejs build,
+// which is also exactly what package.json's "node" export condition
+// resolves real `import ... from "@dixscript/core"` consumers to under
+// plain Node -- so this exercises the same code path they get, not a
+// test-only shortcut.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -21,7 +31,7 @@ import {
   mergeSourcesWeighted,
   MdixSchema,
   MdixWatcher,
-} from "../dist/index.js";
+} from "../dist/index.node.js";
 
 // ── DLM (compress / encrypt / audit) ─────────────────────────────────────
 

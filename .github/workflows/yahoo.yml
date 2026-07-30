@@ -1,0 +1,32 @@
+name: Crate Download Test
+
+on:
+  workflow_dispatch: # Allows you to trigger the workflow manually from the GitHub UI
+  push:
+    branches: [ main ]
+
+jobs:
+  download-crate:
+    name: Fetch Crate (${{ matrix.os }} - ${{ matrix.toolchain }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Runs across Linux, macOS, and Windows
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Runs across multiple toolchains (3 OSes x 2 toolchains = 6 total runs)
+        toolchain: [stable, beta]
+
+    steps:
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - name: Download dixscript 1.0.0 from crates.io
+        shell: bash
+        run: |
+          mkdir test_dir && cd test_dir
+          cargo init --name test_app
+          cargo add dixscript@=1.0.0
+          cargo fetch

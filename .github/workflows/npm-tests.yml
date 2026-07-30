@@ -106,6 +106,24 @@ jobs:
             --out-dir "$GITHUB_WORKSPACE/mdix-npm/wasm-pkg" \
             --out-name mdix_wasm
 
+      # --target bundler's JS glue does a raw `import * as X from
+      # "./mdix_wasm_bg.wasm"` -- meant for an actual bundler to resolve,
+      # which is exactly why plain `node --test` below was failing with
+      # ERR_UNKNOWN_FILE_EXTENSION on the .wasm file before this fix:
+      # nothing in this job is a bundler. --target nodejs loads the .wasm
+      # via fs.readFileSync + WebAssembly.Instance instead, which plain
+      # Node handles natively. src/index.node.ts (compiled to
+      # dist/index.node.js) imports from this output specifically --
+      # that's also what package.json's "node" export condition points
+      # real `import ... from "@dixscript/core"` consumers to under Node.
+      - name: Build WASM crate — nodejs target (for mdix-npm's Node entry point)
+        run: |
+          wasm-pack build mdix-wasm \
+            --target nodejs \
+            --release \
+            --out-dir "$GITHUB_WORKSPACE/mdix-npm/wasm-pkg-node" \
+            --out-name mdix_wasm
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'

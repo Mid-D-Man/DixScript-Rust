@@ -82,6 +82,40 @@ const toml = db.toToml();
 const mdix = db.toMdix();
 ```
 
+## Querying
+
+`dixscript`'s `DixQuery` (Rust core) is a chainable `.where_()/.orderBy_desc()/
+.select()/.groupBy()/...` API over array data. That chain isn't ported here as
+its own thing — every one of those operations works on plain decoded values,
+which is exactly what `query()`/`queryMany()` hand back. Use native `Array`
+methods on the result instead:
+```typescript
+import { query, queryMany, MdixDatabase } from "@dixscript/core";
+
+// query(path) — a plain `tasks = [...]` array, or a `tasks::` GroupArray
+// (the flattener stores a GroupArray's items at the base path either way,
+// no pattern needed for that case):
+const highPriority = query(db, "tasks")
+  .filter(t => t.priority === 3)             // where_
+  .sort((a, b) => b.priority - a.priority)    // order_by_desc
+  .map(t => t.name);                          // select
+
+// queryMany(pattern) — sibling paths sharing shape, `*` wildcarding one
+// whole dot-segment (e.g. "servers.web1.status", "servers.db1.status", ...):
+const upCount = queryMany(db, "servers.*.status").filter(s => s === "up").length;
+```
+Cheat sheet for the rest of `query.rs`'s methods once you have the array:
+`count()` → `.length`; `any()/all()` → `.some()/.every()`; `first()/last()/
+nth(i)` → `[0]/.at(-1)/[i]`; `sum_int()/avg_float()` → `.reduce()`; `group_by()`
+→ reduce into a `Map`; `distinct()` → dedupe via `Set`/a keyed `Map`.
+One real gotcha, not just a style difference: Rust's `max_by_key` returns the
+*last* maximum element on a tie — a naive `.reduce((max, t) => t.x > max.x ? t
+: max)` returns the *first* instead. Use `>=` in the reducer to match Rust's
+tie-break exactly.
+
+`query()`/`queryMany()` return `[]` for a path that doesn't exist or isn't
+an `Array` — that's a normal "no match" result here, not a thrown error.
+
 ## Merging
 
 AST-level merge with weighted-priority conflict resolution, per-source

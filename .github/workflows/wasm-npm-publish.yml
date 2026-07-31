@@ -140,7 +140,29 @@ jobs:
           echo "wasm-pack bundler output:"
           ls -lh mdix-npm/wasm-pkg/
 
-      # ── Step 2: build web target for GitHub Pages playground ──────────
+      # ── Step 2: build nodejs target for mdix-npm's Node entry point ────
+      # --target bundler's JS glue does a raw `import * as X from
+      # "./mdix_wasm_bg.wasm"` -- meant for an actual bundler to resolve.
+      # Plain Node has no idea what to do with that and throws
+      # ERR_UNKNOWN_FILE_EXTENSION on the .wasm file before any of your
+      # code runs (confirmed directly, this is what "Run mdix-npm test
+      # suite" below was failing on). --target nodejs loads the .wasm via
+      # fs.readFileSync + WebAssembly.Instance instead, which plain Node
+      # handles natively -- src/index.node.ts (-> dist/index.node.js)
+      # imports from this output, and it's also what package.json's
+      # "node" export condition points real `import ... from
+      # "@dixscript/core"` consumers to under Node.
+      - name: Build WASM crate — nodejs target (for mdix-npm's Node entry point)
+        run: |
+          wasm-pack build mdix-wasm \
+            --target nodejs \
+            --release \
+            --out-dir "$GITHUB_WORKSPACE/mdix-npm/wasm-pkg-node" \
+            --out-name mdix_wasm
+          echo "wasm-pack nodejs output:"
+          ls -lh mdix-npm/wasm-pkg-node/
+
+      # ── Step 3: build web target for GitHub Pages playground ──────────
       # --target web produces JS that uses fetch() to load the .wasm file,
       # which works on a plain static file server (GitHub Pages).
       # --target bundler uses a static import that only bundlers understand.
@@ -175,6 +197,8 @@ jobs:
           ls -lh dist/ || echo "dist/ not found"
           echo "wasm-pkg/ (bundler) contents:"
           ls -lh wasm-pkg/
+          echo "wasm-pkg-node/ (nodejs) contents:"
+          ls -lh wasm-pkg-node/
           echo "wasm-web/ (web) contents:"
           ls -lh ../wasm-web/
         working-directory: mdix-npm
@@ -201,6 +225,7 @@ jobs:
           path: |
             mdix-npm/dist/
             mdix-npm/wasm-pkg/
+            mdix-npm/wasm-pkg-node/
             wasm-web/
             mdix-npm/package-lock.json
           retention-days: 30
@@ -335,8 +360,9 @@ jobs:
           echo "Build/Publish: ${{ needs.build-test-and-publish.result || 'skipped' }}"
           echo "Deploy:        ${{ needs.deploy-wasm-page.result || 'skipped' }}"
           echo ""
-          echo "npm package uses:  --target bundler (wasm-pkg/)"
-          echo "playground uses:   --target web     (wasm-web/)"
+          echo "npm package (bundler consumers): --target bundler (wasm-pkg/)"
+          echo "npm package (plain Node):        --target nodejs  (wasm-pkg-node/)"
+          echo "playground:                      --target web     (wasm-web/)"
           echo ""
           echo "Playground → https://mid-d-man.github.io/DixScript-Rust/wasm/"
           echo "Package    → https://www.npmjs.com/package/@dixscript/core"

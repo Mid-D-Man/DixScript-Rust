@@ -48,3 +48,4 @@ export type {
   MdixValidationError,
 } from "./types.js";
 export { ok, err, tryGet, tryGetAsync, unwrap, unwrapOr } from "./result.js";
+export { query, queryMany } from "./query.js";

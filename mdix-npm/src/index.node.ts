@@ -4,15 +4,16 @@
 // resolved by an actual bundler (webpack/vite/rollup) that knows how to
 // turn a .wasm import into something loadable. Plain Node has no idea
 // what to do with it and throws ERR_UNKNOWN_FILE_EXTENSION before your
-// code even runs, confirmed directly (see wasm-npm-publish.yml's header
-// comment for the CI run this came from).
+// code even runs (confirmed directly against a real CI run).
 //
 // wasm-pack's --target nodejs output solves this a completely different
 // way: it loads the .wasm file itself via `fs.readFileSync` +
 // `WebAssembly.Instance`, synchronously, no ESM .wasm import involved.
 // That's the only wasm-pack target actually meant for direct
 // `node script.mjs` execution with no bundler in the loop -- see
-// package.json's build:wasm script, which now builds both targets.
+// package.json's build:wasm script, which builds both targets, and its
+// "node" export condition, which points real `import ... from
+// "@dixscript/core"` consumers here under plain Node.
 //
 // This file is intentionally identical to index.ts below the import
 // line -- same symbols, same shape, same re-exported TS layer. Keep
@@ -59,3 +60,4 @@ export type {
   MdixValidationError,
 } from "./types.js";
 export { ok, err, tryGet, tryGetAsync, unwrap, unwrapOr } from "./result.js";
+export { query, queryMany } from "./query.js";

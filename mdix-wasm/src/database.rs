@@ -1,4 +1,3 @@
-
 use crate::error::{freed_err, invalid_path_err, runtime_err};
 use dixscript::Runtime::{DixData, DixLoadOptions, DixLoader, DixValue};
 use wasm_bindgen::prelude::*;
@@ -270,6 +269,66 @@ impl MdixDatabase {
         }
     }
 
+    // ── Querying ──────────────────────────────────────────────────────────
+    //
+    // DixQuery (dixscript/src/Runtime/query.rs) is a chain of Rust closures
+    // -- where_(|v| ...), order_by_desc(|v| ...), select(|v| ...), group_by,
+    // any/all, min_by_key/max_by_key. None of that can cross the
+    // wasm-bindgen boundary as-is; JS doesn't have Rust closures, and
+    // marshaling a JS callback in and calling it per-element (js_sys::
+    // Function) would add real overhead for something with an exact native
+    // equivalent already sitting on the other side of the boundary: every
+    // one of those closures just calls `.field(name)` on a `&DixValue`,
+    // which is exactly object-property access once you have plain decoded
+    // JSON. So query()/queryMany() below don't try to port the chain --
+    // they resolve and hand back the same DixValue data get_json() already
+    // hands back for a single path (same direct serde_json::to_string on
+    // the raw values, no DixConverter round-trip -- consistent with
+    // get_json above, not to_json's whole-database hashmap reconstruction),
+    // and native Array.filter/sort/map/reduce/some/every on the decoded
+    // result covers where_/order_by/select/group_by/any/all/sum/avg/
+    // min_by_key/max_by_key, with no parallel API to keep in sync with
+    // query.rs as it grows. See mdix-npm/src/query.ts for the JS-side
+    // convenience wrapper and the equivalent-native-JS cheat sheet.
+
+    /// Query the array at `path` and return its elements as a JSON array
+    /// string. `path` itself must be a plain `Array` value, or a
+    /// `GroupArray`'s own path (the flattener already stores a
+    /// `GroupArray`'s items as a real Array there) -- for gathering across
+    /// multiple *sibling* paths instead, use `query_many`.
+    ///
+    /// Returns `"[]"` for a path that doesn't exist or isn't an Array,
+    /// rather than erroring -- mirrors `DixData::query`, which returns
+    /// `None` for exactly the same two cases: "no matching data" is a
+    /// normal, common outcome for a query, not a caller mistake worth
+    /// throwing over the way e.g. `getString` on the wrong type is.
+    #[wasm_bindgen(js_name = query)]
+    pub fn query(&self, path: &str) -> Result<String, JsValue> {
+        let data = self.data(path)?;
+        match data.query(path) {
+            Some(q) => serde_json::to_string(q.as_slice())
+                .map_err(|e| runtime_err("query serialize", e)),
+            None => Ok("[]".to_string()),
+        }
+    }
+
+    /// Query across every sibling path matched by a glob `pattern` (same
+    /// whole-segment `*` syntax as the core's `select_many` -- see
+    /// query.rs's module doc for exactly what that does and doesn't
+    /// match), gathered into one JSON array string. For a single Array or
+    /// GroupArray path's own items, use `query` instead.
+    ///
+    /// Always returns a JSON array (possibly `"[]"`) -- `DixData::
+    /// query_many` has no `None` case, an empty match set is just an
+    /// empty `DixQuery`.
+    #[wasm_bindgen(js_name = queryMany)]
+    pub fn query_many(&self, pattern: &str) -> Result<String, JsValue> {
+        let data = self.data(pattern)?;
+        let q = data.query_many(pattern);
+        serde_json::to_string(q.as_slice())
+            .map_err(|e| runtime_err("query_many serialize", e))
+    }
+
     // ── Keys ──────────────────────────────────────────────────────────────
 
     /// Returns the direct child key names under `prefix`.
@@ -420,4 +479,4 @@ impl MdixDatabase {
     pub(crate) fn from_data(data: DixData) -> Self {
         MdixDatabase { inner: Some(data) }
     }
-    }
+                     }

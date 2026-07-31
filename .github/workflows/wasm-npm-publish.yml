@@ -52,6 +52,17 @@ name: MidManStudio.Mdix — WASM mdix-npm publish
 #   `on:` block below only ever declares workflow_dispatch, so that
 #   parsing was dead code that could never actually fire from a push or
 #   PR event; it's replaced by the confirm-trigger gate below.
+# - Added a GitHub Packages mirror publish, right after the real npmjs.org
+#   one — see the comment on that step for the naming/auth details, and
+#   the important caveat that it is NOT anonymously installable the way
+#   the npmjs.org package is, even though this repo is public.
+#
+# ── Known issue shipping in this version, on purpose ────────────────────
+# github.com/Mid-D-Man/DixScript-Rust/issues/2 (.mdix.key's compressed_size
+# always equalling original_size, encrypted_size being mislabeled) is
+# still open — dixscript on crates.io is still 1.0.0, no patch published.
+# compileWithDlm() here inherits that as-is. Deliberate call: fixed in the
+# next core dixscript version, not blocking this one.
 
 on:
   workflow_dispatch:
@@ -62,6 +73,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
   actions: read
 
 jobs:
@@ -244,6 +256,64 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # ── Mirror to GitHub Packages ────────────────────────────────────────
+      # "Just in case" backup — npmjs.org above stays the real, primary
+      # distribution channel; that's what `npm install @dixscript/core`
+      # from anywhere in the world actually resolves against.
+      #
+      # GitHub Packages' npm registry enforces that a published package's
+      # scope match the repository owner, so this can't just be a second
+      # `npm publish` of the same package.json — @dixscript isn't
+      # Mid-D-Man's GitHub namespace. Renamed just for this publish
+      # (mdix-npm/package.json on disk in this checkout only — nothing
+      # gets committed back). Auth is GITHUB_TOKEN, not NPM_TOKEN — no new
+      # secret to configure, GitHub Packages accepts the workflow's own
+      # token for a repo it belongs to.
+      #
+      # Caveat worth knowing before treating this as equivalent to the
+      # npmjs.org package: GitHub Packages' npm registry has no anonymous
+      # public install path at all, even for a public repo's public
+      # package — every consumer needs their own GitHub PAT with
+      # read:packages scope configured in .npmrc just to run `npm
+      # install`. This is a mirror for discoverability / your own use,
+      # not a second general-audience distribution channel.
+      #
+      # continue-on-error here on purpose: this is the backup copy, not
+      # the real publish above — a failure here shouldn't undo or
+      # overshadow a successful npmjs.org publish, just get flagged.
+      - name: Compute GitHub Packages scope
+        id: gh_scope
+        run: |
+          set -euo pipefail
+          # npm scopes must be lowercase; github.repository_owner keeps
+          # whatever case the account actually has (Mid-D-Man).
+          echo "scope=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@${{ steps.gh_scope.outputs.scope }}'
+
+      - name: Publish mirror to GitHub Packages
+        id: gh_packages_publish
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          npm pkg set name="@${{ steps.gh_scope.outputs.scope }}/dixscript-core"
+          npm publish
+        working-directory: mdix-npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Note GitHub Packages mirror outcome
+        if: always()
+        run: |
+          if [ "${{ steps.gh_packages_publish.outcome }}" == "success" ]; then
+            echo "GitHub Packages mirror: published to @${{ steps.gh_scope.outputs.scope }}/dixscript-core."
+          else
+            echo "::warning::GitHub Packages mirror publish failed — the real npmjs.org package above is unaffected. Check the 'Publish mirror to GitHub Packages' step's log."
+          fi
+
       # ── GitHub Release ──────────────────────────────────────────────────
       # npm and GitHub Releases are entirely separate systems — `npm
       # publish` above only pushes to the registry. This makes the release
@@ -365,4 +435,5 @@ jobs:
           echo "playground:                      --target web     (wasm-web/)"
           echo ""
           echo "Playground → https://mid-d-man.github.io/DixScript-Rust/wasm/"
-          echo "Package    → https://www.npmjs.com/package/@dixscript/core"
+          echo "Package (npm, real)      → https://www.npmjs.com/package/@dixscript/core"
+          echo "Package (GitHub mirror)  → https://github.com/Mid-D-Man/DixScript-Rust/pkgs/npm/dixscript-core"

@@ -20,7 +20,8 @@
     "dist",
     "wasm-pkg",
     "wasm-pkg-node",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build:wasm": "wasm-pack build ../mdix-wasm --target bundler --out-dir \"$(pwd)/wasm-pkg\" --out-name mdix_wasm && wasm-pack build ../mdix-wasm --target nodejs --out-dir \"$(pwd)/wasm-pkg-node\" --out-name mdix_wasm",
@@ -39,7 +40,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Mid-D-Man/DixScript-Rust.git"
+    "url": "git+https://github.com/Mid-D-Man/DixScript-Rust.git"
   },
   "publishConfig": {
     "access": "public"

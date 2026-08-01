@@ -1,7 +1,7 @@
 @CONFIG(
   version  -> "1.0.0"
   author   -> "CLI Test — QuickFuncs"
-  features -> "data,enums"
+  features -> "data,enums,quickfuncs"
 )
 
 @ENUMS(

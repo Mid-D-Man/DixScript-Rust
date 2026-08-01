@@ -5,12 +5,9 @@ name: Publish midmanstudio-mdix to PyPI
 # gating a-publish-dixscript-crate.yml already uses for crates.io and
 # mdix-core-cs-nuget-publish.yml uses for NuGet.
 #
-# Requires a PYPI_API_TOKEN secret in this repo's settings
-# (Settings -> Secrets and variables -> Actions -> New repository secret).
-# Generate the token at https://pypi.org/manage/account/token/, scoped to
-# the midmanstudio-mdix project (or "entire account" the first time, since
-# a project-scoped token can't be created before the project exists on
-# PyPI — narrow it to the project once this first publish succeeds).
+# Authenticates using PyPI Trusted Publishers (OIDC) — no API tokens required.
+# As long as the PyPI pending publisher is configured for this exact repository
+# and workflow filename, the upload will succeed and automatically create the project.
 #
 # Builds wheels on all 3 OSes maturin/pyo3 need a real build environment
 # for (can't cross-compile a compiled-extension wheel from Linux alone the
@@ -36,6 +33,7 @@ on:
 permissions:
   contents: write   # needed to create the tag + GitHub Release below
   actions: read
+  id-token: write   # REQUIRED for PyPI Trusted Publisher (OIDC) authentication
 
 jobs:
   confirm-trigger:
@@ -162,10 +160,10 @@ jobs:
         run: twine check dist/*.whl
 
       - name: Upload to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload --skip-existing dist/*.whl
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true
 
       # ── GitHub Release ────────────────────────────────────────────────────
       # PyPI and GitHub Releases are entirely separate systems -- the twine

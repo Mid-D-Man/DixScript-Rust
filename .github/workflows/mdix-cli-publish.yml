@@ -1,0 +1,201 @@
+name: Publish mdix-cli
+
+# Manual only (Actions tab -> Run workflow) — requires typing "publish" in
+# the confirmation input, same gating a-publish-dixscript-crate.yml uses
+# for crates.io, mdix-core-cs-nuget-publish.yml uses for NuGet, and
+# mdix-python-pypi-publish.yml uses for PyPI.
+#
+# Publishes mdix-cli to TWO places:
+#   1. crates.io       — `cargo install mdix-cli`
+#   2. GitHub Packages  — a container image at ghcr.io/<owner>/mdix-cli,
+#      since GitHub Packages has no native "plain Cargo crate" registry
+#      type (only npm/Maven/Gradle/NuGet/RubyGems/container images) — a
+#      container is the closest equivalent for a CLI binary, and doubles
+#      as a `docker run` / CI-friendly distribution path that doesn't
+#      need a Rust toolchain at all.
+# Then creates a GitHub Release tagged "mdix-cli-v<version>", same
+# reasoning a-publish-dixscript-crate.yml/wasm-npm-publish.yml/
+# mdix-python-pypi-publish.yml already document for their own packages.
+#
+# ── crates.io — Trusted Publishing (OIDC), same bootstrap situation as
+#    dixscript originally had ────────────────────────────────────────────
+# crates.io can only trust a GitHub repo/workflow for a crate that already
+# exists in the registry — there is no way to pre-authorize a name that
+# has never been published. So:
+#   1. First-ever publish of `mdix-cli`: this file uses the plain
+#      CARGO_REGISTRY_TOKEN-based step below (reuses the SAME repo secret
+#      a-publish-dixscript-crate.yml already uses — only reused here if
+#      that token is a general account token rather than one scoped to
+#      the `dixscript` crate specifically; if publishing fails with a
+#      permissions error, generate a fresh token at
+#      https://crates.io/settings/tokens with publish scope covering
+#      `mdix-cli`, or "entire account", and update the secret).
+#   2. Once that succeeds, go to
+#      https://crates.io/crates/mdix-cli/settings -> Trusted Publishing
+#      -> add a GitHub Actions publisher with:
+#        Repository owner: Mid-D-Man
+#        Repository name:  DixScript-Rust
+#        Workflow filename: mdix-cli-publish.yml
+#        Environment: (leave blank unless you add one below)
+#   3. From then on, switch the "Authenticate to crates.io" step below
+#      from `if: false` to enabled, and the publish step's
+#      CARGO_REGISTRY_TOKEN env to `${{ steps.auth.outputs.token }}` —
+#      same swap a-publish-dixscript-crate.yml documents for itself.
+#
+# ── GitHub Packages (container) ─────────────────────────────────────────
+# Uses the built-in GITHUB_TOKEN, not a new secret — GITHUB_TOKEN already
+# has package-write rights for this repo once `packages: write` is
+# granted below.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm. crates.io does not allow un-publishing a version once it is live — only yanking. A container tag CAN be overwritten by re-running this workflow, but avoid relying on that. Bump version in mdix-cli/Cargo.toml first if this is a new release.'
+        required: true
+
+permissions:
+  contents: write   # needed to create the tag + GitHub Release
+  packages: write   # needed to push the container image to GHCR
+  actions: read
+
+jobs:
+
+  # ── 1. Confirm trigger ─────────────────────────────────────────────────
+  confirm-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm manual trigger
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "publish" ]; then
+            echo "Confirmation text did not match 'publish' — aborting."
+            exit 1
+          fi
+
+  # ── 2. Publish to crates.io ─────────────────────────────────────────────
+  publish-crate:
+    name: Publish to crates.io
+    needs: confirm-trigger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build (release)
+        run: cargo build -p mdix-cli --release
+
+      - name: Run tests
+        run: cargo test -p mdix-cli
+
+      # Packages the crate exactly as it would be uploaded and does a full
+      # build from that package in a clean temp directory — catches
+      # anything an exclude list or a missing file would break, without
+      # actually publishing yet. Same purpose as a-publish-dixscript-
+      # crate.yml's identical step.
+      - name: Verify package (dry run)
+        run: cargo publish -p mdix-cli --dry-run
+
+      # ══ BOOTSTRAP ONLY ══════════════════════════════════════════════════
+      # See the header comment. Once Trusted Publishing is configured for
+      # mdix-cli, flip this to enabled and swap the token in the step
+      # below, mirroring a-publish-dixscript-crate.yml's own bootstrap
+      # swap.
+      - name: Authenticate to crates.io (Trusted Publishing)
+        if: false
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      - name: "BOOTSTRAP: Publish to crates.io (plain token, first publish only)"
+        run: cargo publish -p mdix-cli
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # - name: Publish to crates.io
+      #   run: cargo publish -p mdix-cli
+      #   env:
+      #     CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      # ══ END BOOTSTRAP ═══════════════════════════════════════════════════
+
+  # ── 3. Publish container image to GitHub Packages (GHCR) ───────────────
+  publish-container:
+    name: Publish to GitHub Packages
+    # Waits on publish-crate succeeding first so the container always
+    # represents a version that's actually live on crates.io too, rather
+    # than the two registries ever drifting to different commits.
+    needs: [confirm-trigger, publish-crate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image name
+        id: image
+        run: |
+          # GHCR image names must be lowercase; github.repository_owner
+          # is "Mid-D-Man" (mixed case) so this can't be used verbatim.
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "name=ghcr.io/${OWNER_LC}/mdix-cli" >> "$GITHUB_OUTPUT"
+
+      - name: Read package version
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version' mdix-cli/Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build image
+        run: |
+          docker build \
+            -f mdix-cli/Dockerfile \
+            -t "${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}" \
+            -t "${{ steps.image.outputs.name }}:latest" \
+            .
+
+      - name: Smoke-test image
+        run: docker run --rm "${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}" --version
+
+      - name: Push image
+        run: |
+          docker push "${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}"
+          docker push "${{ steps.image.outputs.name }}:latest"
+
+  # ── 4. GitHub Release ────────────────────────────────────────────────────
+  create-release:
+    needs: [confirm-trigger, publish-crate, publish-container]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read package version
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version' mdix-cli/Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing mdix-cli v$VERSION"
+
+      - name: Compute image name
+        id: image
+        run: |
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "name=ghcr.io/${OWNER_LC}/mdix-cli" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE: ${{ steps.image.outputs.name }}
+          # Real GHCR-package URL format for a container linked to a repo:
+          # https://github.com/<owner>/<repo>/pkgs/container/<image-name>
+          PACKAGE_URL: https://github.com/${{ github.repository }}/pkgs/container/mdix-cli
+        run: |
+          NOTES="mdix-cli v${VERSION}
+
+          - crates.io: https://crates.io/crates/mdix-cli/${VERSION}
+          - Container: \`docker pull ${IMAGE}:${VERSION}\` (also tagged \`:latest\`) — ${PACKAGE_URL}"
+
+          gh release create "mdix-cli-v${VERSION}" \
+            --title "mdix-cli v${VERSION}" \
+            --notes "$NOTES" \
+            --target "${{ github.sha }}"

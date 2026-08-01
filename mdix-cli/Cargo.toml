@@ -15,7 +15,7 @@ name = "mdix"
 path = "src/main.rs"
 
 [dependencies]
-dixscript  = { path = "../dixscript", version = "1.0.0" }
+dixscript  = "1.0.0"
 
 clap       = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"

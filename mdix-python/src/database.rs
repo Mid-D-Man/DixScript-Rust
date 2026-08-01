@@ -544,6 +544,66 @@ impl MdixDatabase {
         Ok(crate::schema::MdixValidationReport::from_core(report))
     }
 
+    // ── Querying ───────────────────────────────────────────────────────────
+
+    /// Query the array at `path` as a chainable `MdixQuery` — mirrors the
+    /// core's `DixData::query(path)`. `None` if the path doesn't exist or
+    /// isn't an array (same "wrong shape -> None, not error" contract the
+    /// core method uses); covers a plain array literal or a GroupArray's
+    /// items alike, since the flattener stores the full array at the base
+    /// path for both.
+    ///
+    /// Routes through `get_json` + `json.loads` — the same well-tested
+    /// conversion path `to_table()` already uses — rather than binding
+    /// the core's `DixQuery` directly. See `query.rs`'s module doc for why.
+    ///
+    /// ```python
+    /// high_priority = (db.query("tasks")
+    ///     .where_(lambda t: t["priority"] == 3)
+    ///     .order_by_desc(lambda t: t["priority"]))
+    /// ```
+    fn query(&self, py: Python<'_>, path: &str) -> PyResult<Option<crate::query::MdixQuery>> {
+        if path.is_empty() { return Err(invalid_path_err(path)); }
+        let data = self.data()?;
+        match data.get_value(path) {
+            Some(DixValue::Array(_)) => {
+                let json_str = self.get_json(path)?;
+                let json_module = py.import_bound("json")
+                    .map_err(|e| runtime_err("query", format!("failed to import json module: {}", e)))?;
+                let obj = json_module.call_method1("loads", (json_str,))
+                    .map_err(|e| runtime_err("query", format!("json.loads failed: {}", e)))?;
+                Ok(Some(crate::query::MdixQuery::from_any(&obj)?))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Query across every sibling path matched by a glob `pattern` (same
+    /// whole-segment `*` syntax as the core's `DixData::select_many` /
+    /// `query_many` — a `*` segment matches any single dotted segment
+    /// verbatim, not a substring/prefix glob). Always returns an
+    /// `MdixQuery` (possibly empty) rather than `None`, matching the
+    /// core's own `query_many` signature.
+    ///
+    /// For iterating a GroupArray's own items, use `query(path)` instead —
+    /// the flattener already stores the full array there directly.
+    ///
+    /// ```python
+    /// statuses = db.query_many("servers.*.status")
+    /// ```
+    fn query_many(&self, py: Python<'_>, pattern: &str) -> PyResult<crate::query::MdixQuery> {
+        if pattern.is_empty() { return Err(invalid_path_err(pattern)); }
+        let data = self.data()?;
+        let items = data.select_many::<DixValue>(pattern);
+        let json_str = serde_json::to_string(&items)
+            .map_err(|e| runtime_err("query_many:serialize", e))?;
+        let json_module = py.import_bound("json")
+            .map_err(|e| runtime_err("query_many", format!("failed to import json module: {}", e)))?;
+        let obj = json_module.call_method1("loads", (json_str,))
+            .map_err(|e| runtime_err("query_many", format!("json.loads failed: {}", e)))?;
+        crate::query::MdixQuery::from_any(&obj)
+    }
+
     /// Merges this database with `other`. Returns `(database, conflicts)`
     /// — see merge.rs for strategy names. Neither `self` nor `other` is
     /// mutated.

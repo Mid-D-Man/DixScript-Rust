@@ -47,6 +47,21 @@ Quick start::
         for err in report.errors:
             print(err)
 
+    # Query — LINQ-style chaining over array data
+    high_priority = (db.query("enemies")
+                      .where_(lambda e: e["hp"] > 50)
+                      .order_by_desc(lambda e: e["hp"]))
+    names = high_priority.select(lambda e: e["name"])
+
+    # query_many — sibling paths sharing shape via a wildcarded segment
+    statuses = db.query_many("servers.*.status")
+
+    # Hot reload — poll-based, call .check() from your own update loop
+    watcher = MdixWatcher("config.mdix")
+    reloaded, changed = watcher.check()
+    if changed:
+        db = reloaded
+
 ML extras (requires numpy / pandas)::
 
     from midmanstudio.mdix.ml import MdixNumpy, MdixMLConfig, MdixDataFrame, MdixTensor
@@ -63,6 +78,8 @@ from ._mdix import (  # type: ignore[import]
     MdixSchemaBuilder,
     MdixValidationReport,
     MdixValidationError,
+    MdixWatcher,
+    MdixQuery,
     __version__,
 )
 
@@ -75,5 +92,7 @@ __all__ = [
     "MdixSchemaBuilder",
     "MdixValidationReport",
     "MdixValidationError",
+    "MdixWatcher",
+    "MdixQuery",
     "__version__",
 ]

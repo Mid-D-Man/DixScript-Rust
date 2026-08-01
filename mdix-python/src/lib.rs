@@ -4,6 +4,7 @@ mod builder;
 mod database;
 mod error;
 mod merge;
+mod query;
 mod result;
 mod schema;
 mod watch;
@@ -22,6 +23,7 @@ fn _mdix(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<schema::MdixValidationError>()?;
     m.add_class::<schema::MdixValidationReport>()?;
     m.add_class::<watch::MdixWatcher>()?;
+    m.add_class::<query::MdixQuery>()?;
     // MdixMerger's merge_files/merge_files_weighted/merge_strings are
     // instance methods on a builder-style class (set strategy, then merge),
     // not free functions — registered as a class, not via wrap_pyfunction.

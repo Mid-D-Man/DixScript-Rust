@@ -71,6 +71,54 @@ if result:
     print(result.value)
 ```
 
+## MdixQuery — LINQ-style querying
+```python
+db = MdixDatabase.load_str("""
+@DATA(
+  tasks::
+  { name = "Backup", priority = 3 },
+  { name = "Docs",   priority = 1 },
+  { name = "Audit",  priority = 3 }
+)
+""")
+
+high_priority = (db.query("tasks")
+                  .where_(lambda t: t["priority"] == 3)
+                  .order_by_desc(lambda t: t["priority"]))
+names = high_priority.select(lambda t: t["name"])   # ["Backup", "Audit"]
+
+# Sibling paths sharing shape via a wildcarded segment
+statuses = db.query_many("servers.*.status")
+
+# MdixQuery also supports len(), indexing, and iteration directly
+for task in db.query("tasks"):
+    print(task["name"])
+```
+`db.query(path)` covers a plain array literal or a GroupArray's items
+alike, and returns `None` (not an error) if `path` doesn't exist or isn't
+an array. Every predicate/key/selector is a plain Python callable —
+`where_`, `where_field_eq`, `select`, `select_field`, `order_by`,
+`order_by_desc`, `group_by`, `distinct`, `skip`, `take`, `any`, `all`,
+`count`, `is_empty`, `first`/`first_or`/`last`/`nth`, `sum_int`/`sum_float`/
+`avg_float`, `min_by_key`/`max_by_key`, and `to_list`.
+
+## MdixWatcher — hot reload
+```python
+from midmanstudio.mdix import MdixWatcher
+
+watcher = MdixWatcher("config.mdix")
+
+# in your own update loop / tick / timer callback:
+db, changed = watcher.check()
+if changed:
+    apply_new_config(db)
+```
+Poll-based, not OS-event-based — a single stat call per `check()`, cheap
+enough to run every frame and consistent across every platform. The
+first `check()` always reports a change; `db` is `None` when `changed`
+is `False`. Use `force_reload()` to reload unconditionally, or
+`has_changed()` to check without reloading.
+
 ## Requirements
 
 - Python 3.8+

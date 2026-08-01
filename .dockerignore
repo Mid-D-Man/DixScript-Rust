@@ -1,0 +1,36 @@
+# Keeps the mdix-cli container build context (repo root -- see
+# mdix-cli/Dockerfile's header comment for why) from dragging in every
+# other wrapper's build output, test fixtures, and tooling that
+# `cargo build -p mdix-cli` never touches.
+
+.git/
+.github/
+.idea/
+.vscode/
+*.pdb
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Rust build output -- rebuilt fresh inside the image every time.
+target/
+**/target/
+
+# Non-Rust wrapper build outputs / dependency caches not needed to build
+# mdix-cli or dixscript.
+mdix-npm/node_modules/
+mdix-npm/dist/
+mdix-npm/wasm-pkg/
+mdix-python/python/**/__pycache__/
+mdix-python/**/*.egg-info/
+mdix-python/tests/fixtures/
+mdix-csharp/**/bin/
+mdix-csharp/**/obj/
+mdix-csharp/src/MidManStudio.Mdix.Core/Generated/
+mdix-csharp/src/MidManStudio.Mdix.Core/runtimes/
+mdix-csharp/tests/**/fixtures/
+
+# Docs and misc tooling -- not part of the crate build.
+docs/
+tools/

@@ -16,12 +16,26 @@ name: Publish midmanstudio-mdix to PyPI
 # for (can't cross-compile a compiled-extension wheel from Linux alone the
 # way mdix-ffi's cdylib can be cross-compiled) — mirrors
 # mdix-core-cs-nuget-publish.yml's linux-x64/win-x64/osx-arm64 split.
+#
+# ── GitHub Release ───────────────────────────────────────────────────────
+# After a successful PyPI upload, tags "mdix-python-v<version>" and creates
+# a GitHub Release — same reasoning a-publish-dixscript-crate.yml and
+# wasm-npm-publish.yml already document: the registry upload and the
+# GitHub Release are entirely separate systems, so this is the step that
+# makes the release visible/discoverable on the repo itself. No per-package
+# CHANGELOG.md exists yet for mdix-python, so (matching wasm-npm-publish.yml,
+# which has the same gap for mdix-npm) the release notes are a generic note
+# + PyPI link rather than a changelog excerpt.
 on:
   workflow_dispatch:
     inputs:
       confirm:
         description: 'Type "publish" to confirm. PyPI does not allow re-uploading the same version once it is live — only yanking, which hides it from new installs but does not remove it. Bump version in mdix-python/pyproject.toml first if this is a new release.'
         required: true
+
+permissions:
+  contents: write   # needed to create the tag + GitHub Release below
+  actions: read
 
 jobs:
   confirm-trigger:
@@ -125,6 +139,8 @@ jobs:
     needs: [confirm-trigger, build-wheel, test-before-publish]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all wheels
         uses: actions/download-artifact@v4
         with:
@@ -150,3 +166,24 @@ jobs:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: twine upload --skip-existing dist/*.whl
+
+      # ── GitHub Release ────────────────────────────────────────────────────
+      # PyPI and GitHub Releases are entirely separate systems -- the twine
+      # upload above only pushes to the registry. See the header comment
+      # for why the notes here are a generic note + PyPI link rather than
+      # a changelog excerpt.
+      - name: Read package version
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version' mdix-python/pyproject.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Published midmanstudio-mdix v$VERSION"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "mdix-python-v${{ steps.version.outputs.version }}" \
+            --title "midmanstudio-mdix v${{ steps.version.outputs.version }}" \
+            --notes "midmanstudio-mdix v${{ steps.version.outputs.version }} — published to PyPI: https://pypi.org/project/midmanstudio-mdix/${{ steps.version.outputs.version }}/" \
+            --target "${{ github.sha }}"

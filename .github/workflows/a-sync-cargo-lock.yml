@@ -1,0 +1,67 @@
+name: Sync Cargo.lock
+
+# Manual only. Regenerates Cargo.lock against the current Cargo.toml files
+# and commits it back if it changed.
+#
+# Needed whenever a workspace member's dependency changes SOURCE KIND —
+# e.g. `dixscript = { path = "../dixscript", version = "1.0.0" }` becoming
+# `dixscript = "1.0.0"` (a path+workspace source becoming a plain registry
+# source), the way mdix-cli/Cargo.toml and mdix-lsp/Cargo.toml do now. The
+# resolved version doesn't change, but the source does, and Cargo.lock
+# tracks source per entry — editing Cargo.toml alone does not update it.
+# There's no local `cargo update` available (GitHub web UI only), so this
+# workflow is the only way to keep `--locked` builds (e.g.
+# mdix-cli/Dockerfile) working without an out-of-repo manual step.
+#
+# Conservative by default: only re-resolves the package(s) named in
+# `packages` (space-separated, passed to `cargo update -p`), leaving every
+# other pinned version untouched. The default "dixscript" covers the two
+# crates currently affected (mdix-cli, mdix-wasm) in one run. Leave
+# `packages` blank to run a full `cargo generate-lockfile` instead
+# (re-resolves everything to the latest versions each Cargo.toml's
+# requirements allow — review the diff carefully before trusting it).
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: 'Space-separated crate names to update (e.g. "dixscript"). Leave blank to regenerate the whole lockfile.'
+        required: false
+        default: 'dixscript'
+
+permissions:
+  contents: write
+
+jobs:
+  sync-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Update Cargo.lock
+        run: |
+          if [ -n "${{ github.event.inputs.packages }}" ]; then
+            for pkg in ${{ github.event.inputs.packages }}; do
+              echo "cargo update -p $pkg"
+              cargo update -p "$pkg"
+            done
+          else
+            echo "cargo generate-lockfile (full re-resolve)"
+            cargo generate-lockfile
+          fi
+
+      - name: Show what changed
+        run: git diff -- Cargo.lock || true
+
+      - name: Commit Cargo.lock if it changed
+        run: |
+          if git diff --quiet -- Cargo.lock; then
+            echo "Cargo.lock already up to date -- nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git commit -m "chore: sync Cargo.lock"
+          git push

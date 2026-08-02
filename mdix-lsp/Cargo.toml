@@ -2,10 +2,13 @@
 name         = "mdix-lsp"
 version      = "1.0.0"
 edition      = "2021"
-rust-version = "1.70"
+rust-version = "1.85"
 authors      = ["MidManStudio"]
 description  = "Language server for DixScript (.mdix files)"
 license      = "MIT"
+repository   = "https://github.com/Mid-D-Man/DixScript-Rust"
+keywords     = ["lsp", "language-server", "dixscript", "mdix"]
+categories   = ["development-tools"]
 
 [[bin]]
 name = "mdix-lsp"
@@ -13,7 +16,16 @@ path = "src/main.rs"
 
 [dependencies]
 tower-lsp          = { version = "0.20" }
-dixscript          = { path = "../dixscript", version = "1.0.0" }
+# Deliberately the published crates.io version, not `{ path = "../dixscript" }`
+# — same reasoning mdix-wasm/Cargo.toml documents for itself and mdix-cli/
+# Cargo.toml now uses too: the LSP is a standalone binary with no
+# cross-crate type identity to preserve, so every build here — including
+# CI — exercises the same dixscript real external consumers get. Run the
+# "Sync Cargo.lock" workflow (workflow_dispatch, default target
+# "dixscript") once before publishing/`--locked` building off this, since
+# this changed from a path+version dep and the committed Cargo.lock hasn't
+# been regenerated to match yet.
+dixscript          = "1.0.0"
 tokio              = { version = "1", features = ["full"] }
 dashmap            = "6"
 serde_json         = "1.0"

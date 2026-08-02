@@ -8,17 +8,43 @@ name: MidManStudio.Mdix — WASM mdix-npm publish
 # go straight to `npm publish` with nothing to stop an accidental click.
 #
 # ── Before the very first run ───────────────────────────────────────────
-# @dixscript/core is a SCOPED package. As of writing, nothing has ever
-# been published under the "dixscript" scope (registry.npmjs.org has no
-# entry for it at all) — which means the "dixscript" npm user or
-# Organization needs to already exist on npmjs.com, and NPM_TOKEN
-# (Settings -> Secrets and variables -> Actions -> New repository secret)
-# needs to belong to an account with publish rights to it, or the publish
-# step below fails on its very first real run with a permissions/
-# scope-not-found error rather than a build error. Generate the token as
-# an "Automation" type specifically (npmjs.com -> your avatar -> Access
-# Tokens) — a "Publish" token can prompt for a 2FA one-time code that has
-# nowhere to go in CI and will just hang.
+# @dixscript/core is a SCOPED package that has never been published (as
+# of writing, registry.npmjs.org has no entry for the "dixscript" scope
+# at all). Publishing here uses OIDC trusted publishing — no NPM_TOKEN,
+# no long-lived secret of any kind — but that has a real bootstrapping
+# order dependency worth understanding before the first run:
+#
+#   1. Trusted publishing is configured on the PACKAGE's own settings
+#      page on npmjs.com (Package -> Settings -> Trusted Publisher), and
+#      that page only exists once the package has been published at
+#      least once. A package that's never existed has nowhere to
+#      configure this.
+#   2. So v1.0.0 specifically has to be published once, manually,
+#      interactively, from a machine with npm installed — `npm login`
+#      (real 2FA/authenticator code) then `npm publish --access public`
+#      from inside mdix-npm/ after a local `npm run build`. This can't
+#      be this workflow's job; it needs actual account credentials.
+#   3. Once @dixscript/core exists: npmjs.com -> the package -> Settings
+#      -> Trusted Publisher -> add GitHub Actions, org/user "Mid-D-Man",
+#      repo "DixScript-Rust", workflow filename "wasm-npm-publish.yml".
+#   4. From then on, every version this workflow publishes (v1.0.1
+#      onward) authenticates via OIDC automatically — nothing else to
+#      configure, no token to generate or rotate.
+#
+# (For context on why this isn't just "generate an Automation token and
+# use NPM_TOKEN" the way mdix-core-cs-nuget-publish.yml/mdix-python-
+# pypi-publish.yml still do for their registries: npm retired that
+# token type entirely in November 2025, and is actively restricting
+# even the newer "bypass 2FA" granular tokens as of a policy change on
+# 2026-07-31, targeting full removal of token-based direct-publish by
+# January 2027 in favor of exactly this OIDC flow. Confirmed directly
+# against a real failed publish attempt hitting E403 on a correctly
+# -configured bypass-2FA token, which also matches a still-open npm/cli
+# bug (#9268) independent of the policy change.)
+#
+# npm CLI >= 11.5.1 is required for OIDC — see the "Ensure npm supports
+# OIDC" step below; GitHub's hosted Node 20 doesn't reliably bundle a
+# recent enough npm on its own.
 #
 # ── What this actually publishes ────────────────────────────────────────
 # @dixscript/core's mdix-npm/src/index.ts re-exports the full mdix-wasm/
@@ -56,6 +82,10 @@ name: MidManStudio.Mdix — WASM mdix-npm publish
 #   one — see the comment on that step for the naming/auth details, and
 #   the important caveat that it is NOT anonymously installable the way
 #   the npmjs.org package is, even though this repo is public.
+# - Switched the npmjs.org publish from an NPM_TOKEN secret to OIDC
+#   trusted publishing — see "Before the very first run" above for the
+#   bootstrapping order this requires and why the token approach was
+#   dropped rather than just debugged further.
 #
 # ── Known issue shipping in this version, on purpose ────────────────────
 # github.com/Mid-D-Man/DixScript-Rust/issues/2 (.mdix.key's compressed_size
@@ -74,6 +104,7 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write
   actions: read
 
 jobs:
@@ -195,6 +226,13 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
+      # Trusted publishing needs npm >= 11.5.1; the npm bundled with
+      # setup-node's Node 20 isn't reliably that recent on its own.
+      - name: Ensure npm supports OIDC trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
       - name: Install TypeScript dependencies
         run: npm install
         working-directory: mdix-npm
@@ -245,16 +283,24 @@ jobs:
       # Packages the tarball exactly as it would be uploaded and reports
       # exactly what would go in it, without touching the registry — same
       # purpose as a-publish-dixscript-crate.yml's `cargo publish
-      # --dry-run` step.
+      # --dry-run` step. Doesn't validate auth/trusted-publisher config
+      # either way, confirmed directly — this passed on the run that then
+      # hit npm's E403 on the real "Publish to npm" step immediately after.
       - name: Verify npm package (dry run)
         run: npm publish --access public --dry-run
         working-directory: mdix-npm
 
+      # No NODE_AUTH_TOKEN / NPM_TOKEN — OIDC trusted publishing. npm CLI
+      # detects the GitHub Actions OIDC environment automatically and
+      # authenticates against the Trusted Publisher configured on this
+      # package's npmjs.com settings page (see "Before the very first
+      # run" at the top of this file — that page, and this working, both
+      # depend on v1.0.0 already having been published once manually).
+      # Provenance attestations are generated automatically with trusted
+      # publishing; no --provenance flag needed.
       - name: Publish to npm
         run: npm publish --access public
         working-directory: mdix-npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # ── Mirror to GitHub Packages ────────────────────────────────────────
       # "Just in case" backup — npmjs.org above stays the real, primary

@@ -2,7 +2,7 @@
 name = "mdix-cli"
 version = "1.0.0"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.85"
 authors = ["MidManStudio"]
 description = "Command-line interface for DixScript (.mdix) files"
 license = "MIT"

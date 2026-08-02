@@ -1,0 +1,209 @@
+name: Publish mdix-lsp
+
+# Manual only (Actions tab -> Run workflow) — requires typing "publish" in
+# the confirmation input, same gating a-publish-dixscript-crate.yml,
+# mdix-cli-publish.yml, mdix-core-cs-nuget-publish.yml, and
+# mdix-python-pypi-publish.yml all use for their own registries.
+#
+# Publishes mdix-lsp to TWO places:
+#   1. crates.io       — `cargo install mdix-lsp`
+#   2. GitHub Release   — prebuilt binaries for Linux, macOS
+#      (x86_64 + aarch64), and Windows, so editor extensions (mdix-vscode,
+#      mdix-intellij, or any other LSP client) can point
+#      `dixscript.server.path` at a downloaded binary without needing a
+#      Rust toolchain.
+#
+# NOT published as a container image, unlike mdix-cli. mdix-lsp only
+# speaks LSP over stdio (see mdix-lsp/src/main.rs — stdin/stdout, no TCP
+# listener), and editor LSP clients spawn it as a local subprocess and
+# pipe stdio directly. A container is a good distribution fit for a CLI
+# tool invoked over `docker run`; it isn't one here — there's nothing an
+# editor could meaningfully do with an image it can't exec into a pipe.
+# Prebuilt per-platform binaries are the actual "no Rust toolchain needed"
+# equivalent for this crate.
+#
+# ── crates.io — Trusted Publishing (OIDC), same bootstrap situation
+#    a-publish-dixscript-crate.yml and mdix-cli-publish.yml document ──────
+# crates.io can only trust a GitHub repo/workflow for a crate that already
+# exists in the registry — there is no way to pre-authorize a name that
+# has never been published. So:
+#   1. First-ever publish of `mdix-lsp`: this file uses the plain
+#      CARGO_REGISTRY_TOKEN-based step below (reuses the SAME repo secret
+#      a-publish-dixscript-crate.yml/mdix-cli-publish.yml already use —
+#      only reused here if that token is a general account token rather
+#      than one scoped to a specific crate; if publishing fails with a
+#      permissions error, generate a fresh token at
+#      https://crates.io/settings/tokens with publish scope covering
+#      `mdix-lsp`, or "entire account", and update the secret).
+#   2. Once that succeeds, go to
+#      https://crates.io/crates/mdix-lsp/settings -> Trusted Publishing
+#      -> add a GitHub Actions publisher with:
+#        Repository owner: Mid-D-Man
+#        Repository name:  DixScript-Rust
+#        Workflow filename: mdix-lsp-publish.yml
+#        Environment: (leave blank unless you add one below)
+#   3. From then on, switch the "Authenticate to crates.io" step below
+#      from `if: false` to enabled, and the publish step's
+#      CARGO_REGISTRY_TOKEN env to `${{ steps.auth.outputs.token }}` —
+#      same swap the other publish workflows document for themselves.
+#
+# ── Cargo.lock prerequisite ───────────────────────────────────────────────
+# mdix-lsp's dixscript dependency just changed from a path+version dep to
+# a plain version dep (see mdix-lsp/Cargo.toml) — run the "Sync Cargo.lock"
+# workflow (default target "dixscript") first if that hasn't happened yet
+# since that change landed. None of the steps below pass --locked, so
+# they'll still succeed even without it — Cargo will just re-resolve
+# on the fly in each ephemeral runner — but the committed Cargo.lock will
+# stay stale until that workflow runs, which will eventually bite anything
+# that does add a --locked step later (mdix-cli/Dockerfile already does).
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm. crates.io does not allow un-publishing a version once it is live — only yanking. Bump version in mdix-lsp/Cargo.toml first if this is a new release.'
+        required: true
+
+permissions:
+  contents: write   # needed to create the tag + GitHub Release + upload assets
+  actions: read
+
+jobs:
+
+  # ── 1. Confirm trigger ─────────────────────────────────────────────────
+  confirm-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm manual trigger
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "publish" ]; then
+            echo "Confirmation text did not match 'publish' — aborting."
+            exit 1
+          fi
+
+  # ── 2. Publish to crates.io ─────────────────────────────────────────────
+  publish-crate:
+    name: Publish to crates.io
+    needs: confirm-trigger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build (release)
+        run: cargo build -p mdix-lsp --release
+
+      - name: Run tests
+        run: cargo test -p mdix-lsp
+
+      # Packages the crate exactly as it would be uploaded and does a full
+      # build from that package in a clean temp directory — catches
+      # anything an exclude list or a missing file would break, without
+      # actually publishing yet. Same purpose as a-publish-dixscript-
+      # crate.yml's / mdix-cli-publish.yml's identical step. Doesn't need
+      # Cargo.lock to already be in sync (see header) — cargo re-resolves
+      # as needed for a dry run.
+      - name: Verify package (dry run)
+        run: cargo publish -p mdix-lsp --dry-run
+
+      # ══ BOOTSTRAP ONLY ══════════════════════════════════════════════════
+      # See the header comment. Once Trusted Publishing is configured for
+      # mdix-lsp, flip this to enabled and swap the token in the step
+      # below, mirroring mdix-cli-publish.yml's own bootstrap swap.
+      - name: Authenticate to crates.io (Trusted Publishing)
+        if: false
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      - name: "BOOTSTRAP: Publish to crates.io (plain token, first publish only)"
+        run: cargo publish -p mdix-lsp
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # - name: Publish to crates.io
+      #   run: cargo publish -p mdix-lsp
+      #   env:
+      #     CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      # ══ END BOOTSTRAP ═══════════════════════════════════════════════════
+
+  # ── 3. Build prebuilt binaries for each platform ─────────────────────────
+  build-binaries:
+    name: Build (${{ matrix.target }})
+    needs: [confirm-trigger, publish-crate]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os:          ubuntu-latest
+            target:      x86_64-unknown-linux-gnu
+            asset_name:  mdix-lsp-x86_64-unknown-linux-gnu
+            bin_name:    mdix-lsp
+          - os:          macos-latest
+            target:      aarch64-apple-darwin
+            asset_name:  mdix-lsp-aarch64-apple-darwin
+            bin_name:    mdix-lsp
+          - os:          macos-latest
+            target:      x86_64-apple-darwin
+            asset_name:  mdix-lsp-x86_64-apple-darwin
+            bin_name:    mdix-lsp
+          - os:          windows-latest
+            target:      x86_64-pc-windows-msvc
+            asset_name:  mdix-lsp-x86_64-pc-windows-msvc.exe
+            bin_name:    mdix-lsp.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build (release)
+        run: cargo build -p mdix-lsp --release --target ${{ matrix.target }}
+
+      - name: Rename binary to asset name
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin_name }}" \
+             "dist/${{ matrix.asset_name }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/${{ matrix.asset_name }}
+          if-no-files-found: error
+
+  # ── 4. GitHub Release with all binaries attached ─────────────────────────
+  create-release:
+    needs: [confirm-trigger, publish-crate, build-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read package version
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version' mdix-lsp/Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing mdix-lsp v$VERSION"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION:  ${{ steps.version.outputs.version }}
+        run: |
+          NOTES="mdix-lsp v${VERSION}
+
+          - crates.io: https://crates.io/crates/mdix-lsp/${VERSION}
+          - Prebuilt binaries attached below (Linux x86_64, macOS x86_64/aarch64, Windows x86_64) — point your editor's \`dixscript.server.path\` (or equivalent) at the one for your platform."
+
+          gh release create "mdix-lsp-v${VERSION}" \
+            --title "mdix-lsp v${VERSION}" \
+            --notes "$NOTES" \
+            --target "${{ github.sha }}" \
+            dist/*

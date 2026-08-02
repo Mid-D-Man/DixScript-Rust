@@ -90,6 +90,51 @@ impl Backend {
         }
     }
 
+    /// Waits, with a hard budget, for `documents[uri]` to catch up to at
+    /// least `want_version` before a request reads it.
+    ///
+    /// `spawn_analysis` re-tokenizes/re-parses/re-analyzes in a background
+    /// task and only swaps the new `Document` into `documents` once that
+    /// finishes — there is no synchronous update in `did_change` itself.
+    /// Position-based requests (completion, hover, signature help, ...)
+    /// previously read `documents.get(uri)` the instant they arrived, with
+    /// no guarantee the in-flight analysis for the very edit that triggered
+    /// the request had landed yet. On a fast edit burst — e.g. backspace
+    /// right after a `.` and immediately retyping — the request commonly
+    /// wins that race and gets served a `Document` that is one or more
+    /// edits stale. `Document` bundles source/tokens/AST together and they
+    /// only get swapped in as one atomic unit, so it isn't just inferred
+    /// types that lag during that window, it's the receiver text itself —
+    /// which reliably produces an empty completion list right when the
+    /// popup is expected.
+    ///
+    /// This never blocks indefinitely: if analysis is slow, erroring, or
+    /// stuck, the budget still expires and the caller proceeds with
+    /// whatever is cached, same as before this existed — it can only help,
+    /// never hang a request.
+    async fn wait_for_fresh_document(&self, uri: &Url, want_version: i32) {
+        const BUDGET: std::time::Duration = std::time::Duration::from_millis(400);
+        const POLL:   std::time::Duration = std::time::Duration::from_millis(15);
+        let deadline = tokio::time::Instant::now() + BUDGET;
+
+        loop {
+            let fresh = self.documents.get(uri)
+                .map(|d| d.version >= want_version)
+                .unwrap_or(false);
+            if fresh { return; }
+            if tokio::time::Instant::now() >= deadline { return; }
+            tokio::time::sleep(POLL).await;
+        }
+    }
+
+    /// Convenience wrapper: waits for `uri` to reach whatever version was
+    /// last reported via `did_change`, if any is on record.
+    async fn wait_for_latest(&self, uri: &Url) {
+        if let Some(want) = self.pending_versions.get(uri).map(|v| *v) {
+            self.wait_for_fresh_document(uri, want).await;
+        }
+    }
+
     async fn show_message(&self, success: bool, msg: &str) {
         let kind = if success { MessageType::INFO } else { MessageType::ERROR };
         self.client.show_message(kind, msg).await;
@@ -242,6 +287,7 @@ impl LanguageServer for Backend {
         let uri     = &params.text_document_position.text_document.uri;
         let pos     = params.text_document_position.position;
         let trigger = params.context.and_then(|c| c.trigger_character);
+        self.wait_for_latest(uri).await;
         Ok(features::completions::provide(
             self.documents.get(uri).as_deref(), pos, trigger.as_deref(),
         ))
@@ -253,6 +299,7 @@ impl LanguageServer for Backend {
     ) -> LspResult<Option<SignatureHelp>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
+        self.wait_for_latest(uri).await;
         Ok(features::signature_help::provide(
             self.documents.get(uri).as_deref(), pos, params.context,
         ))
@@ -261,6 +308,7 @@ impl LanguageServer for Backend {
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
+        self.wait_for_latest(uri).await;
         Ok(features::hover::provide(self.documents.get(uri).as_deref(), pos))
     }
 

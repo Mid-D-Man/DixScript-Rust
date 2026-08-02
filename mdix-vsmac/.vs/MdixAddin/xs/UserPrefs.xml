@@ -1,38 +1,28 @@
 ﻿<Properties StartupConfiguration="{9FBBC633-2FF2-4909-85CC-B8697A7FCC3E}|Default">
-  <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug" />
-  <MonoDevelop.Ide.DebuggingService.PinnedWatches />
-  <MonoDevelop.Ide.ItemProperties.MdixAddin PreferredExecutionTarget="MonoDevelop.Default" />
   <MonoDevelop.Ide.DebuggingService.Breakpoints>
     <BreakpointStore />
   </MonoDevelop.Ide.DebuggingService.Breakpoints>
+  <MonoDevelop.Ide.DebuggingService.PinnedWatches />
+  <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug" />
   <MonoDevelop.Ide.Workbench ActiveDocument="Issues.cs">
     <Files>
       <File FileName="../../../../../usr/local/share/dotnet/sdk/8.0.401/Sdks/Microsoft.NET.Sdk/targets/Microsoft.PackageDependencyResolution.targets" />
       <File FileName="../../../.nuget/NuGet/NuGet.Config" />
-      <File FileName="MdixLanguageClientProvider.cs" Line="19" Column="48" />
-      <File FileName="MdixLanguageClient.cs" Line="177" Column="1" />
-      <File FileName="Manifest.addin.xml" Line="36" Column="1" />
-      <File FileName="Issues.cs" Line="19" Column="1" />
+      <File FileName="MdixLanguageClientProvider.cs" />
+      <File FileName="MdixLanguageClient.cs" />
+      <File FileName="Manifest.addin.xml" />
+      <File FileName="Issues.cs" Line="17" Column="35" />
     </Files>
     <Pads>
       <Pad Id="ProjectPad">
         <State name="__root__">
           <Node name="MdixAddin">
             <Node name="NuGet.Config files" expanded="True" />
-            <Node name="MdixAddin">
-              <Node name="Dependencies" expanded="True">
-                <Node name="PackageDependencies" expanded="True">
-                  <Node name="Microsoft.VisualStudioMac.Sdk" expanded="True">
-                    <Node name="System.Security.Cryptography.Pkcs" expanded="True" />
-                  </Node>
-                </Node>
-              </Node>
-              <Node name="Issues.cs" selected="True" />
-            </Node>
           </Node>
         </State>
       </Pad>
     </Pads>
   </MonoDevelop.Ide.Workbench>
   <MultiItemStartupConfigurations />
+  <MonoDevelop.Ide.ItemProperties.MdixAddin PreferredExecutionTarget="MonoDevelop.Default" />
 </Properties>

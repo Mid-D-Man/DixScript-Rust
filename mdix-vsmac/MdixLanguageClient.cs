@@ -58,6 +58,48 @@
 // on your machine as the real test, and send me whatever it says if
 // anything's still off.
 // ============================================================================
+//
+// ----------------------------------------------------------------------------
+// 2026-08-02 update — clearing the 14 build warnings from Issues.cs.
+// Checked the actual current ILanguageClient reference page (learn.
+// microsoft.com/.../ilanguageclient.onserverinitializefailedasync) rather
+// than assume anything from the notes above still holds:
+//
+//   - The interface really does declare
+//     Task<InitializationFailureContext?> OnServerInitializeFailedAsync(
+//         ILanguageClientInitializationInfo initializationState)
+//     — a Task<T>, not a plain Task. That means the PUBLIC (non-explicit)
+//     overload that used to sit here, `public Task
+//     OnServerInitializeFailedAsync(ILanguageClientInitializationInfo) =>
+//     Task.CompletedTask;`, never actually implemented the interface — its
+//     return type doesn't match, so it compiled only because C# allows an
+//     explicit interface implementation to coexist with an unrelated public
+//     method of the same name/parameters. The host only ever calls through
+//     the ILanguageClient reference, which resolves to the explicit
+//     implementation further down — so that public overload was dead code,
+//     never invoked by anything. Removed it rather than leave a method that
+//     looks load-bearing but isn't.
+//   - CS8603 on the explicit implementation's `return default;`: default of
+//     Task<T> is a null Task reference, which is what the analyzer is
+//     correctly flagging (and which would NullReferenceException if the
+//     host ever awaited it). Changed to
+//     Task.FromResult<InitializationFailureContext?>(null) — a real
+//     completed Task wrapping a null context, which is what "no special
+//     failure context" actually means here per the interface docs.
+//   - The 12 CA1416 warnings (Process/ProcessStartInfo "only supported on
+//     macOS/OSX") are because this csproj targets plain net7.0 with no
+//     platform suffix, so the analyzer doesn't know this assembly only ever
+//     runs inside VS4Mac on macOS. Per Microsoft's own CA1416 docs
+//     (learn.microsoft.com/.../quality-rules/ca1416 — "you can mark ... an
+//     entire assembly"), the documented fix for exactly this case is an
+//     assembly-level [SupportedOSPlatform] attribute. Added below.
+//   - MSB3243 (System.Security.Cryptography.Pkcs/Xml 6.0 vs 7.0) is left
+//     alone: MSBuild is just choosing the higher of two versions, and at
+//     runtime VS4Mac's own MonoBundle copy (7.0.0.0, confirmed in your
+//     project cache) is what actually loads either way, since this runs
+//     inside the host process rather than as a standalone exe with its own
+//     binding config. Informational only.
+// ----------------------------------------------------------------------------
 
 using Microsoft.VisualStudio.LanguageServer.Client;
 using Microsoft.VisualStudio.Threading;
@@ -69,8 +111,15 @@ using System.ComponentModel.Composition;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
+
+// This addin only ever runs hosted inside Visual Studio for Mac, i.e. on
+// macOS — tells the CA1416 platform-compatibility analyzer that, so it stops
+// flagging Process/ProcessStartInfo usage below as if this were a
+// cross-platform library that might also run on Windows/Linux/browser.
+[assembly: SupportedOSPlatform("macos")]
 
 namespace MidManStudio.Mdix
 {
@@ -156,9 +205,6 @@ namespace MidManStudio.Mdix
 
         public Task OnServerInitializeFailedAsync(Exception e) => Task.CompletedTask;
 
-        public Task OnServerInitializeFailedAsync(ILanguageClientInitializationInfo initializationState)
-            => Task.CompletedTask;
-      
         // Same resolution order as the VS Code / mdix-lsp wrappers: env
         // override, then bundled binary next to this assembly, then PATH.
         static string ResolveServerPath()
@@ -175,9 +221,14 @@ namespace MidManStudio.Mdix
             return "mdix-lsp"; // fall back to PATH resolution by the shell
         }
 
+        // This IS the real interface member (return type is
+        // Task<InitializationFailureContext?>, not plain Task — see the
+        // 2026-08-02 note at the top of this file for why the previous
+        // public non-explicit overload of the same name was dead code and
+        // got removed).
         Task<InitializationFailureContext?> ILanguageClient.OnServerInitializeFailedAsync(ILanguageClientInitializationInfo initializationState)
         {
-            return default;
+            return Task.FromResult<InitializationFailureContext?>(null);
         }
     }
 }

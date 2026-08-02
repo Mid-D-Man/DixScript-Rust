@@ -1751,7 +1751,7 @@ version = "1.0.0"
 dependencies = [
  "base64",
  "dashmap 6.1.0",
- "dixscript 1.0.0",
+ "dixscript 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex",
  "serde_json",
  "tokio",

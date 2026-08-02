@@ -1,4 +1,3 @@
-
 mod commands;
 mod config;
 mod output;
@@ -16,7 +15,7 @@ use commands::{
 #[derive(Parser)]
 #[command(
     name    = "mdix",
-    version = "1.0.0",
+    version = env!("CARGO_PKG_VERSION"),
     about   = "DixScript (.mdix) file toolchain",
 )]
 pub struct Cli {
@@ -134,4 +133,4 @@ fn main() {
     };
 
     std::process::exit(exit_code);
-        }
+    }

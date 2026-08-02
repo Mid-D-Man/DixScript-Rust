@@ -316,6 +316,30 @@ namespace MidManStudio.Mdix.Core
         {
             try
             {
+                // FIX: Nullable<T> properties (e.g. `int? Port`) previously fell through
+                // to `return (false, null)` at the bottom of this method, because
+                // `targetType` here is `Nullable<int>`, which never equals `typeof(int)`
+                // etc. above. Unwrap to the underlying type and recurse -- a boxed T
+                // assigns correctly to a Nullable<T> property via PropertyInfo.SetValue,
+                // so no re-wrapping is needed once the underlying value is read.
+                var nullableUnderlying = Nullable.GetUnderlyingType(targetType);
+                if (nullableUnderlying != null)
+                    return DirectGet(db, nullableUnderlying, path);
+
+                // FIX: enum-typed properties previously had no branch here at all and
+                // silently fell through to (false, null) -- meaning enum properties
+                // never round-tripped even though DixScript's Enum type is fully
+                // supported at the database/builder level. DixScript resolves an enum
+                // reference to its underlying int value (see MdixDatabase.GetEnumValue),
+                // so we read that int and reinterpret it as the target C# enum type.
+                if (targetType.IsEnum)
+                {
+                    var er = db.GetEnumValue(path);
+                    if (!er.IsSuccess) return (false, null);
+                    try { return (true, Enum.ToObject(targetType, er.SuccessResult)); }
+                    catch { return (false, null); }
+                }
+
                 if (targetType == typeof(string))
                 {
                     var r = db.GetString(path);
@@ -457,6 +481,32 @@ namespace MidManStudio.Mdix.Core
         {
             try
             {
+                // FIX: same Nullable<T> unwrap as DirectGet -- see comment there.
+                var nullableUnderlying = Nullable.GetUnderlyingType(targetType);
+                if (nullableUnderlying != null)
+                    return ParseJsonElementAsType(el, nullableUnderlying);
+
+                // FIX: same enum gap as DirectGet -- see comment there. mdix_to_json
+                // emits resolved enum references as plain integers, so the common case
+                // is a JSON number; a string is also accepted (matched by field name)
+                // in case a future/alternate JSON shape emits the field name instead.
+                if (targetType.IsEnum)
+                {
+                    if (el.ValueKind == JsonValueKind.Number)
+                    {
+                        try { return (true, Enum.ToObject(targetType, el.GetInt32())); }
+                        catch { return (false, null); }
+                    }
+                    if (el.ValueKind == JsonValueKind.String)
+                    {
+                        var name = el.GetString();
+                        if (name != null &&
+                            Enum.TryParse(targetType, name, ignoreCase: true, out var parsed))
+                            return (true, parsed);
+                    }
+                    return (false, null);
+                }
+
                 if (targetType == typeof(string))
                 {
                     var s = el.ValueKind == JsonValueKind.String
@@ -631,6 +681,22 @@ namespace MidManStudio.Mdix.Core
                     else
                         data.WithTimestamp(path, dt);
                     break;
+                // FIX: these five wrapper structs previously fell through to `default`,
+                // which wrote them as a plain string via ToString() -- losing the
+                // DixScript type tag (a HexColor became a bare string, not a color).
+                case MdixHexColor hc:  data.WithHexColor(path, hc.RawString);          break;
+                case MdixBlob     bl:  data.WithBlob(path, bl.RawBase64);              break;
+                case MdixRegex    rx:  data.WithRegex(path, rx.Pattern);               break;
+                case MdixDate     dv:  data.WithDate(path, dv.Value);                  break;
+                case MdixTimestamp tv: data.WithTimestamp(path, tv.Value.UtcDateTime); break;
+                // FIX: enums previously fell through to `default` too, which wrote
+                // the member name as a plain string (e.g. "PROD") rather than a real
+                // DixScript enum reference (Environment.PROD). The DixScript-side enum
+                // name is taken from the C# enum type's own name by convention -- the
+                // same convention MdixEnumCodeGenerator uses when generating enum types
+                // from a `.mdix` file's @ENUMS section, so a generated enum round-trips
+                // correctly out of the box.
+                case Enum en: data.WithEnum(path, en.GetType().Name, en.ToString()); break;
                 case null: break;
                 default:   data.WithString(path, value.ToString() ?? string.Empty); break;
             }
@@ -656,6 +722,15 @@ namespace MidManStudio.Mdix.Core
                     else
                         t.WithTimestamp(name, dt);
                     break;
+                // FIX: see matching comment in ApplyFlat -- these previously fell
+                // through to `default` and lost their DixScript type tag.
+                case MdixHexColor hc:  t.WithHexColor(name, hc.RawString);          break;
+                case MdixBlob     bl:  t.WithBlob(name, bl.RawBase64);              break;
+                case MdixRegex    rx:  t.WithRegex(name, rx.Pattern);               break;
+                case MdixDate     dv:  t.WithDate(name, dv.Value);                  break;
+                case MdixTimestamp tv: t.WithTimestamp(name, tv.Value.UtcDateTime); break;
+                // FIX: see matching comment in ApplyFlat.
+                case Enum en: t.WithEnum(name, en.GetType().Name, en.ToString()); break;
                 case null: break;
                 default:   t.WithString(name, value.ToString() ?? string.Empty); break;
             }

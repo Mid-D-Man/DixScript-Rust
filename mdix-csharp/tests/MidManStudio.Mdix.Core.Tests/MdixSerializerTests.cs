@@ -116,6 +116,45 @@ namespace MidManStudio.Mdix.Core.Tests
         public bool    Active  { get; set; }
     }
 
+    // ── FIX regression fixtures ─────────────────────────────────────────────
+    // The four fixture types below cover MdixSerializer paths that were either
+    // silently broken (enum, Nullable<T> on read) or simply never exercised by
+    // any test (long, the five DixScript leaf value types) before this fix.
+
+    public enum LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3 }
+
+    // FIX: enum-typed properties previously had no branch in DirectGet,
+    // ParseJsonElementAsType, ApplyFlat, or ApplyTable, so they silently
+    // failed to round-trip in either direction.
+    public class EnumRoundTripConfig
+    {
+        public LogLevel Level { get; set; }
+    }
+
+    // FIX: Nullable<T> properties previously had no branch in DirectGet or
+    // ParseJsonElementAsType, so a present value was silently discarded on
+    // read (write already worked, incidentally, via C#'s own boxing rules
+    // for Nullable<T>).
+    public class NullableRoundTripConfig
+    {
+        public int?  MaxConnections { get; set; }
+        public bool? DebugMode      { get; set; }
+    }
+
+    // Coverage gap fix: DirectGet already correctly handled `long` and all
+    // five DixScript leaf value types before this change -- only the write
+    // side (ApplyFlat/ApplyTable, fixed alongside enum support above) and
+    // the test coverage were missing.
+    public class WrapperTypesRoundTripConfig
+    {
+        public long          RequestId { get; set; }
+        public MdixHexColor  Accent    { get; set; }
+        public MdixBlob      Payload   { get; set; }
+        public MdixRegex     Pattern   { get; set; }
+        public MdixDate      Since     { get; set; }
+        public MdixTimestamp CreatedAt { get; set; }
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // Tests
     // ══════════════════════════════════════════════════════════════════════════
@@ -540,6 +579,139 @@ namespace MidManStudio.Mdix.Core.Tests
             var s = b.Serialize().OrThrow();
             _out.WriteLine($"Output:\n{s}");
             s.Should().Contain("t:(1, 2, 3, 4, 5, 6)");
+        }
+
+        // ── FIX: enum-typed properties round-trip ─────────────────────────────
+
+        [Fact]
+        public void EnumProperty_RoundTrip_PreservesValue()
+        {
+            var original = new EnumRoundTripConfig { Level = LogLevel.WARN };
+
+            using var builder = MdixBuilder.Create();
+            var serResult = builder.Serialize(original);
+
+            _out.WriteLine($"Serialize IsSuccess: {serResult.IsSuccess}");
+            if (serResult.IsFailure) _out.WriteLine($"Error: {serResult.Error.Message}");
+            serResult.IsSuccess.Should().BeTrue();
+
+            var mdixString = builder.Serialize().OrThrow();
+            _out.WriteLine($"Generated .mdix:\n{mdixString}");
+            // Confirms the write side emits a real enum reference
+            // ("LogLevel.WARN"), not the member name as a bare string.
+            mdixString.Should().Contain("LogLevel.WARN");
+
+            using var db = Dix.LoadStr(mdixString).OrThrow();
+            var result = db.Deserialize<EnumRoundTripConfig>();
+
+            _out.WriteLine($"Deserialize IsSuccess: {result.IsSuccess}");
+            if (result.IsFailure) _out.WriteLine($"Error: {result.Error.Message}");
+
+            result.IsSuccess.Should().BeTrue();
+            result.SuccessResult.Level.Should().Be(LogLevel.WARN);
+        }
+
+        [Fact]
+        public void EnumProperty_ReadFromHandAuthoredSource_ResolvesCorrectly()
+        {
+            // Confirms DirectGet correctly resolves an enum reference authored
+            // directly in .mdix source (not one this same serializer wrote) --
+            // this works via GetEnumValue's underlying int resolution, so it
+            // does not depend on the DixScript enum name matching the C# enum
+            // type's own name the way the write side does.
+            using var db = Load(
+                "@ENUMS( LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3 } ) " +
+                "@DATA( level<enum> = LogLevel.ERROR )");
+
+            var result = db.Deserialize<EnumRoundTripConfig>();
+
+            _out.WriteLine($"IsSuccess: {result.IsSuccess}");
+            if (result.IsFailure) _out.WriteLine($"Error: {result.Error.Message}");
+
+            result.IsSuccess.Should().BeTrue();
+            result.SuccessResult.Level.Should().Be(LogLevel.ERROR);
+        }
+
+        // ── FIX: Nullable<T> properties round-trip ────────────────────────────
+
+        [Fact]
+        public void NullableProperty_PresentValue_RoundTrips()
+        {
+            var original = new NullableRoundTripConfig { MaxConnections = 128, DebugMode = true };
+
+            using var builder = MdixBuilder.Create();
+            builder.Serialize(original).IsSuccess.Should().BeTrue();
+            var mdixString = builder.Serialize().OrThrow();
+            _out.WriteLine($"Generated .mdix:\n{mdixString}");
+
+            using var db = Dix.LoadStr(mdixString).OrThrow();
+            var result = db.Deserialize<NullableRoundTripConfig>();
+
+            _out.WriteLine($"IsSuccess: {result.IsSuccess}");
+            if (result.IsFailure) _out.WriteLine($"Error: {result.Error.Message}");
+
+            result.IsSuccess.Should().BeTrue();
+            result.SuccessResult.MaxConnections.Should().Be(128);
+            result.SuccessResult.DebugMode.Should().Be(true);
+        }
+
+        [Fact]
+        public void NullableProperty_MissingPath_StaysNull()
+        {
+            // Neither field is [MdixRequired], so a missing path should leave
+            // the nullable property at its default (null), not throw or fail
+            // the whole deserialization.
+            using var db = Load("@DATA( unrelated = 1 )");
+
+            var result = db.Deserialize<NullableRoundTripConfig>();
+
+            _out.WriteLine($"IsSuccess: {result.IsSuccess}");
+            if (result.IsFailure) _out.WriteLine($"Error: {result.Error.Message}");
+
+            result.IsSuccess.Should().BeTrue();
+            result.SuccessResult.MaxConnections.Should().BeNull();
+            result.SuccessResult.DebugMode.Should().BeNull();
+        }
+
+        // ── Coverage gap fix: long + the five DixScript leaf value types ──────
+
+        [Fact]
+        public void WrapperTypesAndLong_RoundTrip_PreserveValues()
+        {
+            var original = new WrapperTypesRoundTripConfig
+            {
+                RequestId = 9_223_372_036_854_775_800, // near long.MaxValue -- would truncate through `int`
+                Accent    = MdixHexColor.Parse("#1A2B3C").OrThrow(),
+                Payload   = new MdixBlob("SGVsbG8sIFdvcmxkIQ=="),
+                Pattern   = new MdixRegex("^[a-z0-9_]+$"),
+                Since     = MdixDate.Parse("2024-01-15").OrThrow(),
+                CreatedAt = MdixTimestamp.Parse("2024-01-15T10:30:00.000Z").OrThrow(),
+            };
+
+            using var builder = MdixBuilder.Create();
+            var serResult = builder.Serialize(original);
+
+            _out.WriteLine($"Serialize IsSuccess: {serResult.IsSuccess}");
+            if (serResult.IsFailure) _out.WriteLine($"Error: {serResult.Error.Message}");
+            serResult.IsSuccess.Should().BeTrue();
+
+            var mdixString = builder.Serialize().OrThrow();
+            _out.WriteLine($"Generated .mdix:\n{mdixString}");
+
+            using var db = Dix.LoadStr(mdixString).OrThrow();
+            var result = db.Deserialize<WrapperTypesRoundTripConfig>();
+
+            _out.WriteLine($"Deserialize IsSuccess: {result.IsSuccess}");
+            if (result.IsFailure) _out.WriteLine($"Error: {result.Error.Message}");
+            result.IsSuccess.Should().BeTrue();
+
+            var actual = result.SuccessResult;
+            actual.RequestId.Should().Be(original.RequestId);
+            actual.Accent.Should().Be(original.Accent);
+            actual.Payload.Should().Be(original.Payload);
+            actual.Pattern.Pattern.Should().Be(original.Pattern.Pattern);
+            actual.Since.Should().Be(original.Since);
+            actual.CreatedAt.Value.Should().Be(original.CreatedAt.Value);
         }
     }
 }

@@ -347,6 +347,73 @@ namespace MidManStudio.Mdix.Core.Tests
             result.SuccessResult.Should().NotContain("//");
         }
 
+        // ── FIX: StripComments -- was exported from mdix-ffi but never wired up ─
+
+        [Fact]
+        public void StripComments_RemovesLineComments()
+        {
+            const string input = "x = 5 // comment\ny = 10";
+            var result = MdixConverter.StripComments(input);
+            _out.WriteLine($"Result: [{result.OrThrow()}]");
+
+            result.IsSuccess.Should().BeTrue();
+            result.SuccessResult.Should().NotContain("//");
+            result.SuccessResult.Should().Contain("x = 5");
+            result.SuccessResult.Should().Contain("y = 10");
+        }
+
+        [Fact]
+        public void StripComments_RemovesBlockComments()
+        {
+            const string input = "x = 5 /* block */ y = 10";
+            var result = MdixConverter.StripComments(input);
+
+            result.IsSuccess.Should().BeTrue();
+            result.SuccessResult.Should().NotContain("block");
+        }
+
+        [Fact]
+        public void StripComments_PreservesStringContents()
+        {
+            const string input = "url = \"http://example.com\" // comment";
+            var result = MdixConverter.StripComments(input);
+
+            result.IsSuccess.Should().BeTrue();
+            result.SuccessResult.Should().Contain("http://example.com");
+        }
+
+        [Fact]
+        public void StripComments_PreservesFormattingUnlikeMinify()
+        {
+            // The distinction that motivated adding this alongside MinifySource:
+            // comment removal without whitespace collapsing. FormatSource(...,
+            // Compact) doesn't give you this either -- it reformats, it doesn't
+            // just strip comments.
+            const string input = "@DATA(\n    x = 1, // keep me indented\n    y = 2\n)";
+            var result = MdixConverter.StripComments(input);
+            _out.WriteLine($"Result: [{result.OrThrow()}]");
+
+            result.IsSuccess.Should().BeTrue();
+            result.SuccessResult.Should().NotContain("keep me indented");
+            result.SuccessResult.Should().Contain("\n");
+            result.SuccessResult.Should().Contain("    x = 1");
+        }
+
+        [Fact]
+        public void StripComments_NullSource_ReturnsError()
+        {
+            MdixConverter.StripComments(null!).IsFailure.Should().BeTrue();
+        }
+
+        [Fact]
+        public void DixFacade_StripComments_Delegates()
+        {
+            const string input = "@DATA(\n  x = 1 // comment\n)";
+            var result = Dix.StripComments(input);
+            result.IsSuccess.Should().BeTrue();
+            result.SuccessResult.Should().NotContain("//");
+        }
+
         [Fact]
         public void DixFacade_Format_Delegates()
         {

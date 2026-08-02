@@ -477,6 +477,31 @@ namespace MidManStudio.Mdix.Core
             return Add(name, new DixHexEntry(hex));
         }
 
+        // FIX: WithBlob/WithRegex existed on MdixDataSectionBuilder but were missing
+        // here, so a blob/regex property nested inside a table block had no way to
+        // serialize correctly -- validation mirrors MdixDataSectionBuilder exactly.
+        public MdixTablePropertiesBuilder WithBlob(string name, string base64Data)
+        {
+            try { Convert.FromBase64String(base64Data); }
+            catch (FormatException ex)
+            {
+                throw new ArgumentException(
+                    $"Invalid base64 blob data: {ex.Message}", nameof(base64Data), ex);
+            }
+            return Add(name, new DixBlobEntry(base64Data));
+        }
+
+        public MdixTablePropertiesBuilder WithRegex(string name, string pattern)
+        {
+            try { _ = new System.Text.RegularExpressions.Regex(pattern); }
+            catch (ArgumentException ex)
+            {
+                throw new ArgumentException(
+                    $"Invalid regex pattern: {ex.Message}", nameof(pattern), ex);
+            }
+            return Add(name, new DixRegexEntry(pattern));
+        }
+
         public MdixTablePropertiesBuilder WithEnum(string name, string enumName, string fieldName) =>
             Add(name, new DixEnumEntry(enumName, fieldName));
 

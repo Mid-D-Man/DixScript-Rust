@@ -2,7 +2,12 @@
 name = "mdix-ffi"
 version = "1.0.0"
 edition = "2021"
-rust-version = "1.70"
+# FIX: was "1.70" -- mdix-ffi path-depends on `dixscript`, which itself declares
+# rust-version = "1.85" (see ../dixscript/Cargo.toml). A crate's real MSRV can never
+# be lower than that of a dependency it unconditionally builds against, so "1.70"
+# was never actually reachable -- `cargo build` would fail on any toolchain between
+# 1.70 and 1.85 despite this manifest claiming support for it. Aligned to match.
+rust-version = "1.85"
 authors = ["MidManStudio"]
 description = "C FFI layer for DixScript — Unity/C# native plugin"
 license = "MIT"

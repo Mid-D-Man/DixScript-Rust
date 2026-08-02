@@ -179,6 +179,30 @@ namespace MidManStudio.Mdix.Core
             }
         }
 
+        // FIX: mdix_strip_comments was exported from mdix-ffi but never wired up on
+        // the C# side. FormatSource(..., Compact) already covers what mdix_compact_source
+        // does (both route to DixCompactor::compact internally), but comment removal on
+        // its own had no equivalent -- only reachable indirectly and lossily via
+        // MinifySource, which also collapses whitespace.
+        /// <summary>
+        /// Removes comments from a raw .mdix source string while preserving formatting
+        /// and whitespace otherwise. String literal contents are preserved.
+        /// Delegates to Rust DixCompactor::remove_comments.
+        /// </summary>
+        public static MdixResult<string> StripComments(string source)
+        {
+            if (source is null) return MdixError.NativeError("StripComments: source cannot be null.");
+            MdixNative.mdix_clear_error();
+
+            fixed (byte* srcPtr = MdixStringCache.GetUtf8Bytes(source))
+            {
+                var ptr = MdixNative.mdix_strip_comments(srcPtr);
+                if (ptr == null)
+                    return MdixError.NativeError(ReadLastError() ?? "mdix_strip_comments returned null.");
+                return MdixResult<string>.Ok(ReadFreeString(ptr)!);
+            }
+        }
+
         // ── Private helpers ───────────────────────────────────────────────────
 
         private static string? ReadLastError()

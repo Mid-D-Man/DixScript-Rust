@@ -14,8 +14,29 @@
     <Description>DixScript (.mdix) runtime — load, read, and build .mdix config files.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Mid-D-Man/DixScript-Rust</RepositoryUrl>
+    <!-- FIX: was missing -- nuget.org uses RepositoryUrl+RepositoryType together to
+         render the "Source repository" link on the package page. -->
+    <RepositoryType>git</RepositoryType>
     <PackageTags>config;data;encryption;dixscript;mdix</PackageTags>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+
+    <!-- FIX: was missing -- nuget.org renders this on the package page. The file is
+         bundled below via the README <None> item. -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!--
+      FIX: SourceLink + deterministic build were entirely missing. Together these let a
+      consumer's debugger step into the exact commit this package was built from,
+      fetched straight from GitHub, without a local source checkout.
+      ContinuousIntegrationBuild is gated to CI only (the standard pattern) so local
+      `dotnet pack` for manual testing isn't forced into deterministic-path mode, which
+      would otherwise embed CI-only absolute paths that don't resolve for a local dev.
+    -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
 
     <!--
       Suppress warnings when native runtimes/ files are absent.
@@ -36,6 +57,16 @@
 
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="6.0.10" />
+    <!-- FIX: was missing -- see PublishRepositoryUrl/EmbedUntrackedSources above.
+         PrivateAssets="All" keeps this a build-time-only dependency; it is not
+         carried transitively to consumers of this package. -->
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <!-- FIX: was missing -- bundles the package README (added alongside this project)
+       so it appears on the nuget.org package page per PackageReadmeFile above. -->
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <!--

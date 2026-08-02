@@ -178,6 +178,10 @@ namespace MidManStudio.Mdix
         public static Core.MdixResult<string> Minify(string source) =>
             Core.MdixConverter.MinifySource(source);
 
+        // FIX: was exported from mdix-ffi but never wired up on the C# side.
+        public static Core.MdixResult<string> StripComments(string source) =>
+            Core.MdixConverter.StripComments(source);
+
         // ── Serializer cache ──────────────────────────────────────────────────
 
         public static void ClearSerializerCache() => Core.MdixSerializer.ClearCache();

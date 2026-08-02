@@ -73,10 +73,16 @@ All commands accept `--verbose`, `--quiet`, `--json`, and `--no-color`.
 The `--json` flag wraps output in `{ "success": bool, "data": ... }` for
 scripting and CI pipelines.
 
-## Global flags--verbose    Show per-stage timing and extra detail
+## Global flags
+
+```
+--verbose    Show per-stage timing and extra detail
 --quiet      Suppress all non-error output
 --json       Machine-readable JSON on stdout; errors on stderr
---no-color   Disable ANSI colour codes## Examples
+--no-color   Disable ANSI colour codes
+```
+
+## Examples
 
 ### Validate with strict mode (warnings as errors)
 

@@ -861,6 +861,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "dixscript"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb6f361a3813045cc86f14f2243493c97dcd2056857763c09aa7e3de23b7f63a"
+dependencies = [
+ "aes-gcm",
+ "argon2",
+ "async-trait",
+ "base64",
+ "bitflags 2.10.0",
+ "bzip2",
+ "chacha20poly1305",
+ "chrono",
+ "flate2",
+ "getrandom 0.2.16",
+ "hex",
+ "hostname",
+ "itertools 0.13.0",
+ "lazy_static",
+ "lzma-rust2",
+ "memchr",
+ "phf",
+ "rand",
+ "rayon",
+ "regex",
+ "reqwest",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "toml 0.8.23",
+ "unicase",
+ "url",
+ "uuid",
+ "web-sys",
+ "web-time",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1674,7 +1714,7 @@ dependencies = [
  "clap_complete",
  "colored",
  "dirs",
- "dixscript",
+ "dixscript 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "indicatif",
  "predicates",
  "rand",
@@ -1692,7 +1732,7 @@ dependencies = [
  "cbindgen",
  "chrono",
  "csbindgen",
- "dixscript",
+ "dixscript 1.0.0",
  "serde_json",
 ]
 
@@ -1700,7 +1740,7 @@ dependencies = [
 name = "mdix-java"
 version = "1.0.0"
 dependencies = [
- "dixscript",
+ "dixscript 1.0.0",
  "jni",
  "serde_json",
 ]
@@ -1711,7 +1751,7 @@ version = "1.0.0"
 dependencies = [
  "base64",
  "dashmap 6.1.0",
- "dixscript",
+ "dixscript 1.0.0",
  "regex",
  "serde_json",
  "tokio",
@@ -1727,7 +1767,7 @@ name = "mdix-lua"
 version = "1.0.0"
 dependencies = [
  "chrono",
- "dixscript",
+ "dixscript 1.0.0",
  "mlua",
  "serde_json",
 ]
@@ -1737,7 +1777,7 @@ name = "mdix-python"
 version = "1.0.0"
 dependencies = [
  "chrono",
- "dixscript",
+ "dixscript 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "pyo3",
  "serde_json",
  "tempfile",
@@ -1749,7 +1789,7 @@ version = "1.0.0"
 dependencies = [
  "chrono",
  "console_error_panic_hook",
- "dixscript",
+ "dixscript 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.16",
  "js-sys",
  "serde_json",

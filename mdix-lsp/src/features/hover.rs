@@ -22,6 +22,7 @@ use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Posi
 
 use crate::document::Document;
 use crate::features::hover_data::{INSTANCE_METHOD_SIGS, STATIC_SIGS};
+use crate::features::local_scope;
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -564,23 +565,15 @@ fn infer_receiver_dix_type(doc: &Document, tok: &Token, section: SectionId) -> O
 fn infer_identifier_dix_type(doc: &Document, name: &str, section: SectionId) -> Option<DixType> {
     if section == SectionId::QuickFuncs {
         if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
+            let st = doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref());
             for func in &qf.functions {
-                for param in &func.parameters {
-                    if param.name == name { return param.data_type.and_then(ast_data_type_to_dix_type); }
-                }
-                if let Some((dt_opt, _)) = find_var_decl_in_stmts(&func.body, name) {
-                    if let Some(dt) = dt_opt { return ast_data_type_to_dix_type(dt); }
-                    if let Some(val_expr) = find_var_value_in_stmts(&func.body, name) {
-                        if let Some(st) = doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref()) {
-                            let param_types: HashMap<String, Option<DataType>> =
-                                func.parameters.iter().map(|p| (p.name.clone(), p.data_type)).collect();
-                            let visitor = TypeInferenceVisitor::new(st, Some(param_types));
-                            if let Some(dt) = visitor.infer_type_from_expression(val_expr) {
-                                return ast_data_type_to_dix_type(dt);
-                            }
-                        }
-                    }
-                    return None;
+                let locals = local_scope::local_variable_types_for_function(func, st);
+                if let Some(dt_opt) = locals.get(name) {
+                    // Known parameter/local in this function — shadows any
+                    // same-named DATA variable, so commit to this answer
+                    // (even if the type itself couldn't be resolved) rather
+                    // than falling through to the DATA-section lookups below.
+                    return dt_opt.and_then(ast_data_type_to_dix_type);
                 }
             }
         }
@@ -599,17 +592,21 @@ fn infer_identifier_dix_type(doc: &Document, name: &str, section: SectionId) -> 
 fn infer_identifier_full_data_type(doc: &Document, name: &str, section: SectionId) -> Option<DataType> {
     if section == SectionId::QuickFuncs {
         if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
+            let st = doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref());
             for func in &qf.functions {
-                for param in &func.parameters {
-                    if param.name == name { return param.data_type; }
-                }
                 if let Some((dt_opt, _)) = find_var_decl_in_stmts(&func.body, name) {
                     if let Some(dt) = dt_opt { return Some(dt); }
                     if let Some(val_expr) = find_var_value_in_stmts(&func.body, name) {
-                        if let Some(st) = doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref()) {
-                            let param_types: HashMap<String, Option<DataType>> =
-                                func.parameters.iter().map(|p| (p.name.clone(), p.data_type)).collect();
-                            return infer_full_dt_for_hover(val_expr, &param_types, st);
+                        if let Some(st) = st {
+                            // Full running map (params + every prior local in
+                            // this body), not just parameters — so e.g.
+                            // `mytup = sometuple.first()` resolves `sometuple`
+                            // even when it's itself a local a few lines up.
+                            // infer_full_dt_for_hover still does its own
+                            // tuple/array element-detail enhancement on top
+                            // of this, unchanged.
+                            let locals = local_scope::local_variable_types_for_function(func, Some(st));
+                            return infer_full_dt_for_hover(val_expr, &locals, st);
                         }
                     }
                     return None;
@@ -1139,9 +1136,8 @@ fn hover_qf_local_var(doc: &Document, name: &str) -> Option<String> {
                 None => {
                     let inferred = if let Some(st) = st {
                         find_var_value_in_stmts(&func.body, name).and_then(|val_expr| {
-                            let param_types: HashMap<String, Option<DataType>> =
-                                func.parameters.iter().map(|p| (p.name.clone(), p.data_type)).collect();
-                            infer_full_dt_for_hover(val_expr, &param_types, st).map(format_dt_type_str)
+                            let locals = local_scope::local_variable_types_for_function(func, Some(st));
+                            infer_full_dt_for_hover(val_expr, &locals, st).map(format_dt_type_str)
                         })
                     } else { None };
                     match inferred {
@@ -1846,4 +1842,4 @@ fn ordinal_suffix(d: u32) -> &'static str {
         n if n % 10 == 3     => "rd",
         _                    => "th",
     }
-                           }
+                                                      }

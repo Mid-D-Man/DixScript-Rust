@@ -17,9 +17,9 @@ use dixscript::Compiler::AST::{
 use dixscript::Compiler::Core::Tokenizer::Token;
 use dixscript::Compiler::Core::Tokenizer::token::SectionId;
 use dixscript::Compiler::Core::Tokenizer::TokenType;
-use dixscript::Compiler::Utilities::SymbolTable;
 
 use crate::document::Document;
+use crate::features::local_scope;
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -657,53 +657,9 @@ fn bracket_completions(ch: char, pos: Position) -> Vec<CompletionItem> {
 // ─────────────────────────────────────────────────────────────────────────────
 // LOCAL VARIABLE TYPE LOOKUP
 // ─────────────────────────────────────────────────────────────────────────────
-
-fn find_local_var_dt_in_stmts(
-    stmts: &[QuickFuncStatement],
-    name:  &str,
-    st:    Option<&SymbolTable>,
-) -> Option<DataType> {
-    for stmt in stmts {
-        match stmt {
-            QuickFuncStatement::VariableDeclaration { variable_name, data_type, value, .. }
-                if *variable_name == name =>
-            {
-                if let Some(dt) = data_type {
-                    return Some(*dt);
-                }
-                // `infer_datatype_from_expr_simple` only recognizes literal
-                // `Expression::Value`s (and parens around one) — it gives up
-                // on anything richer (function calls, property/index access,
-                // arithmetic, qualified identifiers, ...). Before returning
-                // None outright, fall back to the same TypeInferenceVisitor
-                // engine inlay hints use (see inlay_hints.rs::precise_dt) so
-                // `x <no annotation> = someFunc()`-style locals still get a
-                // real type here instead of silently killing completions
-                // for every `x.` that follows.
-                return infer_datatype_from_expr_simple(value)
-                    .or_else(|| st.and_then(|st| {
-                        TypeInferenceVisitor::new(st, None).infer_type_from_expression(value)
-                    }));
-            }
-            QuickFuncStatement::If { then_branch, else_branch, .. } => {
-                if let Some(dt) = find_local_var_dt_in_stmts(then_branch, name, st) { return Some(dt); }
-                if let Some(eb) = else_branch {
-                    if let Some(dt) = find_local_var_dt_in_stmts(eb, name, st) { return Some(dt); }
-                }
-            }
-            QuickFuncStatement::Switch { cases, default_case, .. } => {
-                for case in cases {
-                    if let Some(dt) = find_local_var_dt_in_stmts(&case.statements, name, st) { return Some(dt); }
-                }
-                if let Some(dc) = default_case {
-                    if let Some(dt) = find_local_var_dt_in_stmts(&dc.statements, name, st) { return Some(dt); }
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
+// See local_scope.rs — completion_identifier_dix_type below now uses
+// local_scope::local_variable_types_for_function directly instead of a
+// bespoke walk here.
 
 fn infer_datatype_from_expr_simple(expr: &Expression) -> Option<DataType> {
     match expr {
@@ -1321,7 +1277,7 @@ fn resolve_dot_call_type(
 fn get_token_dix_type_for_chain(tokens: &[Token], idx: usize, doc: &Document) -> Option<DixType> {
     match tokens[idx].token_type.clone() {
         TokenType::Identifier(name) =>
-            completion_identifier_dix_type(&name, doc, tokens[idx].section),
+            completion_identifier_dix_type(&name, doc),
         TokenType::String(_) | TokenType::StringSingle(_) | TokenType::InterpolatedString(_) =>
             Some(DixType::String),
 
@@ -1414,41 +1370,27 @@ fn dix_type_of_token(token: &Token, doc: &Document) -> Option<DixType> {
         TokenType::Symbol(']') => Some(DixType::Array),
 
         TokenType::Identifier(name) =>
-            completion_identifier_dix_type(name, doc, token.section),
+            completion_identifier_dix_type(name, doc),
         _ => None,
     }
 }
 
 fn completion_identifier_dix_type(
-    name:    &str,
-    doc:     &Document,
-    section: SectionId,
+    name: &str,
+    doc:  &Document,
 ) -> Option<DixType> {
-    // 1. QuickFunc parameter type annotation
+    // 1. QuickFunc parameter or local-variable type. Uses the same
+    // incremental running-map approach inlay hints use (see
+    // local_scope.rs), so a local declared from another local earlier in
+    // the same body — e.g. `mytup = sometuple.first()` where `sometuple`
+    // was itself declared a few lines up, not a parameter — resolves
+    // here too, not just direct-from-parameter/symbol-table cases.
     if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
+        let st = doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref());
         for func in &qf.functions {
-            for param in &func.parameters {
-                if param.name == name {
-                    // Only short-circuit when there's an actual annotation.
-                    // An untyped parameter previously returned None right
-                    // here, which killed dot-completion for it outright —
-                    // fall through to the richer lookups below instead.
-                    if let Some(dt) = param.data_type {
-                        return completion_dt_to_dix(dt);
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. QuickFunc body local variable declaration
-    if section == SectionId::QuickFuncs {
-        if let Some(qf) = doc.ast.as_ref().and_then(|a| a.quick_functions.as_ref()) {
-            let st = doc.semantic_result.as_ref().and_then(|sr| sr.symbol_table.as_ref());
-            for func in &qf.functions {
-                if let Some(dt) = find_local_var_dt_in_stmts(&func.body, name, st) {
-                    return completion_dt_to_dix(dt);
-                }
+            let locals = local_scope::local_variable_types_for_function(func, st);
+            if let Some(dt) = locals.get(name).copied().flatten() {
+                return completion_dt_to_dix(dt);
             }
         }
     }
@@ -2389,4 +2331,4 @@ fn word_before_dot(source: &str, pos: Position) -> String {
         .last()
         .unwrap_or("")
         .to_string()
-                    }
+            }

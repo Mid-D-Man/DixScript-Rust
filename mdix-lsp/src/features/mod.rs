@@ -1,4 +1,3 @@
-
 pub mod code_actions;
 pub mod code_lens;
 pub mod call_hierarchy;
@@ -13,6 +12,7 @@ pub mod goto_definition;
 pub mod hover;
 pub mod hover_data;
 pub mod inlay_hints;
+pub mod local_scope;
 pub mod references;
 pub mod rename;
 pub mod semantic_tokens;

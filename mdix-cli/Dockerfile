@@ -2,12 +2,24 @@
 #
 # Build context must be the REPO ROOT, not mdix-cli/ itself:
 #   docker build -f mdix-cli/Dockerfile -t mdix-cli .
-# mdix-cli depends on dixscript via a workspace path dependency (see
-# mdix-cli/Cargo.toml), and Cargo needs every workspace member's Cargo.toml
-# present to even parse the workspace -- same reason CI's
-# `cargo build -p mdix-cli` steps already run from the repo root rather
-# than from inside mdix-cli/. See .dockerignore at the repo root for what's
+# mdix-cli is a member of this Cargo workspace (see the root Cargo.toml),
+# and Cargo needs every workspace member's Cargo.toml present to even parse
+# the workspace -- same reason CI's `cargo build -p mdix-cli` steps already
+# run from the repo root rather than from inside mdix-cli/. (mdix-cli's own
+# dixscript dependency is now a plain crates.io version, not a path dep --
+# see mdix-cli/Cargo.toml -- but the workspace-parsing requirement still
+# applies regardless.) See .dockerignore at the repo root for what's
 # excluded from the build context.
+#
+# ── Cargo.lock prerequisite ─────────────────────────────────────────────
+# The `--locked` build below will fail with "the lock file needs to be
+# updated but --locked was passed" until Cargo.lock has been regenerated
+# against mdix-cli's current Cargo.toml (its dixscript dependency changed
+# from a path+version dep to a plain version dep, which is a different
+# Cargo source kind even though the resolved version is unchanged -- the
+# committed Cargo.lock still only has a path-sourced dixscript entry).
+# Run the "Sync Cargo.lock" workflow (workflow_dispatch) once first if
+# this hasn't been done since that Cargo.toml change landed.
 
 # ── Build stage ──────────────────────────────────────────────────────────
 # `rust:1-bookworm` (not `-slim`) is used deliberately: it ships gcc and

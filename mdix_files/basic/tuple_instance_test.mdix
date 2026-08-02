@@ -26,6 +26,7 @@
         let second = tup.second();
         let third = tup.third();
         let fourth = tup.fourth();
+
         return first;
     }
 
@@ -33,6 +34,7 @@
         let mut tup = t:(10, 20, 30, 40);
         let has20 = tup.contains(20);
         let has50 = tup.contains(50);
+
         return has20;
     }
 

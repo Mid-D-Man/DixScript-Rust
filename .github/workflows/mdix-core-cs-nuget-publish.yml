@@ -5,10 +5,10 @@ name: Publish MidManStudio.Mdix to NuGet
 # for crates.io, mdix-cli-publish.yml uses for crates.io+GHCR, and
 # mdix-python-pypi-publish.yml uses for PyPI.
 #
-# Builds native mdix-ffi for all 7 RIDs the .csproj/.targets already wire
+# Builds native mdix-ffi for all 9 RIDs the .csproj/.targets already wire
 # up (see MidManStudio.Mdix.Core.csproj's runtimes/ ItemGroup and
 # build/MidManStudio.Mdix.targets): linux-x64, linux-arm64, win-x64,
-# win-x86, osx-arm64, osx-x64, android-arm64. Each Exists() guard in the
+# win-x86, osx-arm64, osx-x64, android-arm64, android-arm, android-x64. Each Exists() guard in the
 # .csproj means `dotnet pack` still succeeds even if a job below is ever
 # skipped or fails independently — the package just ships fewer RIDs that
 # run, not zero.
@@ -265,13 +265,17 @@ jobs:
           path: target/x86_64-apple-darwin/release/libmdix_ffi.dylib
           if-no-files-found: error
 
-  # FIX: was missing -- uses cargo-ndk per the build command already
-  # documented in mdix-ffi/Cargo.toml's own per-platform comment block.
-  # GitHub-hosted ubuntu-latest runners ship the Android SDK/NDK
-  # preinstalled with ANDROID_NDK_HOME / ANDROID_NDK_LATEST_HOME already
-  # set (see actions/runner-images) -- cargo-ndk picks one of those up
-  # automatically, no separate NDK download/setup step needed.
-  build-native-android-arm64:
+  # FIX: was a single arm64-v8a-only job. mdix-ffi/Cargo.toml's own Android
+  # doc comment already documents all three cargo-ndk invocations below, and
+  # MidManStudio_Unity's build-audio-libs.yml / build-projectile-rust-libs.yml
+  # already build exactly these three ABIs in one job for the same crates'
+  # native libs, with the same reasoning: arm64-v8a alone covers current-gen
+  # devices, but armeabi-v7a is still a real install base on older/budget
+  # Android hardware, and x86_64 covers emulators plus some Intel
+  # Chromebooks/tablets. This job -- including the NDK-location step, the
+  # `--version "^3"` pin, and the symbol-set-parity check -- mirrors that
+  # Unity workflow's build-android job directly rather than reinventing it.
+  build-native-android:
     needs: confirm-trigger
     runs-on: ubuntu-latest
     steps:
@@ -279,7 +283,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
       - uses: actions/cache@v3
         with:
           path: |
@@ -288,16 +292,75 @@ jobs:
             ~/.cargo/git/db/
             target/
             ~/.cargo/bin/cargo-ndk
-          key: ubuntu-latest-cargo-ffi-android-arm64-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ubuntu-latest-cargo-ffi-android-arm64-
-      - name: Install cargo-ndk
-        run: command -v cargo-ndk || cargo install cargo-ndk --locked
-      - name: Build mdix-ffi (android-arm64)
-        run: cargo ndk -t arm64-v8a -o ./android-out build --release -p mdix-ffi
+          key: ubuntu-latest-cargo-ffi-android-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-ffi-android-
+      - run: cargo install cargo-ndk --version "^3" --locked
+      - name: Locate NDK
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}"
+          [ -z "$NDK" ] && NDK=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -1)
+          [ -z "$NDK" ] && { echo "❌ Android NDK not found on runner"; exit 1; }
+          echo "ANDROID_NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "Using NDK: $NDK"
+      - name: Build all ABIs
+        run: |
+          set -e
+          cargo ndk -t arm64-v8a   -o ./android-out build --release -p mdix-ffi
+          cargo ndk -t armeabi-v7a -o ./android-out build --release -p mdix-ffi
+          cargo ndk -t x86_64      -o ./android-out build --release -p mdix-ffi
+      - name: Verify ABI outputs (symbol-set consistency, not just presence)
+        run: |
+          set -e
+          # mdix-ffi exports ~65 functions -- unlike mid_audio/projectile_core's
+          # small hand-enumerated EXPECTED_SYMS list, cross-ABI parity plus a
+          # floor on the count is the maintainable check here: it still catches
+          # "one ABI silently exports fewer functions than the others" without
+          # needing every FFI addition to also touch this workflow.
+          MIN_BYTES=100000     # mdix-ffi is a full compiler+runtime, expect low-MB .so; 100KB only catches a stub/truncated build
+          MIN_SYMBOLS=60
+          FAIL=0
+          declare -A SYMSETS
+
+          for ABI in arm64-v8a armeabi-v7a x86_64; do
+            F="android-out/$ABI/libmdix_ffi.so"
+            if [ ! -f "$F" ]; then
+              echo "❌ MISSING: $ABI — libmdix_ffi.so was not produced"
+              FAIL=1; continue
+            fi
+            SIZE=$(stat -c%s "$F")
+            echo "  $ABI: ${SIZE} bytes"
+            if [ "$SIZE" -lt "$MIN_BYTES" ]; then
+              echo "❌ SUSPICIOUSLY SMALL: $ABI ($SIZE bytes) — likely a stub/failed build"
+              FAIL=1; continue
+            fi
+
+            DEFINED=$(nm -D --defined-only "$F" 2>/dev/null | awk '{print $3}' | sort)
+            SYMSETS[$ABI]="$DEFINED"
+            SYMCOUNT=$(echo "$DEFINED" | grep -c '^mdix_' || true)
+            echo "  $ABI: $SYMCOUNT mdix_* exported symbols"
+            if [ "$SYMCOUNT" -lt "$MIN_SYMBOLS" ]; then
+              echo "❌ $ABI exports too few mdix_* symbols ($SYMCOUNT < $MIN_SYMBOLS)"
+              FAIL=1
+            fi
+          done
+
+          # All three ABIs must export the exact same set of functions --
+          # this is what actually distinguishes "smaller but correct" from
+          # "an ABI silently missing exports" (sizes legitimately differ
+          # per-target and that alone is fine).
+          if [ -n "${SYMSETS[arm64-v8a]:-}" ] && [ -n "${SYMSETS[armeabi-v7a]:-}" ]; then
+            [ "${SYMSETS[arm64-v8a]}" = "${SYMSETS[armeabi-v7a]}" ] || { echo "❌ arm64-v8a/armeabi-v7a export different symbol sets"; FAIL=1; }
+          fi
+          if [ -n "${SYMSETS[arm64-v8a]:-}" ] && [ -n "${SYMSETS[x86_64]:-}" ]; then
+            [ "${SYMSETS[arm64-v8a]}" = "${SYMSETS[x86_64]}" ] || { echo "❌ arm64-v8a/x86_64 export different symbol sets"; FAIL=1; }
+          fi
+
+          [ "$FAIL" = "1" ] && { echo "❌ Android artifact verification failed."; exit 1; }
+          echo "✅ All 3 ABIs present, sane size, and export identical symbol sets."
       - uses: actions/upload-artifact@v4
         with:
-          name: native-android-arm64
-          path: android-out/arm64-v8a/libmdix_ffi.so
+          name: native-android
+          path: android-out/
           if-no-files-found: error
 
   pack-test-and-publish:
@@ -309,7 +372,7 @@ jobs:
       - build-native-win-x86
       - build-native-osx-arm64
       - build-native-osx-x64
-      - build-native-android-arm64
+      - build-native-android
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -365,7 +428,7 @@ jobs:
         with:
           path: native-artifacts
 
-      # FIX: now assembles all 7 RIDs instead of 3.
+      # FIX: now assembles all 9 RIDs instead of 7 (3 Android ABIs instead of 1).
       - name: Assemble runtimes/ folder
         run: |
           set -e
@@ -377,13 +440,17 @@ jobs:
           mkdir -p "$CORE/runtimes/osx-arm64/native"
           mkdir -p "$CORE/runtimes/osx-x64/native"
           mkdir -p "$CORE/runtimes/android-arm64/native"
+          mkdir -p "$CORE/runtimes/android-arm/native"
+          mkdir -p "$CORE/runtimes/android-x64/native"
           cp native-artifacts/native-linux-x64/libmdix_ffi.so       "$CORE/runtimes/linux-x64/native/"
           cp native-artifacts/native-linux-arm64/libmdix_ffi.so     "$CORE/runtimes/linux-arm64/native/"
           cp native-artifacts/native-win-x64/mdix_ffi.dll           "$CORE/runtimes/win-x64/native/"
           cp native-artifacts/native-win-x86/mdix_ffi.dll           "$CORE/runtimes/win-x86/native/"
           cp native-artifacts/native-osx-arm64/libmdix_ffi.dylib    "$CORE/runtimes/osx-arm64/native/"
           cp native-artifacts/native-osx-x64/libmdix_ffi.dylib      "$CORE/runtimes/osx-x64/native/"
-          cp native-artifacts/native-android-arm64/libmdix_ffi.so   "$CORE/runtimes/android-arm64/native/"
+          cp native-artifacts/native-android/arm64-v8a/libmdix_ffi.so   "$CORE/runtimes/android-arm64/native/"
+          cp native-artifacts/native-android/armeabi-v7a/libmdix_ffi.so "$CORE/runtimes/android-arm/native/"
+          cp native-artifacts/native-android/x86_64/libmdix_ffi.so      "$CORE/runtimes/android-x64/native/"
           echo "runtimes/ assembled:"
           find "$CORE/runtimes" -type f -exec ls -lh {} \;
 
@@ -393,19 +460,19 @@ jobs:
             --configuration Release \
             --output ./nupkg
 
-      # FIX: now verifies all 7 RIDs instead of 3.
+      # FIX: now verifies all 9 RIDs instead of 7.
       - name: Verify package contents (still no push yet)
         run: |
           set -e
           PKG=$(ls ./nupkg/*.nupkg | grep -v '\.snupkg$' | head -1)
           echo "Package: $PKG"
           unzip -l "$PKG"
-          for rid in linux-x64 linux-arm64 win-x64 win-x86 osx-arm64 osx-x64 android-arm64; do
+          for rid in linux-x64 linux-arm64 win-x64 win-x86 osx-arm64 osx-x64 android-arm64 android-arm android-x64; do
             unzip -l "$PKG" | grep -q "runtimes/$rid/native/" || { echo "❌ missing $rid native lib in package"; exit 1; }
           done
           unzip -l "$PKG" | grep -q "build/MidManStudio.Mdix.targets" || { echo "❌ missing build/MidManStudio.Mdix.targets in package"; exit 1; }
           unzip -l "$PKG" | grep -qi "README.md" || { echo "❌ missing README.md in package"; exit 1; }
-          echo "✅ All 7 native RIDs + the .targets file + README.md are present in the package."
+          echo "✅ All 9 native RIDs + the .targets file + README.md are present in the package."
 
       - name: Read package version
         id: version

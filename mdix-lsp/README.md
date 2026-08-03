@@ -63,6 +63,47 @@ For any other editor, point its generic LSP client config at the
 `mdix-lsp` binary with no arguments — it starts, waits on stdin, and
 speaks LSP immediately.
 
+## Extending for other dialects
+
+`mdix-lsp` is also usable as a library, not just a binary. If you build
+something on top of `.mdix` that's still valid `.mdix` grammar underneath
+— extra identifiers that mean something to your tooling (`scene`,
+`animation`, ...) rather than genuinely new keywords the tokenizer has to
+understand — you can add completions and hover text for them from your
+own crate, without forking this one:
+
+```toml
+[dependencies]
+mdix-lsp = "1.0"
+```
+
+```rust
+use mdix_lsp::extensions::{CompletionExtension, Extensions};
+use mdix_lsp::Document;
+use mdix_lsp::tower_lsp::lsp_types::{CompletionItem, Position};
+
+struct MsxCompletions;
+impl CompletionExtension for MsxCompletions {
+    fn extra_completions(&self, doc: &Document, pos: Position, trigger: Option<&str>) -> Vec<CompletionItem> {
+        vec![] // inspect doc.source / doc.tokens / doc.ast yourself
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    mdix_lsp::setup_logging();
+    mdix_lsp::run_with_extensions(
+        Extensions::new().with_completion_extension(MsxCompletions),
+    ).await;
+}
+```
+
+See the `extensions` module docs (`cargo doc -p mdix-lsp --open`) for the
+full trait surface, including `HoverExtension`. This can't teach the
+underlying `dixscript` compiler new syntax — if your dialect needs real
+new keywords, not just special-cased identifiers, that requires changes
+to `dixscript` itself, not this crate.
+
 ## Logging
 
 All tracing goes to stderr — stdout is reserved for the LSP stdio channel.

@@ -46,8 +46,8 @@ name = "mdix_ffi"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-# version field required for `cargo publish -p mdix-ffi` after dixscript lands on crates.io
-dixscript  = { path = "../dixscript", version = "1.0.0" }
+
+dixscript          = "1.0.0"
 serde_json = "1.0"
 # merge.rs needs chrono::Utc::now() for DixData::from_ast() — previously only
 # reached transitively through dixscript, which isn't enough to `use` it

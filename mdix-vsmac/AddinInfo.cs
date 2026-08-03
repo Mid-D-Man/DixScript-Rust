@@ -13,6 +13,34 @@ using MonoDevelop.Core;
 [assembly: AddinAuthor("MidManStudio")]
 [assembly: AddinUrl("https://github.com/Mid-D-Man/DixScript-Rust")]
 
+// ----------------------------------------------------------------------------
+// 2026-08-03 — ROOT CAUSE of the 7KB .mpack (and the file-tree corruption
+// when opening/expanding a folder with a .mdix file in it):
+//
+// vstool/mdtool's "setup pack" does NOT bundle everything sitting next to
+// the DLL in the build output. Per Mono.Addins' own docs ("Files included in
+// an add-in"): a file only gets packed if it's declared as belonging to the
+// addin, either via <Import file="..."/> in a <Runtime> manifest section, or
+// via this attribute, [assembly: ImportAddinFile]. Manifest.addin.xml never
+// had a <Runtime> section, so packing only ever produced the DLL itself —
+// no mdix-lsp binary, no icon SVGs. That's the entire 7KB.
+//
+// The missing icon is almost certainly what corrupted the Solution/file pad:
+// Manifest.addin.xml registers a StockIcon for every .mdix file, and VS4Mac
+// has to resolve that icon the moment it renders a tree node for one — i.e.
+// exactly when you expand a folder containing one, or immediately if it's at
+// the root. With the resource never actually shipped, that resolution fails
+// right in the middle of tree rendering.
+//
+// Paths below are relative to the addin's own install directory, matching
+// where MdixAddin.csproj's CopyToOutputDirectory items actually place these
+// files at build time (bin/<config>/net7.0/lsp/mdix-lsp,
+// bin/<config>/net7.0/Resources/*.svg).
+// ----------------------------------------------------------------------------
+[assembly: ImportAddinFile("lsp/mdix-lsp")]
+[assembly: ImportAddinFile("Resources/mdix-file.svg")]
+[assembly: ImportAddinFile("Resources/mdix-file-dark.svg")]
+
 // "MonoDevelop.Ide" is still the correct host addin id under VS 2022 for Mac
 // (17.x) — the Cocoa/net7 rewrite changed the UI shell and the addin build
 // toolchain (see MdixAddin.csproj), but it kept the underlying Mono.Addins

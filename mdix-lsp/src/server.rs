@@ -17,6 +17,7 @@ use crate::analyzer::run_pipeline;
 use crate::capabilities::server_capabilities;
 use crate::converters::to_diagnostics;
 use crate::document::Document;
+use crate::extensions::Extensions;
 use crate::features;
 use crate::features::code_lens::{
     CMD_COMPILE, CMD_CREATE_RESOLVED, CMD_MINIFY,
@@ -35,16 +36,18 @@ pub struct Backend {
     pub shutdown_requested: AtomicBool,
     pub analysis_tasks:     StdMutex<Vec<tokio::task::JoinHandle<()>>>,
     pub pending_versions:   Arc<DashMap<Url, i32>>,
+    pub extensions:         Extensions,
 }
 
 impl Backend {
-    pub fn new(client: Client) -> Self {
+    pub fn new(client: Client, extensions: Extensions) -> Self {
         Backend {
             client,
             documents:          Arc::new(DashMap::new()),
             shutdown_requested: AtomicBool::new(false),
             analysis_tasks:     StdMutex::new(Vec::new()),
             pending_versions:   Arc::new(DashMap::new()),
+            extensions,
         }
     }
 
@@ -288,9 +291,24 @@ impl LanguageServer for Backend {
         let pos     = params.text_document_position.position;
         let trigger = params.context.and_then(|c| c.trigger_character);
         self.wait_for_latest(uri).await;
-        Ok(features::completions::provide(
-            self.documents.get(uri).as_deref(), pos, trigger.as_deref(),
-        ))
+
+        let doc_guard = self.documents.get(uri);
+        let doc       = doc_guard.as_deref();
+
+        let mut items: Vec<CompletionItem> =
+            match features::completions::provide(doc, pos, trigger.as_deref()) {
+                Some(CompletionResponse::Array(items)) => items,
+                Some(CompletionResponse::List(list))   => list.items,
+                None                                    => Vec::new(),
+            };
+
+        if let Some(doc) = doc {
+            for ext in &self.extensions.completions {
+                items.extend(ext.extra_completions(doc, pos, trigger.as_deref()));
+            }
+        }
+
+        Ok(if items.is_empty() { None } else { Some(CompletionResponse::Array(items)) })
     }
 
     async fn signature_help(
@@ -309,7 +327,23 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
         self.wait_for_latest(uri).await;
-        Ok(features::hover::provide(self.documents.get(uri).as_deref(), pos))
+
+        let doc_guard = self.documents.get(uri);
+        let doc       = doc_guard.as_deref();
+
+        if let Some(hover) = features::hover::provide(doc, pos) {
+            return Ok(Some(hover));
+        }
+
+        if let Some(doc) = doc {
+            for ext in &self.extensions.hover {
+                if let Some(hover) = ext.extra_hover(doc, pos) {
+                    return Ok(Some(hover));
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     async fn goto_definition(
@@ -704,4 +738,4 @@ impl LanguageServer for Backend {
 
         Ok(None)
     }
-                }
+            }

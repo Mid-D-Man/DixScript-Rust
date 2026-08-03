@@ -455,17 +455,57 @@ namespace MidManStudio.Mdix.Core
         public MdixResult<MdixHexColor> GetHexColor(string path) =>
             GetString(path).AndThen(raw => MdixHexColor.Parse(raw));
 
+        // FIX: GetBlob/GetRegex previously went through GetString, which
+        // silently failed for these two types specifically. Root cause:
+        // dixscript core's own `impl TryFrom<DixValue> for String` (which
+        // mdix_get_string calls into) only handles the String/Date/
+        // Timestamp/HexColor variants -- Blob and Regex are represented
+        // identically internally (also a String-wrapping variant, just a
+        // different tag) but were left out of that match, so the
+        // conversion returned an error that GetString propagated and this
+        // method's old `GetString(path).Map(...)` silently turned into a
+        // "not found"-shaped failure. That's a bug in the already-published
+        // dixscript crate itself -- out of scope to touch from here.
+        // mdix_get_json takes a different path entirely: it extracts the
+        // raw DixValue directly (h.data.get_value) and serializes *that*
+        // with serde_json, never going through the broken conversion, so
+        // routing through it here sidesteps the bug without touching core
+        // or mdix-ffi at all. DixValue's `#[serde(untagged)]` means a Blob/
+        // Regex value serializes as a plain JSON string, which GetJsonString
+        // below unwraps.
         public MdixResult<MdixBlob> GetBlob(string path) =>
-            GetString(path).Map(raw => new MdixBlob(raw));
+            GetJsonString(path).Map(raw => new MdixBlob(raw));
 
         public MdixResult<MdixRegex> GetRegex(string path) =>
-            GetString(path).Map(raw => new MdixRegex(raw));
+            GetJsonString(path).Map(raw => new MdixRegex(raw));
 
         public MdixResult<MdixDate> GetDate(string path) =>
             GetString(path).AndThen(raw => MdixDate.Parse(raw));
 
         public MdixResult<MdixTimestamp> GetTimestamp(string path) =>
             GetString(path).AndThen(raw => MdixTimestamp.Parse(raw));
+
+        // Unwraps a JSON string value (as produced by mdix_get_json for any
+        // scalar DixValue) into its raw text. Only used by GetBlob/GetRegex
+        // above -- GetHexColor/GetDate/GetTimestamp go through GetString
+        // fine today since those three variants are already handled by
+        // dixscript's own String conversion.
+        private MdixResult<string> GetJsonString(string path) =>
+            GetJson(path).AndThen(json =>
+            {
+                try
+                {
+                    var s = System.Text.Json.JsonSerializer.Deserialize<string>(json);
+                    return s != null
+                        ? MdixResult<string>.Ok(s)
+                        : MdixError.NativeError($"GetJsonString('{path}'): value was JSON null.");
+                }
+                catch (System.Text.Json.JsonException ex)
+                {
+                    return MdixError.NativeError(
+                        $"GetJsonString('{path}'): expected a JSON string, got '{json}' ({ex.Message}).");
+                }
+            });
 
         #endregion
 

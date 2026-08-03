@@ -14,19 +14,29 @@ name: Sync Cargo.lock
 # mdix-cli/Dockerfile) working without an out-of-repo manual step.
 #
 # Conservative by default: only re-resolves the package(s) named in
-# `packages` (space-separated, passed to `cargo update -p`), leaving every
-# other pinned version untouched. The default "dixscript" covers the two
-# crates currently affected (mdix-cli, mdix-wasm) in one run. Leave
+# `packages`, leaving every other pinned version untouched. Leave
 # `packages` blank to run a full `cargo generate-lockfile` instead
 # (re-resolves everything to the latest versions each Cargo.toml's
 # requirements allow — review the diff carefully before trusting it).
+#
+# `packages` must be a fully-qualified pkgid spec, not a bare crate name.
+# `dixscript` now genuinely exists at TWO sources in this workspace: the
+# local path member (used by dixscript itself, mdix-ffi, mdix-java,
+# mdix-lua) and a plain registry dependency (mdix-cli, mdix-lsp,
+# mdix-wasm) — `cargo update -p dixscript` errors with "specification
+# `dixscript` is ambiguous" because the name alone no longer says which
+# source you mean. The default below is the registry-sourced one (the
+# one actually missing from Cargo.lock), pinned to dixscript's current
+# published version — bump the `@1.0.0` suffix here if/when dixscript's
+# version changes, or just leave `packages` blank for a full regenerate
+# instead of updating this file.
 on:
   workflow_dispatch:
     inputs:
       packages:
-        description: 'Space-separated crate names to update (e.g. "dixscript"). Leave blank to regenerate the whole lockfile.'
+        description: 'Fully-qualified pkgid spec(s), space-separated (e.g. "registry+https://github.com/rust-lang/crates.io-index#dixscript@1.0.0") — NOT a bare crate name, see workflow header. Leave blank to regenerate the whole lockfile.'
         required: false
-        default: 'dixscript'
+        default: 'registry+https://github.com/rust-lang/crates.io-index#dixscript@1.0.0'
 
 permissions:
   contents: write

@@ -14,13 +14,13 @@
     <Description>DixScript (.mdix) runtime — load, read, and build .mdix config files.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Mid-D-Man/DixScript-Rust</RepositoryUrl>
-    <!-- FIX: was missing -- nuget.org uses RepositoryUrl+RepositoryType together to
+    <!-- FIX: was missing — nuget.org uses RepositoryUrl+RepositoryType together to
          render the "Source repository" link on the package page. -->
     <RepositoryType>git</RepositoryType>
     <PackageTags>config;data;encryption;dixscript;mdix</PackageTags>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 
-    <!-- FIX: was missing -- nuget.org renders this on the package page. The file is
+    <!-- FIX: was missing — nuget.org renders this on the package page. The file is
          bundled below via the README <None> item. -->
     <PackageReadmeFile>README.md</PackageReadmeFile>
 
@@ -57,13 +57,13 @@
 
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="6.0.10" />
-    <!-- FIX: was missing -- see PublishRepositoryUrl/EmbedUntrackedSources above.
+    <!-- FIX: was missing — see PublishRepositoryUrl/EmbedUntrackedSources above.
          PrivateAssets="All" keeps this a build-time-only dependency; it is not
          carried transitively to consumers of this package. -->
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
   </ItemGroup>
 
-  <!-- FIX: was missing -- bundles the package README (added alongside this project)
+  <!-- FIX: was missing — bundles the package README (added alongside this project)
        so it appears on the nuget.org package page per PackageReadmeFile above. -->
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
@@ -89,7 +89,9 @@
         linux-arm64/native/libmdix_ffi.so
         osx-x64/native/libmdix_ffi.dylib
         osx-arm64/native/libmdix_ffi.dylib
-        android-arm64/native/libmdix_ffi.so   (Xamarin / MAUI consumers)
+        android-arm64/native/libmdix_ffi.so   (Xamarin / MAUI consumers, 64-bit ARM — current-gen devices)
+        android-arm/native/libmdix_ffi.so     (32-bit ARM — older/budget devices; still real install base)
+        android-x64/native/libmdix_ffi.so     (Intel Android — emulators, some Chromebooks/tablets)
   -->
   <ItemGroup>
     <None Include="runtimes\win-x64\native\mdix_ffi.dll"
@@ -132,6 +134,25 @@
           Condition="Exists('runtimes\android-arm64\native\libmdix_ffi.so')"
           Pack="true"
           PackagePath="runtimes/android-arm64/native/libmdix_ffi.so"
+          CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- FIX: android-arm (armeabi-v7a) and android-x64 (x86_64) were missing — mdix-ffi/Cargo.toml's own Android doc comment already lists all three
+         cargo-ndk invocations, and the Unity build workflows
+         (MidManStudio_Unity: build-audio-libs.yml / build-projectile-rust-libs.yml)
+         already build all three for the exact same reason: arm64-v8a alone
+         covers current-gen devices, but armeabi-v7a is still real install base
+         on older/budget hardware, and x86_64 covers emulators and Intel
+         Chromebooks/tablets. Only arm64-v8a was actually wired up here before. -->
+    <None Include="runtimes\android-arm\native\libmdix_ffi.so"
+          Condition="Exists('runtimes\android-arm\native\libmdix_ffi.so')"
+          Pack="true"
+          PackagePath="runtimes/android-arm/native/libmdix_ffi.so"
+          CopyToOutputDirectory="PreserveNewest" />
+
+    <None Include="runtimes\android-x64\native\libmdix_ffi.so"
+          Condition="Exists('runtimes\android-x64\native\libmdix_ffi.so')"
+          Pack="true"
+          PackagePath="runtimes/android-x64/native/libmdix_ffi.so"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

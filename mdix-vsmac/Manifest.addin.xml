@@ -30,8 +30,18 @@
     </MimeType>
   </Extension>
 
+  <!--
+    2026-08-03: resource name corrected to mdix-file.svg — the file that
+    actually exists in Resources/ (mdix-file-icon.svg never did, which is
+    why the .mpack came out at ~7KB: no <Runtime> section here ever declared
+    ANY support file as belonging to the addin, so vstool setup pack had
+    nothing but the DLL to bundle. That declaration now lives in
+    AddinInfo.cs as [assembly: ImportAddinFile(...)] attributes rather than
+    a <Runtime> block here — same mechanism, Mono.Addins supports both, this
+    project already leans on the attribute style everywhere else.
+  -->
   <Extension path="/MonoDevelop/Ide/StockIcons">
-    <StockIcon stockid="md-mdix-file" resource="mdix-file-icon.svg" />
+    <StockIcon stockid="md-mdix-file" resource="mdix-file.svg" />
   </Extension>
 
   <Extension path="/MonoDevelop/Ide/FileFilters">

@@ -62,9 +62,12 @@
     Manifest.addin.xml's <StockIcon> extension pointed at mdix-file-icon.svg /
     mdix-file-icon-dark.svg, and the old csproj had <None Include="Resources\...svg">
     entries for them — but no Resources folder, and no SVGs, ever actually existed in
-    mdix-vsmac. That's a guaranteed "file not found" at build time. I've added the two
-    files (copied over from mdix-vscode/icons, which already has light/dark variants)
-    to Resources/ alongside this fix — see mdix-vsmac/Resources/ in this same delivery.
+    mdix-vsmac. That's a guaranteed "file not found" at build time.
+
+    2026-08-03 update: the actual files that got added to Resources/ landed as
+    mdix-file.svg / mdix-file-dark.svg (no "-icon" in the name) — updated the
+    references below and in Manifest.addin.xml to match, rather than re-renaming
+    the files again.
 
     Using Update= here, not Include=: the same default-item-globbing that bit the
     Manifest.addin.xml EmbeddedResource item above also applies to None items — the SDK
@@ -72,12 +75,17 @@
     binaries, etc.) as None by default. Include= would double-declare them and throw the
     same NETSDK1022 you just hit; Update= just attaches CopyToOutputDirectory metadata to
     the item the SDK already added, without re-adding it.
+
+    Note: copying these to the output directory is necessary but not sufficient for
+    them to end up in the .mpack — vstool setup pack only bundles files the addin
+    manifest actually declares as belonging to it. That declaration now lives in
+    AddinInfo.cs as [assembly: ImportAddinFile(...)] attributes.
   -->
   <ItemGroup>
-    <None Update="Resources\mdix-file-icon.svg" Condition="Exists('Resources\mdix-file-icon.svg')">
+    <None Update="Resources\mdix-file.svg" Condition="Exists('Resources\mdix-file.svg')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="Resources\mdix-file-icon-dark.svg" Condition="Exists('Resources\mdix-file-icon-dark.svg')">
+    <None Update="Resources\mdix-file-dark.svg" Condition="Exists('Resources\mdix-file-dark.svg')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
@@ -87,6 +95,11 @@
     bin/<platform>/mdix-lsp layout the VS Code extension uses). Update=, same reasoning
     as above: these are default-included as None already once the file exists on disk.
     Condition guards against the file not existing yet (before copy-binary.sh has run).
+
+    Same packaging note as the icons above: being copied to the output directory
+    doesn't get this into the .mpack by itself — see the [assembly: ImportAddinFile
+    ("lsp/mdix-lsp")] declaration in AddinInfo.cs, which is what actually makes
+    vstool setup pack include it.
   -->
   <ItemGroup>
     <None Update="bin\darwin-arm64\mdix-lsp" Condition="Exists('bin\darwin-arm64\mdix-lsp')">

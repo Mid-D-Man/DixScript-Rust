@@ -561,7 +561,7 @@ namespace MidManStudio.Mdix.Core
         // ── Serialization ─────────────────────────────────────────────────────
 
         internal MdixResult<Unit> Serialize<T>(
-            T obj, MdixDataSectionBuilder data, string? prefix = null)
+            T obj, MdixDataSectionBuilder data, string? prefix = null, MdixEnumsBuilder? enums = null)
         {
             if (obj == null)
                 return MdixError.NativeError("Cannot serialize a null object.");
@@ -591,7 +591,7 @@ namespace MidManStudio.Mdix.Core
                                    .ToList();
 
                 foreach (var (path, value) in flat)
-                    ApplyFlat(data, path, value);
+                    ApplyFlat(data, path, value, enums);
 
                 foreach (var group in grouped)
                 {
@@ -601,7 +601,7 @@ namespace MidManStudio.Mdix.Core
                         foreach (var (fullPath, value) in group)
                         {
                             var propName = fullPath.Substring(tablePath.Length + 1);
-                            ApplyTable(t, propName, value);
+                            ApplyTable(t, propName, value, enums);
                         }
                     });
                 }
@@ -661,7 +661,8 @@ namespace MidManStudio.Mdix.Core
             }
         }
 
-        private static void ApplyFlat(MdixDataSectionBuilder data, string path, object? value)
+        private static void ApplyFlat(
+            MdixDataSectionBuilder data, string path, object? value, MdixEnumsBuilder? enums)
         {
             switch (value)
             {
@@ -696,13 +697,22 @@ namespace MidManStudio.Mdix.Core
                 // same convention MdixEnumCodeGenerator uses when generating enum types
                 // from a `.mdix` file's @ENUMS section, so a generated enum round-trips
                 // correctly out of the box.
-                case Enum en: data.WithEnum(path, en.GetType().Name, en.ToString()); break;
+                // FIX: was missing the matching @ENUMS declaration -- see
+                // TryRegisterEnumType's comment in MdixBuilder.cs. Must run
+                // before WithEnum writes the reference below, since a
+                // reference to an undeclared enum fails DixScript's
+                // semantic analysis at load time.
+                case Enum en:
+                    enums?.TryRegisterEnumType(en.GetType());
+                    data.WithEnum(path, en.GetType().Name, en.ToString());
+                    break;
                 case null: break;
                 default:   data.WithString(path, value.ToString() ?? string.Empty); break;
             }
         }
 
-        private static void ApplyTable(MdixTablePropertiesBuilder t, string name, object? value)
+        private static void ApplyTable(
+            MdixTablePropertiesBuilder t, string name, object? value, MdixEnumsBuilder? enums)
         {
             switch (value)
             {
@@ -730,7 +740,10 @@ namespace MidManStudio.Mdix.Core
                 case MdixDate     dv:  t.WithDate(name, dv.Value);                  break;
                 case MdixTimestamp tv: t.WithTimestamp(name, tv.Value.UtcDateTime); break;
                 // FIX: see matching comment in ApplyFlat.
-                case Enum en: t.WithEnum(name, en.GetType().Name, en.ToString()); break;
+                case Enum en:
+                    enums?.TryRegisterEnumType(en.GetType());
+                    t.WithEnum(name, en.GetType().Name, en.ToString());
+                    break;
                 case null: break;
                 default:   t.WithString(name, value.ToString() ?? string.Empty); break;
             }

@@ -534,4 +534,4 @@ FATAL ERROR [2026-08-03 15:56:16Z]: System.IO.DirectoryNotFoundException: Could 
    at Mono.Addins.Setup.SetupTool.RunCommand(String cmd, String[] parms) in /Users/runner/work/1/s/Mono.Addins.Setup/Mono.Addins.Setup/SetupTool.cs:line 161
    at Mono.Addins.Setup.SetupTool.Run(String[] args) in /Users/runner/work/1/s/Mono.Addins.Setup/Mono.Addins.Setup/SetupTool.cs:line 150
    at VsTool.RunSetup(String[] args) in /Users/runner/work/1/s/main/src/tools/vstool/src/vstool.cs:line 242
-   at VsTool.Main(String[] args) in /Users/runner/work/1/s/main/src/tools/vstool/src/vstool.cs:line 123
+   at VsTool.Main(String[] args) in /Users/runner/work/1/s/main/src/tools/vstool/src/vstool.cs:line 123       i also noticed its, /Users/midman/Desktop/DixScript-Rust/mdix-vsmac/bin/Release/net7.0/MdixLanguageSupport.dll its only bin/release/.net7/resources/mdixlanguagesupport.dll,pdb,deps.json

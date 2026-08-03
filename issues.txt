@@ -1,0 +1,537 @@
+~/Desktop/DixScript-Rust/mdix-vsmac git:[master]
+./scripts/pack-addin.sh --release
+==> Building mdix-lsp (Release)
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/midman/Desktop/DixScript-Rust/mdix-ffi/Cargo.toml
+workspace: /Users/midman/Desktop/DixScript-Rust/Cargo.toml
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/midman/Desktop/DixScript-Rust/mdix-java/Cargo.toml
+workspace: /Users/midman/Desktop/DixScript-Rust/Cargo.toml
+   Compiling mdix-lsp v1.0.0 (/Users/midman/Desktop/DixScript-Rust/mdix-lsp)
+warning: unused import: `std::collections::HashMap`
+ --> mdix-lsp/src/features/completions.rs:3:5
+  |
+3 | use std::collections::HashMap;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `DixScript`
+  --> mdix-lsp/src/features/document_symbols.rs:10:43
+   |
+10 | use dixscript::Compiler::AST::{DataEntry, DixScript};
+   |                                           ^^^^^^^^^
+
+warning: unused imports: `DixScript`, `Expression`, `ObjectProperty`, and `Value`
+  --> mdix-lsp/src/features/goto_definition.rs:27:5
+   |
+27 |     DixScript, Expression, ObjectProperty, QuickFuncStatement, Value,
+   |     ^^^^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^^^^^                      ^^^^^
+
+warning: unused import: `HashMap`
+  --> mdix-lsp/src/features/semantic_tokens.rs:30:24
+   |
+30 | use std::collections::{HashMap, HashSet};
+   |                        ^^^^^^^
+
+warning: unused import: `dixscript::Compiler::AST::DataType`
+  --> mdix-lsp/src/features/semantic_tokens.rs:34:5
+   |
+34 | use dixscript::Compiler::AST::DataType;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `ElemType`
+  --> mdix-lsp/src/features/signature_help.rs:15:42
+   |
+15 | use dixscript::Compiler::AST::{DataType, ElemType, QuickFuncParam};
+   |                                          ^^^^^^^^
+
+warning: function `get_resolved_ast` is never used
+  --> mdix-lsp/src/analyzer.rs:52:8
+   |
+52 | pub fn get_resolved_ast(doc: &Document) -> Option<DixScript> {
+   |        ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: constant `MOD_DEPRECATED` is never used
+  --> mdix-lsp/src/capabilities.rs:25:11
+   |
+25 | pub const MOD_DEPRECATED:  u32 = 1 << 2;
+   |           ^^^^^^^^^^^^^^
+
+warning: field `out_file` is never read
+  --> mdix-lsp/src/features/commands.rs:11:9
+   |
+8  | pub struct CommandResult {
+   |            ------------- field in this struct
+...
+11 |     pub out_file: Option<PathBuf>,
+   |         ^^^^^^^^
+   |
+   = note: `CommandResult` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: function `object_user_properties_completions` is never used
+   --> mdix-lsp/src/features/completions.rs:802:4
+    |
+802 | fn object_user_properties_completions(doc: &Document, var_name: &str) -> Vec<CompletionItem> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `quickfunc_return_object_properties` is never used
+   --> mdix-lsp/src/features/completions.rs:857:4
+    |
+857 | fn quickfunc_return_object_properties(doc: &Document, func_name: &str) -> Vec<CompletionItem> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `collect_object_props_from_stmts` is never used
+   --> mdix-lsp/src/features/completions.rs:869:4
+    |
+869 | fn collect_object_props_from_stmts(stmts: &[QuickFuncStatement]) -> Vec<CompletionItem> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `find_config_entry_def` is never used
+   --> mdix-lsp/src/features/goto_definition.rs:328:4
+    |
+328 | fn find_config_entry_def(doc: &Document, key: &str) -> Option<GotoDefinitionResponse> {
+    |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `find_enum_field_def` is never used
+   --> mdix-lsp/src/features/goto_definition.rs:555:4
+    |
+555 | fn find_enum_field_def(doc: &Document, enum_name: &str, field_name: &str) -> Option<Location> {
+    |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `hover_enum_access` is never used
+    --> mdix-lsp/src/features/hover.rs:1117:4
+     |
+1117 | fn hover_enum_access(doc: &Document, enum_name: &str, field: &str) -> Option<String> {
+     |    ^^^^^^^^^^^^^^^^^
+
+warning: function `hover_table_path_rich` is never used
+    --> mdix-lsp/src/features/hover.rs:1179:4
+     |
+1179 | fn hover_table_path_rich(doc: &Document, path: &str) -> Option<String> {
+     |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: `mdix-lsp` (lib) generated 16 warnings (run `cargo fix --lib -p mdix-lsp` to apply 6 suggestions)
+    Finished `release` profile [optimized] target(s) in 13m 24s
+==> Bundling mdix-lsp binary
+Copied: /Users/midman/Desktop/DixScript-Rust/target/release/mdix-lsp
+    to: /Users/midman/Desktop/DixScript-Rust/mdix-vsmac/scripts/../bin/darwin-x64/mdix-lsp
+==> Building MdixAddin (Release)
+objc[8072]: Class AMSupportURLConnectionDelegate is implemented in both /System/Library/PrivateFrameworks/OSPersonalization.framework/Versions/A/OSPersonalization (0x7fff92942510) and /System/Library/PrivateFrameworks/MobileDevice.framework/Versions/A/MobileDevice (0x1035cd630). One of the two will be used. Which one is undefined.
+objc[8072]: Class AMSupportURLSession is implemented in both /System/Library/PrivateFrameworks/OSPersonalization.framework/Versions/A/OSPersonalization (0x7fff92942560) and /System/Library/PrivateFrameworks/MobileDevice.framework/Versions/A/MobileDevice (0x1035cd680). One of the two will be used. Which one is undefined.
+2026-08-03 15:52:24.271 vstool[8072:88890] Microsoft.macOS: Invalid IDE Port: -1
+Visual Studio Build Tool
+Building MdixAddin (Release)
+   Build started 8/3/2026 3:54:23 PM.
+   __________________________________________________
+   Project "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/MdixAddin.csproj" (Build target(s)):
+
+   Target ResolveVisualStudioInstance:
+       VSAppDir:
+       VSBinDir:          /Applications/Visual Studio.app/Contents/MonoBundle
+       VSProfileVersion:  17.5
+       VSConfigDir:       /Users/midman/Library/Preferences/VisualStudio/17.0
+       VSAddinsDir:       /Users/midman/Library/Application Support/VisualStudio/17.0/LocalInstall/Addins
+   Target RestoreAddins:
+       Updating addin database at /Users/midman/Desktop/DixScript-Rust/mdix-vsmac/obj/Release/net7.0/vsmam/db
+       Resolved 'MonoDevelop.Core' reference to version '17.6.10'
+       Resolved 'MonoDevelop.Ide' reference to version '17.6.10'
+   Target _VSResolveAddinReferences:
+       Updating addin database at /Users/midman/Desktop/DixScript-Rust/mdix-vsmac/obj/Release/net7.0/vsmam/db
+       Resolved 'MonoDevelop.Core' reference to version '17.6.10'
+       Resolved 'MonoDevelop.Ide' reference to version '17.6.10'
+   Target ResolveAssemblyReferences:
+       /usr/local/share/dotnet/sdk/8.0.401/Microsoft.Common.CurrentVersion.targets(2412,5): warning MSB3243: No way to resolve conflict
+   between "System.Security.Cryptography.Pkcs, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" and
+   "System.Security.Cryptography.Pkcs, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a". Choosing
+   "System.Security.Cryptography.Pkcs, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" arbitrarily.
+       /usr/local/share/dotnet/sdk/8.0.401/Microsoft.Common.CurrentVersion.targets(2412,5): warning MSB3243: No way to resolve conflict
+   between "System.Security.Cryptography.Xml, Version=7.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51" and
+   "System.Security.Cryptography.Xml, Version=6.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51". Choosing
+   "System.Security.Cryptography.Xml, Version=7.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51" arbitrarily.
+       Consider app.config remapping of assembly "System.Security.Cryptography.Pkcs, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+   from Version "6.0.0.0"
+   [/Users/midman/.nuget/packages/system.security.cryptography.pkcs/6.0.1/lib/net6.0/System.Security.Cryptography.Pkcs.dll] to Version
+   "7.0.0.0" [/Applications/Visual Studio.app/Contents/MonoBundle/System.Security.Cryptography.Pkcs.dll] to solve conflict and get rid of
+   warning.
+       Consider app.config remapping of assembly "System.Security.Cryptography.Xml, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51" from
+   Version "6.0.0.0"
+   [/Users/midman/.nuget/packages/system.security.cryptography.xml/6.0.0/lib/net6.0/System.Security.Cryptography.Xml.dll] to Version
+   "7.0.0.0" [/Applications/Visual Studio.app/Contents/MonoBundle/System.Security.Cryptography.Xml.dll] to solve conflict and get rid of
+   warning.
+   Done building target "ResolveAssemblyReferences" in project "MdixAddin.csproj".
+   Target _VSGenerateManifest:
+     Skipping target "_VSGenerateManifest" because all output files are up-to-date with respect to the input files.
+   Target GenerateTargetFrameworkMonikerAttribute:
+     Skipping target "GenerateTargetFrameworkMonikerAttribute" because all output files are up-to-date with respect to the input files.
+   Target _GenerateSourceLinkFile:
+       Updating Source Link file 'obj/Release/net7.0/MdixAddin.sourcelink.json'.
+   Target CoreCompile:
+       /usr/local/share/dotnet/dotnet exec "/usr/local/share/dotnet/sdk/8.0.401/Roslyn/bincore/csc.dll" /noconfig /unsafe- /checked-
+   /nowarn:1701,1702,1701,1702,2008 /fullpaths /nostdlib+ /errorreport:prompt /warn:7
+   /define:TRACE;RELEASE;NET;NET7_0;NETCOREAPP;MD_17_5;NET5_0_OR_GREATER;NET6_0_OR_GREATER;NET7_0_OR_GREATER;NETCOREAPP1_0_OR_GREATER;NETCO
+   REAPP1_1_OR_GREATER;NETCOREAPP2_0_OR_GREATER;NETCOREAPP2_1_OR_GREATER;NETCOREAPP2_2_OR_GREATER;NETCOREAPP3_0_OR_GREATER;NETCOREAPP3_1_OR
+   _GREATER /errorendlocation /preferreduilang:en-US /highentropyva+ /nullable:enable /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Humanizer.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/ICSharpCode.Decompiler.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/ICSharpCode.SharpZipLib.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/MessagePack.Annotations.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/MessagePack.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Bcl.AsyncInterfaces.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Build.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Build.Framework.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Build.Tasks.Core.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Build.Utilities.Core.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.CSharp.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.CSharp.EditorFeatures.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.CSharp.Features.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.CSharp.Scripting.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.CSharp.Workspaces.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.EditorFeatures.Cocoa.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.EditorFeatures.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.EditorFeatures.Text.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.Elfie.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.Features.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.InteractiveHost.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.LanguageServer.Protocol.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.Remote.Workspaces.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.Scripting.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CodeAnalysis.Workspaces.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CommonLanguageServerProtocol.Framework.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.CSharp.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.DiaSymReader.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Extensions.Logging.Abstractions.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Extensions.ObjectPool.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.macOS.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.NET.StringTools.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.ServiceHub.Client.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.ServiceHub.Framework.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.ServiceHub.Resources.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.TemplateEngine.Abstractions.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.TemplateEngine.Core.Contracts.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.TemplateEngine.Core.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.TemplateEngine.Edge.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.TemplateEngine.IDE.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.TemplateEngine.Orchestrator.RunnableProjects.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.TemplateEngine.Utils.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Toolkit.HighPerformance.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/Microsoft.VisualBasic.Core.dll
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/Microsoft.VisualBasic.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.CodingConventions.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.ComponentModelHost.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Composition.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.CoreUtility.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Debugger.Contracts.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Imaging.Interop.14.0.DesignTime.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Interop.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Language.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Language.Intellisense.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Language.StandardClassification.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.LanguageServer.Client.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.LanguageServer.Protocol.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.LanguageServer.Protocol.Extensions.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.LanguageServer.Protocol.Internal.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.RemoteControl.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.RpcContracts.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Shell.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Telemetry.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Text.Data.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Text.Logic.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Text.UI.Cocoa.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Text.UI.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Threading.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Utilities.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Utilities.Internal.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudio.Validation.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.VisualStudioMac.Ide.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Web.XmlTransform.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Win32.Primitives.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Win32.Registry.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Microsoft.Win32.SystemEvents.dll"
+   /reference:/Users/midman/.nuget/packages/mono.addins.cecilreflector/1.4.2-alpha.4/lib/netstandard2.0/Mono.Addins.CecilReflector.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Mono.Addins.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Mono.Addins.Setup.dll" /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Mono.Cecil.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Mono.Cecil.Mdb.dll"
+   /reference:/Users/midman/.nuget/packages/mono.cecil/0.10.1/lib/netstandard1.3/Mono.Cecil.Pdb.dll
+   /reference:/Users/midman/.nuget/packages/mono.cecil/0.10.1/lib/netstandard1.3/Mono.Cecil.Rocks.dll /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/Mono.Unix.dll" /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/MonoDevelop.Core.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/MonoDevelop.Ide.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/monodoc.dll" /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/mscorlib.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Nerdbank.Streams.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/netstandard.dll" /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Newtonsoft.Json.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/NuGet.Commands.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/NuGet.Common.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/NuGet.Configuration.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/NuGet.Credentials.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/NuGet.DependencyResolver.Core.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/NuGet.Frameworks.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/NuGet.LibraryModel.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/NuGet.PackageManagement.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/NuGet.Packaging.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/NuGet.ProjectModel.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/NuGet.Protocol.dll" /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/NuGet.Resolver.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/NuGet.Versioning.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/PresentationCore.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/PresentationFramework.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/SQLitePCLRaw.batteries_v2.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/SQLitePCLRaw.core.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/SQLitePCLRaw.provider.e_sqlite3.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/StreamJsonRpc.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.AppContext.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Buffers.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.CodeDom.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Collections.Concurrent.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Collections.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Collections.Immutable.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Collections.NonGeneric.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Collections.Specialized.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.ComponentModel.Annotations.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.ComponentModel.Composition.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.ComponentModel.DataAnnotations.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.ComponentModel.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.ComponentModel.EventBasedAsync.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.ComponentModel.Primitives.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.ComponentModel.TypeConverter.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Composition.AttributedModel.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Composition.Hosting.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Composition.Runtime.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Composition.TypedParts.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Configuration.ConfigurationManager.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Configuration.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Console.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Core.dll" /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Data.Common.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Data.DataSetExtensions.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Data.dll /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Diagnostics.Contracts.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Diagnostics.Debug.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Diagnostics.DiagnosticSource.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Diagnostics.EventLog.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Diagnostics.FileVersionInfo.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Diagnostics.PerformanceCounter.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Diagnostics.Process.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Diagnostics.StackTrace.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Diagnostics.TextWriterTraceListener.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Diagnostics.Tools.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Diagnostics.TraceSource.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Diagnostics.Tracing.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.dll" /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Drawing.Common.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Drawing.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Drawing.Primitives.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Dynamic.Runtime.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Formats.Asn1.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Formats.Tar.dll
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Globalization.Calendars.dll
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Globalization.dll
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Globalization.Extensions.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.IO.Compression.Brotli.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.Compression.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.IO.Compression.FileSystem.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.IO.Compression.ZipFile.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.FileSystem.AccessControl.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.FileSystem.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.FileSystem.DriveInfo.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.FileSystem.Primitives.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.FileSystem.Watcher.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.IsolatedStorage.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.MemoryMappedFiles.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.Packaging.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.Pipelines.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.Pipes.AccessControl.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.Pipes.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.IO.Ports.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.IO.UnmanagedMemoryStream.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Linq.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Linq.Expressions.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Linq.Parallel.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Linq.Queryable.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Management.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Memory.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Net.dll /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.Http.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Net.Http.Json.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Net.HttpListener.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.Mail.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.NameResolution.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.NetworkInformation.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.Ping.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.Primitives.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.Quic.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.Requests.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.Security.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.ServicePoint.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.Sockets.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.WebClient.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.WebHeaderCollection.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.WebProxy.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.WebSockets.Client.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Net.WebSockets.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Numerics.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Numerics.Vectors.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.ObjectModel.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Private.CoreLib.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Private.DataContractSerialization.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Private.Uri.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Private.Xml.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Private.Xml.Linq.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Reactive.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Reflection.DispatchProxy.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Reflection.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Reflection.Emit.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Reflection.Emit.ILGeneration.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Reflection.Emit.Lightweight.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Reflection.Extensions.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Reflection.Metadata.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Reflection.MetadataLoadContext.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Reflection.Primitives.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Reflection.TypeExtensions.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Resources.Extensions.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Resources.Reader.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Resources.ResourceManager.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Resources.Writer.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Runtime.CompilerServices.Unsafe.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Runtime.CompilerServices.VisualC.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Runtime.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Runtime.Extensions.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Runtime.Handles.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Runtime.InteropServices.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Runtime.InteropServices.JavaScript.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Runtime.InteropServices.RuntimeInformation.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Runtime.Intrinsics.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Runtime.Loader.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Runtime.Numerics.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Runtime.Serialization.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Runtime.Serialization.Formatters.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Runtime.Serialization.Json.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Runtime.Serialization.Primitives.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Runtime.Serialization.Xml.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Security.AccessControl.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Security.Claims.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Security.Cryptography.Algorithms.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Security.Cryptography.Cng.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Security.Cryptography.Csp.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Security.Cryptography.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Security.Cryptography.Encoding.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Security.Cryptography.OpenSsl.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Security.Cryptography.Pkcs.dll"
+   /reference:/Users/midman/.nuget/packages/system.security.cryptography.pkcs/6.0.1/lib/net6.0/System.Security.Cryptography.Pkcs.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Security.Cryptography.Primitives.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Security.Cryptography.ProtectedData.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Security.Cryptography.X509Certificates.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Security.Cryptography.Xml.dll"
+   /reference:/Users/midman/.nuget/packages/system.security.cryptography.xml/6.0.0/lib/net6.0/System.Security.Cryptography.Xml.dll
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Security.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Security.Permissions.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Security.Principal.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Security.Principal.Windows.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Security.SecureString.dll
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.ServiceModel.Web.dll
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.ServiceProcess.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Text.Encoding.CodePages.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Text.Encoding.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Text.Encoding.Extensions.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Text.Encodings.Web.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Text.Json.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Text.RegularExpressions.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Threading.AccessControl.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Threading.Channels.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Threading.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Threading.Overlapped.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Threading.Tasks.Dataflow.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Threading.Tasks.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Threading.Tasks.Extensions.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Threading.Tasks.Parallel.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Threading.Thread.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Threading.ThreadPool.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Threading.Timer.dll
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Transactions.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Transactions.Local.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.ValueTuple.dll
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Web.dll /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Web.HttpUtility.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Windows.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Windows.Extensions.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Xml.dll
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Xml.Linq.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Xml.ReaderWriter.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Xml.Serialization.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Xml.XDocument.dll"
+   /reference:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/ref/net7.0/System.Xml.XmlDocument.dll
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/System.Xml.XmlSerializer.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Xml.XPath.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/System.Xml.XPath.XDocument.dll" /reference:"/Applications/Visual
+   Studio.app/Contents/MonoBundle/WindowsBase.dll" /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Xwt.dll"
+   /reference:"/Applications/Visual Studio.app/Contents/MonoBundle/Xwt.XamMac.dll" /debug- /debug:portable /filealign:512 /optimize+
+   /out:obj/Release/net7.0/MdixLanguageSupport.dll /refout:obj/Release/net7.0/refint/MdixLanguageSupport.dll
+   /resource:Manifest.addin.xml,MidManStudio.Mdix.Manifest.addin.xml /resource:obj/Release/net7.0/_Manifest.addin.xml,_Manifest.addin.xml
+   /target:library /warnaserror- /utf8output /deterministic+ /sourcelink:obj/Release/net7.0/MdixAddin.sourcelink.json /langversion:11.0
+   /embed:"obj/Release/net7.0/.NETCoreApp,Version=v7.0.AssemblyAttributes.cs"
+   /analyzerconfig:obj/Release/net7.0/MdixAddin.GeneratedMSBuildEditorConfig.editorconfig
+   /analyzerconfig:/usr/local/share/dotnet/sdk/8.0.401/Sdks/Microsoft.NET.Sdk/analyzers/build/config/analysislevel_7_default.globalconfig
+   /analyzer:/usr/local/share/dotnet/sdk/8.0.401/Sdks/Microsoft.NET.Sdk/targets/../analyzers/Microsoft.CodeAnalysis.CSharp.NetAnalyzers.dll
+    /analyzer:/usr/local/share/dotnet/sdk/8.0.401/Sdks/Microsoft.NET.Sdk/targets/../analyzers/Microsoft.CodeAnalysis.NetAnalyzers.dll
+   /analyzer:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/analyzers/dotnet/cs/Microsoft.Interop.JavaScript.JSImportGenera
+   tor.dll
+   /analyzer:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/analyzers/dotnet/cs/Microsoft.Interop.LibraryImportGenerator.dl
+   l /analyzer:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/analyzers/dotnet/cs/Microsoft.Interop.SourceGeneration.dll
+   /analyzer:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/analyzers/dotnet/cs/System.Text.Json.SourceGeneration.dll
+   /analyzer:/Users/midman/.nuget/packages/microsoft.netcore.app.ref/7.0.20/analyzers/dotnet/cs/System.Text.RegularExpressions.Generator.dl
+   l AddinInfo.cs Issues.cs MdixLanguageClient.cs "obj/Release/net7.0/.NETCoreApp,Version=v7.0.AssemblyAttributes.cs"
+   /warnaserror+:NU1605,SYSLIB0011
+       CompilerServer: server - server processed compilation - MdixAddin (net7.0)
+   Target _CopyOutOfDateSourceItemsToOutputDirectory:
+       Creating directory "bin/Release/net7.0/Resources".
+       Copying file from "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/Resources/mdix-file.svg" to
+   "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/bin/Release/net7.0/Resources/mdix-file.svg".
+       Copying file from "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/Resources/mdix-file-dark.svg" to
+   "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/bin/Release/net7.0/Resources/mdix-file-dark.svg".
+   Target CopyFilesToOutputDirectory:
+       Copying file from "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/obj/Release/net7.0/MdixLanguageSupport.dll" to
+   "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/bin/Release/net7.0/MdixLanguageSupport.dll".
+       Copying reference assembly from "obj/Release/net7.0/refint/MdixLanguageSupport.dll" to
+   "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/obj/Release/net7.0/ref/MdixLanguageSupport.dll".
+       MdixAddin -> /Users/midman/Desktop/DixScript-Rust/mdix-vsmac/bin/Release/net7.0/MdixLanguageSupport.dll
+       Copying file from "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/obj/Release/net7.0/MdixLanguageSupport.pdb" to
+   "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/bin/Release/net7.0/MdixLanguageSupport.pdb".
+   Target _VSCopyOutputFiles:
+     Skipping target "_VSCopyOutputFiles" because it has no outputs.
+
+   Done building project "MdixAddin.csproj".
+
+   Build succeeded.
+
+   /usr/local/share/dotnet/sdk/8.0.401/Microsoft.Common.CurrentVersion.targets(2412,5): warning MSB3243: No way to resolve conflict
+   between "System.Security.Cryptography.Pkcs, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" and
+   "System.Security.Cryptography.Pkcs, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a". Choosing
+   "System.Security.Cryptography.Pkcs, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" arbitrarily.
+   /usr/local/share/dotnet/sdk/8.0.401/Microsoft.Common.CurrentVersion.targets(2412,5): warning MSB3243: No way to resolve conflict
+   between "System.Security.Cryptography.Xml, Version=7.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51" and
+   "System.Security.Cryptography.Xml, Version=6.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51". Choosing
+   "System.Security.Cryptography.Xml, Version=7.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51" arbitrarily.
+       2 Warning(s)
+       0 Error(s)
+
+   Time Elapsed 00:01:21.21
+/usr/local/share/dotnet/sdk/8.0.401/Microsoft.Common.CurrentVersion.targets(2412,5) : warning MSB3243: No way to resolve conflict between "System.Security.Cryptography.Pkcs, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" and "System.Security.Cryptography.Pkcs, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a". Choosing "System.Security.Cryptography.Pkcs, Version=7.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" arbitrarily.
+/usr/local/share/dotnet/sdk/8.0.401/Microsoft.Common.CurrentVersion.targets(2412,5) : warning MSB3243: No way to resolve conflict between "System.Security.Cryptography.Xml, Version=7.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51" and "System.Security.Cryptography.Xml, Version=6.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51". Choosing "System.Security.Cryptography.Xml, Version=7.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51" arbitrarily.
+==> Packing .mpack
+objc[8099]: Class AMSupportURLConnectionDelegate is implemented in both /System/Library/PrivateFrameworks/OSPersonalization.framework/Versions/A/OSPersonalization (0x7fff92942510) and /System/Library/PrivateFrameworks/MobileDevice.framework/Versions/A/MobileDevice (0x111b36630). One of the two will be used. Which one is undefined.
+objc[8099]: Class AMSupportURLSession is implemented in both /System/Library/PrivateFrameworks/OSPersonalization.framework/Versions/A/OSPersonalization (0x7fff92942560) and /System/Library/PrivateFrameworks/MobileDevice.framework/Versions/A/MobileDevice (0x111b36680). One of the two will be used. Which one is undefined.
+2026-08-03 15:55:55.214 vstool[8099:90169] Microsoft.macOS: Invalid IDE Port: -1
+Visual Studio Extension Setup Utility
+Creating package com.midmanstudio.MdixLanguageSupport.1.0.mpack
+FATAL ERROR [2026-08-03 15:56:16Z]: System.IO.DirectoryNotFoundException: Could not find a part of the path '/Users/midman/Desktop/DixScript-Rust/mdix-vsmac/bin/Release/net7.0/lsp/mdix-lsp'.
+   at Interop.ThrowExceptionForIoErrno(ErrorInfo errorInfo, String path, Boolean isDirError)
+   at Microsoft.Win32.SafeHandles.SafeFileHandle.Open(String fullPath, FileMode mode, FileAccess access, FileShare share, FileOptions options, Int64 preallocationSize, UnixFileMode openPermissions, Int64& fileLength, UnixFileMode& filePermissions, Func`4 createOpenException)
+   at System.IO.Strategies.OSFileStreamStrategy..ctor(String path, FileMode mode, FileAccess access, FileShare share, FileOptions options, Int64 preallocationSize, Nullable`1 unixCreateMode)
+   at System.IO.File.OpenRead(String path)
+   at Mono.Addins.Setup.SetupService.BuildPackageInternal(IProgressStatus monitor, Boolean debugSymbols, String targetDirectory, String filePath, PackageFormat format) in /Users/runner/work/1/s/Mono.Addins.Setup/Mono.Addins.Setup/SetupService.cs:line 563
+   at Mono.Addins.Setup.SetupService.BuildPackage(IProgressStatus statusMonitor, Boolean debugSymbols, String targetDirectory, PackageFormat format, String[] filePaths) in /Users/runner/work/1/s/Mono.Addins.Setup/Mono.Addins.Setup/SetupService.cs:line 441
+   at Mono.Addins.Setup.SetupTool.BuildPackage(String[] args) in /Users/runner/work/1/s/Mono.Addins.Setup/Mono.Addins.Setup/SetupTool.cs:line 508
+   at Mono.Addins.Setup.SetupTool.RunCommand(String cmd, String[] parms) in /Users/runner/work/1/s/Mono.Addins.Setup/Mono.Addins.Setup/SetupTool.cs:line 161
+   at Mono.Addins.Setup.SetupTool.Run(String[] args) in /Users/runner/work/1/s/Mono.Addins.Setup/Mono.Addins.Setup/SetupTool.cs:line 150
+   at VsTool.RunSetup(String[] args) in /Users/runner/work/1/s/main/src/tools/vstool/src/vstool.cs:line 242
+   at VsTool.Main(String[] args) in /Users/runner/work/1/s/main/src/tools/vstool/src/vstool.cs:line 123

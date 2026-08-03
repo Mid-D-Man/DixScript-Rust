@@ -145,6 +145,19 @@
       <span class="card-badge badge-csharp">C#</span>
     </a>
 
+    <!-- FIX: this page (csharp/index.html + csharp/test-results.json) has
+         existed and been deployed by mdix-core-cs-publish.yml's own
+         deploy-results job for a while -- it was just never linked from
+         here. Distinct from the ffi/ card above: ffi/ covers whether the
+         native mdix-ffi library + generated MdixNative.cs bindings built;
+         this covers whether the C# unit test suite itself passed. -->
+    <a class="card" href="csharp/">
+      <div class="card-icon">#️⃣</div>
+      <div class="card-title">C# Unit Tests</div>
+      <div class="card-lang">MidManStudio.Mdix.Core · xUnit · FluentAssertions</div>
+      <span class="card-badge badge-csharp">C#</span>
+    </a>
+
     <a class="card" href="wasm/">
       <div class="card-icon">🕸️</div>
       <div class="card-title">WASM Tests</div>

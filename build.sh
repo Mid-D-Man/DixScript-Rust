@@ -38,7 +38,7 @@ if [[ "${SKIP_CLI:-0}" != "1" ]]; then
     else
         cargo build -p mdix-cli 2>&1
     fi
-    ok "mdix-cli  → $TARGET_DIR/mdix-cli"
+    ok "mdix-cli  → $TARGET_DIR/mdix"
 fi
 
 echo ""
@@ -46,7 +46,7 @@ bold "Done."
 echo ""
 echo "  LSP binary : $SCRIPT_DIR/$TARGET_DIR/mdix-lsp"
 if [[ "${SKIP_CLI:-0}" != "1" ]]; then
-echo "  CLI binary : $SCRIPT_DIR/$TARGET_DIR/mdix-cli"
+echo "  CLI binary : $SCRIPT_DIR/$TARGET_DIR/mdix"
 fi
 echo ""
 echo "  VS Code / Neovim: point your mdix extension at the LSP binary above."

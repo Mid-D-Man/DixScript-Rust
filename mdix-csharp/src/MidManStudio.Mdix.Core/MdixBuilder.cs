@@ -107,7 +107,7 @@ namespace MidManStudio.Mdix.Core
             ThrowIfDisposed();
             if (obj == null) return MdixError.NativeError("Cannot serialize a null object.");
             var serializer = new MdixSerializer();
-            return serializer.Serialize(obj, _data, prefix);
+            return serializer.Serialize(obj, _data, prefix, _enums);
         }
 
         public MdixResult<MdixDatabase> ToDatabase()
@@ -327,6 +327,32 @@ namespace MidManStudio.Mdix.Core
             var fieldList = fields.Select(f => (f.Field, (int?)f.Value)).ToList();
             _enums.Add((enumName, fieldList));
             return this;
+        }
+
+        // FIX: MdixSerializer's ApplyFlat/ApplyTable write an enum property
+        // as a real EnumName.FIELD reference (see the `case Enum en:` there),
+        // but nothing declared the matching @ENUMS section -- a builder that
+        // serializes a POCO with an enum property produced .mdix text that
+        // referenced an enum type without ever defining it, which
+        // dixscript's semantic analyzer correctly rejects as "Enum 'X' not
+        // found". Called from ApplyFlat/ApplyTable via reflection whenever
+        // an Enum value is encountered; deduplicates by name so the same
+        // enum type used across multiple properties (or multiple Serialize
+        // calls against the same builder) is only declared once -- calling
+        // WithEnum twice for the same name would otherwise produce a
+        // duplicate @ENUMS declaration, which is also a semantic error.
+        internal void TryRegisterEnumType(Type enumType)
+        {
+            var name = enumType.Name;
+            if (_enums.Any(e => e.Name == name)) return;
+
+            var fields = Enum.GetValues(enumType)
+                .Cast<object>()
+                .Select(v => (Enum.GetName(enumType, v) ?? v.ToString() ?? "", (int?)Convert.ToInt32(v)))
+                .ToList();
+
+            if (fields.Count == 0) return; // an empty C# enum has nothing to declare
+            _enums.Add((name, fields));
         }
     }
 

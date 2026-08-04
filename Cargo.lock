@@ -1732,7 +1732,7 @@ dependencies = [
  "cbindgen",
  "chrono",
  "csbindgen",
- "dixscript 1.0.0",
+ "dixscript 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json",
 ]
 

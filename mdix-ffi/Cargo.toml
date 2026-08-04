@@ -2,11 +2,7 @@
 name = "mdix-ffi"
 version = "1.0.0"
 edition = "2021"
-# FIX: was "1.70" -- mdix-ffi path-depends on `dixscript`, which itself declares
-# rust-version = "1.85" (see ../dixscript/Cargo.toml). A crate's real MSRV can never
-# be lower than that of a dependency it unconditionally builds against, so "1.70"
-# was never actually reachable -- `cargo build` would fail on any toolchain between
-# 1.70 and 1.85 despite this manifest claiming support for it. Aligned to match.
+
 rust-version = "1.85"
 authors = ["MidManStudio"]
 description = "C FFI layer for DixScript — Unity/C# native plugin"
@@ -50,8 +46,8 @@ name = "mdix_ffi"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-# version field required for `cargo publish -p mdix-ffi` after dixscript lands on crates.io
-dixscript  = { path = "../dixscript", version = "1.0.0" }
+
+dixscript          = "1.0.0"
 serde_json = "1.0"
 # merge.rs needs chrono::Utc::now() for DixData::from_ast() — previously only
 # reached transitively through dixscript, which isn't enough to `use` it

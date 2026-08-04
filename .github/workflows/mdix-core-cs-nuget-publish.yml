@@ -404,6 +404,23 @@ jobs:
           echo "Organized runtimes layout:"
           find "$R" -type f
 
+      # FIX: this step was missing entirely, and it's the actual cause of
+      # the CS0234 "type or namespace 'DixScript' does not exist" errors --
+      # mdix-ffi/build.rs writes Core/Generated/MdixNative.cs (the P/Invoke
+      # bindings every file below references) as a side effect of building
+      # mdix-ffi itself, into mdix-csharp/src/MidManStudio.Mdix.Core/Generated/
+      # relative to the mdix-ffi crate. Each build-native-* job above builds
+      # mdix-ffi too, but each runs on its own separate checkout/runner and
+      # only uploads the compiled .so/.dll/.dylib as an artifact -- the
+      # generated .cs file itself is never uploaded and never committed
+      # (it's a build artifact), so this job's own fresh checkout never had
+      # it until now. `dotnet restore` doesn't touch C# source at all
+      # (that's why it succeeded above) -- it's `dotnet build` that needs
+      # this file to exist, and nothing on this job's checkout had produced
+      # it before.
+      - name: Build mdix-ffi (regenerates Core/Generated/MdixNative.cs)
+        run: cargo build -p mdix-ffi --release
+
       # ── Build CLI + generate test fixtures ──────────────────────────────
       - name: Build mdix-cli
         run: cargo build -p mdix-cli --release

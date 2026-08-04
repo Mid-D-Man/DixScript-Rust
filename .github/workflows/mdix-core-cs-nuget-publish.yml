@@ -21,32 +21,22 @@ name: Publish MidManStudio.Mdix to NuGet
 # rather than a changelog excerpt — same situation wasm-npm-publish.yml
 # documents for mdix-npm, and upgradeable the same way later.
 #
-# ── NuGet — Trusted Publishing (OIDC), same bootstrap situation
-#    mdix-cli-publish.yml documents for crates.io ─────────────────────────
-# nuget.org's Trusted Publishing UI ties a policy to packages already
-# owned by your account — for the very first push of a brand-new package
-# ID, the classic API-key flow below is used. Once this package exists on
-# nuget.org:
-#   1. Sign in to nuget.org -> account menu -> Trusted Publishing ->
-#      Add a new trusted publisher, with:
+# ── NuGet — Trusted Publishing (OIDC) ─────────────────────────────────────
+# Publishes via nuget.org's Trusted Publishing: the job's GitHub OIDC token
+# is exchanged for a short-lived NuGet API key at push time (see the
+# "NuGet login" step below), so no long-lived API key is stored as a repo
+# secret. Requires two things already set up:
+#   1. A Trusted Publisher policy on nuget.org (account menu -> Trusted
+#      Publishing -> Add a new trusted publisher) pointing at:
 #        Repository owner:  Mid-D-Man
 #        Repository name:   DixScript-Rust
 #        Workflow filename: mdix-core-cs-nuget-publish.yml
 #        Package ID:        MidManStudio.Mdix
-#   2. Switch the "NuGet login (OIDC)" step below from `if: false` to
-#      enabled, and change the push step's `--api-key` argument from
-#      `${{ secrets.NUGET_API_KEY }}` to
-#      `${{ steps.nuget-login.outputs.NUGET_API_KEY }}` — same swap
-#      mdix-cli-publish.yml documents for its own crates.io bootstrap.
-#   3. Once that's confirmed working, the NUGET_API_KEY repo secret can be
-#      deleted — Trusted Publishing needs no long-lived secret at all.
-#
-# Requires a NUGET_API_KEY secret in this repo's settings until the
-# bootstrap swap above happens (Settings -> Secrets and variables ->
-# Actions -> New repository secret). Generate the key at
-# https://www.nuget.org/account/apikeys with push scope for
-# MidManStudio.Mdix (or "*" while it's still new — narrow it once the
-# package exists, per NuGet's own guidance on first-publish key scope).
+#   2. A NUGET_USER repo secret containing your nuget.org profile username
+#      (not email) -- Settings -> Secrets and variables -> Actions -> New
+#      repository secret, name it NUGET_USER.
+# The old NUGET_API_KEY secret is no longer referenced anywhere in this
+# file and can be deleted from repo settings.
 on:
   workflow_dispatch:
     inputs:
@@ -235,6 +225,14 @@ jobs:
           path: target/aarch64-apple-darwin/release/libmdix_ffi.dylib
           if-no-files-found: error
 
+  # FIX: was plain `cargo build --target aarch64-linux-android`, which has
+  # no way to tell cc-rs (used by the `ring` crate, pulled in transitively
+  # for TLS) where the Android NDK's clang lives -- that's exactly why the
+  # build failed with "failed to find tool aarch64-linux-android-clang".
+  # cargo-ndk is what actually sets up CC_<target>/AR_<target>/linker env
+  # vars pointing into the NDK, matching MidManStudio_Unity's own
+  # build-projectile-rust-libs.yml / build-audio-libs.yml build-android
+  # jobs exactly (both build these same three ABIs the same way).
   build-native-android-arm64:
     needs: confirm-trigger
     runs-on: ubuntu-latest
@@ -242,7 +240,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: aarch64-linux-android
+          targets: aarch64-linux-android
       - uses: actions/cache@v3
         with:
           path: |
@@ -250,14 +248,23 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
+            ~/.cargo/bin/cargo-ndk
           key: ubuntu-latest-cargo-android-arm64-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ubuntu-latest-cargo-android-arm64-
+      - run: cargo install cargo-ndk --version "^3" --locked
+      - name: Locate NDK
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}"
+          [ -z "$NDK" ] && NDK=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -1)
+          [ -z "$NDK" ] && { echo "❌ Android NDK not found on runner"; exit 1; }
+          echo "ANDROID_NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "Using NDK: $NDK"
       - name: Build mdix-ffi (android-arm64)
-        run: cargo build -p mdix-ffi --release --target aarch64-linux-android
+        run: cargo ndk -t arm64-v8a -o ./android-out build --release -p mdix-ffi
       - uses: actions/upload-artifact@v4
         with:
           name: native-android-arm64
-          path: target/aarch64-linux-android/release/libmdix_ffi.so
+          path: android-out/arm64-v8a/libmdix_ffi.so
           if-no-files-found: error
 
   build-native-android-arm:
@@ -267,7 +274,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: armv7-linux-androideabi
+          targets: armv7-linux-androideabi
       - uses: actions/cache@v3
         with:
           path: |
@@ -275,14 +282,23 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
+            ~/.cargo/bin/cargo-ndk
           key: ubuntu-latest-cargo-android-arm-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ubuntu-latest-cargo-android-arm-
+      - run: cargo install cargo-ndk --version "^3" --locked
+      - name: Locate NDK
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}"
+          [ -z "$NDK" ] && NDK=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -1)
+          [ -z "$NDK" ] && { echo "❌ Android NDK not found on runner"; exit 1; }
+          echo "ANDROID_NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "Using NDK: $NDK"
       - name: Build mdix-ffi (android-arm)
-        run: cargo build -p mdix-ffi --release --target armv7-linux-androideabi
+        run: cargo ndk -t armeabi-v7a -o ./android-out build --release -p mdix-ffi
       - uses: actions/upload-artifact@v4
         with:
           name: native-android-arm
-          path: target/armv7-linux-androideabi/release/libmdix_ffi.so
+          path: android-out/armeabi-v7a/libmdix_ffi.so
           if-no-files-found: error
 
   build-native-android-x64:
@@ -292,7 +308,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: x86_64-linux-android
+          targets: x86_64-linux-android
       - uses: actions/cache@v3
         with:
           path: |
@@ -300,14 +316,23 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
+            ~/.cargo/bin/cargo-ndk
           key: ubuntu-latest-cargo-android-x64-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ubuntu-latest-cargo-android-x64-
+      - run: cargo install cargo-ndk --version "^3" --locked
+      - name: Locate NDK
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}"
+          [ -z "$NDK" ] && NDK=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -1)
+          [ -z "$NDK" ] && { echo "❌ Android NDK not found on runner"; exit 1; }
+          echo "ANDROID_NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "Using NDK: $NDK"
       - name: Build mdix-ffi (android-x64)
-        run: cargo build -p mdix-ffi --release --target x86_64-linux-android
+        run: cargo ndk -t x86_64 -o ./android-out build --release -p mdix-ffi
       - uses: actions/upload-artifact@v4
         with:
           name: native-android-x64
-          path: target/x86_64-linux-android/release/libmdix_ffi.so
+          path: android-out/x86_64/libmdix_ffi.so
           if-no-files-found: error
 
   # ── 2. Pack, Test, and Publish Job ───────────────────────────────────────
@@ -426,12 +451,26 @@ jobs:
             --configuration Release \
             -o nupkg-output
 
-      # ── Push to NuGet (using API Key) ───────────────────────────────────
+      # ── NuGet Trusted Publishing (OIDC) ──────────────────────────────────
+      # FIX: was missing -- see the header comment's bootstrap instructions.
+      # This exchanges the job's GitHub OIDC token (id-token: write, already
+      # granted at workflow level) for a short-lived NuGet API key scoped to
+      # this push only. Requires a Trusted Publisher policy already
+      # configured on nuget.org for MidManStudio.Mdix pointing at this exact
+      # workflow file -- confirmed done. NUGET_API_KEY repo secret is no
+      # longer read anywhere below and can be deleted from repo settings.
+      - name: NuGet login (Trusted Publishing / OIDC)
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      # ── Push to NuGet (Trusted Publishing) ───────────────────────────────
       - name: Push to NuGet
         run: |
           dotnet nuget push "nupkg-output/*.nupkg" \
             --source https://api.nuget.org/v3/index.json \
-            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} \
             --skip-duplicate
 
       # ── Create GitHub Release ───────────────────────────────────────────

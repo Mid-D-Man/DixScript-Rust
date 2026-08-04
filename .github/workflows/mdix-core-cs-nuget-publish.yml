@@ -77,6 +77,8 @@ jobs:
             exit 1
           fi
 
+  # ── 1. Native Build Jobs (All 9 RIDs) ────────────────────────────────────
+
   build-native-linux-x64:
     needs: confirm-trigger
     runs-on: ubuntu-latest
@@ -90,8 +92,8 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ubuntu-latest-cargo-ffi-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ubuntu-latest-cargo-ffi-
+          key: ubuntu-latest-cargo-linux-x64-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-linux-x64-
       - name: Build mdix-ffi (linux-x64)
         run: cargo build -p mdix-ffi --release
       - uses: actions/upload-artifact@v4
@@ -100,18 +102,14 @@ jobs:
           path: target/release/libmdix_ffi.so
           if-no-files-found: error
 
-  # FIX: was missing -- cross-compiled from the same ubuntu-latest host as
-  # linux-x64, mirroring the mingw-cross pattern win-x64 already uses below,
-  # just with the aarch64-linux-gnu cross-compiler instead of mingw.
   build-native-linux-arm64:
     needs: confirm-trigger
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          targets: aarch64-unknown-linux-gnu
+          target: aarch64-unknown-linux-gnu
       - uses: actions/cache@v3
         with:
           path: |
@@ -119,18 +117,13 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ubuntu-latest-cargo-ffi-linux-arm64-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ubuntu-latest-cargo-ffi-linux-arm64-
-      - name: Install aarch64 cross-compiler
-        run: sudo apt-get update -q && sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Configure aarch64 linker
-        run: |
-          mkdir -p ~/.cargo
-          cat >> ~/.cargo/config.toml << 'EOF'
-          [target.aarch64-unknown-linux-gnu]
-          linker = "aarch64-linux-gnu-gcc"
-          EOF
+          key: ubuntu-latest-cargo-linux-arm64-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-linux-arm64-
+      - name: Install cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Build mdix-ffi (linux-arm64)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build -p mdix-ffi --release --target aarch64-unknown-linux-gnu
       - uses: actions/upload-artifact@v4
         with:
@@ -143,10 +136,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          targets: x86_64-pc-windows-gnu
+          target: x86_64-pc-windows-gnu
       - uses: actions/cache@v3
         with:
           path: |
@@ -154,17 +146,10 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ubuntu-latest-cargo-ffi-windows-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ubuntu-latest-cargo-ffi-windows-
-      - name: Install mingw-w64
-        run: sudo apt-get update -q && sudo apt-get install -y gcc-mingw-w64-x86-64
-      - name: Configure mingw linker
-        run: |
-          mkdir -p ~/.cargo
-          cat >> ~/.cargo/config.toml << 'EOF'
-          [target.x86_64-pc-windows-gnu]
-          linker = "x86_64-w64-mingw32-gcc"
-          EOF
+          key: ubuntu-latest-cargo-win-x64-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-win-x64-
+      - name: Install MinGW
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
       - name: Build mdix-ffi (win-x64)
         run: cargo build -p mdix-ffi --release --target x86_64-pc-windows-gnu
       - uses: actions/upload-artifact@v4
@@ -173,17 +158,14 @@ jobs:
           path: target/x86_64-pc-windows-gnu/release/mdix_ffi.dll
           if-no-files-found: error
 
-  # FIX: was missing -- same mingw-cross approach as win-x64 above, just
-  # the 32-bit mingw package/target/linker instead of the 64-bit ones.
   build-native-win-x86:
     needs: confirm-trigger
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          targets: i686-pc-windows-gnu
+          target: i686-pc-windows-gnu
       - uses: actions/cache@v3
         with:
           path: |
@@ -191,17 +173,10 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ubuntu-latest-cargo-ffi-win-x86-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ubuntu-latest-cargo-ffi-win-x86-
-      - name: Install mingw-w64 (32-bit)
-        run: sudo apt-get update -q && sudo apt-get install -y gcc-mingw-w64-i686
-      - name: Configure mingw linker
-        run: |
-          mkdir -p ~/.cargo
-          cat >> ~/.cargo/config.toml << 'EOF'
-          [target.i686-pc-windows-gnu]
-          linker = "i686-w64-mingw32-gcc"
-          EOF
+          key: ubuntu-latest-cargo-win-x86-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-win-x86-
+      - name: Install MinGW 32-bit
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-i686
       - name: Build mdix-ffi (win-x86)
         run: cargo build -p mdix-ffi --release --target i686-pc-windows-gnu
       - uses: actions/upload-artifact@v4
@@ -210,44 +185,14 @@ jobs:
           path: target/i686-pc-windows-gnu/release/mdix_ffi.dll
           if-no-files-found: error
 
-  build-native-osx-arm64:
-    needs: confirm-trigger
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: macos-latest-cargo-ffi-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: macos-latest-cargo-ffi-
-      - name: Build mdix-ffi (osx-arm64)
-        run: cargo build -p mdix-ffi --release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-osx-arm64
-          path: target/release/libmdix_ffi.dylib
-          if-no-files-found: error
-
-  # FIX: was missing -- GitHub-hosted macos-latest runners are Apple
-  # Silicon (arm64) by default, so osx-x64 needs an explicit cross target
-  # rather than a plain `cargo build`. No extra linker configuration is
-  # needed the way win-x64/win-x86/linux-arm64 above need one -- Xcode's
-  # clang is a native universal (arm64 + x86_64) toolchain, so
-  # `rustup target add x86_64-apple-darwin` is sufficient on its own.
   build-native-osx-x64:
     needs: confirm-trigger
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          targets: x86_64-apple-darwin
+          target: x86_64-apple-darwin
       - uses: actions/cache@v3
         with:
           path: |
@@ -255,8 +200,8 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: macos-latest-cargo-ffi-osx-x64-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: macos-latest-cargo-ffi-osx-x64-
+          key: macos-latest-cargo-osx-x64-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-latest-cargo-osx-x64-
       - name: Build mdix-ffi (osx-x64)
         run: cargo build -p mdix-ffi --release --target x86_64-apple-darwin
       - uses: actions/upload-artifact@v4
@@ -265,25 +210,14 @@ jobs:
           path: target/x86_64-apple-darwin/release/libmdix_ffi.dylib
           if-no-files-found: error
 
-  # FIX: was a single arm64-v8a-only job. mdix-ffi/Cargo.toml's own Android
-  # doc comment already documents all three cargo-ndk invocations below, and
-  # MidManStudio_Unity's build-audio-libs.yml / build-projectile-rust-libs.yml
-  # already build exactly these three ABIs in one job for the same crates'
-  # native libs, with the same reasoning: arm64-v8a alone covers current-gen
-  # devices, but armeabi-v7a is still a real install base on older/budget
-  # Android hardware, and x86_64 covers emulators plus some Intel
-  # Chromebooks/tablets. This job -- including the NDK-location step, the
-  # `--version "^3"` pin, and the symbol-set-parity check -- mirrors that
-  # Unity workflow's build-android job directly rather than reinventing it.
-  build-native-android:
+  build-native-osx-arm64:
     needs: confirm-trigger
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+          target: aarch64-apple-darwin
       - uses: actions/cache@v3
         with:
           path: |
@@ -291,107 +225,161 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-            ~/.cargo/bin/cargo-ndk
-          key: ubuntu-latest-cargo-ffi-android-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ubuntu-latest-cargo-ffi-android-
-      - run: cargo install cargo-ndk --version "^3" --locked
-      - name: Locate NDK
-        run: |
-          NDK="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}"
-          [ -z "$NDK" ] && NDK=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -1)
-          [ -z "$NDK" ] && { echo "❌ Android NDK not found on runner"; exit 1; }
-          echo "ANDROID_NDK_HOME=$NDK" >> $GITHUB_ENV
-          echo "Using NDK: $NDK"
-      - name: Build all ABIs
-        run: |
-          set -e
-          cargo ndk -t arm64-v8a   -o ./android-out build --release -p mdix-ffi
-          cargo ndk -t armeabi-v7a -o ./android-out build --release -p mdix-ffi
-          cargo ndk -t x86_64      -o ./android-out build --release -p mdix-ffi
-      - name: Verify ABI outputs (symbol-set consistency, not just presence)
-        run: |
-          set -e
-          # mdix-ffi exports ~65 functions -- unlike mid_audio/projectile_core's
-          # small hand-enumerated EXPECTED_SYMS list, cross-ABI parity plus a
-          # floor on the count is the maintainable check here: it still catches
-          # "one ABI silently exports fewer functions than the others" without
-          # needing every FFI addition to also touch this workflow.
-          MIN_BYTES=100000     # mdix-ffi is a full compiler+runtime, expect low-MB .so; 100KB only catches a stub/truncated build
-          MIN_SYMBOLS=60
-          FAIL=0
-          declare -A SYMSETS
-
-          for ABI in arm64-v8a armeabi-v7a x86_64; do
-            F="android-out/$ABI/libmdix_ffi.so"
-            if [ ! -f "$F" ]; then
-              echo "❌ MISSING: $ABI — libmdix_ffi.so was not produced"
-              FAIL=1; continue
-            fi
-            SIZE=$(stat -c%s "$F")
-            echo "  $ABI: ${SIZE} bytes"
-            if [ "$SIZE" -lt "$MIN_BYTES" ]; then
-              echo "❌ SUSPICIOUSLY SMALL: $ABI ($SIZE bytes) — likely a stub/failed build"
-              FAIL=1; continue
-            fi
-
-            DEFINED=$(nm -D --defined-only "$F" 2>/dev/null | awk '{print $3}' | sort)
-            SYMSETS[$ABI]="$DEFINED"
-            SYMCOUNT=$(echo "$DEFINED" | grep -c '^mdix_' || true)
-            echo "  $ABI: $SYMCOUNT mdix_* exported symbols"
-            if [ "$SYMCOUNT" -lt "$MIN_SYMBOLS" ]; then
-              echo "❌ $ABI exports too few mdix_* symbols ($SYMCOUNT < $MIN_SYMBOLS)"
-              FAIL=1
-            fi
-          done
-
-          # All three ABIs must export the exact same set of functions --
-          # this is what actually distinguishes "smaller but correct" from
-          # "an ABI silently missing exports" (sizes legitimately differ
-          # per-target and that alone is fine).
-          if [ -n "${SYMSETS[arm64-v8a]:-}" ] && [ -n "${SYMSETS[armeabi-v7a]:-}" ]; then
-            [ "${SYMSETS[arm64-v8a]}" = "${SYMSETS[armeabi-v7a]}" ] || { echo "❌ arm64-v8a/armeabi-v7a export different symbol sets"; FAIL=1; }
-          fi
-          if [ -n "${SYMSETS[arm64-v8a]:-}" ] && [ -n "${SYMSETS[x86_64]:-}" ]; then
-            [ "${SYMSETS[arm64-v8a]}" = "${SYMSETS[x86_64]}" ] || { echo "❌ arm64-v8a/x86_64 export different symbol sets"; FAIL=1; }
-          fi
-
-          [ "$FAIL" = "1" ] && { echo "❌ Android artifact verification failed."; exit 1; }
-          echo "✅ All 3 ABIs present, sane size, and export identical symbol sets."
+          key: macos-latest-cargo-osx-arm64-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-latest-cargo-osx-arm64-
+      - name: Build mdix-ffi (osx-arm64)
+        run: cargo build -p mdix-ffi --release --target aarch64-apple-darwin
       - uses: actions/upload-artifact@v4
         with:
-          name: native-android
-          path: android-out/
+          name: native-osx-arm64
+          path: target/aarch64-apple-darwin/release/libmdix_ffi.dylib
           if-no-files-found: error
 
-  pack-test-and-publish:
-    needs:
-      - confirm-trigger
-      - build-native-linux-x64
-      - build-native-linux-arm64
-      - build-native-win-x64
-      - build-native-win-x86
-      - build-native-osx-arm64
-      - build-native-osx-x64
-      - build-native-android
+  build-native-android-arm64:
+    needs: confirm-trigger
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: aarch64-linux-android
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-android-arm64-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-android-arm64-
+      - name: Build mdix-ffi (android-arm64)
+        run: cargo build -p mdix-ffi --release --target aarch64-linux-android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-android-arm64
+          path: target/aarch64-linux-android/release/libmdix_ffi.so
+          if-no-files-found: error
+
+  build-native-android-arm:
+    needs: confirm-trigger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: armv7-linux-androideabi
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-android-arm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-android-arm-
+      - name: Build mdix-ffi (android-arm)
+        run: cargo build -p mdix-ffi --release --target armv7-linux-androideabi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-android-arm
+          path: target/armv7-linux-androideabi/release/libmdix_ffi.so
+          if-no-files-found: error
+
+  build-native-android-x64:
+    needs: confirm-trigger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: x86_64-linux-android
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-android-x64-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-android-x64-
+      - name: Build mdix-ffi (android-x64)
+        run: cargo build -p mdix-ffi --release --target x86_64-linux-android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-android-x64
+          path: target/x86_64-linux-android/release/libmdix_ffi.so
+          if-no-files-found: error
+
+  # ── 2. Pack, Test, and Publish Job ───────────────────────────────────────
+
+  pack-test-and-publish:
+    needs: [
+      confirm-trigger,
+      build-native-linux-x64,
+      build-native-linux-arm64,
+      build-native-win-x64,
+      build-native-win-x86,
+      build-native-osx-x64,
+      build-native-osx-arm64,
+      build-native-android-arm64,
+      build-native-android-arm,
+      build-native-android-x64
+    ]
+    runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup .NET 7
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '7.0.x'
+
       - uses: dtolnay/rust-toolchain@stable
+      
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-cli-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-cli-
 
-      # cargo build -p mdix-ffi (host/linux) also regenerates
-      # Core/Generated/MdixNative.cs -- `dotnet build`/`dotnet pack` below
-      # can't compile without it, same prerequisite
-      # mdix-core-cs-publish.yml already relies on.
-      - name: Build mdix-ffi (regenerates Core/Generated/MdixNative.cs)
-        run: cargo build -p mdix-ffi --release
+      # ── Download all native binaries into runtimes/ folder ──────────────
+      - name: Download Native Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded-natives
 
-      # ── Build mdix-cli + generate enum-only DLM test fixtures ──────────────
-      # Same reasoning as mdix-core-cs-publish.yml's identical step: needed
-      # for MdixEnumDlmTests.cs, must run before `dotnet test`/`dotnet
-      # build` below.
+      - name: Organize Native Binaries into Runtimes Structure
+        run: |
+          R="mdix-csharp/src/MidManStudio.Mdix.Core/runtimes"
+          mkdir -p "$R/win-x64/native"
+          mkdir -p "$R/win-x86/native"
+          mkdir -p "$R/linux-x64/native"
+          mkdir -p "$R/linux-arm64/native"
+          mkdir -p "$R/osx-x64/native"
+          mkdir -p "$R/osx-arm64/native"
+          mkdir -p "$R/android-arm64/native"
+          mkdir -p "$R/android-arm/native"
+          mkdir -p "$R/android-x64/native"
+
+          cp downloaded-natives/native-win-x64/mdix_ffi.dll             "$R/win-x64/native/" || true
+          cp downloaded-natives/native-win-x86/mdix_ffi.dll             "$R/win-x86/native/" || true
+          cp downloaded-natives/native-linux-x64/libmdix_ffi.so         "$R/linux-x64/native/" || true
+          cp downloaded-natives/native-linux-arm64/libmdix_ffi.so       "$R/linux-arm64/native/" || true
+          cp downloaded-natives/native-osx-x64/libmdix_ffi.dylib        "$R/osx-x64/native/" || true
+          cp downloaded-natives/native-osx-arm64/libmdix_ffi.dylib      "$R/osx-arm64/native/" || true
+          cp downloaded-natives/native-android-arm64/libmdix_ffi.so     "$R/android-arm64/native/" || true
+          cp downloaded-natives/native-android-arm/libmdix_ffi.so       "$R/android-arm/native/" || true
+          cp downloaded-natives/native-android-x64/libmdix_ffi.so       "$R/android-x64/native/" || true
+
+          echo "Organized runtimes layout:"
+          find "$R" -type f
+
+      # ── Build CLI + generate test fixtures ──────────────────────────────
       - name: Build mdix-cli
         run: cargo build -p mdix-cli --release
 
@@ -403,133 +391,62 @@ jobs:
           OUT="$(mktemp -d)"
           DST="mdix-csharp/tests/MidManStudio.Mdix.Core.Tests/fixtures/enum_dlm"
           mkdir -p "$DST"
+
           for name in 11_enum_only_gzip 12_enum_only_aes256 13_enum_only_gzip_aes256; do
             "$MDIX" compile "$SRC/$name.mdix" -o "$OUT"
             cp "$OUT/$name.mdix.enc" "$DST/"
             cp "$OUT/$name.mdix.key" "$DST/"
           done
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '7.0.x'
-
-      # Belt-and-suspenders: mdix-core-cs-publish.yml already runs the full
-      # test suite on every push, but a publish that skips its own
-      # last-minute check on exactly the commit being packed is how "CI was
-      # green three commits ago" ends up on a registry that doesn't support
-      # un-publishing.
-      - name: Run tests before packaging
+      - name: Restore and Build Solution
         run: |
           dotnet restore mdix-csharp/MidManStudio.Mdix.sln
-          dotnet test mdix-csharp/MidManStudio.Mdix.sln --configuration Release
+          dotnet build mdix-csharp/MidManStudio.Mdix.sln --configuration Release
 
-      - name: Download native artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: native-artifacts
-
-      # FIX: now assembles all 9 RIDs instead of 7 (3 Android ABIs instead of 1).
-      - name: Assemble runtimes/ folder
+      # ── Copy native library next to test output to prevent DllNotFoundException ──
+      - name: Copy native library to test output directory
         run: |
-          set -e
-          CORE=mdix-csharp/src/MidManStudio.Mdix.Core
-          mkdir -p "$CORE/runtimes/linux-x64/native"
-          mkdir -p "$CORE/runtimes/linux-arm64/native"
-          mkdir -p "$CORE/runtimes/win-x64/native"
-          mkdir -p "$CORE/runtimes/win-x86/native"
-          mkdir -p "$CORE/runtimes/osx-arm64/native"
-          mkdir -p "$CORE/runtimes/osx-x64/native"
-          mkdir -p "$CORE/runtimes/android-arm64/native"
-          mkdir -p "$CORE/runtimes/android-arm/native"
-          mkdir -p "$CORE/runtimes/android-x64/native"
-          cp native-artifacts/native-linux-x64/libmdix_ffi.so       "$CORE/runtimes/linux-x64/native/"
-          cp native-artifacts/native-linux-arm64/libmdix_ffi.so     "$CORE/runtimes/linux-arm64/native/"
-          cp native-artifacts/native-win-x64/mdix_ffi.dll           "$CORE/runtimes/win-x64/native/"
-          cp native-artifacts/native-win-x86/mdix_ffi.dll           "$CORE/runtimes/win-x86/native/"
-          cp native-artifacts/native-osx-arm64/libmdix_ffi.dylib    "$CORE/runtimes/osx-arm64/native/"
-          cp native-artifacts/native-osx-x64/libmdix_ffi.dylib      "$CORE/runtimes/osx-x64/native/"
-          cp native-artifacts/native-android/arm64-v8a/libmdix_ffi.so   "$CORE/runtimes/android-arm64/native/"
-          cp native-artifacts/native-android/armeabi-v7a/libmdix_ffi.so "$CORE/runtimes/android-arm/native/"
-          cp native-artifacts/native-android/x86_64/libmdix_ffi.so      "$CORE/runtimes/android-x64/native/"
-          echo "runtimes/ assembled:"
-          find "$CORE/runtimes" -type f -exec ls -lh {} \;
+          TEST_OUT="mdix-csharp/tests/MidManStudio.Mdix.Core.Tests/bin/Release/net7.0"
+          mkdir -p "$TEST_OUT"
+          cp downloaded-natives/native-linux-x64/libmdix_ffi.so "$TEST_OUT/libmdix_ffi.so"
+          cp downloaded-natives/native-linux-x64/libmdix_ffi.so "$TEST_OUT/mdix_ffi.so"
 
-      - name: dotnet pack
+      - name: Run Tests
         run: |
-          dotnet pack mdix-csharp/src/MidManStudio.Mdix.Core/MidManStudio.Mdix.Core.csproj \
+          dotnet test mdix-csharp/MidManStudio.Mdix.sln \
+            --no-build \
             --configuration Release \
-            --output ./nupkg
+            --verbosity normal
 
-      # FIX: now verifies all 9 RIDs instead of 7.
-      - name: Verify package contents (still no push yet)
+      # ── Pack NuGet Package ──────────────────────────────────────────────
+      - name: Pack NuGet Package
         run: |
-          set -e
-          PKG=$(ls ./nupkg/*.nupkg | grep -v '\.snupkg$' | head -1)
-          echo "Package: $PKG"
-          unzip -l "$PKG"
-          for rid in linux-x64 linux-arm64 win-x64 win-x86 osx-arm64 osx-x64 android-arm64 android-arm android-x64; do
-            unzip -l "$PKG" | grep -q "runtimes/$rid/native/" || { echo "❌ missing $rid native lib in package"; exit 1; }
-          done
-          unzip -l "$PKG" | grep -q "build/MidManStudio.Mdix.targets" || { echo "❌ missing build/MidManStudio.Mdix.targets in package"; exit 1; }
-          unzip -l "$PKG" | grep -qi "README.md" || { echo "❌ missing README.md in package"; exit 1; }
-          echo "✅ All 9 native RIDs + the .targets file + README.md are present in the package."
+          dotnet pack mdix-csharp/MidManStudio.Mdix.sln \
+            --no-build \
+            --configuration Release \
+            -o nupkg-output
 
-      - name: Read package version
-        id: version
+      # ── Push to NuGet (using API Key) ───────────────────────────────────
+      - name: Push to NuGet
         run: |
-          VERSION=$(grep -m1 '<Version>' mdix-csharp/src/MidManStudio.Mdix.Core/MidManStudio.Mdix.Core.csproj \
-            | sed -E 's/.*<Version>([^<]+)<\/Version>.*/\1/')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Publishing MidManStudio.Mdix v$VERSION"
-
-      # ══ BOOTSTRAP-ONLY TRUSTED PUBLISHING SETUP ═════════════════════════
-      # See the header comment. Once a Trusted Publishing policy exists for
-      # MidManStudio.Mdix on nuget.org, flip this from `if: false` to
-      # enabled and swap the --api-key argument in the push step below,
-      # mirroring mdix-cli-publish.yml's own crates.io bootstrap swap.
-      - name: NuGet login (OIDC, disabled until Trusted Publishing is configured)
-        if: false
-        id: nuget-login
-        uses: NuGet/login@v1
-        with:
-          user: ${{ secrets.NUGET_USER }}
-      # ══ END BOOTSTRAP-ONLY SECTION ═══════════════════════════════════════
-
-      - name: "BOOTSTRAP: Push to NuGet.org (API key, first publish only)"
-        run: |
-          dotnet nuget push ./nupkg/*.nupkg \
+          dotnet nuget push "nupkg-output/*.nupkg" \
             --source https://api.nuget.org/v3/index.json \
-            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
             --skip-duplicate
 
-      # - name: Push to NuGet.org (Trusted Publishing)
-      #   run: |
-      #     dotnet nuget push ./nupkg/*.nupkg \
-      #       --source https://api.nuget.org/v3/index.json \
-      #       --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
-      #       --skip-duplicate
-
-  # FIX: was missing entirely -- every other publish workflow in this repo
-  # (a-publish-dixscript-crate.yml, mdix-cli-publish.yml, wasm-npm-
-  # publish.yml, mdix-python-pypi-publish.yml) tags and creates a GitHub
-  # Release after a successful registry push. This one stopped after
-  # `dotnet nuget push` with no tag and no release -- npm/PyPI/crates.io
-  # and GitHub Releases are entirely separate systems, a push to one
-  # doesn't create anything on the other.
-  create-release:
-    needs: [confirm-trigger, pack-test-and-publish]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      # ── Create GitHub Release ───────────────────────────────────────────
+      - name: Extract Version
+        id: version
+        run: |
+          VERSION=$(grep -oPm1 "(?<=<Version>)[^<]+" mdix-csharp/src/MidManStudio.Mdix.Core/MidManStudio.Mdix.Core.csproj)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.pack-test-and-publish.outputs.version }}
-        run: |
-          NOTES="MidManStudio.Mdix v${VERSION} — published to NuGet: https://www.nuget.org/packages/MidManStudio.Mdix/${VERSION}"
-
-          gh release create "MidManStudio.Mdix-v${VERSION}" \
-            --title "MidManStudio.Mdix v${VERSION}" \
-            --notes "$NOTES" \
-            --target "${{ github.sha }}"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: MidManStudio.Mdix-v${{ steps.version.outputs.version }}
+          name: MidManStudio.Mdix v${{ steps.version.outputs.version }}
+          files: nupkg-output/*.nupkg
+          body: |
+            Automated release of **MidManStudio.Mdix** v${{ steps.version.outputs.version }}.
+            Available on [NuGet.org](https://www.nuget.org/packages/MidManStudio.Mdix/${{ steps.version.outputs.version }}).

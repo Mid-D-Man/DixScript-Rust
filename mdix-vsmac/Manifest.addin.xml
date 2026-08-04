@@ -31,16 +31,26 @@
   </Extension>
 
   <!--
-    2026-08-03: resource name corrected to mdix-file.svg — the file that
-    actually exists in Resources/ (mdix-file-icon.svg never did, which is
-    why the .mpack came out at ~7KB: no <Runtime> section here ever declared
-    ANY support file as belonging to the addin, so vstool setup pack had
-    nothing but the DLL to bundle. That declaration now lives in
-    AddinInfo.cs as [assembly: ImportAddinFile(...)] attributes rather than
-    a <Runtime> block here — same mechanism, Mono.Addins supports both, this
-    project already leans on the attribute style everywhere else.
+    2026-08-03 — ROOT CAUSE OF THE INSTALL WARNING ("is trying to extend
+    '/MonoDevelop/Ide/StockIcons', but there isn't any add-in defining this
+    extension point") and, most likely, the folder-expand/dropdown issue:
+    wrong top-level namespace. Confirmed against mono/monodevelop's actual
+    current source (github.com/mono/monodevelop) — every real addin that
+    registers a StockIcon (MonoDevelop.Deployment, MonoDevelop.XmlEditor,
+    MonoDevelop.DotNetCore, MonoDevelop.Refactoring, MonoDevelop.Profiling,
+    Unity-Technologies/MonoDevelop.UnityMode) extends
+    "/MonoDevelop/Core/StockIcons" — under Core, not Ide. That extension
+    point genuinely doesn't exist under Ide, which is exactly what the
+    install warning said and why the icon registration was silently
+    dropped. Since the MimeType extension above references icon=
+    "md-mdix-file", and that stock icon was therefore never actually
+    registered, resolving it while rendering a .mdix file's tree node is
+    the most likely cause of the folder not expanding.
+
+    resource="mdix-file.svg" also corrected earlier to match the file that
+    actually exists in Resources/ (mdix-file-icon.svg never did).
   -->
-  <Extension path="/MonoDevelop/Ide/StockIcons">
+  <Extension path="/MonoDevelop/Core/StockIcons">
     <StockIcon stockid="md-mdix-file" resource="mdix-file.svg" />
   </Extension>
 

@@ -249,8 +249,26 @@ jobs:
             ~/.cargo/git/db/
             target/
             ~/.cargo/bin/cargo-ndk
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
           key: ubuntu-latest-cargo-android-arm64-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ubuntu-latest-cargo-android-arm64-
+      # FIX: root cause of "error: binary `cargo-ndk` already exists in
+      # destination / Add --force to overwrite" -- caching ~/.cargo/bin/
+      # alone restores the compiled binary on a cache hit, but not cargo's
+      # own install ledger (~/.cargo/.crates.toml, ~/.cargo/.crates2.json),
+      # which is what `cargo install` actually checks to know a binary is
+      # its own managed install vs. some unrelated file blocking the path.
+      # Without the ledger, cargo sees a binary it has no record of and
+      # hard-errors instead of comparing versions. Confirmed as the known
+      # cause + fix upstream: rust-lang/cargo#8841 ("Suggested cache set is
+      # insufficient for `cargo install`") -- "It sufficed ... to also
+      # cache .crates.toml and .crates2.json." With the ledger cached too,
+      # a cache hit on the same "^3" version now makes cargo print "already
+      # installed" and exit 0 instead of reinstalling or erroring; a cache
+      # miss (or a genuinely newer/older version) still installs normally.
+      # No --force added -- that would force a rebuild every single run,
+      # defeating the point of caching ~/.cargo/bin/cargo-ndk at all.
       - run: cargo install cargo-ndk --version "^3" --locked
       - name: Locate NDK
         run: |
@@ -283,8 +301,15 @@ jobs:
             ~/.cargo/git/db/
             target/
             ~/.cargo/bin/cargo-ndk
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
           key: ubuntu-latest-cargo-android-arm-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ubuntu-latest-cargo-android-arm-
+      # FIX: same "binary already exists in destination" cache-hit collision
+      # as build-native-android-arm64 above -- see that job's comment for
+      # the full explanation (rust-lang/cargo#8841). Caching cargo's install
+      # ledger (.crates.toml/.crates2.json) alongside the binary is what
+      # makes `cargo install` recognize it's already installed and skip.
       - run: cargo install cargo-ndk --version "^3" --locked
       - name: Locate NDK
         run: |
@@ -317,8 +342,15 @@ jobs:
             ~/.cargo/git/db/
             target/
             ~/.cargo/bin/cargo-ndk
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
           key: ubuntu-latest-cargo-android-x64-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ubuntu-latest-cargo-android-x64-
+      # FIX: same "binary already exists in destination" cache-hit collision
+      # as build-native-android-arm64 above -- see that job's comment for
+      # the full explanation (rust-lang/cargo#8841). Caching cargo's install
+      # ledger (.crates.toml/.crates2.json) alongside the binary is what
+      # makes `cargo install` recognize it's already installed and skip.
       - run: cargo install cargo-ndk --version "^3" --locked
       - name: Locate NDK
         run: |

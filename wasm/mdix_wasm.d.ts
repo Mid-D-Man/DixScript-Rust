@@ -231,6 +231,48 @@ export class MdixDatabase {
      */
     static loadStr(source: string): MdixDatabase;
     /**
+     * Merges this database with `other` and returns a fresh
+     * `MdixMergeOutcome` — leaves both original databases untouched.
+     *
+     * `strategy`: "weighted" (default) | "primary_wins" | "secondary_wins"
+     * | "throw_on_conflict". `array_strategy`: "concat_dedup" (default) |
+     * "replace" | "concat". `this` merges as the primary source
+     * (weight 1.0), `other` as secondary (weight 0.5).
+     *
+     * NOTE: this method previously didn't exist as a real binding despite
+     * being documented at the top of merge.rs — `crate::merge::merge_with`
+     * was a plain Rust free function, never wired into a #[wasm_bindgen]
+     * impl block or re-exported from lib.rs, so `MdixDatabase.mergeWith`
+     * was unreachable from JS entirely. This is that wiring.
+     */
+    mergeWith(other: MdixDatabase, strategy?: string | null, array_strategy?: string | null): MdixMergeOutcome;
+    /**
+     * Query the array at `path` and return its elements as a JSON array
+     * string. `path` itself must be a plain `Array` value, or a
+     * `GroupArray`'s own path (the flattener already stores a
+     * `GroupArray`'s items as a real Array there) -- for gathering across
+     * multiple *sibling* paths instead, use `query_many`.
+     *
+     * Returns `"[]"` for a path that doesn't exist or isn't an Array,
+     * rather than erroring -- mirrors `DixData::query`, which returns
+     * `None` for exactly the same two cases: "no matching data" is a
+     * normal, common outcome for a query, not a caller mistake worth
+     * throwing over the way e.g. `getString` on the wrong type is.
+     */
+    query(path: string): string;
+    /**
+     * Query across every sibling path matched by a glob `pattern` (same
+     * whole-segment `*` syntax as the core's `select_many` -- see
+     * query.rs's module doc for exactly what that does and doesn't
+     * match), gathered into one JSON array string. For a single Array or
+     * GroupArray path's own items, use `query` instead.
+     *
+     * Always returns a JSON array (possibly `"[]"`) -- `DixData::
+     * query_many` has no `None` case, an empty match set is just an
+     * empty `DixQuery`.
+     */
+    queryMany(pattern: string): string;
+    /**
      * Exports the entire database as a JSON string.
      */
     toJson(indented: boolean): string;
@@ -243,6 +285,23 @@ export class MdixDatabase {
      */
     toToml(): string;
     /**
+     * Validates this database against `schema` and returns a
+     * `MdixValidationReport`.
+     *
+     * `schema` is borrowed, not consumed — the same `MdixSchema` instance
+     * can validate multiple databases (mirrors the underlying
+     * `SchemaBuilder::validate(&self, ..)` in dixscript core, and the same
+     * pattern mdix-python's `MdixDatabase.validate_schema` already uses).
+     *
+     * NOTE: this method was documented at the top of schema.rs
+     * (`db.validateSchema(schema)`) but was never actually wired up here —
+     * `MdixSchema` and `MdixValidationReport` existed with no way to reach
+     * them from `MdixDatabase` at all. Same shape of bug as `mergeWith`
+     * above (see the regression test docs on that one); this is that
+     * wiring for schema.rs.
+     */
+    validateSchema(schema: MdixSchema): MdixValidationReport;
+    /**
      * Total number of entries loaded.
      */
     readonly entryCount: number;
@@ -250,6 +309,34 @@ export class MdixDatabase {
      * Returns true if the database is still valid (not freed).
      */
     readonly isValid: boolean;
+}
+
+export class MdixDlmOutcome {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    errors(): string[];
+    /**
+     * Which DLM modules actually ran, e.g. `["DCompressor.xz",
+     * "DEncryptor.aes256"]` — empty when `source` had no `@DLM` section.
+     */
+    executedModules(): string[];
+    isSuccess(): boolean;
+    /**
+     * The `.mdix.key` file's content as a plain string, ready to hand
+     * straight to `decompileWithDlm`. `undefined` when `source` had no
+     * `@DLM` modules to apply (nothing to decrypt on the way back
+     * either — see the module doc comment above).
+     */
+    keyFileContent(): string | undefined;
+    /**
+     * The compressed/encrypted (or, with no `@DLM` modules, plain
+     * binary-packed) bytes — always populated in memory regardless of
+     * whether any on-disk artifact could be written (never possible on
+     * wasm32 in the first place).
+     */
+    processedData(): Uint8Array;
+    warnings(): string[];
 }
 
 /**
@@ -382,6 +469,28 @@ export class MdixWatcher {
     reset(): void;
 }
 
+/**
+ * Compiles `source` and, if it declares an `@DLM(DCompressor...
+ * DEncryptor...)` section, runs compression/encryption on the result —
+ * entirely in memory. `sourceLabel` is just an identifier used for
+ * error messages and (if `@DLM` includes `DAuditor`) as the audit
+ * trail's localStorage key — it doesn't need to be a real file name,
+ * though using one consistently is what makes the audit trail track a
+ * given config's history across compiles.
+ */
+export function compileWithDlm(source: string, source_label: string): MdixDlmOutcome;
+
+/**
+ * Reverse of `compileWithDlm`: takes the bytes from `processedData()`
+ * and the string from `keyFileContent()` and returns a normal
+ * `MdixDatabase`, exactly as if you'd `loadStr()`'d the original source.
+ *
+ * Pass `""` for `keyFileContent` when the original `compileWithDlm` call
+ * returned `undefined` for it (source had no `@DLM` modules) — this then
+ * unpacks `data` directly rather than attempting decryption.
+ */
+export function decompileWithDlm(data: Uint8Array, key_file_content: string, source_label: string): MdixDatabase;
+
 export function init(): void;
 
 /**
@@ -427,12 +536,14 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_mdixbuilder_free: (a: number, b: number) => void;
     readonly __wbg_mdixdatabase_free: (a: number, b: number) => void;
+    readonly __wbg_mdixdlmoutcome_free: (a: number, b: number) => void;
     readonly __wbg_mdixmergeoutcome_free: (a: number, b: number) => void;
     readonly __wbg_mdixschema_free: (a: number, b: number) => void;
     readonly __wbg_mdixvalidationreport_free: (a: number, b: number) => void;
     readonly __wbg_mdixwatcher_free: (a: number, b: number) => void;
     readonly __wbg_mdixwatchoutcome_free: (a: number, b: number) => void;
-    readonly init: () => void;
+    readonly compileWithDlm: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly decompileWithDlm: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly mdixbuilder_addEnum: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly mdixbuilder_free: (a: number) => void;
     readonly mdixbuilder_isValid: (a: number) => number;
@@ -479,9 +590,19 @@ export interface InitOutput {
     readonly mdixdatabase_getValueType: (a: number, b: number, c: number) => [number, number, number, number];
     readonly mdixdatabase_isValid: (a: number) => number;
     readonly mdixdatabase_loadStr: (a: number, b: number) => [number, number, number];
+    readonly mdixdatabase_mergeWith: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly mdixdatabase_query: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly mdixdatabase_queryMany: (a: number, b: number, c: number) => [number, number, number, number];
     readonly mdixdatabase_toJson: (a: number, b: number) => [number, number, number, number];
     readonly mdixdatabase_toMdix: (a: number) => [number, number, number, number];
     readonly mdixdatabase_toToml: (a: number) => [number, number, number, number];
+    readonly mdixdatabase_validateSchema: (a: number, b: number) => [number, number, number];
+    readonly mdixdlmoutcome_errors: (a: number) => [number, number];
+    readonly mdixdlmoutcome_executedModules: (a: number) => [number, number];
+    readonly mdixdlmoutcome_isSuccess: (a: number) => number;
+    readonly mdixdlmoutcome_keyFileContent: (a: number) => [number, number];
+    readonly mdixdlmoutcome_processedData: (a: number) => [number, number];
+    readonly mdixdlmoutcome_warnings: (a: number) => [number, number];
     readonly mdixmergeoutcome_conflicts: (a: number) => [number, number, number];
     readonly mdixmergeoutcome_database: (a: number) => [number, number, number];
     readonly mdixschema_fieldCount: (a: number) => number;
@@ -520,6 +641,7 @@ export interface InitOutput {
     readonly mergeSourcesWeighted: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly prefetchImport: (a: number, b: number, c: number, d: number) => void;
     readonly mdixbuilder_withTimestamp: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly init: () => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

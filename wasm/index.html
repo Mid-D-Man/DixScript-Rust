@@ -1,2478 +1,582 @@
+';
+  };
+</script>
+
+</body>
+</html>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DixScript WASM — Test Results</title>
+  <title>DixScript WASM — Browser Playground</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Segoe UI', system-ui, sans-serif;
       background: #0d1117; color: #e6edf3;
-      min-height: 100vh; padding: 40px 24px;
+      min-height: 100vh; padding: 24px;
     }
-    .container { max-width: 900px; margin: 0 auto; }
-    a { color: #39d353; }
+    a { color: #39d353; text-decoration: none; }
+    a:hover { text-decoration: underline; }
     .back-link {
       display: inline-flex; align-items: center; gap: 6px;
       font-size: 0.82rem; color: #8b949e; margin-bottom: 20px;
-      text-decoration: none;
+      transition: color 0.15s;
     }
-    .back-link:hover { color: #39d353; }
-    h1 { font-size: 1.6rem; color: #e6edf3; margin-bottom: 6px; }
-    .subtitle { font-size: 0.8rem; color: #484f58; margin-bottom: 28px; }
+    .back-link:hover { color: #39d353; text-decoration: none; }
 
-    .summary-grid {
-      display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
-      margin-bottom: 24px;
-    }
-    .stat {
-      background: #161b22; border: 1px solid #30363d; border-radius: 10px;
-      padding: 16px; text-align: center;
-    }
-    .stat-value { font-size: 1.6rem; font-weight: 700; }
-    .stat-label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
-    .stat.passed .stat-value { color: #3fb950; }
-    .stat.failed .stat-value { color: #f85149; }
-    .stat.total  .stat-value { color: #e6edf3; }
-    .stat.duration .stat-value { color: #8b949e; font-size: 1.1rem; }
+    h1 { font-size: 1.5rem; color: #39d353; margin-bottom: 4px; }
+    .subtitle { font-size: 0.8rem; color: #484f58; margin-bottom: 24px; }
 
-    .meta-row {
-      display: flex; gap: 16px; flex-wrap: wrap;
-      font-size: 0.72rem; color: #484f58; margin-bottom: 24px;
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
     }
-    .meta-row strong { color: #8b949e; }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
 
     .panel {
-      background: #161b22; border: 1px solid #30363d; border-radius: 10px;
-      overflow: hidden; margin-bottom: 16px;
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 10px; overflow: hidden;
     }
     .panel-header {
       padding: 10px 16px; font-size: 0.78rem; font-weight: 600;
-      background: #1c2128; border-bottom: 1px solid #30363d; color: #8b949e;
+      background: #1c2128; border-bottom: 1px solid #30363d;
+      color: #8b949e; display: flex; align-items: center;
+      justify-content: space-between;
+    }
+    .panel-header .badge {
+      font-size: 0.68rem; padding: 2px 8px; border-radius: 4px;
+      background: #0d1117; color: #484f58; border: 1px solid #30363d;
+    }
+    textarea, .output {
+      width: 100%; padding: 14px 16px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 0.8rem; line-height: 1.5;
+      background: transparent; color: #e6edf3;
+      border: none; outline: none; resize: vertical;
+      min-height: 220px;
+    }
+    .output {
+      white-space: pre-wrap; word-break: break-all;
+      min-height: 220px; resize: none;
+      color: #3fb950;
+    }
+    .output.error { color: #f85149; }
+    .output.warn  { color: #d29922; }
+
+    .toolbar {
+      display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;
+    }
+    button {
+      padding: 8px 18px; border-radius: 6px; border: 1px solid #30363d;
+      background: #1c2128; color: #e6edf3; font-size: 0.82rem;
+      cursor: pointer; transition: border-color 0.15s, color 0.15s;
+    }
+    button:hover   { border-color: #39d353; color: #39d353; }
+    button.primary { border-color: #39d353; color: #39d353; }
+    button.primary:hover { background: #0f2d1a; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .status-bar {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 8px; padding: 10px 16px;
+      font-size: 0.78rem; color: #484f58;
+      margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #484f58; flex-shrink: 0;
+    }
+    .dot.ready   { background: #3fb950; }
+    .dot.loading { background: #d29922; animation: pulse 1s infinite; }
+    .dot.error   { background: #f85149; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    .meta-row {
+      display: flex; gap: 16px; flex-wrap: wrap;
+      font-size: 0.72rem; color: #484f58; margin-bottom: 20px;
+    }
+    .meta-row span { display: flex; align-items: center; gap: 4px; }
+    .meta-row strong { color: #8b949e; }
+
+    .test-suite {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 10px; margin-bottom: 12px; overflow: hidden;
+    }
+    .test-suite-header {
+      padding: 12px 16px; font-size: 0.82rem; font-weight: 600;
+      background: #1c2128; border-bottom: 1px solid #30363d;
+      color: #c9d1d9;
     }
     .test-row {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 8px 16px; font-size: 0.82rem; font-family: 'Cascadia Code', 'Fira Code', monospace;
-      border-bottom: 1px solid #21262d;
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 16px; border-bottom: 1px solid #21262d;
+      font-size: 0.78rem;
     }
     .test-row:last-child { border-bottom: none; }
-    .test-name { color: #e6edf3; }
-    .test-status { font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
-    .test-status.ok     { background: #0f2d1a; color: #3fb950; border: 1px solid #1a5c33; }
-    .test-status.failed { background: #2a0f0f; color: #f85149; border: 1px solid #5c1a1a; }
-
-    .raw-log {
-      background: #0d1117; border: 1px solid #30363d; border-radius: 10px;
-      padding: 16px; font-family: 'Cascadia Code', 'Fira Code', monospace;
-      font-size: 0.76rem; color: #8b949e; white-space: pre-wrap;
-      max-height: 400px; overflow-y: auto;
+    .test-badge {
+      flex-shrink: 0; width: 50px; font-size: 0.68rem; font-weight: 600;
+      text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
+      text-align: center;
     }
-    .note {
-      font-size: 0.75rem; color: #484f58; margin: 16px 0; line-height: 1.5;
-    }
-    footer { margin-top: 32px; font-size: 0.72rem; color: #484f58; text-align: center; }
+    .test-badge.pass { background: #0f2d1a; color: #3fb950; }
+    .test-badge.fail { background: #2d0f0f; color: #f85149; }
+    .test-name { flex: 1; font-family: monospace; color: #c9d1d9; }
+    .test-detail { font-size: 0.72rem; color: #484f58; }
   </style>
 </head>
 <body>
-<div class="container">
 
-  <a class="back-link" href="../">&larr; Back to dashboard</a>
-  <h1>DixScript WASM — Test Results</h1>
-  <p class="subtitle">wasm-bindgen-test · headless Chrome · wasm32-unknown-unknown</p>
+  <a class="back-link" href="../">← CI Dashboard</a>
 
-  <div class="summary-grid">
-    <div class="stat total">
-      <div class="stat-value" id="stat-total">49</div>
-      <div class="stat-label">Total</div>
+  <h1>WASM Playground</h1>
+  <p class="subtitle">@midmanstudio/mdix — live browser test · build <strong id="build-num">—</strong></p>
+
+  <div class="meta-row" id="meta-row" style="display:none">
+    <span>🌿 <strong id="meta-branch">—</strong></span>
+    <span>📝 <strong id="meta-commit">—</strong></span>
+    <span>🕐 <strong id="meta-date">—</strong></span>
+  </div>
+
+  <div class="status-bar">
+    <div class="dot loading" id="status-dot"></div>
+    <span id="status-text">Loading WebAssembly module…</span>
+  </div>
+
+  <div class="toolbar">
+    <button class="primary" onclick="runCode()" id="btn-run" disabled>▶ Run</button>
+    <button onclick="runBuiltinTests()" id="btn-tests" disabled>🧪 Run built-in tests</button>
+    <button onclick="clearOutput()">✕ Clear output</button>
+    <button onclick="loadExample('basic')">Example: basic</button>
+    <button onclick="loadExample('builder')">Example: builder</button>
+    <button onclick="loadExample('json')">Example: from JSON</button>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="panel-header">
+        Input — .mdix source
+        <span class="badge">editable</span>
+      </div>
+      <textarea id="editor" spellcheck="false">@DATA(
+  app_name = "DixScript WASM"
+  version  = 1
+  enabled  = true
+  server: host = "localhost", port = 8080
+)</textarea>
     </div>
-    <div class="stat passed">
-      <div class="stat-value" id="stat-passed">49</div>
-      <div class="stat-label">Passed</div>
-    </div>
-    <div class="stat failed">
-      <div class="stat-value" id="stat-failed">0</div>
-      <div class="stat-label">Failed</div>
-    </div>
-    <div class="stat duration">
-      <div class="stat-value" id="stat-duration">1.69s</div>
-      <div class="stat-label">Duration</div>
+    <div class="panel">
+      <div class="panel-header">
+        Output
+        <span class="badge" id="output-badge">—</span>
+      </div>
+      <div class="output" id="output">Waiting for WASM module…</div>
     </div>
   </div>
 
-  <div class="meta-row">
-    <span><strong>Build</strong>&nbsp;#99</span>
-    <span><strong>Branch</strong>&nbsp;master</span>
-    <span><strong>Commit</strong>&nbsp;5e115eef</span>
-    <span><strong>Date</strong>&nbsp;</span>
-  </div>
+  <div id="test-results-container"></div>
+
+<script type="module">
+  // ── Meta ──────────────────────────────────────────────────────────────────
+  async function loadMeta() {
+    try {
+      const r = await fetch('meta.json');
+      if (!r.ok) return;
+      const m = await r.json();
+      document.getElementById('build-num').textContent   = m.build  || '—';
+      document.getElementById('meta-branch').textContent = m.branch || '—';
+      document.getElementById('meta-commit').textContent = m.commit || '—';
+      document.getElementById('meta-date').textContent   = m.date   ? new Date(m.date).toUTCString() : '—';
+      document.getElementById('meta-row').style.display  = 'flex';
+    } catch {}
+  }
+  loadMeta();
+
+  // ── WASM load ─────────────────────────────────────────────────────────────
+  // The playground uses --target web output. The init function (default export)
+  // accepts an explicit URL to the .wasm binary, which avoids any ambiguity on
+  // static file hosts like GitHub Pages.
+  let wasm = null;
+
+  function setStatus(state, text) {
+    const dot  = document.getElementById('status-dot');
+    const span = document.getElementById('status-text');
+    dot.className  = 'dot ' + state;
+    span.textContent = text;
+  }
+
+  async function initWasm() {
+    try {
+      setStatus('loading', 'Fetching mdix_wasm.js…');
+      const mod = await import('./mdix_wasm.js');
+
+      setStatus('loading', 'Initialising WebAssembly binary…');
+
+      // Pass an explicit URL to the .wasm file so fetch() can locate it
+      // regardless of the script's base URL on GitHub Pages.
+      await mod.default(new URL('./mdix_wasm_bg.wasm', import.meta.url));
+
+      wasm = mod;
+      setStatus('ready', 'WebAssembly module ready');
+      document.getElementById('btn-run').disabled   = false;
+      document.getElementById('btn-tests').disabled = false;
+      document.getElementById('output').textContent = '// Module loaded. Press ▶ Run to execute the editor source.';
+      document.getElementById('output').className   = 'output';
+    } catch (e) {
+      setStatus('error', 'Failed to load WASM: ' + e.message);
+      document.getElementById('output').textContent = '// Error loading WASM:\n// ' + e.message;
+      document.getElementById('output').className   = 'output error';
+    }
+  }
+  initWasm();
+
+  // ── Code execution ────────────────────────────────────────────────────────
+  window.runCode = function () {
+    if (!wasm) return;
+    const src = document.getElementById('editor').value;
+    const out = document.getElementById('output');
+    const badge = document.getElementById('output-badge');
+
+    try {
+      const db = wasm.MdixDatabase.loadStr(src);
+      const lines = [];
+
+      lines.push('// Loaded successfully');
+      lines.push('// Entry count: ' + db.entryCount);
+      lines.push('');
+
+      const keys = db.getKeys('');
+      lines.push('// Top-level keys: ' + JSON.stringify(keys));
+      lines.push('');
+
+      lines.push('// JSON export:');
+      lines.push(db.toJson(true));
+
+      db.free();
+
+      out.textContent = lines.join('\n');
+      out.className   = 'output';
+      badge.textContent = 'ok';
+    } catch (e) {
+      out.textContent = '// Error:\n// ' + e.message;
+      out.className   = 'output error';
+      badge.textContent = 'error';
+    }
+  };
+
+  // ── Built-in test suite ───────────────────────────────────────────────────
+  window.runBuiltinTests = function () {
+    if (!wasm) return;
+
+    const container = document.getElementById('test-results-container');
+    container.innerHTML = '';
+
+    const suites = [
+      {
+        name: 'MdixDatabase — basic load and read',
+        tests: [
+          {
+            name: 'loadStr — valid source succeeds',
+            run: () => {
+              const db = wasm.MdixDatabase.loadStr('@DATA( x = 1 )');
+              const ok = db.isValid;
+              db.free();
+              if (!ok) throw new Error('isValid was false');
+            },
+          },
+          {
+            name: 'loadStr — empty source throws',
+            run: () => {
+              let threw = false;
+              try { wasm.MdixDatabase.loadStr(''); } catch { threw = true; }
+              if (!threw) throw new Error('Expected error for empty source');
+            },
+          },
+          {
+            name: 'getString — known path returns value',
+            run: () => {
+              const db  = wasm.MdixDatabase.loadStr('@DATA( greeting = "hello" )');
+              const val = db.getString('greeting');
+              db.free();
+              if (val !== 'hello') throw new Error('Expected "hello", got "' + val + '"');
+            },
+          },
+          {
+            name: 'getInt — known path returns value',
+            run: () => {
+              const db  = wasm.MdixDatabase.loadStr('@DATA( port = 8080 )');
+              const val = db.getInt('port');
+              db.free();
+              if (val !== 8080) throw new Error('Expected 8080, got ' + val);
+            },
+          },
+          {
+            name: 'getBool — known path returns value',
+            run: () => {
+              const db  = wasm.MdixDatabase.loadStr('@DATA( flag = true )');
+              const val = db.getBool('flag');
+              db.free();
+              if (val !== true) throw new Error('Expected true');
+            },
+          },
+          {
+            name: 'exists — present path returns true',
+            run: () => {
+              const db = wasm.MdixDatabase.loadStr('@DATA( x = 1 )');
+              const ok = db.exists('x');
+              db.free();
+              if (!ok) throw new Error('Expected exists to return true');
+            },
+          },
+          {
+            name: 'exists — absent path returns false',
+            run: () => {
+              const db = wasm.MdixDatabase.loadStr('@DATA( x = 1 )');
+              const ok = db.exists('missing');
+              db.free();
+              if (ok) throw new Error('Expected exists to return false');
+            },
+          },
+          {
+            name: 'getValueType — int returns "int"',
+            run: () => {
+              const db   = wasm.MdixDatabase.loadStr('@DATA( n = 42 )');
+              const type = db.getValueType('n');
+              db.free();
+              if (type !== 'int') throw new Error('Expected "int", got "' + type + '"');
+            },
+          },
+          {
+            name: 'getValueType — string returns "string"',
+            run: () => {
+              const db   = wasm.MdixDatabase.loadStr('@DATA( s = "hi" )');
+              const type = db.getValueType('s');
+              db.free();
+              if (type !== 'string') throw new Error('Expected "string", got "' + type + '"');
+            },
+          },
+          {
+            name: 'toJson — exports valid JSON',
+            run: () => {
+              const db   = wasm.MdixDatabase.loadStr('@DATA( port = 9000 )');
+              const json = db.toJson(false);
+              db.free();
+              const parsed = JSON.parse(json);
+              if (parsed.port !== 9000) throw new Error('Expected port 9000 in JSON');
+            },
+          },
+          {
+            name: 'free — double free does not throw',
+            run: () => {
+              const db = wasm.MdixDatabase.loadStr('@DATA( x = 1 )');
+              db.free();
+              db.free();
+            },
+          },
+        ],
+      },
+      {
+        name: 'MdixDatabase — nested table properties',
+        tests: [
+          {
+            name: 'table property — dotted path accessible',
+            run: () => {
+              const db  = wasm.MdixDatabase.loadStr('@DATA( server: host = "localhost", port = 8080 )');
+              const h   = db.getString('server.host');
+              const p   = db.getInt('server.port');
+              db.free();
+              if (h !== 'localhost') throw new Error('Expected "localhost"');
+              if (p !== 8080) throw new Error('Expected 8080');
+            },
+          },
+        ],
+      },
+      {
+        name: 'MdixDatabase — format conversion',
+        tests: [
+          {
+            name: 'fromJson — valid object produces readable database',
+            run: () => {
+              const db  = wasm.MdixDatabase.fromJson(JSON.stringify({ port: 8080, host: 'localhost' }));
+              const p   = db.getInt('port');
+              db.free();
+              if (p !== 8080) throw new Error('Expected 8080');
+            },
+          },
+          {
+            name: 'fromToml — valid table produces readable database',
+            run: () => {
+              const db  = wasm.MdixDatabase.fromToml('port = 8080\nhost = "localhost"\n');
+              const p   = db.getInt('port');
+              db.free();
+              if (p !== 8080) throw new Error('Expected 8080');
+            },
+          },
+          {
+            name: 'toJson then fromJson round-trip',
+            run: () => {
+              const orig     = wasm.MdixDatabase.loadStr('@DATA( port = 8080, host = "localhost", enabled = true )');
+              const json     = orig.toJson(false);
+              orig.free();
+              const restored = wasm.MdixDatabase.fromJson(json);
+              const p = restored.getInt('port');
+              const h = restored.getString('host');
+              const e = restored.getBool('enabled');
+              restored.free();
+              if (p !== 8080)        throw new Error('port mismatch');
+              if (h !== 'localhost') throw new Error('host mismatch');
+              if (e !== true)        throw new Error('enabled mismatch');
+            },
+          },
+        ],
+      },
+      {
+        name: 'MdixBuilder',
+        tests: [
+          {
+            name: 'new builder — isValid is true',
+            run: () => {
+              const b = new wasm.MdixBuilder();
+              if (!b.isValid) throw new Error('Expected isValid = true');
+              b.free();
+            },
+          },
+          {
+            name: 'withString then toDatabase — value readable',
+            run: () => {
+              const b  = new wasm.MdixBuilder();
+              const db = b.withString('name', 'TestApp').toDatabase();
+              const v  = db.getString('name');
+              db.free();
+              if (v !== 'TestApp') throw new Error('Expected "TestApp", got "' + v + '"');
+            },
+          },
+          {
+            name: 'withInt then toDatabase — value readable',
+            run: () => {
+              const b  = new wasm.MdixBuilder();
+              const db = b.withInt('port', 9000).toDatabase();
+              const v  = db.getInt('port');
+              db.free();
+              if (v !== 9000) throw new Error('Expected 9000, got ' + v);
+            },
+          },
+          {
+            name: 'withBool then toDatabase — value readable',
+            run: () => {
+              const b  = new wasm.MdixBuilder();
+              const db = b.withBool('ssl', true).toDatabase();
+              const v  = db.getBool('ssl');
+              db.free();
+              if (v !== true) throw new Error('Expected true');
+            },
+          },
+          {
+            name: 'two-tier violation — flat after grouped throws',
+            run: () => {
+              let threw = false;
+              try {
+                const b = new wasm.MdixBuilder();
+                b.withTableProperties('server', JSON.stringify({ port: 8080 }))
+                 .withString('name', 'MyApp');
+              } catch { threw = true; }
+              if (!threw) throw new Error('Expected two-tier violation error');
+            },
+          },
+          {
+            name: 'serialize — produces @DATA string',
+            run: () => {
+              const b   = new wasm.MdixBuilder();
+              const src = b.withString('x', 'hello').serialize();
+              if (!src.includes('@DATA(')) throw new Error('Expected @DATA( in output');
+            },
+          },
+        ],
+      },
+    ];
+
+    let totalPass = 0;
+    let totalFail = 0;
+
+    for (const suite of suites) {
+      const block = document.createElement('div');
+      block.className = 'test-suite';
+
+      const header = document.createElement('div');
+      header.className = 'test-suite-header';
+      header.textContent = suite.name;
+      block.appendChild(header);
+
+      for (const test of suite.tests) {
+        const row = document.createElement('div');
+        row.className = 'test-row';
+
+        const badge  = document.createElement('span');
+        const name   = document.createElement('span');
+        const detail = document.createElement('span');
+
+        name.className   = 'test-name';
+        detail.className = 'test-detail';
+        name.textContent = test.name;
+
+        try {
+          test.run();
+          badge.className   = 'test-badge pass';
+          badge.textContent = 'pass';
+          detail.textContent = '';
+          totalPass++;
+        } catch (e) {
+          badge.className   = 'test-badge fail';
+          badge.textContent = 'fail';
+          detail.textContent = e.message;
+          totalFail++;
+        }
+
+        row.appendChild(badge);
+        row.appendChild(name);
+        row.appendChild(detail);
+        block.appendChild(row);
+      }
+
+      container.appendChild(block);
+    }
+
+    const summary = document.createElement('div');
+    summary.className = 'status-bar';
+    summary.style.marginTop = '8px';
+    const dot  = document.createElement('div');
+    const text = document.createElement('span');
+    dot.className = 'dot ' + (totalFail === 0 ? 'ready' : 'error');
+    text.textContent = totalFail === 0
+      ? `All ${totalPass} tests passed`
+      : `${totalFail} failed, ${totalPass} passed`;
+    summary.appendChild(dot);
+    summary.appendChild(text);
+    container.appendChild(summary);
+  };
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  window.clearOutput = function () {
+    const out = document.getElementById('output');
+    out.textContent = '';
+    out.className   = 'output';
+    document.getElementById('output-badge').textContent = '—';
+    document.getElementById('test-results-container').innerHTML = '';
+  };
+
+  const examples = {
+    basic: `@DATA(\n  app_name = "DixScript WASM"\n  version  = 1\n  enabled  = true\n  server: host = "localhost", port = 8080\n)`,
+    builder: `// This example uses MdixBuilder in the Run panel.\n// Click ▶ Run to see the JSON export of the editor source.\n@ENUMS(\n  LogLevel { DEBUG, INFO, WARN, ERROR }\n)\n@DATA(\n  app_name = "MyGame"\n  port     = 8080\n  log_level<enum> = LogLevel.INFO\n  server: host = "game.local", port = 7070\n  enemies::\n    { name = "Goblin", hp = 50 },\n    { name = "Orc",    hp = 100 }\n)`,
+    json: `// Loaded from JSON — click ▶ Run\n// (editor input is ignored for fromJson example)\n`,
+  };
+
+  window.loadExample = function (key) {
+    document.getElementById('editor').value = examples[key] || '';
+  };
+</script>
 
-  <div class="panel">
-    <div class="panel-header">Individual tests</div>
-    <div id="test-rows">
-      <div class="test-row"><span class="test-name">top_level_and_nested_fields_still_resolve_correctly_under_compression</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">lzma_plus_encryption_round_trips</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">lzma_alone_round_trips</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">gzip_alone_round_trips</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">enum_only_data_survives_encryption_alone</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">enum_only_data_survives_compression_and_encryption_together</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">enum_only_data_survives_compression_alone</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">each_compressor_actually_shrinks_the_packed_data</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">bzip2_plus_encryption_round_trips</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">bzip2_alone_round_trips</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">top_level_and_nested_enum_fields_do_not_cross_contaminate</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">sibling_fields_are_unaffected_by_the_enum_field</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">second_group_array_element_resolves_independently</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">first_group_array_element_resolves_independently</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">enum_field_resolves_name_field_and_value_together</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">validate_schema_reports_wrong_type</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">validate_schema_reports_missing_field</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">validate_schema_passes_for_matching_data</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">validate_schema_can_be_reused_across_databases</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">prefetch_import_then_cloud_import_resolves</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">prefetch_import_does_not_panic</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_with_primary_wins_by_default_weighting</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_with_merges_two_loaded_databases</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_weighted_respects_explicit_weights</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_weighted_rejects_empty_list</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_throw_on_conflict_succeeds_for_disjoint_data</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_throw_on_conflict_raises_for_real_conflict</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_secondary_wins_on_conflict</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_rejects_empty_list</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_primary_wins_on_conflict</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_group_array_same_id_twice_is_not_key_merged</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_group_array_combine_fails_under_throw_on_conflict</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_conflicts_report_has_the_expected_shape</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_combines_non_conflicting_group_array_items</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">merge_sources_combines_disjoint_data</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">load_str_rejects_empty_source</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">load_str_parses_valid_source</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">get_string_returns_the_right_value</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">get_string_on_missing_path_errors_cleanly</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">get_int_returns_the_right_value</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">get_bool_returns_the_right_value</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">from_toml_round_trips_a_simple_table</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">from_json_round_trips_a_simple_object</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">entry_count_is_nonzero_for_valid_data</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">decompile_with_dlm_rejects_empty_data</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">compile_with_dlm_round_trips_with_compression_and_encryption</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">compile_with_dlm_rejects_empty_source</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">compile_with_dlm_passthrough_when_no_dlm_section</span><span class="test-status ok">PASS</span></div>
-<div class="test-row"><span class="test-name">cloud_import_without_prefetch_errors_cleanly</span><span class="test-status ok">PASS</span></div>
-
-    </div>
-  </div>
-
-  <p class="note">
-    Parsed from wasm-bindgen-test-runner's console output — there's no
-    structured JSON report for wasm tests the way pytest has one, so this
-    is a plain-text parse of the same pass/fail lines you'd see running
-    <code>wasm-pack test</code> locally. Raw output below for anything the
-    parse missed.
-  </p>
-
-  <div class="panel">
-    <div class="panel-header">Raw output</div>
-    <div class="raw-log" id="raw-log">[INFO]: 🎯  Checking for the Wasm target...
-[1m[33mwarning[0m: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /home/runner/work/DixScript-Rust/DixScript-Rust/mdix-ffi/Cargo.toml
-workspace: /home/runner/work/DixScript-Rust/DixScript-Rust/Cargo.toml
-[1m[33mwarning[0m: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /home/runner/work/DixScript-Rust/DixScript-Rust/mdix-java/Cargo.toml
-workspace: /home/runner/work/DixScript-Rust/DixScript-Rust/Cargo.toml
-[1m[92m   Compiling[0m proc-macro2 v1.0.104
-[1m[92m   Compiling[0m unicode-ident v1.0.22
-[1m[92m   Compiling[0m quote v1.0.42
-[1m[92m   Compiling[0m wasm-bindgen-shared v0.2.108
-[1m[92m   Compiling[0m cfg-if v1.0.4
-[1m[92m   Compiling[0m rustversion v1.0.22
-[1m[92m   Compiling[0m syn v2.0.112
-[1m[92m   Compiling[0m bumpalo v3.19.1
-[1m[92m   Compiling[0m wasm-bindgen v0.2.108
-[1m[92m   Compiling[0m once_cell v1.21.3
-[1m[92m   Compiling[0m typenum v1.20.1
-[1m[92m   Compiling[0m version_check v0.9.5
-[1m[92m   Compiling[0m wasm-bindgen-macro-support v0.2.108
-[1m[92m   Compiling[0m generic-array v0.14.7
-[1m[92m   Compiling[0m synstructure v0.13.2
-[1m[92m   Compiling[0m wasm-bindgen-macro v0.2.108
-[1m[92m   Compiling[0m zerofrom-derive v0.1.6
-[1m[92m   Compiling[0m js-sys v0.3.85
-[1m[92m   Compiling[0m zerofrom v0.1.6
-[1m[92m   Compiling[0m yoke-derive v0.8.1
-[1m[92m   Compiling[0m stable_deref_trait v1.2.1
-[1m[92m   Compiling[0m yoke v0.8.1
-[1m[92m   Compiling[0m zerovec-derive v0.11.2
-[1m[92m   Compiling[0m serde_core v1.0.228
-[1m[92m   Compiling[0m subtle v2.6.1
-[1m[92m   Compiling[0m zerovec v0.11.5
-[1m[92m   Compiling[0m displaydoc v0.2.5
-[1m[92m   Compiling[0m getrandom v0.2.16
-[1m[92m   Compiling[0m rand_core v0.6.4
-[1m[92m   Compiling[0m crypto-common v0.1.7
-[1m[92m   Compiling[0m serde v1.0.228
-[1m[92m   Compiling[0m tinystr v0.8.2
-[1m[92m   Compiling[0m serde_derive v1.0.228
-[1m[92m   Compiling[0m litemap v0.8.1
-[1m[92m   Compiling[0m writeable v0.6.2
-[1m[92m   Compiling[0m icu_locale_core v2.1.1
-[1m[92m   Compiling[0m zerotrie v0.2.3
-[1m[92m   Compiling[0m potential_utf v0.1.4
-[1m[92m   Compiling[0m inout v0.1.4
-[1m[92m   Compiling[0m zeroize v1.8.2
-[1m[92m   Compiling[0m icu_normalizer_data v2.1.1
-[1m[92m   Compiling[0m icu_properties_data v2.1.2
-[1m[92m   Compiling[0m cipher v0.4.4
-[1m[92m   Compiling[0m icu_collections v2.1.1
-[1m[92m   Compiling[0m icu_provider v2.1.1
-[1m[92m   Compiling[0m universal-hash v0.5.1
-[1m[92m   Compiling[0m hybrid-array v0.4.13
-[1m[92m   Compiling[0m autocfg v1.5.0
-[1m[92m   Compiling[0m libm v0.2.16
-[1m[92m   Compiling[0m memchr v2.7.6
-[1m[92m   Compiling[0m opaque-debug v0.3.1
-[1m[92m   Compiling[0m zerocopy v0.8.31
-[1m[92m   Compiling[0m num-traits v0.2.19
-[1m[92m   Compiling[0m block-buffer v0.10.4
-[1m[92m   Compiling[0m smallvec v1.15.1
-[1m[92m   Compiling[0m siphasher v1.0.1
-[1m[92m   Compiling[0m zmij v1.0.15
-[1m[92m   Compiling[0m phf_shared v0.11.3
-[1m[92m   Compiling[0m icu_normalizer v2.1.1
-[1m[92m   Compiling[0m rand v0.8.5
-[1m[92m   Compiling[0m icu_properties v2.1.2
-[1m[92m   Compiling[0m digest v0.10.7
-[1m[92m   Compiling[0m crypto-common v0.2.2
-[1m[92m   Compiling[0m block-buffer v0.12.1
-[1m[92m   Compiling[0m equivalent v1.0.2
-[1m[92m   Compiling[0m const-oid v0.10.2
-[1m[92m   Compiling[0m serde_json v1.0.149
-[1m[92m   Compiling[0m crc32fast v1.5.0
-[1m[92m   Compiling[0m hashbrown v0.16.1
-[1m[92m   Compiling[0m digest v0.11.3
-[1m[92m   Compiling[0m indexmap v2.13.0
-[1m[92m   Compiling[0m ppv-lite86 v0.2.21
-[1m[92m   Compiling[0m idna_adapter v1.2.1
-[1m[92m   Compiling[0m phf_generator v0.11.3
-[1m[92m   Compiling[0m aho-corasick v1.1.4
-[1m[92m   Compiling[0m polyval v0.6.2
-[1m[92m   Compiling[0m serde_spanned v0.6.9
-[1m[92m   Compiling[0m toml_datetime v0.6.11
-[1m[92m   Compiling[0m aead v0.5.2
-[1m[92m   Compiling[0m toml_write v0.1.2
-[1m[92m   Compiling[0m itoa v1.0.17
-[1m[92m   Compiling[0m winnow v0.7.15
-[1m[92m   Compiling[0m utf8_iter v1.0.4
-[1m[92m   Compiling[0m regex-syntax v0.8.8
-[1m[92m   Compiling[0m simd-adler32 v0.3.8
-[1m[92m   Compiling[0m base64ct v1.8.3
-[1m[92m   Compiling[0m adler2 v2.0.1
-[1m[92m   Compiling[0m percent-encoding v2.3.2
-[1m[92m   Compiling[0m regex-automata v0.4.13
-[1m[92m   Compiling[0m form_urlencoded v1.2.2
-[1m[92m   Compiling[0m miniz_oxide v0.8.9
-[1m[92m   Compiling[0m password-hash v0.5.0
-[1m[92m   Compiling[0m toml_edit v0.22.27
-[1m[92m   Compiling[0m idna v1.1.0
-[1m[92m   Compiling[0m ghash v0.5.1
-[1m[92m   Compiling[0m phf_macros v0.11.3
-[1m[92m   Compiling[0m rand_chacha v0.3.1
-[1m[92m   Compiling[0m sha2 v0.11.0
-[1m[92m   Compiling[0m blake2 v0.10.6
-[1m[92m   Compiling[0m poly1305 v0.8.0
-[1m[92m   Compiling[0m aes v0.8.4
-[1m[92m   Compiling[0m chacha20 v0.9.1
-[1m[92m   Compiling[0m ctr v0.9.2
-[1m[92m   Compiling[0m async-trait v0.1.89
-[1m[92m   Compiling[0m either v1.15.0
-[1m[92m   Compiling[0m futures-core v0.3.31
-[1m[92m   Compiling[0m pin-utils v0.1.0
-[1m[92m   Compiling[0m futures-task v0.3.31
-[1m[92m   Compiling[0m libbz2-rs-sys v0.2.5
-[1m[92m   Compiling[0m pin-project-lite v0.2.16
-[1m[92m   Compiling[0m slab v0.4.11
-[1m[92m   Compiling[0m futures-util v0.3.31
-[1m[92m   Compiling[0m bzip2 v0.6.1
-[1m[92m   Compiling[0m itertools v0.13.0
-[1m[92m   Compiling[0m aes-gcm v0.10.3
-[1m[92m   Compiling[0m chacha20poly1305 v0.10.1
-[1m[92m   Compiling[0m argon2 v0.5.3
-[1m[92m   Compiling[0m flate2 v1.1.9
-[1m[92m   Compiling[0m lzma-rust2 v0.16.5
-[1m[92m   Compiling[0m phf v0.11.3
-[1m[92m   Compiling[0m toml v0.8.23
-[1m[92m   Compiling[0m url v2.5.8
-[1m[92m   Compiling[0m regex v1.12.2
-[1m[92m   Compiling[0m chrono v0.4.43
-[1m[92m   Compiling[0m sha2 v0.10.9
-[1m[92m   Compiling[0m uuid v1.19.0
-[1m[92m   Compiling[0m web-time v1.1.0
-[1m[92m   Compiling[0m web-sys v0.3.85
-[1m[92m   Compiling[0m rustc-hash v2.1.1
-[1m[92m   Compiling[0m lazy_static v1.5.0
-[1m[92m   Compiling[0m base64 v0.21.7
-[1m[92m   Compiling[0m hex v0.4.3
-[1m[92m   Compiling[0m unicase v2.9.0
-[1m[92m   Compiling[0m bitflags v2.10.0
-[1m[92m   Compiling[0m wasm-bindgen-futures v0.4.58
-[1m[92m   Compiling[0m console_error_panic_hook v0.1.7
-[1m[92m   Compiling[0m wasm-bindgen-test-macro v0.3.58
-[1m[92m   Compiling[0m nu-ansi-term v0.50.3
-[1m[92m   Compiling[0m oorandom v11.1.5
-[1m[92m   Compiling[0m wasm-bindgen-test-shared v0.2.108
-[1m[92m   Compiling[0m cast v0.3.0
-[1m[92m   Compiling[0m wasm-bindgen-test v0.3.58
-[1m[92m   Compiling[0m dixscript v1.0.0 (/home/runner/work/DixScript-Rust/DixScript-Rust/dixscript)
-[1m[33mwarning[0m[1m: type `MID_Logger` should have an upper camel case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:17:12
-   [1m[94m|[0m
-[1m[94m17[0m [1m[94m|[0m pub struct MID_Logger {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to upper camel case: `MidLogger`[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
-
-[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `debug_logging`[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:293:15
-    [1m[94m|[0m
-[1m[94m293[0m [1m[94m|[0m         #[cfg(feature = &quot;debug_logging&quot;)]
-    [1m[94m|[0m               [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `bzip2-support`, `cloud-import`, `default`, `rayon-support`, and `xz-support`
-    [1m[94m= [0m[1mhelp[0m: consider adding `debug_logging` as a feature in `Cargo.toml`
-    [1m[94m= [0m[1mnote[0m: see &lt;https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html&gt; for more information about checking conditional configuration
-    [1m[94m= [0m[1mnote[0m: `#[warn(unexpected_cfgs)]` on by default
-
-[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `debug_logging`[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:297:19
-    [1m[94m|[0m
-[1m[94m297[0m [1m[94m|[0m         #[cfg(not(feature = &quot;debug_logging&quot;))]
-    [1m[94m|[0m                   [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `bzip2-support`, `cloud-import`, `default`, `rayon-support`, and `xz-support`
-    [1m[94m= [0m[1mhelp[0m: consider adding `debug_logging` as a feature in `Cargo.toml`
-    [1m[94m= [0m[1mnote[0m: see &lt;https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html&gt; for more information about checking conditional configuration
-
-[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `verbose_logging`[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:305:15
-    [1m[94m|[0m
-[1m[94m305[0m [1m[94m|[0m         #[cfg(feature = &quot;verbose_logging&quot;)]
-    [1m[94m|[0m               [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `bzip2-support`, `cloud-import`, `default`, `rayon-support`, and `xz-support`
-    [1m[94m= [0m[1mhelp[0m: consider adding `verbose_logging` as a feature in `Cargo.toml`
-    [1m[94m= [0m[1mnote[0m: see &lt;https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html&gt; for more information about checking conditional configuration
-
-[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `verbose_logging`[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:309:19
-    [1m[94m|[0m
-[1m[94m309[0m [1m[94m|[0m         #[cfg(not(feature = &quot;verbose_logging&quot;))]
-    [1m[94m|[0m                   [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `bzip2-support`, `cloud-import`, `default`, `rayon-support`, and `xz-support`
-    [1m[94m= [0m[1mhelp[0m: consider adding `verbose_logging` as a feature in `Cargo.toml`
-    [1m[94m= [0m[1mnote[0m: see &lt;https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html&gt; for more information about checking conditional configuration
-
-[1m[33mwarning[0m[1m: type `MID_HelperFunctions` should have an upper camel case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:5:12
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m pub struct MID_HelperFunctions;
-  [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to upper camel case: `MidHelperFunctions`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `src`[0m
-  [1m[94m--&gt; [0mdixscript/src/ErrorManager/ErrorTypes/lexical_error.rs:41:43
-   [1m[94m|[0m
-[1m[94m41[0m [1m[94m|[0m         let error_indicator = if let Some(ref src) = source_line {
-   [1m[94m|[0m                                           [1m[33m^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_src`[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: unused variable: `src`[0m
-  [1m[94m--&gt; [0mdixscript/src/ErrorManager/ErrorTypes/parse_error.rs:54:43
-   [1m[94m|[0m
-[1m[94m54[0m [1m[94m|[0m         let error_indicator = if let Some(ref src) = source_line {
-   [1m[94m|[0m                                           [1m[33m^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_src`[0m
-
-[1m[33mwarning[0m[1m: unreachable pattern[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/ValueResolution/ast_walker.rs:637:9
-    [1m[94m|[0m
-[1m[94m624[0m [1m[94m|[0m         Expression::BitwiseOp { .. } =&gt; &quot;BitwiseOp&quot;,
-    [1m[94m|[0m         [1m[94m----------------------------[0m [1m[94mmatches all the relevant values[0m
-[1m[94m...[0m
-[1m[94m637[0m [1m[94m|[0m         Expression::BitwiseOp { .. } =&gt; &quot;BitwiseOp&quot;,
-    [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[33mno value can reach this[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: `#[warn(unreachable_patterns)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: variable `any_changed` is assigned to, but never used[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/ValueResolution/value_resolver.rs:772:13
-    [1m[94m|[0m
-[1m[94m772[0m [1m[94m|[0m         let mut any_changed = false;
-    [1m[94m|[0m             [1m[33m^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: consider using `_any_changed` instead
-
-[1m[33mwarning[0m[1m: value assigned to `any_changed` is never read[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/ValueResolution/value_resolver.rs:786:17
-    [1m[94m|[0m
-[1m[94m786[0m [1m[94m|[0m                 any_changed = true;
-    [1m[94m|[0m                 [1m[33m^^^^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
-    [1m[94m= [0m[1mnote[0m: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: unused variable: `position`[0m
-    [1m[94m--&gt; [0mdixscript/src/Compiler/Core/ValueResolution/function_interpreter.rs:2279:5
-     [1m[94m|[0m
-[1m[94m2279[0m [1m[94m|[0m     position: Position,
-     [1m[94m|[0m     [1m[33m^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_position`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `id`[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/BinarySerialization/binary_unpacker.rs:330:14
-    [1m[94m|[0m
-[1m[94m330[0m [1m[94m|[0m         for (id, result) in results {
-    [1m[94m|[0m              [1m[33m^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_id`[0m
-
-[1m[33mwarning[0m[1m: value assigned to `depth` is never read[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/general_parser.rs:279:26
-    [1m[94m|[0m
-[1m[94m279[0m [1m[94m|[0m         let mut depth  = 0i32;
-    [1m[94m|[0m                          [1m[33m^^^^[0m [1m[33mthis value is reassigned later and never used[0m
-[1m[94m...[0m
-[1m[94m293[0m [1m[94m|[0m             depth = 1;
-    [1m[94m|[0m             [1m[94m---------[0m [1m[94m`depth` is overwritten here before the previous value is read[0m
-
-[1m[33mwarning[0m[1m: unused variable: `caps`[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/DLM/Auditor/enhanced_auditor.rs:105:21
-    [1m[94m|[0m
-[1m[94m105[0m [1m[94m|[0m         if let Some(caps) = RE_CHECKSUM.captures(&amp;content) {
-    [1m[94m|[0m                     [1m[33m^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_caps`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `data_type`[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Extensions/type_system_manager.rs:293:27
-    [1m[94m|[0m
-[1m[94m293[0m [1m[94m|[0m     fn is_valid_data_type(data_type: DataType) -&gt; bool {
-    [1m[94m|[0m                           [1m[33m^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_data_type`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `path`[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Utilities/file_permissions.rs:14:21
-   [1m[94m|[0m
-[1m[94m14[0m [1m[94m|[0m pub fn set_readonly(path: &amp;Path) -&gt; Result&lt;(), String&gt; {
-   [1m[94m|[0m                     [1m[33m^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_path`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `path`[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Utilities/file_permissions.rs:34:21
-   [1m[94m|[0m
-[1m[94m34[0m [1m[94m|[0m pub fn set_writable(path: &amp;Path) -&gt; Result&lt;(), String&gt; {
-   [1m[94m|[0m                     [1m[33m^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_path`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `path`[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Utilities/file_permissions.rs:51:20
-   [1m[94m|[0m
-[1m[94m51[0m [1m[94m|[0m pub fn is_readonly(path: &amp;Path) -&gt; bool {
-   [1m[94m|[0m                    [1m[33m^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_path`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `winner`[0m
-   [1m[94m--&gt; [0mdixscript/src/Runtime/merge.rs:539:9
-    [1m[94m|[0m
-[1m[94m539[0m [1m[94m|[0m         winner:           usize,
-    [1m[94m|[0m         [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_winner`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `winner`[0m
-   [1m[94m--&gt; [0mdixscript/src/Runtime/merge.rs:860:9
-    [1m[94m|[0m
-[1m[94m860[0m [1m[94m|[0m         winner:          usize,
-    [1m[94m|[0m         [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_winner`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `secondary_src`[0m
-   [1m[94m--&gt; [0mdixscript/src/Runtime/merge.rs:915:9
-    [1m[94m|[0m
-[1m[94m915[0m [1m[94m|[0m         secondary_src:  usize,
-    [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_secondary_src`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `winner`[0m
-    [1m[94m--&gt; [0mdixscript/src/Runtime/merge.rs:1028:9
-     [1m[94m|[0m
-[1m[94m1028[0m [1m[94m|[0m         winner:           usize,
-     [1m[94m|[0m         [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_winner`[0m
-
-[1m[33mwarning[0m[1m: associated items `MAX_DEPTH`, `MAX_COLLECTION_ITEMS`, `get_indentation`, and `get_arrow_indentation` are never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:12:11
-   [1m[94m|[0m
-[1m[94m 7[0m [1m[94m|[0m impl MID_HelperFunctions {
-   [1m[94m|[0m [1m[94m------------------------[0m [1m[94massociated items in this implementation[0m
-[1m[94m...[0m
-[1m[94m12[0m [1m[94m|[0m     const MAX_DEPTH: usize = 10;
-   [1m[94m|[0m           [1m[33m^^^^^^^^^[0m
-[1m[94m13[0m [1m[94m|[0m     const MAX_COLLECTION_ITEMS: usize = 100;
-   [1m[94m|[0m           [1m[33m^^^^^^^^^^^^^^^^^^^^[0m
-[1m[94m...[0m
-[1m[94m81[0m [1m[94m|[0m     fn get_indentation(depth: usize) -&gt; String {
-   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^[0m
-[1m[94m...[0m
-[1m[94m86[0m [1m[94m|[0m     fn get_arrow_indentation(depth: usize) -&gt; &amp;&#x27;static str {
-   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: associated function `new` is never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Builtins/Core/dix_value.rs:36:19
-   [1m[94m|[0m
-[1m[94m33[0m [1m[94m|[0m impl DixValue {
-   [1m[94m|[0m [1m[94m-------------[0m [1m[94massociated function in this implementation[0m
-[1m[94m...[0m
-[1m[94m36[0m [1m[94m|[0m     pub(crate) fn new(value: ValueData, dix_type: DixType) -&gt; Self {
-   [1m[94m|[0m                   [1m[33m^^^[0m
-
-[1m[33mwarning[0m[1m: constant `TUPLE_POSITIONAL_METHODS` is never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/AST/Visitors/type_inference_visitor.rs:37:7
-   [1m[94m|[0m
-[1m[94m37[0m [1m[94m|[0m const TUPLE_POSITIONAL_METHODS: &amp;[(&amp;str, usize)] = &amp;[
-   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: constant `TUPLE_ELEMENT_METHODS` is never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/AST/Visitors/type_inference_visitor.rs:51:7
-   [1m[94m|[0m
-[1m[94m51[0m [1m[94m|[0m const TUPLE_ELEMENT_METHODS: &amp;[&amp;str] = &amp;[
-   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `settings` is never read[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/Tokenizer/lexer.rs:124:5
-    [1m[94m|[0m
-[1m[94m122[0m [1m[94m|[0m pub struct Tokenizer&lt;&#x27;src&gt; {
-    [1m[94m|[0m            [1m[94m---------[0m [1m[94mfield in this struct[0m
-[1m[94m123[0m [1m[94m|[0m     input:    &amp;&#x27;src str,
-[1m[94m124[0m [1m[94m|[0m     settings: &amp;&#x27;src OperationalSettings,
-    [1m[94m|[0m     [1m[33m^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: method `is_hex_digit` is never used[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/Tokenizer/lexer.rs:331:8
-    [1m[94m|[0m
-[1m[94m136[0m [1m[94m|[0m impl&lt;&#x27;src&gt; Tokenizer&lt;&#x27;src&gt; {
-    [1m[94m|[0m [1m[94m--------------------------[0m [1m[94mmethod in this implementation[0m
-[1m[94m...[0m
-[1m[94m331[0m [1m[94m|[0m     fn is_hex_digit(&amp;self, c: char) -&gt; bool {
-    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: function `is_whitespace_byte` is never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/Tokenizer/platform/scalar.rs:25:8
-   [1m[94m|[0m
-[1m[94m25[0m [1m[94m|[0m pub fn is_whitespace_byte(b: u8) -&gt; bool {
-   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: constant `MAX_STUCK_COUNT` is never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs:31:7
-   [1m[94m|[0m
-[1m[94m31[0m [1m[94m|[0m const MAX_STUCK_COUNT: usize = 3;
-   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: fields `last_position` and `stuck_count` are never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs:86:5
-   [1m[94m|[0m
-[1m[94m80[0m [1m[94m|[0m pub struct QuickFuncsSectionParser&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m-----------------------[0m [1m[94mfields in this struct[0m
-[1m[94m...[0m
-[1m[94m86[0m [1m[94m|[0m     last_position: usize,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
-[1m[94m87[0m [1m[94m|[0m     stuck_count: usize,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: method `parse_interpolated_expression` is never used[0m
-    [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs:2352:8
-     [1m[94m|[0m
-[1m[94m  98[0m [1m[94m|[0m impl&lt;&#x27;a&gt; QuickFuncsSectionParser&lt;&#x27;a&gt; {
-     [1m[94m|[0m [1m[94m------------------------------------[0m [1m[94mmethod in this implementation[0m
-[1m[94m...[0m
-[1m[94m2352[0m [1m[94m|[0m     fn parse_interpolated_expression(&amp;self, text: &amp;str, position: Position) -&gt; Expression {
-     [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: methods `get_long_field` and `get_bool_field` are never used[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs:164:18
-    [1m[94m|[0m
-[1m[94m131[0m [1m[94m|[0m impl&lt;&#x27;a&gt; ParsedEncryptionConfig&lt;&#x27;a&gt; {
-    [1m[94m|[0m [1m[94m-----------------------------------[0m [1m[94mmethods in this implementation[0m
-[1m[94m...[0m
-[1m[94m164[0m [1m[94m|[0m     #[inline] fn get_long_field(&amp;self, key: &amp;str) -&gt; Option&lt;i64&gt; {
-    [1m[94m|[0m                  [1m[33m^^^^^^^^^^^^^^[0m
-[1m[94m...[0m
-[1m[94m170[0m [1m[94m|[0m     #[inline] fn get_bool_field(&amp;self, key: &amp;str) -&gt; Option&lt;bool&gt; {
-    [1m[94m|[0m                  [1m[33m^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `operational_settings` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:52:5
-   [1m[94m|[0m
-[1m[94m51[0m [1m[94m|[0m pub struct DataSectionAnalyzer&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m-------------------[0m [1m[94mfield in this struct[0m
-[1m[94m52[0m [1m[94m|[0m     operational_settings:    &amp;&#x27;a OperationalSettings,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: method `get_element_type` is never used[0m
-    [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionAnalyzers/quickfuncs_section_analyzer.rs:3089:8
-     [1m[94m|[0m
-[1m[94m2998[0m [1m[94m|[0m impl LocalScopeTracker {
-     [1m[94m|[0m [1m[94m----------------------[0m [1m[94mmethod in this implementation[0m
-[1m[94m...[0m
-[1m[94m3089[0m [1m[94m|[0m     fn get_element_type(&amp;self, name: &amp;str) -&gt; Option&lt;DataType&gt; {
-     [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: fields `operational_settings` and `current_file_path` are never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionAnalyzers/imports_section_analyzer.rs:15:5
-   [1m[94m|[0m
-[1m[94m13[0m [1m[94m|[0m pub struct ImportsSectionAnalyzer&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m----------------------[0m [1m[94mfields in this struct[0m
-[1m[94m14[0m [1m[94m|[0m     symbol_table:         &amp;&#x27;a SymbolTable,
-[1m[94m15[0m [1m[94m|[0m     operational_settings: &amp;&#x27;a OperationalSettings,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^[0m
-[1m[94m16[0m [1m[94m|[0m     current_file_path:    String,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `operational_settings` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionEnhancers/quickfuncs_ast_enhancer.rs:17:5
-   [1m[94m|[0m
-[1m[94m16[0m [1m[94m|[0m pub struct QuickFunctionsAstEnhancer&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m-------------------------[0m [1m[94mfield in this struct[0m
-[1m[94m17[0m [1m[94m|[0m     operational_settings: &amp;&#x27;a OperationalSettings,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: associated items `resolve_call_arguments`, `resolve_expr_to_dix`, and `resolve_value_to_dix` are never used[0m
-    [1m[94m--&gt; [0mdixscript/src/Compiler/Core/ValueResolution/value_resolver.rs:1864:8
-     [1m[94m|[0m
-[1m[94m 146[0m [1m[94m|[0m impl&lt;&#x27;a&gt; ValueResolver&lt;&#x27;a&gt; {
-     [1m[94m|[0m [1m[94m--------------------------[0m [1m[94massociated items in this implementation[0m
-[1m[94m...[0m
-[1m[94m1864[0m [1m[94m|[0m     fn resolve_call_arguments(
-     [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^[0m
-[1m[94m...[0m
-[1m[94m1881[0m [1m[94m|[0m     fn resolve_expr_to_dix(
-     [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^[0m
-[1m[94m...[0m
-[1m[94m1965[0m [1m[94m|[0m fn resolve_value_to_dix(
-     [1m[94m|[0m    [1m[33m^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/BinarySerialization/value_decoder.rs:13:5
-   [1m[94m|[0m
-[1m[94m12[0m [1m[94m|[0m pub struct ValueDecoder {
-   [1m[94m|[0m            [1m[94m------------[0m [1m[94mfield in this struct[0m
-[1m[94m13[0m [1m[94m|[0m     error_manager: ErrorManager,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `position` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/general_parser.rs:30:5
-   [1m[94m|[0m
-[1m[94m27[0m [1m[94m|[0m struct SectionData {
-   [1m[94m|[0m        [1m[94m-----------[0m [1m[94mfield in this struct[0m
-[1m[94m...[0m
-[1m[94m30[0m [1m[94m|[0m     position: usize,
-   [1m[94m|[0m     [1m[33m^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: struct `ParseTimings` is never constructed[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/general_parser.rs:34:12
-   [1m[94m|[0m
-[1m[94m34[0m [1m[94m|[0m pub struct ParseTimings {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `is_advanced_mode` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/general_parser.rs:62:5
-   [1m[94m|[0m
-[1m[94m50[0m [1m[94m|[0m pub struct GeneralParser&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m-------------[0m [1m[94mfield in this struct[0m
-[1m[94m...[0m
-[1m[94m62[0m [1m[94m|[0m     is_advanced_mode:       bool,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `has_dlm_enabled` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/general_semantics_analyzer.rs:33:5
-   [1m[94m|[0m
-[1m[94m21[0m [1m[94m|[0m pub struct GeneralSemanticAnalyzer&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m-----------------------[0m [1m[94mfield in this struct[0m
-[1m[94m...[0m
-[1m[94m33[0m [1m[94m|[0m     has_dlm_enabled:        bool,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Runtime/key_resolver.rs:27:5
-   [1m[94m|[0m
-[1m[94m26[0m [1m[94m|[0m pub struct KeyFileResolver {
-   [1m[94m|[0m            [1m[94m---------------[0m [1m[94mfield in this struct[0m
-[1m[94m27[0m [1m[94m|[0m     error_manager: ErrorManager,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: module `Utilities` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/lib.rs:7:9
-  [1m[94m|[0m
-[1m[94m7[0m [1m[94m|[0m pub mod Utilities;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `utilities`[0m
-  [1m[94m|[0m
-  [1m[94m= [0m[1mnote[0m: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
-
-[1m[33mwarning[0m[1m: module `ErrorManager` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/lib.rs:8:9
-  [1m[94m|[0m
-[1m[94m8[0m [1m[94m|[0m pub mod ErrorManager;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `error_manager`[0m
-
-[1m[33mwarning[0m[1m: module `Builtins` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/lib.rs:9:9
-  [1m[94m|[0m
-[1m[94m9[0m [1m[94m|[0m pub mod Builtins;
-  [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `builtins`[0m
-
-[1m[33mwarning[0m[1m: module `Compiler` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/lib.rs:10:9
-   [1m[94m|[0m
-[1m[94m10[0m [1m[94m|[0m pub mod Compiler;
-   [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `compiler`[0m
-
-[1m[33mwarning[0m[1m: module `Runtime` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/lib.rs:11:9
-   [1m[94m|[0m
-[1m[94m11[0m [1m[94m|[0m pub mod Runtime;
-   [1m[94m|[0m         [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `runtime`[0m
-
-[1m[33mwarning[0m[1m: method `GetSharedInstance` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:40:12
-   [1m[94m|[0m
-[1m[94m40[0m [1m[94m|[0m     pub fn GetSharedInstance(level: Option&lt;LogLevel&gt;, enabled: Option&lt;bool&gt;) -&gt; Arc&lt;Mutex&lt;Self&gt;&gt; {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_shared_instance`[0m
-
-[1m[33mwarning[0m[1m: method `HasSharedInstance` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:63:12
-   [1m[94m|[0m
-[1m[94m63[0m [1m[94m|[0m     pub fn HasSharedInstance() -&gt; bool {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `has_shared_instance`[0m
-
-[1m[33mwarning[0m[1m: method `IncreaseIndent` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:71:12
-   [1m[94m|[0m
-[1m[94m71[0m [1m[94m|[0m     pub fn IncreaseIndent(&amp;mut self) {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `increase_indent`[0m
-
-[1m[33mwarning[0m[1m: method `DecreaseIndent` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:75:12
-   [1m[94m|[0m
-[1m[94m75[0m [1m[94m|[0m     pub fn DecreaseIndent(&amp;mut self) {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `decrease_indent`[0m
-
-[1m[33mwarning[0m[1m: method `ResetIndent` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:81:12
-   [1m[94m|[0m
-[1m[94m81[0m [1m[94m|[0m     pub fn ResetIndent(&amp;mut self) {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `reset_indent`[0m
-
-[1m[33mwarning[0m[1m: method `Error` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:87:12
-   [1m[94m|[0m
-[1m[94m87[0m [1m[94m|[0m     pub fn Error(&amp;mut self, message: &amp;str) {
-   [1m[94m|[0m            [1m[33m^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `error`[0m
-
-[1m[33mwarning[0m[1m: method `Warning` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:94:12
-   [1m[94m|[0m
-[1m[94m94[0m [1m[94m|[0m     pub fn Warning(&amp;mut self, message: &amp;str) {
-   [1m[94m|[0m            [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `warning`[0m
-
-[1m[33mwarning[0m[1m: method `Info` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:101:12
-    [1m[94m|[0m
-[1m[94m101[0m [1m[94m|[0m     pub fn Info(&amp;mut self, message: &amp;str) {
-    [1m[94m|[0m            [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `info`[0m
-
-[1m[33mwarning[0m[1m: method `Debug` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:113:12
-    [1m[94m|[0m
-[1m[94m113[0m [1m[94m|[0m     pub fn Debug&lt;F&gt;(&amp;mut self, message_builder: F)
-    [1m[94m|[0m            [1m[33m^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `debug`[0m
-
-[1m[33mwarning[0m[1m: method `DebugStr` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:129:12
-    [1m[94m|[0m
-[1m[94m129[0m [1m[94m|[0m     pub fn DebugStr(&amp;mut self, message: &amp;str) {
-    [1m[94m|[0m            [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `debug_str`[0m
-
-[1m[33mwarning[0m[1m: method `Verbose` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:141:12
-    [1m[94m|[0m
-[1m[94m141[0m [1m[94m|[0m     pub fn Verbose&lt;F&gt;(&amp;mut self, message_builder: F)
-    [1m[94m|[0m            [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `verbose`[0m
-
-[1m[33mwarning[0m[1m: method `VerboseStr` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:157:12
-    [1m[94m|[0m
-[1m[94m157[0m [1m[94m|[0m     pub fn VerboseStr(&amp;mut self, message: &amp;str) {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `verbose_str`[0m
-
-[1m[33mwarning[0m[1m: method `CreateScope` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:197:12
-    [1m[94m|[0m
-[1m[94m197[0m [1m[94m|[0m     pub fn CreateScope&lt;&#x27;a&gt;(&amp;&#x27;a mut self, scope_name: &amp;str) -&gt; LoggerScope&lt;&#x27;a&gt; {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `create_scope`[0m
-
-[1m[33mwarning[0m[1m: method `CreateDebugScope` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:217:12
-    [1m[94m|[0m
-[1m[94m217[0m [1m[94m|[0m     pub fn CreateDebugScope&lt;&#x27;a&gt;(&amp;&#x27;a mut self, scope_name: &amp;str) -&gt; LoggerScope&lt;&#x27;a&gt; {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `create_debug_scope`[0m
-
-[1m[33mwarning[0m[1m: method `CreateVerboseScope` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:237:12
-    [1m[94m|[0m
-[1m[94m237[0m [1m[94m|[0m     pub fn CreateVerboseScope&lt;&#x27;a&gt;(&amp;&#x27;a mut self, scope_name: &amp;str) -&gt; LoggerScope&lt;&#x27;a&gt; {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `create_verbose_scope`[0m
-
-[1m[33mwarning[0m[1m: method `SetLogLevel` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:275:12
-    [1m[94m|[0m
-[1m[94m275[0m [1m[94m|[0m     pub fn SetLogLevel(&amp;mut self, level: LogLevel) {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `set_log_level`[0m
-
-[1m[33mwarning[0m[1m: method `SetEnabled` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:279:12
-    [1m[94m|[0m
-[1m[94m279[0m [1m[94m|[0m     pub fn SetEnabled(&amp;mut self, enabled: bool) {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `set_enabled`[0m
-
-[1m[33mwarning[0m[1m: method `GetCurrentLevel` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:283:12
-    [1m[94m|[0m
-[1m[94m283[0m [1m[94m|[0m     pub fn GetCurrentLevel(&amp;self) -&gt; LogLevel {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_current_level`[0m
-
-[1m[33mwarning[0m[1m: method `IsEnabled` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:287:12
-    [1m[94m|[0m
-[1m[94m287[0m [1m[94m|[0m     pub fn IsEnabled(&amp;self) -&gt; bool {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_enabled`[0m
-
-[1m[33mwarning[0m[1m: method `IsDebugEnabled` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:292:12
-    [1m[94m|[0m
-[1m[94m292[0m [1m[94m|[0m     pub fn IsDebugEnabled(&amp;self) -&gt; bool {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_debug_enabled`[0m
-
-[1m[33mwarning[0m[1m: method `IsVerboseEnabled` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:304:12
-    [1m[94m|[0m
-[1m[94m304[0m [1m[94m|[0m     pub fn IsVerboseEnabled(&amp;self) -&gt; bool {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_verbose_enabled`[0m
-
-[1m[33mwarning[0m[1m: method `WouldLog` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:315:12
-    [1m[94m|[0m
-[1m[94m315[0m [1m[94m|[0m     pub fn WouldLog(&amp;self, level: LogLevel) -&gt; bool {
-    [1m[94m|[0m            [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `would_log`[0m
-
-[1m[33mwarning[0m[1m: method `GetLogContents` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:321:12
-    [1m[94m|[0m
-[1m[94m321[0m [1m[94m|[0m     pub fn GetLogContents(&amp;self) -&gt; &amp;str {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_log_contents`[0m
-
-[1m[33mwarning[0m[1m: method `ClearLogBuffer` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:325:12
-    [1m[94m|[0m
-[1m[94m325[0m [1m[94m|[0m     pub fn ClearLogBuffer(&amp;mut self) {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `clear_log_buffer`[0m
-
-[1m[33mwarning[0m[1m: method `IsValidString` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:18:12
-   [1m[94m|[0m
-[1m[94m18[0m [1m[94m|[0m     pub fn IsValidString(input: Option&lt;&amp;str&gt;) -&gt; bool {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_valid_string`[0m
-
-[1m[33mwarning[0m[1m: method `GetEnvironment` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:35:12
-   [1m[94m|[0m
-[1m[94m35[0m [1m[94m|[0m     pub fn GetEnvironment() -&gt; &amp;&#x27;static str {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_environment`[0m
-
-[1m[33mwarning[0m[1m: method `GenerateRandomString` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:47:12
-   [1m[94m|[0m
-[1m[94m47[0m [1m[94m|[0m     pub fn GenerateRandomString(length: usize, use_special_characters: bool) -&gt; String {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `generate_random_string`[0m
-
-[1m[33mwarning[0m[1m: method `GetStructOrClassMemberValues` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:76:12
-   [1m[94m|[0m
-[1m[94m76[0m [1m[94m|[0m     pub fn GetStructOrClassMemberValues&lt;T: std::fmt::Debug&gt;(instance: &amp;T) -&gt; String {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_struct_or_class_member_values`[0m
-
-[1m[33mwarning[0m[1m: trait method `IsNullOrEmpty` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:3:8
-  [1m[94m|[0m
-[1m[94m3[0m [1m[94m|[0m     fn IsNullOrEmpty(&amp;self) -&gt; bool;
-  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_null_or_empty`[0m
-
-[1m[33mwarning[0m[1m: trait method `IsNullOrWhiteSpace` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:4:8
-  [1m[94m|[0m
-[1m[94m4[0m [1m[94m|[0m     fn IsNullOrWhiteSpace(&amp;self) -&gt; bool;
-  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_null_or_white_space`[0m
-
-[1m[33mwarning[0m[1m: trait method `ToUpperInvariant` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:5:8
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m     fn ToUpperInvariant(&amp;self) -&gt; String;
-  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `to_upper_invariant`[0m
-
-[1m[33mwarning[0m[1m: trait method `ToLowerInvariant` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:6:8
-  [1m[94m|[0m
-[1m[94m6[0m [1m[94m|[0m     fn ToLowerInvariant(&amp;self) -&gt; String;
-  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `to_lower_invariant`[0m
-
-[1m[33mwarning[0m[1m: trait method `Contains` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:7:8
-  [1m[94m|[0m
-[1m[94m7[0m [1m[94m|[0m     fn Contains(&amp;self, value: &amp;str) -&gt; bool;
-  [1m[94m|[0m        [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `contains`[0m
-
-[1m[33mwarning[0m[1m: trait method `StartsWith` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:8:8
-  [1m[94m|[0m
-[1m[94m8[0m [1m[94m|[0m     fn StartsWith(&amp;self, value: &amp;str) -&gt; bool;
-  [1m[94m|[0m        [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `starts_with`[0m
-
-[1m[33mwarning[0m[1m: trait method `EndsWith` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:9:8
-  [1m[94m|[0m
-[1m[94m9[0m [1m[94m|[0m     fn EndsWith(&amp;self, value: &amp;str) -&gt; bool;
-  [1m[94m|[0m        [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `ends_with`[0m
-
-[1m[33mwarning[0m[1m: trait method `Trim` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:10:8
-   [1m[94m|[0m
-[1m[94m10[0m [1m[94m|[0m     fn Trim(&amp;self) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case: `trim`[0m
-
-[1m[33mwarning[0m[1m: trait method `TrimStart` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:11:8
-   [1m[94m|[0m
-[1m[94m11[0m [1m[94m|[0m     fn TrimStart(&amp;self) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `trim_start`[0m
-
-[1m[33mwarning[0m[1m: trait method `TrimEnd` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:12:8
-   [1m[94m|[0m
-[1m[94m12[0m [1m[94m|[0m     fn TrimEnd(&amp;self) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `trim_end`[0m
-
-[1m[33mwarning[0m[1m: trait method `Replace` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:13:8
-   [1m[94m|[0m
-[1m[94m13[0m [1m[94m|[0m     fn Replace(&amp;self, old: &amp;str, new: &amp;str) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `replace`[0m
-
-[1m[33mwarning[0m[1m: trait method `Split` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:14:8
-   [1m[94m|[0m
-[1m[94m14[0m [1m[94m|[0m     fn Split(&amp;self, separator: char) -&gt; Vec&lt;String&gt;;
-   [1m[94m|[0m        [1m[33m^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `split`[0m
-
-[1m[33mwarning[0m[1m: trait method `Join` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:15:8
-   [1m[94m|[0m
-[1m[94m15[0m [1m[94m|[0m     fn Join(separator: &amp;str, values: &amp;[String]) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case: `join`[0m
-
-[1m[33mwarning[0m[1m: trait method `Substring` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:16:8
-   [1m[94m|[0m
-[1m[94m16[0m [1m[94m|[0m     fn Substring(&amp;self, start: usize, length: Option&lt;usize&gt;) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `substring`[0m
-
-[1m[33mwarning[0m[1m: trait method `IndexOf` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:17:8
-   [1m[94m|[0m
-[1m[94m17[0m [1m[94m|[0m     fn IndexOf(&amp;self, value: &amp;str) -&gt; Option&lt;usize&gt;;
-   [1m[94m|[0m        [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `index_of`[0m
-
-[1m[33mwarning[0m[1m: trait method `LastIndexOf` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:18:8
-   [1m[94m|[0m
-[1m[94m18[0m [1m[94m|[0m     fn LastIndexOf(&amp;self, value: &amp;str) -&gt; Option&lt;usize&gt;;
-   [1m[94m|[0m        [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `last_index_of`[0m
-
-[1m[33mwarning[0m[1m: trait method `ToString` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:162:8
-    [1m[94m|[0m
-[1m[94m162[0m [1m[94m|[0m     fn ToString(&amp;self) -&gt; String;
-    [1m[94m|[0m        [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `to_string`[0m
-
-[1m[33mwarning[0m[1m: trait method `GetHashCode` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:163:8
-    [1m[94m|[0m
-[1m[94m163[0m [1m[94m|[0m     fn GetHashCode(&amp;self) -&gt; u64;
-    [1m[94m|[0m        [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_hash_code`[0m
-
-[1m[33mwarning[0m[1m: module `ErrorTypes` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/ErrorManager/mod.rs:3:9
-  [1m[94m|[0m
-[1m[94m3[0m [1m[94m|[0m pub mod ErrorTypes;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `error_types`[0m
-
-[1m[33mwarning[0m[1m: module `Helpers` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/ErrorManager/mod.rs:4:9
-  [1m[94m|[0m
-[1m[94m4[0m [1m[94m|[0m pub mod Helpers;
-  [1m[94m|[0m         [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `helpers`[0m
-
-[1m[33mwarning[0m[1m: module `Core` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Builtins/mod.rs:4:9
-  [1m[94m|[0m
-[1m[94m4[0m [1m[94m|[0m pub mod Core;
-  [1m[94m|[0m         [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `core`[0m
-
-[1m[33mwarning[0m[1m: module `Instance` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Builtins/mod.rs:5:9
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m pub mod Instance;
-  [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `instance`[0m
-
-[1m[33mwarning[0m[1m: module `Static` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Builtins/mod.rs:6:9
-  [1m[94m|[0m
-[1m[94m6[0m [1m[94m|[0m pub mod Static;
-  [1m[94m|[0m         [1m[33m^^^^^^[0m
-  [1m[94m|[0m
-[1m[96mhelp[0m: rename the identifier or convert it to a snake case raw identifier
-  [1m[94m|[0m
-[1m[94m6[0m [91m- [0mpub mod [91mStatic[0m;
-[1m[94m6[0m [92m+ [0mpub mod [92mr#static[0m;
-  [1m[94m|[0m
-
-[1m[33mwarning[0m[1m: module `Resolver` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Builtins/mod.rs:7:9
-  [1m[94m|[0m
-[1m[94m7[0m [1m[94m|[0m pub mod Resolver;
-  [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `resolver`[0m
-
-[1m[33mwarning[0m[1m: module `AST` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:4:9
-  [1m[94m|[0m
-[1m[94m4[0m [1m[94m|[0m pub mod AST;
-  [1m[94m|[0m         [1m[33m^^^[0m [1m[33mhelp: convert the identifier to snake case: `ast`[0m
-
-[1m[33mwarning[0m[1m: module `Core` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:5:9
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m pub mod Core;
-  [1m[94m|[0m         [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `core`[0m
-
-[1m[33mwarning[0m[1m: module `DLM` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:6:9
-  [1m[94m|[0m
-[1m[94m6[0m [1m[94m|[0m pub mod DLM;
-  [1m[94m|[0m         [1m[33m^^^[0m [1m[33mhelp: convert the identifier to snake case: `dlm`[0m
-
-[1m[33mwarning[0m[1m: module `Extensions` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:7:9
-  [1m[94m|[0m
-[1m[94m7[0m [1m[94m|[0m pub mod Extensions;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `extensions`[0m
-
-[1m[33mwarning[0m[1m: module `Utilities` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:8:9
-  [1m[94m|[0m
-[1m[94m8[0m [1m[94m|[0m pub mod Utilities;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `utilities`[0m
-
-[1m[33mwarning[0m[1m: module `VersionControl` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:9:9
-  [1m[94m|[0m
-[1m[94m9[0m [1m[94m|[0m pub mod VersionControl;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `version_control`[0m
-
-[1m[33mwarning[0m[1m: module `ImportsResolution` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:10:9
-   [1m[94m|[0m
-[1m[94m10[0m [1m[94m|[0m pub mod ImportsResolution;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `imports_resolution`[0m
-
-[1m[33mwarning[0m[1m: module `Visitors` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/AST/mod.rs:19:9
-   [1m[94m|[0m
-[1m[94m19[0m [1m[94m|[0m pub mod Visitors;
-   [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `visitors`[0m
-
-[1m[33mwarning[0m[1m: module `Tokenizer` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:9:9
-  [1m[94m|[0m
-[1m[94m9[0m [1m[94m|[0m pub mod Tokenizer;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `tokenizer`[0m
-
-[1m[33mwarning[0m[1m: module `SectionParsers` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:10:9
-   [1m[94m|[0m
-[1m[94m10[0m [1m[94m|[0m pub mod SectionParsers;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_parsers`[0m
-
-[1m[33mwarning[0m[1m: module `SectionAnalyzers` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:11:9
-   [1m[94m|[0m
-[1m[94m11[0m [1m[94m|[0m pub mod SectionAnalyzers;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_analyzers`[0m
-
-[1m[33mwarning[0m[1m: module `SectionEnhancers` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:12:9
-   [1m[94m|[0m
-[1m[94m12[0m [1m[94m|[0m pub mod SectionEnhancers;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_enhancers`[0m
-
-[1m[33mwarning[0m[1m: module `ValueResolution` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:13:9
-   [1m[94m|[0m
-[1m[94m13[0m [1m[94m|[0m pub mod ValueResolution;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `value_resolution`[0m
-
-[1m[33mwarning[0m[1m: module `BinarySerialization` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:14:9
-   [1m[94m|[0m
-[1m[94m14[0m [1m[94m|[0m pub mod BinarySerialization;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `binary_serialization`[0m
-
-[1m[33mwarning[0m[1m: module `Config` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:15:9
-   [1m[94m|[0m
-[1m[94m15[0m [1m[94m|[0m pub mod Config;
-   [1m[94m|[0m         [1m[33m^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `config`[0m
-
-[1m[33mwarning[0m[1m: module `Functions` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:16:9
-   [1m[94m|[0m
-[1m[94m16[0m [1m[94m|[0m pub mod Functions;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `functions`[0m
-
-[1m[33mwarning[0m[1m: module `SectionReaders` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/BinarySerialization/mod.rs:21:9
-   [1m[94m|[0m
-[1m[94m21[0m [1m[94m|[0m pub mod SectionReaders;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_readers`[0m
-
-[1m[33mwarning[0m[1m: module `SectionWriters` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/BinarySerialization/mod.rs:22:9
-   [1m[94m|[0m
-[1m[94m22[0m [1m[94m|[0m pub mod SectionWriters;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_writers`[0m
-
-[1m[33mwarning[0m[1m: module `Auditor` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/DLM/mod.rs:3:9
-  [1m[94m|[0m
-[1m[94m3[0m [1m[94m|[0m pub mod Auditor;
-  [1m[94m|[0m         [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `auditor`[0m
-
-[1m[33mwarning[0m[1m: module `Compressor` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/DLM/mod.rs:4:9
-  [1m[94m|[0m
-[1m[94m4[0m [1m[94m|[0m pub mod Compressor;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `compressor`[0m
-
-[1m[33mwarning[0m[1m: module `Encryptor` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/DLM/mod.rs:5:9
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m pub mod Encryptor;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `encryptor`[0m
-
-[1m[33mwarning[0m[1m: module `KeyManagement` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/DLM/mod.rs:6:9
-  [1m[94m|[0m
-[1m[94m6[0m [1m[94m|[0m pub mod KeyManagement;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `key_management`[0m
-
-[1m[33mwarning[0m: `dixscript` (lib) generated 124 warnings (run `cargo fix --lib -p dixscript` to apply 13 suggestions)
-[1m[92m   Compiling[0m mdix-wasm v1.0.0 (/home/runner/work/DixScript-Rust/DixScript-Rust/mdix-wasm)
-[1m[33mwarning[0m[1m: unused imports: `DixLoadOptions` and `DixLoader`[0m
- [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:5:26
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m use dixscript::Runtime::{DixLoadOptions, DixLoader};
-  [1m[94m|[0m                          [1m[33m^^^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^[0m
-  [1m[94m|[0m
-  [1m[94m= [0m[1mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:202:24
-    [1m[94m|[0m
-[1m[94m202[0m [1m[94m|[0m     pub fn with_string(mut self, path: &amp;str, value: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                        [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                        [1m[94m|[0m
-    [1m[94m|[0m                        [1m[94mhelp: remove this `mut`[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:207:21
-    [1m[94m|[0m
-[1m[94m207[0m [1m[94m|[0m     pub fn with_int(mut self, path: &amp;str, value: i32) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                     [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                     [1m[94m|[0m
-    [1m[94m|[0m                     [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:221:22
-    [1m[94m|[0m
-[1m[94m221[0m [1m[94m|[0m     pub fn with_long(mut self, path: &amp;str, value: i64) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                      [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                      [1m[94m|[0m
-    [1m[94m|[0m                      [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:226:23
-    [1m[94m|[0m
-[1m[94m226[0m [1m[94m|[0m     pub fn with_float(mut self, path: &amp;str, value: f32) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                       [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                       [1m[94m|[0m
-    [1m[94m|[0m                       [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:231:24
-    [1m[94m|[0m
-[1m[94m231[0m [1m[94m|[0m     pub fn with_double(mut self, path: &amp;str, value: f64) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                        [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                        [1m[94m|[0m
-    [1m[94m|[0m                        [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:236:22
-    [1m[94m|[0m
-[1m[94m236[0m [1m[94m|[0m     pub fn with_bool(mut self, path: &amp;str, value: bool) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                      [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                      [1m[94m|[0m
-    [1m[94m|[0m                      [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:242:27
-    [1m[94m|[0m
-[1m[94m242[0m [1m[94m|[0m     pub fn with_hex_color(mut self, path: &amp;str, hex: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                           [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                           [1m[94m|[0m
-    [1m[94m|[0m                           [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:251:22
-    [1m[94m|[0m
-[1m[94m251[0m [1m[94m|[0m     pub fn with_date(mut self, path: &amp;str, date: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                      [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                      [1m[94m|[0m
-    [1m[94m|[0m                      [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:257:27
-    [1m[94m|[0m
-[1m[94m257[0m [1m[94m|[0m     pub fn with_timestamp(mut self, path: &amp;str, ts: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                           [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                           [1m[94m|[0m
-    [1m[94m|[0m                           [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:263:22
-    [1m[94m|[0m
-[1m[94m263[0m [1m[94m|[0m     pub fn with_blob(mut self, path: &amp;str, base64: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                      [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                      [1m[94m|[0m
-    [1m[94m|[0m                      [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:269:23
-    [1m[94m|[0m
-[1m[94m269[0m [1m[94m|[0m     pub fn with_regex(mut self, path: &amp;str, pattern: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                       [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                       [1m[94m|[0m
-    [1m[94m|[0m                       [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:278:9
-    [1m[94m|[0m
-[1m[94m278[0m [1m[94m|[0m         mut self,
-    [1m[94m|[0m         [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m         [1m[94m|[0m
-    [1m[94m|[0m         [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:289:23
-    [1m[94m|[0m
-[1m[94m289[0m [1m[94m|[0m     pub fn with_array(mut self, path: &amp;str, items_json: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                       [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                       [1m[94m|[0m
-    [1m[94m|[0m                       [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:298:24
-    [1m[94m|[0m
-[1m[94m298[0m [1m[94m|[0m     pub fn with_object(mut self, path: &amp;str, props_json: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                        [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                        [1m[94m|[0m
-    [1m[94m|[0m                        [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:307:23
-    [1m[94m|[0m
-[1m[94m307[0m [1m[94m|[0m     pub fn with_tuple(mut self, path: &amp;str, items_json: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                       [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                       [1m[94m|[0m
-    [1m[94m|[0m                       [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: method `isSuccess` should have a snake case name[0m
-  [1m[94m--&gt; [0mmdix-wasm/src/dlm.rs:56:12
-   [1m[94m|[0m
-[1m[94m56[0m [1m[94m|[0m     pub fn isSuccess(&amp;self) -&gt; bool {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_success`[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
-
-[1m[33mwarning[0m[1m: method `processedData` should have a snake case name[0m
-  [1m[94m--&gt; [0mmdix-wasm/src/dlm.rs:64:12
-   [1m[94m|[0m
-[1m[94m64[0m [1m[94m|[0m     pub fn processedData(&amp;self) -&gt; Vec&lt;u8&gt; {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `processed_data`[0m
-
-[1m[33mwarning[0m[1m: method `keyFileContent` should have a snake case name[0m
-  [1m[94m--&gt; [0mmdix-wasm/src/dlm.rs:72:12
-   [1m[94m|[0m
-[1m[94m72[0m [1m[94m|[0m     pub fn keyFileContent(&amp;self) -&gt; Option&lt;String&gt; {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `key_file_content`[0m
-
-[1m[33mwarning[0m[1m: method `executedModules` should have a snake case name[0m
-  [1m[94m--&gt; [0mmdix-wasm/src/dlm.rs:78:12
-   [1m[94m|[0m
-[1m[94m78[0m [1m[94m|[0m     pub fn executedModules(&amp;self) -&gt; Vec&lt;String&gt; {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `executed_modules`[0m
-
-[1m[33mwarning[0m: `mdix-wasm` (lib test) generated 20 warnings (2 duplicates) (run `cargo fix --lib -p mdix-wasm --tests` to apply 16 suggestions)
-[1m[33mwarning[0m: `mdix-wasm` (lib) generated 20 warnings (18 duplicates)
-[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 49.69s
-[INFO]: ⬇️  Installing wasm-bindgen...
-[1m[33mwarning[0m: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /home/runner/work/DixScript-Rust/DixScript-Rust/mdix-ffi/Cargo.toml
-workspace: /home/runner/work/DixScript-Rust/DixScript-Rust/Cargo.toml
-[1m[33mwarning[0m: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /home/runner/work/DixScript-Rust/DixScript-Rust/mdix-java/Cargo.toml
-workspace: /home/runner/work/DixScript-Rust/DixScript-Rust/Cargo.toml
-[1m[33mwarning[0m[1m: type `MID_Logger` should have an upper camel case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:17:12
-   [1m[94m|[0m
-[1m[94m17[0m [1m[94m|[0m pub struct MID_Logger {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to upper camel case: `MidLogger`[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
-
-[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `debug_logging`[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:293:15
-    [1m[94m|[0m
-[1m[94m293[0m [1m[94m|[0m         #[cfg(feature = &quot;debug_logging&quot;)]
-    [1m[94m|[0m               [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `bzip2-support`, `cloud-import`, `default`, `rayon-support`, and `xz-support`
-    [1m[94m= [0m[1mhelp[0m: consider adding `debug_logging` as a feature in `Cargo.toml`
-    [1m[94m= [0m[1mnote[0m: see &lt;https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html&gt; for more information about checking conditional configuration
-    [1m[94m= [0m[1mnote[0m: `#[warn(unexpected_cfgs)]` on by default
-
-[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `debug_logging`[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:297:19
-    [1m[94m|[0m
-[1m[94m297[0m [1m[94m|[0m         #[cfg(not(feature = &quot;debug_logging&quot;))]
-    [1m[94m|[0m                   [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `bzip2-support`, `cloud-import`, `default`, `rayon-support`, and `xz-support`
-    [1m[94m= [0m[1mhelp[0m: consider adding `debug_logging` as a feature in `Cargo.toml`
-    [1m[94m= [0m[1mnote[0m: see &lt;https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html&gt; for more information about checking conditional configuration
-
-[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `verbose_logging`[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:305:15
-    [1m[94m|[0m
-[1m[94m305[0m [1m[94m|[0m         #[cfg(feature = &quot;verbose_logging&quot;)]
-    [1m[94m|[0m               [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `bzip2-support`, `cloud-import`, `default`, `rayon-support`, and `xz-support`
-    [1m[94m= [0m[1mhelp[0m: consider adding `verbose_logging` as a feature in `Cargo.toml`
-    [1m[94m= [0m[1mnote[0m: see &lt;https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html&gt; for more information about checking conditional configuration
-
-[1m[33mwarning[0m[1m: unexpected `cfg` condition value: `verbose_logging`[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:309:19
-    [1m[94m|[0m
-[1m[94m309[0m [1m[94m|[0m         #[cfg(not(feature = &quot;verbose_logging&quot;))]
-    [1m[94m|[0m                   [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `bzip2-support`, `cloud-import`, `default`, `rayon-support`, and `xz-support`
-    [1m[94m= [0m[1mhelp[0m: consider adding `verbose_logging` as a feature in `Cargo.toml`
-    [1m[94m= [0m[1mnote[0m: see &lt;https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html&gt; for more information about checking conditional configuration
-
-[1m[33mwarning[0m[1m: type `MID_HelperFunctions` should have an upper camel case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:5:12
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m pub struct MID_HelperFunctions;
-  [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to upper camel case: `MidHelperFunctions`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `src`[0m
-  [1m[94m--&gt; [0mdixscript/src/ErrorManager/ErrorTypes/lexical_error.rs:41:43
-   [1m[94m|[0m
-[1m[94m41[0m [1m[94m|[0m         let error_indicator = if let Some(ref src) = source_line {
-   [1m[94m|[0m                                           [1m[33m^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_src`[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: unused variable: `src`[0m
-  [1m[94m--&gt; [0mdixscript/src/ErrorManager/ErrorTypes/parse_error.rs:54:43
-   [1m[94m|[0m
-[1m[94m54[0m [1m[94m|[0m         let error_indicator = if let Some(ref src) = source_line {
-   [1m[94m|[0m                                           [1m[33m^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_src`[0m
-
-[1m[33mwarning[0m[1m: unreachable pattern[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/ValueResolution/ast_walker.rs:637:9
-    [1m[94m|[0m
-[1m[94m624[0m [1m[94m|[0m         Expression::BitwiseOp { .. } =&gt; &quot;BitwiseOp&quot;,
-    [1m[94m|[0m         [1m[94m----------------------------[0m [1m[94mmatches all the relevant values[0m
-[1m[94m...[0m
-[1m[94m637[0m [1m[94m|[0m         Expression::BitwiseOp { .. } =&gt; &quot;BitwiseOp&quot;,
-    [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[33mno value can reach this[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: `#[warn(unreachable_patterns)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: variable `any_changed` is assigned to, but never used[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/ValueResolution/value_resolver.rs:772:13
-    [1m[94m|[0m
-[1m[94m772[0m [1m[94m|[0m         let mut any_changed = false;
-    [1m[94m|[0m             [1m[33m^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: consider using `_any_changed` instead
-
-[1m[33mwarning[0m[1m: value assigned to `any_changed` is never read[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/ValueResolution/value_resolver.rs:786:17
-    [1m[94m|[0m
-[1m[94m786[0m [1m[94m|[0m                 any_changed = true;
-    [1m[94m|[0m                 [1m[33m^^^^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
-    [1m[94m= [0m[1mnote[0m: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: unused variable: `position`[0m
-    [1m[94m--&gt; [0mdixscript/src/Compiler/Core/ValueResolution/function_interpreter.rs:2279:5
-     [1m[94m|[0m
-[1m[94m2279[0m [1m[94m|[0m     position: Position,
-     [1m[94m|[0m     [1m[33m^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_position`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `id`[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/BinarySerialization/binary_unpacker.rs:330:14
-    [1m[94m|[0m
-[1m[94m330[0m [1m[94m|[0m         for (id, result) in results {
-    [1m[94m|[0m              [1m[33m^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_id`[0m
-
-[1m[33mwarning[0m[1m: value assigned to `depth` is never read[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/general_parser.rs:279:26
-    [1m[94m|[0m
-[1m[94m279[0m [1m[94m|[0m         let mut depth  = 0i32;
-    [1m[94m|[0m                          [1m[33m^^^^[0m [1m[33mthis value is reassigned later and never used[0m
-[1m[94m...[0m
-[1m[94m293[0m [1m[94m|[0m             depth = 1;
-    [1m[94m|[0m             [1m[94m---------[0m [1m[94m`depth` is overwritten here before the previous value is read[0m
-
-[1m[33mwarning[0m[1m: unused variable: `caps`[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/DLM/Auditor/enhanced_auditor.rs:105:21
-    [1m[94m|[0m
-[1m[94m105[0m [1m[94m|[0m         if let Some(caps) = RE_CHECKSUM.captures(&amp;content) {
-    [1m[94m|[0m                     [1m[33m^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_caps`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `data_type`[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Extensions/type_system_manager.rs:293:27
-    [1m[94m|[0m
-[1m[94m293[0m [1m[94m|[0m     fn is_valid_data_type(data_type: DataType) -&gt; bool {
-    [1m[94m|[0m                           [1m[33m^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_data_type`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `path`[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Utilities/file_permissions.rs:14:21
-   [1m[94m|[0m
-[1m[94m14[0m [1m[94m|[0m pub fn set_readonly(path: &amp;Path) -&gt; Result&lt;(), String&gt; {
-   [1m[94m|[0m                     [1m[33m^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_path`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `path`[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Utilities/file_permissions.rs:34:21
-   [1m[94m|[0m
-[1m[94m34[0m [1m[94m|[0m pub fn set_writable(path: &amp;Path) -&gt; Result&lt;(), String&gt; {
-   [1m[94m|[0m                     [1m[33m^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_path`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `path`[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Utilities/file_permissions.rs:51:20
-   [1m[94m|[0m
-[1m[94m51[0m [1m[94m|[0m pub fn is_readonly(path: &amp;Path) -&gt; bool {
-   [1m[94m|[0m                    [1m[33m^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_path`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `winner`[0m
-   [1m[94m--&gt; [0mdixscript/src/Runtime/merge.rs:539:9
-    [1m[94m|[0m
-[1m[94m539[0m [1m[94m|[0m         winner:           usize,
-    [1m[94m|[0m         [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_winner`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `winner`[0m
-   [1m[94m--&gt; [0mdixscript/src/Runtime/merge.rs:860:9
-    [1m[94m|[0m
-[1m[94m860[0m [1m[94m|[0m         winner:          usize,
-    [1m[94m|[0m         [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_winner`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `secondary_src`[0m
-   [1m[94m--&gt; [0mdixscript/src/Runtime/merge.rs:915:9
-    [1m[94m|[0m
-[1m[94m915[0m [1m[94m|[0m         secondary_src:  usize,
-    [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_secondary_src`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `winner`[0m
-    [1m[94m--&gt; [0mdixscript/src/Runtime/merge.rs:1028:9
-     [1m[94m|[0m
-[1m[94m1028[0m [1m[94m|[0m         winner:           usize,
-     [1m[94m|[0m         [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_winner`[0m
-
-[1m[33mwarning[0m[1m: associated items `MAX_DEPTH`, `MAX_COLLECTION_ITEMS`, `get_indentation`, and `get_arrow_indentation` are never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:12:11
-   [1m[94m|[0m
-[1m[94m 7[0m [1m[94m|[0m impl MID_HelperFunctions {
-   [1m[94m|[0m [1m[94m------------------------[0m [1m[94massociated items in this implementation[0m
-[1m[94m...[0m
-[1m[94m12[0m [1m[94m|[0m     const MAX_DEPTH: usize = 10;
-   [1m[94m|[0m           [1m[33m^^^^^^^^^[0m
-[1m[94m13[0m [1m[94m|[0m     const MAX_COLLECTION_ITEMS: usize = 100;
-   [1m[94m|[0m           [1m[33m^^^^^^^^^^^^^^^^^^^^[0m
-[1m[94m...[0m
-[1m[94m81[0m [1m[94m|[0m     fn get_indentation(depth: usize) -&gt; String {
-   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^[0m
-[1m[94m...[0m
-[1m[94m86[0m [1m[94m|[0m     fn get_arrow_indentation(depth: usize) -&gt; &amp;&#x27;static str {
-   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: associated function `new` is never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Builtins/Core/dix_value.rs:36:19
-   [1m[94m|[0m
-[1m[94m33[0m [1m[94m|[0m impl DixValue {
-   [1m[94m|[0m [1m[94m-------------[0m [1m[94massociated function in this implementation[0m
-[1m[94m...[0m
-[1m[94m36[0m [1m[94m|[0m     pub(crate) fn new(value: ValueData, dix_type: DixType) -&gt; Self {
-   [1m[94m|[0m                   [1m[33m^^^[0m
-
-[1m[33mwarning[0m[1m: constant `TUPLE_POSITIONAL_METHODS` is never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/AST/Visitors/type_inference_visitor.rs:37:7
-   [1m[94m|[0m
-[1m[94m37[0m [1m[94m|[0m const TUPLE_POSITIONAL_METHODS: &amp;[(&amp;str, usize)] = &amp;[
-   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: constant `TUPLE_ELEMENT_METHODS` is never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/AST/Visitors/type_inference_visitor.rs:51:7
-   [1m[94m|[0m
-[1m[94m51[0m [1m[94m|[0m const TUPLE_ELEMENT_METHODS: &amp;[&amp;str] = &amp;[
-   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `settings` is never read[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/Tokenizer/lexer.rs:124:5
-    [1m[94m|[0m
-[1m[94m122[0m [1m[94m|[0m pub struct Tokenizer&lt;&#x27;src&gt; {
-    [1m[94m|[0m            [1m[94m---------[0m [1m[94mfield in this struct[0m
-[1m[94m123[0m [1m[94m|[0m     input:    &amp;&#x27;src str,
-[1m[94m124[0m [1m[94m|[0m     settings: &amp;&#x27;src OperationalSettings,
-    [1m[94m|[0m     [1m[33m^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: method `is_hex_digit` is never used[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/Tokenizer/lexer.rs:331:8
-    [1m[94m|[0m
-[1m[94m136[0m [1m[94m|[0m impl&lt;&#x27;src&gt; Tokenizer&lt;&#x27;src&gt; {
-    [1m[94m|[0m [1m[94m--------------------------[0m [1m[94mmethod in this implementation[0m
-[1m[94m...[0m
-[1m[94m331[0m [1m[94m|[0m     fn is_hex_digit(&amp;self, c: char) -&gt; bool {
-    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: function `is_whitespace_byte` is never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/Tokenizer/platform/scalar.rs:25:8
-   [1m[94m|[0m
-[1m[94m25[0m [1m[94m|[0m pub fn is_whitespace_byte(b: u8) -&gt; bool {
-   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: constant `MAX_STUCK_COUNT` is never used[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs:31:7
-   [1m[94m|[0m
-[1m[94m31[0m [1m[94m|[0m const MAX_STUCK_COUNT: usize = 3;
-   [1m[94m|[0m       [1m[33m^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: fields `last_position` and `stuck_count` are never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs:86:5
-   [1m[94m|[0m
-[1m[94m80[0m [1m[94m|[0m pub struct QuickFuncsSectionParser&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m-----------------------[0m [1m[94mfields in this struct[0m
-[1m[94m...[0m
-[1m[94m86[0m [1m[94m|[0m     last_position: usize,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
-[1m[94m87[0m [1m[94m|[0m     stuck_count: usize,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: method `parse_interpolated_expression` is never used[0m
-    [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionParsers/quickfuncs_section_parser.rs:2352:8
-     [1m[94m|[0m
-[1m[94m  98[0m [1m[94m|[0m impl&lt;&#x27;a&gt; QuickFuncsSectionParser&lt;&#x27;a&gt; {
-     [1m[94m|[0m [1m[94m------------------------------------[0m [1m[94mmethod in this implementation[0m
-[1m[94m...[0m
-[1m[94m2352[0m [1m[94m|[0m     fn parse_interpolated_expression(&amp;self, text: &amp;str, position: Position) -&gt; Expression {
-     [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: methods `get_long_field` and `get_bool_field` are never used[0m
-   [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionAnalyzers/security_section_analyzer.rs:164:18
-    [1m[94m|[0m
-[1m[94m131[0m [1m[94m|[0m impl&lt;&#x27;a&gt; ParsedEncryptionConfig&lt;&#x27;a&gt; {
-    [1m[94m|[0m [1m[94m-----------------------------------[0m [1m[94mmethods in this implementation[0m
-[1m[94m...[0m
-[1m[94m164[0m [1m[94m|[0m     #[inline] fn get_long_field(&amp;self, key: &amp;str) -&gt; Option&lt;i64&gt; {
-    [1m[94m|[0m                  [1m[33m^^^^^^^^^^^^^^[0m
-[1m[94m...[0m
-[1m[94m170[0m [1m[94m|[0m     #[inline] fn get_bool_field(&amp;self, key: &amp;str) -&gt; Option&lt;bool&gt; {
-    [1m[94m|[0m                  [1m[33m^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `operational_settings` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionAnalyzers/data_section_analyzer.rs:52:5
-   [1m[94m|[0m
-[1m[94m51[0m [1m[94m|[0m pub struct DataSectionAnalyzer&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m-------------------[0m [1m[94mfield in this struct[0m
-[1m[94m52[0m [1m[94m|[0m     operational_settings:    &amp;&#x27;a OperationalSettings,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: method `get_element_type` is never used[0m
-    [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionAnalyzers/quickfuncs_section_analyzer.rs:3089:8
-     [1m[94m|[0m
-[1m[94m2998[0m [1m[94m|[0m impl LocalScopeTracker {
-     [1m[94m|[0m [1m[94m----------------------[0m [1m[94mmethod in this implementation[0m
-[1m[94m...[0m
-[1m[94m3089[0m [1m[94m|[0m     fn get_element_type(&amp;self, name: &amp;str) -&gt; Option&lt;DataType&gt; {
-     [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: fields `operational_settings` and `current_file_path` are never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionAnalyzers/imports_section_analyzer.rs:15:5
-   [1m[94m|[0m
-[1m[94m13[0m [1m[94m|[0m pub struct ImportsSectionAnalyzer&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m----------------------[0m [1m[94mfields in this struct[0m
-[1m[94m14[0m [1m[94m|[0m     symbol_table:         &amp;&#x27;a SymbolTable,
-[1m[94m15[0m [1m[94m|[0m     operational_settings: &amp;&#x27;a OperationalSettings,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^[0m
-[1m[94m16[0m [1m[94m|[0m     current_file_path:    String,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `operational_settings` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/SectionEnhancers/quickfuncs_ast_enhancer.rs:17:5
-   [1m[94m|[0m
-[1m[94m16[0m [1m[94m|[0m pub struct QuickFunctionsAstEnhancer&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m-------------------------[0m [1m[94mfield in this struct[0m
-[1m[94m17[0m [1m[94m|[0m     operational_settings: &amp;&#x27;a OperationalSettings,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: associated items `resolve_call_arguments`, `resolve_expr_to_dix`, and `resolve_value_to_dix` are never used[0m
-    [1m[94m--&gt; [0mdixscript/src/Compiler/Core/ValueResolution/value_resolver.rs:1864:8
-     [1m[94m|[0m
-[1m[94m 146[0m [1m[94m|[0m impl&lt;&#x27;a&gt; ValueResolver&lt;&#x27;a&gt; {
-     [1m[94m|[0m [1m[94m--------------------------[0m [1m[94massociated items in this implementation[0m
-[1m[94m...[0m
-[1m[94m1864[0m [1m[94m|[0m     fn resolve_call_arguments(
-     [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^[0m
-[1m[94m...[0m
-[1m[94m1881[0m [1m[94m|[0m     fn resolve_expr_to_dix(
-     [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^[0m
-[1m[94m...[0m
-[1m[94m1965[0m [1m[94m|[0m fn resolve_value_to_dix(
-     [1m[94m|[0m    [1m[33m^^^^^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/BinarySerialization/value_decoder.rs:13:5
-   [1m[94m|[0m
-[1m[94m12[0m [1m[94m|[0m pub struct ValueDecoder {
-   [1m[94m|[0m            [1m[94m------------[0m [1m[94mfield in this struct[0m
-[1m[94m13[0m [1m[94m|[0m     error_manager: ErrorManager,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `position` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/general_parser.rs:30:5
-   [1m[94m|[0m
-[1m[94m27[0m [1m[94m|[0m struct SectionData {
-   [1m[94m|[0m        [1m[94m-----------[0m [1m[94mfield in this struct[0m
-[1m[94m...[0m
-[1m[94m30[0m [1m[94m|[0m     position: usize,
-   [1m[94m|[0m     [1m[33m^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: struct `ParseTimings` is never constructed[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/general_parser.rs:34:12
-   [1m[94m|[0m
-[1m[94m34[0m [1m[94m|[0m pub struct ParseTimings {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `is_advanced_mode` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/general_parser.rs:62:5
-   [1m[94m|[0m
-[1m[94m50[0m [1m[94m|[0m pub struct GeneralParser&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m-------------[0m [1m[94mfield in this struct[0m
-[1m[94m...[0m
-[1m[94m62[0m [1m[94m|[0m     is_advanced_mode:       bool,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `has_dlm_enabled` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/general_semantics_analyzer.rs:33:5
-   [1m[94m|[0m
-[1m[94m21[0m [1m[94m|[0m pub struct GeneralSemanticAnalyzer&lt;&#x27;a&gt; {
-   [1m[94m|[0m            [1m[94m-----------------------[0m [1m[94mfield in this struct[0m
-[1m[94m...[0m
-[1m[94m33[0m [1m[94m|[0m     has_dlm_enabled:        bool,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: field `error_manager` is never read[0m
-  [1m[94m--&gt; [0mdixscript/src/Runtime/key_resolver.rs:27:5
-   [1m[94m|[0m
-[1m[94m26[0m [1m[94m|[0m pub struct KeyFileResolver {
-   [1m[94m|[0m            [1m[94m---------------[0m [1m[94mfield in this struct[0m
-[1m[94m27[0m [1m[94m|[0m     error_manager: ErrorManager,
-   [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: module `Utilities` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/lib.rs:7:9
-  [1m[94m|[0m
-[1m[94m7[0m [1m[94m|[0m pub mod Utilities;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `utilities`[0m
-  [1m[94m|[0m
-  [1m[94m= [0m[1mnote[0m: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
-
-[1m[33mwarning[0m[1m: module `ErrorManager` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/lib.rs:8:9
-  [1m[94m|[0m
-[1m[94m8[0m [1m[94m|[0m pub mod ErrorManager;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `error_manager`[0m
-
-[1m[33mwarning[0m[1m: module `Builtins` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/lib.rs:9:9
-  [1m[94m|[0m
-[1m[94m9[0m [1m[94m|[0m pub mod Builtins;
-  [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `builtins`[0m
-
-[1m[33mwarning[0m[1m: module `Compiler` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/lib.rs:10:9
-   [1m[94m|[0m
-[1m[94m10[0m [1m[94m|[0m pub mod Compiler;
-   [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `compiler`[0m
-
-[1m[33mwarning[0m[1m: module `Runtime` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/lib.rs:11:9
-   [1m[94m|[0m
-[1m[94m11[0m [1m[94m|[0m pub mod Runtime;
-   [1m[94m|[0m         [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `runtime`[0m
-
-[1m[33mwarning[0m[1m: method `GetSharedInstance` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:40:12
-   [1m[94m|[0m
-[1m[94m40[0m [1m[94m|[0m     pub fn GetSharedInstance(level: Option&lt;LogLevel&gt;, enabled: Option&lt;bool&gt;) -&gt; Arc&lt;Mutex&lt;Self&gt;&gt; {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_shared_instance`[0m
-
-[1m[33mwarning[0m[1m: method `HasSharedInstance` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:63:12
-   [1m[94m|[0m
-[1m[94m63[0m [1m[94m|[0m     pub fn HasSharedInstance() -&gt; bool {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `has_shared_instance`[0m
-
-[1m[33mwarning[0m[1m: method `IncreaseIndent` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:71:12
-   [1m[94m|[0m
-[1m[94m71[0m [1m[94m|[0m     pub fn IncreaseIndent(&amp;mut self) {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `increase_indent`[0m
-
-[1m[33mwarning[0m[1m: method `DecreaseIndent` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:75:12
-   [1m[94m|[0m
-[1m[94m75[0m [1m[94m|[0m     pub fn DecreaseIndent(&amp;mut self) {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `decrease_indent`[0m
-
-[1m[33mwarning[0m[1m: method `ResetIndent` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:81:12
-   [1m[94m|[0m
-[1m[94m81[0m [1m[94m|[0m     pub fn ResetIndent(&amp;mut self) {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `reset_indent`[0m
-
-[1m[33mwarning[0m[1m: method `Error` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:87:12
-   [1m[94m|[0m
-[1m[94m87[0m [1m[94m|[0m     pub fn Error(&amp;mut self, message: &amp;str) {
-   [1m[94m|[0m            [1m[33m^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `error`[0m
-
-[1m[33mwarning[0m[1m: method `Warning` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:94:12
-   [1m[94m|[0m
-[1m[94m94[0m [1m[94m|[0m     pub fn Warning(&amp;mut self, message: &amp;str) {
-   [1m[94m|[0m            [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `warning`[0m
-
-[1m[33mwarning[0m[1m: method `Info` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:101:12
-    [1m[94m|[0m
-[1m[94m101[0m [1m[94m|[0m     pub fn Info(&amp;mut self, message: &amp;str) {
-    [1m[94m|[0m            [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `info`[0m
-
-[1m[33mwarning[0m[1m: method `Debug` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:113:12
-    [1m[94m|[0m
-[1m[94m113[0m [1m[94m|[0m     pub fn Debug&lt;F&gt;(&amp;mut self, message_builder: F)
-    [1m[94m|[0m            [1m[33m^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `debug`[0m
-
-[1m[33mwarning[0m[1m: method `DebugStr` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:129:12
-    [1m[94m|[0m
-[1m[94m129[0m [1m[94m|[0m     pub fn DebugStr(&amp;mut self, message: &amp;str) {
-    [1m[94m|[0m            [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `debug_str`[0m
-
-[1m[33mwarning[0m[1m: method `Verbose` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:141:12
-    [1m[94m|[0m
-[1m[94m141[0m [1m[94m|[0m     pub fn Verbose&lt;F&gt;(&amp;mut self, message_builder: F)
-    [1m[94m|[0m            [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `verbose`[0m
-
-[1m[33mwarning[0m[1m: method `VerboseStr` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:157:12
-    [1m[94m|[0m
-[1m[94m157[0m [1m[94m|[0m     pub fn VerboseStr(&amp;mut self, message: &amp;str) {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `verbose_str`[0m
-
-[1m[33mwarning[0m[1m: method `CreateScope` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:197:12
-    [1m[94m|[0m
-[1m[94m197[0m [1m[94m|[0m     pub fn CreateScope&lt;&#x27;a&gt;(&amp;&#x27;a mut self, scope_name: &amp;str) -&gt; LoggerScope&lt;&#x27;a&gt; {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `create_scope`[0m
-
-[1m[33mwarning[0m[1m: method `CreateDebugScope` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:217:12
-    [1m[94m|[0m
-[1m[94m217[0m [1m[94m|[0m     pub fn CreateDebugScope&lt;&#x27;a&gt;(&amp;&#x27;a mut self, scope_name: &amp;str) -&gt; LoggerScope&lt;&#x27;a&gt; {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `create_debug_scope`[0m
-
-[1m[33mwarning[0m[1m: method `CreateVerboseScope` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:237:12
-    [1m[94m|[0m
-[1m[94m237[0m [1m[94m|[0m     pub fn CreateVerboseScope&lt;&#x27;a&gt;(&amp;&#x27;a mut self, scope_name: &amp;str) -&gt; LoggerScope&lt;&#x27;a&gt; {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `create_verbose_scope`[0m
-
-[1m[33mwarning[0m[1m: method `SetLogLevel` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:275:12
-    [1m[94m|[0m
-[1m[94m275[0m [1m[94m|[0m     pub fn SetLogLevel(&amp;mut self, level: LogLevel) {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `set_log_level`[0m
-
-[1m[33mwarning[0m[1m: method `SetEnabled` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:279:12
-    [1m[94m|[0m
-[1m[94m279[0m [1m[94m|[0m     pub fn SetEnabled(&amp;mut self, enabled: bool) {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `set_enabled`[0m
-
-[1m[33mwarning[0m[1m: method `GetCurrentLevel` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:283:12
-    [1m[94m|[0m
-[1m[94m283[0m [1m[94m|[0m     pub fn GetCurrentLevel(&amp;self) -&gt; LogLevel {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_current_level`[0m
-
-[1m[33mwarning[0m[1m: method `IsEnabled` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:287:12
-    [1m[94m|[0m
-[1m[94m287[0m [1m[94m|[0m     pub fn IsEnabled(&amp;self) -&gt; bool {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_enabled`[0m
-
-[1m[33mwarning[0m[1m: method `IsDebugEnabled` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:292:12
-    [1m[94m|[0m
-[1m[94m292[0m [1m[94m|[0m     pub fn IsDebugEnabled(&amp;self) -&gt; bool {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_debug_enabled`[0m
-
-[1m[33mwarning[0m[1m: method `IsVerboseEnabled` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:304:12
-    [1m[94m|[0m
-[1m[94m304[0m [1m[94m|[0m     pub fn IsVerboseEnabled(&amp;self) -&gt; bool {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_verbose_enabled`[0m
-
-[1m[33mwarning[0m[1m: method `WouldLog` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:315:12
-    [1m[94m|[0m
-[1m[94m315[0m [1m[94m|[0m     pub fn WouldLog(&amp;self, level: LogLevel) -&gt; bool {
-    [1m[94m|[0m            [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `would_log`[0m
-
-[1m[33mwarning[0m[1m: method `GetLogContents` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:321:12
-    [1m[94m|[0m
-[1m[94m321[0m [1m[94m|[0m     pub fn GetLogContents(&amp;self) -&gt; &amp;str {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_log_contents`[0m
-
-[1m[33mwarning[0m[1m: method `ClearLogBuffer` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/mid_logger.rs:325:12
-    [1m[94m|[0m
-[1m[94m325[0m [1m[94m|[0m     pub fn ClearLogBuffer(&amp;mut self) {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `clear_log_buffer`[0m
-
-[1m[33mwarning[0m[1m: method `IsValidString` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:18:12
-   [1m[94m|[0m
-[1m[94m18[0m [1m[94m|[0m     pub fn IsValidString(input: Option&lt;&amp;str&gt;) -&gt; bool {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_valid_string`[0m
-
-[1m[33mwarning[0m[1m: method `GetEnvironment` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:35:12
-   [1m[94m|[0m
-[1m[94m35[0m [1m[94m|[0m     pub fn GetEnvironment() -&gt; &amp;&#x27;static str {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_environment`[0m
-
-[1m[33mwarning[0m[1m: method `GenerateRandomString` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:47:12
-   [1m[94m|[0m
-[1m[94m47[0m [1m[94m|[0m     pub fn GenerateRandomString(length: usize, use_special_characters: bool) -&gt; String {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `generate_random_string`[0m
-
-[1m[33mwarning[0m[1m: method `GetStructOrClassMemberValues` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/mid_helper_functions.rs:76:12
-   [1m[94m|[0m
-[1m[94m76[0m [1m[94m|[0m     pub fn GetStructOrClassMemberValues&lt;T: std::fmt::Debug&gt;(instance: &amp;T) -&gt; String {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_struct_or_class_member_values`[0m
-
-[1m[33mwarning[0m[1m: trait method `IsNullOrEmpty` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:3:8
-  [1m[94m|[0m
-[1m[94m3[0m [1m[94m|[0m     fn IsNullOrEmpty(&amp;self) -&gt; bool;
-  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_null_or_empty`[0m
-
-[1m[33mwarning[0m[1m: trait method `IsNullOrWhiteSpace` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:4:8
-  [1m[94m|[0m
-[1m[94m4[0m [1m[94m|[0m     fn IsNullOrWhiteSpace(&amp;self) -&gt; bool;
-  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_null_or_white_space`[0m
-
-[1m[33mwarning[0m[1m: trait method `ToUpperInvariant` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:5:8
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m     fn ToUpperInvariant(&amp;self) -&gt; String;
-  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `to_upper_invariant`[0m
-
-[1m[33mwarning[0m[1m: trait method `ToLowerInvariant` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:6:8
-  [1m[94m|[0m
-[1m[94m6[0m [1m[94m|[0m     fn ToLowerInvariant(&amp;self) -&gt; String;
-  [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `to_lower_invariant`[0m
-
-[1m[33mwarning[0m[1m: trait method `Contains` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:7:8
-  [1m[94m|[0m
-[1m[94m7[0m [1m[94m|[0m     fn Contains(&amp;self, value: &amp;str) -&gt; bool;
-  [1m[94m|[0m        [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `contains`[0m
-
-[1m[33mwarning[0m[1m: trait method `StartsWith` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:8:8
-  [1m[94m|[0m
-[1m[94m8[0m [1m[94m|[0m     fn StartsWith(&amp;self, value: &amp;str) -&gt; bool;
-  [1m[94m|[0m        [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `starts_with`[0m
-
-[1m[33mwarning[0m[1m: trait method `EndsWith` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:9:8
-  [1m[94m|[0m
-[1m[94m9[0m [1m[94m|[0m     fn EndsWith(&amp;self, value: &amp;str) -&gt; bool;
-  [1m[94m|[0m        [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `ends_with`[0m
-
-[1m[33mwarning[0m[1m: trait method `Trim` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:10:8
-   [1m[94m|[0m
-[1m[94m10[0m [1m[94m|[0m     fn Trim(&amp;self) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case: `trim`[0m
-
-[1m[33mwarning[0m[1m: trait method `TrimStart` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:11:8
-   [1m[94m|[0m
-[1m[94m11[0m [1m[94m|[0m     fn TrimStart(&amp;self) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `trim_start`[0m
-
-[1m[33mwarning[0m[1m: trait method `TrimEnd` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:12:8
-   [1m[94m|[0m
-[1m[94m12[0m [1m[94m|[0m     fn TrimEnd(&amp;self) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `trim_end`[0m
-
-[1m[33mwarning[0m[1m: trait method `Replace` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:13:8
-   [1m[94m|[0m
-[1m[94m13[0m [1m[94m|[0m     fn Replace(&amp;self, old: &amp;str, new: &amp;str) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `replace`[0m
-
-[1m[33mwarning[0m[1m: trait method `Split` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:14:8
-   [1m[94m|[0m
-[1m[94m14[0m [1m[94m|[0m     fn Split(&amp;self, separator: char) -&gt; Vec&lt;String&gt;;
-   [1m[94m|[0m        [1m[33m^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `split`[0m
-
-[1m[33mwarning[0m[1m: trait method `Join` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:15:8
-   [1m[94m|[0m
-[1m[94m15[0m [1m[94m|[0m     fn Join(separator: &amp;str, values: &amp;[String]) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case: `join`[0m
-
-[1m[33mwarning[0m[1m: trait method `Substring` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:16:8
-   [1m[94m|[0m
-[1m[94m16[0m [1m[94m|[0m     fn Substring(&amp;self, start: usize, length: Option&lt;usize&gt;) -&gt; String;
-   [1m[94m|[0m        [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `substring`[0m
-
-[1m[33mwarning[0m[1m: trait method `IndexOf` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:17:8
-   [1m[94m|[0m
-[1m[94m17[0m [1m[94m|[0m     fn IndexOf(&amp;self, value: &amp;str) -&gt; Option&lt;usize&gt;;
-   [1m[94m|[0m        [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `index_of`[0m
-
-[1m[33mwarning[0m[1m: trait method `LastIndexOf` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:18:8
-   [1m[94m|[0m
-[1m[94m18[0m [1m[94m|[0m     fn LastIndexOf(&amp;self, value: &amp;str) -&gt; Option&lt;usize&gt;;
-   [1m[94m|[0m        [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `last_index_of`[0m
-
-[1m[33mwarning[0m[1m: trait method `ToString` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:162:8
-    [1m[94m|[0m
-[1m[94m162[0m [1m[94m|[0m     fn ToString(&amp;self) -&gt; String;
-    [1m[94m|[0m        [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `to_string`[0m
-
-[1m[33mwarning[0m[1m: trait method `GetHashCode` should have a snake case name[0m
-   [1m[94m--&gt; [0mdixscript/src/Utilities/utilities.rs:163:8
-    [1m[94m|[0m
-[1m[94m163[0m [1m[94m|[0m     fn GetHashCode(&amp;self) -&gt; u64;
-    [1m[94m|[0m        [1m[33m^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `get_hash_code`[0m
-
-[1m[33mwarning[0m[1m: module `ErrorTypes` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/ErrorManager/mod.rs:3:9
-  [1m[94m|[0m
-[1m[94m3[0m [1m[94m|[0m pub mod ErrorTypes;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `error_types`[0m
-
-[1m[33mwarning[0m[1m: module `Helpers` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/ErrorManager/mod.rs:4:9
-  [1m[94m|[0m
-[1m[94m4[0m [1m[94m|[0m pub mod Helpers;
-  [1m[94m|[0m         [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `helpers`[0m
-
-[1m[33mwarning[0m[1m: module `Core` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Builtins/mod.rs:4:9
-  [1m[94m|[0m
-[1m[94m4[0m [1m[94m|[0m pub mod Core;
-  [1m[94m|[0m         [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `core`[0m
-
-[1m[33mwarning[0m[1m: module `Instance` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Builtins/mod.rs:5:9
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m pub mod Instance;
-  [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `instance`[0m
-
-[1m[33mwarning[0m[1m: module `Static` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Builtins/mod.rs:6:9
-  [1m[94m|[0m
-[1m[94m6[0m [1m[94m|[0m pub mod Static;
-  [1m[94m|[0m         [1m[33m^^^^^^[0m
-  [1m[94m|[0m
-[1m[96mhelp[0m: rename the identifier or convert it to a snake case raw identifier
-  [1m[94m|[0m
-[1m[94m6[0m [91m- [0mpub mod [91mStatic[0m;
-[1m[94m6[0m [92m+ [0mpub mod [92mr#static[0m;
-  [1m[94m|[0m
-
-[1m[33mwarning[0m[1m: module `Resolver` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Builtins/mod.rs:7:9
-  [1m[94m|[0m
-[1m[94m7[0m [1m[94m|[0m pub mod Resolver;
-  [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `resolver`[0m
-
-[1m[33mwarning[0m[1m: module `AST` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:4:9
-  [1m[94m|[0m
-[1m[94m4[0m [1m[94m|[0m pub mod AST;
-  [1m[94m|[0m         [1m[33m^^^[0m [1m[33mhelp: convert the identifier to snake case: `ast`[0m
-
-[1m[33mwarning[0m[1m: module `Core` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:5:9
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m pub mod Core;
-  [1m[94m|[0m         [1m[33m^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `core`[0m
-
-[1m[33mwarning[0m[1m: module `DLM` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:6:9
-  [1m[94m|[0m
-[1m[94m6[0m [1m[94m|[0m pub mod DLM;
-  [1m[94m|[0m         [1m[33m^^^[0m [1m[33mhelp: convert the identifier to snake case: `dlm`[0m
-
-[1m[33mwarning[0m[1m: module `Extensions` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:7:9
-  [1m[94m|[0m
-[1m[94m7[0m [1m[94m|[0m pub mod Extensions;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `extensions`[0m
-
-[1m[33mwarning[0m[1m: module `Utilities` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:8:9
-  [1m[94m|[0m
-[1m[94m8[0m [1m[94m|[0m pub mod Utilities;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `utilities`[0m
-
-[1m[33mwarning[0m[1m: module `VersionControl` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:9:9
-  [1m[94m|[0m
-[1m[94m9[0m [1m[94m|[0m pub mod VersionControl;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `version_control`[0m
-
-[1m[33mwarning[0m[1m: module `ImportsResolution` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/mod.rs:10:9
-   [1m[94m|[0m
-[1m[94m10[0m [1m[94m|[0m pub mod ImportsResolution;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `imports_resolution`[0m
-
-[1m[33mwarning[0m[1m: module `Visitors` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/AST/mod.rs:19:9
-   [1m[94m|[0m
-[1m[94m19[0m [1m[94m|[0m pub mod Visitors;
-   [1m[94m|[0m         [1m[33m^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `visitors`[0m
-
-[1m[33mwarning[0m[1m: module `Tokenizer` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:9:9
-  [1m[94m|[0m
-[1m[94m9[0m [1m[94m|[0m pub mod Tokenizer;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `tokenizer`[0m
-
-[1m[33mwarning[0m[1m: module `SectionParsers` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:10:9
-   [1m[94m|[0m
-[1m[94m10[0m [1m[94m|[0m pub mod SectionParsers;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_parsers`[0m
-
-[1m[33mwarning[0m[1m: module `SectionAnalyzers` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:11:9
-   [1m[94m|[0m
-[1m[94m11[0m [1m[94m|[0m pub mod SectionAnalyzers;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_analyzers`[0m
-
-[1m[33mwarning[0m[1m: module `SectionEnhancers` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:12:9
-   [1m[94m|[0m
-[1m[94m12[0m [1m[94m|[0m pub mod SectionEnhancers;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_enhancers`[0m
-
-[1m[33mwarning[0m[1m: module `ValueResolution` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:13:9
-   [1m[94m|[0m
-[1m[94m13[0m [1m[94m|[0m pub mod ValueResolution;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `value_resolution`[0m
-
-[1m[33mwarning[0m[1m: module `BinarySerialization` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:14:9
-   [1m[94m|[0m
-[1m[94m14[0m [1m[94m|[0m pub mod BinarySerialization;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `binary_serialization`[0m
-
-[1m[33mwarning[0m[1m: module `Config` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:15:9
-   [1m[94m|[0m
-[1m[94m15[0m [1m[94m|[0m pub mod Config;
-   [1m[94m|[0m         [1m[33m^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `config`[0m
-
-[1m[33mwarning[0m[1m: module `Functions` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/mod.rs:16:9
-   [1m[94m|[0m
-[1m[94m16[0m [1m[94m|[0m pub mod Functions;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `functions`[0m
-
-[1m[33mwarning[0m[1m: module `SectionReaders` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/BinarySerialization/mod.rs:21:9
-   [1m[94m|[0m
-[1m[94m21[0m [1m[94m|[0m pub mod SectionReaders;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_readers`[0m
-
-[1m[33mwarning[0m[1m: module `SectionWriters` should have a snake case name[0m
-  [1m[94m--&gt; [0mdixscript/src/Compiler/Core/BinarySerialization/mod.rs:22:9
-   [1m[94m|[0m
-[1m[94m22[0m [1m[94m|[0m pub mod SectionWriters;
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `section_writers`[0m
-
-[1m[33mwarning[0m[1m: module `Auditor` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/DLM/mod.rs:3:9
-  [1m[94m|[0m
-[1m[94m3[0m [1m[94m|[0m pub mod Auditor;
-  [1m[94m|[0m         [1m[33m^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `auditor`[0m
-
-[1m[33mwarning[0m[1m: module `Compressor` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/DLM/mod.rs:4:9
-  [1m[94m|[0m
-[1m[94m4[0m [1m[94m|[0m pub mod Compressor;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case (notice the capitalization): `compressor`[0m
-
-[1m[33mwarning[0m[1m: module `Encryptor` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/DLM/mod.rs:5:9
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m pub mod Encryptor;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `encryptor`[0m
-
-[1m[33mwarning[0m[1m: module `KeyManagement` should have a snake case name[0m
- [1m[94m--&gt; [0mdixscript/src/Compiler/DLM/mod.rs:6:9
-  [1m[94m|[0m
-[1m[94m6[0m [1m[94m|[0m pub mod KeyManagement;
-  [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `key_management`[0m
-
-[1m[33mwarning[0m: `dixscript` (lib) generated 124 warnings (run `cargo fix --lib -p dixscript` to apply 13 suggestions)
-[1m[33mwarning[0m[1m: unused imports: `DixLoadOptions` and `DixLoader`[0m
- [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:5:26
-  [1m[94m|[0m
-[1m[94m5[0m [1m[94m|[0m use dixscript::Runtime::{DixLoadOptions, DixLoader};
-  [1m[94m|[0m                          [1m[33m^^^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^[0m
-  [1m[94m|[0m
-  [1m[94m= [0m[1mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:202:24
-    [1m[94m|[0m
-[1m[94m202[0m [1m[94m|[0m     pub fn with_string(mut self, path: &amp;str, value: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                        [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                        [1m[94m|[0m
-    [1m[94m|[0m                        [1m[94mhelp: remove this `mut`[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:207:21
-    [1m[94m|[0m
-[1m[94m207[0m [1m[94m|[0m     pub fn with_int(mut self, path: &amp;str, value: i32) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                     [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                     [1m[94m|[0m
-    [1m[94m|[0m                     [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:221:22
-    [1m[94m|[0m
-[1m[94m221[0m [1m[94m|[0m     pub fn with_long(mut self, path: &amp;str, value: i64) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                      [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                      [1m[94m|[0m
-    [1m[94m|[0m                      [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:226:23
-    [1m[94m|[0m
-[1m[94m226[0m [1m[94m|[0m     pub fn with_float(mut self, path: &amp;str, value: f32) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                       [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                       [1m[94m|[0m
-    [1m[94m|[0m                       [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:231:24
-    [1m[94m|[0m
-[1m[94m231[0m [1m[94m|[0m     pub fn with_double(mut self, path: &amp;str, value: f64) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                        [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                        [1m[94m|[0m
-    [1m[94m|[0m                        [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:236:22
-    [1m[94m|[0m
-[1m[94m236[0m [1m[94m|[0m     pub fn with_bool(mut self, path: &amp;str, value: bool) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                      [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                      [1m[94m|[0m
-    [1m[94m|[0m                      [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:242:27
-    [1m[94m|[0m
-[1m[94m242[0m [1m[94m|[0m     pub fn with_hex_color(mut self, path: &amp;str, hex: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                           [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                           [1m[94m|[0m
-    [1m[94m|[0m                           [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:251:22
-    [1m[94m|[0m
-[1m[94m251[0m [1m[94m|[0m     pub fn with_date(mut self, path: &amp;str, date: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                      [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                      [1m[94m|[0m
-    [1m[94m|[0m                      [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:257:27
-    [1m[94m|[0m
-[1m[94m257[0m [1m[94m|[0m     pub fn with_timestamp(mut self, path: &amp;str, ts: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                           [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                           [1m[94m|[0m
-    [1m[94m|[0m                           [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:263:22
-    [1m[94m|[0m
-[1m[94m263[0m [1m[94m|[0m     pub fn with_blob(mut self, path: &amp;str, base64: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                      [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                      [1m[94m|[0m
-    [1m[94m|[0m                      [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:269:23
-    [1m[94m|[0m
-[1m[94m269[0m [1m[94m|[0m     pub fn with_regex(mut self, path: &amp;str, pattern: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                       [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                       [1m[94m|[0m
-    [1m[94m|[0m                       [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:278:9
-    [1m[94m|[0m
-[1m[94m278[0m [1m[94m|[0m         mut self,
-    [1m[94m|[0m         [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m         [1m[94m|[0m
-    [1m[94m|[0m         [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:289:23
-    [1m[94m|[0m
-[1m[94m289[0m [1m[94m|[0m     pub fn with_array(mut self, path: &amp;str, items_json: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                       [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                       [1m[94m|[0m
-    [1m[94m|[0m                       [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:298:24
-    [1m[94m|[0m
-[1m[94m298[0m [1m[94m|[0m     pub fn with_object(mut self, path: &amp;str, props_json: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                        [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                        [1m[94m|[0m
-    [1m[94m|[0m                        [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
-   [1m[94m--&gt; [0mmdix-wasm/src/builder.rs:307:23
-    [1m[94m|[0m
-[1m[94m307[0m [1m[94m|[0m     pub fn with_tuple(mut self, path: &amp;str, items_json: &amp;str) -&gt; Result&lt;MdixBuilder, JsValue&gt; {
-    [1m[94m|[0m                       [1m[94m----[0m[1m[33m^^^^[0m
-    [1m[94m|[0m                       [1m[94m|[0m
-    [1m[94m|[0m                       [1m[94mhelp: remove this `mut`[0m
-
-[1m[33mwarning[0m[1m: method `isSuccess` should have a snake case name[0m
-  [1m[94m--&gt; [0mmdix-wasm/src/dlm.rs:56:12
-   [1m[94m|[0m
-[1m[94m56[0m [1m[94m|[0m     pub fn isSuccess(&amp;self) -&gt; bool {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `is_success`[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
-
-[1m[33mwarning[0m[1m: method `processedData` should have a snake case name[0m
-  [1m[94m--&gt; [0mmdix-wasm/src/dlm.rs:64:12
-   [1m[94m|[0m
-[1m[94m64[0m [1m[94m|[0m     pub fn processedData(&amp;self) -&gt; Vec&lt;u8&gt; {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `processed_data`[0m
-
-[1m[33mwarning[0m[1m: method `keyFileContent` should have a snake case name[0m
-  [1m[94m--&gt; [0mmdix-wasm/src/dlm.rs:72:12
-   [1m[94m|[0m
-[1m[94m72[0m [1m[94m|[0m     pub fn keyFileContent(&amp;self) -&gt; Option&lt;String&gt; {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `key_file_content`[0m
-
-[1m[33mwarning[0m[1m: method `executedModules` should have a snake case name[0m
-  [1m[94m--&gt; [0mmdix-wasm/src/dlm.rs:78:12
-   [1m[94m|[0m
-[1m[94m78[0m [1m[94m|[0m     pub fn executedModules(&amp;self) -&gt; Vec&lt;String&gt; {
-   [1m[94m|[0m            [1m[33m^^^^^^^^^^^^^^^[0m [1m[33mhelp: convert the identifier to snake case: `executed_modules`[0m
-
-[1m[33mwarning[0m: `mdix-wasm` (lib) generated 20 warnings (run `cargo fix --lib -p mdix-wasm` to apply 16 suggestions)
-[1m[33mwarning[0m: `mdix-wasm` (lib test) generated 20 warnings (20 duplicates)
-[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.13s
-[1m[92m     Running[0m unittests src/lib.rs (/home/runner/work/DixScript-Rust/DixScript-Rust/target/wasm32-unknown-unknown/debug/deps/mdix_wasm-630c5d678dbb14b8.wasm)
-no tests to run!
-[1m[92m     Running[0m tests/dlm_compression.rs (/home/runner/work/DixScript-Rust/DixScript-Rust/target/wasm32-unknown-unknown/debug/deps/dlm_compression-395d8885f2b6c6be.wasm)
-Executing bindgen...                              
-                                                  
-Running headless tests in Chrome on `http://127.0.0.1:34303/`
-Try find `webdriver.json` for configure browser&#x27;s capabilities:
-Not found
-Starting new webdriver session...                 
-Visiting http://127.0.0.1:36407...                
-Loading page elements...                          
-Waiting for test to finish...                     
-                                                  
-running 10 tests
-test top_level_and_nested_fields_still_resolve_correctly_under_compression ... ok
-test lzma_plus_encryption_round_trips ... ok
-test lzma_alone_round_trips ... ok
-test gzip_alone_round_trips ... ok
-test enum_only_data_survives_encryption_alone ... ok
-test enum_only_data_survives_compression_and_encryption_together ... ok
-test enum_only_data_survives_compression_alone ... ok
-test each_compressor_actually_shrinks_the_packed_data ... ok
-test bzip2_plus_encryption_round_trips ... ok
-test bzip2_alone_round_trips ... ok
-
-test result: ok. 10 passed; 0 failed; 0 ignored; 0 filtered out; finished in 1.69s
-                                                  
-[1m[92m     Running[0m tests/enum_mixed_data.rs (/home/runner/work/DixScript-Rust/DixScript-Rust/target/wasm32-unknown-unknown/debug/deps/enum_mixed_data-6b90458ff32d2384.wasm)
-Executing bindgen...                              
-                                                  
-Running headless tests in Chrome on `http://127.0.0.1:41715/`
-Try find `webdriver.json` for configure browser&#x27;s capabilities:
-Not found
-Starting new webdriver session...                 
-Visiting http://127.0.0.1:38675...                
-Loading page elements...                          
-Waiting for test to finish...                     
-                                                  
-running 5 tests
-test top_level_and_nested_enum_fields_do_not_cross_contaminate ... ok
-test sibling_fields_are_unaffected_by_the_enum_field ... ok
-test second_group_array_element_resolves_independently ... ok
-test first_group_array_element_resolves_independently ... ok
-test enum_field_resolves_name_field_and_value_together ... ok
-
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 filtered out; finished in 0.09s
-                                                  
-[1m[92m     Running[0m tests/web.rs (/home/runner/work/DixScript-Rust/DixScript-Rust/target/wasm32-unknown-unknown/debug/deps/web-c787ba8d622f6d16.wasm)
-Executing bindgen...                              
-                                                  
-Running headless tests in Chrome on `http://127.0.0.1:43485/`
-Try find `webdriver.json` for configure browser&#x27;s capabilities:
-Not found
-Starting new webdriver session...                 
-Visiting http://127.0.0.1:40213...                
-Loading page elements...                          
-Waiting for test to finish...                     
-                                                  
-running 34 tests
-test validate_schema_reports_wrong_type ... ok
-test validate_schema_reports_missing_field ... ok
-test validate_schema_passes_for_matching_data ... ok
-test validate_schema_can_be_reused_across_databases ... ok
-test prefetch_import_then_cloud_import_resolves ... ok
-test prefetch_import_does_not_panic ... ok
-test merge_with_primary_wins_by_default_weighting ... ok
-test merge_with_merges_two_loaded_databases ... ok
-test merge_sources_weighted_respects_explicit_weights ... ok
-test merge_sources_weighted_rejects_empty_list ... ok
-test merge_sources_throw_on_conflict_succeeds_for_disjoint_data ... ok
-test merge_sources_throw_on_conflict_raises_for_real_conflict ... ok
-test merge_sources_secondary_wins_on_conflict ... ok
-test merge_sources_rejects_empty_list ... ok
-test merge_sources_primary_wins_on_conflict ... ok
-test merge_sources_group_array_same_id_twice_is_not_key_merged ... ok
-test merge_sources_group_array_combine_fails_under_throw_on_conflict ... ok
-test merge_sources_conflicts_report_has_the_expected_shape ... ok
-test merge_sources_combines_non_conflicting_group_array_items ... ok
-test merge_sources_combines_disjoint_data ... ok
-test load_str_rejects_empty_source ... ok
-test load_str_parses_valid_source ... ok
-test get_string_returns_the_right_value ... ok
-test get_string_on_missing_path_errors_cleanly ... ok
-test get_int_returns_the_right_value ... ok
-test get_bool_returns_the_right_value ... ok
-test from_toml_round_trips_a_simple_table ... ok
-test from_json_round_trips_a_simple_object ... ok
-test entry_count_is_nonzero_for_valid_data ... ok
-test decompile_with_dlm_rejects_empty_data ... ok
-test compile_with_dlm_round_trips_with_compression_and_encryption ... ok
-test compile_with_dlm_rejects_empty_source ... ok
-test compile_with_dlm_passthrough_when_no_dlm_section ... ok
-test cloud_import_without_prefetch_errors_cleanly ... ok
-
-test result: ok. 34 passed; 0 failed; 0 ignored; 0 filtered out; finished in 0.18s
-                                                  
-[1m[92m   Doc-tests[0m mdix_wasm
-
-running 0 tests
-
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-
-[WARN]: ⚠️   There&#x27;s a newer version of wasm-pack available, the new version is: 0.15.0, you are using: 0.13.1. To update, navigate to: https://rustwasm.github.io/wasm-pack/installer/
-</div>
-  </div>
-
-  <footer>
-    <a href="https://github.com/Mid-D-Man/DixScript-Rust">github.com/Mid-D-Man/DixScript-Rust</a>
-  </footer>
-
-</div>
 </body>
-</html>
+                                               </html>

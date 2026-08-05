@@ -859,6 +859,105 @@ export class MdixDatabase {
         return MdixDatabase.__wrap(ret[0]);
     }
     /**
+     * Merges this database with `other` and returns a fresh
+     * `MdixMergeOutcome` — leaves both original databases untouched.
+     *
+     * `strategy`: "weighted" (default) | "primary_wins" | "secondary_wins"
+     * | "throw_on_conflict". `array_strategy`: "concat_dedup" (default) |
+     * "replace" | "concat". `this` merges as the primary source
+     * (weight 1.0), `other` as secondary (weight 0.5).
+     *
+     * NOTE: this method previously didn't exist as a real binding despite
+     * being documented at the top of merge.rs — `crate::merge::merge_with`
+     * was a plain Rust free function, never wired into a #[wasm_bindgen]
+     * impl block or re-exported from lib.rs, so `MdixDatabase.mergeWith`
+     * was unreachable from JS entirely. This is that wiring.
+     * @param {MdixDatabase} other
+     * @param {string | null} [strategy]
+     * @param {string | null} [array_strategy]
+     * @returns {MdixMergeOutcome}
+     */
+    mergeWith(other, strategy, array_strategy) {
+        _assertClass(other, MdixDatabase);
+        var ptr0 = isLikeNone(strategy) ? 0 : passStringToWasm0(strategy, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(array_strategy) ? 0 : passStringToWasm0(array_strategy, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mdixdatabase_mergeWith(this.__wbg_ptr, other.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return MdixMergeOutcome.__wrap(ret[0]);
+    }
+    /**
+     * Query the array at `path` and return its elements as a JSON array
+     * string. `path` itself must be a plain `Array` value, or a
+     * `GroupArray`'s own path (the flattener already stores a
+     * `GroupArray`'s items as a real Array there) -- for gathering across
+     * multiple *sibling* paths instead, use `query_many`.
+     *
+     * Returns `"[]"` for a path that doesn't exist or isn't an Array,
+     * rather than erroring -- mirrors `DixData::query`, which returns
+     * `None` for exactly the same two cases: "no matching data" is a
+     * normal, common outcome for a query, not a caller mistake worth
+     * throwing over the way e.g. `getString` on the wrong type is.
+     * @param {string} path
+     * @returns {string}
+     */
+    query(path) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.mdixdatabase_query(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Query across every sibling path matched by a glob `pattern` (same
+     * whole-segment `*` syntax as the core's `select_many` -- see
+     * query.rs's module doc for exactly what that does and doesn't
+     * match), gathered into one JSON array string. For a single Array or
+     * GroupArray path's own items, use `query` instead.
+     *
+     * Always returns a JSON array (possibly `"[]"`) -- `DixData::
+     * query_many` has no `None` case, an empty match set is just an
+     * empty `DixQuery`.
+     * @param {string} pattern
+     * @returns {string}
+     */
+    queryMany(pattern) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(pattern, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.mdixdatabase_queryMany(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * Exports the entire database as a JSON string.
      * @param {boolean} indented
      * @returns {string}
@@ -925,8 +1024,120 @@ export class MdixDatabase {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
     }
+    /**
+     * Validates this database against `schema` and returns a
+     * `MdixValidationReport`.
+     *
+     * `schema` is borrowed, not consumed — the same `MdixSchema` instance
+     * can validate multiple databases (mirrors the underlying
+     * `SchemaBuilder::validate(&self, ..)` in dixscript core, and the same
+     * pattern mdix-python's `MdixDatabase.validate_schema` already uses).
+     *
+     * NOTE: this method was documented at the top of schema.rs
+     * (`db.validateSchema(schema)`) but was never actually wired up here —
+     * `MdixSchema` and `MdixValidationReport` existed with no way to reach
+     * them from `MdixDatabase` at all. Same shape of bug as `mergeWith`
+     * above (see the regression test docs on that one); this is that
+     * wiring for schema.rs.
+     * @param {MdixSchema} schema
+     * @returns {MdixValidationReport}
+     */
+    validateSchema(schema) {
+        _assertClass(schema, MdixSchema);
+        const ret = wasm.mdixdatabase_validateSchema(this.__wbg_ptr, schema.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return MdixValidationReport.__wrap(ret[0]);
+    }
 }
 if (Symbol.dispose) MdixDatabase.prototype[Symbol.dispose] = MdixDatabase.prototype.free;
+
+export class MdixDlmOutcome {
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(MdixDlmOutcome.prototype);
+        obj.__wbg_ptr = ptr;
+        MdixDlmOutcomeFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        MdixDlmOutcomeFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_mdixdlmoutcome_free(ptr, 0);
+    }
+    /**
+     * @returns {string[]}
+     */
+    errors() {
+        const ret = wasm.mdixdlmoutcome_errors(this.__wbg_ptr);
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * Which DLM modules actually ran, e.g. `["DCompressor.xz",
+     * "DEncryptor.aes256"]` — empty when `source` had no `@DLM` section.
+     * @returns {string[]}
+     */
+    executedModules() {
+        const ret = wasm.mdixdlmoutcome_executedModules(this.__wbg_ptr);
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {boolean}
+     */
+    isSuccess() {
+        const ret = wasm.mdixdlmoutcome_isSuccess(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * The `.mdix.key` file's content as a plain string, ready to hand
+     * straight to `decompileWithDlm`. `undefined` when `source` had no
+     * `@DLM` modules to apply (nothing to decrypt on the way back
+     * either — see the module doc comment above).
+     * @returns {string | undefined}
+     */
+    keyFileContent() {
+        const ret = wasm.mdixdlmoutcome_keyFileContent(this.__wbg_ptr);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getStringFromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+    /**
+     * The compressed/encrypted (or, with no `@DLM` modules, plain
+     * binary-packed) bytes — always populated in memory regardless of
+     * whether any on-disk artifact could be written (never possible on
+     * wasm32 in the first place).
+     * @returns {Uint8Array}
+     */
+    processedData() {
+        const ret = wasm.mdixdlmoutcome_processedData(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {string[]}
+     */
+    warnings() {
+        const ret = wasm.mdixdlmoutcome_warnings(this.__wbg_ptr);
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+}
+if (Symbol.dispose) MdixDlmOutcome.prototype[Symbol.dispose] = MdixDlmOutcome.prototype.free;
 
 /**
  * Returned by `mergeSources`, `mergeSourcesWeighted`, and
@@ -1227,6 +1438,13 @@ if (Symbol.dispose) MdixSchema.prototype[Symbol.dispose] = MdixSchema.prototype.
  * Returned by `MdixDatabase.validateSchema`.
  */
 export class MdixValidationReport {
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(MdixValidationReport.prototype);
+        obj.__wbg_ptr = ptr;
+        MdixValidationReportFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -1404,6 +1622,57 @@ export class MdixWatcher {
 }
 if (Symbol.dispose) MdixWatcher.prototype[Symbol.dispose] = MdixWatcher.prototype.free;
 
+/**
+ * Compiles `source` and, if it declares an `@DLM(DCompressor...
+ * DEncryptor...)` section, runs compression/encryption on the result —
+ * entirely in memory. `sourceLabel` is just an identifier used for
+ * error messages and (if `@DLM` includes `DAuditor`) as the audit
+ * trail's localStorage key — it doesn't need to be a real file name,
+ * though using one consistently is what makes the audit trail track a
+ * given config's history across compiles.
+ * @param {string} source
+ * @param {string} source_label
+ * @returns {MdixDlmOutcome}
+ */
+export function compileWithDlm(source, source_label) {
+    const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(source_label, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compileWithDlm(ptr0, len0, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return MdixDlmOutcome.__wrap(ret[0]);
+}
+
+/**
+ * Reverse of `compileWithDlm`: takes the bytes from `processedData()`
+ * and the string from `keyFileContent()` and returns a normal
+ * `MdixDatabase`, exactly as if you'd `loadStr()`'d the original source.
+ *
+ * Pass `""` for `keyFileContent` when the original `compileWithDlm` call
+ * returned `undefined` for it (source had no `@DLM` modules) — this then
+ * unpacks `data` directly rather than attempting decryption.
+ * @param {Uint8Array} data
+ * @param {string} key_file_content
+ * @param {string} source_label
+ * @returns {MdixDatabase}
+ */
+export function decompileWithDlm(data, key_file_content, source_label) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(key_file_content, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(source_label, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.decompileWithDlm(ptr0, len0, ptr1, len1, ptr2, len2);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return MdixDatabase.__wrap(ret[0]);
+}
+
 export function init() {
     wasm.init();
 }
@@ -1488,6 +1757,19 @@ export function prefetchImport(url, content) {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg___wbindgen_is_function_0095a73b8b156f76: function(arg0) {
+            const ret = typeof(arg0) === 'function';
+            return ret;
+        },
+        __wbg___wbindgen_is_object_5ae8e5880f2c1fbd: function(arg0) {
+            const val = arg0;
+            const ret = typeof(val) === 'object' && val !== null;
+            return ret;
+        },
+        __wbg___wbindgen_is_string_cd444516edc5b180: function(arg0) {
+            const ret = typeof(arg0) === 'string';
+            return ret;
+        },
         __wbg___wbindgen_is_undefined_9e4d92534c42d778: function(arg0) {
             const ret = arg0 === undefined;
             return ret;
@@ -1513,6 +1795,14 @@ function __wbg_get_imports() {
             const ret = arg0.call(arg1);
             return ret;
         }, arguments); },
+        __wbg_call_4708e0c13bdc8e95: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = arg0.call(arg1, arg2);
+            return ret;
+        }, arguments); },
+        __wbg_crypto_574e78ad8b13b65f: function(arg0) {
+            const ret = arg0.crypto;
+            return ret;
+        },
         __wbg_error_7534b8e9a36f1ab4: function(arg0, arg1) {
             let deferred0_0;
             let deferred0_1;
@@ -1524,6 +1814,19 @@ function __wbg_get_imports() {
                 wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
             }
         },
+        __wbg_getItem_0c792d344808dcf5: function() { return handleError(function (arg0, arg1, arg2, arg3) {
+            const ret = arg1.getItem(getStringFromWasm0(arg2, arg3));
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        }, arguments); },
+        __wbg_getRandomValues_9b655bdd369112f2: function() { return handleError(function (arg0, arg1) {
+            globalThis.crypto.getRandomValues(getArrayU8FromWasm0(arg0, arg1));
+        }, arguments); },
+        __wbg_getRandomValues_b8f5dbd5f3995a9e: function() { return handleError(function (arg0, arg1) {
+            arg0.getRandomValues(arg1);
+        }, arguments); },
         __wbg_getTime_1e3cd1391c5c3995: function(arg0) {
             const ret = arg0.getTime();
             return ret;
@@ -1550,10 +1853,18 @@ function __wbg_get_imports() {
             const ret = Array.isArray(arg0);
             return ret;
         },
+        __wbg_length_32ed9a279acd054c: function(arg0) {
+            const ret = arg0.length;
+            return ret;
+        },
         __wbg_localStorage_a22d31b9eacc4594: function() { return handleError(function (arg0) {
             const ret = arg0.localStorage;
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         }, arguments); },
+        __wbg_msCrypto_a61aeb35a24c1329: function(arg0) {
+            const ret = arg0.msCrypto;
+            return ret;
+        },
         __wbg_new_0_73afc35eb544e539: function() {
             const ret = new Date();
             return ret;
@@ -1574,8 +1885,41 @@ function __wbg_get_imports() {
             const ret = new Function(getStringFromWasm0(arg0, arg1));
             return ret;
         },
+        __wbg_new_with_length_a2c39cbe88fd8ff1: function(arg0) {
+            const ret = new Uint8Array(arg0 >>> 0);
+            return ret;
+        },
+        __wbg_node_905d3e251edff8a2: function(arg0) {
+            const ret = arg0.node;
+            return ret;
+        },
+        __wbg_now_2c95c9de01293173: function(arg0) {
+            const ret = arg0.now();
+            return ret;
+        },
         __wbg_parse_708461a1feddfb38: function() { return handleError(function (arg0, arg1) {
             const ret = JSON.parse(getStringFromWasm0(arg0, arg1));
+            return ret;
+        }, arguments); },
+        __wbg_performance_7a3ffd0b17f663ad: function(arg0) {
+            const ret = arg0.performance;
+            return ret;
+        },
+        __wbg_process_dc0fbacc7c1c06f7: function(arg0) {
+            const ret = arg0.process;
+            return ret;
+        },
+        __wbg_prototypesetcall_bdcdcc5842e4d77d: function(arg0, arg1, arg2) {
+            Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), arg2);
+        },
+        __wbg_randomFillSync_ac0988aba3254290: function() { return handleError(function (arg0, arg1) {
+            arg0.randomFillSync(arg1);
+        }, arguments); },
+        __wbg_removeItem_f6369b1a6fa39850: function() { return handleError(function (arg0, arg1, arg2) {
+            arg0.removeItem(getStringFromWasm0(arg1, arg2));
+        }, arguments); },
+        __wbg_require_60cc747a6bc5215a: function() { return handleError(function () {
+            const ret = module.require;
             return ret;
         }, arguments); },
         __wbg_setItem_cf340bb2edbd3089: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
@@ -1604,12 +1948,25 @@ function __wbg_get_imports() {
             const ret = typeof window === 'undefined' ? null : window;
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         },
+        __wbg_subarray_a96e1fef17ed23cb: function(arg0, arg1, arg2) {
+            const ret = arg0.subarray(arg1 >>> 0, arg2 >>> 0);
+            return ret;
+        },
+        __wbg_versions_c01dfd4722a88165: function(arg0) {
+            const ret = arg0.versions;
+            return ret;
+        },
         __wbindgen_cast_0000000000000001: function(arg0) {
             // Cast intrinsic for `F64 -> Externref`.
             const ret = arg0;
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
+            // Cast intrinsic for `Ref(Slice(U8)) -> NamedExternref("Uint8Array")`.
+            const ret = getArrayU8FromWasm0(arg0, arg1);
+            return ret;
+        },
+        __wbindgen_cast_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
             return ret;
@@ -1636,6 +1993,9 @@ const MdixBuilderFinalization = (typeof FinalizationRegistry === 'undefined')
 const MdixDatabaseFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_mdixdatabase_free(ptr >>> 0, 1));
+const MdixDlmOutcomeFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_mdixdlmoutcome_free(ptr >>> 0, 1));
 const MdixMergeOutcomeFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_mdixmergeoutcome_free(ptr >>> 0, 1));
@@ -1658,6 +2018,12 @@ function addToExternrefTable0(obj) {
     return idx;
 }
 
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+
 function getArrayJsValueFromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     const mem = getDataViewMemory0();
@@ -1667,6 +2033,11 @@ function getArrayJsValueFromWasm0(ptr, len) {
     }
     wasm.__externref_drop_slice(ptr, len);
     return result;
+}
+
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
 }
 
 let cachedDataViewMemory0 = null;
@@ -1701,6 +2072,13 @@ function handleError(f, args) {
 
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passArrayJsValueToWasm0(array, malloc) {

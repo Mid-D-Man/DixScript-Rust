@@ -13,7 +13,7 @@
 // `node script.mjs` execution with no bundler in the loop -- see
 // package.json's build:wasm script, which builds both targets, and its
 // "node" export condition, which points real `import ... from
-// "@dixscript/core"` consumers here under plain Node.
+// "@midmanstudio/mdix"` consumers here under plain Node.
 //
 // This file is intentionally identical to index.ts below the import
 // line -- same symbols, same shape, same re-exported TS layer. Keep

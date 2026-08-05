@@ -159,14 +159,26 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
         .to_mdix(&ast, Some(&DixFormatOptions::new()))
         .map_err(CliError::ConversionError)?;
 
-    let output_dir = opts.output_dir.as_deref().unwrap_or(".");
+    // Default to writing next to the source .enc file (same convention as
+    // the key auto-detect above, and the Auditor's "next to source" rule)
+    // instead of the process's current working directory. ("." was the bug:
+    // under `cargo test`, CWD is the crate root, so every decrypt call in
+    // the test suite that omitted `-o` was dropping a plaintext .mdix file
+    // straight into mdix-cli/, which then tripped `cargo publish`'s
+    // git-dirty check.)
+    let output_dir = opts.output_dir.clone().unwrap_or_else(|| {
+        path.parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| ".".to_string())
+    });
     let stem = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("output")
         .trim_end_matches(".enc");
 
-    let output_path_buf = Path::new(output_dir).join(stem);
+    let output_path_buf = Path::new(&output_dir).join(stem);
 
     crate::services::file_io::write_file(&output_path_buf, &mdix_text)?;
 
@@ -178,4 +190,4 @@ pub fn decrypt(path: &Path, opts: &DecryptOpts) -> Result<DecryptResult, CliErro
         encrypted_size,
         elapsed: t.elapsed(),
     })
-        }
+                                           }

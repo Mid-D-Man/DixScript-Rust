@@ -8,6 +8,8 @@
 [![docs.rs](https://img.shields.io/docsrs/dixscript)](https://docs.rs/dixscript)
 [![Downloads](https://img.shields.io/crates/d/dixscript.svg)](https://crates.io/crates/dixscript)
 
+## Documentation Site https://dixscript-docs.pages.dev 
+
 > **"I built this because I was tired of copy-pasting the same JSON config blocks 500 times. Turns out other people hate that too."**  
 > — Mid-D-Man, Creator
 

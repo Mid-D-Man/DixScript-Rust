@@ -68,13 +68,8 @@ csbindgen = "1"
 # cbindgen  → auto-generates mdix_ffi.h (C header for Go cgo / C / C++ consumers).
 cbindgen  = "0.26"
 
-[profile.release]
-opt-level     = 3
-lto           = true
-codegen-units = 1
-strip         = true
-debug         = false
-
-[profile.dev]
-opt-level = 0
-debug     = true
+# NOTE: [profile.release] / [profile.dev] used to be duplicated here.
+# Cargo only reads profiles from the workspace root (see the warning
+# "profiles for the non root package will be ignored"), so the duplicate
+# tables were dead weight — the workspace root Cargo.toml's profiles were
+# always the ones actually applied. Removed rather than kept in sync by hand.

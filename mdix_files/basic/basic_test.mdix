@@ -6,7 +6,7 @@
   ~somethingBigger<tuple>() {
 
   let somebool = "str";
-  if: not somebool.contains("p"){
+  if:not somebool.contains("p") ||somebool == "12"{
 
   }
    i

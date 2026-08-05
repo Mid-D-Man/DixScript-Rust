@@ -9,20 +9,35 @@
     "type": "git",
     "url": "https://github.com/Mid-D-Man/DixScript-Rust"
   },
-  "engines": { "vscode": "^1.82.0" },
-  "categories": ["Programming Languages"],
-  "keywords": ["dixscript", "mdix", "config", "configuration", "data-format"],
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "dixscript",
+    "mdix",
+    "config",
+    "configuration",
+    "data-format"
+  ],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
     "languages": [
       {
         "id": "mdix",
-        "aliases": ["DixScript", "mdix"],
-        "extensions": [".mdix"],
+        "aliases": [
+          "DixScript",
+          "mdix"
+        ],
+        "extensions": [
+          ".mdix"
+        ],
         "icon": {
           "light": "./icons/mdix-file-light.svg",
-          "dark":  "./icons/mdix-file-dark.svg"
+          "dark": "./icons/mdix-file-dark.svg"
         },
         "configuration": "./language-configuration.json"
       }
@@ -50,13 +65,19 @@
         },
         "dixscript.server.trace": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "LSP protocol trace level. Use 'verbose' when reporting bugs."
         },
         "dixscript.server.extraArgs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Extra command-line arguments passed to mdix-lsp."
         }
@@ -64,16 +85,17 @@
     }
   },
   "scripts": {
-    "compile":            "tsc -p ./",
-    "watch":              "tsc -watch -p ./",
-    "vscode:prepublish":  "npm run compile && node scripts/copy-binary.js"
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile && node scripts/copy-binary.js"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "@types/vscode": "^1.82.0",
-    "@types/node":   "^20.0.0",
-    "typescript":    "^5.3.0"
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.3.0"
   }
 }

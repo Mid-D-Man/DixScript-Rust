@@ -1,10 +1,10 @@
-@CONFIG(
+@CONFIG(       
   version -> "1.0.0",
   author -> "GameStudio",
   features -> "advanced",
-  error_handling -> "halt"
+  error_handling -> "halt" 
 )
-
+   
 @ENUMS(
   Difficulty { EASY, NORMAL, HARD, EXTREME, NIGHTMARE }
   Rarity { COMMON, UNCOMMON, RARE, EPIC, LEGENDARY }
@@ -22,6 +22,8 @@
     return Math.round(base * multiplier);
     
   }
+
+
   
   // Create enemy spawn entry
   ~createSpawn<object> (id<string>, level<int>, chance<float>, count<int>, respawn<int>) {
@@ -107,7 +109,7 @@
     createSpawn("scorpion", 6, 0.7, 5, 70),
     createSpawn("sand_worm", 9, 0.4, 2, 150),
     createSpawn("desert_bandit", 7, 0.5, 4, 100)
-  
+   
   enemySpawns.zone_5_swamp::
     createSpawn("slime", 3, 0.8, 8, 50),
     createSpawn("alligator", 8, 0.4, 3, 120),

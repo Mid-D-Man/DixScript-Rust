@@ -2,7 +2,7 @@
 // DLM compile/decompile, AST merge, schema validation, and the content-hash
 // watcher. mdix-wasm's own #[wasm_bindgen_test] suite (tests/web.rs) already
 // covers the underlying Rust behavior in depth — this file only confirms
-// each binding is actually *reachable* through @dixscript/core's public
+// each binding is actually *reachable* through @midmanstudio/mdix's public
 // export surface and that the JS-facing shapes (camelCase methods, JSON
 // conflict/error arrays) look the way consumers will actually use them.
 //
@@ -17,7 +17,7 @@
 // ERR_UNKNOWN_FILE_EXTENSION on it before this file's own code even runs
 // (confirmed directly). dist/index.node.js is the --target nodejs build,
 // which is also exactly what package.json's "node" export condition
-// resolves real `import ... from "@dixscript/core"` consumers to under
+// resolves real `import ... from "@midmanstudio/mdix"` consumers to under
 // plain Node -- so this exercises the same code path they get, not a
 // test-only shortcut.
 

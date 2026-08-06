@@ -1,6 +1,6 @@
 {
   "name": "com.midmanstudio.mdix.webgl",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "displayName": "MidMan Studio — Mdix WebGL",
   "description": "Unity WebGL support for DixScript (.mdix). Bridges MdixDatabase to mdix-wasm via a .jslib shim so the exact same MdixDatabase/Dix API works in WebGL builds, since mdix-ffi (the native P/Invoke backend used everywhere else) cannot be linked into a WebGL player. First-slice coverage only: LoadStr, GetString, GetInt, GetBool, Exists, EntryCount, Dispose. See README.md for setup and current API coverage.",
   "unity": "2022.3",

@@ -1,11 +1,11 @@
-# @dixscript/core
+# @midmanstudio/mdix
 
 WebAssembly runtime for DixScript (`.mdix`) — works in the browser,
 Node.js, and any bundler that supports WASM (Vite, webpack, Rollup).
 
 ## Installation
 ```bash
-npm install @dixscript/core
+npm install @midmanstudio/mdix
 ```
 
 ## Docs
@@ -13,12 +13,12 @@ npm install @dixscript/core
 Full language reference, `.mdix` syntax, and per-binding guides:
 **https://dixscript-docs.pages.dev**
 
-This README covers the `@dixscript/core` JS/TS API specifically — every
+This README covers the `@midmanstudio/mdix` JS/TS API specifically — every
 example below maps 1:1 onto a `#[wasm_bindgen]` binding in `mdix-wasm`.
 
 ## Quick start
 ```typescript
-import { MdixDatabase, MdixBuilder, tryGet } from "@dixscript/core";
+import { MdixDatabase, MdixBuilder, tryGet } from "@midmanstudio/mdix";
 
 // Load from a .mdix source string
 const db = MdixDatabase.loadStr(`
@@ -43,7 +43,7 @@ db.free();
 
 ## Building programmatically
 ```typescript
-import { MdixBuilder } from "@dixscript/core";
+import { MdixBuilder } from "@midmanstudio/mdix";
 
 const db = new MdixBuilder()
   .setConfigVersion("1.0.0")
@@ -90,7 +90,7 @@ its own thing — every one of those operations works on plain decoded values,
 which is exactly what `query()`/`queryMany()` hand back. Use native `Array`
 methods on the result instead:
 ```typescript
-import { query, queryMany, MdixDatabase } from "@dixscript/core";
+import { query, queryMany, MdixDatabase } from "@midmanstudio/mdix";
 
 // query(path) — a plain `tasks = [...]` array, or a `tasks::` GroupArray
 // (the flattener stores a GroupArray's items at the base path either way,
@@ -122,7 +122,7 @@ AST-level merge with weighted-priority conflict resolution, per-source
 labels, and a full conflict report — not a JSON round-trip deep-merge.
 See **https://dixscript-docs.pages.dev** for the full strategy semantics.
 ```typescript
-import { mergeSources, mergeSourcesWeighted, MdixDatabase } from "@dixscript/core";
+import { mergeSources, mergeSourcesWeighted, MdixDatabase } from "@midmanstudio/mdix";
 
 // Sources are weighted in descending order: first gets weight 1.0.
 const outcome = mergeSources([baseSource, overridesSource]);
@@ -146,7 +146,7 @@ const merged = dbA.mergeWith(dbB, "weighted", "concat_dedup").database();
 ## Schema validation
 
 ```typescript
-import { MdixSchema, MdixDatabase } from "@dixscript/core";
+import { MdixSchema, MdixDatabase } from "@midmanstudio/mdix";
 
 const schema = new MdixSchema()
   .requireString("app_name")
@@ -174,7 +174,7 @@ The host (Node's `fs.watch`/`chokidar`, or a browser polling its own
 decides *whether* to re-parse, by content hash instead of a multi-KB
 memcmp on every tick.
 ```typescript
-import { MdixWatcher } from "@dixscript/core";
+import { MdixWatcher } from "@midmanstudio/mdix";
 
 const watcher = new MdixWatcher();
 
@@ -201,7 +201,7 @@ write `.mdix.enc`/`.mdix.key` to disk itself). If `source` has no `@DLM`
 section, `compileWithDlm` still succeeds — `processedData` is just the
 plain binary-packed AST, and `keyFileContent` is `undefined`.
 ```typescript
-import { compileWithDlm, decompileWithDlm } from "@dixscript/core";
+import { compileWithDlm, decompileWithDlm } from "@midmanstudio/mdix";
 
 const source = `
   @DLM(DCompressor.xz, DEncryptor.aes256)
@@ -228,7 +228,7 @@ db.getString("secret"); // "shh"
 All WASM methods throw on failure by default. Import `tryGet` to
 get a `MdixResult<T>` instead:
 ```typescript
-import { tryGet, unwrapOr } from "@dixscript/core";
+import { tryGet, unwrapOr } from "@midmanstudio/mdix";
 
 const port = unwrapOr(tryGet(() => db.getInt("port")), 3000);
 ```

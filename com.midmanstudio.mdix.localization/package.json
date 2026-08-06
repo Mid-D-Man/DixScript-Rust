@@ -1,7 +1,6 @@
-
 {
     "name": "com.midmanstudio.mdix.localization",
-    "version": "2.0.0",
+    "version": "1.0.0",
     "displayName": "MidMan Studio — Mdix Localization",
     "description": "Localization system built on DixScript (.mdix). Self-describing locale files with @ENUMS and @QUICKFUNCS, named CLDR plural forms, translator CSV export/import, hot reload, baked ScriptableObjects for shipped builds. No Addressables dependency.",
     "unity": "2023.1",
@@ -12,6 +11,6 @@
     "license": "MIT",
     "keywords": ["localization", "i18n", "l10n", "dixscript", "mdix", "plurals", "cldr"],
     "dependencies": {
-        "com.midmanstudio.mdix": "2.0.0"
+        "com.midmanstudio.mdix": "1.0.0"
     }
 }

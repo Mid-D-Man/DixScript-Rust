@@ -1,5 +1,5 @@
 {
-  "name": "@dixscript/core",
+  "name": "@midmanstudio/mdix",
   "version": "1.0.0",
   "description": "DixScript (.mdix) runtime for browser and Node.js via WebAssembly",
   "type": "module",

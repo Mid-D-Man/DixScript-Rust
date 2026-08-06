@@ -2,6 +2,16 @@ name: MidManStudio.Mdix — Unity Package Build
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_upm:
+        description: 'Also publish to the upm branch (git URL install point). Leave off for a normal build — this only pushes local libs into the repo via commit-to-repo.'
+        type: boolean
+        default: false
+  push:
+    branches: [master]
+    paths:
+      - 'mdix-ffi/**'
+      - 'mdix-csharp/**'
 
 permissions:
   contents: write
@@ -21,6 +31,11 @@ jobs:
           RUN=false
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            # Already scoped by on.push.paths above (mdix-ffi/** or
+            # mdix-csharp/** changed) — no commit-message flag needed on
+            # top of that, unlike the pull_request case below.
             RUN=true
           elif [ "${{ github.event_name }}" = "pull_request" ]; then
             MSG="${{ github.event.pull_request.title }}"
@@ -356,47 +371,272 @@ jobs:
           name: core-dll-${{ github.run_number }}
           path: core-dll/
 
-      - name: Assemble package directory
+      - name: Assemble package + generate/validate .meta
         run: |
+          set -e
           PKG="com.midmanstudio.mdix"
+          CORRUPT=0
+
+          copy_if() {
+            [ -f "$1" ] && { mkdir -p "$(dirname "$2")"; cp "$1" "$2"; echo "copied $2"; } || echo "missing $1"
+          }
+
+          gen_guid() { python3 -c "import uuid; print(uuid.uuid4().hex)"; }
+
+          # Known Unity duplicate-platformData-block corruption pattern — same
+          # check MidManStudio_Unity's own build-projectile-rust-libs.yml uses.
+          # Never auto-fix this; a hand-authored file that's already corrupt
+          # needs a human, not CI silently overwriting it.
+          fail_on_corruption() {
+            local f="$1"
+            [ -f "$f" ] || return 0
+            if grep -q "^      : Any" "$f"; then
+              echo "❌ CORRUPTED META (duplicate legacy platformData block): $f"
+              echo "   Known Unity duplicate-key import crash. Fix by hand — CI will not overwrite it."
+              CORRUPT=1
+            fi
+          }
+
+          # Guard shared by every write_*_meta below: if a .meta already
+          # exists, leave it untouched — the GUID must stay stable across
+          # rebuilds or every existing scene/prefab reference to this asset
+          # breaks. Only ever generates a fresh one the first time a binary
+          # shows up with no .meta sitting next to it yet.
+          already_has_meta() { [ -f "$1" ]; }
+
+          # Managed C# assembly (Core.dll) — same DLL ships on every platform.
+          write_managed_meta() {
+            local dll="$1" meta="${1}.meta"
+            fail_on_corruption "$meta"
+            already_has_meta "$meta" && return 0
+            [ -f "$dll" ] || return 0
+            local guid; guid=$(gen_guid)
+            cat > "$meta" <<EOF
+          fileFormatVersion: 2
+          guid: $guid
+          PluginImporter:
+            externalObjects: {}
+            serializedVersion: 2
+            iconMap: {}
+            executionOrder: {}
+            defineConstraints: []
+            isPreloaded: 0
+            isOverridable: 0
+            isExplicitlyReferenced: 1
+            validateReferences: 1
+            platformData:
+            - first:
+                Any:
+              second:
+                enabled: 1
+                settings: {}
+            - first:
+                Editor: Editor
+              second:
+                enabled: 1
+                settings:
+                  DefaultValueInitialized: true
+            - first:
+                Standalone: Win64
+              second:
+                enabled: 1
+                settings: {}
+            - first:
+                Standalone: Linux64
+              second:
+                enabled: 1
+                settings: {}
+            - first:
+                Standalone: OSXUniversal
+              second:
+                enabled: 1
+                settings: {}
+            - first:
+                Android: Android
+              second:
+                enabled: 1
+                settings: {}
+            - first:
+                iPhone: iOS
+              second:
+                enabled: 1
+                settings: {}
+            userData:
+            assetBundleName:
+            assetBundleVariant:
+          EOF
+            echo "generated $meta"
+          }
+
+          # Desktop native lib (Windows/Linux/macOS). editor_on: 1 = also load
+          # in the Editor — needs to be 1 for anything you're actually going
+          # to open PackageSandbox and test against locally.
+          write_desktop_meta() {
+            local so="$1" os="$2" cpu="$3" editor_on="$4" meta="${1}.meta"
+            fail_on_corruption "$meta"
+            already_has_meta "$meta" && return 0
+            [ -f "$so" ] || return 0
+            local guid; guid=$(gen_guid)
+            cat > "$meta" <<EOF
+          fileFormatVersion: 2
+          guid: $guid
+          PluginImporter:
+            externalObjects: {}
+            serializedVersion: 2
+            iconMap: {}
+            executionOrder: {}
+            defineConstraints: []
+            isPreloaded: 0
+            isOverridable: 0
+            isExplicitlyReferenced: 0
+            validateReferences: 1
+            platformData:
+            - first:
+                Any:
+              second:
+                enabled: 0
+                settings: {}
+            - first:
+                Editor: Editor
+              second:
+                enabled: $editor_on
+                settings:
+                  DefaultValueInitialized: true
+            - first:
+                Standalone: $os
+              second:
+                enabled: 1
+                settings:
+                  CPU: $cpu
+            userData:
+            assetBundleName:
+            assetBundleVariant:
+          EOF
+            echo "generated $meta"
+          }
+
+          write_android_meta() {
+            local so="$1" cpu="$2" meta="${1}.meta"
+            fail_on_corruption "$meta"
+            already_has_meta "$meta" && return 0
+            [ -f "$so" ] || return 0
+            local guid; guid=$(gen_guid)
+            cat > "$meta" <<EOF
+          fileFormatVersion: 2
+          guid: $guid
+          PluginImporter:
+            externalObjects: {}
+            serializedVersion: 2
+            iconMap: {}
+            executionOrder: {}
+            defineConstraints: []
+            isPreloaded: 0
+            isOverridable: 0
+            isExplicitlyReferenced: 0
+            validateReferences: 1
+            platformData:
+            - first:
+                Android: Android
+              second:
+                enabled: 1
+                settings:
+                  CPU: $cpu
+            - first:
+                Any:
+              second:
+                enabled: 0
+                settings: {}
+            - first:
+                Editor: Editor
+              second:
+                enabled: 0
+                settings:
+                  DefaultValueInitialized: true
+            userData:
+            assetBundleName:
+            assetBundleVariant:
+          EOF
+            echo "generated $meta"
+          }
+
+          write_ios_meta() {
+            local a="$1" meta="${1}.meta"
+            fail_on_corruption "$meta"
+            already_has_meta "$meta" && return 0
+            [ -f "$a" ] || return 0
+            local guid; guid=$(gen_guid)
+            cat > "$meta" <<EOF
+          fileFormatVersion: 2
+          guid: $guid
+          PluginImporter:
+            externalObjects: {}
+            serializedVersion: 2
+            iconMap: {}
+            executionOrder: {}
+            defineConstraints: []
+            isPreloaded: 0
+            isOverridable: 0
+            isExplicitlyReferenced: 0
+            validateReferences: 1
+            platformData:
+            - first:
+                iPhone: iOS
+              second:
+                enabled: 1
+                settings:
+                  CompileFlags:
+                  FrameworkDependencies:
+            - first:
+                Any:
+              second:
+                enabled: 0
+                settings: {}
+            - first:
+                Editor: Editor
+              second:
+                enabled: 0
+                settings:
+                  DefaultValueInitialized: true
+            userData:
+            assetBundleName:
+            assetBundleVariant:
+          EOF
+            echo "generated $meta"
+          }
+
+          # Existing .meta corruption check runs even for files we don't
+          # regenerate below.
+          find "$PKG/Runtime/Plugins" -name "*.meta" 2>/dev/null | while read -r f; do fail_on_corruption "$f"; done
 
           # ── Core DLL ───────────────────────────────────────────────────────
-          mkdir -p "$PKG/Runtime/Plugins"
-          cp core-dll/MidManStudio.Mdix.Core.dll \
-             "$PKG/Runtime/Plugins/MidManStudio.Mdix.Core.dll"
+          copy_if core-dll/MidManStudio.Mdix.Core.dll "$PKG/Runtime/Plugins/MidManStudio.Mdix.Core.dll"
+          write_managed_meta "$PKG/Runtime/Plugins/MidManStudio.Mdix.Core.dll"
 
           # ── Native — Linux x64 ─────────────────────────────────────────────
-          mkdir -p "$PKG/Runtime/Plugins/Linux/x86_64"
-          cp ffi-ubuntu/linux-x64/libmdix_ffi.so \
-             "$PKG/Runtime/Plugins/Linux/x86_64/libmdix_ffi.so"
+          copy_if ffi-ubuntu/linux-x64/libmdix_ffi.so "$PKG/Runtime/Plugins/Linux/x86_64/libmdix_ffi.so"
+          write_desktop_meta "$PKG/Runtime/Plugins/Linux/x86_64/libmdix_ffi.so" Linux64 x86_64 1
 
           # ── Native — Windows x64 ───────────────────────────────────────────
-          mkdir -p "$PKG/Runtime/Plugins/Windows/x86_64"
-          cp ffi-ubuntu/windows-x64/mdix_ffi.dll \
-             "$PKG/Runtime/Plugins/Windows/x86_64/mdix_ffi.dll"
+          copy_if ffi-ubuntu/windows-x64/mdix_ffi.dll "$PKG/Runtime/Plugins/Windows/x86_64/mdix_ffi.dll"
+          write_desktop_meta "$PKG/Runtime/Plugins/Windows/x86_64/mdix_ffi.dll" Win64 x86_64 1
 
           # ── Native — Android (arm64-v8a, armeabi-v7a, x86_64) ──────────────
-          mkdir -p "$PKG/Runtime/Plugins/Android/arm64-v8a"
-          cp ffi-ubuntu/android-arm64-v8a/libmdix_ffi.so \
-             "$PKG/Runtime/Plugins/Android/arm64-v8a/libmdix_ffi.so"
-
-          mkdir -p "$PKG/Runtime/Plugins/Android/armeabi-v7a"
-          cp ffi-ubuntu/android-armeabi-v7a/libmdix_ffi.so \
-             "$PKG/Runtime/Plugins/Android/armeabi-v7a/libmdix_ffi.so"
-
-          mkdir -p "$PKG/Runtime/Plugins/Android/x86_64"
-          cp ffi-ubuntu/android-x86_64/libmdix_ffi.so \
-             "$PKG/Runtime/Plugins/Android/x86_64/libmdix_ffi.so"
+          declare -A CPUMAP=( [arm64-v8a]=ARM64 [armeabi-v7a]=ARMv7 [x86_64]=X86_64 )
+          for ABI in arm64-v8a armeabi-v7a x86_64; do
+            DST="$PKG/Runtime/Plugins/Android/$ABI/libmdix_ffi.so"
+            copy_if "ffi-ubuntu/android-$ABI/libmdix_ffi.so" "$DST"
+            write_android_meta "$DST" "${CPUMAP[$ABI]}"
+          done
 
           # ── Native — macOS universal ───────────────────────────────────────
-          mkdir -p "$PKG/Runtime/Plugins/macOS"
-          cp ffi-macos/macos-universal/libmdix_ffi.dylib \
-             "$PKG/Runtime/Plugins/macOS/libmdix_ffi.dylib"
+          copy_if ffi-macos/macos-universal/libmdix_ffi.dylib "$PKG/Runtime/Plugins/macOS/libmdix_ffi.dylib"
+          write_desktop_meta "$PKG/Runtime/Plugins/macOS/libmdix_ffi.dylib" OSXUniversal AnyCPU 1
 
           # ── Native — iOS static ────────────────────────────────────────────
-          mkdir -p "$PKG/Runtime/Plugins/iOS"
-          cp ffi-macos/ios-arm64/libmdix_ffi.a \
-             "$PKG/Runtime/Plugins/iOS/libmdix_ffi.a"
+          copy_if ffi-macos/ios-arm64/libmdix_ffi.a "$PKG/Runtime/Plugins/iOS/libmdix_ffi.a"
+          write_ios_meta "$PKG/Runtime/Plugins/iOS/libmdix_ffi.a"
+
+          [ "$CORRUPT" = "1" ] && { echo "❌ One or more existing .meta files are corrupted — see above. Fix by hand before this can pass."; exit 1; }
 
           echo "Package contents:"
           find "$PKG" -type f | sort
@@ -502,14 +742,63 @@ jobs:
           path: com.midmanstudio.mdix/
           retention-days: 1
 
-  # ── 6. Push to upm branch ────────────────────────────────────────────────
+  # ── 6. Commit rebuilt package back onto the ref that triggered this run ───
+  #
+  # This is what makes local file: package references "just work" after a
+  # plain `git pull` — same convention MidManStudio_Unity's own
+  # build-projectile-rust-libs.yml / build-audio-libs.yml already use for
+  # projectile_core / mid_audio. Without this job, the only place built
+  # binaries ever land is the upm branch (publish-upm below), which a
+  # normal local clone tracking master never sees.
+  #
+  # Runs on whatever ref triggered the build — push to master, or
+  # workflow_dispatch from a manually-selected branch. Does not assume
+  # master specifically.
+  commit-to-repo:
+    runs-on: ubuntu-latest
+    needs: assemble-package
+    if: |
+      needs.assemble-package.result == 'success' &&
+      (github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch')
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Download unpacked package
+        uses: actions/download-artifact@v4
+        with:
+          name: mdix-unity-unpacked-${{ github.run_number }}
+          path: com.midmanstudio.mdix/
+
+      - name: Commit rebuilt binaries
+        run: |
+          git config user.name  "DixScript CI"
+          git config user.email "ci@dixscript.dev"
+
+          git add com.midmanstudio.mdix/
+
+          if git diff --staged --quiet; then
+            echo "No changes — binaries on ${{ github.ref_name }} already up to date."
+            exit 0
+          fi
+
+          git commit -m "ci: rebuild mdix Unity package (build #${{ github.run_number }}) [skip ci]"
+          git push origin HEAD:${{ github.ref_name }}
+
+          echo "Committed rebuilt package directly to ${{ github.ref_name }}."
+          echo "A plain 'git pull' on this branch now has the new binaries —"
+          echo "no manual cargo/dotnet build needed for local file: package testing."
+
+  # ── 7. Push to upm branch ────────────────────────────────────────────────
   publish-upm:
     runs-on: ubuntu-latest
     needs: assemble-package
     if: |
-      github.ref == 'refs/heads/master' ||
-      github.ref == 'refs/heads/main'   ||
-      github.event_name == 'workflow_dispatch'
+      needs.assemble-package.result == 'success' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.publish_upm == true
 
     steps:
       - uses: actions/checkout@v4
@@ -563,10 +852,10 @@ jobs:
           echo "Install via UPM:"
           echo "  https://github.com/${{ github.repository }}.git#upm"
 
-  # ── 7. Summary ───────────────────────────────────────────────────────────
+  # ── 8. Summary ───────────────────────────────────────────────────────────
   summary:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, build-ffi-ubuntu, build-ffi-macos, build-core-dll, assemble-package, publish-upm]
+    needs: [parse-trigger, build-ffi-ubuntu, build-ffi-macos, build-core-dll, assemble-package, commit-to-repo, publish-upm]
     if: always()
 
     steps:
@@ -578,16 +867,19 @@ jobs:
           echo "Build:        #${{ github.run_number }}"
           echo "Branch:       ${{ github.ref_name }}"
           echo "Trigger:      ${{ github.event_name }}"
+          echo "Publish UPM requested: ${{ github.event.inputs.publish_upm || 'false (not a manual dispatch)' }}"
           echo ""
           echo "FFI (ubuntu): ${{ needs.build-ffi-ubuntu.result  || 'skipped' }}"
           echo "FFI (macOS):  ${{ needs.build-ffi-macos.result   || 'skipped' }}"
           echo "Core DLL:     ${{ needs.build-core-dll.result     || 'skipped' }}"
           echo "Assemble:     ${{ needs.assemble-package.result   || 'skipped' }}"
+          echo "Commit repo:  ${{ needs.commit-to-repo.result     || 'skipped' }}"
           echo "Publish UPM:  ${{ needs.publish-upm.result        || 'skipped' }}"
           echo ""
 
           if [ "${{ needs.parse-trigger.outputs.run_unity }}" != "true" ]; then
-            echo "Skipped — commit message did not contain --mdix-unity"
+            echo "Skipped — not triggered (push path filter didn't match mdix-ffi/**"
+            echo "or mdix-csharp/**, or PR title lacked --mdix-unity)."
           elif [ "${{ needs.assemble-package.result }}" = "success" ]; then
             echo "Package artifact: mdix-unity-package-${{ github.run_number }}"
             echo "Download from Actions → this run → Artifacts"

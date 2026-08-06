@@ -58,37 +58,17 @@
   -->
 
   <!--
-    ROOT CAUSE OF YOUR BUILD ERRORS (#2):
-    Manifest.addin.xml's <StockIcon> extension pointed at mdix-file-icon.svg /
-    mdix-file-icon-dark.svg, and the old csproj had <None Include="Resources\...svg">
-    entries for them — but no Resources folder, and no SVGs, ever actually existed in
-    mdix-vsmac. That's a guaranteed "file not found" at build time.
-
-    2026-08-03 update: the actual files that got added to Resources/ landed as
-    mdix-file.svg / mdix-file-dark.svg (no "-icon" in the name) — updated the
-    references below and in Manifest.addin.xml to match, rather than re-renaming
-    the files again.
-
-    Using Update= here, not Include=: the same default-item-globbing that bit the
-    Manifest.addin.xml EmbeddedResource item above also applies to None items — the SDK
-    auto-includes arbitrary files under the project directory (svg, json, extensionless
-    binaries, etc.) as None by default. Include= would double-declare them and throw the
-    same NETSDK1022 you just hit; Update= just attaches CopyToOutputDirectory metadata to
-    the item the SDK already added, without re-adding it.
-
-    Note: copying these to the output directory is necessary but not sufficient for
-    them to end up in the .mpack — vstool setup pack only bundles files the addin
-    manifest actually declares as belonging to it. That declaration now lives in
-    AddinInfo.cs as [assembly: ImportAddinFile(...)] attributes.
+    2026-08-06 — icon Resources block removed (was mdix-file.svg /
+    mdix-file-dark.svg). The crash report from the build that used these
+    (mdix-vsmac/Issues.txt) showed VS4Mac's own crash monitor FailFasting on
+    a native NSException thrown mid-redraw, right after this became the
+    first build where the StockIcons extension point path was actually
+    correct — i.e. the first time the SVG was genuinely rasterized rather
+    than silently skipped. Pulled as a clean isolation test; see the
+    comment in Manifest.addin.xml and AddinInfo.cs for the full reasoning.
+    If it comes back later, restore this block and the matching
+    <StockIcon>/ImportAddinFile entries together.
   -->
-  <ItemGroup>
-    <None Update="Resources\mdix-file.svg" Condition="Exists('Resources\mdix-file.svg')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Resources\mdix-file-dark.svg" Condition="Exists('Resources\mdix-file-dark.svg')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
 
   <!--
     2026-08-03 — ROOT CAUSE of the FATAL ERROR during `vstool setup pack`
@@ -96,39 +76,33 @@
     and of the 7KB .mpack: this ItemGroup used Update=, not Include=.
 
     Update= only attaches metadata (CopyToOutputDirectory, Link) to an item
-    that's ALREADY part of the project's item list. Resources\*.svg above
-    works with Update= because those files live outside bin/ and obj/, so the
-    SDK's default globbing auto-discovers them as None items first.
-
-    bin\darwin-x64\mdix-lsp and bin\darwin-arm64\mdix-lsp are different: per
-    Microsoft's own docs (learn.microsoft.com/en-us/dotnet/core/project-sdk/
-    overview — "Default includes and excludes" — and .../msbuild-props,
-    DefaultItemExcludes), the SDK excludes $(BaseOutputPath) (bin\) and
-    $(BaseIntermediateOutputPath) (obj\) from default item globbing,
-    unconditionally, so the SDK never adds these files as items in the first
-    place. Update= on a nonexistent item is a silent no-op — no warning, no
-    error, it just does nothing. That's why the build log's
-    _CopyOutOfDateSourceItemsToOutputDirectory target only ever copied the
-    two SVGs and never touched mdix-lsp: MSBuild had no idea the file was
-    supposed to go anywhere.
+    that's ALREADY part of the project's item list. bin\ and obj\ are
+    excluded from the SDK's default item globbing unconditionally (per
+    Microsoft's own docs — "Default includes and excludes" /
+    DefaultItemExcludes), so the SDK never adds these files as items in the
+    first place, and Update= on a nonexistent item is a silent no-op — no
+    warning, no error, it just does nothing.
 
     Fix: Include= instead of Update=. Explicit Include items are authored by
     us, not produced by the default wildcard glob, so DefaultItemExcludes
     (which only filters the SDK's own implicit **\* glob) never applies to
-    them — this is the standard, documented way to pull a file that
-    physically lives under bin/ or obj/ into the build as a real item (the
-    same trick used for pulling generated sources out of obj/ before Roslyn
-    incremental generators existed). No duplicate-item risk here (unlike the
-    SVGs/Manifest.addin.xml earlier): since bin/ was never auto-included,
-    there's no existing default item for Include= to collide with.
+    them. Confirmed working: unzip -l on the resulting .mpack showed
+    lsp/mdix-lsp present at the correct nested path.
 
-    Condition still guards against the file not existing yet (before
-    copy-binary.sh has run). Same packaging note as the icons above: being
-    copied to the output directory is necessary but not sufficient for this
-    to end up in the .mpack — see the [assembly: ImportAddinFile
-    ("lsp/mdix-lsp")] declaration in AddinInfo.cs, which is what actually
-    makes vstool setup pack include it once it's really sitting at
-    bin/<config>/net7.0/lsp/mdix-lsp.
+    2026-08-06 — added the mdix CLI binary (mdix-cli crate, see its
+    Cargo.toml [[bin]] name = "mdix") alongside mdix-lsp here, same fix
+    applied to mdix-vscode's copy-binary.js. mdix-lsp's own CLI resolution
+    (which_mdix() in mdix-lsp/src/features/commands.rs) checks PATH first,
+    then falls back to looking next to its own running executable — landing
+    mdix at lsp/mdix, right beside lsp/mdix-lsp, means that fallback finds
+    it with nothing else required.
+
+    Condition still guards against the files not existing yet (before
+    copy-binary.sh has run). Same packaging note as before: being copied to
+    the output directory is necessary but not sufficient — see the
+    [assembly: ImportAddinFile(...)] declarations in AddinInfo.cs, which are
+    what actually makes vstool setup pack include these once they're really
+    sitting at bin/<config>/net7.0/lsp/.
   -->
   <ItemGroup>
     <None Include="bin\darwin-arm64\mdix-lsp" Condition="Exists('bin\darwin-arm64\mdix-lsp')">
@@ -138,6 +112,14 @@
     <None Include="bin\darwin-x64\mdix-lsp" Condition="Exists('bin\darwin-x64\mdix-lsp')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>lsp\mdix-lsp</Link>
+    </None>
+    <None Include="bin\darwin-arm64\mdix" Condition="Exists('bin\darwin-arm64\mdix')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>lsp\mdix</Link>
+    </None>
+    <None Include="bin\darwin-x64\mdix" Condition="Exists('bin\darwin-x64\mdix')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>lsp\mdix</Link>
     </None>
   </ItemGroup>
 

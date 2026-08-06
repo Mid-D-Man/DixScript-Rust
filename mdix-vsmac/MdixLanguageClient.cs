@@ -29,76 +29,45 @@
 //      form at all"). It does; the 2022 Cocoa/.NET7 rewrite bundles it
 //      directly rather than requiring the old separate mrward .mpack.
 //
-// What's DIFFERENT here vs. MdixLanguageClient.cs.experimental (which was on
-// the right track structurally, just against an incomplete/older picture of
-// the interface):
-//   - Added `ShowNotificationOnInitializeFailed` (bool) — a property that
-//     doesn't exist in Matt Ward's 2018 walkthrough OR the .experimental
-//     file, but is required by the interface as it exists in the
-//     Microsoft.VisualStudio.LanguageServer.Client package version actually
-//     resolved on this machine (confirmed via the official current API
-//     reference: learn.microsoft.com/en-us/dotnet/api/microsoft.
-//     visualstudio.languageserver.client.ilanguageclient).
-//   - `OnServerInitializeFailedAsync` — the interface declares TWO
-//     overloads, `(Exception)` and `(ILanguageClientInitializationInfo)`.
-//     The .experimental file only implemented the Exception one; your build
-//     error named the ILanguageClientInitializationInfo one specifically as
-//     missing. Both are implemented below.
-//   - Manifest.addin.xml needs a matching update (delivered alongside this
-//     file) — without registering this assembly for MEF composition
-//     scanning under "/MonoDevelop/Ide/Composition", the host will never
-//     discover the [Export(typeof(ILanguageClient))] class below no matter
-//     how correctly it compiles.
-//
 // I can't compile this myself — no .NET toolchain, and even with one, no
-// copy of the actual VS4Mac SDK/app bundle to build against. This is a
-// best-effort synthesis against the official, current interface reference
-// plus your own build cache's confirmed assembly resolution — it should be
-// structurally correct, but treat the next `vstool build`/`dotnet build` run
-// on your machine as the real test, and send me whatever it says if
-// anything's still off.
+// copy of the actual VS4Mac SDK/app bundle to build against. Treat the next
+// `vstool build`/`dotnet build` run on your machine as the real test.
 // ============================================================================
 //
 // ----------------------------------------------------------------------------
 // 2026-08-02 update — clearing the 14 build warnings from Issues.cs.
-// Checked the actual current ILanguageClient reference page (learn.
-// microsoft.com/.../ilanguageclient.onserverinitializefailedasync) rather
-// than assume anything from the notes above still holds:
+// (CS8603 fix on OnServerInitializeFailedAsync, dead-overload removal,
+// assembly-level [SupportedOSPlatform("macos")] for the CA1416 warnings.
+// Full reasoning in earlier revisions of this file / conversation history.)
+// ----------------------------------------------------------------------------
 //
-//   - The interface really does declare
-//     Task<InitializationFailureContext?> OnServerInitializeFailedAsync(
-//         ILanguageClientInitializationInfo initializationState)
-//     — a Task<T>, not a plain Task. That means the PUBLIC (non-explicit)
-//     overload that used to sit here, `public Task
-//     OnServerInitializeFailedAsync(ILanguageClientInitializationInfo) =>
-//     Task.CompletedTask;`, never actually implemented the interface — its
-//     return type doesn't match, so it compiled only because C# allows an
-//     explicit interface implementation to coexist with an unrelated public
-//     method of the same name/parameters. The host only ever calls through
-//     the ILanguageClient reference, which resolves to the explicit
-//     implementation further down — so that public overload was dead code,
-//     never invoked by anything. Removed it rather than leave a method that
-//     looks load-bearing but isn't.
-//   - CS8603 on the explicit implementation's `return default;`: default of
-//     Task<T> is a null Task reference, which is what the analyzer is
-//     correctly flagging (and which would NullReferenceException if the
-//     host ever awaited it). Changed to
-//     Task.FromResult<InitializationFailureContext?>(null) — a real
-//     completed Task wrapping a null context, which is what "no special
-//     failure context" actually means here per the interface docs.
-//   - The 12 CA1416 warnings (Process/ProcessStartInfo "only supported on
-//     macOS/OSX") are because this csproj targets plain net7.0 with no
-//     platform suffix, so the analyzer doesn't know this assembly only ever
-//     runs inside VS4Mac on macOS. Per Microsoft's own CA1416 docs
-//     (learn.microsoft.com/.../quality-rules/ca1416 — "you can mark ... an
-//     entire assembly"), the documented fix for exactly this case is an
-//     assembly-level [SupportedOSPlatform] attribute. Added below.
-//   - MSB3243 (System.Security.Cryptography.Pkcs/Xml 6.0 vs 7.0) is left
-//     alone: MSBuild is just choosing the higher of two versions, and at
-//     runtime VS4Mac's own MonoBundle copy (7.0.0.0, confirmed in your
-//     project cache) is what actually loads either way, since this runs
-//     inside the host process rather than as a standalone exe with its own
-//     binding config. Informational only.
+// ----------------------------------------------------------------------------
+// 2026-08-06 — diagnostic logging added throughout. Reason: package installs
+// clean, no warnings, mdix-lsp confirmed present in the .mpack (unzip -l) —
+// and yet nothing happens when opening a .mdix file. No colors, no
+// completions, but ALSO no crash and no error notification.
+//
+// Per Matt Ward's own walkthrough (lastexitcode.com/blog/2018/03/18/
+// LanguageServerSupportInVisualStudioMac7-4/), the real activation chain is:
+//   MEF discovers [Export(typeof(ILanguageClient))] and constructs it
+//     -> host calls OnLoadedAsync()
+//     -> OnLoadedAsync fires the StartAsync event
+//     -> the HOST's own base LSP-client infrastructure (not our code) is
+//        what actually calls ActivateAsync() in response to that event
+//
+// OnLoadedAsync here already does the right thing (StartAsync?.InvokeAsync
+// (...)), so the C# logic itself looks correct against the documented
+// pattern -- which means total silence most likely means MEF never
+// instantiated this class in the first place, and everything downstream
+// never got a chance to run OR fail. Rather than guess further at why
+// composition might not be finding it, logging a breadcrumb at every stage
+// turns "nothing happens" into "here's exactly how far it got":
+//   constructed -> OnLoadedAsync entered -> StartAsync had a subscriber
+//   -> ActivateAsync entered -> process launched -> initialized/failed
+//
+// Writes to /tmp/mdix-debug.log (not Desktop -- avoids any sandbox/
+// permission ambiguity). Wrapped in try/catch purely so a logging failure
+// itself can never mask or alter the real behavior being diagnosed.
 // ----------------------------------------------------------------------------
 
 using Microsoft.VisualStudio.LanguageServer.Client;
@@ -123,6 +92,24 @@ using System.Threading.Tasks;
 
 namespace MidManStudio.Mdix
 {
+    // Shared by everything below -- one log file, one place to look.
+    internal static class MdixDebugLog
+    {
+        const string LogPath = "/tmp/mdix-debug.log";
+
+        public static void Write(string message)
+        {
+            try
+            {
+                File.AppendAllText(LogPath, $"{DateTime.Now:HH:mm:ss.fff} {message}\n");
+            }
+            catch
+            {
+                // Never let logging itself be the reason something breaks.
+            }
+        }
+    }
+
     // Maps the .mdix file extension to a content type, so the IDE knows this
     // language client applies to DixScript files. Required companion piece
     // alongside the client itself -- without it ActivateAsync never fires.
@@ -139,6 +126,15 @@ namespace MidManStudio.Mdix
         [ContentType("mdix")]
         internal static FileExtensionToContentTypeDefinition? MdixFileExtensionDefinition;
 #pragma warning restore CS0649
+
+        // Static constructors run once, the first time ANYTHING in this
+        // class is touched -- including MEF just inspecting the exports
+        // above during composition. If this line never shows up in the log,
+        // MEF isn't even looking at this assembly's content-type exports.
+        static MdixContentDefinition()
+        {
+            MdixDebugLog.Write("MdixContentDefinition static ctor ran (MEF touched this class)");
+        }
     }
 
     [ContentType("mdix")]
@@ -169,9 +165,21 @@ namespace MidManStudio.Mdix
         // signal they'd otherwise get.
         public bool ShowNotificationOnInitializeFailed => true;
 
+        public MdixLanguageClient()
+        {
+            // If this line never appears in /tmp/mdix-debug.log after
+            // opening a .mdix file, MEF composition never constructed this
+            // class at all -- the problem is entirely on the addin-loading /
+            // composition side, not anything below this point.
+            MdixDebugLog.Write("MdixLanguageClient constructed (MEF instantiated the export)");
+        }
+
         public Task<Connection?> ActivateAsync(CancellationToken token)
         {
+            MdixDebugLog.Write("ActivateAsync entered");
+
             var serverPath = ResolveServerPath();
+            MdixDebugLog.Write($"ActivateAsync: resolved server path = {serverPath}");
 
             var info = new ProcessStartInfo
             {
@@ -185,11 +193,27 @@ namespace MidManStudio.Mdix
             var process = new Process { StartInfo = info };
 
             Connection? connection = null;
-            if (process.Start())
+            try
             {
-                connection = new Connection(
-                    process.StandardOutput.BaseStream,
-                    process.StandardInput.BaseStream);
+                if (process.Start())
+                {
+                    MdixDebugLog.Write($"ActivateAsync: process.Start() succeeded, pid={process.Id}");
+                    connection = new Connection(
+                        process.StandardOutput.BaseStream,
+                        process.StandardInput.BaseStream);
+                }
+                else
+                {
+                    MdixDebugLog.Write("ActivateAsync: process.Start() returned false");
+                }
+            }
+            catch (Exception ex)
+            {
+                // process.Start() throws (rather than returning false) when
+                // the file genuinely can't be found/executed -- e.g. wrong
+                // path, missing +x bit, bad architecture. Logging the real
+                // exception here rather than letting it propagate silently.
+                MdixDebugLog.Write($"ActivateAsync: process.Start() THREW: {ex.GetType().Name}: {ex.Message}");
             }
 
             return Task.FromResult(connection);
@@ -197,13 +221,23 @@ namespace MidManStudio.Mdix
 
         public async Task OnLoadedAsync()
         {
+            MdixDebugLog.Write($"OnLoadedAsync entered, StartAsync has subscriber = {StartAsync != null}");
+
             if (StartAsync != null)
                 await StartAsync.InvokeAsync(this, EventArgs.Empty);
         }
 
-        public Task OnServerInitializedAsync() => Task.CompletedTask;
+        public Task OnServerInitializedAsync()
+        {
+            MdixDebugLog.Write("OnServerInitializedAsync -- server initialized successfully");
+            return Task.CompletedTask;
+        }
 
-        public Task OnServerInitializeFailedAsync(Exception e) => Task.CompletedTask;
+        public Task OnServerInitializeFailedAsync(Exception e)
+        {
+            MdixDebugLog.Write($"OnServerInitializeFailedAsync(Exception) -- {e.GetType().Name}: {e.Message}");
+            return Task.CompletedTask;
+        }
 
         // Same resolution order as the VS Code / mdix-lsp wrappers: env
         // override, then bundled binary next to this assembly, then PATH.
@@ -222,12 +256,10 @@ namespace MidManStudio.Mdix
         }
 
         // This IS the real interface member (return type is
-        // Task<InitializationFailureContext?>, not plain Task — see the
-        // 2026-08-02 note at the top of this file for why the previous
-        // public non-explicit overload of the same name was dead code and
-        // got removed).
+        // Task<InitializationFailureContext?>, not plain Task).
         Task<InitializationFailureContext?> ILanguageClient.OnServerInitializeFailedAsync(ILanguageClientInitializationInfo initializationState)
         {
+            MdixDebugLog.Write("ILanguageClient.OnServerInitializeFailedAsync(ILanguageClientInitializationInfo) called");
             return Task.FromResult<InitializationFailureContext?>(null);
         }
     }

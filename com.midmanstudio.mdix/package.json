@@ -1,14 +1,26 @@
 {
   "name": "com.midmanstudio.mdix",
   "version": "1.0.0",
-  "displayName": "MidMan Studio — Mdix",
-  "description": "DixScript (.mdix) runtime for Unity. Structured typed encrypted game data — more powerful than PlayerPrefs, lighter than SQLite.",
+  "displayName": "MidMan Studio \u2014 Mdix",
+  "description": "DixScript (.mdix) runtime for Unity. Structured typed encrypted game data \u2014 more powerful than PlayerPrefs, lighter than SQLite.",
   "unity": "2022.3",
   "author": {
     "name": "MidManStudio",
     "url": "https://github.com/Mid-D-Man/DixScript-Rust"
   },
   "license": "MIT",
-  "keywords": ["config", "data", "encryption", "save", "dixscript"],
-  "dependencies": {}
+  "keywords": [
+    "config",
+    "data",
+    "encryption",
+    "save",
+    "dixscript"
+  ],
+  "dependencies": {},
+  "_build": {
+    "number": "1153",
+    "commit": "482d97f1",
+    "date": "2026-08-06T04:22:22Z",
+    "branch": "master"
+  }
 }

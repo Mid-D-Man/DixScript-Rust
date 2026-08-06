@@ -25,12 +25,22 @@ using MonoDevelop.Core;
 // had a <Runtime> section, so packing only ever produced the DLL itself —
 // no mdix-lsp binary, no icon SVGs. That's the entire 7KB.
 //
-// Confirmed fixed: unzip -l on the resulting .mpack now shows lsp/mdix-lsp
-// present at the correct nested path (57,100,400 bytes), so the ImportAddinFile
-// declaration below is doing its job and the subdirectory survives packaging
-// intact -- no need to flatten it.
+// Confirmed fixed: unzip -l on the resulting .mpack showed lsp/mdix-lsp
+// present at the correct nested path (57,100,400 bytes), so the
+// ImportAddinFile declaration below is doing its job and the subdirectory
+// survives packaging intact.
 // ----------------------------------------------------------------------------
 [assembly: ImportAddinFile("lsp/mdix-lsp")]
+
+// 2026-08-06 — mdix (the mdix-cli crate's binary — see mdix-cli/Cargo.toml's
+// [[bin]] name = "mdix") added alongside mdix-lsp, same fix as
+// mdix-vscode's copy-binary.js. mdix-lsp's own CLI resolution (which_mdix()
+// in mdix-lsp/src/features/commands.rs) falls back to looking next to its
+// own running executable when it's not on PATH — landing this at lsp/mdix,
+// right beside lsp/mdix-lsp (see the matching MdixAddin.csproj and
+// copy-binary.sh changes), means that fallback finds it with nothing else
+// required inside VS4Mac either.
+[assembly: ImportAddinFile("lsp/mdix")]
 
 // 2026-08-06 — the two Resources/*.svg ImportAddinFile lines that used to be
 // here are removed, along with the matching <StockIcon> extension and the

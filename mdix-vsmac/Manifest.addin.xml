@@ -20,38 +20,35 @@
     <Assembly file="MdixLanguageSupport.dll" />
   </Extension>
 
+  <!--
+    2026-08-06 — icon="md-mdix-file" removed. The crash report from this
+    build (Issues.txt) shows a real native NSException, thrown mid-redraw
+    (Core Animation transaction flush), caught by VS4Mac's own
+    VisualStudioApplicationMonitor.CrashOnException — which deliberately
+    FailFasts rather than continue with Cocoa's internal state possibly
+    corrupted. This build is the first one where the StockIcons extension
+    point path was actually correct, meaning it's the first time VS4Mac
+    ever genuinely tried to rasterize Resources/mdix-file.svg. The OS field
+    in the crash dump confirms 10.15.7 -- Catalina is literally the first
+    macOS version with any native SVG image support (CoreSVG), which makes
+    a loose-file (non-Asset-Catalog) SVG load a real candidate for hitting
+    an immature/edge-case path in that framework.
+    Pulling the icon out entirely for now rather than guessing at the SVG
+    again -- clean isolation test: if the crash and the folder-expand issue
+    both go away without it, that confirms the icon load as the cause, and
+    it can go back on the backlog as a cosmetic-only, non-blocking fix. If
+    they DON'T go away, we've ruled the icon out completely and know to
+    look elsewhere next, rather than re-guessing a fourth time.
+    The StockIcons extension block and the two ImportAddinFile("Resources/
+    ...") lines in AddinInfo.cs are removed together with this.
+  -->
   <Extension path="/MonoDevelop/Core/MimeTypes">
     <MimeType
         id="text/x-mdix"
         _description="DixScript Configuration File"
-        icon="md-mdix-file"
         isText="true">
       <File pattern="*.mdix" />
     </MimeType>
-  </Extension>
-
-  <!--
-    2026-08-03 — ROOT CAUSE OF THE INSTALL WARNING ("is trying to extend
-    '/MonoDevelop/Ide/StockIcons', but there isn't any add-in defining this
-    extension point") and, most likely, the folder-expand/dropdown issue:
-    wrong top-level namespace. Confirmed against mono/monodevelop's actual
-    current source (github.com/mono/monodevelop) — every real addin that
-    registers a StockIcon (MonoDevelop.Deployment, MonoDevelop.XmlEditor,
-    MonoDevelop.DotNetCore, MonoDevelop.Refactoring, MonoDevelop.Profiling,
-    Unity-Technologies/MonoDevelop.UnityMode) extends
-    "/MonoDevelop/Core/StockIcons" — under Core, not Ide. That extension
-    point genuinely doesn't exist under Ide, which is exactly what the
-    install warning said and why the icon registration was silently
-    dropped. Since the MimeType extension above references icon=
-    "md-mdix-file", and that stock icon was therefore never actually
-    registered, resolving it while rendering a .mdix file's tree node is
-    the most likely cause of the folder not expanding.
-
-    resource="mdix-file.svg" also corrected earlier to match the file that
-    actually exists in Resources/ (mdix-file-icon.svg never did).
-  -->
-  <Extension path="/MonoDevelop/Core/StockIcons">
-    <StockIcon stockid="md-mdix-file" resource="mdix-file.svg" />
   </Extension>
 
   <Extension path="/MonoDevelop/Ide/FileFilters">

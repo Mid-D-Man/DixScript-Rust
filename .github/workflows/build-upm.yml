@@ -2,6 +2,16 @@ name: MidManStudio.Mdix — Unity Package Build
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_upm:
+        description: 'Also publish to the upm branch (git URL install point). Leave off for a normal build — this only pushes local libs into the repo via commit-to-repo.'
+        type: boolean
+        default: false
+  push:
+    branches: [master]
+    paths:
+      - 'mdix-ffi/**'
+      - 'mdix-csharp/**'
 
 permissions:
   contents: write
@@ -21,6 +31,11 @@ jobs:
           RUN=false
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            # Already scoped by on.push.paths above (mdix-ffi/** or
+            # mdix-csharp/** changed) — no commit-message flag needed on
+            # top of that, unlike the pull_request case below.
             RUN=true
           elif [ "${{ github.event_name }}" = "pull_request" ]; then
             MSG="${{ github.event.pull_request.title }}"
@@ -502,14 +517,63 @@ jobs:
           path: com.midmanstudio.mdix/
           retention-days: 1
 
-  # ── 6. Push to upm branch ────────────────────────────────────────────────
+  # ── 6. Commit rebuilt package back onto the ref that triggered this run ───
+  #
+  # This is what makes local file: package references "just work" after a
+  # plain `git pull` — same convention MidManStudio_Unity's own
+  # build-projectile-rust-libs.yml / build-audio-libs.yml already use for
+  # projectile_core / mid_audio. Without this job, the only place built
+  # binaries ever land is the upm branch (publish-upm below), which a
+  # normal local clone tracking master never sees.
+  #
+  # Runs on whatever ref triggered the build — push to master, or
+  # workflow_dispatch from a manually-selected branch. Does not assume
+  # master specifically.
+  commit-to-repo:
+    runs-on: ubuntu-latest
+    needs: assemble-package
+    if: |
+      needs.assemble-package.result == 'success' &&
+      (github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch')
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Download unpacked package
+        uses: actions/download-artifact@v4
+        with:
+          name: mdix-unity-unpacked-${{ github.run_number }}
+          path: com.midmanstudio.mdix/
+
+      - name: Commit rebuilt binaries
+        run: |
+          git config user.name  "DixScript CI"
+          git config user.email "ci@dixscript.dev"
+
+          git add com.midmanstudio.mdix/
+
+          if git diff --staged --quiet; then
+            echo "No changes — binaries on ${{ github.ref_name }} already up to date."
+            exit 0
+          fi
+
+          git commit -m "ci: rebuild mdix Unity package (build #${{ github.run_number }}) [skip ci]"
+          git push origin HEAD:${{ github.ref_name }}
+
+          echo "Committed rebuilt package directly to ${{ github.ref_name }}."
+          echo "A plain 'git pull' on this branch now has the new binaries —"
+          echo "no manual cargo/dotnet build needed for local file: package testing."
+
+  # ── 7. Push to upm branch ────────────────────────────────────────────────
   publish-upm:
     runs-on: ubuntu-latest
     needs: assemble-package
     if: |
-      github.ref == 'refs/heads/master' ||
-      github.ref == 'refs/heads/main'   ||
-      github.event_name == 'workflow_dispatch'
+      needs.assemble-package.result == 'success' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.publish_upm == true
 
     steps:
       - uses: actions/checkout@v4
@@ -563,10 +627,10 @@ jobs:
           echo "Install via UPM:"
           echo "  https://github.com/${{ github.repository }}.git#upm"
 
-  # ── 7. Summary ───────────────────────────────────────────────────────────
+  # ── 8. Summary ───────────────────────────────────────────────────────────
   summary:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, build-ffi-ubuntu, build-ffi-macos, build-core-dll, assemble-package, publish-upm]
+    needs: [parse-trigger, build-ffi-ubuntu, build-ffi-macos, build-core-dll, assemble-package, commit-to-repo, publish-upm]
     if: always()
 
     steps:
@@ -578,16 +642,19 @@ jobs:
           echo "Build:        #${{ github.run_number }}"
           echo "Branch:       ${{ github.ref_name }}"
           echo "Trigger:      ${{ github.event_name }}"
+          echo "Publish UPM requested: ${{ github.event.inputs.publish_upm || 'false (not a manual dispatch)' }}"
           echo ""
           echo "FFI (ubuntu): ${{ needs.build-ffi-ubuntu.result  || 'skipped' }}"
           echo "FFI (macOS):  ${{ needs.build-ffi-macos.result   || 'skipped' }}"
           echo "Core DLL:     ${{ needs.build-core-dll.result     || 'skipped' }}"
           echo "Assemble:     ${{ needs.assemble-package.result   || 'skipped' }}"
+          echo "Commit repo:  ${{ needs.commit-to-repo.result     || 'skipped' }}"
           echo "Publish UPM:  ${{ needs.publish-upm.result        || 'skipped' }}"
           echo ""
 
           if [ "${{ needs.parse-trigger.outputs.run_unity }}" != "true" ]; then
-            echo "Skipped — commit message did not contain --mdix-unity"
+            echo "Skipped — not triggered (push path filter didn't match mdix-ffi/**"
+            echo "or mdix-csharp/**, or PR title lacked --mdix-unity)."
           elif [ "${{ needs.assemble-package.result }}" = "success" ]; then
             echo "Package artifact: mdix-unity-package-${{ github.run_number }}"
             echo "Download from Actions → this run → Artifacts"

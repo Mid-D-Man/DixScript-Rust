@@ -29,12 +29,12 @@
     corrupted. This build is the first one where the StockIcons extension
     point path was actually correct, meaning it's the first time VS4Mac
     ever genuinely tried to rasterize Resources/mdix-file.svg. The OS field
-    in the crash dump confirms 10.15.7 -- Catalina is literally the first
+    in the crash dump confirms 10.15.7  Catalina is literally the first
     macOS version with any native SVG image support (CoreSVG), which makes
     a loose-file (non-Asset-Catalog) SVG load a real candidate for hitting
     an immature/edge-case path in that framework.
     Pulling the icon out entirely for now rather than guessing at the SVG
-    again -- clean isolation test: if the crash and the folder-expand issue
+    again  clean isolation test: if the crash and the folder-expand issue
     both go away without it, that confirms the icon load as the cause, and
     it can go back on the backlog as a cosmetic-only, non-blocking fix. If
     they DON'T go away, we've ruled the icon out completely and know to

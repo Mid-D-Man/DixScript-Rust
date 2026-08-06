@@ -25,21 +25,33 @@ using MonoDevelop.Core;
 // had a <Runtime> section, so packing only ever produced the DLL itself —
 // no mdix-lsp binary, no icon SVGs. That's the entire 7KB.
 //
-// The missing icon is almost certainly what corrupted the Solution/file pad:
-// Manifest.addin.xml registers a StockIcon for every .mdix file, and VS4Mac
-// has to resolve that icon the moment it renders a tree node for one — i.e.
-// exactly when you expand a folder containing one, or immediately if it's at
-// the root. With the resource never actually shipped, that resolution fails
-// right in the middle of tree rendering.
-//
-// Paths below are relative to the addin's own install directory, matching
-// where MdixAddin.csproj's CopyToOutputDirectory items actually place these
-// files at build time (bin/<config>/net7.0/lsp/mdix-lsp,
-// bin/<config>/net7.0/Resources/*.svg).
+// Confirmed fixed: unzip -l on the resulting .mpack showed lsp/mdix-lsp
+// present at the correct nested path (57,100,400 bytes), so the
+// ImportAddinFile declaration below is doing its job and the subdirectory
+// survives packaging intact.
 // ----------------------------------------------------------------------------
 [assembly: ImportAddinFile("lsp/mdix-lsp")]
-[assembly: ImportAddinFile("Resources/mdix-file.svg")]
-[assembly: ImportAddinFile("Resources/mdix-file-dark.svg")]
+
+// 2026-08-06 — mdix (the mdix-cli crate's binary — see mdix-cli/Cargo.toml's
+// [[bin]] name = "mdix") added alongside mdix-lsp, same fix as
+// mdix-vscode's copy-binary.js. mdix-lsp's own CLI resolution (which_mdix()
+// in mdix-lsp/src/features/commands.rs) falls back to looking next to its
+// own running executable when it's not on PATH — landing this at lsp/mdix,
+// right beside lsp/mdix-lsp (see the matching MdixAddin.csproj and
+// copy-binary.sh changes), means that fallback finds it with nothing else
+// required inside VS4Mac either.
+[assembly: ImportAddinFile("lsp/mdix")]
+
+// 2026-08-06 — the two Resources/*.svg ImportAddinFile lines that used to be
+// here are removed, along with the matching <StockIcon> extension and the
+// icon="md-mdix-file" attribute in Manifest.addin.xml. The crash report from
+// this exact build (mdix-vsmac/Issues.txt) shows VS4Mac's own crash monitor
+// FailFasting on a native NSException thrown mid-redraw, right after this
+// was the first build where the StockIcons extension point was actually
+// correct (i.e. the first time the SVG was genuinely rasterized rather than
+// silently skipped). Pulled out as a clean isolation test rather than a
+// fourth guess at the SVG itself -- see the comment in Manifest.addin.xml
+// for the reasoning and what to do with each outcome.
 
 // "MonoDevelop.Ide" is still the correct host addin id under VS 2022 for Mac
 // (17.x) — the Cocoa/net7 rewrite changed the UI shell and the addin build

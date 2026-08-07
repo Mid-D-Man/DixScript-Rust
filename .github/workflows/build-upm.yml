@@ -86,7 +86,7 @@ jobs:
             gcc-aarch64-linux-gnu
 
       - name: Install cargo-ndk
-        run: cargo install cargo-ndk --version "^3" --locked
+        run: cargo install cargo-ndk --version "^3" --locked --force
 
       # ubuntu-latest ships an Android SDK + NDK preinstalled — no need for a
       # third-party setup action, same as MidManStudio_Unity's own

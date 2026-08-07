@@ -1,0 +1,25 @@
+// Brought to u by MidManStudio
+//
+// Regex validation and blob preview, both in @DATA.
+//
+// Note the doubled backslashes (\\w, \\.) below — DixScript string literals
+// only recognize \n \t \r \\ \" \' \{ \} \0 as escapes; anything else
+// (like a bare \w) silently drops the backslash and keeps just the letter.
+// \\w survives escape processing as a literal \w for the regex engine to
+// see; a bare \w would've quietly become just "w".
+
+@CONFIG(
+  version -> "1.0.0"
+  author  -> "Mid-D-Man"
+)
+
+@DATA(
+  // Try breaking this — e.g. r:("[unclosed") — and watch it get flagged.
+  // (Regex constructors in @QUICKFUNCS don't validate yet; this one, in
+  // @DATA, already does.)
+  email_pattern = r:("^[\\w.+-]+@[\\w-]+\\.[a-zA-Z]{2,}$")
+
+  // Click the ▶ lens above this — sniffed and rendered as whatever it
+  // actually is. This one's a 1x1 transparent PNG.
+  sample_icon = b:("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+)

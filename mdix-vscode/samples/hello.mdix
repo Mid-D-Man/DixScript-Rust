@@ -1,0 +1,28 @@
+// Brought to u by MidManStudio
+//
+// A quick tour of DixScript's core literal types. Open this file to see:
+//   - the inline hex color swatch + picker (click the color square below)
+//   - the 📅 date/timestamp lens (click it above release_date or
+//     last_deploy_at to edit with a native picker)
+
+@CONFIG(
+  version -> "1.0.0"
+  author  -> "Mid-D-Man"
+)
+
+@DATA(
+  project_name    = "DixScript Sample"
+  max_connections = 100
+  timeout_seconds = 30
+  retry_backoff   = 1.5
+  debug_enabled   = true
+
+  tags = ["getting-started", "sample", "mdix"]
+
+  // Native VS Code color swatch + picker on this — try it.
+  brand_color = #569CD6
+
+  // Click the 📅 lens above either of these.
+  release_date   = 2026-08-07
+  last_deploy_at = 2026-08-07T14:30:00Z
+)

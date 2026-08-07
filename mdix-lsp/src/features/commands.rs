@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use dixscript::Runtime::{DixConverter, DixFormatOptions};
-use dixscript::Compiler::AST::{DixScript, DLMModuleType};
+use dixscript::Compiler::AST::{DixScript, DLMModuleType, DataEntry, Value};
 
 #[derive(Debug)]
 pub struct CommandResult {
@@ -313,3 +313,288 @@ pub fn run_show_ast(ast: &DixScript) -> CommandResult {
         sections.join(", "), func_count, enum_count, data_entries, dlm_summary,
     ))
     }
+
+// ── Theme colors (semantic token color customization) ─────────────────────────
+//
+// Reads `@DATA` tables named `dark:` / `light:` and maps their properties to
+// VS Code's `editor.semanticTokenColorCustomizations` "rules" shape. Property
+// names use an `m_` prefix (`m_keyword`, `m_string`, ...): `parse_property_name`
+// (data_section_parser.rs) does accept a bare reserved word like `string` as a
+// table-property key today, so the prefix isn't rescuing a parse failure — it's
+// what this file's `map_theme_key` table below actually keys off of, and it
+// keeps working even if that keyword-tolerance is ever tightened later.
+//
+// Mapping mirrors capabilities.rs's TOKEN_TYPES legend exactly (the 14 in
+// active use, plus the STRUCT/REGEXP/EVENT/METHOD slots that are registered
+// but not yet emitted by any highlighter). A new legend entry there should
+// come with a new arm here.
+//
+// This command deliberately does NOT return CommandResult / go through
+// self.show_message() like everything else in this file. Every other command
+// here is a one-shot action reported via a toast; this one hands structured
+// data back to a client-side command (mdix.applyThemeColors, registered in
+// the VS Code extension, deliberately NOT in ALL_COMMANDS) which does the
+// actual workspace.getConfiguration().update(...) and reports success or
+// failure itself. A toast here too would just double up on the same action.
+
+const MDIX_KEY_PREFIX: &str = "m_";
+
+fn map_theme_key(name: &str) -> Option<&'static str> {
+    let bare = name.strip_prefix(MDIX_KEY_PREFIX)?;
+    Some(match bare {
+        "keyword"    => "keyword",
+        "string"     => "string",
+        "number"     => "number",
+        "operator"   => "operator",
+        "variable"   => "variable",
+        "function"   => "function",
+        "type"       => "type",
+        "enummember" => "enumMember",
+        "comment"    => "comment",
+        "namespace"  => "namespace",
+        "property"   => "property",
+        "parameter"  => "parameter",
+        "macro"      => "macro",
+        "decorator"  => "decorator",
+        "struct"     => "struct",
+        "regexp"     => "regexp",
+        "event"      => "event",
+        "method"     => "method",
+        _ => return None,
+    })
+}
+
+/// Cheap presence check used to gate the "🎨 Apply Theme" CodeLens — true if
+/// `@DATA` has a top-level `dark:` and/or `light:` table. Doesn't validate
+/// keys or values; `run_get_theme_colors` is the source of truth for that.
+pub fn has_theme_tables(ast: &DixScript) -> bool {
+    ast.data.as_ref().is_some_and(|d| {
+        d.entries.iter().any(|e| matches!(
+            e,
+            DataEntry::TableProperty { path, .. }
+                if path.segments.len() == 1
+                    && matches!(path.segments[0].as_str(), "dark" | "light")
+        ))
+    })
+}
+
+fn hex_from_value(value: &Value) -> Option<String> {
+    match value {
+        Value::HexColor { value, .. } => Some(value.clone()),
+        // Tolerate a quoted "#RRGGBB" string too — cheap to accept, no reason
+        // to make someone re-type a color just because they quoted it.
+        Value::String { value, .. } if value.starts_with('#') => Some(value.clone()),
+        _ => None,
+    }
+}
+
+pub fn run_get_theme_colors(ast: &DixScript) -> serde_json::Value {
+    use serde_json::{Map, Value as JsonValue};
+
+    let mut dark:  Map<String, JsonValue> = Map::new();
+    let mut light: Map<String, JsonValue> = Map::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    if let Some(data) = ast.data.as_ref() {
+        for entry in &data.entries {
+            let DataEntry::TableProperty { path, properties, .. } = entry else { continue };
+            if path.segments.len() != 1 {
+                continue;
+            }
+
+            let bucket = match path.segments[0].as_str() {
+                "dark"  => &mut dark,
+                "light" => &mut light,
+                _       => continue,
+            };
+
+            for prop in properties {
+                let Some(token_type) = map_theme_key(&prop.name) else {
+                    warnings.push(format!(
+                        "unrecognized key '{}' (expected an m_-prefixed token name, e.g. m_keyword)",
+                        prop.name
+                    ));
+                    continue;
+                };
+                match hex_from_value(&prop.value) {
+                    Some(hex) => { bucket.insert(token_type.to_string(), JsonValue::String(hex)); }
+                    None => warnings.push(format!(
+                        "'{}' is not a hex color (got '{}') — use e.g. `{} = #569CD6`",
+                        prop.name, prop.value, prop.name
+                    )),
+                }
+            }
+        }
+    }
+
+    let success = !dark.is_empty() || !light.is_empty();
+    let message = if success {
+        format!("🎨 dark: {} color(s), light: {} color(s)", dark.len(), light.len())
+    } else {
+        "🎨 No `dark:` or `light:` table found in @DATA — expected e.g. \
+         `dark: m_keyword = #569CD6, m_string = #CE9178`.".to_string()
+    };
+
+    serde_json::json!({
+        "success":  success,
+        "message":  message,
+        "dark":     if dark.is_empty()  { JsonValue::Null } else { JsonValue::Object(dark) },
+        "light":    if light.is_empty() { JsonValue::Null } else { JsonValue::Object(light) },
+        "warnings": warnings,
+    })
+}
+
+// ── Settings (bulk-apply a curated set of VS Code / DixScript settings) ────────
+//
+// Same shape as the theme-colors command above: reads @DATA's `settings:`
+// table, maps `m_`-prefixed keys through a curated table (`map_setting_key`),
+// returns JSON for `mdix.applySettings` (client-only, deliberately not in
+// ALL_COMMANDS) to apply via the VS Code configuration API.
+//
+// Curated allowlist, not arbitrary keys: a `.mdix` key here can only ever
+// reach one of the specific VS Code settings named below, decided in Rust,
+// not whatever dotted string someone puts in the file. A new setting needs a
+// new match arm — deliberately more friction than a shared/committed
+// settings file being able to silently rewrite any global VS Code setting.
+//
+// `dixscript.server.path` is deliberately NOT in this table — it's an
+// absolute filesystem path to the mdix-lsp binary, specific to one machine.
+// Applying it from a shared file would just break the extension on anyone
+// else's machine (or your own, on a different device).
+
+#[derive(Clone, Copy)]
+enum SettingScope {
+    /// Plain global (User) setting — dixscript.server.*.
+    Global,
+    /// A generic `editor.*` setting, written scoped to the `mdix` language
+    /// via VS Code's `overrideInLanguage` update flag, not globally — so it
+    /// only affects .mdix files, not every language you edit.
+    LanguageMdix,
+}
+
+#[derive(Clone, Copy)]
+enum SettingKind {
+    Str,
+    Bool,
+    StrArray,
+}
+
+struct SettingSpec {
+    vscode_key: &'static str,
+    scope:      SettingScope,
+    kind:       SettingKind,
+}
+
+fn map_setting_key(name: &str) -> Option<SettingSpec> {
+    let bare = name.strip_prefix(MDIX_KEY_PREFIX)?;
+    Some(match bare {
+        "trace" => SettingSpec {
+            vscode_key: "dixscript.server.trace", scope: SettingScope::Global, kind: SettingKind::Str,
+        },
+        "extra_args" => SettingSpec {
+            vscode_key: "dixscript.server.extraArgs", scope: SettingScope::Global, kind: SettingKind::StrArray,
+        },
+        "inlay_hints" => SettingSpec {
+            vscode_key: "editor.inlayHints.enabled", scope: SettingScope::LanguageMdix, kind: SettingKind::Str,
+        },
+        "semantic_highlighting" => SettingSpec {
+            vscode_key: "editor.semanticHighlighting.enabled", scope: SettingScope::LanguageMdix, kind: SettingKind::Str,
+        },
+        "format_on_save" => SettingSpec {
+            vscode_key: "editor.formatOnSave", scope: SettingScope::LanguageMdix, kind: SettingKind::Bool,
+        },
+        "word_wrap" => SettingSpec {
+            vscode_key: "editor.wordWrap", scope: SettingScope::LanguageMdix, kind: SettingKind::Str,
+        },
+        _ => return None,
+    })
+}
+
+/// Cheap presence check used to gate the "⚙ Apply Settings" CodeLens — true
+/// if @DATA has a top-level `settings:` table. Doesn't validate keys/values;
+/// `run_get_settings_values` is the source of truth for that.
+pub fn has_settings_table(ast: &DixScript) -> bool {
+    ast.data.as_ref().is_some_and(|d| {
+        d.entries.iter().any(|e| matches!(
+            e,
+            DataEntry::TableProperty { path, .. }
+                if path.segments.len() == 1 && path.segments[0] == "settings"
+        ))
+    })
+}
+
+fn json_for_setting(kind: SettingKind, value: &Value) -> Result<serde_json::Value, String> {
+    use serde_json::Value as JsonValue;
+    match (kind, value) {
+        (SettingKind::Str, Value::String { value, .. }) => Ok(JsonValue::String(value.clone())),
+        (SettingKind::Bool, Value::Boolean { value, .. }) => Ok(JsonValue::Bool(*value)),
+        (SettingKind::StrArray, Value::Array { values, .. }) => {
+            let mut out = Vec::with_capacity(values.len());
+            for v in values {
+                match v {
+                    Value::String { value, .. } => out.push(JsonValue::String(value.clone())),
+                    other => return Err(format!("array element '{}' is not a string", other)),
+                }
+            }
+            Ok(JsonValue::Array(out))
+        }
+        (SettingKind::Str, other) => Err(format!("expected a string, got '{}'", other)),
+        (SettingKind::Bool, other) => Err(format!("expected true/false, got '{}'", other)),
+        (SettingKind::StrArray, other) => Err(format!("expected an array of strings, got '{}'", other)),
+    }
+}
+
+pub fn run_get_settings_values(ast: &DixScript) -> serde_json::Value {
+    use serde_json::Value as JsonValue;
+
+    let mut settings: Vec<JsonValue> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    if let Some(data) = ast.data.as_ref() {
+        for entry in &data.entries {
+            let DataEntry::TableProperty { path, properties, .. } = entry else { continue };
+            if path.segments.len() != 1 || path.segments[0] != "settings" {
+                continue;
+            }
+
+            for prop in properties {
+                let Some(spec) = map_setting_key(&prop.name) else {
+                    warnings.push(format!(
+                        "unrecognized key '{}' (expected an m_-prefixed setting name, e.g. m_inlay_hints)",
+                        prop.name
+                    ));
+                    continue;
+                };
+                match json_for_setting(spec.kind, &prop.value) {
+                    Ok(json_value) => {
+                        let scope = match spec.scope {
+                            SettingScope::Global       => "global",
+                            SettingScope::LanguageMdix => "mdix",
+                        };
+                        settings.push(serde_json::json!({
+                            "key":   spec.vscode_key,
+                            "scope": scope,
+                            "value": json_value,
+                        }));
+                    }
+                    Err(reason) => warnings.push(format!("'{}' — {}", prop.name, reason)),
+                }
+            }
+        }
+    }
+
+    let success = !settings.is_empty();
+    let message = if success {
+        format!("⚙ {} setting(s) ready to apply", settings.len())
+    } else {
+        "⚙ No `settings:` table found in @DATA — expected e.g. \
+         `settings: m_inlay_hints = \"off\", m_format_on_save = true`.".to_string()
+    };
+
+    serde_json::json!({
+        "success":  success,
+        "message":  message,
+        "settings": settings,
+        "warnings": warnings,
+    })
+}

@@ -1,29 +1,59 @@
+// Brought to u by MidManStudio
+
 @CONFIG(
-  version -> "1.0.0"
-  author  -> "Mid-D-Man"
+  version    -> "1.0.0"
+  author     -> "Mid-D-Man"
+  features   -> "data"
+  debug_mode -> "off"
 )
 
-@ENUMS(
-  Theme { DARK = 0, LIGHT = 1, HIGH_CONTRAST = 2 }
-)
 @DATA(
-  // Dark theme token colors
+  // Run "DixScript: Apply Theme Colors" (Command Palette) or click the
+  // 🎨 Apply Theme lens above @DATA to push these into
+  // editor.semanticTokenColorCustomizations for your active theme.
+  //
+  // Keys use an `m_` prefix uniformly (mdix-lsp/src/features/commands.rs ->
+  // map_theme_key strips it and maps the rest to the exact semantic token
+  // type name from capabilities.rs's legend). Values are DixScript's native
+  // HexColor literal (#RGB..#RRGGBBAA, 3-8 hex digits, no quotes needed).
+
   dark:
-  keyword   = #569CD6
-  string    = #CE9178
-  number    = #B5CEA8
-  function  = #DCDCAA
-  type      = #4EC9B0
-  comment   = #6A9955
-  namespace = #9CDCFE
-  enum      = #C8C8C8
-  parameter = #9CDCFE
-  decorator = #C586C0
+    m_keyword    = #569CD6
+    m_string     = #CE9178
+    m_number     = #B5CEA8
+    m_operator   = #D4D4D4
+    m_variable   = #9CDCFE
+    m_function   = #DCDCAA
+    m_type       = #4EC9B0
+    m_enummember = #4FC1FF
+    m_comment    = #6A9955
+    m_namespace  = #C8C8C8
+    m_property   = #9CDCFE
+    m_parameter  = #9CDCFE
+    m_macro      = #C586C0
+    m_decorator  = #C586C0
 
-  // Light theme overrides
   light:
-  keyword  = #0000FF
-  string   = #A31515
-  function = #795E26
+    m_keyword    = #0000FF
+    m_string     = #A31515
+    m_number     = #098658
+    m_operator   = #000000
+    m_variable   = #001080
+    m_function   = #795E26
+    m_type       = #267F99
+    m_enummember = #0070C1
+    m_comment    = #008000
+    m_namespace  = #383838
+    m_property   = #001080
+    m_parameter  = #001080
+    m_macro      = #AF00DB
+    m_decorator  = #AF00DB
 
-)  
+  // capabilities.rs also registers struct/regexp/event/method (indices
+  // 14-17) but nothing in the highlighter emits them yet — add
+  // map_theme_key arms for these first if you start using them:
+  //   m_struct = #4EC9B0
+  //   m_regexp = #D16969
+  //   m_event  = #4FC1FF
+  //   m_method = #DCDCAA
+)

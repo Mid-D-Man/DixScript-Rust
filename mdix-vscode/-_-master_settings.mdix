@@ -1,0 +1,33 @@
+// Brought to u by MidManStudio
+
+@CONFIG(
+  version    -> "1.0.0"
+  author     -> "Mid-D-Man"
+  features   -> "data"
+  debug_mode -> "off"
+)
+
+@DATA(
+  // Run "DixScript: Apply Settings" (Command Palette) or click the
+  // ⚙ Apply Settings lens above @DATA to bulk-apply these.
+  //
+  // Curated allowlist (mdix-lsp/src/features/commands.rs -> map_setting_key)
+  // — a key here can only ever reach one of the specific settings below,
+  // not an arbitrary VS Code setting ID. Add a new match arm there before
+  // adding a new m_ key here.
+  //
+  // dixscript.server.path is deliberately NOT settable this way — it's an
+  // absolute path to the mdix-lsp binary, specific to one machine.
+
+  settings:
+    // DixScript language server (global / User settings)
+    m_trace      = "off"
+    m_extra_args = []
+
+    // Editor behavior, scoped to .mdix files only (VS Code's
+    // overrideInLanguage, not a global override of every language you edit)
+    m_inlay_hints           = "on"
+    m_semantic_highlighting = true
+    m_format_on_save        = false
+    m_word_wrap             = "off"
+)

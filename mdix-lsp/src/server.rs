@@ -20,12 +20,12 @@ use crate::document::Document;
 use crate::extensions::Extensions;
 use crate::features;
 use crate::features::code_lens::{
-    CMD_COMPILE, CMD_CREATE_RESOLVED, CMD_MINIFY,
-    CMD_SHOW_AST, CMD_TO_JSON, CMD_TO_TOML,
+    CMD_COMPILE, CMD_CREATE_RESOLVED, CMD_GET_SETTINGS_VALUES, CMD_GET_THEME_COLORS,
+    CMD_MINIFY, CMD_SHOW_AST, CMD_TO_JSON, CMD_TO_TOML,
 };
 use crate::features::commands::{
-    run_compile, run_convert_to_json, run_convert_to_toml,
-    run_create_resolved, run_minify, run_show_ast, CommandResult,
+    run_compile, run_convert_to_json, run_convert_to_toml, run_create_resolved,
+    run_get_settings_values, run_get_theme_colors, run_minify, run_show_ast, CommandResult,
 };
 
 const ANALYSIS_TIMEOUT_SECS: u64 = 10;
@@ -495,6 +495,14 @@ impl LanguageServer for Backend {
         params: CodeLensParams,
     ) -> LspResult<Option<Vec<CodeLens>>> {
         let uri = &params.text_document.uri;
+        // Was reading `self.documents.get(uri)` immediately, racing the
+        // background `spawn_analysis` task the same way completion/hover/
+        // signature_help used to (see `wait_for_fresh_document`'s doc
+        // comment) — on a fresh edit, that's a real chance of getting served
+        // a `Document` whose `tokens` predate the edit, silently dropping
+        // whatever lens depended on the new token (e.g. a just-typed date/
+        // timestamp literal's 📅 Edit lens). Same fix as those three.
+        self.wait_for_latest(uri).await;
         Ok(features::code_lens::provide(self.documents.get(uri).as_deref()))
     }
 
@@ -725,6 +733,59 @@ impl LanguageServer for Backend {
                     None      => CommandResult::err("AST not available — wait for analysis."),
                 };
                 self.show_message(result.success, &result.message).await;
+            }
+
+            // Returns its JSON payload directly instead of falling through to
+            // the unconditional `Ok(None)` below — see the doc comment on
+            // `run_get_theme_colors` in commands.rs for why this one command
+            // doesn't go through CommandResult/show_message like the rest.
+            CMD_GET_THEME_COLORS => {
+                let ast_clone = {
+                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
+                    doc.as_ref().and_then(|d| d.ast.clone())
+                };
+                let payload = tokio::task::spawn_blocking(move || {
+                    match ast_clone {
+                        Some(ast) => run_get_theme_colors(&ast),
+                        None => serde_json::json!({
+                            "success": false,
+                            "message": "AST not available — wait for analysis.",
+                            "dark": null, "light": null, "warnings": []
+                        }),
+                    }
+                })
+                    .await
+                    .unwrap_or_else(|_| serde_json::json!({
+                        "success": false,
+                        "message": "Theme colors task panicked.",
+                        "dark": null, "light": null, "warnings": []
+                    }));
+                return Ok(Some(payload));
+            }
+
+            // Same shape as CMD_GET_THEME_COLORS above.
+            CMD_GET_SETTINGS_VALUES => {
+                let ast_clone = {
+                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
+                    doc.as_ref().and_then(|d| d.ast.clone())
+                };
+                let payload = tokio::task::spawn_blocking(move || {
+                    match ast_clone {
+                        Some(ast) => run_get_settings_values(&ast),
+                        None => serde_json::json!({
+                            "success": false,
+                            "message": "AST not available — wait for analysis.",
+                            "settings": [], "warnings": []
+                        }),
+                    }
+                })
+                    .await
+                    .unwrap_or_else(|_| serde_json::json!({
+                        "success": false,
+                        "message": "Settings values task panicked.",
+                        "settings": [], "warnings": []
+                    }));
+                return Ok(Some(payload));
             }
 
             other => {

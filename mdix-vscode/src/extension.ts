@@ -22,6 +22,8 @@ import {
 
 import { registerDateTimeEditor } from "./dateTimeEditor";
 import { registerBlobPreview }    from "./blobPreview";
+import { registerThemeColors }    from "./themeColors";
+import { registerSettingsSync }   from "./settingsSync";
 
 let client: LanguageClient | undefined;
 
@@ -30,6 +32,12 @@ let client: LanguageClient | undefined;
 export function activate(context: ExtensionContext): void {
   registerDateTimeEditor(context);
   registerBlobPreview(context);
+  // Getter, not `client` itself — `client` isn't assigned until further down
+  // this function. The closure re-reads it lazily whenever the command
+  // actually runs (module-scope `let`, captured by reference), so it always
+  // sees the real client once it exists.
+  registerThemeColors(context, () => client);
+  registerSettingsSync(context, () => client);
 
   const serverPath = resolveServerPath(context);
 

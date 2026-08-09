@@ -1,5 +1,548 @@
-﻿2026-08-06 16:59:41.228 vstool[43005:494478] Microsoft.macOS: Invalid IDE Port: -1
-Visual Studio Extension Setup Utility
-ERROR: There was an error while scanning assembly: /Users/midman/Desktop/Dixscript-Rust/mdix-vsmac/bin/Debug/net7.0/MdixLanguageSupport.dll (The add-in configuration file is invalid: An XML comment cannot contain '--', and '-' cannot be the last character. Line 32, position 40.)
-ERROR: Could not read add-in file: /Users/midman/Desktop/Dixscript-Rust/mdix-vsmac/scripts/../bin/Debug/net7.0/MdixLanguageSupport.dll
-Done. Look for MdixLanguageSupport_*.mpack in /Users/midman/Desktop/Dixscript-Rust/mdix-vsmac/scripts/../dist
+﻿DEBUG[2026-08-09 10:08:13Z]: LSPClient.PlatformLog Error: 0 : 
+DEBUG[2026-08-09 10:08:13Z]: MidManStudio.Mdix.MdixLanguageClient: Activating language client: System.InvalidOperationException: Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
+   at Microsoft.VisualStudio.LanguageServer.Client.RemoteLanguageClientInstance.InitializeAsync(String workspaceLocation, IProgress`1 progress, CancellationToken token)
+DEBUG[2026-08-09 10:08:13Z]: LSPClient.PlatformLog Error: 0 : 
+DEBUG[2026-08-09 10:08:13Z]: MidManStudio.Mdix.MdixLanguageClient: System.InvalidOperationException: Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
+   at Microsoft.VisualStudio.LanguageServer.Client.RemoteLanguageClientInstance.InitializeAsync(String workspaceLocation, IProgress`1 progress, CancellationToken token)
+   at Microsoft.VisualStudio.Threading.TplExtensions.WithTimeout(Task task, TimeSpan timeout)
+   at Microsoft.VisualStudio.LanguageServer.Client.RemoteLanguageClientInstance.TrackTaskAsync(Task task)
+   at Microsoft.VisualStudio.LanguageServer.Client.RemoteLanguageClientInstance.ActivateLanguageClientAsync(String workspaceLocation, CancellationToken token)
+DEBUG[2026-08-09 10:08:13Z]: LSPClient.PlatformLog Error: 0 : 
+DEBUG[2026-08-09 10:08:13Z]: DrainQueueAsync: textDocument/didOpen - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
+DEBUG[2026-08-09 10:08:13Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 10:08:13Z]: Level: Verbose, ActivityTracing
+DEBUG[2026-08-09 10:08:13Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
+DEBUG[2026-08-09 10:08:13Z]: initialize
+DEBUG[2026-08-09 10:08:14Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 10:08:14Z]: LSPSent: {
+  "processId": 8231,
+  "rootPath": "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac",
+  "rootUri": "file:///Users/midman/Desktop/DixScript-Rust/mdix-vsmac",
+  "capabilities": {
+    "_vs_supportsVisualStudioExtensions": true,
+    "_vs_supportsDiagnosticRequests": true,
+    "workspace": {
+      "applyEdit": true,
+      "workspaceEdit": {
+        "documentChanges": true,
+        "resourceOperations": []
+      },
+      "executeCommand": {
+        "_vs_supportedCommands": [
+          "_ms_setClipboard",
+          "_ms_openUrl"
+        ]
+      },
+      "semanticTokens": {
+        "refreshSupport": true
+      }
+    },
+    "textDocument": {
+      "_vs_onAutoInsert": {},
+      "synchronization": {
+        "didSave": true
+      },
+      "completion": {
+        "_vs_completionList": {
+          "_vs_data": true,
+          "_vs_commitCharacters": true
+        },
+        "completionItem": {},
+        "completionItemKind": {
+          "valueSet": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            118115,
+            118116,
+            118117,
+            118118,
+            118119,
+            118120,
+            118121,
+            118122,
+            118123,
+            118124,
+            118125,
+            118126
+          ]
+        },
+        "completionList": {
+          "itemDefaults": [
+            "commitCharacters",
+            "editRange",
+            "insertTextFormat"
+          ]
+        }
+      },
+      "hover": {
+        "contentFormat": [
+          "plaintext"
+        ]
+      },
+      "signatureHelp": {
+        "signatureInformation": {
+          "documentationFormat": [
+            "plaintext"
+          ],
+          "parameterInformation": {
+            "labelOffsetSupport": true
+          }
+        },
+        "contextSupport": true
+      },
+      "definition": {},
+      "typeDefinition": {},
+      "implementation": {},
+      "references": {},
+      "documentHighlight": {},
+      "codeAction": {
+        "codeActionLiteralSupport": {
+          "_vs_codeActionGroup": {
+            "_vs_valueSet": [
+              "quickfix",
+              "refactor",
+              "refactor.extract",
+              "refactor.inline",
+              "refactor.rewrite",
+              "source",
+              "source.organizeImports"
+            ]
+          },
+          "codeActionKind": {
+            "valueSet": [
+              "quickfix",
+              "refactor",
+              "refactor.extract",
+              "refactor.inline",
+              "refactor.rewrite",
+              "source",
+              "source.organizeImports"
+            ]
+          }
+        },
+        "resolveSupport": {
+          "properties": [
+            "additionalTextEdits",
+            "command",
+            "commitCharacters",
+            "description",
+            "detail",
+            "documentation",
+            "insertText",
+            "insertTextFormat",
+            "label"
+          ]
+        },
+        "dataSupport": true
+      },
+      "formatting": {},
+      "rangeFormatting": {},
+      "onTypeFormatting": {},
+      "rename": {
+        "prepareSupport": true,
+        "prepareSupportDefaultBehavior": 1
+      },
+      "publishDiagnostics": {
+        "tagSupport": {
+          "valueSet": [
+            1,
+            2,
+            -1,
+            -2
+          ]
+        }
+      },
+      "foldingRange": {
+        "_vs_refreshSupport": true,
+        "foldingRange": {
+          "collapsedText": true
+        }
+      },
+      "linkedEditingRange": {},
+      "semanticTokens": {
+        "requests": {
+          "range": true,
+          "full": {
+            "range": true
+          }
+        },
+        "tokenTypes": [
+          "namespace",
+          "type",
+          "class",
+          "enum",
+          "interface",
+          "struct",
+          "typeParameter",
+          "parameter",
+          "variable",
+          "property",
+          "enumMember",
+          "event",
+          "function",
+          "method",
+          "macro",
+          "keyword",
+          "modifier",
+          "comment",
+          "string",
+          "number",
+          "regexp",
+          "operator"
+        ],
+        "tokenModifiers": [
+          "declaration",
+          "definition",
+          "readonly",
+          "static",
+          "deprecated",
+          "abstract",
+          "async",
+          "modification",
+          "documentation",
+          "defaultLibrary"
+        ],
+        "formats": [
+          "relative"
+        ]
+      }
+    }
+  }
+}
+DEBUG[2026-08-09 10:08:14Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 0 : 
+DEBUG[2026-08-09 10:08:14Z]: Sending initalize request
+DEBUG[2026-08-09 10:08:14Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 8 : 
+DEBUG[2026-08-09 10:08:14Z]: {"id":2,"method":"initialize"}
+DEBUG[2026-08-09 10:08:14Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 8 : 
+DEBUG[2026-08-09 10:08:14Z]: Sent: {
+  "traceparent": "00-43fc7bbbd3793b42af879e56f617bcfe-31ac039340d70e48-01",
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "initialize",
+  "params": {
+    "processId": 8231,
+    "rootPath": "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac",
+    "rootUri": "file:///Users/midman/Desktop/DixScript-Rust/mdix-vsmac",
+    "capabilities": {
+      "_vs_supportsVisualStudioExtensions": true,
+      "_vs_supportsDiagnosticRequests": true,
+      "workspace": {
+        "applyEdit": true,
+        "workspaceEdit": {
+          "documentChanges": true,
+          "resourceOperations": []
+        },
+        "executeCommand": {
+          "_vs_supportedCommands": [
+            "_ms_setClipboard",
+            "_ms_openUrl"
+          ]
+        },
+        "semanticTokens": {
+          "refreshSupport": true
+        }
+      },
+      "textDocument": {
+        "_vs_onAutoInsert": {},
+        "synchronization": {
+          "didSave": true
+        },
+        "completion": {
+          "_vs_completionList": {
+            "_vs_data": true,
+            "_vs_commitCharacters": true
+          },
+          "completionItem": {},
+          "completionItemKind": {
+            "valueSet": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              118115,
+              118116,
+              118117,
+              118118,
+              118119,
+              118120,
+              118121,
+              118122,
+              118123,
+              118124,
+              118125,
+              118126
+            ]
+          },
+          "completionList": {
+            "itemDefaults": [
+              "commitCharacters",
+              "editRange",
+              "insertTextFormat"
+            ]
+          }
+        },
+        "hover": {
+          "contentFormat": [
+            "plaintext"
+          ]
+        },
+        "signatureHelp": {
+          "signatureInformation": {
+            "documentationFormat": [
+              "plaintext"
+            ],
+            "parameterInformation": {
+              "labelOffsetSupport": true
+            }
+          },
+          "contextSupport": true
+        },
+        "definition": {},
+        "typeDefinition": {},
+        "implementation": {},
+        "references": {},
+        "documentHighlight": {},
+        "codeAction": {
+          "codeActionLiteralSupport": {
+            "_vs_codeActionGroup": {
+              "_vs_valueSet": [
+                "quickfix",
+                "refactor",
+                "refactor.extract",
+                "refactor.inline",
+                "refactor.rewrite",
+                "source",
+                "source.organizeImports"
+              ]
+            },
+            "codeActionKind": {
+              "valueSet": [
+                "quickfix",
+                "refactor",
+                "refactor.extract",
+                "refactor.inline",
+                "refactor.rewrite",
+                "source",
+                "source.organizeImports"
+              ]
+            }
+          },
+          "resolveSupport": {
+            "properties": [
+              "additionalTextEdits",
+              "command",
+              "commitCharacters",
+              "description",
+              "detail",
+              "documentation",
+              "insertText",
+              "insertTextFormat",
+              "label"
+            ]
+          },
+          "dataSupport": true
+        },
+        "formatting": {},
+        "rangeFormatting": {},
+        "onTypeFormatting": {},
+        "rename": {
+          "prepareSupport": true,
+          "prepareSupportDefaultBehavior": 1
+        },
+        "publishDiagnostics": {
+          "tagSupport": {
+            "valueSet": [
+              1,
+              2,
+              -1,
+              -2
+            ]
+          }
+        },
+        "foldingRange": {
+          "_vs_refreshSupport": true,
+          "foldingRange": {
+            "collapsedText": true
+          }
+        },
+        "linkedEditingRange": {},
+        "semanticTokens": {
+          "requests": {
+            "range": true,
+            "full": {
+              "range": true
+            }
+          },
+          "tokenTypes": [
+            "namespace",
+            "type",
+            "class",
+            "enum",
+            "interface",
+            "struct",
+            "typeParameter",
+            "parameter",
+            "variable",
+            "property",
+            "enumMember",
+            "event",
+            "function",
+            "method",
+            "macro",
+            "keyword",
+            "modifier",
+            "comment",
+            "string",
+            "number",
+            "regexp",
+            "operator"
+          ],
+          "tokenModifiers": [
+            "declaration",
+            "definition",
+            "readonly",
+            "static",
+            "deprecated",
+            "abstract",
+            "async",
+            "modification",
+            "documentation",
+            "defaultLibrary"
+          ],
+          "formats": [
+            "relative"
+          ]
+        }
+      }
+    }
+  }
+}
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 7 : 
+DEBUG[2026-08-09 10:08:15Z]: {"id":2}
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 7 : 
+DEBUG[2026-08-09 10:08:15Z]: Received: {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "capabilities": {
+      "_vs_disableGoToWorkspaceSymbols": true,
+      "_vs_spellCheckingProvider": true,
+      "_vs_breakableRangeProvider": true,
+      "_vs_projectContextProvider": true,
+      "textDocumentSync": {
+        "openClose": true,
+        "change": 2
+      },
+      "workspaceSymbolProvider": true
+    }
+  }
+}
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 11 : 
+DEBUG[2026-08-09 10:08:15Z]: Received result for request "2".
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: Received initalize response
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: LSPReceived: {
+  "capabilities": {
+    "_vs_disableGoToWorkspaceSymbols": true,
+    "_vs_spellCheckingProvider": true,
+    "_vs_breakableRangeProvider": true,
+    "_vs_projectContextProvider": true,
+    "textDocumentSync": {
+      "openClose": true,
+      "change": 2
+    },
+    "workspaceSymbolProvider": true
+  }
+}
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: Level: Verbose, ActivityTracing
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: initialize
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: Level: Verbose, ActivityTracing
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: initialized
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: Sending initalized notification
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 8 : 
+DEBUG[2026-08-09 10:08:15Z]: {"id":null,"method":"initialized"}
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 8 : 
+DEBUG[2026-08-09 10:08:15Z]: Sent: {
+  "traceparent": "00-0ff2cfd31e2e14419e35aebe95752c3c-a0883a5b36ebd143-01",
+  "jsonrpc": "2.0",
+  "method": "initialized",
+  "params": {}
+}
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: Level: Verbose, ActivityTracing
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: initialized
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 5 : 
+DEBUG[2026-08-09 10:08:15Z]: No target methods are registered that match "workspace/configuration".
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: textDocument/didOpen
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: textDocument/didOpen
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: textDocument/didOpen
+DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
+DEBUG[2026-08-09 10:08:15Z]: textDocument/didOpen
+DEBUG[2026-08-09 10:09:19Z]: LSPClient.PlatformLog Error: 0 : 
+DEBUG[2026-08-09 10:09:19Z]: DrainQueueAsync: textDocument/foldingRange - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
+DEBUG[2026-08-09 10:09:20Z]: LSPClient.PlatformLog Error: 0 : 
+DEBUG[2026-08-09 10:09:20Z]: DrainQueueAsync: textDocument/didOpen - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
+DEBUG[2026-08-09 10:11:05Z]: LSPClient.PlatformLog Error: 0 : 
+DEBUG[2026-08-09 10:11:05Z]: DrainQueueAsync: textDocument/hover - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
+DEBUG[2026-08-09 10:14:59Z]: LSPClient.PlatformLog Error: 0 : 
+DEBUG[2026-08-09 10:14:59Z]: DrainQueueAsync: textDocument/hover - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
+DEBUG[2026-08-09 10:15:02Z]: LSPClient.PlatformLog Error: 0 : 
+DEBUG[2026-08-09 10:15:02Z]: DrainQueueAsync: textDocument/hover - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
+DEBUG[2026-08-09 10:21:16Z]: LSPClient.PlatformLog Error: 0 : 
+DEBUG[2026-08-09 10:21:16Z]: DrainQueueAsync: textDocument/hover - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client

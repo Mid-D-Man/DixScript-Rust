@@ -136,10 +136,23 @@ func (db *Database) GetInt32(path string) (int32, error) {
 	return int32(v), err
 }
 
-// GetInt64 returns the int64 value at path.
+// GetInt64 returns the int64 value at path — uses the real 64-bit FFI
+// getter (mdix_get_long), not a widened GetInt. Previously this widened
+// GetInt's int32 result instead, which meant it could never actually
+// read a genuine Long value outside i32's range; GetInt itself does not
+// accept Long-stored values (see GetLong's doc comment in
+// internal/ffi.go for why the widening only goes one direction).
 func (db *Database) GetInt64(path string) (int64, error) {
-	v, err := db.GetInt(path)
-	return int64(v), err
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	if err := db.checkOpen(); err != nil {
+		return 0, err
+	}
+	val, ok := internal.GetLong(db.handle, path)
+	if !ok {
+		return 0, nativeOrNotFound(path)
+	}
+	return val, nil
 }
 
 // GetFloat32 returns the float32 value at path.

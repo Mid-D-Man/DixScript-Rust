@@ -5,13 +5,15 @@ Go bindings for the [DixScript](https://github.com/Mid-D-Man/DixScript-Rust) `.m
 [![Go Reference](https://pkg.go.dev/badge/github.com/Mid-D-Man/dixscript-go.svg)](https://pkg.go.dev/github.com/Mid-D-Man/dixscript-go)
 [![CI](https://github.com/Mid-D-Man/DixScript-Rust/actions/workflows/go-ci.yml/badge.svg)](https://github.com/Mid-D-Man/DixScript-Rust/actions/workflows/go-ci.yml)
 
+## Documentation Site https://dixscript-docs.pages.dev
+
 ---
 
 ## Requirements
 
 | Requirement | Notes |
 |---|---|
-| Go 1.21+ | |
+| Go 1.21+ | Query uses generics + the stdlib `cmp` package |
 | CGO_ENABLED=1 | Default for native builds; does not work with CGO_ENABLED=0 |
 | C compiler (gcc/clang) | Needed by cgo |
 | `cargo build -p mdix-ffi` | Run once to generate the C header and native lib |
@@ -63,7 +65,7 @@ go test ./...
 ### Load
 
 ```go
-db, err := dixscript.Load("config.mdix")           // from file
+db, err := dixscript.Load("config.mdix")           // from file — required for EnableHotReload
 db, err := dixscript.LoadStr(src)                   // from string
 db, err := dixscript.LoadEncrypted(enc, key)        // encrypted + key file
 db, err := dixscript.LoadEncryptedPassword(enc, pw) // encrypted + password
@@ -75,11 +77,12 @@ defer db.Close()
 ### Read
 
 ```go
-s, err  := db.GetString("path")
-i, err  := db.GetInt("path")
+s, err   := db.GetString("path")
+i, err   := db.GetInt("path")     // 32-bit — mdix_get_int
+i64, err := db.GetInt64("path")   // genuine 64-bit Long — mdix_get_long, not GetInt widened
 f32, err := db.GetFloat32("path")
 f64, err := db.GetFloat64("path")
-b, err  := db.GetBool("path")
+b, err   := db.GetBool("path")
 
 // Special types
 color, err := db.GetHexColor("primary_color")  // → HexColor{R,G,B,A float32}
@@ -94,11 +97,16 @@ field, err := db.GetEnumField("ai_type")   // → "BOSS"
 val,   err := db.GetEnumValue("ai_type")   // → 2 (resolved int)
 
 // Introspection
-typ := db.ValueTypeAt("path")   // → dixscript.TypeInt, TypeString, etc.
+typ := db.ValueTypeAt("path")   // → dixscript.TypeInt, TypeLong, TypeString, etc.
 ok  := db.Exists("path")        // → bool
 n,  err := db.ArrayLength("path")
 keys, err := db.Keys("")        // top-level keys
 ```
+
+> `GetInt` (32-bit) and `GetInt64`/Long are genuinely distinct at the FFI
+> level — a value written as `9_000_000_000L` only reads back correctly
+> through `GetInt64`. See `RequireInt`/`RequireLong` below for the same
+> asymmetry in schema validation.
 
 ### Build
 
@@ -107,7 +115,8 @@ b := dixscript.NewBuilder()
 defer b.Close()
 
 b.SetString("profile.name", "player1")
-b.SetInt("profile.level", 42)
+b.SetInt("profile.level", 42)       // 32-bit
+b.SetInt64("profile.xp_total", 9_000_000_000) // genuine 64-bit Long
 b.SetFloat64("profile.score", 9876.5)
 b.SetBool("profile.active", true)
 b.SetDate("profile.joined", time.Now())
@@ -139,6 +148,103 @@ formatted, err := dixscript.Convert.FormatSource(src, dixscript.FormatCompact)
 minified,  err := dixscript.Convert.MinifySource(src)
 ```
 
+### Query
+
+DixScript's core `DixQuery` (`dixscript::Runtime::query`) takes Rust
+closures, which can't cross the cgo boundary — so, like the Python and C#
+bindings, this fetches the target array natively and queries it with Go's
+own idioms (generics + closures) instead:
+
+```go
+type Enemy struct {
+    Name string `json:"name"`
+    HP   int    `json:"hp"`
+}
+
+q, err := dixscript.LoadQuery[Enemy](db, "enemies")
+heavies := q.Where(func(e Enemy) bool { return e.HP > 500 })
+names   := dixscript.Select(heavies, func(e Enemy) string { return e.Name })
+sorted  := dixscript.OrderByDesc(heavies, func(e Enemy) int { return e.HP })
+groups  := dixscript.GroupBy(q, func(e Enemy) string { return e.Name })
+total   := dixscript.SumInt(q, func(e Enemy) int64 { return int64(e.HP) })
+
+// Sibling paths sharing shape, wildcarding one segment:
+statuses, err := dixscript.QueryMany[string](db, "servers.*.status")
+```
+
+Also available on `Query[T]`: `Skip`, `Take`, `Any`, `All`, `Count`,
+`IsEmpty`, `First`, `FirstOr`, `Last`, `Nth`, `ToSlice`. Also as free
+functions (need a 2nd type parameter, so can't be methods): `Distinct`,
+`OrderBy`, `MinByKey`, `MaxByKey`, `SumFloat`, `AvgFloat`.
+
+### Merge
+
+Wraps the real AST-level merger (`mdix_merge_sources`) — full DixScript
+type fidelity, not a JSON round-trip:
+
+```go
+db, conflicts, err := dixscript.MergeSources(
+    []string{baseSrc, overrideSrc},
+    dixscript.PrimaryWins,
+    dixscript.ArrayConcat,
+)
+defer db.Close()
+
+for _, c := range conflicts {
+    fmt.Printf("%s: source %d won\n", c.Path, c.WinningSource)
+}
+
+// Or with explicit per-source weights:
+db, conflicts, err := dixscript.MergeSourcesWeighted(sources, weights, dixscript.WeightedPriority, dixscript.ArrayReplace)
+```
+
+### Schema
+
+`mdix-ffi` has no schema-validation C ABI, so — same as C#'s
+`MdixSchemaBuilder` — this validates client-side, purely with
+`Exists`/`ValueTypeAt`:
+
+```go
+report := dixscript.NewSchema().
+    RequireString("app_name").
+    RequireInt("port").
+    OptionalBool("debug").
+    Validate(db)
+
+if !report.IsValid() {
+    for _, e := range report.Errors {
+        fmt.Println(e) // `"port": missing required field (expected Int)`
+    }
+}
+```
+
+A `SchemaBuilder` is reusable — `Validate` only reads from the `Database`
+you pass it.
+
+### Hot reload
+
+Polls the source file's mtime rather than using a filesystem watcher —
+this package has zero runtime dependencies beyond cgo by design, and
+`fsnotify` would be the one thing that broke that:
+
+```go
+db, err := dixscript.Load("config.mdix") // must be Load, not LoadStr
+db.OnReloaded(func(db *dixscript.Database) {
+    fmt.Println("config changed, new port:", must(db.GetInt("port")))
+})
+db.OnReloadFailed(func(err error) {
+    log.Println("reload failed, still serving last-good config:", err)
+})
+if err := db.EnableHotReload(500 * time.Millisecond); err != nil {
+    log.Fatal(err)
+}
+defer db.Close() // also disables hot reload
+```
+
+On a successful reload the *same* `*Database` has its internal handle
+swapped in place — anything already holding it sees fresh data with no
+re-fetch needed.
+
 ---
 
 ## Error handling
@@ -168,25 +274,30 @@ if err != nil {
 
 ```
 mdix-go/
-├── dixscript.go           # Load*, NewBuilder, Version — top-level facade
-├── database.go            # Database type — all typed getters
-├── builder.go             # Builder type — Set*, Save, ToString
-├── converter.go           # Convert.ToJSON / FromJSON / ToToml / Format / Minify
-├── types.go               # HexColor, Blob, MdixRegex, MdixDate, MdixTimestamp, ValueType
-├── errors.go              # MdixError, ErrorKind constants
+├── dixscript.go            # Load*, NewBuilder, Version — top-level facade
+├── database.go             # Database type — all typed getters, SourcePath
+├── builder.go               # Builder type — Set*, Save, ToString, ToDatabase
+├── converter.go             # Convert.ToJSON / FromJSON / ToToml / Format / Minify
+├── query.go                  # Query[T] — Where/Select/OrderBy/GroupBy/..., QueryMany
+├── merge.go                  # MergeSources / MergeSourcesWeighted
+├── schema.go                 # SchemaBuilder — client-side Require*/Optional* validation
+├── watch.go                   # EnableHotReload / DisableHotReload — mtime polling
+├── types.go                 # HexColor, Blob, MdixRegex, MdixDate, MdixTimestamp,
+│                             # ValueType, MergeStrategy, ArrayMergeStrategy, FormatMode
+├── errors.go                # MdixError, ErrorKind constants
+├── *_test.go                 # one per file above — go test -v ./...
 ├── internal/
-│   ├── ffi.go             # All cgo declarations (the only file with unsafe)
+│   ├── ffi.go              # All cgo declarations (the only file with unsafe)
 │   ├── include/
-│   │   └── mdix_ffi.h     # Generated by cbindgen — do not edit
-│   └── lib/               # Native libs — populated by CI or local cargo build
+│   │   └── mdix_ffi.h      # Generated by cbindgen — do not edit
+│   └── lib/                # Native libs — populated by CI or local cargo build
 │       ├── linux-amd64/
 │       ├── linux-arm64/
 │       ├── darwin-amd64/
 │       ├── darwin-arm64/
 │       └── windows-amd64/
 └── examples/
-    ├── basic/main.go
-    └── game_config/main.go
+    └── basic/main.go
 ```
 
 ---
@@ -198,6 +309,10 @@ mdix-go/
 | Load | `Dix.Load(path)` | `dixscript.Load(path)` |
 | Read | `db.GetInt("path").OrThrow()` | `db.GetInt("path")` → `(int, error)` |
 | Build | `MdixBuilder.Create()` | `dixscript.NewBuilder()` |
+| Query | `db.QueryWhere<T>(path, pred)` | `dixscript.LoadQuery[T](db, path)` + `.Where(pred)` |
+| Merge | `MdixMerger.Merge(sources, strategy)` | `dixscript.MergeSources(sources, strategy, arrayStrategy)` |
+| Schema | `MdixSchemaBuilder` (client-side) | `dixscript.NewSchema()` (client-side, same reason) |
+| Hot reload | `db.EnableHotReload()` (FileSystemWatcher) | `db.EnableHotReload(interval)` (mtime polling) |
 | Close | `using var db = ...` (IDisposable) | `defer db.Close()` (io.Closer) |
 | Errors | `MdixResult<T>` with `.IsSuccess` | `(T, error)` idiomatic Go |
 | FFI glue | csbindgen auto-generates `MdixNative.cs` | cgo with hand-written `internal/ffi.go` |

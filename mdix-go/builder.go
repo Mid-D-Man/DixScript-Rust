@@ -102,6 +102,22 @@ func (b *Builder) SetInt32(path string, value int32) error {
 	return b.SetInt(path, int(value))
 }
 
+// SetInt64 sets a genuine 64-bit Long value at the dotted path — uses
+// the real 64-bit FFI setter (mdix_builder_set_long), not SetInt widened.
+// Previously there was no way to build a Long field at all through this
+// package; only Int (32-bit) was reachable.
+func (b *Builder) SetInt64(path string, value int64) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := b.checkOpen(); err != nil {
+		return err
+	}
+	if !internal.BuilderSetLong(b.handle, path, value) {
+		return errNative(internal.LastError())
+	}
+	return nil
+}
+
 // SetFloat32 sets a float32 value at the dotted path.
 func (b *Builder) SetFloat32(path string, value float32) error {
 	b.mu.Lock()
@@ -199,6 +215,22 @@ func (b *Builder) GetInt(path string) (int, error) {
 		return 0, nativeOrNotFound(path)
 	}
 	return int(val), nil
+}
+
+// GetInt64 reads a genuine 64-bit Long value back from the builder —
+// uses mdix_builder_get_long, not GetInt widened. Previously absent
+// entirely, so a value set via SetInt64 had no matching getter.
+func (b *Builder) GetInt64(path string) (int64, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := b.checkOpen(); err != nil {
+		return 0, err
+	}
+	val, ok := internal.BuilderGetLong(b.handle, path)
+	if !ok {
+		return 0, nativeOrNotFound(path)
+	}
+	return val, nil
 }
 
 // GetFloat32 reads a float32 back from the builder.

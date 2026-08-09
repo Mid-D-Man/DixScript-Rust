@@ -5,6 +5,7 @@ use serde_json::Value as JsonValue;
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 
 use crate::document::Document;
+use crate::features::commands::{has_settings_table, has_theme_tables};
 
 // CMD_VALIDATE intentionally removed from ALL_COMMANDS and the lens list.
 pub const CMD_TO_JSON:          &str = "mdix.convertToJson";
@@ -13,12 +14,19 @@ pub const CMD_MINIFY:           &str = "mdix.minify";
 pub const CMD_COMPILE:          &str = "mdix.compile";
 pub const CMD_SHOW_AST:         &str = "mdix.showAst";
 pub const CMD_CREATE_RESOLVED:  &str = "mdix.createResolved";
-// Unlike CMD_EDIT_DATETIME/CMD_PREVIEW_BLOB below, this one genuinely needs
-// the server (runs test text through the real `regex` crate DixScript's
-// `regex` type is backed by) rather than being intercepted client-side --
-// belongs in ALL_COMMANDS/execute_command like the rest of this block, not
-// with the client-only commands.
-pub const CMD_TEST_REGEX:       &str = "mdix.testRegex";
+// Data-only: returns a JSON payload (`{success, message, dark, light,
+// warnings}`) via `Ok(Some(...))` instead of a toast — see the doc comment on
+// `run_get_theme_colors` in commands.rs. Consumed by the client-only
+// `mdix.applyThemeColors` command below, not invoked directly by the user.
+pub const CMD_GET_THEME_COLORS:    &str = "mdix.getThemeColors";
+// Same shape as CMD_GET_THEME_COLORS, for the curated settings table instead
+// — see `run_get_settings_values` in commands.rs.
+pub const CMD_GET_SETTINGS_VALUES: &str = "mdix.getSettingsValues";
+// Same "data-only, genuinely needs the server" reasoning as the two above —
+// runs test text through the real `regex` crate DixScript's `regex` type is
+// backed by, not a client-side JS approximation. Consumed by the client-only
+// mdix.previewRegex below (which owns the webview), not the user directly.
+pub const CMD_TEST_REGEX:          &str = "mdix.testRegex";
 
 pub const ALL_COMMANDS: &[&str] = &[
     CMD_TO_JSON,
@@ -27,6 +35,8 @@ pub const ALL_COMMANDS: &[&str] = &[
     CMD_COMPILE,
     CMD_SHOW_AST,
     CMD_CREATE_RESOLVED,
+    CMD_GET_THEME_COLORS,
+    CMD_GET_SETTINGS_VALUES,
     CMD_TEST_REGEX,
 ];
 
@@ -39,8 +49,20 @@ pub const ALL_COMMANDS: &[&str] = &[
 // a locally-registered command with this ID before forwarding a CodeLens
 // click to the server via `workspace/executeCommand`, so a local handler
 // intercepts these before the server ever sees them.
-pub const CMD_EDIT_DATETIME: &str = "mdix.editDateTime";
-pub const CMD_PREVIEW_BLOB:  &str = "mdix.previewBlob";
+pub const CMD_EDIT_DATETIME:      &str = "mdix.editDateTime";
+pub const CMD_PREVIEW_BLOB:       &str = "mdix.previewBlob";
+// Proxies CMD_GET_THEME_COLORS via `workspace/executeCommand`, then applies
+// the result through the VS Code configuration API — same "client owns
+// anything touching VS Code APIs" reasoning as the two commands above.
+pub const CMD_APPLY_THEME_COLORS: &str = "mdix.applyThemeColors";
+// Proxies CMD_GET_SETTINGS_VALUES the same way.
+pub const CMD_APPLY_SETTINGS:     &str = "mdix.applySettings";
+// Opens the regex tester webview pre-filled with the clicked literal's
+// pattern (2nd CodeLens argument below) — same webview dixscript.testRegex
+// opens empty from the command palette, just seeded here. Doesn't itself run
+// anything through regex — the webview does that via CMD_TEST_REGEX once
+// it's open, same as it would for a pattern typed in by hand.
+pub const CMD_PREVIEW_REGEX:      &str = "mdix.previewRegex";
 
 pub fn provide(doc: Option<&Document>) -> Option<Vec<CodeLens>> {
     let result = panic::catch_unwind(panic::AssertUnwindSafe(|| provide_inner(doc)));
@@ -72,6 +94,22 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<CodeLens>> {
     lenses.push(make_lens(file_range, "⊡ Minify",  CMD_MINIFY,          vec![uri_arg.clone()]));
     lenses.push(make_lens(file_range, "⊞ Resolve", CMD_CREATE_RESOLVED, vec![uri_arg.clone()]));
     lenses.push(make_lens(file_range, "⚙ Compile", CMD_COMPILE,         vec![uri_arg.clone()]));
+
+    // Only shown when @DATA actually has a top-level `dark:`/`light:` table —
+    // unlike the five lenses above, this one doesn't make sense on every
+    // .mdix file, so it's gated on real AST content rather than always shown.
+    if doc.ast.as_ref().is_some_and(has_theme_tables) {
+        lenses.push(make_lens(
+            file_range, "🎨 Apply Theme", CMD_APPLY_THEME_COLORS, vec![uri_arg.clone()],
+        ));
+    }
+
+    // Same gating idea, for a top-level `settings:` table.
+    if doc.ast.as_ref().is_some_and(has_settings_table) {
+        lenses.push(make_lens(
+            file_range, "⚙ Apply Settings", CMD_APPLY_SETTINGS, vec![uri_arg.clone()],
+        ));
+    }
 
     for (idx, token) in doc.tokens.iter().enumerate() {
         let is_data = matches!(token.token_type, TokenType::SectionData);
@@ -129,7 +167,7 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<CodeLens>> {
 
         // ── Blob constructor → preview lens ───────────────────────────────────
         if matches!(token.token_type, TokenType::BlobConstructor(_)) {
-            if let Some(content) = find_blob_content(&doc.tokens, idx) {
+            if let Some(content) = find_constructor_content(&doc.tokens, idx) {
                 let line = token.line.saturating_sub(1) as u32;
                 let col  = token.column.saturating_sub(1) as u32;
                 let point = Range::new(Position::new(line, col), Position::new(line, col));
@@ -142,17 +180,41 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<CodeLens>> {
                 ));
             }
         }
+
+        // ── Regex constructor → test lens ─────────────────────────────────────
+        // Same token shape as BlobConstructor (see find_constructor_content's
+        // own comment) — RegexConstructor(String) is lexed with an empty
+        // String too, real pattern text is the following String/StringSingle
+        // token inside the parens.
+        if matches!(token.token_type, TokenType::RegexConstructor(_)) {
+            if let Some(pattern) = find_constructor_content(&doc.tokens, idx) {
+                let line = token.line.saturating_sub(1) as u32;
+                let col  = token.column.saturating_sub(1) as u32;
+                let point = Range::new(Position::new(line, col), Position::new(line, col));
+
+                lenses.push(make_lens(
+                    point,
+                    "🔍 Test Regex",
+                    CMD_PREVIEW_REGEX,
+                    vec![uri_arg.clone(), JsonValue::String(pattern.to_string())],
+                ));
+            }
+        }
     }
 
     if lenses.is_empty() { None } else { Some(lenses) }
 }
 
-// A `b:(...)` constructs as: BlobConstructor  Symbol('(')  <content>  Symbol(')').
-// The content is almost always a String/StringSingle literal (base64 text);
-// `b:()` (empty blob) has no content token at all. Bounded lookahead (a
-// handful of tokens) keeps this cheap and safe against malformed input.
-fn find_blob_content(tokens: &[Token], blob_idx: usize) -> Option<String> {
-    let open_idx = blob_idx + 1;
+// A `b:(...)` or `r:(...)` constructs as:
+// BlobConstructor|RegexConstructor  Symbol('(')  <content>  Symbol(')').
+// Both token types are lexed with an empty String payload (see lexer.rs) —
+// the real content always comes from the following String/StringSingle
+// literal, never the constructor token itself. `b:()`/`r:()` (empty) has no
+// content token at all. Bounded lookahead (a handful of tokens) keeps this
+// cheap and safe against malformed input. Renamed from find_blob_content:
+// identical shape for both constructor kinds, no reason to duplicate it.
+fn find_constructor_content(tokens: &[Token], constructor_idx: usize) -> Option<String> {
+    let open_idx = constructor_idx + 1;
     match tokens.get(open_idx).map(|t| &t.token_type) {
         Some(TokenType::Symbol('(')) => {}
         _ => return None,
@@ -160,7 +222,7 @@ fn find_blob_content(tokens: &[Token], blob_idx: usize) -> Option<String> {
 
     match tokens.get(open_idx + 1).map(|t| &t.token_type) {
         Some(TokenType::String(s)) | Some(TokenType::StringSingle(s)) => Some(s.clone()),
-        Some(TokenType::Symbol(')')) => Some(String::new()), // b:() — empty blob
+        Some(TokenType::Symbol(')')) => Some(String::new()), // b:()/r:() — empty
         _ => None,
     }
 }

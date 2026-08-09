@@ -6,6 +6,15 @@
  * (v1.10), which deliberately doesn't support backreferences or lookaround
  * (linear-time guarantee). A JS-side tester could show matches DixScript
  * itself would never produce, so this always goes through the real server.
+ *
+ * Two ways in:
+ *   - `dixscript.testRegex` (command palette) — opens empty.
+ *   - `mdix.previewRegex` (mdix-lsp's "🔍 Test Regex" CodeLens, same
+ *     mechanism as `mdix.previewBlob`) — opens pre-filled with the clicked
+ *     `r:(...)` literal's pattern. Client-only, not in ALL_COMMANDS, same
+ *     reasoning as blobPreview.ts/dateTimeEditor.ts: vscode-languageclient
+ *     checks for a locally-registered command with this ID before ever
+ *     forwarding the CodeLens click to the server.
  */
 
 import * as vscode from "vscode";
@@ -38,14 +47,32 @@ export function registerRegexTester(
       openPanel(context, getClient);
     })
   );
+
+  // Positional args match the CodeLens's `arguments` array order exactly —
+  // same convention as mdix.previewBlob/mdix.editDateTime.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "mdix.previewRegex",
+      (_uriStr: string, pattern: string) => {
+        openPanel(context, getClient, pattern);
+      }
+    )
+  );
 }
 
 function openPanel(
   context: vscode.ExtensionContext,
-  getClient: () => LanguageClient | undefined
+  getClient: () => LanguageClient | undefined,
+  initialPattern?: string
 ): void {
   if (panel) {
     panel.reveal();
+    if (initialPattern !== undefined) {
+      // Already open — push the new pattern in via postMessage instead of
+      // regenerating the HTML (would lose whatever test text is already
+      // typed in).
+      panel.webview.postMessage({ type: "setPattern", pattern: initialPattern });
+    }
     return;
   }
 
@@ -64,7 +91,11 @@ function openPanel(
     dark:  vscode.Uri.joinPath(context.extensionUri, "icons", "mdix-file-dark.svg"),
   };
 
-  panel.webview.html = getHtml();
+  // Baked into the initial HTML rather than sent via a follow-up
+  // postMessage: postMessage right after setting .html races the webview's
+  // own script actually finishing evaluation and attaching its listener on
+  // first load. Embedding it in the generated markup has no such race.
+  panel.webview.html = getHtml(initialPattern);
   panel.onDidDispose(() => { panel = undefined; }, null, context.subscriptions);
 
   panel.webview.onDidReceiveMessage(
@@ -99,7 +130,12 @@ function openPanel(
   );
 }
 
-function getHtml(): string {
+function getHtml(initialPattern?: string): string {
+  // JSON.stringify doubles as HTML-safe escaping here — the result always
+  // has surrounding quotes and any " or < in the pattern comes out safely
+  // backslash-escaped, so it's fine to inline directly into the <script>.
+  const initialPatternJson = JSON.stringify(initialPattern ?? "");
+
   return /* html */ `<!DOCTYPE html>
 <html>
 <head>
@@ -122,7 +158,7 @@ function getHtml(): string {
 </head>
 <body>
   <label for="pattern">Pattern</label>
-  <input id="pattern" placeholder="e.g. ^[A-Z][a-z]+$" />
+  <input id="pattern" placeholder="e.g. ^[A-Z][a-z]+$" value=${initialPatternJson.replace(/"/g, '&quot;')} />
 
   <label for="testText">Test text</label>
   <textarea id="testText" placeholder="Paste text to test against the pattern..."></textarea>
@@ -155,6 +191,11 @@ function getHtml(): string {
 
   window.addEventListener('message', (event) => {
     const msg = event.data;
+    if (msg.type === 'setPattern') {
+      patternEl.value = msg.pattern;
+      run();
+      return;
+    }
     if (msg.type !== 'result') return;
     render(msg.result);
   });
@@ -195,6 +236,10 @@ function getHtml(): string {
 
     resultEl.innerHTML = html + (groupsHtml ? '<hr/>' + groupsHtml : '');
   }
+
+  // Run immediately if this panel was opened pre-filled (from the CodeLens),
+  // so results show up without requiring the user to type anything first.
+  if (patternEl.value) { run(); }
 </script>
 </body>
 </html>`;

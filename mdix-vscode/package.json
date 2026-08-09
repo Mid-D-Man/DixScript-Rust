@@ -63,6 +63,9 @@
       {
         "command": "mdix.applySettings",
         "title": "DixScript: Apply Settings"
+      },{
+  "command": "dixscript.testRegex",
+  "title": "DixScript: Test Regex"
       }
     ],
     "configuration": {

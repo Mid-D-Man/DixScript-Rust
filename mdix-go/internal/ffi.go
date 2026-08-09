@@ -437,3 +437,97 @@ func BuilderToString(handle unsafe.Pointer) (string, bool) {
 	defer C.mdix_free_string(result)
 	return C.GoString(result), true
 }
+
+// ── Query ─────────────────────────────────────────────────────────────────────
+
+// SelectManyAsJSON matches a single '*' wildcard segment (e.g.
+// "servers.*.status") against every sibling path and returns every match
+// as a JSON array string. Wraps mdix_select_many_as_json — see its doc
+// comment in mdix-ffi/src/lib.rs for the exact wildcard semantics (single
+// segment only).
+func SelectManyAsJSON(handle unsafe.Pointer, pattern string) (string, bool) {
+	cPattern := C.CString(pattern)
+	defer C.free(unsafe.Pointer(cPattern))
+	result := C.mdix_select_many_as_json(handle, cPattern)
+	if result == nil {
+		return "", false
+	}
+	defer C.mdix_free_string(result)
+	return C.GoString(result), true
+}
+
+// ── Merge ─────────────────────────────────────────────────────────────────────
+
+// MergeSources merges .mdix source strings with the real AST-level merger
+// (mdix_merge_sources) — full DixScript type fidelity, unlike a JSON
+// round-trip. strategy/arrayStrategy are the raw int32 discriminants of
+// MdixMergeStrategy / ArrayMergeStrategy (dixscript.MergeStrategy /
+// dixscript.ArrayMergeStrategy — cast at the call site so this package
+// stays free of a dixscript import). Returns the new handle, the
+// conflicts-JSON report ("[]" when there were none), and whether the
+// merge succeeded; check LastError() on failure.
+func MergeSources(sources []string, strategy, arrayStrategy int32) (unsafe.Pointer, string, bool) {
+	if len(sources) == 0 {
+		return nil, "", false
+	}
+	cSources := make([]*C.char, len(sources))
+	for i, s := range sources {
+		cSources[i] = C.CString(s)
+	}
+	defer func() {
+		for _, cs := range cSources {
+			C.free(unsafe.Pointer(cs))
+		}
+	}()
+
+	var outConflicts *C.char
+	h := C.mdix_merge_sources(
+		(**C.char)(unsafe.Pointer(&cSources[0])),
+		C.int(len(sources)),
+		C.MdixMergeStrategy(strategy),
+		C.ArrayMergeStrategy(arrayStrategy),
+		&outConflicts,
+	)
+
+	conflicts := ""
+	if outConflicts != nil {
+		conflicts = C.GoString(outConflicts)
+		C.mdix_free_string(outConflicts)
+	}
+	return unsafe.Pointer(h), conflicts, h != nil
+}
+
+// MergeSourcesWeighted is MergeSources with explicit per-source weights
+// (mdix_merge_sources_weighted). weights must be the same length as
+// sources; higher weight wins under MdixMergeStrategy::WeightedPriority.
+func MergeSourcesWeighted(sources []string, weights []float64, strategy, arrayStrategy int32) (unsafe.Pointer, string, bool) {
+	if len(sources) == 0 || len(sources) != len(weights) {
+		return nil, "", false
+	}
+	cSources := make([]*C.char, len(sources))
+	for i, s := range sources {
+		cSources[i] = C.CString(s)
+	}
+	defer func() {
+		for _, cs := range cSources {
+			C.free(unsafe.Pointer(cs))
+		}
+	}()
+
+	var outConflicts *C.char
+	h := C.mdix_merge_sources_weighted(
+		(**C.char)(unsafe.Pointer(&cSources[0])),
+		(*C.double)(unsafe.Pointer(&weights[0])),
+		C.int(len(sources)),
+		C.MdixMergeStrategy(strategy),
+		C.ArrayMergeStrategy(arrayStrategy),
+		&outConflicts,
+	)
+
+	conflicts := ""
+	if outConflicts != nil {
+		conflicts = C.GoString(outConflicts)
+		C.mdix_free_string(outConflicts)
+	}
+	return unsafe.Pointer(h), conflicts, h != nil
+}

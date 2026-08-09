@@ -1,0 +1,239 @@
+name: Publish dixscript-java to Maven Central
+
+# Manual only (Actions tab -> Run workflow) — requires typing "publish" in
+# the confirmation input, same gating a-publish-dixscript-crate.yml uses for
+# crates.io, mdix-cli-publish.yml uses for crates.io+GHCR,
+# mdix-python-pypi-publish.yml uses for PyPI, wasm-npm-publish.yml uses for
+# npm, and mdix-core-cs-nuget-publish.yml uses for NuGet.
+#
+# Builds native mdix-java for the 4 RIDs NativeLoader.java actually resolves
+# to (see internal/NativeLoader.java's rid() / libName()): linux-x86_64,
+# darwin-x86_64, darwin-aarch64, win32-x86-64. Each RID's native lib lands
+# in its own src/main/resources/native/<rid>/ subdirectory, so — same
+# reasoning mdix-core-cs-nuget-publish.yml documents for its runtimes/
+# layout — a missing platform costs that platform's native support, not the
+# whole build.
+#
+# ── Maven Central — Central Publisher Portal (no full OIDC Trusted
+#    Publishing exists yet for Maven Central, unlike crates.io / PyPI / npm /
+#    NuGet, which this repo's other publish workflows already use) ─────────
+# com.vanniktech.maven.publish (configured in build.gradle.kts) drives both
+# GPG signing and the Central Portal upload. Requires, one-time:
+#   1. A Sonatype Central Portal account (https://central.sonatype.com) with
+#      the `com.midmanstudio` namespace verified — either prove ownership of
+#      midmanstudio.com via a DNS TXT record, or switch the group ID in
+#      build.gradle.kts to the auto-verified `io.github.Mid-D-Man` (verified
+#      just by logging into the Portal with the Mid-D-Man GitHub account) if
+#      domain verification isn't set up. dixscript-java's Maven coordinates
+#      are permanent once a version is live either way — decide before the
+#      first real publish.
+#   2. A Central Portal user token (Account -> Generate User Token) stored
+#      as two repo secrets: MAVEN_CENTRAL_USERNAME, MAVEN_CENTRAL_PASSWORD.
+#   3. A GPG signing key (`gpg --full-generate-key`), exported with
+#      `gpg --export-secret-keys --armor <key-id>`, stored as the
+#      MAVEN_SIGNING_KEY repo secret (full armored private key block) plus
+#      MAVEN_SIGNING_PASSWORD (the key's passphrase). The public key needs
+#      publishing to a keyserver Central checks, e.g.:
+#        gpg --keyserver keyserver.ubuntu.com --send-keys <key-id>
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm. Maven Central does not allow re-uploading or deleting a live version — bump `version` in build.gradle.kts first if this is a new release.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  confirm-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm manual trigger
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "publish" ]; then
+            echo "Confirmation text did not match 'publish' — aborting."
+            exit 1
+          fi
+
+  # ── 1. Native build jobs (4 RIDs) ────────────────────────────────────────
+
+  build-native-linux-x64:
+    needs: confirm-trigger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-java-linux-x64-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-java-linux-x64-
+      - name: Build mdix-java (linux-x86_64)
+        run: cargo build -p mdix-java --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-linux-x86_64
+          path: target/release/libmdix_java.so
+          if-no-files-found: error
+
+  build-native-darwin-x64:
+    needs: confirm-trigger
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-13-cargo-java-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-13-cargo-java-
+      - name: Build mdix-java (darwin-x86_64)
+        run: cargo build -p mdix-java --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-darwin-x86_64
+          path: target/release/libmdix_java.dylib
+          if-no-files-found: error
+
+  build-native-darwin-arm64:
+    needs: confirm-trigger
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-14-cargo-java-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-14-cargo-java-
+      - name: Build mdix-java (darwin-aarch64)
+        run: cargo build -p mdix-java --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-darwin-aarch64
+          path: target/release/libmdix_java.dylib
+          if-no-files-found: error
+
+  build-native-win-x64:
+    needs: confirm-trigger
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: windows-latest-cargo-java-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: windows-latest-cargo-java-
+      - name: Build mdix-java (win32-x86-64)
+        run: cargo build -p mdix-java --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-win32-x86-64
+          path: target/release/mdix_java.dll
+          if-no-files-found: error
+
+  # ── 2. Assemble, test, sign, and publish ─────────────────────────────────
+
+  publish:
+    needs: [
+      confirm-trigger,
+      build-native-linux-x64,
+      build-native-darwin-x64,
+      build-native-darwin-arm64,
+      build-native-win-x64
+    ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-java-pack-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-java-pack-
+
+      - name: Download native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded-natives
+
+      - name: Organize natives into src/main/resources/native/<rid>/
+        run: |
+          R="mdix-java/src/main/resources/native"
+          mkdir -p "$R/linux-x86_64" "$R/darwin-x86_64" "$R/darwin-aarch64" "$R/win32-x86-64"
+          cp downloaded-natives/native-linux-x86_64/libmdix_java.so   "$R/linux-x86_64/"   || true
+          cp downloaded-natives/native-darwin-x86_64/libmdix_java.dylib "$R/darwin-x86_64/"  || true
+          cp downloaded-natives/native-darwin-aarch64/libmdix_java.dylib "$R/darwin-aarch64/" || true
+          cp downloaded-natives/native-win32-x86-64/mdix_java.dll     "$R/win32-x86-64/"    || true
+          echo "Bundled natives:"
+          find "$R" -type f
+
+      # This runner's own linux-x86_64 build is what tests actually run
+      # against (jvmArgs -Djava.library.path in build.gradle.kts points at
+      # nativeOutputDir, which resolves to native/linux-x86_64/ here) — the
+      # buildNativeLib Gradle task re-running below only (re)writes that one
+      # RID's subdirectory, so it can't clobber the mac/Windows natives
+      # already placed above.
+      - name: Run tests (Gradle, includes Query/Merge/Schema/HotReload)
+        working-directory: mdix-java
+        run: ./gradlew test --no-daemon
+
+      - name: Publish to Maven Central
+        working-directory: mdix-java
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
+        run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache --no-daemon
+
+      # ── Create GitHub Release ─────────────────────────────────────────────
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(grep -oPm1 '(?<=^version = ")[^"]+' mdix-java/build.gradle.kts)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dixscript-java-v${{ steps.version.outputs.version }}
+          name: dixscript-java v${{ steps.version.outputs.version }}
+          body: |
+            Automated release of **dixscript-java** (Java + Kotlin bindings) v${{ steps.version.outputs.version }}.
+            Available on [Maven Central](https://central.sonatype.com/artifact/com.midmanstudio/dixscript-java/${{ steps.version.outputs.version }}).
+
+            ```kotlin
+            dependencies {
+                implementation("com.midmanstudio:dixscript-java:${{ steps.version.outputs.version }}")
+            }
+            ```

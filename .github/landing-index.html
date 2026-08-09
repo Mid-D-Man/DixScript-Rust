@@ -41,6 +41,7 @@
     .badge-php    { background: #1a1f3a; color: #8892bf; border: 1px solid #3a4080; }
     .badge-csharp { background: #1a0a2a; color: #9b4dca; border: 1px solid #5a1e90; }
     .badge-lua    { background: #1a0d2e; color: #a855f7; border: 1px solid #6b21a8; }
+    .badge-c      { background: #1a1a1a; color: #a8a8a8; border: 1px solid #444444; }
     .badge-test   { background: #0f1e3a; color: #79c0ff; border: 1px solid #1f4080; }
     .section-label {
       font-size: 0.70rem; text-transform: uppercase; letter-spacing: 0.8px;
@@ -145,6 +146,19 @@
       <span class="card-badge badge-csharp">C#</span>
     </a>
 
+    <!-- FIX: c-release.yml has deployed c/index.html + c/build-info.json for a
+         while (its own deploy-results step) -- like the C# fix above, it was
+         just never linked from here. Distinct from ffi/: ffi/ covers whether
+         mdix-ffi itself + its generated bindings built; this covers whether
+         the mdix-c package (headers + cross-platform native libs + the
+         test_mdix_c/test_mdix_cpp suites) assembled and passed. -->
+    <a class="card" href="c/">
+      <div class="card-icon">🔧</div>
+      <div class="card-title">C / C++ Package</div>
+      <div class="card-lang">mdix-c · header-only C99/C++17 · CMake + CTest</div>
+      <span class="card-badge badge-c">C</span>
+    </a>
+
     <!-- FIX: this page (csharp/index.html + csharp/test-results.json) has
          existed and been deployed by mdix-core-cs-publish.yml's own
          deploy-results job for a while -- it was just never linked from
@@ -181,4 +195,4 @@
 
 </div>
 </body>
-        </html>
+  </html>

@@ -79,8 +79,7 @@ fn provide_inner(doc: Option<&Document>) -> Vec<ColorInformation> {
 // This is also the most likely cause of the picker closing after one edit:
 // flipping between a 6-digit and 8-digit replacement changes the edited
 // range's text length on every interaction, which can be enough to make the
-// picker lose track of the range it's anchored to. Worth retesting whether
-// that resolves on its own once this ordering fix is in.
+// picker lose track of the range it's anchored to.
 pub fn presentation(color: Color, range: Range) -> Vec<ColorPresentation> {
     let r = (color.red   * 255.0).round() as u8;
     let g = (color.green * 255.0).round() as u8;

@@ -56,6 +56,14 @@ function openPanel(
     { enableScripts: true, retainContextWhenHidden: true }
   );
 
+  // Reusing the extension's existing file icons for now rather than adding
+  // a new asset — swap these two paths for a dedicated regex icon later if
+  // you want the tab visually distinct from a plain .mdix file tab.
+  panel.iconPath = {
+    light: vscode.Uri.joinPath(context.extensionUri, "icons", "mdix-file-light.svg"),
+    dark:  vscode.Uri.joinPath(context.extensionUri, "icons", "mdix-file-dark.svg"),
+  };
+
   panel.webview.html = getHtml();
   panel.onDidDispose(() => { panel = undefined; }, null, context.subscriptions);
 

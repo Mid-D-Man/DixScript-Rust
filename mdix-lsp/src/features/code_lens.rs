@@ -5,24 +5,20 @@ use serde_json::Value as JsonValue;
 use dixscript::Compiler::Core::Tokenizer::{Token, TokenType};
 
 use crate::document::Document;
-use crate::features::commands::{has_settings_table, has_theme_tables};
 
 // CMD_VALIDATE intentionally removed from ALL_COMMANDS and the lens list.
 pub const CMD_TO_JSON:          &str = "mdix.convertToJson";
 pub const CMD_TO_TOML:          &str = "mdix.convertToToml";
 pub const CMD_MINIFY:           &str = "mdix.minify";
-pub const CMD_TEST_REGEX: &str = "mdix.testRegex";
 pub const CMD_COMPILE:          &str = "mdix.compile";
 pub const CMD_SHOW_AST:         &str = "mdix.showAst";
 pub const CMD_CREATE_RESOLVED:  &str = "mdix.createResolved";
-// Data-only: returns a JSON payload (`{success, message, dark, light,
-// warnings}`) via `Ok(Some(...))` instead of a toast — see the doc comment on
-// `run_get_theme_colors` in commands.rs. Consumed by the client-only
-// `mdix.applyThemeColors` command below, not invoked directly by the user.
-pub const CMD_GET_THEME_COLORS:    &str = "mdix.getThemeColors";
-// Same shape as CMD_GET_THEME_COLORS, for the curated settings table instead
-// — see `run_get_settings_values` in commands.rs.
-pub const CMD_GET_SETTINGS_VALUES: &str = "mdix.getSettingsValues";
+// Unlike CMD_EDIT_DATETIME/CMD_PREVIEW_BLOB below, this one genuinely needs
+// the server (runs test text through the real `regex` crate DixScript's
+// `regex` type is backed by) rather than being intercepted client-side --
+// belongs in ALL_COMMANDS/execute_command like the rest of this block, not
+// with the client-only commands.
+pub const CMD_TEST_REGEX:       &str = "mdix.testRegex";
 
 pub const ALL_COMMANDS: &[&str] = &[
     CMD_TO_JSON,
@@ -31,8 +27,7 @@ pub const ALL_COMMANDS: &[&str] = &[
     CMD_COMPILE,
     CMD_SHOW_AST,
     CMD_CREATE_RESOLVED,
-    CMD_GET_THEME_COLORS,
-    CMD_GET_SETTINGS_VALUES,
+    CMD_TEST_REGEX,
 ];
 
 // ── Client-only commands ─────────────────────────────────────────────────────
@@ -44,14 +39,8 @@ pub const ALL_COMMANDS: &[&str] = &[
 // a locally-registered command with this ID before forwarding a CodeLens
 // click to the server via `workspace/executeCommand`, so a local handler
 // intercepts these before the server ever sees them.
-pub const CMD_EDIT_DATETIME:      &str = "mdix.editDateTime";
-pub const CMD_PREVIEW_BLOB:       &str = "mdix.previewBlob";
-// Proxies CMD_GET_THEME_COLORS via `workspace/executeCommand`, then applies
-// the result through the VS Code configuration API — same "client owns
-// anything touching VS Code APIs" reasoning as the two commands above.
-pub const CMD_APPLY_THEME_COLORS: &str = "mdix.applyThemeColors";
-// Proxies CMD_GET_SETTINGS_VALUES the same way.
-pub const CMD_APPLY_SETTINGS:     &str = "mdix.applySettings";
+pub const CMD_EDIT_DATETIME: &str = "mdix.editDateTime";
+pub const CMD_PREVIEW_BLOB:  &str = "mdix.previewBlob";
 
 pub fn provide(doc: Option<&Document>) -> Option<Vec<CodeLens>> {
     let result = panic::catch_unwind(panic::AssertUnwindSafe(|| provide_inner(doc)));
@@ -83,22 +72,6 @@ fn provide_inner(doc: Option<&Document>) -> Option<Vec<CodeLens>> {
     lenses.push(make_lens(file_range, "⊡ Minify",  CMD_MINIFY,          vec![uri_arg.clone()]));
     lenses.push(make_lens(file_range, "⊞ Resolve", CMD_CREATE_RESOLVED, vec![uri_arg.clone()]));
     lenses.push(make_lens(file_range, "⚙ Compile", CMD_COMPILE,         vec![uri_arg.clone()]));
-
-    // Only shown when @DATA actually has a top-level `dark:`/`light:` table —
-    // unlike the five lenses above, this one doesn't make sense on every
-    // .mdix file, so it's gated on real AST content rather than always shown.
-    if doc.ast.as_ref().is_some_and(has_theme_tables) {
-        lenses.push(make_lens(
-            file_range, "🎨 Apply Theme", CMD_APPLY_THEME_COLORS, vec![uri_arg.clone()],
-        ));
-    }
-
-    // Same gating idea, for a top-level `settings:` table.
-    if doc.ast.as_ref().is_some_and(has_settings_table) {
-        lenses.push(make_lens(
-            file_range, "⚙ Apply Settings", CMD_APPLY_SETTINGS, vec![uri_arg.clone()],
-        ));
-    }
 
     for (idx, token) in doc.tokens.iter().enumerate() {
         let is_data = matches!(token.token_type, TokenType::SectionData);

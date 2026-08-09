@@ -20,12 +20,12 @@ use crate::document::Document;
 use crate::extensions::Extensions;
 use crate::features;
 use crate::features::code_lens::{
-    CMD_COMPILE, CMD_CREATE_RESOLVED, CMD_GET_SETTINGS_VALUES, CMD_GET_THEME_COLORS,
-    CMD_MINIFY, CMD_SHOW_AST, CMD_TO_JSON, CMD_TO_TOML,
+    CMD_COMPILE, CMD_CREATE_RESOLVED, CMD_MINIFY,
+    CMD_SHOW_AST, CMD_TO_JSON, CMD_TO_TOML, CMD_TEST_REGEX,
 };
 use crate::features::commands::{
-    run_compile, run_convert_to_json, run_convert_to_toml, run_create_resolved,
-    run_get_settings_values, run_get_theme_colors, run_minify, run_show_ast,run_test_regex, CommandResult,
+    run_compile, run_convert_to_json, run_convert_to_toml,
+    run_create_resolved, run_minify, run_show_ast, run_test_regex, CommandResult,
 };
 
 const ANALYSIS_TIMEOUT_SECS: u64 = 10;
@@ -495,14 +495,6 @@ impl LanguageServer for Backend {
         params: CodeLensParams,
     ) -> LspResult<Option<Vec<CodeLens>>> {
         let uri = &params.text_document.uri;
-        // Was reading `self.documents.get(uri)` immediately, racing the
-        // background `spawn_analysis` task the same way completion/hover/
-        // signature_help used to (see `wait_for_fresh_document`'s doc
-        // comment) — on a fresh edit, that's a real chance of getting served
-        // a `Document` whose `tokens` predate the edit, silently dropping
-        // whatever lens depended on the new token (e.g. a just-typed date/
-        // timestamp literal's 📅 Edit lens). Same fix as those three.
-        self.wait_for_latest(uri).await;
         Ok(features::code_lens::provide(self.documents.get(uri).as_deref()))
     }
 
@@ -735,65 +727,36 @@ impl LanguageServer for Backend {
                 self.show_message(result.success, &result.message).await;
             }
 
-            // Returns its JSON payload directly instead of falling through to
-            // the unconditional `Ok(None)` below — see the doc comment on
-            // `run_get_theme_colors` in commands.rs for why this one command
-            // doesn't go through CommandResult/show_message like the rest.
-            CMD_GET_THEME_COLORS => {
-                let ast_clone = {
-                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
-                    doc.as_ref().and_then(|d| d.ast.clone())
-                };
-                let payload = tokio::task::spawn_blocking(move || {
-                    match ast_clone {
-                        Some(ast) => run_get_theme_colors(&ast),
-                        None => serde_json::json!({
-                            "success": false,
-                            "message": "AST not available — wait for analysis.",
-                            "dark": null, "light": null, "warnings": []
-                        }),
-                    }
-                })
-                    .await
-                    .unwrap_or_else(|_| serde_json::json!({
-                        "success": false,
-                        "message": "Theme colors task panicked.",
-                        "dark": null, "light": null, "warnings": []
-                    }));
-                return Ok(Some(payload));
+            // Unlike every other arm here, this returns actual data rather
+            // than a toast notification -- `return` directly rather than
+            // falling through to the `Ok(None)` at the end of this function,
+            // which is what every other command relies on.
+            //
+            // Doesn't use the uri/source_path parsed above -- those assume
+            // arguments[0] is a document URI, which holds for every other
+            // command here (all triggered from a CodeLens tied to the open
+            // file) but not this one: pattern and test_text come straight
+            // from the webview's own input fields, not from any open
+            // document, so arguments[0]/[1] are read directly instead.
+            //
+            // .to_string() on both up front: run_test_regex takes owned
+            // Strings specifically so it stays safe to later wrap in
+            // spawn_blocking (matching CMD_COMPILE etc.) without hitting a
+            // 'static lifetime error on data borrowed from `params`.
+            CMD_TEST_REGEX => {
+                let pattern = params.arguments.get(0)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let test_text = params.arguments.get(1)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let result = run_test_regex(pattern, test_text);
+                return Ok(Some(serde_json::to_value(result).unwrap_or(serde_json::Value::Null)));
             }
 
-            // Same shape as CMD_GET_THEME_COLORS above.
-            CMD_GET_SETTINGS_VALUES => {
-                let ast_clone = {
-                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
-                    doc.as_ref().and_then(|d| d.ast.clone())
-                };
-                let payload = tokio::task::spawn_blocking(move || {
-                    match ast_clone {
-                        Some(ast) => run_get_settings_values(&ast),
-                        None => serde_json::json!({
-                            "success": false,
-                            "message": "AST not available — wait for analysis.",
-                            "settings": [], "warnings": []
-                        }),
-                    }
-                })
-                    .await
-                    .unwrap_or_else(|_| serde_json::json!({
-                        "success": false,
-                        "message": "Settings values task panicked.",
-                        "settings": [], "warnings": []
-                    }));
-                return Ok(Some(payload));
-            }
-CMD_TEST_REGEX => {
-        let pattern = params.arguments.get(0).and_then(|v| v.as_str()).unwrap_or("");
-        let test_text = params.arguments.get(1).and_then(|v| v.as_str()).unwrap_or("");
- 
-        let result = run_test_regex(pattern, test_text);
-        return Ok(Some(serde_json::to_value(result).unwrap_or(serde_json::Value::Null)));
-                                                          }
             other => {
                 tracing::warn!("Unknown command: {}", other);
                 self.client.show_message(

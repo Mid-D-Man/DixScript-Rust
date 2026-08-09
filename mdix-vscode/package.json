@@ -1,7 +1,7 @@
 {
   "name": "dixscript",
   "displayName": "DixScript (.mdix)",
-  "description": "Full IDE support for DixScript — syntax highlighting, completions, hover, goto-definition, diagnostics, inlay hints, formatting, theme color sync, and bulk settings apply.",
+  "description": "Full IDE support for DixScript \u2014 syntax highlighting, completions, hover, goto-definition, diagnostics, inlay hints, formatting, and more.",
   "version": "1.0.0",
   "publisher": "midmanstudio",
   "license": "MIT",
@@ -20,9 +20,7 @@
     "mdix",
     "config",
     "configuration",
-    "data-format",
-    "theme",
-    "settings-sync"
+    "data-format"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
@@ -57,15 +55,8 @@
         "title": "DixScript: Restart Language Server"
       },
       {
-        "command": "mdix.applyThemeColors",
-        "title": "DixScript: Apply Theme Colors"
-      },
-      {
-        "command": "mdix.applySettings",
-        "title": "DixScript: Apply Settings"
-      },{
-  "command": "dixscript.testRegex",
-  "title": "DixScript: Test Regex"
+        "command": "dixscript.testRegex",
+        "title": "DixScript: Test Regex"
       }
     ],
     "configuration": {

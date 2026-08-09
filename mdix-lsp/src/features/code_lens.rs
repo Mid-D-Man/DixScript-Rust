@@ -11,6 +11,7 @@ use crate::features::commands::{has_settings_table, has_theme_tables};
 pub const CMD_TO_JSON:          &str = "mdix.convertToJson";
 pub const CMD_TO_TOML:          &str = "mdix.convertToToml";
 pub const CMD_MINIFY:           &str = "mdix.minify";
+pub const CMD_TEST_REGEX: &str = "mdix.testRegex";
 pub const CMD_COMPILE:          &str = "mdix.compile";
 pub const CMD_SHOW_AST:         &str = "mdix.showAst";
 pub const CMD_CREATE_RESOLVED:  &str = "mdix.createResolved";

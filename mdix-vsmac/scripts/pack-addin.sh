@@ -84,6 +84,31 @@ if [[ ! -f "$OUT_DLL" ]]; then
   exit 1
 fi
 
+# 2026-08-09 — added after a FATAL ERROR from `vstool setup pack` itself
+# (System.IO.DirectoryNotFoundException on bin/$PROFILE/net7.0/lsp/mdix-lsp)
+# produced NO .mpack at all, silently — the DLL check above passed (the C#
+# build genuinely succeeded), so nothing before this point would have caught
+# it. That particular run turned out to predate the Update=/Include= csproj
+# fix elsewhere in this project (Update= on bin\... items is a no-op MSBuild
+# silently accepts — they're excluded from default globbing, so there was
+# nothing to attach CopyToOutputDirectory metadata to), but the failure mode
+# itself — vstool crashing on a file ImportAddinFile declared that isn't
+# actually sitting in the build output — is real regardless of root cause,
+# and worth failing on clearly here rather than via vstool's own opaque
+# stack trace, however it happens next time.
+OUT_LSP="$ADDIN_DIR/bin/$PROFILE/net7.0/lsp/mdix-lsp"
+if [[ ! -f "$OUT_LSP" ]]; then
+  echo "mdix-lsp binary not found in build output at $OUT_LSP" >&2
+  echo "AddinInfo.cs declares this via [assembly: ImportAddinFile(\"lsp/mdix-lsp\")] —" >&2
+  echo "vstool setup pack will FATAL ERROR on this file missing, not just skip it." >&2
+  echo "copy-binary.sh ran above and didn't fail, so this means the csproj isn't" >&2
+  echo "actually copying the platform binary (bin/darwin-x64/mdix-lsp or" >&2
+  echo "bin/darwin-arm64/mdix-lsp, whichever matches this Mac) into the build" >&2
+  echo "output — check MdixAddin.csproj uses Include=, not Update=, on that None" >&2
+  echo "item (Update= is a silent no-op for anything under bin\\/obj\\)." >&2
+  exit 1
+fi
+
 OUT_DIR="$ADDIN_DIR/dist"
 mkdir -p "$OUT_DIR"
 

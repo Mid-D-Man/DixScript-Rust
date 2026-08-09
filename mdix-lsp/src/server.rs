@@ -25,7 +25,7 @@ use crate::features::code_lens::{
 };
 use crate::features::commands::{
     run_compile, run_convert_to_json, run_convert_to_toml, run_create_resolved,
-    run_get_settings_values, run_get_theme_colors, run_minify, run_show_ast, CommandResult,
+    run_get_settings_values, run_get_theme_colors, run_minify, run_show_ast,run_test_regex, CommandResult,
 };
 
 const ANALYSIS_TIMEOUT_SECS: u64 = 10;
@@ -787,7 +787,13 @@ impl LanguageServer for Backend {
                     }));
                 return Ok(Some(payload));
             }
-
+CMD_TEST_REGEX => {
+        let pattern = params.arguments.get(0).and_then(|v| v.as_str()).unwrap_or("");
+        let test_text = params.arguments.get(1).and_then(|v| v.as_str()).unwrap_or("");
+ 
+        let result = run_test_regex(pattern, test_text);
+        return Ok(Some(serde_json::to_value(result).unwrap_or(serde_json::Value::Null)));
+                                                          }
             other => {
                 tracing::warn!("Unknown command: {}", other);
                 self.client.show_message(

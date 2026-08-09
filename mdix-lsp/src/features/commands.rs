@@ -22,7 +22,26 @@ impl CommandResult {
         CommandResult { message: msg.into(), success: false, out_file: None }
     }
 }
-
+#[derive(serde::Serialize)]
+pub struct RegexMatchGroup {
+    pub name:  Option<String>,
+    pub value: Option<String>,
+}
+ 
+#[derive(serde::Serialize)]
+pub struct RegexMatch {
+    pub start:  usize,
+    pub end:    usize,
+    pub text:   String,
+    pub groups: Vec<RegexMatchGroup>,
+}
+ 
+#[derive(serde::Serialize)]
+pub struct RegexTestResult {
+    pub valid:   bool,
+    pub error:   Option<String>,
+    pub matches: Vec<RegexMatch>,
+}
 // ── Convert → JSON ────────────────────────────────────────────────────────────
 
 pub fn run_convert_to_json(ast: &DixScript, source_path: Option<&Path>) -> CommandResult {
@@ -313,6 +332,53 @@ pub fn run_show_ast(ast: &DixScript) -> CommandResult {
         sections.join(", "), func_count, enum_count, data_entries, dlm_summary,
     ))
     }
+// regex::Regex::new returns a clean Err on a bad pattern rather than
+// panicking, so no catch_unwind needed here (unlike run_compile etc., which
+// wrap AST-walking code that legitimately can panic on malformed input).
+pub fn run_test_regex(pattern: &str, test_text: &str) -> RegexTestResult {
+    let re = match regex::Regex::new(pattern) {
+        Ok(re) => re,
+        Err(e) => {
+            return RegexTestResult {
+                valid:   false,
+                error:   Some(e.to_string()),
+                matches: vec![],
+            };
+        }
+    };
+ 
+    // capture_names()[0] is always the implicit whole-match group (None) --
+    // skip it, we report start/end/text for the whole match separately per
+    // RegexMatch already.
+    let capture_names: Vec<Option<String>> =
+        re.capture_names().map(|n| n.map(String::from)).collect();
+ 
+    let matches = re
+        .captures_iter(test_text)
+        .map(|caps| {
+            let whole = caps.get(0).expect("capture group 0 always present on a match");
+ 
+            let groups = capture_names
+                .iter()
+                .enumerate()
+                .skip(1)
+                .map(|(i, name)| RegexMatchGroup {
+                    name:  name.clone(),
+                    value: caps.get(i).map(|g| g.as_str().to_string()),
+                })
+                .collect();
+ 
+            RegexMatch {
+                start: whole.start(),
+                end:   whole.end(),
+                text:  whole.as_str().to_string(),
+                groups,
+            }
+        })
+        .collect();
+ 
+    RegexTestResult { valid: true, error: None, matches }
+                                           }
 
 // ── Theme colors (semantic token color customization) ─────────────────────────
 //

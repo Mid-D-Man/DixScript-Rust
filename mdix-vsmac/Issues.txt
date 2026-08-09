@@ -1,21 +1,10 @@
-﻿DEBUG[2026-08-09 10:08:13Z]: LSPClient.PlatformLog Error: 0 : 
-DEBUG[2026-08-09 10:08:13Z]: MidManStudio.Mdix.MdixLanguageClient: Activating language client: System.InvalidOperationException: Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
-   at Microsoft.VisualStudio.LanguageServer.Client.RemoteLanguageClientInstance.InitializeAsync(String workspaceLocation, IProgress`1 progress, CancellationToken token)
-DEBUG[2026-08-09 10:08:13Z]: LSPClient.PlatformLog Error: 0 : 
-DEBUG[2026-08-09 10:08:13Z]: MidManStudio.Mdix.MdixLanguageClient: System.InvalidOperationException: Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
-   at Microsoft.VisualStudio.LanguageServer.Client.RemoteLanguageClientInstance.InitializeAsync(String workspaceLocation, IProgress`1 progress, CancellationToken token)
-   at Microsoft.VisualStudio.Threading.TplExtensions.WithTimeout(Task task, TimeSpan timeout)
-   at Microsoft.VisualStudio.LanguageServer.Client.RemoteLanguageClientInstance.TrackTaskAsync(Task task)
-   at Microsoft.VisualStudio.LanguageServer.Client.RemoteLanguageClientInstance.ActivateLanguageClientAsync(String workspaceLocation, CancellationToken token)
-DEBUG[2026-08-09 10:08:13Z]: LSPClient.PlatformLog Error: 0 : 
-DEBUG[2026-08-09 10:08:13Z]: DrainQueueAsync: textDocument/didOpen - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
-DEBUG[2026-08-09 10:08:13Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
-DEBUG[2026-08-09 10:08:13Z]: Level: Verbose, ActivityTracing
-DEBUG[2026-08-09 10:08:13Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
-DEBUG[2026-08-09 10:08:13Z]: initialize
-DEBUG[2026-08-09 10:08:14Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
-DEBUG[2026-08-09 10:08:14Z]: LSPSent: {
-  "processId": 8231,
+﻿DEBUG[2026-08-09 12:24:20Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 12:24:20Z]: Level: Verbose, ActivityTracing
+DEBUG[2026-08-09 12:24:20Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
+DEBUG[2026-08-09 12:24:20Z]: initialize
+DEBUG[2026-08-09 12:24:21Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 12:24:21Z]: LSPSent: {
+  "processId": 1678,
   "rootPath": "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac",
   "rootUri": "file:///Users/midman/Desktop/DixScript-Rust/mdix-vsmac",
   "capabilities": {
@@ -233,18 +222,18 @@ DEBUG[2026-08-09 10:08:14Z]: LSPSent: {
     }
   }
 }
-DEBUG[2026-08-09 10:08:14Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 0 : 
-DEBUG[2026-08-09 10:08:14Z]: Sending initalize request
-DEBUG[2026-08-09 10:08:14Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 8 : 
-DEBUG[2026-08-09 10:08:14Z]: {"id":2,"method":"initialize"}
-DEBUG[2026-08-09 10:08:14Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 8 : 
-DEBUG[2026-08-09 10:08:14Z]: Sent: {
-  "traceparent": "00-43fc7bbbd3793b42af879e56f617bcfe-31ac039340d70e48-01",
+DEBUG[2026-08-09 12:24:21Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 0 : 
+DEBUG[2026-08-09 12:24:21Z]: Sending initalize request
+DEBUG[2026-08-09 12:24:21Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 8 : 
+DEBUG[2026-08-09 12:24:21Z]: {"id":2,"method":"initialize"}
+DEBUG[2026-08-09 12:24:21Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 8 : 
+DEBUG[2026-08-09 12:24:21Z]: Sent: {
+  "traceparent": "00-25fac376b98ecc4e803d1b0f038d7b46-7be65d6913c1d949-01",
   "jsonrpc": "2.0",
   "id": 2,
   "method": "initialize",
   "params": {
-    "processId": 8231,
+    "processId": 1678,
     "rootPath": "/Users/midman/Desktop/DixScript-Rust/mdix-vsmac",
     "rootUri": "file:///Users/midman/Desktop/DixScript-Rust/mdix-vsmac",
     "capabilities": {
@@ -463,10 +452,10 @@ DEBUG[2026-08-09 10:08:14Z]: Sent: {
     }
   }
 }
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 7 : 
-DEBUG[2026-08-09 10:08:15Z]: {"id":2}
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 7 : 
-DEBUG[2026-08-09 10:08:15Z]: Received: {
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 7 : 
+DEBUG[2026-08-09 12:24:22Z]: {"id":2}
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 7 : 
+DEBUG[2026-08-09 12:24:22Z]: Received: {
   "jsonrpc": "2.0",
   "id": 2,
   "result": {
@@ -483,12 +472,12 @@ DEBUG[2026-08-09 10:08:15Z]: Received: {
     }
   }
 }
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 11 : 
-DEBUG[2026-08-09 10:08:15Z]: Received result for request "2".
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: Received initalize response
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: LSPReceived: {
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 11 : 
+DEBUG[2026-08-09 12:24:22Z]: Received result for request "2".
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: Received initalize response
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: LSPReceived: {
   "capabilities": {
     "_vs_disableGoToWorkspaceSymbols": true,
     "_vs_spellCheckingProvider": true,
@@ -501,48 +490,36 @@ DEBUG[2026-08-09 10:08:15Z]: LSPReceived: {
     "workspaceSymbolProvider": true
   }
 }
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: Level: Verbose, ActivityTracing
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: initialize
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: Level: Verbose, ActivityTracing
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: initialized
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: Sending initalized notification
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 8 : 
-DEBUG[2026-08-09 10:08:15Z]: {"id":null,"method":"initialized"}
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 8 : 
-DEBUG[2026-08-09 10:08:15Z]: Sent: {
-  "traceparent": "00-0ff2cfd31e2e14419e35aebe95752c3c-a0883a5b36ebd143-01",
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: Level: Verbose, ActivityTracing
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: initialize
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: Level: Verbose, ActivityTracing
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: initialized
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: Sending initalized notification
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Information: 8 : 
+DEBUG[2026-08-09 12:24:22Z]: {"id":null,"method":"initialized"}
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 8 : 
+DEBUG[2026-08-09 12:24:22Z]: Sent: {
+  "traceparent": "00-32c9aeec382ab645ba1a66afda14df27-7f40017d9ad22144-01",
   "jsonrpc": "2.0",
   "method": "initialized",
   "params": {}
 }
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: Level: Verbose, ActivityTracing
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: initialized
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 5 : 
-DEBUG[2026-08-09 10:08:15Z]: No target methods are registered that match "workspace/configuration".
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: textDocument/didOpen
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: textDocument/didOpen
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: textDocument/didOpen
-DEBUG[2026-08-09 10:08:15Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
-DEBUG[2026-08-09 10:08:15Z]: textDocument/didOpen
-DEBUG[2026-08-09 10:09:19Z]: LSPClient.PlatformLog Error: 0 : 
-DEBUG[2026-08-09 10:09:19Z]: DrainQueueAsync: textDocument/foldingRange - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
-DEBUG[2026-08-09 10:09:20Z]: LSPClient.PlatformLog Error: 0 : 
-DEBUG[2026-08-09 10:09:20Z]: DrainQueueAsync: textDocument/didOpen - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
-DEBUG[2026-08-09 10:11:05Z]: LSPClient.PlatformLog Error: 0 : 
-DEBUG[2026-08-09 10:11:05Z]: DrainQueueAsync: textDocument/hover - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
-DEBUG[2026-08-09 10:14:59Z]: LSPClient.PlatformLog Error: 0 : 
-DEBUG[2026-08-09 10:14:59Z]: DrainQueueAsync: textDocument/hover - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
-DEBUG[2026-08-09 10:15:02Z]: LSPClient.PlatformLog Error: 0 : 
-DEBUG[2026-08-09 10:15:02Z]: DrainQueueAsync: textDocument/hover - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
-DEBUG[2026-08-09 10:21:16Z]: LSPClient.PlatformLog Error: 0 : 
-DEBUG[2026-08-09 10:21:16Z]: DrainQueueAsync: textDocument/hover - Connection could not be established with the client. Client did not return a valid connnection. Client: DixScript Language Client
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Verbose: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: Level: Verbose, ActivityTracing
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: initialized
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Warning: 5 : 
+DEBUG[2026-08-09 12:24:22Z]: No target methods are registered that match "workspace/configuration".
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: textDocument/didOpen
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: textDocument/didOpen
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Start: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: textDocument/didOpen
+DEBUG[2026-08-09 12:24:22Z]: LSPClient.Microsoft.CodeAnalysis.Editor.Implementation.LanguageClient.AlwaysActivateInProcLanguageClient Stop: 0 : 
+DEBUG[2026-08-09 12:24:22Z]: textDocument/didOpen

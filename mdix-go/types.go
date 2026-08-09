@@ -12,23 +12,31 @@ import (
 // ValueType identifies the DixScript type of a value at a given path.
 type ValueType int
 
+// These values are the raw discriminants of MdixType in mdix-ffi/src/lib.rs
+// (cbindgen-generated as mdix_ffi.h) and must stay numerically identical to
+// it — GetType()/ValueTypeAt() cast the C ABI's return value straight into
+// a ValueType with no translation table. Previously this block skipped
+// Long entirely (Int=2, Float=3, ...), silently shifting every type from
+// Float onward one discriminant off from the real C ABI; fixed by
+// inserting TypeLong at 3, matching MdixType exactly.
 const (
 	TypeUnknown   ValueType = -1
 	TypeNull      ValueType = 0
 	TypeBool      ValueType = 1
 	TypeInt       ValueType = 2
-	TypeFloat     ValueType = 3
-	TypeDouble    ValueType = 4
-	TypeString    ValueType = 5
-	TypeDate      ValueType = 6
-	TypeTimestamp ValueType = 7
-	TypeHexColor  ValueType = 8
-	TypeBlob      ValueType = 9
-	TypeRegex     ValueType = 10
-	TypeArray     ValueType = 11
-	TypeObject    ValueType = 12
-	TypeTuple     ValueType = 13
-	TypeEnum      ValueType = 14
+	TypeLong      ValueType = 3
+	TypeFloat     ValueType = 4
+	TypeDouble    ValueType = 5
+	TypeString    ValueType = 6
+	TypeDate      ValueType = 7
+	TypeTimestamp ValueType = 8
+	TypeHexColor  ValueType = 9
+	TypeBlob      ValueType = 10
+	TypeRegex     ValueType = 11
+	TypeArray     ValueType = 12
+	TypeObject    ValueType = 13
+	TypeTuple     ValueType = 14
+	TypeEnum      ValueType = 15
 )
 
 func (t ValueType) String() string {
@@ -39,6 +47,8 @@ func (t ValueType) String() string {
 		return "Bool"
 	case TypeInt:
 		return "Int"
+	case TypeLong:
+		return "Long"
 	case TypeFloat:
 		return "Float"
 	case TypeDouble:
@@ -260,11 +270,73 @@ const (
 	FormatMinified FormatMode = 3 // smallest possible output
 )
 
-// MergeStrategy controls conflict resolution when merging two databases.
-type MergeStrategy int
+// MergeStrategy controls key-conflict resolution when merging sources with
+// MergeSources / MergeSourcesWeighted. Raw discriminants match
+// MdixMergeStrategy in mdix-ffi/src/lib.rs exactly — this block previously
+// existed here (scaffolded ahead of merge.go) but was missing
+// WeightedPriority entirely and had PrimaryWins/SecondaryWins/
+// ThrowOnConflict shifted down by one from the real C ABI values; fixed
+// to match.
+type MergeStrategy int32
 
 const (
-	PrimaryWins     MergeStrategy = iota // primary keys take precedence (default)
-	SecondaryWins                        // secondary keys overwrite primary
-	ThrowOnConflict                      // any conflict returns an error
+	// WeightedPriority resolves conflicts by each source's weight (see
+	// MergeSourcesWeighted); MergeSources assigns descending weights by
+	// source order, so this is equivalent to "earlier source wins" there.
+	WeightedPriority MergeStrategy = 0
+	// PrimaryWins always keeps sources[0]'s value on conflict, regardless
+	// of weight.
+	PrimaryWins MergeStrategy = 1
+	// SecondaryWins always keeps the last source's value on conflict.
+	SecondaryWins MergeStrategy = 2
+	// ThrowOnConflict fails the merge (returns an error) on the first
+	// conflicting key instead of resolving it.
+	ThrowOnConflict MergeStrategy = 3
 )
+
+func (s MergeStrategy) String() string {
+	switch s {
+	case WeightedPriority:
+		return "WeightedPriority"
+	case PrimaryWins:
+		return "PrimaryWins"
+	case SecondaryWins:
+		return "SecondaryWins"
+	case ThrowOnConflict:
+		return "ThrowOnConflict"
+	default:
+		return "Unknown"
+	}
+}
+
+// ArrayMergeStrategy controls how array-typed values are combined when
+// merging sources. Raw discriminants match ArrayMergeStrategy in
+// mdix-ffi/src/lib.rs exactly. Previously absent from this package
+// entirely — merge.go has no way to request Concat/ConcatDedup behavior
+// without it.
+type ArrayMergeStrategy int32
+
+const (
+	// ArrayReplace: the winning source's array (per MergeStrategy)
+	// replaces the other entirely — no element-level combining.
+	ArrayReplace ArrayMergeStrategy = 0
+	// ArrayConcat: arrays from every source that defines the path are
+	// concatenated in source order.
+	ArrayConcat ArrayMergeStrategy = 1
+	// ArrayConcatDedup: like ArrayConcat, but duplicate elements (by
+	// value equality) are dropped, keeping the first occurrence.
+	ArrayConcatDedup ArrayMergeStrategy = 2
+)
+
+func (s ArrayMergeStrategy) String() string {
+	switch s {
+	case ArrayReplace:
+		return "Replace"
+	case ArrayConcat:
+		return "Concat"
+	case ArrayConcatDedup:
+		return "ConcatDedup"
+	default:
+		return "Unknown"
+	}
+}

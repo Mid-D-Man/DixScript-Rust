@@ -220,8 +220,8 @@ func (r MdixRegex) String() string { return fmt.Sprintf("r:(%q)", r.Pattern) }
 
 // MdixDate is a date value (YYYY-MM-DD) from DixScript.
 type MdixDate struct {
-	Value   time.Time
-	RawStr  string
+	Value  time.Time
+	RawStr string
 }
 
 // ParseMdixDate parses a YYYY-MM-DD string.

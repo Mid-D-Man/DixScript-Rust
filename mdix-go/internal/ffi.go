@@ -2,10 +2,10 @@
 // This is internal — do not import outside mdix-go/.
 //
 // Build requirements:
-//   1. Run `cargo build -p mdix-ffi` to generate:
-//      - internal/include/mdix_ffi.h   (C header via cbindgen)
-//      - internal/lib/<os>-<arch>/     (copy libmdix_ffi.* here)
-//   2. CGO_ENABLED=1 (the default for native builds)
+//  1. Run `cargo build -p mdix-ffi` to generate:
+//     - internal/include/mdix_ffi.h   (C header via cbindgen)
+//     - internal/lib/<os>-<arch>/     (copy libmdix_ffi.* here)
+//  2. CGO_ENABLED=1 (the default for native builds)
 package internal
 
 /*
@@ -136,6 +136,28 @@ func GetInt(handle unsafe.Pointer, path string) (int32, bool) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 	val := int32(C.mdix_get_int(handle, cPath))
+	if HasError() {
+		return 0, false
+	}
+	return val, true
+}
+
+// GetLong reads a 64-bit integer at path (mdix_get_long). Also succeeds
+// against a value actually stored as Int — mdix_get_long widens it
+// losslessly (see its doc comment in mdix-ffi/src/lib.rs) — but the
+// reverse isn't true: GetInt does not read an actual Long-stored value,
+// since a 64-bit value that overflows i32 has no lossless narrowing.
+// Previously Database.GetInt64 called GetInt and simply widened its i32
+// result to int64, meaning it could never actually read a Long value
+// bigger than i32's range (e.g. 9_000_000_000L, from the DixScript
+// writing skill's own numeric-literal example) — it would always fail
+// via mdix_get_int on paths like that. Fixed by adding this and pointing
+// GetInt64 at it directly.
+func GetLong(handle unsafe.Pointer, path string) (int64, bool) {
+	ClearError()
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+	val := int64(C.mdix_get_long(handle, cPath))
 	if HasError() {
 		return 0, false
 	}
@@ -350,6 +372,17 @@ func BuilderSetInt(handle unsafe.Pointer, path string, value int32) bool {
 	return bool(C.mdix_builder_set_int(handle, cPath, C.int(value)))
 }
 
+// BuilderSetLong sets a genuine 64-bit Long value (mdix_builder_set_long),
+// distinct from BuilderSetInt's 32-bit mdix_builder_set_int. This binding
+// didn't exist at all previously — mdix_builder_set_long is in the C ABI
+// (mdix_ffi.h) but nothing on the Go side called it, so Builder had no
+// way to construct a genuine Long field, only Int.
+func BuilderSetLong(handle unsafe.Pointer, path string, value int64) bool {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+	return bool(C.mdix_builder_set_long(handle, cPath, C.int64_t(value)))
+}
+
 func BuilderSetFloat(handle unsafe.Pointer, path string, value float32) bool {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
@@ -396,6 +429,17 @@ func BuilderGetInt(handle unsafe.Pointer, path string) (int32, bool) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 	val := int32(C.mdix_builder_get_int(handle, cPath))
+	return val, !HasError()
+}
+
+// BuilderGetLong reads back a genuine 64-bit Long value (mdix_builder_get_long).
+// Same rationale as GetLong above — previously absent, so a Long set via
+// the new BuilderSetLong couldn't be read back through this package at all.
+func BuilderGetLong(handle unsafe.Pointer, path string) (int64, bool) {
+	ClearError()
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+	val := int64(C.mdix_builder_get_long(handle, cPath))
 	return val, !HasError()
 }
 

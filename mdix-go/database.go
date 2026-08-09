@@ -19,11 +19,31 @@ type Database struct {
 	handle unsafe.Pointer
 	mu     sync.RWMutex
 	closed bool
+
+	// sourcePath is the file path this Database was loaded from via
+	// Load() — empty for LoadStr/LoadEncrypted*/FromJSON/FromToml/merge
+	// results, all of which have no single on-disk file to re-read.
+	// Read by watch.go's EnableHotReload; see SourcePath().
+	sourcePath string
+	hotReload  *hotReloadState // nil until EnableHotReload is called
 }
 
-// Close releases the native memory for this database.
+// SourcePath returns the file path this Database was loaded from, and
+// whether one exists. Only Load() populates it — LoadStr, the
+// LoadEncrypted* family, FromJSON/FromToml, and merge results all return
+// false, since none of them have a single on-disk file to point back to.
+func (db *Database) SourcePath() (string, bool) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	return db.sourcePath, db.sourcePath != ""
+}
+
+// Close releases the native memory for this database. Also disables hot
+// reload first, if it was enabled — stopping the poll goroutine before
+// freeing the handle it might otherwise try to swap out from under Close.
 // Safe to call multiple times. Implements io.Closer.
 func (db *Database) Close() error {
+	db.DisableHotReload()
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	if !db.closed {

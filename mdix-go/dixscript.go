@@ -38,7 +38,7 @@ func Load(path string) (*Database, error) {
 	if h == nil {
 		return nil, loadError(path)
 	}
-	return &Database{handle: h}, nil
+	return &Database{handle: h, sourcePath: path}, nil
 }
 
 // LoadStr loads .mdix content from a source string.

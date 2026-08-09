@@ -4,6 +4,7 @@ project(mdix-c VERSION 1.0.0 LANGUAGES C CXX)
 # ── Options ────────────────────────────────────────────────────────────
 
 option(MDIX_BUILD_EXAMPLES "Build usage examples" OFF)
+option(MDIX_BUILD_TESTS    "Build and register the C/C++ API tests" OFF)
 option(MDIX_PREFER_STATIC  "Prefer static library over shared"  OFF)
 
 # ── Locate native library ──────────────────────────────────────────────
@@ -77,6 +78,43 @@ if(MDIX_BUILD_EXAMPLES)
     target_link_libraries(mdix_hello_c   PRIVATE mdix::mdix)
     target_link_libraries(mdix_hello_cpp PRIVATE mdix::mdix)
     set_target_properties(mdix_hello_cpp PROPERTIES CXX_STANDARD 17)
+endif()
+
+# ── Tests ──────────────────────────────────────────────────────────────
+#
+# Self-contained (no GoogleTest/Catch2 dependency) — a small assert-and-report
+# runner in each file, consistent with mdix-c's own dependency-minimal design
+# (header-only, no build-time deps beyond the pre-built native lib). Covers
+# both mdix.h (plain C) and mdix.hpp (the C++ RAII wrapper) independently,
+# since a bug in the header-only C++ layer wouldn't show up testing the C
+# API alone.
+
+if(MDIX_BUILD_TESTS)
+    enable_testing()
+
+    add_executable(mdix_test_c tests/test_mdix_c.c)
+    target_link_libraries(mdix_test_c PRIVATE mdix::mdix)
+    add_test(NAME mdix_c_api_tests COMMAND mdix_test_c)
+
+    add_executable(mdix_test_cpp tests/test_mdix_cpp.cpp)
+    target_link_libraries(mdix_test_cpp PRIVATE mdix::mdix)
+    set_target_properties(mdix_test_cpp PROPERTIES CXX_STANDARD 17)
+    add_test(NAME mdix_cpp_wrapper_tests COMMAND mdix_test_cpp)
+
+    # Both test binaries load the shared/dynamic mdix_ffi library at runtime —
+    # point them at it directly so `ctest` works without a system-wide install.
+    if(NOT MDIX_PREFER_STATIC)
+        get_filename_component(_MDIX_LIB_DIR "${MDIX_LIBRARY}" DIRECTORY)
+        if(APPLE)
+            set_tests_properties(mdix_c_api_tests mdix_cpp_wrapper_tests PROPERTIES
+                ENVIRONMENT "DYLD_LIBRARY_PATH=${_MDIX_LIB_DIR}")
+        elseif(UNIX)
+            set_tests_properties(mdix_c_api_tests mdix_cpp_wrapper_tests PROPERTIES
+                ENVIRONMENT "LD_LIBRARY_PATH=${_MDIX_LIB_DIR}")
+        endif()
+        # Windows resolves the DLL via PATH or by sitting next to the .exe —
+        # CMake's RUNTIME_OUTPUT_DIRECTORY default already places both there.
+    endif()
 endif()
 
 # ── Install ────────────────────────────────────────────────────────────

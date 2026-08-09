@@ -18,7 +18,7 @@
 // types that have no C# equivalent. pub(crate) keeps the structs opaque.
 
 use std::collections::HashMap;
-use dixscript::Runtime::{DixData, DixValue};
+use dixscript::Runtime::{DixData, DixValue, HotReloadWatcher};
 
 /// Read handle wrapping a fully loaded DixData.
 ///
@@ -87,4 +87,34 @@ impl MdixBuilderHandle {
             drop(Box::from_raw(ptr));
         }
     }
+}
+
+/// Poll-based file watcher handle wrapping HotReloadWatcher.
+///
+/// Created by mdix_watcher_new. Freed by mdix_watcher_free.
+/// HotReloadWatcher is deliberately a single-file, std::fs::metadata poll —
+/// no notify/inotify/FSEvents dependency, identical behavior on every
+/// platform this crate builds for (see dixscript's hot_reload.rs doc
+/// comment). force_reload() always reloads through the plaintext loader
+/// path — encrypted .mdix files are not supported by hot reload.
+#[repr(C)]
+pub struct MdixWatcherHandle {
+    pub(crate) watcher: HotReloadWatcher,
+}
+
+impl MdixWatcherHandle {
+    pub fn new(watcher: HotReloadWatcher) -> *mut Self {
+        Box::into_raw(Box::new(MdixWatcherHandle { watcher }))
+    }
+
+    /// Consume a raw pointer, freeing the allocation.
+    ///
+    /// # Safety
+    /// `ptr` must have been created by MdixWatcherHandle::new and not yet
+    /// freed. Calling this twice on the same pointer is UB.
+    pub unsafe fn free(ptr: *mut Self) {
+        if !ptr.is_null() {
+            drop(Box::from_raw(ptr));
         }
+    }
+}

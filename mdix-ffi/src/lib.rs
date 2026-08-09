@@ -10,10 +10,11 @@ use std::collections::HashMap;
 
 use dixscript::Runtime::{
     DixCompactor, DixConverter, DixFormatOptions, DixLoader, DixLoadOptions, DixValue,
+    HotReloadWatcher,
 };
 
 use error::{clear_last_error, get_last_error_ptr, set_last_error};
-use handle::{MdixBuilderHandle, MdixHandle};
+use handle::{MdixBuilderHandle, MdixHandle, MdixWatcherHandle};
 use merge::{read_source_array, run_merge};
 use string_utils::{
     c_str_to_str, free_c_char, free_c_char_array, str_to_c_char, string_vec_to_c_array,
@@ -103,6 +104,16 @@ unsafe fn as_handle<'a>(ptr: *const c_void) -> Option<&'a MdixHandle> {
 #[inline]
 unsafe fn as_handle_mut<'a>(ptr: *mut c_void) -> Option<&'a mut MdixHandle> {
     if ptr.is_null() { None } else { Some(&mut *(ptr as *mut MdixHandle)) }
+}
+
+#[inline]
+unsafe fn as_watcher<'a>(ptr: *const c_void) -> Option<&'a MdixWatcherHandle> {
+    if ptr.is_null() { None } else { Some(&*(ptr as *const MdixWatcherHandle)) }
+}
+
+#[inline]
+unsafe fn as_watcher_mut<'a>(ptr: *mut c_void) -> Option<&'a mut MdixWatcherHandle> {
+    if ptr.is_null() { None } else { Some(&mut *(ptr as *mut MdixWatcherHandle)) }
 }
 
 #[inline]
@@ -1431,3 +1442,117 @@ fn format_mode_to_options(mode: MdixFormatMode) -> DixFormatOptions {
         MdixFormatMode::Minified => DixFormatOptions::minified(),
     }
                             }
+
+// =============================================================================
+// HOT RELOAD
+// =============================================================================
+//
+// Thin wrapper over dixscript::Runtime::HotReloadWatcher — deliberately a
+// single-file, std::fs::metadata poll rather than an OS filesystem-event
+// subscription (see hot_reload.rs's own doc comment for why: no
+// notify/inotify/FSEvents/ReadDirectoryChangesW dependency, identical
+// behavior on every platform this crate ships to). Call
+// mdix_watcher_check_and_reload from a game loop / timer tick — a single
+// stat() call per check is cheap enough to run every frame.
+//
+// Encrypted .mdix files are not supported: HotReloadWatcher::force_reload()
+// always reloads through the plaintext loader path internally, a core
+// Runtime limitation, not something this binding adds on top.
+//
+// bool/pointer sentinel ambiguity: mdix_watcher_has_changed's `false` means
+// either "unchanged" or "error" (same as mdix_validate's existing bool
+// convention elsewhere in this file); mdix_watcher_check_and_reload's null
+// means either "unchanged" or "error". Call mdix_get_last_error() after
+// either sentinel if the caller needs to tell them apart — it returns an
+// empty/null result when there was no error.
+
+/// Starts watching a single plaintext `.mdix` path. Does not read the file
+/// yet — the first `mdix_watcher_has_changed`/`check_and_reload` call always
+/// reports a change. Returns an opaque handle, or null on failure (null/
+/// invalid-UTF8 path). Caller must free with mdix_watcher_free.
+#[no_mangle]
+pub extern "C" fn mdix_watcher_new(path: *const c_char) -> *mut c_void {
+    clear_last_error();
+    let path_str = match unsafe { c_str_to_str(path) } {
+        Some(s) => s,
+        None => { set_last_error("mdix_watcher_new: path is null or invalid UTF-8"); return std::ptr::null_mut(); }
+    };
+    MdixWatcherHandle::new(HotReloadWatcher::new(path_str)) as *mut c_void
+}
+
+/// Frees a watcher handle created by mdix_watcher_new. Safe to call with null.
+#[no_mangle]
+pub extern "C" fn mdix_watcher_free(handle: *mut c_void) {
+    unsafe { MdixWatcherHandle::free(handle as *mut MdixWatcherHandle) };
+}
+
+/// Returns the watched path. Caller must free with mdix_free_string.
+/// Returns null if `handle` is null.
+#[no_mangle]
+pub extern "C" fn mdix_watcher_path(handle: *const c_void) -> *mut c_char {
+    clear_last_error();
+    let w = match unsafe { as_watcher(handle) } {
+        Some(w) => w,
+        None => { set_last_error("mdix_watcher_path: handle is null"); return std::ptr::null_mut(); }
+    };
+    str_to_c_char(w.watcher.path().to_string_lossy().into_owned())
+}
+
+/// True once a successful reload has happened at least once.
+#[no_mangle]
+pub extern "C" fn mdix_watcher_has_loaded(handle: *const c_void) -> bool {
+    clear_last_error();
+    match unsafe { as_watcher(handle) } {
+        Some(w) => w.watcher.has_loaded(),
+        None => { set_last_error("mdix_watcher_has_loaded: handle is null"); false }
+    }
+}
+
+/// Checks whether the file's modified-time differs from the last successful
+/// reload, without reloading it. See the section header comment above for
+/// the false-return ambiguity.
+#[no_mangle]
+pub extern "C" fn mdix_watcher_has_changed(handle: *const c_void) -> bool {
+    clear_last_error();
+    let w = match unsafe { as_watcher(handle) } {
+        Some(w) => w,
+        None => { set_last_error("mdix_watcher_has_changed: handle is null"); return false; }
+    };
+    match w.watcher.has_changed() {
+        Ok(b) => b,
+        Err(e) => { set_last_error(&format!("mdix_watcher_has_changed: {}", e)); false }
+    }
+}
+
+/// Reloads only if the file has changed since the last successful reload
+/// (or since construction, on the first call). Returns a new read handle
+/// (free with mdix_free) on a successful reload, or null when unchanged OR
+/// on error — see the section header comment above for telling them apart.
+#[no_mangle]
+pub extern "C" fn mdix_watcher_check_and_reload(handle: *mut c_void) -> *mut c_void {
+    clear_last_error();
+    let w = match unsafe { as_watcher_mut(handle) } {
+        Some(w) => w,
+        None => { set_last_error("mdix_watcher_check_and_reload: handle is null"); return std::ptr::null_mut(); }
+    };
+    match w.watcher.check_and_reload() {
+        Ok(Some(data)) => MdixHandle::new(data) as *mut c_void,
+        Ok(None) => std::ptr::null_mut(),
+        Err(e) => { set_last_error(&format!("mdix_watcher_check_and_reload: {}", e)); std::ptr::null_mut() }
+    }
+}
+
+/// Reloads unconditionally, regardless of whether the file has changed.
+/// Returns a new read handle (free with mdix_free), or null on failure.
+#[no_mangle]
+pub extern "C" fn mdix_watcher_force_reload(handle: *mut c_void) -> *mut c_void {
+    clear_last_error();
+    let w = match unsafe { as_watcher_mut(handle) } {
+        Some(w) => w,
+        None => { set_last_error("mdix_watcher_force_reload: handle is null"); return std::ptr::null_mut(); }
+    };
+    match w.watcher.force_reload() {
+        Ok(data) => MdixHandle::new(data) as *mut c_void,
+        Err(e) => { set_last_error(&format!("mdix_watcher_force_reload: {}", e)); std::ptr::null_mut() }
+    }
+}

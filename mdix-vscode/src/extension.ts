@@ -22,8 +22,7 @@ import {
 
 import { registerDateTimeEditor } from "./dateTimeEditor";
 import { registerBlobPreview }    from "./blobPreview";
-import { registerThemeColors }    from "./themeColors";
-import { registerSettingsSync }   from "./settingsSync";
+import { registerRegexTester }    from "./regexTestPanel";
 
 let client: LanguageClient | undefined;
 
@@ -32,12 +31,12 @@ let client: LanguageClient | undefined;
 export function activate(context: ExtensionContext): void {
   registerDateTimeEditor(context);
   registerBlobPreview(context);
-  // Getter, not `client` itself — `client` isn't assigned until further down
-  // this function. The closure re-reads it lazily whenever the command
-  // actually runs (module-scope `let`, captured by reference), so it always
-  // sees the real client once it exists.
-  registerThemeColors(context, () => client);
-  registerSettingsSync(context, () => client);
+
+  // Getter closure, not the value itself: dixscript.restartServer reassigns
+  // `client` to a new instance later, and this needs to see that new
+  // instance when the regex tester command runs after a restart, not a
+  // stale reference captured at registration time.
+  registerRegexTester(context, () => client);
 
   const serverPath = resolveServerPath(context);
 
@@ -170,4 +169,4 @@ function which(name: string): string | undefined {
   } catch {
     return undefined;
   }
-          }
+}

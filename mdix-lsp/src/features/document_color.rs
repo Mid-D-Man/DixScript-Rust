@@ -60,6 +60,27 @@ fn provide_inner(doc: Option<&Document>) -> Vec<ColorInformation> {
     colors
 }
 
+// 2026-08-07 — ROOT CAUSE of "can't add alpha via the color picker from a
+// color that started without one": VS Code applies presentations[0] as the
+// actual document text edit automatically -- the rest of the list is only
+// reachable through the small format-cycle control next to the picker, not
+// applied by default. This function always put hex_rgb (no alpha) first,
+// regardless of what alpha the user had actually just dragged the slider
+// to. So: drag alpha down -> Color{alpha: 0.5} comes in here -> we compute
+// hex_rgba correctly -> but presentations[0] was still the alpha-less
+// 6-digit form -> THAT's what got written to the document -> the alpha the
+// user just picked was silently thrown away, on every single edit. Next
+// time the picker opened, it parsed back from that same alpha-less text and
+// started fresh at full opacity -- looking exactly like "can't add alpha at
+// all", because it never actually landed.
+//
+// Fix: order by whether the color is actually opaque. Once alpha isn't
+// 255/fully-opaque, the 8-digit form goes first, so IT's what gets written.
+// This is also the most likely cause of the picker closing after one edit:
+// flipping between a 6-digit and 8-digit replacement changes the edited
+// range's text length on every interaction, which can be enough to make the
+// picker lose track of the range it's anchored to. Worth retesting whether
+// that resolves on its own once this ordering fix is in.
 pub fn presentation(color: Color, range: Range) -> Vec<ColorPresentation> {
     let r = (color.red   * 255.0).round() as u8;
     let g = (color.green * 255.0).round() as u8;
@@ -69,10 +90,11 @@ pub fn presentation(color: Color, range: Range) -> Vec<ColorPresentation> {
     let hex_rgb  = format!("#{:02X}{:02X}{:02X}",       r, g, b);
     let hex_rgba = format!("#{:02X}{:02X}{:02X}{:02X}", r, g, b, a);
 
-    let mut presentations = vec![
-        make_presentation(hex_rgb,  range),
-        make_presentation(hex_rgba, range),
-    ];
+    let mut presentations = if a != 255 {
+        vec![make_presentation(hex_rgba, range), make_presentation(hex_rgb, range)]
+    } else {
+        vec![make_presentation(hex_rgb, range), make_presentation(hex_rgba, range)]
+    };
 
     // 3-digit shorthand when both nibbles of each channel are equal.
     if (r >> 4) == (r & 0x0F)

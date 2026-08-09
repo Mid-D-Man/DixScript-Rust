@@ -18,6 +18,11 @@ crate-type = ["cdylib"]
 dixscript = { path = "../dixscript", version = "1.0.0" }
 jni        = { version = "0.21", default-features = false }
 serde_json = "1.0"
+# Needed by the Merge JNI binding: dixscript::Runtime::DixData::from_ast()
+# takes a chrono::DateTime<Utc> compile-time stamp. Version pinned to the
+# same 0.4 family dixscript itself already resolves, so this doesn't add a
+# second copy of the crate to the dependency tree.
+chrono     = "0.4"
 
 # NOTE: [profile.release] / [profile.dev] used to be duplicated here.
 # Cargo only reads profiles from the workspace root (see the warning

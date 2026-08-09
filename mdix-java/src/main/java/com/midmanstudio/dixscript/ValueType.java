@@ -28,8 +28,10 @@ public enum ValueType {
 
     ValueType(int code) { this.code = code; }
 
+    /** The native ordinal for this type, matching {@code MdixType} on the Rust/C side. */
     public int getCode() { return code; }
 
+    /** Maps a native type ordinal back to a {@link ValueType}, or {@link #UNKNOWN} if unrecognized. */
     public static ValueType fromCode(int code) {
         for (ValueType t : values()) {
             if (t.code == code) return t;

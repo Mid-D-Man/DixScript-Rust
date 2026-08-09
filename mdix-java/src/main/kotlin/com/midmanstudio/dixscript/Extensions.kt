@@ -3,6 +3,7 @@
 package com.midmanstudio.dixscript
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
@@ -103,3 +104,74 @@ fun safeLoad(path: String): Result<Database> =
 
 fun safeLoadStr(source: String): Result<Database> =
     runCatching { DixScript.loadStr(source) }
+
+// ── Query extension functions ─────────────────────────────────────────────────
+
+/** Kotlin-idiomatic alias for [MdixQuery.where_] — reads more naturally than a trailing underscore in Kotlin. */
+fun MdixQuery.filter(predicate: (MdixValue) -> Boolean): MdixQuery = where_(predicate)
+
+/** [Database.query] on the IO dispatcher (JSON parsing for a large array can be worth moving off the calling thread). */
+suspend fun Database.queryAsync(path: String): MdixQuery =
+    withContext(Dispatchers.IO) { query(path) }
+
+/** [Database.queryMany] on the IO dispatcher. */
+suspend fun Database.queryManyAsync(pattern: String): MdixQuery =
+    withContext(Dispatchers.IO) { queryMany(pattern) }
+
+// ── Merge extension functions ─────────────────────────────────────────────────
+
+/**
+ * Kotlin-idiomatic entry point for [Merge.sourcesWeighted] with default arguments,
+ * since Java has no default parameters:
+ *   val result = mergeSources(listOf(base, override), weights = doubleArrayOf(1.0, 0.5))
+ */
+fun mergeSources(
+    sources: List<String>,
+    weights: DoubleArray? = null,
+    strategy: Merge.Strategy = Merge.Strategy.WEIGHTED_PRIORITY,
+    arrayStrategy: Merge.ArrayStrategy = Merge.ArrayStrategy.REPLACE,
+): Merge.Result = Merge.sourcesWeighted(sources, weights, strategy, arrayStrategy)
+
+/** As [mergeSources], starting from already-loaded databases instead of source text. */
+fun mergeDatabases(
+    databases: List<Database>,
+    weights: DoubleArray? = null,
+    strategy: Merge.Strategy = Merge.Strategy.WEIGHTED_PRIORITY,
+    arrayStrategy: Merge.ArrayStrategy = Merge.ArrayStrategy.REPLACE,
+): Merge.Result = Merge.databasesWeighted(databases, weights, strategy, arrayStrategy)
+
+/** [mergeSources] on the IO dispatcher. */
+suspend fun mergeSourcesAsync(
+    sources: List<String>,
+    weights: DoubleArray? = null,
+    strategy: Merge.Strategy = Merge.Strategy.WEIGHTED_PRIORITY,
+    arrayStrategy: Merge.ArrayStrategy = Merge.ArrayStrategy.REPLACE,
+): Merge.Result = withContext(Dispatchers.IO) { mergeSources(sources, weights, strategy, arrayStrategy) }
+
+// ── Schema extension functions ────────────────────────────────────────────────
+
+/** Kotlin DSL builder for [SchemaBuilder], mirroring [buildMdix]'s shape. */
+inline fun buildSchema(block: SchemaBuilder.() -> Unit): SchemaBuilder =
+    SchemaBuilder().apply(block)
+
+/** Fluent alternative to [SchemaBuilder.validate]: `db.validate(schema)`. */
+fun Database.validate(schema: SchemaBuilder): SchemaBuilder.Report = schema.validate(this)
+
+// ── HotReload extension functions ─────────────────────────────────────────────
+
+/** Kotlin DSL — runs [block] with a [HotReload] watcher, closing it automatically afterward. */
+inline fun <T> watchMdix(path: String, block: HotReload.() -> T): T =
+    HotReload(path).use { it.block() }
+
+/**
+ * Suspends, polling every [pollIntervalMs], until the watched file changes and reloads
+ * successfully, then returns the fresh [Database]. The caller owns the returned Database.
+ * Cancelling the calling coroutine stops the poll loop cleanly.
+ */
+suspend fun HotReload.awaitChange(pollIntervalMs: Long = 250L): Database {
+    while (true) {
+        val reloaded = checkAndReload()
+        if (reloaded.isPresent) return reloaded.get()
+        delay(pollIntervalMs)
+    }
+}

@@ -27,6 +27,7 @@ public final class Builder implements Closeable {
     private volatile long handle;
     private volatile boolean closed = false;
 
+    /** Creates a new, empty builder. */
     public Builder() {
         this.handle = MdixNative.builderNew();
         if (this.handle == 0)
@@ -35,6 +36,7 @@ public final class Builder implements Closeable {
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    /** Releases the underlying native handle. Safe to call more than once. */
     @Override
     public synchronized void close() {
         if (!closed && handle != 0) {
@@ -44,11 +46,13 @@ public final class Builder implements Closeable {
         }
     }
 
+    /** Number of key-value pairs currently set on this builder. */
     public int entryCount() {
         checkOpen();
-        return MdixNative.builderNew(); // delegate
+        return MdixNative.builderEntryCount(handle);
     }
 
+    /** Removes every key-value pair, leaving the builder empty. */
     public void clear() {
         checkOpen();
         MdixNative.builderClear(handle);
@@ -56,6 +60,7 @@ public final class Builder implements Closeable {
 
     // ── Write ─────────────────────────────────────────────────────────────────
 
+    /** Sets the string at {@code path}. A {@code null} value is stored as an empty string. */
     public Builder setString(String path, String value) {
         checkOpen();
         checkPath(path);
@@ -64,6 +69,7 @@ public final class Builder implements Closeable {
         return this;
     }
 
+    /** Sets the 32-bit integer at {@code path}. */
     public Builder setInt(String path, int value) {
         checkOpen();
         checkPath(path);
@@ -72,6 +78,7 @@ public final class Builder implements Closeable {
         return this;
     }
 
+    /** Sets the 64-bit integer at {@code path}. */
     public Builder setLong(String path, long value) {
         checkOpen();
         checkPath(path);
@@ -80,6 +87,7 @@ public final class Builder implements Closeable {
         return this;
     }
 
+    /** Sets the 32-bit float at {@code path}. */
     public Builder setFloat(String path, float value) {
         checkOpen();
         checkPath(path);
@@ -88,6 +96,7 @@ public final class Builder implements Closeable {
         return this;
     }
 
+    /** Sets the 64-bit double at {@code path}. */
     public Builder setDouble(String path, double value) {
         checkOpen();
         checkPath(path);
@@ -96,6 +105,7 @@ public final class Builder implements Closeable {
         return this;
     }
 
+    /** Sets the boolean at {@code path}. */
     public Builder setBool(String path, boolean value) {
         checkOpen();
         checkPath(path);
@@ -123,6 +133,7 @@ public final class Builder implements Closeable {
 
     // ── Read back ──────────────────────────────────────────────────────────────
 
+    /** {@code true} if {@code path} has been set on this builder. Never throws — returns {@code false} on a closed builder or a null path. */
     public boolean hasKey(String path) {
         if (closed || path == null) return false;
         return MdixNative.builderHasKey(handle, path);
@@ -173,4 +184,4 @@ public final class Builder implements Closeable {
             throw new MdixException(MdixException.Kind.INVALID_PATH,
                 "path must not be null or empty");
     }
-    }
+}

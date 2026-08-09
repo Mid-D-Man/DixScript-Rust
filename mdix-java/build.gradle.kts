@@ -3,7 +3,7 @@ import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
 plugins {
     kotlin("jvm") version "1.9.23"
     `java-library`
-    `maven-publish`
+    id("com.vanniktech.maven.publish") version "0.37.0"
 }
 
 group   = "com.midmanstudio"
@@ -109,29 +109,47 @@ tasks.test {
     jvmArgs("-Djava.library.path=${nativeOutputDir.absolutePath}")
 }
 
-// ── Publishing ────────────────────────────────────────────────────────────────
+// ── Publishing — Maven Central (Central Publisher Portal) ─────────────────────
+//
+// There is no full zero-secret OIDC "Trusted Publishing" for Maven Central yet
+// (unlike crates.io / PyPI / npm / NuGet, which mdix-dixscript / mdix-python /
+// mdix-npm / mdix-csharp already use) — Sonatype's Central Portal still
+// requires GPG-signed artifacts plus a Central Portal user token. This is the
+// "whatever works" equivalent: com.vanniktech.maven.publish drives both the
+// signing and the Central Portal upload, reading credentials from Gradle
+// properties (mavenCentralUsername/mavenCentralPassword,
+// signingInMemoryKey/signingInMemoryKeyPassword) that CI supplies as
+// ORG_GRADLE_PROJECT_-prefixed env vars — see
+// .github/workflows/mdix-java-maven-publish.yml. `./gradlew publishToMavenLocal`
+// still works locally with no credentials at all for testing the POM/artifact
+// shape before a real release.
+mavenPublishing {
+    publishToMavenCentral()
+    signAllPublications()
 
-publishing {
-    publications {
-        create<MavenPublication>("mavenJava") {
-            from(components["java"])
-            artifactId = "dixscript-java"
+    coordinates(group.toString(), "dixscript-java", version.toString())
 
-            pom {
-                name.set("DixScript Java/Kotlin")
-                description.set("Java and Kotlin bindings for the DixScript (.mdix) runtime")
-                url.set("https://github.com/Mid-D-Man/DixScript-Rust")
-                licenses {
-                    license {
-                        name.set("MIT")
-                        url.set("https://opensource.org/licenses/MIT")
-                    }
-                }
+    pom {
+        name.set("DixScript Java/Kotlin")
+        description.set("Java and Kotlin bindings for the DixScript (.mdix) runtime")
+        url.set("https://github.com/Mid-D-Man/DixScript-Rust")
+        licenses {
+            license {
+                name.set("MIT")
+                url.set("https://opensource.org/licenses/MIT")
             }
         }
-    }
-    repositories {
-        // Local Maven cache — useful for testing before publishing to Maven Central.
-        mavenLocal()
+        developers {
+            developer {
+                id.set("Mid-D-Man")
+                name.set("MidManStudio")
+                url.set("https://github.com/Mid-D-Man")
+            }
+        }
+        scm {
+            url.set("https://github.com/Mid-D-Man/DixScript-Rust")
+            connection.set("scm:git:https://github.com/Mid-D-Man/DixScript-Rust.git")
+            developerConnection.set("scm:git:ssh://git@github.com/Mid-D-Man/DixScript-Rust.git")
+        }
     }
 }

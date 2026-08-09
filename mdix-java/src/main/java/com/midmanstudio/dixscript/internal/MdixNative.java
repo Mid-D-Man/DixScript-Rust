@@ -76,6 +76,7 @@ public final class MdixNative {
     // ── Builder ───────────────────────────────────────────────────────────────
     public static native long    builderNew();
     public static native void    builderFree(long handle);
+    public static native int     builderEntryCount(long handle);
     public static native boolean builderSetString(long handle, String path, String value);
     public static native boolean builderSetInt(long handle, String path, int value);
     public static native boolean builderSetLong(long handle, String path, long value);
@@ -87,4 +88,59 @@ public final class MdixNative {
     public static native boolean builderHasKey(long handle, String path);
     public static native boolean builderSave(long handle, String path);
     public static native String  builderToString(long handle);
-                                                 }
+
+    // ── Query ─────────────────────────────────────────────────────────────────
+    /**
+     * Sibling-path glob query (whole-segment {@code *} only — see
+     * {@link com.midmanstudio.dixscript.Database#queryMany}). Returns a JSON
+     * array of the matched values. {@code query(path)} needs no native call
+     * of its own — it reuses {@link #getJson}.
+     */
+    public static native String  selectManyAsJson(long handle, String pattern);
+
+    // ── Merge ─────────────────────────────────────────────────────────────────
+    /**
+     * Weighted AST-level merge of {@code sources.length} DixScript source
+     * strings. {@code weights} may be {@code null} for auto-descending
+     * weights (source 0 highest), otherwise must be the same length as
+     * {@code sources}, each entry a {@code Double.toString(...)}-parseable
+     * string. {@code strategy}: 0=WeightedPriority 1=PrimaryWins
+     * 2=SecondaryWins 3=ThrowOnConflict. {@code arrayStrategy}: 0=Replace
+     * 1=Concat 2=ConcatDedup.
+     *
+     * Returns a 2-element {@code String[]}: {@code [0]} is the merged
+     * handle as a decimal string (parse with {@code Long.parseLong}),
+     * {@code [1]} is the conflict report as JSON
+     * ({@code [{"path":..,"winningSource":..,"winningLabel":..}, ...]}).
+     * Throws {@link com.midmanstudio.dixscript.MdixException} on failure —
+     * a source that fails to parse, a weights-length mismatch, or a
+     * {@code ThrowOnConflict} strategy hitting an actual conflict.
+     */
+    public static native String[] mergeSources(
+        String[] sources, String[] weights, int strategy, int arrayStrategy);
+
+    // ── Schema ────────────────────────────────────────────────────────────────
+    /**
+     * Validates {@code handle} against a declarative field spec:
+     * {@code [{"path":"port","required":true,"type":"Int","description":"..."}, ...]}
+     * ({@code description} optional; {@code type} one of String/Int/Long/
+     * Float/Double/Bool/Array/Object/Date/Timestamp/HexColor/Blob/Regex/
+     * Enum/Any). Returns the errors as JSON:
+     * {@code [{"path":..,"expected":..,"actual":..,"kind":"Missing"|"WrongType"|"InvalidValue"}, ...]}
+     * — an empty {@code "[]"} means every field passed. Custom
+     * (closure-based) validators aren't representable here; see
+     * {@link com.midmanstudio.dixscript.SchemaBuilder.Validator}.
+     */
+    public static native String  schemaValidate(long handle, String fieldsJson);
+
+    // ── HotReload ─────────────────────────────────────────────────────────────
+    /** Poll-based watcher over a single plaintext {@code .mdix} path (see hot_reload.rs — encrypted files are not supported here). */
+    public static native long    watcherNew(String path);
+    public static native void    watcherFree(long handle);
+    public static native String  watcherPath(long handle);
+    public static native boolean watcherHasLoaded(long handle);
+    public static native boolean watcherHasChanged(long handle);
+    /** Returns a new read handle on reload, or 0 (no exception) if unchanged. */
+    public static native long    watcherCheckAndReload(long handle);
+    public static native long    watcherForceReload(long handle);
+}

@@ -22,10 +22,12 @@ use crate::features;
 use crate::features::code_lens::{
     CMD_COMPILE, CMD_CREATE_RESOLVED, CMD_MINIFY,
     CMD_SHOW_AST, CMD_TO_JSON, CMD_TO_TOML, CMD_TEST_REGEX,
+    CMD_GET_THEME_COLORS, CMD_GET_SETTINGS_VALUES,
 };
 use crate::features::commands::{
     run_compile, run_convert_to_json, run_convert_to_toml,
     run_create_resolved, run_minify, run_show_ast, run_test_regex, CommandResult,
+    run_get_theme_colors, run_get_settings_values,
 };
 
 const ANALYSIS_TIMEOUT_SECS: u64 = 10;
@@ -755,6 +757,59 @@ impl LanguageServer for Backend {
 
                 let result = run_test_regex(pattern, test_text);
                 return Ok(Some(serde_json::to_value(result).unwrap_or(serde_json::Value::Null)));
+            }
+
+            // Returns its JSON payload directly instead of falling through to
+            // the unconditional `Ok(None)` below — see the doc comment on
+            // `run_get_theme_colors` in commands.rs for why this one command
+            // doesn't go through CommandResult/show_message like the rest.
+            CMD_GET_THEME_COLORS => {
+                let ast_clone = {
+                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
+                    doc.as_ref().and_then(|d| d.ast.clone())
+                };
+                let payload = tokio::task::spawn_blocking(move || {
+                    match ast_clone {
+                        Some(ast) => run_get_theme_colors(&ast),
+                        None => serde_json::json!({
+                            "success": false,
+                            "message": "AST not available — wait for analysis.",
+                            "dark": null, "light": null, "warnings": []
+                        }),
+                    }
+                })
+                    .await
+                    .unwrap_or_else(|_| serde_json::json!({
+                        "success": false,
+                        "message": "Theme colors task panicked.",
+                        "dark": null, "light": null, "warnings": []
+                    }));
+                return Ok(Some(payload));
+            }
+
+            // Same shape as CMD_GET_THEME_COLORS above.
+            CMD_GET_SETTINGS_VALUES => {
+                let ast_clone = {
+                    let doc = uri.as_ref().and_then(|u| self.documents.get(u));
+                    doc.as_ref().and_then(|d| d.ast.clone())
+                };
+                let payload = tokio::task::spawn_blocking(move || {
+                    match ast_clone {
+                        Some(ast) => run_get_settings_values(&ast),
+                        None => serde_json::json!({
+                            "success": false,
+                            "message": "AST not available — wait for analysis.",
+                            "settings": [], "warnings": []
+                        }),
+                    }
+                })
+                    .await
+                    .unwrap_or_else(|_| serde_json::json!({
+                        "success": false,
+                        "message": "Settings values task panicked.",
+                        "settings": [], "warnings": []
+                    }));
+                return Ok(Some(payload));
             }
 
             other => {

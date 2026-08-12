@@ -1519,7 +1519,8 @@ fn hover_static_object(name: &str) -> Option<String> {
             vec!["range(min,max)","nextFloat()","nextDouble()","nextBool()","choice(arr)",
                  "shuffle(arr)","alphanumeric(len)"]),
         "Guid"      => ("GUID / UUID v4 generation.",
-            vec!["new()","parse(str)","validate(str)","empty()","format(guid,fmt)"]),
+            vec!["new()","parse(str)","tryParse(str)","validate(str)","empty()",
+                 "format(guid,fmt)","toBytes(str)","fromBytes(arr)"]),
         "IpAddress" => ("IPv4 and IPv6 utilities.",
             vec!["parse(str)","validate(str)","isV4(str)","isV6(str)","isPrivate(str)",
                  "isLoopback(str)","localhost()","anyAddress()"]),
@@ -1842,4 +1843,4 @@ fn ordinal_suffix(d: u32) -> &'static str {
         n if n % 10 == 3     => "rd",
         _                    => "th",
     }
-                                                      }
+        }

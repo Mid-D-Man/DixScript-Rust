@@ -24,10 +24,13 @@ out/
 *.tsbuildinfo
 *.vsix
 
-# Stray local cache from an unrelated VS Code extension (MultiValue BASIC
-# tooling — .rmv/mvbasic naming) that wrote its config into the workspace
-# with a broken path instead of its real global config location. Not
-# something we generate; just needs to stay out of the repo.
+# mdix-lsp/tests/lsp_integration.rs writes this when LSP_RESULTS_OUT isn't
+# set (falls back to a relative default) — happens during `cargo publish`'s
+# own verification test run, which doesn't have that env var (only
+# lsp-ci.yml's dedicated test job sets it). No leading slash: shows up at
+# repo root per lsp-ci.yml's own LSP_RESULTS_OUT, or inside mdix-lsp/ from
+# the relative fallback, depending on the cwd whatever ran it used.
+lsp-integration-results.json
 mdix-vscode/.rmv/
 mdix-vscode/Users/
 

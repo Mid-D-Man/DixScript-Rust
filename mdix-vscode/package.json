@@ -2,7 +2,7 @@
   "name": "dixscript",
   "displayName": "DixScript (.mdix)",
   "description": "Full IDE support for DixScript — syntax highlighting, completions, hover, goto-definition, diagnostics, inlay hints, formatting, theme color sync, bulk settings apply, and regex testing.",
-  "version": "1.2.0",
+  "version": "1.0.0",
   "publisher": "midmanstudio",
   "license": "MIT",
   "repository": {

@@ -258,6 +258,9 @@ pub static STATIC_SIGS: &[(&str, &str, &str, &str, &str)] = &[
     ("Guid", "validate", "Guid.validate(str) → bool",           "Check if string is a valid GUID.",         "Guid.validate(\"550e8400-...\") // → true"),
     ("Guid", "empty",    "Guid.empty() → string",               "All-zero GUID.",                           "Guid.empty()"),
     ("Guid", "format",   "Guid.format(guid, fmt) → string",     "Format GUID with braces or hyphens.",      "Guid.format(Guid.new(), \"D\")"),
+    ("Guid", "tryParse", "Guid.tryParse(str) → string | null",  "Parse GUID; returns null instead of throwing on invalid input.", "id = Guid.tryParse(userInput)"),
+    ("Guid", "toBytes",  "Guid.toBytes(str) → array",           "Convert a GUID to its 16-byte array form.", "bytes = Guid.toBytes(Guid.new())"),
+    ("Guid", "fromBytes","Guid.fromBytes(bytes: array) → string","Build a GUID string from a 16-byte array.", "id = Guid.fromBytes(bytes) // bytes.length must be 16"),
     // IpAddress
     ("IpAddress", "parse",       "IpAddress.parse(str) → string",      "Parse IP; throws on invalid.",           "IpAddress.parse(\"192.168.1.1\")"),
     ("IpAddress", "validate",    "IpAddress.validate(str) → bool",     "Check valid IPv4 or IPv6.",              "IpAddress.validate(\"10.0.0.1\")"),

@@ -5,7 +5,20 @@ using MonoDevelop.Core;
 [assembly: Addin(
     "MdixLanguageSupport",
     Namespace = "com.midmanstudio",
-    Version   = "1.0"
+    // 2026-08-12 — bumped from "1.0". Not a real release version bump —
+    // this exists because MEF/Mono.Addins composition data is very likely
+    // cached keyed by addin id+version (this is confirmed behavior on
+    // Windows VS's equivalent ComponentModelCache, and VS4Mac's Cocoa
+    // rewrite shares much of that same editor/MEF plumbing). We've
+    // uninstalled and reinstalled this exact "1.0" identity across many
+    // different builds while debugging why MEF never touches this
+    // assembly's exports — if a stale cache is why, it'd explain the
+    // symptom exactly: the debug logging added earlier never fires
+    // regardless of what's actually in the new DLL, because composition
+    // never re-scans it. Bump this again on any future install/reinstall
+    // cycle where MEF behavior is in question, until this is confirmed one
+    // way or the other.
+    Version   = "1.0.1"
 )]
 [assembly: AddinName("DixScript (.mdix) Language Support")]
 [assembly: AddinCategory("Language bindings")]

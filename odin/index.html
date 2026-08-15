@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DixScript-Rust — Odin Test Results</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117; color: #e6edf3; min-height: 100vh; padding: 24px;
+    }
+    a { color: #4a9eff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .back-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 0.82rem; color: #8b949e; margin-bottom: 20px; transition: color .15s;
+    }
+    .back-link:hover { color: #4a9eff; text-decoration: none; }
+    h1 { font-size: 1.5rem; color: #4a9eff; margin-bottom: 4px; }
+    .subtitle { font-size: 0.8rem; color: #484f58; margin-bottom: 24px; }
+    .meta-row {
+      display: flex; gap: 16px; flex-wrap: wrap;
+      font-size: 0.72rem; color: #484f58; margin-bottom: 20px;
+    }
+    .meta-row span { display: flex; align-items: center; gap: 4px; }
+    .meta-row strong { color: #8b949e; }
+    .summary-bar {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 500px) { .summary-bar { grid-template-columns: repeat(2, 1fr); } }
+    .summary-card {
+      background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+      padding: 16px; text-align: center;
+    }
+    .summary-card .num {
+      font-size: 1.8rem; font-weight: 700; line-height: 1; margin-bottom: 4px;
+    }
+    .summary-card .label { font-size: 0.72rem; color: #484f58; text-transform: uppercase; letter-spacing: .05em; }
+    .num.total  { color: #e6edf3; }
+    .num.passed { color: #4a9eff; }
+    .num.failed { color: #f85149; }
+    .status-bar {
+      background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      padding: 10px 16px; font-size: 0.78rem; color: #484f58;
+      margin-bottom: 24px; display: flex; align-items: center; gap: 8px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #484f58; flex-shrink: 0; }
+    .dot.pass { background: #4a9eff; }
+    .dot.fail { background: #f85149; }
+    .dot.load { background: #d29922; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .filter-btn {
+      padding: 5px 14px; border-radius: 6px; border: 1px solid #30363d;
+      background: #1c2128; color: #8b949e; font-size: 0.78rem; cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    .filter-btn:hover, .filter-btn.active { border-color: #4a9eff; color: #4a9eff; }
+    .suite {
+      background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+      margin-bottom: 12px; overflow: hidden;
+    }
+    .suite-header {
+      padding: 12px 16px; font-size: 0.82rem; font-weight: 600;
+      background: #1c2128; border-bottom: 1px solid #30363d;
+      color: #c9d1d9; display: flex; justify-content: space-between;
+      align-items: center; cursor: pointer; user-select: none;
+    }
+    .suite-header:hover { background: #21262d; }
+    .suite-pills { display: flex; gap: 6px; }
+    .pill {
+      font-size: 0.66rem; font-weight: 600; padding: 2px 7px; border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .pill.p { background: #002832; color: #4a9eff; }
+    .pill.f { background: #2d0f0f; color: #f85149; }
+    .suite-body { display: none; }
+    .suite-body.open { display: block; }
+    .test-row {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 8px 16px; border-bottom: 1px solid #21262d; font-size: 0.78rem;
+    }
+    .test-row:last-child { border-bottom: none; }
+    .badge {
+      flex-shrink: 0; width: 52px; font-size: 0.66rem; font-weight: 600;
+      text-transform: uppercase; padding: 2px 6px; border-radius: 4px; text-align: center;
+    }
+    .badge.pass { background: #002832; color: #4a9eff; }
+    .badge.fail { background: #2d0f0f; color: #f85149; }
+    .test-name { flex: 1; font-family: monospace; color: #c9d1d9; word-break: break-word; }
+    .test-dur  { font-size: 0.68rem; color: #484f58; flex-shrink: 0; white-space: nowrap; }
+    .test-output {
+      margin: 4px 0 4px 64px; padding: 8px 12px;
+      background: #0d1117; border-radius: 6px; border-left: 3px solid #f85149;
+      font-family: monospace; font-size: 0.72rem; color: #f85149;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .no-results { text-align: center; padding: 40px; color: #484f58; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+
+  <a class="back-link" href="../">← CI Dashboard</a>
+  <h1>Odin Test Results</h1>
+  <p class="subtitle">
+    mdix-odin · build <strong>1</strong> ·
+    branch <strong>master</strong> ·
+    commit <strong>15058836</strong> ·
+    Sat Aug 15 02:13:23 UTC 2026
+  </p>
+
+  <div class="status-bar">
+    <div class="dot load" id="status-dot"></div>
+    <span id="status-text">Loading test results…</span>
+  </div>
+
+  <div class="summary-bar" id="summary-bar" style="display:none">
+    <div class="summary-card"><div class="num total"  id="s-total">–</div><div class="label">Total</div></div>
+    <div class="summary-card"><div class="num passed" id="s-passed">–</div><div class="label">Passed</div></div>
+    <div class="summary-card"><div class="num failed" id="s-failed">–</div><div class="label">Failed</div></div>
+  </div>
+
+  <div class="meta-row" id="meta-row" style="display:none">
+    <span>⚡ Odin <strong id="meta-odin">–</strong></span>
+    <span>🕐 <strong id="meta-dur">–</strong></span>
+    <span>📦 <strong id="meta-pkg">–</strong></span>
+  </div>
+
+  <div class="filter-bar" id="filter-bar" style="display:none">
+    <button class="filter-btn active" onclick="setFilter('all',  this)">All</button>
+    <button class="filter-btn"        onclick="setFilter('fail', this)">Failed only</button>
+    <button class="filter-btn"        onclick="setFilter('pass', this)">Passed only</button>
+    <button class="filter-btn"        onclick="toggleAll(true)">Expand all</button>
+    <button class="filter-btn"        onclick="toggleAll(false)">Collapse all</button>
+  </div>
+
+  <div id="suites-container"></div>
+
+<script>
+  let allSuites = [];
+  let currentFilter = 'all';
+
+  async function loadResults() {
+    try {
+      const r = await fetch('odin-results.json');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      render(data);
+    } catch(e) {
+      setStatus('fail', 'Failed to load odin-results.json: ' + e.message);
+    }
+  }
+
+  function setStatus(cls, msg) {
+    document.getElementById('status-dot').className   = 'dot ' + cls;
+    document.getElementById('status-text').textContent = msg;
+  }
+
+  function render(data) {
+    const t = data.tests || {};
+    document.getElementById('s-total').textContent  = t.total   ?? '–';
+    document.getElementById('s-passed').textContent = t.passed  ?? '–';
+    document.getElementById('s-failed').textContent = t.failed  ?? '–';
+    document.getElementById('summary-bar').style.display = 'grid';
+
+    document.getElementById('meta-odin').textContent  = data.odin_version ?? '–';
+    document.getElementById('meta-dur').textContent =
+      t.duration_s != null ? t.duration_s.toFixed(2) + ' s' : '–';
+    document.getElementById('meta-pkg').textContent = data.package ?? '–';
+    document.getElementById('meta-row').style.display = 'flex';
+
+    document.getElementById('filter-bar').style.display = 'flex';
+
+    allSuites = data.suites || [];
+
+    if (allSuites.length === 0 && t.failed_names && t.failed_names.length > 0) {
+      allSuites = [{
+        name: 'Failed tests',
+        passed: 0,
+        failed: t.failed_names.length,
+        tests: t.failed_names.map(n => ({ name: n, status: 'failed' }))
+      }];
+    }
+
+    renderSuites();
+
+    const failed = t.failed || 0;
+    setStatus(failed === 0 ? 'pass' : 'fail',
+      failed === 0
+        ? 'All ' + (t.total||0) + ' tests passed in ' + (t.duration_s||0).toFixed(2) + ' s'
+        : failed + ' failed, ' + (t.passed||0) + ' passed'
+    );
+  }
+
+  function renderSuites() {
+    const container = document.getElementById('suites-container');
+    container.innerHTML = '';
+
+    const visible = allSuites.filter(s => {
+      if (currentFilter === 'fail') return s.failed  > 0;
+      if (currentFilter === 'pass') return s.passed  > 0 && s.failed === 0;
+      return true;
+    });
+
+    if (visible.length === 0) {
+      container.innerHTML = '<div class="no-results">No suites match the current filter.</div>';
+      return;
+    }
+
+    visible.forEach(suite => {
+      const block = document.createElement('div');
+      block.className = 'suite';
+
+      const header = document.createElement('div');
+      header.className = 'suite-header';
+      header.innerHTML =
+        '<span>' + (suite.package ? suite.package + ' / ' : '') + suite.name +
+        (suite.duration_s != null
+          ? ' <span style="color:#484f58;font-weight:400;font-size:.72rem">(' + suite.duration_s.toFixed(3) + ' s)</span>'
+          : '') +
+        '</span>' +
+        '<div class="suite-pills">' +
+        (suite.passed > 0 ? '<span class="pill p">' + suite.passed + ' pass</span>' : '') +
+        (suite.failed > 0 ? '<span class="pill f">' + suite.failed + ' fail</span>' : '') +
+        '</div>';
+
+      const body = document.createElement('div');
+      body.className = suite.failed > 0 ? 'suite-body open' : 'suite-body';
+      header.onclick = () => body.classList.toggle('open');
+
+      (suite.tests || []).forEach(t => {
+        if (currentFilter === 'fail' && t.status !== 'failed') return;
+        if (currentFilter === 'pass' && t.status !== 'passed') return;
+
+        const row = document.createElement('div');
+        row.className = 'test-row';
+
+        const badge = document.createElement('span');
+        badge.className = 'badge ' + (t.status === 'passed' ? 'pass' : 'fail');
+        badge.textContent = t.status === 'passed' ? 'PASS' : 'FAIL';
+
+        const name = document.createElement('span');
+        name.className = 'test-name';
+        name.textContent = t.name;
+
+        const dur = document.createElement('span');
+        dur.className = 'test-dur';
+        dur.textContent = t.duration_ms != null ? t.duration_ms.toFixed(1) + ' ms' : '';
+
+        row.appendChild(badge);
+        row.appendChild(name);
+        row.appendChild(dur);
+
+        if (t.output) {
+          const out = document.createElement('div');
+          out.className = 'test-output';
+          out.textContent = t.output;
+          const wrap = document.createElement('div');
+          wrap.style.width = '100%';
+          wrap.appendChild(row);
+          wrap.appendChild(out);
+          body.appendChild(wrap);
+        } else {
+          body.appendChild(row);
+        }
+      });
+
+      block.appendChild(header);
+      block.appendChild(body);
+      container.appendChild(block);
+    });
+  }
+
+  function setFilter(f, btn) {
+    currentFilter = f;
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderSuites();
+  }
+
+  function toggleAll(open) {
+    document.querySelectorAll('.suite-body').forEach(b => b.classList.toggle('open', open));
+  }
+
+  loadResults();
+</script>
+</body>
+  </html>

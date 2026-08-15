@@ -1,0 +1,345 @@
+{
+  "build": "1",
+  "branch": "master",
+  "commit": "15058836",
+  "date": "",
+  "odin_version": "odin version dev-2026-08-nightly:902106f",
+  "package": "mdix-odin",
+  "tests": {
+    "status": "success",
+    "total": 53,
+    "passed": 53,
+    "failed": 0,
+    "duration_s": 0,
+    "failed_names": []
+  },
+  "suites": [
+    {
+      "name": "mdix_tests",
+      "package": "mdix_tests",
+      "passed": 53,
+      "failed": 0,
+      "duration_s": null,
+      "tests": [
+        {
+          "name": "builder_clear",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "builder_long_round_trip",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "builder_remove_and_has_key",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "builder_save_and_load",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "builder_set_get_round_trip",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "date_parses",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "date_rejects_bad_format",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "destroy_is_safe_to_call_twice",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "exists_and_array_length",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "get_long_reads_genuine_long",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "hex_color_invalid_rejected",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "hex_color_no_hash_prefix",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "hex_color_rgb_shorthand",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "hex_color_rrggbb",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "hex_color_rrggbbaa",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "hot_reload_check_is_noop_on_uninitialized",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "hot_reload_destroy_is_safe_when_never_initialized",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "hot_reload_detects_mtime_advance",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "hot_reload_init_fails_on_missing_file",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "hot_reload_init_succeeds_on_real_file",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "load_missing_file_fails_cleanly",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "load_str_and_getters",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_array_concat",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_empty_sources_fails",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_no_conflicts_does_not_throw",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_primary_wins",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_secondary_wins",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_throw_on_conflict",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_weighted",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "merge_weighted_mismatched_lengths_fails",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_any_all",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_count_and_empty",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_distinct_by_name",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_group_by_name",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_min_max_by_key",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_on_empty_result_set",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_order_by_ascending",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_order_by_desc",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_select_projects",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_skip_take_first_last_nth",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_sum_and_avg",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "query_where_filters",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "schema_all_required_present",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "schema_float_double_symmetry",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "schema_int_long_asymmetry",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "schema_is_reusable_across_databases",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "schema_missing_optional_field_is_fine",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "schema_missing_required_field",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "schema_wrong_type",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "timestamp_parses_with_fraction",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "timestamp_parses_without_fraction",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "timestamp_rejects_bad_format",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        },
+        {
+          "name": "value_type_matches_ffi_discriminants",
+          "status": "passed",
+          "duration_ms": null,
+          "output": ""
+        }
+      ]
+    }
+  ]
+}

@@ -202,7 +202,7 @@ function getHtml(initialPattern?: string): string {
     // binary is still what's actually running) won't recognize
     // mdix.testRegex at all — tower-lsp's unknown-command fallback returns
     // Ok(None), which arrives here as result === null. render() used to
-    // immediately do `result.valid`, throwing inside this listener with no
+    // immediately do result.valid, throwing inside this listener with no
     // visible error anywhere — looked exactly like "never finds matches"
     // rather than the real problem (wrong/stale server). Checking for a
     // well-formed result before ever touching .valid.

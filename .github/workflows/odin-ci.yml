@@ -1,0 +1,316 @@
+name: DixScript — Odin Package CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Force run regardless of commit message'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  # ── Step 1: decide whether this workflow should run ──────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether to run Odin CI
+        id: decide
+        run: |
+          RUN=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-odin' && RUN=true || true
+          fi
+          echo "should_run=$RUN" >> $GITHUB_OUTPUT
+          echo "Odin CI triggered: $RUN"
+
+  # ── Step 2: build Rust FFI, install Odin, run the native test runner ─────────
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.should_run == 'true'
+    outputs:
+      status:     ${{ steps.result.outputs.status }}
+      total:      ${{ steps.result.outputs.total }}
+      passed:     ${{ steps.result.outputs.passed }}
+      failed:     ${{ steps.result.outputs.failed }}
+      duration_s: ${{ steps.result.outputs.duration_s }}
+      odin_ver:   ${{ steps.odinver.outputs.ver }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Rust toolchain — builds mdix-ffi, same as every other wrapper's CI ────
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-odin-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-odin-
+
+      - name: Build mdix-ffi (generates mdix_ffi.h + libmdix_ffi.so)
+        run: |
+          cargo build -p mdix-ffi --release
+          ls -lh target/release/libmdix_ffi.so
+
+      # ── Odin toolchain ──────────────────────────────────────────────────────
+      # No official setup-odin action in wide enough use to depend on here —
+      # same approach used to develop this package: pull the nightly release
+      # tarball straight from GitHub. Pin a known-good tag rather than
+      # "latest" so a nightly regression upstream can't silently break this
+      # CI; bump deliberately when there's a reason to.
+      - name: Install Odin (nightly)
+        env:
+          ODIN_TAG: dev-2026-08
+        run: |
+          curl -sL "https://github.com/odin-lang/Odin/releases/download/${ODIN_TAG}/odin-linux-amd64-${ODIN_TAG}.tar.gz" -o odin.tar.gz
+          mkdir -p /opt/odin
+          tar xzf odin.tar.gz -C /opt/odin --strip-components=1
+          echo "/opt/odin" >> $GITHUB_PATH
+          echo "ODIN_ROOT=/opt/odin" >> $GITHUB_ENV
+
+      - name: Install clang (Odin's linker)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-18
+          sudo ln -sf /usr/bin/clang-18 /usr/bin/clang
+
+      - name: odin version
+        id: odinver
+        run: echo "ver=$(odin version)" >> $GITHUB_OUTPUT
+
+      # ── Verify both packages type-check on their own ───────────────────────
+      - name: odin check (mdix_ffi, mdix)
+        run: |
+          odin check mdix-odin/mdix_ffi -no-entry-point
+          odin check mdix-odin/mdix -no-entry-point
+
+      # ── Run tests — native lib found via -extra-linker-flags, not a
+      #    system-wide install, so this doesn't touch anything outside the
+      #    checkout ──────────────────────────────────────────────────────────
+      - name: odin test
+        id: odin-test
+        continue-on-error: true
+        run: |
+          LIBDIR="$(pwd)/target/release"
+          START=$(date +%s)
+          odin test mdix-odin/mdix/tests \
+            -define:ODIN_TEST_JSON_REPORT=odin-results-raw.json \
+            -extra-linker-flags:"-L${LIBDIR} -Wl,-rpath,${LIBDIR}" \
+            2>&1 | tee test-output.txt
+          TEST_EXIT=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "TEST_EXIT=$TEST_EXIT"        >> $GITHUB_ENV
+          echo "DURATION_S=$((END - START))" >> $GITHUB_ENV
+          exit 0
+
+      - name: Parse test results
+        id: result
+        if: always()
+        run: |
+          python3 - << 'PYEOF'
+          import json, os
+
+          total = passed = failed = 0
+          if os.path.exists("odin-results-raw.json"):
+              with open("odin-results-raw.json") as f:
+                  raw = json.load(f)
+              total = raw.get("total", 0)
+              passed = raw.get("success", 0)
+              failed = total - passed
+
+          status = "success" if os.environ.get("TEST_EXIT", "1") == "0" else "failed"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"status={status}\n")
+              out.write(f"total={total}\n")
+              out.write(f"passed={passed}\n")
+              out.write(f"failed={failed}\n")
+          PYEOF
+
+      - name: Upload raw results + log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: odin-test-output-${{ github.run_number }}
+          path: |
+            odin-results-raw.json
+            test-output.txt
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ── Step 3: convert results, build the report page, deploy to gh-pages ───────
+  collect-and-deploy:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test]
+    if: |
+      always() &&
+      needs.parse-trigger.outputs.should_run == 'true' &&
+      needs.build-and-test.result != 'skipped'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download raw results
+        uses: actions/download-artifact@v4
+        with:
+          name: odin-test-output-${{ github.run_number }}
+          path: odin-test-artifact/
+        continue-on-error: true
+
+      - name: Generate odin-results.json
+        env:
+          BUILD_NUM:   ${{ github.run_number }}
+          BRANCH:      ${{ github.ref_name }}
+          COMMIT:      ${{ github.sha }}
+          BUILD_DATE:  ${{ github.event.head_commit.timestamp }}
+          ODIN_VER:    ${{ needs.build-and-test.outputs.odin_ver   || 'unknown' }}
+          TEST_STATUS: ${{ needs.build-and-test.outputs.status     || 'skipped' }}
+          TEST_TOTAL:  ${{ needs.build-and-test.outputs.total      || '0' }}
+          TEST_PASSED: ${{ needs.build-and-test.outputs.passed     || '0' }}
+          TEST_FAILED: ${{ needs.build-and-test.outputs.failed     || '0' }}
+        run: |
+          python3 - << 'PYEOF'
+          import json, os
+
+          def int_env(key):
+              try:
+                  return int(os.environ.get(key, "0"))
+              except ValueError:
+                  return 0
+
+          # Reshape Odin's native {"total","success","duration","packages":
+          # {"pkg": [{"success","name"}]}} report into the same shape
+          # go-results.json already uses (tests{}/suites[]), so this
+          # package's report page can reuse go-test-template.html's render()
+          # JS wholesale instead of a second hand-written parser.
+          suites = []
+          raw_path = "odin-test-artifact/odin-results-raw.json"
+          if os.path.exists(raw_path):
+              with open(raw_path) as f:
+                  raw = json.load(f)
+              for pkg_name, tests in raw.get("packages", {}).items():
+                  pkg_passed = sum(1 for t in tests if t.get("success"))
+                  pkg_failed = sum(1 for t in tests if not t.get("success"))
+                  suites.append({
+                      "name": pkg_name,
+                      "package": pkg_name,
+                      "passed": pkg_passed,
+                      "failed": pkg_failed,
+                      "duration_s": None,
+                      "tests": [
+                          {
+                              "name": t.get("name", "?"),
+                              "status": "passed" if t.get("success") else "failed",
+                              "duration_ms": None,
+                              "output": "",
+                          }
+                          for t in tests
+                      ],
+                  })
+
+          result = {
+              "build":        os.environ.get("BUILD_NUM",  "0"),
+              "branch":       os.environ.get("BRANCH",     "unknown"),
+              "commit":       os.environ.get("COMMIT",     "unknown")[:8],
+              "date":         os.environ.get("BUILD_DATE", ""),
+              "odin_version": os.environ.get("ODIN_VER",   "unknown"),
+              "package":      "mdix-odin",
+              "tests": {
+                  "status":       os.environ.get("TEST_STATUS", "skipped"),
+                  "total":        int_env("TEST_TOTAL"),
+                  "passed":       int_env("TEST_PASSED"),
+                  "failed":       int_env("TEST_FAILED"),
+                  "duration_s":   0,
+                  "failed_names": [],
+              },
+              "suites": suites,
+          }
+
+          with open("odin-results.json", "w") as f:
+              json.dump(result, f, indent=2)
+          print(json.dumps(result, indent=2))
+          PYEOF
+
+      - name: Build HTML report
+        run: |
+          cp .github/odin-test-template.html odin-test-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  odin-test-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       odin-test-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            odin-test-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     odin-test-index.html
+          # go-test-template.html's fetch() call names the JSON file
+          # go-results.json literally -- point it at this package's file.
+          sed -i "s/go-results\.json/odin-results.json/g"              odin-test-index.html
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/odin" "$WORK/odin/builds/build_${BUILD_NUM}"
+
+          cp odin-results.json "$WORK/odin/odin-results.json"
+          cp odin-results.json "$WORK/odin/builds/build_${BUILD_NUM}/odin-results.json"
+
+          cp odin-test-index.html "$WORK/odin/index.html"
+          cp odin-test-index.html "$WORK/odin/builds/build_${BUILD_NUM}/index.html"
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "DixScript Odin CI — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+
+  # ── Step 4: print summary ─────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test, collect-and-deploy]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "======================================================="
+          echo "  DixScript — Odin Package CI Summary"
+          echo "======================================================="
+          echo "Build:   #${{ github.run_number }}"
+          echo "Branch:  ${{ github.ref_name }}"
+          echo "Odin:    ${{ needs.build-and-test.outputs.odin_ver || 'n/a' }}"
+          echo "Tests:   ${{ needs.build-and-test.result || 'skipped' }}"
+          echo "Deploy:  ${{ needs.collect-and-deploy.result || 'skipped' }}"
+          echo ""
+          echo "Odin results: https://mid-d-man.github.io/DixScript-Rust/odin/"

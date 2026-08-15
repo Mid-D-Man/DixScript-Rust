@@ -63,6 +63,40 @@ Mdix_Format_Mode :: enum c.int {
 	Minified = 3,
 }
 
+// Mirrors the Rust `MdixMergeStrategy` repr(i32) enum exactly
+// (dixscript::Runtime::MdixMergeStrategy, mirrored in mdix-ffi/src/lib.rs).
+// How to resolve a key defined by more than one source in
+// mdix_merge_sources() / mdix_merge_sources_weighted().
+Mdix_Merge_Strategy :: enum c.int {
+	// Each source has a weight (see mdix_merge_sources_weighted); on
+	// conflict the highest-weight source wins. mdix_merge_sources()
+	// assigns descending weights by source order, so this is equivalent
+	// to "earlier source wins" there.
+	Weighted_Priority = 0,
+	// The lower-indexed (primary) source always wins on conflict,
+	// regardless of weight.
+	Primary_Wins = 1,
+	// The higher-indexed (secondary/later) source always wins on conflict.
+	Secondary_Wins = 2,
+	// Fail the merge (returns nil) on the first conflicting key instead
+	// of resolving it.
+	Throw_On_Conflict = 3,
+}
+
+// Mirrors the Rust `ArrayMergeStrategy` repr(i32) enum exactly. Controls
+// how array-typed values are combined when merging sources.
+Array_Merge_Strategy :: enum c.int {
+	// The winning source's array (per Mdix_Merge_Strategy) replaces the
+	// other entirely — no element-level combining.
+	Replace = 0,
+	// Arrays from every source that defines the path are concatenated in
+	// source order.
+	Concat = 1,
+	// Like Concat, but duplicate elements (by value equality) are
+	// dropped, keeping the first occurrence.
+	Concat_Dedup = 2,
+}
+
 @(default_calling_convention = "c")
 foreign mdix_ffi_lib {
 	// ── Metadata ─────────────────────────────────────────────────────────
@@ -168,4 +202,32 @@ foreign mdix_ffi_lib {
 	// ── Builder — persistence ─────────────────────────────────────────────────
 	mdix_builder_to_string :: proc(builder: rawptr) -> cstring ---
 	mdix_builder_save      :: proc(builder: rawptr, path: cstring) -> bool ---
+
+	// ── Merge ────────────────────────────────────────────────────────────────
+	// sources/count describe a plain C array of .mdix source strings (NOT
+	// handles — merging happens at the AST level before any handle exists).
+	// out_conflicts_json receives a freshly-allocated JSON array string
+	// (free with mdix_free_string) describing every key more than one
+	// source defined and which source won; pass nil to skip the report.
+	// Returns nil on failure (e.g. a source failed to parse, or
+	// Throw_On_Conflict hit a conflict) — check mdix_get_last_error().
+	mdix_merge_sources :: proc(
+		sources:        [^]cstring,
+		count:          c.int32_t,
+		strategy:       Mdix_Merge_Strategy,
+		array_strategy: Array_Merge_Strategy,
+		out_conflicts_json: ^cstring,
+	) -> rawptr ---
+
+	// Same as mdix_merge_sources, but with an explicit per-source weight
+	// array (same length as sources) instead of descending-by-order
+	// weights. Only affects resolution under Weighted_Priority.
+	mdix_merge_sources_weighted :: proc(
+		sources:        [^]cstring,
+		weights:        [^]f64,
+		count:          c.int32_t,
+		strategy:       Mdix_Merge_Strategy,
+		array_strategy: Array_Merge_Strategy,
+		out_conflicts_json: ^cstring,
+	) -> rawptr ---
 }

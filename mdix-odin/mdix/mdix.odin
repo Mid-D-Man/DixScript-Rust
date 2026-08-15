@@ -53,6 +53,12 @@ version :: proc() -> string {
 
 // ── Database ─────────────────────────────────────────────────────────────
 
+// Mdix_Type is get_type's result type — re-exported from mdix_ffi so
+// callers can write mdix.Mdix_Type.Long instead of reaching into the ffi
+// package directly for it (schema.odin and the tests below both need to
+// name it standalone, not just at a call site where it'd be inferred).
+Mdix_Type :: ffi.Mdix_Type
+
 Database :: struct {
 	handle: rawptr,
 }

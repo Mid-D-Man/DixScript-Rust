@@ -6,6 +6,9 @@
 [![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
 [![Crates.io](https://img.shields.io/crates/v/dixscript.svg)](https://crates.io/crates/dixscript)
 [![docs.rs](https://img.shields.io/docsrs/dixscript)](https://docs.rs/dixscript)
+[![npm](https://img.shields.io/npm/v/%40midmanstudio%2Fmdix.svg)](https://www.npmjs.com/package/@midmanstudio/mdix)
+[![PyPI](https://img.shields.io/pypi/v/midmanstudio-mdix.svg)](https://pypi.org/project/midmanstudio-mdix/)
+[![NuGet](https://img.shields.io/nuget/v/MidManStudio.Mdix.svg)](https://www.nuget.org/packages/MidManStudio.Mdix)
 [![Downloads](https://img.shields.io/crates/d/dixscript.svg)](https://crates.io/crates/dixscript)
 
 ## Documentation Site https://dixscript-docs.pages.dev 
@@ -15,19 +18,21 @@
 
 ---
 <!-- GitAds-Verify: YZXZH8RCNBZ1H2T4AKYE91PNIFVCNMFS -->
-## 🎉 `dixscript` v1.0.0 Is Live on crates.io
+## 🎉 `dixscript` v1.0.0 Is Live — And So Is Most of the Ecosystem
 
-**The Rust port is feature-complete, API stable, and `dixscript` v1.0.0 is now published.** It's a fresh release with no real-world mileage yet — install it, use it in your own projects, and file issues for anything you hit. `mdix-cli` and the language wrappers below are still build-from-source until they get their own publish pass.
+**The Rust port is feature-complete, API stable, and now published across five package registries.** These are fresh releases with no real-world mileage yet — install them, use them in your own projects, and file issues for anything you hit. A handful of language wrappers are code-complete but haven't had their publishing pass yet, and the IDE extensions are still in progress.
 
-| Package | Status |
-|---------|--------|
-| `dixscript` (core Rust library) | ✅ **Published on crates.io** — [`dixscript = "1.0"`](https://crates.io/crates/dixscript) |
-| `mdix-cli` | ✅ All commands implemented — build from source |
-| `mdix-ffi` / C# bindings | ⏳ Bindings generated, packaging pending |
-| `mdix-go` | ⏳ Header generated, Go wrapper pending |
-| `mdix-java` / `mdix-python` | ⏳ Pending runtime wrappers |
-| `mdix-wasm` | ⏳ Pending wasm-bindgen annotations |
-| `mdix-c` | ⏳ Header stable, examples pending |
+| Package | Language / Platform | Status |
+|---------|---------------------|--------|
+| `dixscript` | Rust (core) | ✅ **crates.io** — [`dixscript = "1.0"`](https://crates.io/crates/dixscript) |
+| `mdix-cli` | CLI | ✅ **crates.io** — `cargo install mdix-cli` |
+| `mdix-lsp` | LSP server | ✅ **crates.io** — `cargo install mdix-lsp` |
+| `@midmanstudio/mdix` | Node.js / Browser (WASM) | ✅ **npm** — `npm install @midmanstudio/mdix` |
+| `midmanstudio-mdix` | Python | ✅ **PyPI** — `pip install midmanstudio-mdix` |
+| `MidManStudio.Mdix` | C# / Unity | ✅ **NuGet** — `dotnet add package MidManStudio.Mdix` |
+| `mdix-go` · `mdix-java` · `mdix-lua` · `mdix-php` · `mdix-odin` | Go · Java/Kotlin · Lua · PHP · Odin | 🔨 Code-complete — publishing pass pending |
+| `mdix-c` | C / C++ | 🔨 Header + FFI stable — build from source |
+| VS Code · VS for Mac · IntelliJ | IDE extensions | ⏳ In progress |
 
 The C# prototype (`https://github.com/Mid-D-Man/DixScript`) remains the reference implementation for the language itself.
 
@@ -340,7 +345,7 @@ All sections are optional. Use what you need.
 ## Current Status: Rust Port
 
 **Original:** Written in C# (.NET 8), fully functional, available at `https://github.com/Mid-D-Man/DixScript`.  
-**This Repo:** Rust port — feature-complete, API stable, actively tested via CI.
+**This Repo:** Rust port — feature-complete, API stable, actively tested via CI, and now published to crates.io, npm, PyPI, and NuGet.
 
 ### Rust Port Progress
 
@@ -355,22 +360,13 @@ All sections are optional. Use what you need.
 | Binary Serialization | ✅ Complete | Packer + Unpacker |
 | DLM Pipeline | ✅ Complete | Forward and reverse |
 | Runtime API | ✅ Complete | Load, access, build, convert |
-| LSP Server | ✅ Complete | Full IDE integration |
-| CLI | ✅ Complete | All commands |
+| LSP Server | ✅ Complete | Full IDE integration — published, editor extensions pending |
+| CLI | ✅ Complete | All commands — published |
 | FFI / C | ✅ Complete | C header + 40+ exported functions |
 
 ### Language Wrapper Status
 
-All wrappers bind to the Rust runtime via FFI. The core is complete — wrappers are pending packaging and publishing.
-
-| Package | Language | Status |
-|---------|----------|--------|
-| `mdix-ffi` + C# NuGet | C# / Unity | ⏳ Bindings generated, NuGet packaging pending |
-| `mdix-go` | Go | ⏳ C header generated, Go wrapper pending |
-| `mdix-java` | Java / Kotlin | ⏳ Pending JNI wrappers |
-| `mdix-python` | Python | ⏳ Pending PyO3 wrappers |
-| `mdix-wasm` | JS / Browser | ⏳ Pending wasm-bindgen annotations |
-| `mdix-c` | C / C++ | ⏳ Header stable, examples pending |
+All wrappers bind to the Rust runtime via FFI. See the publish table near the top of this README for the exact package/registry per language — short version: **Node/WASM, Python, C#, the CLI, and the LSP are published**; **Go, Java, Lua, PHP, and Odin are code-complete and waiting on a publishing pass**; **C/C++ is header-stable FFI**, build from source until it gets one too.
 
 **Why Rust?**
 - 🚀 **Performance:** The C# prototype is fast. Rust is faster.
@@ -382,7 +378,7 @@ All wrappers bind to the Rust runtime via FFI. The core is complete — wrappers
 
 ## Getting Started
 
-### As a library
+### Rust
 ```bash
 cargo add dixscript
 ```
@@ -404,11 +400,8 @@ fn main() {
 ```
 
 ### CLI (`mdix-cli`)
-Not yet published to crates.io — build from source:
 ```bash
-git clone https://github.com/Mid-D-Man/DixScript-Rust
-cd DixScript-Rust
-cargo build -p mdix-cli --release
+cargo install mdix-cli
 
 mdix validate config.mdix
 mdix compile config.mdix
@@ -416,6 +409,28 @@ mdix compile secrets.mdix --password
 mdix convert config.json --to mdix
 mdix inspect config.mdix --keys
 ```
+
+### Node.js / Browser (`@midmanstudio/mdix`)
+```bash
+npm install @midmanstudio/mdix
+```
+WASM-backed, works in both Node and the browser via bundlers. See the [npm package page](https://www.npmjs.com/package/@midmanstudio/mdix) for the current API surface.
+
+### Python (`midmanstudio-mdix`)
+```bash
+pip install midmanstudio-mdix
+```
+
+### C# / Unity (`MidManStudio.Mdix`)
+```bash
+dotnet add package MidManStudio.Mdix
+```
+
+### LSP (`mdix-lsp`)
+```bash
+cargo install mdix-lsp
+```
+Full IDE integration (diagnostics, completion, hover) is implemented — wrap it as a VS Code / VS for Mac / IntelliJ extension yourself for now, or wait for the official ones.
 
 ---
 
@@ -431,7 +446,7 @@ mdix inspect config.mdix --keys
 
 ## Contributing
 
-Contributions welcome. The Rust port is feature-complete — areas where help is most useful: language wrapper packaging (C#, Go, Python), LSP editor extensions, documentation, and test coverage.
+Contributions welcome. The Rust port and core wrappers are done — areas where help is most useful: publishing the code-complete wrappers (Go, Java, Lua, PHP, Odin), IDE extension packaging (VS Code, VS for Mac, IntelliJ), documentation, and test coverage.
 
 **Code style:** Follow `rustfmt.toml` in the repo.
 

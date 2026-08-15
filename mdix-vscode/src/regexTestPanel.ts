@@ -131,9 +131,12 @@ function openPanel(
 }
 
 function getHtml(initialPattern?: string): string {
-  // JSON.stringify doubles as HTML-safe escaping here — the result always
-  // has surrounding quotes and any " or < in the pattern comes out safely
-  // backslash-escaped, so it's fine to inline directly into the <script>.
+  // JSON.stringify is the right tool here specifically because this gets
+  // embedded as a JS expression inside <script> (assigned to a const, see
+  // below) — JSON string syntax IS valid JS string-literal syntax with
+  // correct escaping. It is NOT safe to bake directly into an HTML
+  // attribute (see the fix note further down for exactly what went wrong
+  // when this used to do that).
   const initialPatternJson = JSON.stringify(initialPattern ?? "");
 
   return /* html */ `<!DOCTYPE html>
@@ -158,7 +161,7 @@ function getHtml(initialPattern?: string): string {
 </head>
 <body>
   <label for="pattern">Pattern</label>
-  <input id="pattern" placeholder="e.g. ^[A-Z][a-z]+$" value=${initialPatternJson.replace(/"/g, '&quot;')} />
+  <input id="pattern" placeholder="e.g. ^[A-Z][a-z]+$" />
 
   <label for="testText">Test text</label>
   <textarea id="testText" placeholder="Paste text to test against the pattern..."></textarea>
@@ -172,6 +175,24 @@ function getHtml(initialPattern?: string): string {
   const testTextEl = document.getElementById('testText');
   const statusEl   = document.getElementById('status');
   const resultEl   = document.getElementById('result');
+
+  // ROOT CAUSE (2026-08-12) of "the tester keeps stray quotes and never
+  // finds matches": this used to be baked into the <input value=...> HTML
+  // attribute directly. JSON.stringify(str) always wraps its output in
+  // literal quote characters -- that's correct JSON-string syntax, and
+  // exactly what you want assigning into a JS string literal (this spot,
+  // right here) -- but it's the wrong tool for an HTML attribute, which
+  // needs the RAW characters HTML-entity-escaped instead, no wrapping
+  // quotes added. Used directly as an HTML attribute value before, the
+  // literal quote characters JSON.stringify adds became part of the actual
+  // input value once the browser parsed the attribute -- every pre-filled
+  // pattern silently gained a leading and trailing ", which regex.Regex
+  // then dutifully required literal " characters in the test text to
+  // match, so nothing ever did. Setting it as a real JS property here
+  // instead sidesteps HTML-attribute escaping entirely -- no wrapping
+  // quotes end up in the value no matter what the pattern contains.
+  const initialPattern = ${initialPatternJson};
+  if (initialPattern) { patternEl.value = initialPattern; }
 
   let debounceTimer;
   function scheduleRun() {
@@ -206,6 +227,21 @@ function getHtml(initialPattern?: string): string {
     // visible error anywhere — looked exactly like "never finds matches"
     // rather than the real problem (wrong/stale server). Checking for a
     // well-formed result before ever touching .valid.
+    //
+    // (Side note for whoever reads this comment next: NO backtick
+    // characters in any comment anywhere inside this function's returned
+    // template literal, ever, including this one — the whole HTML/script
+    // block from the DOCTYPE line to the closing html tag is one giant
+    // backtick-delimited TS string, and a backtick anywhere inside it —
+    // even inside what looks like a harmless nested JS comment — closes
+    // that outer literal right there and turns everything after it into
+    // real TypeScript the compiler then tries and fails to parse. That's
+    // exactly what happened here before: a markdown-style code-emphasis
+    // backtick pair around "result.valid" in this very comment terminated
+    // the literal mid-file and cascaded into a syntax error several dozen
+    // lines away from the actual mistake. Use single quotes for emphasis
+    // in here instead, never backticks — not even once, not even for a
+    // one-word aside.
     if (!msg.result || typeof msg.result.valid !== 'boolean') {
       statusEl.innerHTML = '<span class="error">No usable response from the language server '
         + '(got: ' + JSON.stringify(msg.result) + '). If this persists, the running mdix-lsp '

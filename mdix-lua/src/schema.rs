@@ -23,7 +23,7 @@
 // as a follow-up.
 
 use mlua::{
-    Lua, MetaMethod, Result as LuaResult,
+    AnyUserData, Lua, MetaMethod, Result as LuaResult,
     Table as LuaTable, UserData, UserDataMethods,
 };
 use dixscript::Runtime::{SchemaBuilder, ValidationReport};
@@ -63,106 +63,69 @@ impl LuaMdixSchema {
 impl UserData for LuaMdixSchema {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
 
+        // require_*/optional_*/with_description all mutate the builder
+        // and are meant to chain in Lua the same way schema.rs's own
+        // header doc shows:
+        //   mdix.schema():require_string("x"):require_int("y")
+        // That can't work through add_method_mut — mlua only hands that
+        // closure &mut Self, and returning Ok(()) (what this block used
+        // to do) makes Lua's chain evaluate `(nil):require_int(...)`
+        // once you're two calls deep, which raises. add_function_mut
+        // instead takes the AnyUserData handle itself as the first
+        // argument (mlua's own doc on it: "The first argument will be
+        // an AnyUserData... if the method is called with Lua method
+        // syntax"), borrows through it, and hands that same handle back
+        // — genuinely chainable, not just documented as if it were.
+        //
+        // One macro instead of eighteen near-identical closures, since
+        // every one of these differs only in which SchemaBuilder method
+        // it forwards to.
+        macro_rules! chainable_field_method {
+            ($lua_name:literal, $core_method:ident) => {
+                methods.add_function_mut($lua_name, |_, (this, path): (AnyUserData, String)| {
+                    let mut b = this.borrow_mut::<LuaMdixSchema>()?;
+                    let inner = b.take()?;
+                    b.inner = Some(inner.$core_method(path));
+                    drop(b);
+                    Ok(this)
+                });
+            };
+        }
+
         // ── required ─────────────────────────────────────────────────────
 
-        methods.add_method_mut("require_string", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.require_string(path));
-            Ok(())
-        });
-        methods.add_method_mut("require_int", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.require_int(path));
-            Ok(())
-        });
+        chainable_field_method!("require_string", require_string);
+        chainable_field_method!("require_int", require_int);
         /// Requires a 64-bit integer field. Also accepts Int values
         /// (an i32 widens into the i64 field with no precision loss).
-        methods.add_method_mut("require_long", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.require_long(path));
-            Ok(())
-        });
-        methods.add_method_mut("require_float", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.require_float(path));
-            Ok(())
-        });
-        methods.add_method_mut("require_double", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.require_double(path));
-            Ok(())
-        });
-        methods.add_method_mut("require_bool", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.require_bool(path));
-            Ok(())
-        });
-        methods.add_method_mut("require_array", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.require_array(path));
-            Ok(())
-        });
-        methods.add_method_mut("require_object", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.require_object(path));
-            Ok(())
-        });
-        methods.add_method_mut("require_enum", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.require_enum(path));
-            Ok(())
-        });
+        chainable_field_method!("require_long", require_long);
+        chainable_field_method!("require_float", require_float);
+        chainable_field_method!("require_double", require_double);
+        chainable_field_method!("require_bool", require_bool);
+        chainable_field_method!("require_array", require_array);
+        chainable_field_method!("require_object", require_object);
+        chainable_field_method!("require_enum", require_enum);
 
         // ── optional ─────────────────────────────────────────────────────
 
-        methods.add_method_mut("optional_string", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.optional_string(path));
-            Ok(())
-        });
-        methods.add_method_mut("optional_int", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.optional_int(path));
-            Ok(())
-        });
-        methods.add_method_mut("optional_long", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.optional_long(path));
-            Ok(())
-        });
-        methods.add_method_mut("optional_float", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.optional_float(path));
-            Ok(())
-        });
-        methods.add_method_mut("optional_double", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.optional_double(path));
-            Ok(())
-        });
-        methods.add_method_mut("optional_bool", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.optional_bool(path));
-            Ok(())
-        });
-        methods.add_method_mut("optional_array", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.optional_array(path));
-            Ok(())
-        });
-        methods.add_method_mut("optional_object", |_, this, path: String| {
-            let b = this.take()?;
-            this.inner = Some(b.optional_object(path));
-            Ok(())
-        });
+        chainable_field_method!("optional_string", optional_string);
+        chainable_field_method!("optional_int", optional_int);
+        chainable_field_method!("optional_long", optional_long);
+        chainable_field_method!("optional_float", optional_float);
+        chainable_field_method!("optional_double", optional_double);
+        chainable_field_method!("optional_bool", optional_bool);
+        chainable_field_method!("optional_array", optional_array);
+        chainable_field_method!("optional_object", optional_object);
 
         // ── metadata ─────────────────────────────────────────────────────
 
         /// Annotates the most recently added field with a description.
-        methods.add_method_mut("with_description", |_, this, description: String| {
-            let b = this.take()?;
-            this.inner = Some(b.with_description(description));
-            Ok(())
+        methods.add_function_mut("with_description", |_, (this, description): (AnyUserData, String)| {
+            let mut b = this.borrow_mut::<LuaMdixSchema>()?;
+            let inner = b.take()?;
+            b.inner = Some(inner.with_description(description));
+            drop(b);
+            Ok(this)
         });
 
         methods.add_method("field_count", |_, this, ()| {

@@ -10,6 +10,7 @@ use dixscript::Runtime::{
     DixConverter, DixData, DixFormatOptions, DixValue,
 };
 use crate::error::*;
+use crate::query::LuaMdixQuery;
 use crate::schema::{LuaMdixSchema, LuaMdixValidationReport};
 use crate::value::dix_to_lua;
 
@@ -361,6 +362,34 @@ impl UserData for LuaMdixDatabase {
                 t.set(k.as_str(), dix_to_lua(lua, v)?)?;
             }
             Ok(t)
+        });
+
+        /// Query the array at `path` — see query.rs for the full
+        /// where/select/order_by/group_by/... method surface. Errors if
+        /// path does not exist or is not an Array/Tuple.
+        ///
+        ///   local heavies = db:query("enemies"):where(function(e) return e.hp > 500 end)
+        methods.add_method("query", |lua, this, path: String| {
+            let data = this.data()?;
+            match data.query(&path) {
+                Some(q) => LuaMdixQuery::from_dix_query(lua, q),
+                None => Err(mdix_err(
+                    "query",
+                    format!("'{}' does not exist or is not an array", path),
+                )),
+            }
+        });
+
+        /// Query every value matching a single '*' wildcard segment
+        /// (e.g. "servers.*.status") across sibling paths — see
+        /// DixData::query_many in dixscript/src/Runtime/query.rs for the
+        /// exact wildcard semantics (one segment only). Never errors —
+        /// an empty query if nothing matched, same as the core.
+        ///
+        ///   local statuses = db:query_many("servers.*.status")
+        methods.add_method("query_many", |lua, this, pattern: String| {
+            let data = this.data()?;
+            LuaMdixQuery::from_dix_query(lua, data.query_many(&pattern))
         });
 
         /// Validates this database against a schema built with

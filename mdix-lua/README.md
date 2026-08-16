@@ -2,7 +2,10 @@
 # mdix-lua — DixScript Lua Bindings
 
 Lua 5.4 bindings for the DixScript (`.mdix`) runtime.
-Built on the same core Rust library as the C#, Go, Python, and Java wrappers.
+Built on the same core Rust library as the C#, Go, Odin, Python,
+WASM/npm, and Java wrappers.
+
+## Documentation Site https://dixscript-docs.pages.dev
 
 > **NOT PRODUCTION READY** — runtime incomplete, API may change.
 > Add `"mdix-lua"` to the workspace `members` array in the root `Cargo.toml` before building.
@@ -10,6 +13,7 @@ Built on the same core Rust library as the C#, Go, Python, and Java wrappers.
 ---
 
 ## Building
+
 ```bash
 cargo build -p mdix-lua --release
 ```
@@ -30,6 +34,39 @@ ln -s target/release/libmdix.dylib mdix.so
 
 Then place `mdix.so` / `mdix.dll` somewhere on `package.cpath`, or run Lua
 from the directory that contains it.
+
+### Cross-platform notes (mlua's `module` feature)
+
+This crate builds with mlua's `module` feature, not `vendored` — it's
+meant to be `require()`'d into a host process that already embeds its own
+Lua interpreter (a game's modding layer, an editor's scripting console),
+so it deliberately leaves every `lua_*`/`luaL_*` symbol unresolved at
+build time, to be resolved dynamically against whatever process loads
+it. See `Cargo.toml`'s own comment for the full "why not vendored"
+reasoning.
+
+That has different, real implications per platform — checked directly
+against `mlua-sys`'s build script rather than assumed:
+
+- **Linux** — no special handling needed. This is the standard, decades-old
+  pattern for loadable Lua C modules; the default linker already permits
+  a shared object with unresolved symbols like that. `lua-ci.yml`
+  validates this for real on every run — system `lua5.4` loading a
+  `module`-built `mdix.so`.
+- **macOS** — needs the linker told explicitly that's intentional
+  (`-undefined dynamic_lookup`), which `mlua-sys` does not add
+  automatically. `mdix-lua/build.rs` supplies it for `target_os =
+  "macos"` — without that file, `cargo build --target
+  x86_64-apple-darwin` / `aarch64-apple-darwin` fails at the link step.
+- **Windows** — `mlua-sys` links via Rust's `raw-dylib` feature
+  automatically (no Lua headers/`.lib` needed to build), but the
+  resulting `mdix.dll` hard-requires an actual DLL named `lua54.dll` to
+  be loaded in the host process at runtime — that's the literal name
+  baked into every FFI declaration
+  (`#[link(name = "lua54", kind = "raw-dylib")]`). A host that statically
+  links Lua straight into its own `.exe` with no separate `lua54.dll`
+  will fail to load this module on Windows, even though the identical
+  setup works fine on Linux/macOS.
 
 ---
 
@@ -205,6 +242,119 @@ print(tostring(b))  -- MdixBuilder(flat=0, tables=0, arrays=0)
 
 ---
 
+## Query
+
+DixScript's core `DixQuery` closures can't cross into Lua the same way
+they can't cross into any FFI boundary — but this crate links directly
+against the `dixscript` crate, so `db:query(path)` builds off
+`DixData::query()`'s real `Vec<DixValue>` result directly (via the same
+`dix_to_lua` conversion `db:get()` already uses), no JSON round trip
+needed. Every predicate/key/selector is a plain Lua function:
+
+```lua
+local heavies = db:query("enemies"):where(function(e) return e.hp > 500 end)
+local names = heavies:select(function(e) return e.name end)
+local sorted = db:query("enemies"):order_by_desc(function(e) return e.hp end)
+local groups = db:query("enemies"):group_by(function(e) return e.name end)
+for _, group in ipairs(groups) do
+    print(group.key, #group.items)
+end
+
+-- Sibling paths sharing shape, wildcarding one segment:
+local statuses = db:query_many("servers.*.status")
+
+-- Query arbitrary Lua data too, not just a loaded Database's fields:
+local total = mdix.query({1, 5, 3, 2, 4}):sum_int()
+```
+
+Also available: `where_field_eq`, `select_field`, `skip`, `take`,
+`distinct`, `any`, `all`, `count`, `is_empty`, `first(_or)`, `last`,
+`nth` (1-indexed), `sum_int`/`sum_float`, `avg_float`, `min_by_key`,
+`max_by_key`, `to_table`, `#query` (via `__len`).
+
+---
+
+## Merge
+
+Exposed at module level, not as a `Database` method, since merging
+operates over files/ASTs rather than an already-resolved `DixData` — see
+`merge.rs`'s own header comment for why this is the real AST-level
+merger and not a hand-written deep-merge:
+
+```lua
+local db, conflicts = mdix.merge_files({"base.mdix", "patch.mdix"})
+local db, conflicts = mdix.merge_files({"base.mdix", "patch.mdix"}, "primary_wins")
+local db, conflicts = mdix.merge_files_weighted(
+    {{"base.mdix", 1.0}, {"patch.mdix", 0.8}}, "weighted")
+
+for _, c in ipairs(conflicts) do
+    print(c.path, c.winning_source, c.winning_label)
+end
+
+-- Two already-loaded databases:
+local merged, conflicts = db1:merge_with(db2, "primary_wins", "concat")
+```
+
+`strategy`: `"weighted"` (default) | `"primary_wins"` | `"secondary_wins"` | `"throw_on_conflict"`
+`array_strategy`: `"concat_dedup"` (default) | `"replace"` | `"concat"`
+
+---
+
+## Schema
+
+No schema-validation C ABI exists for this to bind to even if it wanted
+to, so — same as every other binding — this validates client-side. All
+`require_*`/`optional_*`/`with_description` calls chain and return the
+same schema, so this reads the way it looks:
+
+```lua
+local schema = mdix.schema()
+    :require_string("app_name")
+    :require_int("port")
+    :require_long("created_at_ms")   -- also accepts Int values (widened)
+    :optional_bool("debug")
+    :with_description("app configuration")
+
+local report = db:validate_schema(schema)
+if not report:is_valid() then
+    for _, e in ipairs(report:errors()) do
+        print(e.path, e.expected, e.actual, e.kind)
+    end
+end
+```
+
+A schema is reusable — `validate_schema` only reads from the `Database`
+you pass it, so the same schema can validate any number of databases.
+
+Field types: `string`, `int`, `long`, `float`, `double`, `bool`, `array`, `object`, `enum`.
+
+---
+
+## Hot reload
+
+```lua
+local watcher = mdix.watch("config.mdix")
+
+-- in your game loop / tick / update:
+local db, changed = watcher:check()
+if changed then
+    apply_new_config(db)
+end
+
+-- Force a reload regardless of whether the file changed:
+local db = watcher:force_reload()
+
+-- Peek without reloading:
+if watcher:has_changed() then ... end
+```
+
+`db` is `nil` when nothing changed (`changed == false`) — keep using the
+previously loaded database instance in that case. Poll-based (checks
+mtime), same reasoning as every other binding's hot reload — see
+`dixscript/src/Runtime/hot_reload.rs`.
+
+---
+
 ## Error handling
 
 All errors are raised as Lua errors. Use `pcall` to catch them:
@@ -234,6 +384,23 @@ print(val.enum_name)  -- "LogLevel"
 print(val.field)      -- "INFO"
 print(val.value)      -- 1  (the resolved integer)
 ```
+
+---
+
+## Testing
+
+```bash
+cargo build -p mdix-lua --release
+ln -sf ../../target/release/libmdix.so mdix-lua/tests/mdix.so   # or .dylib
+cd mdix-lua/tests
+lua5.4 run_tests.lua
+```
+
+`run_tests.lua` runs every `test_*.lua` module listed in its own
+`test_modules` table (not auto-discovered by filename — add new test
+files to that list explicitly) against the framework in `framework.lua`.
+`lua-ci.yml` does exactly this against a real build on every run and
+publishes results to the `Lua Tests` card on the landing page.
 
 ---
 

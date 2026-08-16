@@ -37,13 +37,16 @@
 //                                                      -- MdixDatabase, conflicts
 //   mdix.merge_files_weighted(entries [, strategy [, array_strategy]])
 //                                                      -- MdixDatabase, conflicts
+//   mdix.query(table)                                 -- MdixQuery
 //   mdix.minify_source(source)                       -- string
 //   mdix.format_source(source)                       -- string
+//   mdix.strip_comments(source)                      -- string
 //
 // MdixDatabase additionally exposes :to_table(), :validate_schema(schema),
-// and :merge_with(other [, strategy [, array_strategy [, temp_dir]]]).
-// See database.rs, builder.rs, schema.rs, merge.rs, and watch.rs for the
-// full method surfaces.
+// :query(path), :query_many(pattern), and
+// :merge_with(other [, strategy [, array_strategy [, temp_dir]]]).
+// See database.rs, builder.rs, schema.rs, merge.rs, query.rs, and watch.rs
+// for the full method surfaces.
 //
 // Cargo.toml crate-type is ["cdylib", "rlib"].
 //   cdylib → mdix.so / mdix.dylib / mdix.dll  (loaded by require)
@@ -58,6 +61,7 @@ mod builder;
 mod database;
 mod error;
 mod merge;
+mod query;
 mod schema;
 mod value;
 mod watch;
@@ -70,6 +74,7 @@ use dixscript::Runtime::{
 use builder::LuaMdixBuilder;
 use database::LuaMdixDatabase;
 use error::mdix_err;
+use query::LuaMdixQuery;
 use schema::LuaMdixSchema;
 use watch::LuaMdixWatcher;
 
@@ -279,6 +284,20 @@ fn mdix(lua: &Lua) -> LuaResult<LuaTable> {
     ///       {{"base.mdix", 1.0}, {"patch.mdix", 0.8}}, "weighted")
     m.set("merge_files_weighted", lua.create_function(merge::merge_files_weighted)?)?;
 
+    // ── Querying ─────────────────────────────────────────────────────────────
+
+    /// Wrap an arbitrary Lua sequence table for querying — see query.rs
+    /// for the full where/select/order_by/group_by/... method surface.
+    /// For querying a loaded Database's own fields, prefer
+    /// MdixDatabase:query(path)/:query_many(pattern) instead — this is
+    /// for querying data that didn't come from a Database at all.
+    ///
+    ///   local q = mdix.query({1, 5, 3, 2, 4})
+    ///   local total = q:sum_int()
+    m.set("query", lua.create_function(|_, table: LuaTable| {
+        LuaMdixQuery::from_table(&table)
+    })?)?;
+
     // ── Source text utilities ──────────────────────────────────────────────
 
     /// Minify a raw .mdix source string.
@@ -292,12 +311,29 @@ fn mdix(lua: &Lua) -> LuaResult<LuaTable> {
 
     /// Compact a raw .mdix source string.
     /// Removes trailing whitespace and collapses multiple blank lines.
-    /// Less aggressive than minify — structure is preserved.
+    /// Less aggressive than minify — structure is preserved. Despite the
+    /// name, this does not do full AST-based pretty-printing with mode
+    /// control (Default/Pretty/Compact/Minified) the way the FFI-based
+    /// bindings' format_source does — the underlying mdix_format_source
+    /// itself only actually differentiates Minified from everything
+    /// else right now (checked directly in mdix-ffi/src/lib.rs; Default/
+    /// Pretty/Compact all currently fall through to the same
+    /// DixCompactor::compact this calls), so this is exactly equivalent,
+    /// just without the mode parameter those bindings expose for a
+    /// distinction that isn't implemented yet either way.
     ///
     ///   local neat = mdix.format_source(source)
     m.set("format_source", lua.create_function(|_, source: String| {
         Ok(DixCompactor::compact(&source))
     })?)?;
 
+    /// Strip comments from a raw .mdix source string, leaving
+    /// structure and whitespace otherwise untouched.
+    ///
+    ///   local uncommented = mdix.strip_comments(source)
+    m.set("strip_comments", lua.create_function(|_, source: String| {
+        Ok(DixCompactor::remove_comments(&source))
+    })?)?;
+
     Ok(m)
-                    }
+}

@@ -61,6 +61,11 @@ local test_modules = {
     "test_basic",
     "test_builder",
     "test_types",
+    "test_database",
+    "test_query",
+    "test_merge",
+    "test_schema",
+    "test_watch",
 }
 
 for _, name in ipairs(test_modules) do

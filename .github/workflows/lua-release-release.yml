@@ -1,0 +1,445 @@
+name: MidManStudio.Mdix — Lua Package Release
+
+# Lua has no central package registry this project depends on for
+# distribution (LuaRocks exists but doesn't handle a prebuilt mlua
+# "module" cdylib well as a build target) — and even if it did, mdix-lua
+# needs a prebuilt native lib per platform either way, same situation as
+# mdix-go and mdix-odin (see go-release.yml / odin-release.yml, which
+# this mirrors). "Publish" means: build every platform's lib, verify for
+# real (same lua-ci.yml approach: system lua5.4 loading the built
+# module), assemble a ready-to-use archive with each lib already renamed
+# to what require("mdix") expects, tag, attach to a GitHub Release.
+#
+# macOS and Windows are exercised for real here, not just Linux — unlike
+# lua-ci.yml, which only ever ran on ubuntu-latest. mdix-lua/build.rs
+# supplies the -undefined dynamic_lookup flag macOS's module builds need
+# (mlua-sys doesn't add it automatically — confirmed by reading its
+# build script directly); this workflow's darwin jobs are what actually
+# proves that fix works, not just that it compiles in isolation.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 0.1.0 (no leading v)"
+        required: true
+      dry_run:
+        description: "Build and verify only — skip creating the GitHub Release"
+        required: false
+        type: choice
+        default: "true"
+        options: ["true", "false"]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  # ── 1. Build the module — one job per platform ────────────────────────────
+  build-linux-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: linux-amd64-mdix-lua-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: linux-amd64-mdix-lua-
+      - name: Build mdix-lua — linux-amd64
+        run: cargo build -p mdix-lua --release --target x86_64-unknown-linux-gnu
+      - name: Collect (renamed to what require("mdix") expects)
+        run: |
+          mkdir -p out/linux-amd64
+          cp target/x86_64-unknown-linux-gnu/release/libmdix.so out/linux-amd64/mdix.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lua-lib-linux-amd64
+          path: out/
+          retention-days: 1
+
+  build-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: aarch64-unknown-linux-gnu
+      - name: Install cross-linker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: linux-arm64-mdix-lua-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: linux-arm64-mdix-lua-
+      - name: Build mdix-lua — linux-arm64
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build -p mdix-lua --release --target aarch64-unknown-linux-gnu
+      - name: Collect
+        run: |
+          mkdir -p out/linux-arm64
+          cp target/aarch64-unknown-linux-gnu/release/libmdix.so out/linux-arm64/mdix.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lua-lib-linux-arm64
+          path: out/
+          retention-days: 1
+
+  build-darwin-amd64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: x86_64-apple-darwin
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: darwin-amd64-mdix-lua-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: darwin-amd64-mdix-lua-
+      - name: Build mdix-lua — darwin-amd64
+        run: cargo build -p mdix-lua --release --target x86_64-apple-darwin
+      - name: Collect
+        run: |
+          mkdir -p out/darwin-amd64
+          cp target/x86_64-apple-darwin/release/libmdix.dylib out/darwin-amd64/mdix.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lua-lib-darwin-amd64
+          path: out/
+          retention-days: 1
+
+  build-darwin-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: darwin-arm64-mdix-lua-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: darwin-arm64-mdix-lua-
+      - name: Build mdix-lua — darwin-arm64
+        run: cargo build -p mdix-lua --release --target aarch64-apple-darwin
+      - name: Collect
+        run: |
+          mkdir -p out/darwin-arm64
+          cp target/aarch64-apple-darwin/release/libmdix.dylib out/darwin-arm64/mdix.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lua-lib-darwin-arm64
+          path: out/
+          retention-days: 1
+
+  build-windows-amd64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: windows-amd64-mdix-lua-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: windows-amd64-mdix-lua-
+      - name: Build mdix-lua — windows-amd64
+        run: cargo build -p mdix-lua --release --target x86_64-pc-windows-msvc
+      - name: Collect
+        shell: bash
+        run: |
+          mkdir -p out/windows-amd64
+          cp target/x86_64-pc-windows-msvc/release/mdix.dll out/windows-amd64/mdix.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lua-lib-windows-amd64
+          path: out/
+          retention-days: 1
+
+  # ── 2. Verify — real system lua5.4 loading the real built module,
+  #      same approach lua-ci.yml already validates on every push ─────────
+  verify-linux:
+    runs-on: ubuntu-latest
+    needs: [build-linux-amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: lua-lib-linux-amd64
+          path: native/
+      - name: Install lua5.4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+      - name: Load and run the real test suite against the real build
+        run: |
+          cp native/linux-amd64/mdix.so mdix-lua/tests/mdix.so
+          cd mdix-lua/tests
+          lua5.4 run_tests.lua
+
+  # This is the job that actually answers "does the macOS build.rs fix
+  # work" — not just "does it compile", but "does require('mdix') then
+  # actually load and run against system Lua on a real macOS runner".
+  verify-darwin:
+    runs-on: macos-latest
+    needs: [build-darwin-amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: lua-lib-darwin-amd64
+          path: native/
+      - name: Install lua5.4 (Homebrew — macos-latest runners ship it or brew installs fast)
+        run: brew install lua@5.4 || brew install lua
+      - name: Load and run the real test suite against the real build
+        run: |
+          cp native/darwin-amd64/mdix.so mdix-lua/tests/mdix.so
+          cd mdix-lua/tests
+          LUA_BIN=$(command -v lua5.4 || command -v lua)
+          "$LUA_BIN" run_tests.lua
+
+  # ── 3. Assemble the release archive ───────────────────────────────────────
+  assemble:
+    runs-on: ubuntu-latest
+    needs: [verify-linux, verify-darwin, build-linux-arm64, build-windows-amd64]
+    outputs:
+      archive_name: ${{ steps.pack.outputs.archive_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lua-lib-*
+          path: native/
+          merge-multiple: false
+
+      - name: Assemble package directory
+        run: |
+          PKG="mdix-lua-v${{ inputs.version }}"
+          mkdir -p "$PKG/lib"
+          cp mdix-lua/README.md "$PKG/"
+          cp -r mdix-lua/tests "$PKG/"
+
+          for plat in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            mkdir -p "$PKG/lib/$plat"
+            cp native/lua-lib-$plat/$plat/mdix.so "$PKG/lib/$plat/mdix.so"
+          done
+          mkdir -p "$PKG/lib/windows-amd64"
+          cp native/lua-lib-windows-amd64/windows-amd64/mdix.dll "$PKG/lib/windows-amd64/mdix.dll"
+
+          find "$PKG" -maxdepth 3 -type d | sort
+          echo "PKG_DIR=$PKG" >> $GITHUB_ENV
+
+      - name: Verify every platform lib is present
+        run: |
+          PKG="mdix-lua-v${{ inputs.version }}"
+          MISSING=0
+          for f in \
+            "lib/linux-amd64/mdix.so" \
+            "lib/linux-arm64/mdix.so" \
+            "lib/darwin-amd64/mdix.so" \
+            "lib/darwin-arm64/mdix.so" \
+            "lib/windows-amd64/mdix.dll"
+          do
+            if [ ! -f "$PKG/$f" ]; then
+              echo "MISSING: $f"; MISSING=$((MISSING+1))
+            else
+              echo "OK: $f"
+            fi
+          done
+          [ $MISSING -eq 0 ] || { echo "ERROR: $MISSING platform lib(s) missing"; exit 1; }
+
+      - name: Write build metadata
+        run: |
+          PKG="mdix-lua-v${{ inputs.version }}"
+          cat > "$PKG/build-info.json" << EOF
+          {
+            "version": "${{ inputs.version }}",
+            "build":   "${{ github.run_number }}",
+            "commit":  "${GITHUB_SHA:0:8}",
+            "date":    "$(date -u --iso-8601=seconds)"
+          }
+          EOF
+
+      - name: Create archive
+        id: pack
+        run: |
+          PKG="mdix-lua-v${{ inputs.version }}"
+          ARCHIVE="mdix-lua-v${{ inputs.version }}.tar.gz"
+          tar czf "$ARCHIVE" "$PKG"
+          ls -lh "$ARCHIVE"
+          echo "archive_name=$ARCHIVE" >> $GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mdix-lua-release-${{ inputs.version }}
+          path: mdix-lua-v${{ inputs.version }}.tar.gz
+          retention-days: 90
+
+  # ── 4. Tag + GitHub Release (skipped entirely when dry_run: true) ────────
+  release:
+    runs-on: ubuntu-latest
+    needs: assemble
+    if: inputs.dry_run == 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mdix-lua-release-${{ inputs.version }}
+          path: dist/
+
+      - name: Tag
+        run: |
+          TAG="mdix-lua/v${{ inputs.version }}"
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+          git tag -a "$TAG" -m "mdix-lua v${{ inputs.version }}"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="mdix-lua/v${{ inputs.version }}"
+          gh release create "$TAG" \
+            "dist/${{ needs.assemble.outputs.archive_name }}" \
+            --title "mdix-lua v${{ inputs.version }}" \
+            --notes "Lua 5.4 bindings for DixScript, v${{ inputs.version }}. Download the archive below — each platform's lib under lib/<platform>/ is already named mdix.so/mdix.dll, ready to drop on package.cpath. Built with mlua's module feature: requires a host process that already embeds its own Lua interpreter. On Windows specifically, that host must provide an actual lua54.dll — see mdix-lua/README.md's cross-platform notes inside the archive." \
+            --repo "${{ github.repository }}"
+
+  # ── 5. Build-info page → gh-pages (always, even in dry_run) ──────────────
+  deploy-page:
+    runs-on: ubuntu-latest
+    needs: [assemble, release]
+    if: always() && needs.assemble.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          DRY="${{ inputs.dry_run }}"
+          if [ "$DRY" = "true" ]; then
+            SUBTITLE="dry run — verify only, nothing published"
+          else
+            SUBTITLE="v${{ inputs.version }}"
+          fi
+
+          WORK=$(mktemp -d)
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/lua/release"
+          cat > "$WORK/lua/release/index.html" << HTMLEOF
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <title>DixScript-Rust — Lua Package Release</title>
+            <style>
+              body{font-family:'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#e6edf3;
+                   display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+              .card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:36px 40px;max-width:520px;width:100%}
+              h1{font-size:1.5rem;color:#a855f7;margin-bottom:4px}
+              .sub{color:#8b949e;font-size:0.82rem;margin-bottom:20px}
+              .meta{font-size:0.78rem;color:#484f58;display:flex;flex-direction:column;gap:6px}
+              a.back{display:inline-flex;color:#8b949e;text-decoration:none;margin-bottom:18px;font-size:0.78rem}
+              a.dl{display:inline-block;margin-top:20px;padding:9px 20px;border-radius:7px;border:1px solid #a855f7;color:#a855f7;text-decoration:none;font-size:0.84rem}
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <a class="back" href="../">← Lua Tests</a>
+              <h1>Lua Package Release</h1>
+              <p class="sub">${SUBTITLE}</p>
+              <div class="meta">
+                <span>Build #${{ github.run_number }}</span>
+                <span>Commit ${GITHUB_SHA:0:8}</span>
+                <span>Date $(date -u)</span>
+              </div>
+              <a class="dl" href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">
+                View this run →
+              </a>
+            </div>
+          </body>
+          </html>
+          HTMLEOF
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "Lua release page — Build #${{ github.run_number }} [skip ci]"
+          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh-pages
+
+  # ── 6. Summary ─────────────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [verify-linux, verify-darwin, assemble, release, deploy-page]
+    if: always()
+    steps:
+      - run: |
+          echo "============================================="
+          echo "  MidManStudio.Mdix — Lua Package Release"
+          echo "============================================="
+          echo "Version:        ${{ inputs.version }}"
+          echo "Dry run:        ${{ inputs.dry_run }}"
+          echo "Verify (linux): ${{ needs.verify-linux.result }}"
+          echo "Verify (macOS): ${{ needs.verify-darwin.result }}"
+          echo "Assemble:       ${{ needs.assemble.result }}"
+          echo "Release:        ${{ needs.release.result || 'skipped (dry_run)' }}"
+          echo "Page:           ${{ needs.deploy-page.result }}"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo ""
+            echo "Dry run only — re-run with dry_run: false to tag mdix-lua/v${{ inputs.version }} and publish the GitHub Release."
+          fi

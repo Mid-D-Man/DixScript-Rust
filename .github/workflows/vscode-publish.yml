@@ -1,0 +1,144 @@
+name: DixScript — VS Code Extension Publish
+
+# Deliberately its OWN workflow, not a job bolted onto vscode-build.yml:
+# that file's push trigger is scoped with `paths:`, and tag pushes don't
+# reliably interact with path filtering (a tag often points at a commit
+# that was already pushed under a branch, so there may be no "new" file
+# changes for GitHub to filter on). Publishing needs to fire on the tag
+# itself, every time, so this workflow's trigger has no `paths:` and no
+# `branches:` filter at all.
+#
+# Auth: this uses a classic Azure DevOps Personal Access Token (the
+# VSCE_PAT secret below) — the quick path to get publishing working today.
+# Microsoft is retiring Azure DevOps' global PATs on 2026-12-01, after
+# which this will need to move to Microsoft Entra ID / OIDC auth instead
+# (`vsce publish --azure-credential`, which @vscode/vsce 3.9.2 already
+# supports) — that's a separate, more involved setup (Entra app
+# registration + federated credential), tracked separately.
+#
+# One-time setup before this can run:
+#   1. Create/confirm the "midmanstudio" publisher at
+#      https://marketplace.visualstudio.com/manage
+#   2. Generate an Azure DevOps PAT scoped to Marketplace (Manage), any
+#      org, and add it to this repo as a secret named VSCE_PAT
+#      (Settings → Secrets and variables → Actions → New repository secret)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+
+  # ── 1. Build the mdix-lsp binary + package the .vsix, per platform ────────
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            vsce_target: linux-x64
+            bin_name: mdix-lsp
+          - os: macos-latest      # GitHub's current macos-latest is arm64
+            vsce_target: darwin-arm64
+            bin_name: mdix-lsp
+          - os: macos-15-intel    # macOS Intel hosted runner label
+            vsce_target: darwin-x64
+            bin_name: mdix-lsp
+          - os: windows-latest
+            vsce_target: win32-x64
+            bin_name: mdix-lsp.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ matrix.os }}-cargo-mdix-lsp-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ matrix.os }}-cargo-mdix-lsp-
+
+      - name: Build mdix-lsp (release)
+        run: cargo build -p mdix-lsp --release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install extension dependencies
+        working-directory: mdix-vscode
+        run: npm install
+
+      - name: Compile + bundle binary (vscode:prepublish)
+        working-directory: mdix-vscode
+        run: npm run vscode:prepublish
+
+      # Fails fast with a clear message instead of vsce's more cryptic
+      # rejection if you tag before bumping package.json's version (or
+      # vice versa).
+      - name: Verify tag matches package.json version
+        if: github.event_name == 'push'
+        working-directory: mdix-vscode
+        shell: bash
+        run: |
+          PKG_VERSION="v$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [ "$PKG_VERSION" != "$TAG" ]; then
+            echo "Tag $TAG doesn't match package.json version ($PKG_VERSION)."
+            echo "Bump package.json's version and re-tag before publishing."
+            exit 1
+          fi
+
+      - name: Package .vsix
+        working-directory: mdix-vscode
+        run: npx --yes @vscode/vsce package --target ${{ matrix.vsce_target }} --no-dependencies
+
+      - name: Upload .vsix
+        uses: actions/upload-artifact@v4
+        with:
+          name: dixscript-vscode-${{ matrix.vsce_target }}
+          path: mdix-vscode/*.vsix
+          retention-days: 30
+
+  # ── 2. Publish all four target-specific .vsix files as one release ────────
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform .vsix files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dixscript-vscode-*
+          path: vsix
+          merge-multiple: true
+
+      - name: List packages about to publish
+        run: ls -la vsix/
+
+      - name: Publish to VS Code Marketplace
+        working-directory: vsix
+        run: npx --yes @vscode/vsce publish --packagePath *.vsix -p "${{ secrets.VSCE_PAT }}"
+
+      # Optional, wider reach — publishes the same builds to Open VSX (used
+      # by VSCodium, Gitpod, and other VS Code forks). Needs an OVSX_PAT
+      # secret from an open-vsx.org namespace access token. Uncomment once
+      # that secret exists, or delete this step if you don't want it.
+      # - name: Publish to Open VSX
+      #   working-directory: vsix
+      #   run: npx --yes ovsx publish --packagePath *.vsix -p "${{ secrets.OVSX_PAT }}"

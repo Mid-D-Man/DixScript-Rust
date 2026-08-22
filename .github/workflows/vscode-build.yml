@@ -7,7 +7,7 @@ on:
       - "mdix-vscode/**"
       - "mdix-lsp/**"
       - "dixscript/**"
-      - ".github/workflows/vscode-ext-build.yml"
+      - ".github/workflows/vscode-build.yml"
   pull_request:
     branches: [master, main]
     paths:

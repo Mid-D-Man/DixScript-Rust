@@ -81,8 +81,13 @@ jobs:
           key: ${{ matrix.os }}-cargo-mdix-lsp-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ matrix.os }}-cargo-mdix-lsp-
 
-      - name: Build mdix-lsp (release)
-        run: cargo build -p mdix-lsp --release
+      # copy-binary.js (run below via vscode:prepublish) copies BOTH mdix-lsp
+      # and mdix-cli's "mdix" binary into bin/{platform}/ -- mdix-lsp's own
+      # CLI resolution falls back to looking for "mdix" next to itself, so
+      # the extension needs both. Building only mdix-lsp here is what broke
+      # run #108 ("Binary not found: .../target/debug/mdix").
+      - name: Build mdix-lsp + mdix-cli (release)
+        run: cargo build -p mdix-lsp -p mdix-cli --release
 
       - uses: actions/setup-node@v4
         with:

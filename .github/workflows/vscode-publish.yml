@@ -74,8 +74,10 @@ jobs:
           key: ${{ matrix.os }}-cargo-mdix-lsp-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ matrix.os }}-cargo-mdix-lsp-
 
-      - name: Build mdix-lsp (release)
-        run: cargo build -p mdix-lsp --release
+      # See vscode-build.yml for why both crates are needed: copy-binary.js
+      # bundles mdix-cli's "mdix" binary alongside mdix-lsp.
+      - name: Build mdix-lsp + mdix-cli (release)
+        run: cargo build -p mdix-lsp -p mdix-cli --release
 
       - uses: actions/setup-node@v4
         with:

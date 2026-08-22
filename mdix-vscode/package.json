@@ -4,6 +4,7 @@
   "description": "Full IDE support for DixScript — syntax highlighting, completions, hover, goto-definition, diagnostics, inlay hints, formatting, theme color sync, bulk settings apply, and regex testing.",
   "version": "1.0.0",
   "publisher": "midmanstudio",
+  "icon": "icons/mdix-icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -68,6 +69,10 @@
       {
         "command": "dixscript.testRegex",
         "title": "DixScript: Test Regex"
+      },
+      {
+        "command": "dixscript.openSample",
+        "title": "DixScript: Open Sample..."
       }
     ],
     "configuration": {

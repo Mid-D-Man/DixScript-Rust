@@ -25,6 +25,7 @@ import { registerBlobPreview }    from "./blobPreview";
 import { registerThemeColors }    from "./themeColors";
 import { registerSettingsSync }   from "./settingsSync";
 import { registerRegexTester }    from "./regexTestPanel";
+import { registerSampleBrowser }  from "./sampleBrowser";
 
 let client: LanguageClient | undefined;
 
@@ -33,6 +34,7 @@ let client: LanguageClient | undefined;
 export function activate(context: ExtensionContext): void {
   registerDateTimeEditor(context);
   registerBlobPreview(context);
+  registerSampleBrowser(context);
 
   // Getter closure, not the value itself, for all three of these:
   // dixscript.restartServer reassigns `client` to a new instance later

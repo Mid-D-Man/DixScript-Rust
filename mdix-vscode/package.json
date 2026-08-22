@@ -10,6 +10,10 @@
     "type": "git",
     "url": "https://github.com/Mid-D-Man/DixScript-Rust"
   },
+  "homepage": "https://dixscript-docs.pages.dev",
+  "bugs": {
+    "url": "https://github.com/Mid-D-Man/DixScript-Rust/issues"
+  },
   "engines": {
     "vscode": "^1.82.0"
   },
@@ -118,4 +122,4 @@
     "@vscode/vsce": "^3.9.2",
     "typescript": "^5.3.0"
   }
-}
+    }

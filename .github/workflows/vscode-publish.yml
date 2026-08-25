@@ -8,20 +8,35 @@ name: DixScript — VS Code Extension Publish
 # itself, every time, so this workflow's trigger has no `paths:` and no
 # `branches:` filter at all.
 #
-# Auth: this uses a classic Azure DevOps Personal Access Token (the
-# VSCE_PAT secret below) — the quick path to get publishing working today.
-# Microsoft is retiring Azure DevOps' global PATs on 2026-12-01, after
-# which this will need to move to Microsoft Entra ID / OIDC auth instead
-# (`vsce publish --azure-credential`, which @vscode/vsce 3.9.2 already
-# supports) — that's a separate, more involved setup (Entra app
-# registration + federated credential), tracked separately.
+# Auth: two independent publish targets, each with its own one-time setup.
 #
-# One-time setup before this can run:
+# Open VSX (publish-openvsx job) — no Azure, no card, ever. Just:
+#   1. Log into https://open-vsx.org with GitHub (free)
+#   2. Settings → Access Tokens → Generate New Token
+#   3. Accept the Publisher Agreement if prompted (terms only, no payment)
+#   4. npx ovsx create-namespace midmanstudio -p <token>   (one-time)
+#   5. Add the token to this repo as secret OVSX_PAT
+# This is what VSCodium, Gitpod, and other VS Code-compatible editors pull
+# extensions from — a real, working, installable release without touching
+# Azure at all.
+#
+# VS Code Marketplace (publish-marketplace job) — uses a classic Azure
+# DevOps Personal Access Token (VSCE_PAT secret). As of early 2026, Azure
+# DevOps requires linking an active Azure subscription to create a NEW
+# organization, and that subscription setup requires a card for identity
+# verification (Microsoft calls it "spending protection" — not meant to
+# auto-charge you unless you explicitly opt into paid usage, but the card
+# itself is non-negotiable at signup). No known way around this for an
+# individual without a card right now. Set this job up whenever that
+# stops being a blocker — it doesn't gate the Open VSX job above at all.
 #   1. Create/confirm the "midmanstudio" publisher at
 #      https://marketplace.visualstudio.com/manage
 #   2. Generate an Azure DevOps PAT scoped to Marketplace (Manage), any
 #      org, and add it to this repo as a secret named VSCE_PAT
-#      (Settings → Secrets and variables → Actions → New repository secret)
+# Also: Microsoft is retiring Azure DevOps' global PATs on 2026-12-01,
+# after which this'll need to move to Entra ID / OIDC auth instead
+# (`vsce publish --azure-credential`, which @vscode/vsce 3.9.2 already
+# supports) — separate, more involved setup, tracked separately.
 
 on:
   push:
@@ -118,8 +133,36 @@ jobs:
           path: mdix-vscode/*.vsix
           retention-days: 30
 
-  # ── 2. Publish all four target-specific .vsix files as one release ────────
-  publish:
+  # ── 2a. Open VSX — no Azure, no card, just a free Eclipse/GitHub login ────
+  # This is the one that'll actually work today. Set up once:
+  #   1. Log into https://open-vsx.org with your GitHub account (free)
+  #   2. Settings → Access Tokens → Generate New Token
+  #   3. Accept the Publisher Agreement if prompted (free, just terms)
+  #   4. One-time, from anywhere with node: npx ovsx create-namespace midmanstudio -p <token>
+  #   5. Add the token to this repo as secret OVSX_PAT
+  publish-openvsx:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform .vsix files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dixscript-vscode-*
+          path: vsix
+          merge-multiple: true
+
+      - name: List packages about to publish
+        run: ls -la vsix/
+
+      - name: Publish to Open VSX
+        working-directory: vsix
+        run: npx --yes ovsx publish --packagePath *.vsix -p "${{ secrets.OVSX_PAT }}"
+
+  # ── 2b. VS Code Marketplace — needs Azure DevOps, which now needs a card ──
+  # linked for identity verification before it'll let you create a new org.
+  # Separate job on purpose: if OVSX_PAT is set but VSCE_PAT isn't yet, the
+  # Open VSX job above still succeeds independently of this one failing.
+  publish-marketplace:
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -136,11 +179,3 @@ jobs:
       - name: Publish to VS Code Marketplace
         working-directory: vsix
         run: npx --yes @vscode/vsce publish --packagePath *.vsix -p "${{ secrets.VSCE_PAT }}"
-
-      # Optional, wider reach — publishes the same builds to Open VSX (used
-      # by VSCodium, Gitpod, and other VS Code forks). Needs an OVSX_PAT
-      # secret from an open-vsx.org namespace access token. Uncomment once
-      # that secret exists, or delete this step if you don't want it.
-      # - name: Publish to Open VSX
-      #   working-directory: vsix
-      #   run: npx --yes ovsx publish --packagePath *.vsix -p "${{ secrets.OVSX_PAT }}"

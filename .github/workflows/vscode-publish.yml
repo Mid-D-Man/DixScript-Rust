@@ -89,9 +89,12 @@ jobs:
           key: ${{ matrix.os }}-cargo-mdix-lsp-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ matrix.os }}-cargo-mdix-lsp-
 
-      # See vscode-build.yml for why both crates are needed: copy-binary.js
-      # bundles mdix-cli's "mdix" binary alongside mdix-lsp.
+      # Without this, the darwin binaries link against whatever minimum
+      # macOS version the runner's Xcode defaults to -- almost certainly
+      # newer than Catalina. Harmless no-op on ubuntu/windows runners.
       - name: Build mdix-lsp + mdix-cli (release)
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
         run: cargo build -p mdix-lsp -p mdix-cli --release
 
       - uses: actions/setup-node@v4

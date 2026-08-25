@@ -16,11 +16,11 @@
 )
 
 @DATA(
-  database_name = "Periodic Table Database - First 5 Elements",
-  database_version = "1.0.0",
-  last_updated = 2025-01-09T00:00:00Z,
+  database_name = "Periodic Table Database - First 20 Elements (Historic Alchemical Set)",
+  database_version = "1.1.0",
+  last_updated = 2026-08-25T00:00:00Z,
   format_type = "DixScript Physics Simulation Ready",
-  total_elements = 5,
+  total_elements = 20,
   properties_per_element = 126,
   simulation_ready = true,
   speed_of_light_m_s = 299792458.0,
@@ -410,4 +410,1074 @@
   
   elements.boron.physics_calculated:
     reactivity_index = physics.calculateReactivityIndex(800.6, 26.7, 2.04)
+
+  // ============================================================
+  // ELEMENT: Carbon (C, Z=6)
+  // Reference form: graphite (matches "Charcoal" -- the alchemical name
+  // this element gets in-game -- better than diamond would). Diamond
+  // exists as a real allotrope but isn't what a medieval charcoal-maker
+  // is producing.
+  // ============================================================
+
+  elements.carbon.identity:
+    core = builders.createIdentity("Carbon", "C", 6, 12.011, enums.ElementGroup.NONMETAL, 2, enums.Block.P_BLOCK, enums.ElementGroup.NONMETAL, enums.Phase.SOLID),
+    cas_registry = "7440-44-0"
+
+  elements.carbon.nuclear:
+    properties = builders.createNuclearCore(6, 6, 0.0, 0.0, 0.0)
+
+  elements.carbon.isotopes::
+    builders.createIsotope(12, 98.93, 0.0, enums.DecayMode.STABLE, 0.0, 0.0035),
+    builders.createIsotope(13, 1.07, 0.0, enums.DecayMode.STABLE, 0.0, 0.00137)
+
+  elements.carbon.electronic:
+    configuration = builders.createElectronicConfig("[He] 2s2 2p2", 4, 121.78, 11.260, 4.6),
+    quantum = builders.createQuantumNumbers(2, 1, -1, 0.5),
+    electronegativity = builders.createElectronegativity(2.55, 2.54, 2.5, 2.75, 2.54)
+
+  elements.carbon.ionization_energies_kj_mol:: 1086.5, 2352.6, 4620.5, 6222.7
+
+  elements.carbon.oxidation_states:: -4, 2, 4
+
+  elements.carbon.geometry:
+    radii = builders.createRadii(70.0, 76.0, 170.0),
+    molar_volume_cm3 = 5.29
+
+  elements.carbon.ionic_radii::
+    builders.createIonicRadius(4, 16.0, 6)
+
+  elements.carbon.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HEXAGONAL, 2.464, 2.464, 6.711, 90.0, 90.0, 120.0),
+    space_group = "P63/mmc",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.carbon.thermodynamics:
+    phases = builders.createPhasePoints(3823.0, 5100.0, 4765.0, 10800000.0, 0.0, 0.0),
+    thermal = builders.createThermalProps(0.0, 715.0, 709.0, 129.0, 8.0e-6, 2230.0)
+
+  elements.carbon.mechanical:
+    bulk = builders.createMechanicalProps(2.267, 0.0, 0.0, 33.8, 0.0, 1.5, 2480.0)
+
+  elements.carbon.electrical:
+    props = builders.createElectricalProps(3.0e5, 1.375e-5, 0.0),
+    type = "semimetal (in-plane); anisotropic"
+
+  elements.carbon.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -1.6e-8, 0.0)
+
+  elements.carbon.optical:
+    refractive_index = 2.417,
+    color = "black (graphite) / colorless (diamond)"
+
+  elements.carbon.interaction:
+    lennard_jones = builders.createLennardJones(52.838, 3.4309),
+    polarizability_angstrom3 = 1.76,
+    polarizability_tensor = builders.createPolarizabilityTensor(1.76, 0.0, 0.0, 0.0, 1.76, 0.0, 0.0, 0.0, 1.76),
+    surface = builders.createSurfaceProps(4.5, 0.0, 4.6)
+
+  elements.carbon.abundance:
+    distribution = builders.createAbundance(200.0, 3000.0, 28.0, 230000.0)
+
+  elements.carbon.discovery:
+    info = builders.createDiscovery(-3750, "Known to ancient civilizations", "Unknown (prehistoric)", "Latin carbo (coal, charcoal)")
+
+  elements.carbon.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(1086.5, 121.78, 2.55)
+
+
+  // ============================================================
+  // ELEMENT: Nitrogen (N, Z=7)
+  // ============================================================
+
+  elements.nitrogen.identity:
+    core = builders.createIdentity("Nitrogen", "N", 7, 14.007, enums.ElementGroup.NONMETAL, 2, enums.Block.P_BLOCK, enums.ElementGroup.NONMETAL, enums.Phase.GAS),
+    cas_registry = "7727-37-9"
+
+  elements.nitrogen.nuclear:
+    properties = builders.createNuclearCore(7, 7, 1.0, 0.40376, 0.02044)
+
+  elements.nitrogen.isotopes::
+    builders.createIsotope(14, 99.636, 0.0, enums.DecayMode.STABLE, 0.0, 1.91),
+    builders.createIsotope(15, 0.364, 0.0, enums.DecayMode.STABLE, 0.0, 0.000024)
+
+  elements.nitrogen.electronic:
+    configuration = builders.createElectronicConfig("[He] 2s2 2p3", 5, 0.0, 14.534, 4.7),
+    quantum = builders.createQuantumNumbers(2, 1, 0, 0.5),
+    electronegativity = builders.createElectronegativity(3.04, 3.07, 3.07, 3.19, 3.07)
+
+  elements.nitrogen.ionization_energies_kj_mol:: 1402.3, 2856.0, 4578.1
+
+  elements.nitrogen.oxidation_states:: -3, 3, 5
+
+  elements.nitrogen.geometry:
+    radii = builders.createRadii(65.0, 71.0, 155.0),
+    molar_volume_cm3 = 13860.0
+
+  elements.nitrogen.ionic_radii::
+    builders.createIonicRadius(-3, 146.0, 4)
+
+  elements.nitrogen.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.CUBIC, 5.66, 5.66, 5.66, 90.0, 90.0, 90.0),
+    space_group = "Pa-3",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.nitrogen.thermodynamics:
+    phases = builders.createPhasePoints(63.15, 77.36, 63.15, 12530.0, 126.2, 3390000.0),
+    thermal = builders.createThermalProps(0.720, 5.577, 1040.0, 0.02583, 0.0, 68.0)
+
+  elements.nitrogen.mechanical:
+    bulk = builders.createMechanicalProps(0.001251, 0.0, 0.0, 0.0, 0.0, 0.0, 353.0)
+
+  elements.nitrogen.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0),
+    type = "insulator (gas)"
+
+  elements.nitrogen.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -5.4e-9, 0.0)
+
+  elements.nitrogen.optical:
+    refractive_index = 1.000297,
+    color = "colorless"
+
+  elements.nitrogen.interaction:
+    lennard_jones = builders.createLennardJones(34.722, 3.2607),
+    polarizability_angstrom3 = 1.10,
+    polarizability_tensor = builders.createPolarizabilityTensor(1.10, 0.0, 0.0, 0.0, 1.10, 0.0, 0.0, 0.0, 1.10),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0)
+
+  elements.nitrogen.abundance:
+    distribution = builders.createAbundance(19.0, 1000.0, 0.5, 26000.0)
+
+  elements.nitrogen.discovery:
+    info = builders.createDiscovery(1772, "Daniel Rutherford", "Scotland", "Greek nitron + genes (niter-forming)")
+
+  elements.nitrogen.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(1402.3, 0.0, 3.04)
+
+
+  // ============================================================
+  // ELEMENT: Oxygen (O, Z=8)
+  // ============================================================
+
+  elements.oxygen.identity:
+    core = builders.createIdentity("Oxygen", "O", 8, 15.999, enums.ElementGroup.NONMETAL, 2, enums.Block.P_BLOCK, enums.ElementGroup.NONMETAL, enums.Phase.GAS),
+    cas_registry = "7782-44-7"
+
+  elements.oxygen.nuclear:
+    properties = builders.createNuclearCore(8, 8, 0.0, 0.0, 0.0)
+
+  elements.oxygen.isotopes::
+    builders.createIsotope(16, 99.757, 0.0, enums.DecayMode.STABLE, 0.0, 0.00019),
+    builders.createIsotope(17, 0.038, 0.0, enums.DecayMode.STABLE, 0.0, 0.24),
+    builders.createIsotope(18, 0.205, 0.0, enums.DecayMode.STABLE, 0.0, 0.00016)
+
+  elements.oxygen.electronic:
+    configuration = builders.createElectronicConfig("[He] 2s2 2p4", 6, 141.0, 13.618, 4.9),
+    quantum = builders.createQuantumNumbers(2, 1, 1, 0.5),
+    electronegativity = builders.createElectronegativity(3.44, 3.61, 3.5, 3.65, 3.61)
+
+  elements.oxygen.ionization_energies_kj_mol:: 1313.9, 3388.3, 5300.5
+
+  elements.oxygen.oxidation_states:: -2, -1
+
+  elements.oxygen.geometry:
+    radii = builders.createRadii(60.0, 66.0, 152.0),
+    molar_volume_cm3 = 17360.0
+
+  elements.oxygen.ionic_radii::
+    builders.createIonicRadius(-2, 140.0, 6)
+
+  elements.oxygen.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.MONOCLINIC, 5.403, 3.429, 5.086, 90.0, 132.53, 90.0),
+    space_group = "C12/m1",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.oxygen.thermodynamics:
+    phases = builders.createPhasePoints(54.36, 90.19, 54.36, 152.0, 154.6, 5043000.0),
+    thermal = builders.createThermalProps(0.222, 6.82, 918.0, 0.02674, 0.0, 155.0)
+
+  elements.oxygen.mechanical:
+    bulk = builders.createMechanicalProps(0.001429, 0.0, 0.0, 0.0, 0.0, 0.0, 330.0)
+
+  elements.oxygen.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0),
+    type = "insulator (gas)"
+
+  elements.oxygen.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 1.9e-6, 0.0)
+
+  elements.oxygen.optical:
+    refractive_index = 1.000271,
+    color = "colorless (pale blue liquid/solid)"
+
+  elements.oxygen.interaction:
+    lennard_jones = builders.createLennardJones(30.193, 3.1181),
+    polarizability_angstrom3 = 0.802,
+    polarizability_tensor = builders.createPolarizabilityTensor(0.802, 0.0, 0.0, 0.0, 0.802, 0.0, 0.0, 0.0, 0.802),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0)
+
+  elements.oxygen.abundance:
+    distribution = builders.createAbundance(461000.0, 9860.0, 857000.0, 610000.0)
+
+  elements.oxygen.discovery:
+    info = builders.createDiscovery(1774, "Carl Wilhelm Scheele / Joseph Priestley", "Sweden / England", "Greek oxys + genes (acid-forming)")
+
+  elements.oxygen.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(1313.9, 141.0, 3.44)
+
+
+  // ============================================================
+  // ELEMENT: Phosphorus (P, Z=15)
+  // Reference form: white phosphorus (most reactive, most-cited form).
+  // ============================================================
+
+  elements.phosphorus.identity:
+    core = builders.createIdentity("Phosphorus", "P", 15, 30.974, enums.ElementGroup.NONMETAL, 3, enums.Block.P_BLOCK, enums.ElementGroup.NONMETAL, enums.Phase.SOLID),
+    cas_registry = "7723-14-0"
+
+  elements.phosphorus.nuclear:
+    properties = builders.createNuclearCore(15, 16, 0.5, 1.1316, 0.0)
+
+  elements.phosphorus.isotopes::
+    builders.createIsotope(31, 100.0, 0.0, enums.DecayMode.STABLE, 0.0, 0.172)
+
+  elements.phosphorus.electronic:
+    configuration = builders.createElectronicConfig("[Ne] 3s2 3p3", 5, 72.03, 10.487, 4.65),
+    quantum = builders.createQuantumNumbers(3, 1, 0, 0.5),
+    electronegativity = builders.createElectronegativity(2.19, 2.39, 2.06, 2.52, 2.25)
+
+  elements.phosphorus.ionization_energies_kj_mol:: 1011.8, 1907.0, 2914.1
+
+  elements.phosphorus.oxidation_states:: -3, 3, 5
+
+  elements.phosphorus.geometry:
+    radii = builders.createRadii(100.0, 107.0, 180.0),
+    molar_volume_cm3 = 17.02
+
+  elements.phosphorus.ionic_radii::
+    builders.createIonicRadius(-3, 212.0, 6)
+
+  elements.phosphorus.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.CUBIC, 18.51, 18.51, 18.51, 90.0, 90.0, 90.0),
+    space_group = "I-43m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.phosphorus.thermodynamics:
+    phases = builders.createPhasePoints(317.3, 553.7, 317.3, 0.0018, 994.0, 8200000.0),
+    thermal = builders.createThermalProps(0.66, 12.4, 769.7, 0.236, 1.25e-4, 193.0)
+
+  elements.phosphorus.mechanical:
+    bulk = builders.createMechanicalProps(1.823, 0.0, 0.0, 11.0, 0.0, 1.5, 0.0)
+
+  elements.phosphorus.electrical:
+    props = builders.createElectricalProps(1.0e-9, 1.0e9, 2.1),
+    type = "insulator"
+
+  elements.phosphorus.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -1.1e-8, 0.0)
+
+  elements.phosphorus.optical:
+    refractive_index = 2.144,
+    color = "waxy white / red / black (allotrope-dependent)"
+
+  elements.phosphorus.interaction:
+    lennard_jones = builders.createLennardJones(153.482, 3.6946),
+    polarizability_angstrom3 = 3.63,
+    polarizability_tensor = builders.createPolarizabilityTensor(3.63, 0.0, 0.0, 0.0, 3.63, 0.0, 0.0, 0.0, 3.63),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.65)
+
+  elements.phosphorus.abundance:
+    distribution = builders.createAbundance(1050.0, 7.0, 0.06, 13000.0)
+
+  elements.phosphorus.discovery:
+    info = builders.createDiscovery(1669, "Hennig Brand", "Germany", "Greek phosphoros (light-bearer)")
+
+  elements.phosphorus.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(1011.8, 72.03, 2.19)
+
+
+  // ============================================================
+  // ELEMENT: Sulfur (S, Z=16)
+  // Reference form: alpha-sulfur (orthorhombic, the stable room-temp form).
+  // ============================================================
+
+  elements.sulfur.identity:
+    core = builders.createIdentity("Sulfur", "S", 16, 32.06, enums.ElementGroup.NONMETAL, 3, enums.Block.P_BLOCK, enums.ElementGroup.NONMETAL, enums.Phase.SOLID),
+    cas_registry = "7704-34-9"
+
+  elements.sulfur.nuclear:
+    properties = builders.createNuclearCore(16, 16, 0.0, 0.0, 0.0)
+
+  elements.sulfur.isotopes::
+    builders.createIsotope(32, 94.99, 0.0, enums.DecayMode.STABLE, 0.0, 0.53),
+    builders.createIsotope(34, 4.25, 0.0, enums.DecayMode.STABLE, 0.0, 0.23),
+    builders.createIsotope(33, 0.75, 0.0, enums.DecayMode.STABLE, 0.0, 0.35)
+
+  elements.sulfur.electronic:
+    configuration = builders.createElectronicConfig("[Ne] 3s2 3p4", 6, 200.41, 10.360, 4.8),
+    quantum = builders.createQuantumNumbers(3, 1, 1, 0.5),
+    electronegativity = builders.createElectronegativity(2.58, 2.65, 2.44, 2.96, 2.59)
+
+  elements.sulfur.ionization_energies_kj_mol:: 999.6, 2252.0, 3357.0
+
+  elements.sulfur.oxidation_states:: -2, 4, 6
+
+  elements.sulfur.geometry:
+    radii = builders.createRadii(100.0, 105.0, 180.0),
+    molar_volume_cm3 = 15.53
+
+  elements.sulfur.ionic_radii::
+    builders.createIonicRadius(-2, 184.0, 6)
+
+  elements.sulfur.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.ORTHORHOMBIC, 10.47, 12.87, 24.49, 90.0, 90.0, 90.0),
+    space_group = "Fddd",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.sulfur.thermodynamics:
+    phases = builders.createPhasePoints(388.36, 717.8, 388.36, 20700.0, 1314.0, 20700000.0),
+    thermal = builders.createThermalProps(1.727, 45.0, 705.0, 0.205, 6.4e-5, 175.0)
+
+  elements.sulfur.mechanical:
+    bulk = builders.createMechanicalProps(2.067, 0.0, 0.0, 7.7, 0.0, 2.0, 1960.0)
+
+  elements.sulfur.electrical:
+    props = builders.createElectricalProps(5.0e-16, 2.0e15, 2.6),
+    type = "insulator"
+
+  elements.sulfur.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -1.2e-8, 0.0)
+
+  elements.sulfur.optical:
+    refractive_index = 1.957,
+    color = "yellow"
+
+  elements.sulfur.interaction:
+    lennard_jones = builders.createLennardJones(137.882, 3.5948),
+    polarizability_angstrom3 = 2.90,
+    polarizability_tensor = builders.createPolarizabilityTensor(2.90, 0.0, 0.0, 0.0, 2.90, 0.0, 0.0, 0.0, 2.90),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.8)
+
+  elements.sulfur.abundance:
+    distribution = builders.createAbundance(350.0, 500.0, 928.0, 2000.0)
+
+  elements.sulfur.discovery:
+    info = builders.createDiscovery(-2000, "Known to ancient civilizations", "Unknown (prehistoric)", "Latin sulphur / Sanskrit sulvere")
+
+  elements.sulfur.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(999.6, 200.41, 2.58)
+
+
+  // ============================================================
+  // ELEMENT: Iron (Fe, Z=26)
+  // ============================================================
+
+  elements.iron.identity:
+    core = builders.createIdentity("Iron", "Fe", 26, 55.845, enums.ElementGroup.TRANSITION_METAL, 4, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7439-89-6"
+
+  elements.iron.nuclear:
+    properties = builders.createNuclearCore(26, 30, 0.0, 0.0, 0.0)
+
+  elements.iron.isotopes::
+    builders.createIsotope(56, 91.75, 0.0, enums.DecayMode.STABLE, 0.0, 2.59),
+    builders.createIsotope(54, 5.85, 0.0, enums.DecayMode.STABLE, 0.0, 2.25),
+    builders.createIsotope(57, 2.12, 0.0, enums.DecayMode.STABLE, 0.0, 2.48)
+
+  elements.iron.electronic:
+    configuration = builders.createElectronicConfig("[Ar] 3d6 4s2", 2, 15.7, 7.902, 4.5),
+    quantum = builders.createQuantumNumbers(3, 2, -2, 0.5),
+    electronegativity = builders.createElectronegativity(1.83, 1.64, 1.64, 1.7, 1.75)
+
+  elements.iron.ionization_energies_kj_mol:: 762.5, 1561.9, 2957.0
+
+  elements.iron.oxidation_states:: 2, 3
+
+  elements.iron.geometry:
+    radii = builders.createRadii(126.0, 132.0, 194.0),
+    molar_volume_cm3 = 7.09
+
+  elements.iron.ionic_radii::
+    builders.createIonicRadius(2, 78.0, 6),
+    builders.createIonicRadius(3, 65.0, 6)
+
+  elements.iron.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.BCC, 2.87, 2.87, 2.87, 90.0, 90.0, 90.0),
+    space_group = "Im-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.iron.thermodynamics:
+    phases = builders.createPhasePoints(1811.0, 3134.0, 0.0, 0.0, 9340.0, 0.0),
+    thermal = builders.createThermalProps(13.81, 340.0, 449.0, 80.4, 1.18e-5, 470.0)
+
+  elements.iron.mechanical:
+    bulk = builders.createMechanicalProps(7.874, 211.0, 82.0, 170.0, 0.29, 4.0, 4910.0)
+
+  elements.iron.electrical:
+    props = builders.createElectricalProps(1.0e7, 9.71e-8, 0.0),
+    type = "conductor"
+
+  elements.iron.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.FERROMAGNETIC, 2.0e-4, 1043.0)
+
+  elements.iron.optical:
+    refractive_index = 0.0,
+    color = "lustrous silvery-grey"
+
+  elements.iron.interaction:
+    lennard_jones = builders.createLennardJones(6.542, 2.5943),
+    polarizability_angstrom3 = 8.4,
+    polarizability_tensor = builders.createPolarizabilityTensor(8.4, 0.0, 0.0, 0.0, 8.4, 0.0, 0.0, 0.0, 8.4),
+    surface = builders.createSurfaceProps(2.417, 0.0, 4.5)
+
+  elements.iron.abundance:
+    distribution = builders.createAbundance(56300.0, 900.0, 0.002, 60.0)
+
+  elements.iron.discovery:
+    info = builders.createDiscovery(-5000, "Known to ancient civilizations", "Unknown (prehistoric)", "Anglo-Saxon iren; alchemical symbol Mars")
+
+  elements.iron.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(762.5, 15.7, 1.83)
+
+
+  // ============================================================
+  // ELEMENT: Copper (Cu, Z=29)
+  // ============================================================
+
+  elements.copper.identity:
+    core = builders.createIdentity("Copper", "Cu", 29, 63.546, enums.ElementGroup.TRANSITION_METAL, 4, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-50-8"
+
+  elements.copper.nuclear:
+    properties = builders.createNuclearCore(29, 34, 1.5, 2.2206, -0.220)
+
+  elements.copper.isotopes::
+    builders.createIsotope(63, 69.15, 0.0, enums.DecayMode.STABLE, 0.0, 4.5),
+    builders.createIsotope(65, 30.85, 0.0, enums.DecayMode.STABLE, 0.0, 2.17)
+
+  elements.copper.electronic:
+    configuration = builders.createElectronicConfig("[Ar] 3d10 4s1", 1, 118.4, 7.726, 4.65),
+    quantum = builders.createQuantumNumbers(4, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(1.90, 1.75, 1.75, 1.72, 1.98)
+
+  elements.copper.ionization_energies_kj_mol:: 745.5, 1957.9, 3555.0
+
+  elements.copper.oxidation_states:: 1, 2
+
+  elements.copper.geometry:
+    radii = builders.createRadii(128.0, 132.0, 140.0),
+    molar_volume_cm3 = 7.11
+
+  elements.copper.ionic_radii::
+    builders.createIonicRadius(1, 77.0, 6),
+    builders.createIonicRadius(2, 73.0, 6)
+
+  elements.copper.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 3.615, 3.615, 3.615, 90.0, 90.0, 90.0),
+    space_group = "Fm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.copper.thermodynamics:
+    phases = builders.createPhasePoints(1357.77, 2835.0, 0.0, 0.0, 8280.0, 0.0),
+    thermal = builders.createThermalProps(13.26, 300.4, 385.0, 401.0, 1.65e-5, 343.0)
+
+  elements.copper.mechanical:
+    bulk = builders.createMechanicalProps(8.96, 130.0, 48.0, 140.0, 0.34, 3.0, 3810.0)
+
+  elements.copper.electrical:
+    props = builders.createElectricalProps(5.96e7, 1.68e-8, 0.0),
+    type = "conductor"
+
+  elements.copper.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -9.6e-6, 0.0)
+
+  elements.copper.optical:
+    refractive_index = 0.0,
+    color = "reddish-orange metallic"
+
+  elements.copper.interaction:
+    lennard_jones = builders.createLennardJones(2.516, 3.1137),
+    polarizability_angstrom3 = 6.1,
+    polarizability_tensor = builders.createPolarizabilityTensor(6.1, 0.0, 0.0, 0.0, 6.1, 0.0, 0.0, 0.0, 6.1),
+    surface = builders.createSurfaceProps(1.83, 0.0, 4.65)
+
+  elements.copper.abundance:
+    distribution = builders.createAbundance(60.0, 6.0, 0.00025, 1.4)
+
+  elements.copper.discovery:
+    info = builders.createDiscovery(-9000, "Known to ancient civilizations", "Unknown (prehistoric)", "Latin cuprum, from Cyprus; alchemical symbol Venus")
+
+  elements.copper.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(745.5, 118.4, 1.90)
+
+
+  // ============================================================
+  // ELEMENT: Zinc (Zn, Z=30)
+  // ============================================================
+
+  elements.zinc.identity:
+    core = builders.createIdentity("Zinc", "Zn", 30, 65.38, enums.ElementGroup.POST_TRANSITION_METAL, 4, enums.Block.D_BLOCK, enums.ElementGroup.POST_TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-66-6"
+
+  elements.zinc.nuclear:
+    properties = builders.createNuclearCore(30, 34, 0.0, 0.0, 0.0)
+
+  elements.zinc.isotopes::
+    builders.createIsotope(64, 49.2, 0.0, enums.DecayMode.STABLE, 0.0, 0.76),
+    builders.createIsotope(66, 27.7, 0.0, enums.DecayMode.STABLE, 0.0, 0.62),
+    builders.createIsotope(68, 18.5, 0.0, enums.DecayMode.STABLE, 0.0, 1.05)
+
+  elements.zinc.electronic:
+    configuration = builders.createElectronicConfig("[Ar] 3d10 4s2", 2, 0.0, 9.394, 4.3),
+    quantum = builders.createQuantumNumbers(4, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(1.65, 1.66, 1.66, 1.49, 1.65)
+
+  elements.zinc.ionization_energies_kj_mol:: 906.4, 1733.3, 3833.0
+
+  elements.zinc.oxidation_states:: 2
+
+  elements.zinc.geometry:
+    radii = builders.createRadii(134.0, 122.0, 139.0),
+    molar_volume_cm3 = 9.16
+
+  elements.zinc.ionic_radii::
+    builders.createIonicRadius(2, 74.0, 6)
+
+  elements.zinc.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 2.665, 2.665, 4.947, 90.0, 90.0, 120.0),
+    space_group = "P63/mmc",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.zinc.thermodynamics:
+    phases = builders.createPhasePoints(692.68, 1180.0, 0.0, 0.0, 1180.0, 0.0),
+    thermal = builders.createThermalProps(7.32, 115.0, 388.0, 116.0, 3.02e-5, 327.0)
+
+  elements.zinc.mechanical:
+    bulk = builders.createMechanicalProps(7.14, 108.0, 43.0, 70.0, 0.25, 2.5, 3700.0)
+
+  elements.zinc.electrical:
+    props = builders.createElectricalProps(1.69e7, 5.9e-8, 0.0),
+    type = "conductor"
+
+  elements.zinc.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -1.15e-8, 0.0)
+
+  elements.zinc.optical:
+    refractive_index = 0.0,
+    color = "silvery-grey"
+
+  elements.zinc.interaction:
+    lennard_jones = builders.createLennardJones(62.399, 2.4616),
+    polarizability_angstrom3 = 5.75,
+    polarizability_tensor = builders.createPolarizabilityTensor(5.75, 0.0, 0.0, 0.0, 5.75, 0.0, 0.0, 0.0, 5.75),
+    surface = builders.createSurfaceProps(0.99, 0.0, 4.3)
+
+  elements.zinc.abundance:
+    distribution = builders.createAbundance(70.0, 40.0, 0.0049, 33.0)
+
+  elements.zinc.discovery:
+    info = builders.createDiscovery(1746, "Andreas Sigismund Marggraf", "Germany", "German zink; alchemical name Spelter")
+
+  elements.zinc.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(906.4, 0.0, 1.65)
+
+
+  // ============================================================
+  // ELEMENT: Arsenic (As, Z=33)
+  // Reference form: grey arsenic (the stable, metallic-looking allotrope).
+  // ============================================================
+
+  elements.arsenic.identity:
+    core = builders.createIdentity("Arsenic", "As", 33, 74.922, enums.ElementGroup.METALLOID, 4, enums.Block.P_BLOCK, enums.ElementGroup.METALLOID, enums.Phase.SOLID),
+    cas_registry = "7440-38-2"
+
+  elements.arsenic.nuclear:
+    properties = builders.createNuclearCore(33, 42, 1.5, 1.4390, 0.314)
+
+  elements.arsenic.isotopes::
+    builders.createIsotope(75, 100.0, 0.0, enums.DecayMode.STABLE, 0.0, 4.3)
+
+  elements.arsenic.electronic:
+    configuration = builders.createElectronicConfig("[Ar] 3d10 4s2 4p3", 5, 78.5, 9.789, 4.8),
+    quantum = builders.createQuantumNumbers(4, 1, 0, 0.5),
+    electronegativity = builders.createElectronegativity(2.18, 2.26, 2.20, 2.82, 2.20)
+
+  elements.arsenic.ionization_energies_kj_mol:: 947.0, 1798.0, 2735.0
+
+  elements.arsenic.oxidation_states:: -3, 3, 5
+
+  elements.arsenic.geometry:
+    radii = builders.createRadii(119.0, 119.0, 185.0),
+    molar_volume_cm3 = 12.95
+
+  elements.arsenic.ionic_radii::
+    builders.createIonicRadius(3, 58.0, 6)
+
+  elements.arsenic.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.RHOMBOHEDRAL, 4.13, 4.13, 4.13, 54.1, 54.1, 54.1),
+    space_group = "R-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.arsenic.thermodynamics:
+    phases = builders.createPhasePoints(1090.0, 887.0, 1090.0, 3628000.0, 1673.0, 0.0),
+    thermal = builders.createThermalProps(27.7, 34.76, 328.0, 50.2, 3.86e-6, 285.0)
+
+  elements.arsenic.mechanical:
+    bulk = builders.createMechanicalProps(5.727, 8.0, 0.0, 22.0, 0.0, 3.5, 0.0)
+
+  elements.arsenic.electrical:
+    props = builders.createElectricalProps(3.45e6, 2.9e-7, 0.0),
+    type = "semimetal"
+
+  elements.arsenic.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -5.5e-9, 0.0)
+
+  elements.arsenic.optical:
+    refractive_index = 0.0,
+    color = "steel grey, metallic lustre"
+
+  elements.arsenic.interaction:
+    lennard_jones = builders.createLennardJones(155.495, 3.7685),
+    polarizability_angstrom3 = 4.31,
+    polarizability_tensor = builders.createPolarizabilityTensor(4.31, 0.0, 0.0, 0.0, 4.31, 0.0, 0.0, 0.0, 4.31),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.8)
+
+  elements.arsenic.abundance:
+    distribution = builders.createAbundance(1.8, 0.006, 0.0015, 0.007)
+
+  elements.arsenic.discovery:
+    info = builders.createDiscovery(1250, "Albertus Magnus", "Germany", "Greek arsenikon (yellow orpiment); alchemical name Orpiment")
+
+  elements.arsenic.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(947.0, 78.5, 2.18)
+
+
+  // ============================================================
+  // ELEMENT: Silver (Ag, Z=47)
+  // ============================================================
+
+  elements.silver.identity:
+    core = builders.createIdentity("Silver", "Ag", 47, 107.868, enums.ElementGroup.TRANSITION_METAL, 5, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-22-4"
+
+  elements.silver.nuclear:
+    properties = builders.createNuclearCore(47, 60, 0.5, -0.11357, 0.0)
+
+  elements.silver.isotopes::
+    builders.createIsotope(107, 51.84, 0.0, enums.DecayMode.STABLE, 0.0, 37.6),
+    builders.createIsotope(109, 48.16, 0.0, enums.DecayMode.STABLE, 0.0, 91.0)
+
+  elements.silver.electronic:
+    configuration = builders.createElectronicConfig("[Kr] 4d10 5s1", 1, 125.6, 7.576, 4.26),
+    quantum = builders.createQuantumNumbers(5, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(1.93, 1.87, 1.42, 1.83, 1.87)
+
+  elements.silver.ionization_energies_kj_mol:: 731.0, 2073.5, 3361.0
+
+  elements.silver.oxidation_states:: 1
+
+  elements.silver.geometry:
+    radii = builders.createRadii(144.0, 145.0, 172.0),
+    molar_volume_cm3 = 10.27
+
+  elements.silver.ionic_radii::
+    builders.createIonicRadius(1, 115.0, 6)
+
+  elements.silver.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 4.079, 4.079, 4.079, 90.0, 90.0, 90.0),
+    space_group = "Fm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.silver.thermodynamics:
+    phases = builders.createPhasePoints(1234.93, 2435.0, 0.0, 0.0, 6410.0, 0.0),
+    thermal = builders.createThermalProps(11.28, 258.0, 235.0, 429.0, 1.89e-5, 225.0)
+
+  elements.silver.mechanical:
+    bulk = builders.createMechanicalProps(10.49, 83.0, 30.0, 100.0, 0.37, 2.5, 2680.0)
+
+  elements.silver.electrical:
+    props = builders.createElectricalProps(6.30e7, 1.59e-8, 0.0),
+    type = "conductor"
+
+  elements.silver.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -2.38e-5, 0.0)
+
+  elements.silver.optical:
+    refractive_index = 0.0,
+    color = "lustrous white metallic"
+
+  elements.silver.interaction:
+    lennard_jones = builders.createLennardJones(18.116, 2.8045),
+    polarizability_angstrom3 = 7.2,
+    polarizability_tensor = builders.createPolarizabilityTensor(7.2, 0.0, 0.0, 0.0, 7.2, 0.0, 0.0, 0.0, 7.2),
+    surface = builders.createSurfaceProps(1.25, 0.0, 4.26)
+
+  elements.silver.abundance:
+    distribution = builders.createAbundance(0.075, 0.006, 0.0000004, 0.00002)
+
+  elements.silver.discovery:
+    info = builders.createDiscovery(-5000, "Known to ancient civilizations", "Unknown (prehistoric)", "Anglo-Saxon seolfor; alchemical symbol Luna")
+
+  elements.silver.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(731.0, 125.6, 1.93)
+
+
+  // ============================================================
+  // ELEMENT: Tin (Sn, Z=50)
+  // Reference form: white/beta-tin (stable at room temperature).
+  // ============================================================
+
+  elements.tin.identity:
+    core = builders.createIdentity("Tin", "Sn", 50, 118.710, enums.ElementGroup.POST_TRANSITION_METAL, 5, enums.Block.P_BLOCK, enums.ElementGroup.POST_TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-31-5"
+
+  elements.tin.nuclear:
+    properties = builders.createNuclearCore(50, 70, 0.0, 0.0, 0.0)
+
+  elements.tin.isotopes::
+    builders.createIsotope(120, 32.58, 0.0, enums.DecayMode.STABLE, 0.0, 0.14),
+    builders.createIsotope(118, 24.22, 0.0, enums.DecayMode.STABLE, 0.0, 0.23),
+    builders.createIsotope(116, 14.54, 0.0, enums.DecayMode.STABLE, 0.0, 0.14)
+
+  elements.tin.electronic:
+    configuration = builders.createElectronicConfig("[Kr] 4d10 5s2 5p2", 4, 107.3, 7.344, 4.42),
+    quantum = builders.createQuantumNumbers(5, 1, -1, 0.5),
+    electronegativity = builders.createElectronegativity(1.96, 1.72, 1.72, 2.02, 1.72)
+
+  elements.tin.ionization_energies_kj_mol:: 708.6, 1411.8, 2943.0
+
+  elements.tin.oxidation_states:: 2, 4
+
+  elements.tin.geometry:
+    radii = builders.createRadii(140.0, 139.0, 217.0),
+    molar_volume_cm3 = 16.29
+
+  elements.tin.ionic_radii::
+    builders.createIonicRadius(2, 118.0, 6),
+    builders.createIonicRadius(4, 69.0, 6)
+
+  elements.tin.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.TETRAGONAL, 5.832, 5.832, 3.182, 90.0, 90.0, 90.0),
+    space_group = "I41/amd",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.tin.thermodynamics:
+    phases = builders.createPhasePoints(505.08, 2875.0, 0.0, 0.0, 5218.0, 0.0),
+    thermal = builders.createThermalProps(7.03, 296.1, 228.0, 66.8, 2.2e-5, 200.0)
+
+  elements.tin.mechanical:
+    bulk = builders.createMechanicalProps(7.265, 50.0, 18.0, 58.0, 0.36, 1.5, 2500.0)
+
+  elements.tin.electrical:
+    props = builders.createElectricalProps(9.17e6, 1.09e-7, 0.0),
+    type = "conductor"
+
+  elements.tin.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 3.1e-9, 0.0)
+
+  elements.tin.optical:
+    refractive_index = 0.0,
+    color = "silvery-white"
+
+  elements.tin.interaction:
+    lennard_jones = builders.createLennardJones(285.326, 3.9128),
+    polarizability_angstrom3 = 7.7,
+    polarizability_tensor = builders.createPolarizabilityTensor(7.7, 0.0, 0.0, 0.0, 7.7, 0.0, 0.0, 0.0, 7.7),
+    surface = builders.createSurfaceProps(0.68, 0.0, 4.42)
+
+  elements.tin.abundance:
+    distribution = builders.createAbundance(2.3, 0.004, 0.000004, 0.0002)
+
+  elements.tin.discovery:
+    info = builders.createDiscovery(-3500, "Known to ancient civilizations", "Unknown (prehistoric)", "Anglo-Saxon tin; alchemical symbol Jupiter")
+
+  elements.tin.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(708.6, 107.3, 1.96)
+
+
+  // ============================================================
+  // ELEMENT: Antimony (Sb, Z=51)
+  // Reference form: grey antimony (the stable metallic allotrope).
+  // ============================================================
+
+  elements.antimony.identity:
+    core = builders.createIdentity("Antimony", "Sb", 51, 121.760, enums.ElementGroup.METALLOID, 5, enums.Block.P_BLOCK, enums.ElementGroup.METALLOID, enums.Phase.SOLID),
+    cas_registry = "7440-36-0"
+
+  elements.antimony.nuclear:
+    properties = builders.createNuclearCore(51, 70, 2.5, 3.3634, -0.36)
+
+  elements.antimony.isotopes::
+    builders.createIsotope(121, 57.21, 0.0, enums.DecayMode.STABLE, 0.0, 5.75),
+    builders.createIsotope(123, 42.79, 0.0, enums.DecayMode.STABLE, 0.0, 3.8)
+
+  elements.antimony.electronic:
+    configuration = builders.createElectronicConfig("[Kr] 4d10 5s2 5p3", 5, 103.2, 8.608, 4.55),
+    quantum = builders.createQuantumNumbers(5, 1, 0, 0.5),
+    electronegativity = builders.createElectronegativity(2.05, 1.82, 1.82, 2.34, 1.82)
+
+  elements.antimony.ionization_energies_kj_mol:: 834.0, 1594.9, 2440.0
+
+  elements.antimony.oxidation_states:: -3, 3, 5
+
+  elements.antimony.geometry:
+    radii = builders.createRadii(140.0, 139.0, 206.0),
+    molar_volume_cm3 = 18.19
+
+  elements.antimony.ionic_radii::
+    builders.createIonicRadius(3, 76.0, 6)
+
+  elements.antimony.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.RHOMBOHEDRAL, 4.51, 4.51, 4.51, 57.1, 57.1, 57.1),
+    space_group = "R-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.antimony.thermodynamics:
+    phases = builders.createPhasePoints(903.78, 1908.0, 903.78, 0.0, 5030.0, 0.0),
+    thermal = builders.createThermalProps(19.79, 193.43, 207.0, 24.4, 1.1e-5, 211.0)
+
+  elements.antimony.mechanical:
+    bulk = builders.createMechanicalProps(6.697, 55.0, 20.0, 42.0, 0.26, 3.0, 3420.0)
+
+  elements.antimony.electrical:
+    props = builders.createElectricalProps(2.55e6, 3.92e-7, 0.0),
+    type = "semimetal"
+
+  elements.antimony.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -9.9e-9, 0.0)
+
+  elements.antimony.optical:
+    refractive_index = 0.0,
+    color = "silvery, lustrous grey"
+
+  elements.antimony.interaction:
+    lennard_jones = builders.createLennardJones(225.946, 3.9378),
+    polarizability_angstrom3 = 6.6,
+    polarizability_tensor = builders.createPolarizabilityTensor(6.6, 0.0, 0.0, 0.0, 6.6, 0.0, 0.0, 0.0, 6.6),
+    surface = builders.createSurfaceProps(0.68, 0.0, 4.55)
+
+  elements.antimony.abundance:
+    distribution = builders.createAbundance(0.2, 0.00004, 0.00000024, 0.0002)
+
+  elements.antimony.discovery:
+    info = builders.createDiscovery(-3000, "Known to ancient civilizations", "Unknown (prehistoric)", "Greek anti + monos (not alone); alchemical name Stibium")
+
+  elements.antimony.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(834.0, 103.2, 2.05)
+
+
+  // ============================================================
+  // ELEMENT: Gold (Au, Z=79)
+  // ============================================================
+
+  elements.gold.identity:
+    core = builders.createIdentity("Gold", "Au", 79, 196.967, enums.ElementGroup.TRANSITION_METAL, 6, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-57-5"
+
+  elements.gold.nuclear:
+    properties = builders.createNuclearCore(79, 118, 1.5, 0.148158, 0.547)
+
+  elements.gold.isotopes::
+    builders.createIsotope(197, 100.0, 0.0, enums.DecayMode.STABLE, 0.0, 98.65)
+
+  elements.gold.electronic:
+    configuration = builders.createElectronicConfig("[Xe] 4f14 5d10 6s1", 1, 222.8, 9.226, 5.1),
+    quantum = builders.createQuantumNumbers(6, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(2.54, 2.31, 1.42, 2.63, 2.4)
+
+  elements.gold.ionization_energies_kj_mol:: 890.1, 1980.0, 2895.0
+
+  elements.gold.oxidation_states:: 1, 3
+
+  elements.gold.geometry:
+    radii = builders.createRadii(144.0, 136.0, 166.0),
+    molar_volume_cm3 = 10.21
+
+  elements.gold.ionic_radii::
+    builders.createIonicRadius(1, 137.0, 6),
+    builders.createIonicRadius(3, 85.0, 6)
+
+  elements.gold.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 4.078, 4.078, 4.078, 90.0, 90.0, 90.0),
+    space_group = "Fm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.gold.thermodynamics:
+    phases = builders.createPhasePoints(1337.33, 3243.0, 0.0, 0.0, 7250.0, 0.0),
+    thermal = builders.createThermalProps(12.55, 342.0, 129.045, 318.0, 1.42e-5, 170.0)
+
+  elements.gold.mechanical:
+    bulk = builders.createMechanicalProps(19.283, 79.0, 27.0, 220.0, 0.44, 2.5, 3240.0)
+
+  elements.gold.electrical:
+    props = builders.createElectricalProps(4.11e7, 2.44e-8, 0.0),
+    type = "conductor"
+
+  elements.gold.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -3.44e-5, 0.0)
+
+  elements.gold.optical:
+    refractive_index = 0.0,
+    color = "metallic yellow"
+
+  elements.gold.interaction:
+    lennard_jones = builders.createLennardJones(19.626, 2.9337),
+    polarizability_angstrom3 = 5.8,
+    polarizability_tensor = builders.createPolarizabilityTensor(5.8, 0.0, 0.0, 0.0, 5.8, 0.0, 0.0, 0.0, 5.8),
+    surface = builders.createSurfaceProps(1.5, 0.0, 5.1)
+
+  elements.gold.abundance:
+    distribution = builders.createAbundance(0.004, 0.0000006, 0.00000001, 0.0)
+
+  elements.gold.discovery:
+    info = builders.createDiscovery(-6000, "Known to ancient civilizations", "Unknown (prehistoric)", "Latin aurum (shining dawn); alchemical symbol Sol")
+
+  elements.gold.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(890.1, 222.8, 2.54)
+
+
+  // ============================================================
+  // ELEMENT: Mercury (Hg, Z=80)
+  // The only elemental metal liquid at room temperature -- Phase.LIQUID
+  // below is not a typo.
+  // ============================================================
+
+  elements.mercury.identity:
+    core = builders.createIdentity("Mercury", "Hg", 80, 200.592, enums.ElementGroup.POST_TRANSITION_METAL, 6, enums.Block.D_BLOCK, enums.ElementGroup.POST_TRANSITION_METAL, enums.Phase.LIQUID),
+    cas_registry = "7439-97-6"
+
+  elements.mercury.nuclear:
+    properties = builders.createNuclearCore(80, 122, 0.0, 0.0, 0.0)
+
+  elements.mercury.isotopes::
+    builders.createIsotope(202, 29.86, 0.0, enums.DecayMode.STABLE, 0.0, 4.9),
+    builders.createIsotope(200, 23.1, 0.0, enums.DecayMode.STABLE, 0.0, 3.08),
+    builders.createIsotope(199, 16.87, 0.0, enums.DecayMode.STABLE, 0.0, 2.15)
+
+  elements.mercury.electronic:
+    configuration = builders.createElectronicConfig("[Xe] 4f14 5d10 6s2", 2, 0.0, 10.438, 4.475),
+    quantum = builders.createQuantumNumbers(6, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(2.00, 1.76, 1.44, 1.44, 1.44)
+
+  elements.mercury.ionization_energies_kj_mol:: 1007.1, 1810.0, 3300.0
+
+  elements.mercury.oxidation_states:: 1, 2
+
+  elements.mercury.geometry:
+    radii = builders.createRadii(151.0, 132.0, 155.0),
+    molar_volume_cm3 = 14.09
+
+  elements.mercury.ionic_radii::
+    builders.createIonicRadius(2, 116.0, 6)
+
+  elements.mercury.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.RHOMBOHEDRAL, 2.99, 2.99, 2.99, 70.5, 70.5, 70.5),
+    space_group = "R-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.mercury.thermodynamics:
+    phases = builders.createPhasePoints(234.32, 629.88, 234.32, 0.165, 1750.0, 172000000.0),
+    thermal = builders.createThermalProps(2.29, 59.11, 139.5, 8.3, 1.81e-4, 100.0)
+
+  elements.mercury.mechanical:
+    bulk = builders.createMechanicalProps(13.534, 0.0, 0.0, 25.0, 0.0, 1.5, 1451.0)
+
+  elements.mercury.electrical:
+    props = builders.createElectricalProps(1.04e6, 9.6e-7, 0.0),
+    type = "conductor (liquid)"
+
+  elements.mercury.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -2.9e-5, 0.0)
+
+  elements.mercury.optical:
+    refractive_index = 0.0,
+    color = "silvery liquid"
+
+  elements.mercury.interaction:
+    lennard_jones = builders.createLennardJones(193.740, 2.4099),
+    polarizability_angstrom3 = 5.7,
+    polarizability_tensor = builders.createPolarizabilityTensor(5.7, 0.0, 0.0, 0.0, 5.7, 0.0, 0.0, 0.0, 5.7),
+    surface = builders.createSurfaceProps(0.4865, 0.0, 4.475)
+
+  elements.mercury.abundance:
+    distribution = builders.createAbundance(0.085, 0.00004, 0.0000001, 0.00006)
+
+  elements.mercury.discovery:
+    info = builders.createDiscovery(-1500, "Known to ancient civilizations", "Egypt / China", "Roman god Mercury; alchemical name Quicksilver")
+
+  elements.mercury.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(1007.1, 0.0, 2.00)
+
+
+  // ============================================================
+  // ELEMENT: Lead (Pb, Z=82)
+  // ============================================================
+
+  elements.lead.identity:
+    core = builders.createIdentity("Lead", "Pb", 82, 207.2, enums.ElementGroup.POST_TRANSITION_METAL, 6, enums.Block.P_BLOCK, enums.ElementGroup.POST_TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7439-92-1"
+
+  elements.lead.nuclear:
+    properties = builders.createNuclearCore(82, 126, 0.0, 0.0, 0.0)
+
+  elements.lead.isotopes::
+    builders.createIsotope(208, 52.4, 0.0, enums.DecayMode.STABLE, 0.0, 0.0006),
+    builders.createIsotope(206, 24.1, 0.0, enums.DecayMode.STABLE, 0.0, 0.03),
+    builders.createIsotope(207, 22.1, 0.0, enums.DecayMode.STABLE, 0.0, 0.7)
+
+  elements.lead.electronic:
+    configuration = builders.createElectronicConfig("[Xe] 4f14 5d10 6s2 6p2", 4, 35.1, 7.417, 4.25),
+    quantum = builders.createQuantumNumbers(6, 1, -1, 0.5),
+    electronegativity = builders.createElectronegativity(2.33, 1.87, 1.55, 2.29, 1.87)
+
+  elements.lead.ionization_energies_kj_mol:: 715.6, 1450.5, 3081.5
+
+  elements.lead.oxidation_states:: 2, 4
+
+  elements.lead.geometry:
+    radii = builders.createRadii(175.0, 146.0, 202.0),
+    molar_volume_cm3 = 18.26
+
+  elements.lead.ionic_radii::
+    builders.createIonicRadius(2, 119.0, 6),
+    builders.createIonicRadius(4, 78.0, 6)
+
+  elements.lead.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 4.950, 4.950, 4.950, 90.0, 90.0, 90.0),
+    space_group = "Fm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.lead.thermodynamics:
+    phases = builders.createPhasePoints(600.61, 2022.0, 0.0, 0.0, 5400.0, 0.0),
+    thermal = builders.createThermalProps(4.77, 179.5, 129.0, 35.3, 2.89e-5, 105.0)
+
+  elements.lead.mechanical:
+    bulk = builders.createMechanicalProps(11.34, 16.0, 5.6, 46.0, 0.44, 1.5, 1260.0)
+
+  elements.lead.electrical:
+    props = builders.createElectricalProps(4.55e6, 2.2e-7, 0.0),
+    type = "conductor"
+
+  elements.lead.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -1.56e-5, 0.0)
+
+  elements.lead.optical:
+    refractive_index = 0.0,
+    color = "dull silvery-grey"
+
+  elements.lead.interaction:
+    lennard_jones = builders.createLennardJones(333.635, 3.8282),
+    polarizability_angstrom3 = 6.8,
+    polarizability_tensor = builders.createPolarizabilityTensor(6.8, 0.0, 0.0, 0.0, 6.8, 0.0, 0.0, 0.0, 6.8),
+    surface = builders.createSurfaceProps(0.61, 0.0, 4.25)
+
+  elements.lead.abundance:
+    distribution = builders.createAbundance(14.0, 0.0002, 0.0000003, 0.002)
+
+  elements.lead.discovery:
+    info = builders.createDiscovery(-7000, "Known to ancient civilizations", "Unknown (prehistoric)", "Anglo-Saxon lead; alchemical symbol Saturn")
+
+  elements.lead.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(715.6, 35.1, 2.33)
+
 )

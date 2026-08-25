@@ -86,7 +86,14 @@ jobs:
       # CLI resolution falls back to looking for "mdix" next to itself, so
       # the extension needs both. Building only mdix-lsp here is what broke
       # run #108 ("Binary not found: .../target/debug/mdix").
+      #
+      # MACOSX_DEPLOYMENT_TARGET: without this, the darwin binaries link
+      # against whatever minimum macOS version the runner's Xcode defaults
+      # to -- almost certainly newer than Catalina. Harmless no-op on
+      # ubuntu/windows runners.
       - name: Build mdix-lsp + mdix-cli (release)
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
         run: cargo build -p mdix-lsp -p mdix-cli --release
 
       - uses: actions/setup-node@v4

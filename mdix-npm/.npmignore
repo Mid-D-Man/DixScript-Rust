@@ -1,0 +1,13 @@
+# Source & Tests (only published dist/ is needed)
+src/
+tests/
+tsconfig.json
+
+# Tooling & Logs
+.DS_Store
+*.log
+.github/
+
+# Force npm to include the WASM build outputs
+!wasm-pkg/
+!wasm-pkg-node/

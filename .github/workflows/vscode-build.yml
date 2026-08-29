@@ -118,6 +118,21 @@ jobs:
         working-directory: mdix-vscode
         run: npm run vscode:prepublish
 
+      # Feeds the package-universal job below. copy-binary.js only ever
+      # writes to bin/<this-runner's-own-platform>/, so at this point
+      # mdix-vscode/bin/ contains exactly one subfolder: this matrix leg's
+      # own vsce_target. Uploading the *parent* (bin/, not bin/<target>/)
+      # preserves that subfolder name inside the artifact, so downloading
+      # all four artifacts together with merge-multiple later reassembles
+      # bin/linux-x64/, bin/darwin-arm64/, etc. side by side with zero
+      # renaming needed.
+      - name: Upload platform binary (feeds the universal-package job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dixscript-bin-${{ matrix.vsce_target }}
+          path: mdix-vscode/bin
+          retention-days: 1
+
       - name: Package .vsix
         working-directory: mdix-vscode
         run: npx --yes @vscode/vsce package --target ${{ matrix.vsce_target }} --no-dependencies
@@ -129,10 +144,95 @@ jobs:
           path: mdix-vscode/*.vsix
           retention-days: 30
 
-  # ── 3. Summary ──────────────────────────────────────────────────────────
+  # ── 3. ALSO bundle all four platforms into ONE non-targeted .vsix ─────────
+  # for a simple one-file manual upload to the VS Code Marketplace publisher
+  # management page (marketplace.visualstudio.com/manage) -- no PAT, no
+  # Azure DevOps org needed for that path, unlike the automated `vsce
+  # publish` route. See:
+  # https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publishing-extensions
+  #
+  # No --target flag, so this ISN'T platform-specific -- it just contains
+  # all four bin/<platform>/ folders side by side. src/extension.ts's
+  # platformDir() already picks the right one at runtime from
+  # process.platform/process.arch, so this installs and runs fine
+  # everywhere; it's just a bigger download than a per-platform package.
+  # Trades file size for not having to juggle four separate VSIX uploads
+  # by hand through the Marketplace's "New Extension" dialog.
+  package-universal:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install extension dependencies
+        working-directory: mdix-vscode
+        run: npm install
+
+      - name: Download all platform binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dixscript-bin-*
+          path: mdix-vscode/bin
+          merge-multiple: true
+
+      - name: Restore executable bit
+        # Artifact upload/download can lose the executable bit on the
+        # non-Windows binaries; belt-and-braces re-apply it.
+        working-directory: mdix-vscode/bin
+        run: find . -type f ! -name '*.exe' -exec chmod 755 {} \;
+
+      - name: Sanity-check all four platforms are present
+        working-directory: mdix-vscode/bin
+        run: |
+          ls -la
+          for d in linux-x64 darwin-arm64 darwin-x64 win32-x64; do
+            if [ ! -d "$d" ]; then
+              echo "::error::Missing platform folder: $d -- one of the four matrix builds must have failed."
+              exit 1
+            fi
+          done
+
+      - name: Compile TypeScript
+        working-directory: mdix-vscode
+        run: npm run compile
+
+      # `vsce package` re-invokes the npm "vscode:prepublish" script
+      # internally regardless of what already ran (see copy-binary.js's own
+      # header comment for the full story on why). Normally that re-copies
+      # target/release/<bin> into bin/<this-runner's-platform>/. This
+      # runner never built any Rust binaries itself, so without this step
+      # that internal re-run fails with "Binary not found:
+      # target/release/mdix-lsp" and aborts the whole package step.
+      # Since this job runs on ubuntu-latest (linux-x64), pointing
+      # target/release/ at the linux-x64 binaries already downloaded above
+      # makes that re-copy a harmless no-op -- same files, same
+      # destination -- and it only ever touches bin/linux-x64/, so the
+      # other three platforms' folders are untouched.
+      - name: Satisfy vscode:prepublish's internal binary copy
+        run: |
+          mkdir -p target/release
+          cp mdix-vscode/bin/linux-x64/mdix-lsp target/release/mdix-lsp
+          cp mdix-vscode/bin/linux-x64/mdix      target/release/mdix
+
+      - name: Package universal .vsix (no --target)
+        working-directory: mdix-vscode
+        run: npx --yes @vscode/vsce package --no-dependencies
+
+      - name: Upload universal .vsix
+        uses: actions/upload-artifact@v4
+        with:
+          name: dixscript-vscode-universal
+          path: mdix-vscode/*.vsix
+          retention-days: 30
+
+  # ── 4. Summary ──────────────────────────────────────────────────────────
   summary:
     runs-on: ubuntu-latest
-    needs: [parse-trigger, build]
+    needs: [parse-trigger, build, package-universal]
     if: always()
     steps:
       - name: Print summary
@@ -140,9 +240,15 @@ jobs:
           echo "======================================================="
           echo "  DixScript — VS Code Extension Build Summary"
           echo "======================================================="
-          echo "Build:  ${{ needs.build.result || 'skipped' }}"
+          echo "Per-platform builds: ${{ needs.build.result || 'skipped' }}"
+          echo "Universal package:   ${{ needs.package-universal.result || 'skipped' }}"
           echo ""
           echo "Download from this run's Artifacts section (bottom of the"
-          echo "Actions run summary page) -- one .vsix per platform."
+          echo "Actions run summary page):"
+          echo "  - dixscript-vscode-<platform>  -- one per platform"
+          echo "  - dixscript-vscode-universal   -- ONE file with all four"
+          echo "    platforms bundled in, for manual upload to"
+          echo "    https://marketplace.visualstudio.com/manage"
+          echo ""
           echo "Install locally with:"
           echo "  code --install-extension dixscript-<platform>-1.0.0.vsix"

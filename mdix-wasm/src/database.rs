@@ -372,13 +372,19 @@ impl MdixDatabase {
         let ast = converter
             .from_hashmap(entries)
             .map_err(|e| runtime_err("to_json ast", e))?;
-        let map = converter.to_hashmap(&ast);
-        let result = if indented {
-            serde_json::to_string_pretty(&map)
-        } else {
-            serde_json::to_string(&map)
-        };
-        result.map_err(|e| runtime_err("to_json serialize", e))
+        // NOTE: this must go through converter.to_json(), not to_hashmap() +
+        // serde_json::to_string() — that was the bug here. to_hashmap()
+        // returns DixData's *flat* key-value store (bracket-notation keys
+        // like "some[0]"/"some[1]" for array elements), which is exactly
+        // what to_json_flat() is for (mdix-scaffold's directory-grouping
+        // needs specifically). A plain group array like `some:: 1, 2, 3`
+        // was round-tripping as {"some[0]":1,"some[1]":2,"some[2]":3}
+        // instead of {"some":[1,2,3]} -- to_json() reconstructs proper
+        // nested JSON from the AST directly and is what every other
+        // language binding's to_json/toJson/ToJson actually calls.
+        converter
+            .to_json(&ast, indented)
+            .map_err(|e| runtime_err("to_json serialize", e))
     }
 
     /// Exports the entire database as a TOML string.

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use dixscript::Runtime::{
     DixCompactor, DixConverter, DixFormatOptions, DixLoader, DixLoadOptions, DixValue,
-    HotReloadWatcher,
+    ExpectedValueType, HotReloadWatcher, SchemaBuilder,
 };
 
 use error::{clear_last_error, get_last_error_ptr, set_last_error};
@@ -1554,5 +1554,95 @@ pub extern "C" fn mdix_watcher_force_reload(handle: *mut c_void) -> *mut c_void 
     match w.watcher.force_reload() {
         Ok(data) => MdixHandle::new(data) as *mut c_void,
         Err(e) => { set_last_error(&format!("mdix_watcher_force_reload: {}", e)); std::ptr::null_mut() }
+    }
+}
+
+// =============================================================================
+// SCHEMA VALIDATION — declarative field validation
+// =============================================================================
+//
+// dixscript::Runtime::SchemaBuilder::require_with()/optional_with() take a
+// Rust closure and can't cross the C ABI, so this only exposes the
+// type/required-checked subset (require/optional + with_description) —
+// everything a schema needs for the common case. Bindings that need custom
+// (closure-based) validators layer their own on top of this result in
+// managed code — see mdix-java's SchemaBuilder.Validator / mdix-php's
+// MdixSchemaBuilder for two worked examples of that pattern.
+
+fn expected_type_from_str(s: &str) -> ExpectedValueType {
+    match s {
+        "String" => ExpectedValueType::String,
+        "Int" => ExpectedValueType::Int,
+        "Long" => ExpectedValueType::Long,
+        "Float" => ExpectedValueType::Float,
+        "Double" => ExpectedValueType::Double,
+        "Bool" => ExpectedValueType::Bool,
+        "Array" => ExpectedValueType::Array,
+        "Object" => ExpectedValueType::Object,
+        "Date" => ExpectedValueType::Date,
+        "Timestamp" => ExpectedValueType::Timestamp,
+        "HexColor" => ExpectedValueType::HexColor,
+        "Blob" => ExpectedValueType::Blob,
+        "Regex" => ExpectedValueType::Regex,
+        "Enum" => ExpectedValueType::Enum,
+        _ => ExpectedValueType::Any,
+    }
+}
+
+/// `fields_json` shape: `[{"path":"port","required":true,"type":"Int","description":"..."?}, ...]`
+/// Returns the validation errors as JSON:
+/// `[{"path":..,"expected":..,"actual":..,"kind":"Missing"|"WrongType"|"InvalidValue"}, ...]`
+/// (an empty "[]" means the schema passed). Returns NULL on a bad handle or
+/// malformed fields_json — check mdix_get_last_error() for why.
+#[no_mangle]
+pub extern "C" fn mdix_schema_validate(handle: *const c_void, fields_json: *const c_char) -> *mut c_char {
+    clear_last_error();
+    let h = match unsafe { as_handle(handle) } {
+        Some(h) => h,
+        None => { set_last_error("mdix_schema_validate: handle is null"); return std::ptr::null_mut(); }
+    };
+    let spec = match unsafe { c_str_to_str(fields_json) } {
+        Some(s) => s,
+        None => { set_last_error("mdix_schema_validate: fields_json is null or invalid UTF-8"); return std::ptr::null_mut(); }
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(spec) {
+        Ok(v) => v,
+        Err(e) => { set_last_error(&format!("mdix_schema_validate: invalid fields JSON: {}", e)); return std::ptr::null_mut(); }
+    };
+    let entries = match parsed.as_array() {
+        Some(a) => a,
+        None => { set_last_error("mdix_schema_validate: fields JSON must be an array"); return std::ptr::null_mut(); }
+    };
+
+    let mut builder = SchemaBuilder::new();
+    for entry in entries {
+        let path = match entry.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p.to_string(),
+            None => { set_last_error("mdix_schema_validate: field entry missing 'path'"); return std::ptr::null_mut(); }
+        };
+        let required = entry.get("required").and_then(|v| v.as_bool()).unwrap_or(true);
+        let ty = expected_type_from_str(entry.get("type").and_then(|v| v.as_str()).unwrap_or("Any"));
+        builder = if required { builder.require(path, ty) } else { builder.optional(path, ty) };
+        if let Some(desc) = entry.get("description").and_then(|v| v.as_str()) {
+            builder = builder.with_description(desc);
+        }
+    }
+
+    let report = builder.validate(&h.data);
+    let errors: Vec<serde_json::Value> = report
+        .errors
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "path": e.path,
+                "expected": e.expected,
+                "actual": e.actual,
+                "kind": e.kind.to_string(),
+            })
+        })
+        .collect();
+    match serde_json::to_string(&errors) {
+        Ok(s) => str_to_c_char(s),
+        Err(e) => { set_last_error(&format!("mdix_schema_validate: {}", e)); std::ptr::null_mut() }
     }
 }

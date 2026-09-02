@@ -3,7 +3,6 @@
     "description": "DixScript (.mdix) runtime — PHP FFI bindings for MidManStudio",
     "type": "library",
     "license": "MIT",
-    "version": "1.0.0",
     "authors": [
         {
             "name": "MidManStudio",
@@ -41,4 +40,4 @@
             "windows": "lib/mdix_ffi.dll"
         }
     }
-        }
+}

@@ -27,8 +27,13 @@ final class MdixBuilder implements \Stringable
     private mixed $handle;
     private bool  $closed = false;
 
-    public function __construct()
+    public function __construct(mixed $existingHandle = null)
     {
+        if ($existingHandle !== null) {
+            $this->handle = $existingHandle;
+            return;
+        }
+
         $this->handle = NativeLoader::get()->mdix_builder_new();
 
         if ($this->handle === null) {
@@ -37,6 +42,30 @@ final class MdixBuilder implements \Stringable
                 ErrorKind::Native,
             );
         }
+    }
+
+    /**
+     * Creates a builder pre-populated with $db's root-level values — for
+     * round-trip editing of an already-loaded file (load -> modify a few
+     * keys -> save), rather than rebuilding one from scratch. Synthetic
+     * indexed children (tags[0], server.host, ...) are already stripped;
+     * only aggregate/root values that map back to valid .mdix identifiers
+     * carry over.
+     *
+     * @throws MdixError on failure.
+     */
+    public static function fromHandle(MdixDatabase $db): self
+    {
+        $handle = NativeLoader::get()->mdix_builder_from_handle($db->rawHandle());
+
+        if ($handle === null) {
+            $ffi = NativeLoader::get();
+            $ptr = $ffi->mdix_get_last_error();
+            $msg = $ptr !== null ? $ptr : 'unknown native error';
+            throw MdixError::fromMessage("[mdix:builderFromHandle] {$msg}");
+        }
+
+        return new self($handle);
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -100,6 +129,21 @@ final class MdixBuilder implements \Stringable
             $this->handle, $path, $value
         )) {
             throw new MdixError("setInt('{$path}') failed", ErrorKind::Native);
+        }
+
+        return $this;
+    }
+
+    /** Sets a 64-bit integer. PHP's native int is already 64-bit on all common platforms, same as setInt(). */
+    public function setLong(string $path, int $value): self
+    {
+        $this->assertOpen();
+        $this->assertPath($path);
+
+        if (!(bool) NativeLoader::get()->mdix_builder_set_long(
+            $this->handle, $path, $value
+        )) {
+            throw new MdixError("setLong('{$path}') failed", ErrorKind::Native);
         }
 
         return $this;
@@ -220,7 +264,25 @@ final class MdixBuilder implements \Stringable
 
         $err = $ffi->mdix_get_last_error();
         if ($err !== null) {
-            throw MdixError::fromMessage(\FFI::string($err));
+            throw MdixError::fromMessage($err);
+        }
+
+        return $value;
+    }
+
+    /** @throws MdixError if the key does not exist or is not numeric. */
+    public function getLong(string $path): int
+    {
+        $this->assertOpen();
+        $this->assertPath($path);
+
+        $ffi = NativeLoader::get();
+        $ffi->mdix_clear_error();
+        $value = (int) $ffi->mdix_builder_get_long($this->handle, $path);
+
+        $err = $ffi->mdix_get_last_error();
+        if ($err !== null) {
+            throw MdixError::fromMessage($err);
         }
 
         return $value;
@@ -238,7 +300,7 @@ final class MdixBuilder implements \Stringable
 
         $err = $ffi->mdix_get_last_error();
         if ($err !== null) {
-            throw MdixError::fromMessage(\FFI::string($err));
+            throw MdixError::fromMessage($err);
         }
 
         return $value;
@@ -256,7 +318,7 @@ final class MdixBuilder implements \Stringable
 
         $err = $ffi->mdix_get_last_error();
         if ($err !== null) {
-            throw MdixError::fromMessage(\FFI::string($err));
+            throw MdixError::fromMessage($err);
         }
 
         return $value;
@@ -274,7 +336,7 @@ final class MdixBuilder implements \Stringable
 
         $err = $ffi->mdix_get_last_error();
         if ($err !== null) {
-            throw MdixError::fromMessage(\FFI::string($err));
+            throw MdixError::fromMessage($err);
         }
 
         return $value;
@@ -296,7 +358,7 @@ final class MdixBuilder implements \Stringable
         if (!(bool) NativeLoader::get()->mdix_builder_save($this->handle, $path)) {
             $ffi = NativeLoader::get();
             $ptr = $ffi->mdix_get_last_error();
-            $msg = $ptr !== null ? \FFI::string($ptr) : 'unknown IO error';
+            $msg = $ptr !== null ? $ptr : 'unknown IO error';
             throw new MdixError($msg, ErrorKind::Io);
         }
     }

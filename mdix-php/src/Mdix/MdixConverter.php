@@ -97,7 +97,7 @@ final class MdixConverter
 
         if ($ptr === null) {
             $errPtr = $ffi->mdix_get_last_error();
-            $msg    = $errPtr !== null ? \FFI::string($errPtr) : 'formatSource failed';
+            $msg    = $errPtr !== null ? $errPtr : 'formatSource failed';
             throw MdixError::fromMessage($msg);
         }
 
@@ -124,7 +124,7 @@ final class MdixConverter
 
         if ($ptr === null) {
             $errPtr = $ffi->mdix_get_last_error();
-            $msg    = $errPtr !== null ? \FFI::string($errPtr) : 'minifySource failed';
+            $msg    = $errPtr !== null ? $errPtr : 'minifySource failed';
             throw MdixError::fromMessage($msg);
         }
 

@@ -36,6 +36,19 @@ final class MdixDatabase implements \Stringable
         $this->handle = $handle;
     }
 
+    /**
+     * Wraps a raw handle produced elsewhere (MdixMerge, MdixHotReload, ...)
+     * in an owning MdixDatabase. Passing a handle not produced by this
+     * library, or one already owned elsewhere, is undefined behavior —
+     * same contract as close() on every other handle.
+     *
+     * @internal
+     */
+    public static function adopt(mixed $handle): self
+    {
+        return new self($handle);
+    }
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     /**
@@ -61,6 +74,74 @@ final class MdixDatabase implements \Stringable
     {
         $this->assertOpen();
         return NativeLoader::get()->mdix_entry_count($this->handle);
+    }
+
+    /** DLM compression flag recorded when this data was loaded. */
+    public function isCompressed(): bool
+    {
+        $this->assertOpen();
+        return (bool) NativeLoader::get()->mdix_is_compressed($this->handle);
+    }
+
+    /** DLM encryption flag recorded when this data was loaded. */
+    public function isEncrypted(): bool
+    {
+        $this->assertOpen();
+        return (bool) NativeLoader::get()->mdix_is_encrypted($this->handle);
+    }
+
+    /**
+     * Runtime version string recorded in the loaded data itself (may differ
+     * from the current mdix_ffi build if the file was produced by a
+     * different mdix-cli).
+     *
+     * @throws MdixError on failure.
+     */
+    public function getLoadedVersion(): string
+    {
+        $this->assertOpen();
+        $ffi = NativeLoader::get();
+        $ptr = $ffi->mdix_get_loaded_version($this->handle);
+
+        if ($ptr === null) {
+            throw self::nativeError('getLoadedVersion');
+        }
+
+        $value = \FFI::string($ptr);
+        $ffi->mdix_free_string($ptr);
+
+        return $value;
+    }
+
+    /**
+     * Reads a key from the loaded @CONFIG section (e.g. "version", "author",
+     * "debug_mode" — all @CONFIG values are strings).
+     *
+     * @throws MdixError if the key isn't set.
+     */
+    public function getConfigValue(string $key): string
+    {
+        $this->assertOpen();
+        $ffi = NativeLoader::get();
+        $ptr = $ffi->mdix_get_config_value($this->handle, $key);
+
+        if ($ptr === null) {
+            throw self::nativeError("getConfigValue('{$key}')");
+        }
+
+        $value = \FFI::string($ptr);
+        $ffi->mdix_free_string($ptr);
+
+        return $value;
+    }
+
+    public function tryGetConfigValue(string $key): MdixResult
+    {
+        try {
+            return MdixResult::ok($this->getConfigValue($key));
+        } catch (\Throwable $e) {
+            return MdixResult::fromThrowable($e);
+        }
     }
 
     // ── Loading — raising ─────────────────────────────────────────────────────
@@ -295,6 +376,35 @@ final class MdixDatabase implements \Stringable
         return $result;
     }
 
+    /**
+     * Every key in the entire flattened data set (recursive) — not just
+     * direct children of a prefix, unlike keys().
+     *
+     * @return string[]
+     */
+    public function getAllKeys(): array
+    {
+        $this->assertOpen();
+        $ffi   = NativeLoader::get();
+        $count = $ffi->new('int32_t');
+        $arr   = $ffi->mdix_get_all_keys($this->handle, \FFI::addr($count));
+
+        if ($arr === null || $count->cdata <= 0) {
+            return [];
+        }
+
+        $result = [];
+        $n      = (int) $count->cdata;
+
+        for ($i = 0; $i < $n; $i++) {
+            $result[] = \FFI::string($arr[$i]);
+        }
+
+        $ffi->mdix_free_string_array($arr, $count->cdata);
+
+        return $result;
+    }
+
     // ── Typed getters — raising ───────────────────────────────────────────────
 
     /**
@@ -340,6 +450,32 @@ final class MdixDatabase implements \Stringable
         $err = $ffi->mdix_get_last_error();
         if ($err !== null) {
             throw self::nativeErrorFromPtr($err, "getInt('{$path}')");
+        }
+
+        return $value;
+    }
+
+    /**
+     * Reads a 64-bit integer. Also accepts Int values (widened without loss).
+     *
+     * @throws MdixError if the path does not exist or is the wrong type.
+     */
+    public function getLong(string $path, ?int $default = null): int
+    {
+        $this->assertOpen();
+        $this->assertPath($path);
+
+        if ($default !== null && !$this->exists($path)) {
+            return $default;
+        }
+
+        $ffi = NativeLoader::get();
+        $ffi->mdix_clear_error();
+        $value = (int) $ffi->mdix_get_long($this->handle, $path);
+
+        $err = $ffi->mdix_get_last_error();
+        if ($err !== null) {
+            throw self::nativeErrorFromPtr($err, "getLong('{$path}')");
         }
 
         return $value;
@@ -509,6 +645,15 @@ final class MdixDatabase implements \Stringable
         }
     }
 
+    public function tryGetLong(string $path): MdixResult
+    {
+        try {
+            return MdixResult::ok($this->getLong($path));
+        } catch (\Throwable $e) {
+            return MdixResult::fromThrowable($e);
+        }
+    }
+
     public function tryGetFloat(string $path): MdixResult
     {
         try {
@@ -543,6 +688,52 @@ final class MdixDatabase implements \Stringable
         } catch (\Throwable $e) {
             return MdixResult::fromThrowable($e);
         }
+    }
+
+    // ── Query ────────────────────────────────────────────────────────────────
+
+    /**
+     * Starts a chainable MdixQuery over the array (or single value) at $path.
+     * Equivalent to Rust's data.query(path).
+     *
+     *   $bossNames = $db->query('enemies')
+     *       ->where(fn($e) => ($e['aiType'] ?? null) === 'BOSS')
+     *       ->select(fn($e) => $e['name']);
+     *
+     * @throws MdixError if $path is not found.
+     */
+    public function query(string $path): MdixQuery
+    {
+        $json  = $this->getJson($path);
+        $value = \json_decode($json, associative: true, flags: \JSON_THROW_ON_ERROR);
+
+        return new MdixQuery(\is_array($value) && \array_is_list($value) ? $value : [$value]);
+    }
+
+    /**
+     * Starts a chainable MdixQuery over every value matching the
+     * whole-segment glob $pattern (e.g. "levels.*.enemies") — sibling
+     * paths sharing structure, gathered natively via
+     * DixData::select_many. Equivalent to Rust's data.query_many(pattern).
+     */
+    public function queryMany(string $pattern): MdixQuery
+    {
+        $this->assertOpen();
+        $this->assertPath($pattern);
+
+        $ffi = NativeLoader::get();
+        $ptr = $ffi->mdix_select_many_as_json($this->handle, $pattern);
+
+        if ($ptr === null) {
+            throw self::nativeError("queryMany('{$pattern}')");
+        }
+
+        $json = \FFI::string($ptr);
+        $ffi->mdix_free_string($ptr);
+
+        $value = \json_decode($json, associative: true, flags: \JSON_THROW_ON_ERROR);
+
+        return new MdixQuery(\is_array($value) ? $value : []);
     }
 
     // ── Export ────────────────────────────────────────────────────────────────
@@ -656,13 +847,25 @@ final class MdixDatabase implements \Stringable
     {
         $ffi = NativeLoader::get();
         $ptr = $ffi->mdix_get_last_error();
-        $msg = $ptr !== null ? \FFI::string($ptr) : 'unknown native error';
+        $msg = $ptr !== null ? $ptr : 'unknown native error';
         return MdixError::fromMessage("[mdix:{$context}] {$msg}");
     }
 
     private static function nativeErrorFromPtr(mixed $ptr, string $context): MdixError
     {
-        $msg = \FFI::string($ptr);
+        // FIX: every call site passes $err from $ffi->mdix_get_last_error()
+        // directly. mdix_get_last_error() returns `const char*`, and PHP's
+        // FFI auto-converts a *const* char* return value straight to a
+        // native PHP string (or null) at the call boundary -- unlike a
+        // plain (non-const) char* return, which stays a FFI\CData object
+        // requiring an explicit FFI::string() to read. Calling FFI::string()
+        // on the already-a-string result threw "must be of type FFI\CData,
+        // string given" on every single getInt/getLong/getFloat/getDouble/
+        // getBool native-error path -- meaning any real native error there
+        // crashed with an unrelated TypeError instead of raising a useful
+        // MdixError. $ptr is normalized here so this helper still works
+        // correctly if ever called with a genuine CData in the future.
+        $msg = $ptr instanceof \FFI\CData ? \FFI::string($ptr) : (string) $ptr;
         return MdixError::fromMessage("[mdix:{$context}] {$msg}");
     }
 }

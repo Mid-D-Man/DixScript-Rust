@@ -153,10 +153,16 @@ final class MdixResult
             }
 
             return $next;
-        } catch (self $e) {
-            // Should not happen but guard anyway
-            return self::fromThrowable($e);
         } catch (\Throwable $e) {
+            // FIX: this used to also have a `catch (self $e)` branch ahead
+            // of this one, presumably meant to special-case the
+            // \LogicException thrown just above — `self` is not a legal
+            // catch type in PHP (a fatal parse error the moment this file
+            // is loaded, i.e. the first time anything calls a try*()
+            // method anywhere in this library) and MdixResult isn't
+            // \Throwable in the first place, so that branch could never
+            // have been reached even with valid syntax. This single
+            // \Throwable catch already covers the LogicException case.
             return self::fromThrowable($e);
         }
     }

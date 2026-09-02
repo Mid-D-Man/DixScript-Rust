@@ -1,0 +1,158 @@
+name: Publish mdix-php (Packagist)
+
+# Manual only (Actions tab -> Run workflow) — requires typing "publish" in
+# the confirmation input, same gating a-publish-dixscript-crate.yml uses for
+# crates.io, mdix-cli-publish.yml uses for crates.io+GHCR,
+# mdix-python-pypi-publish.yml uses for PyPI, wasm-npm-publish.yml uses for
+# npm, mdix-core-cs-nuget-publish.yml uses for NuGet, and
+# mdix-java-maven-publish.yml uses for Maven Central.
+#
+# ── Packagist is not like the others ─────────────────────────────────────
+# There's no artifact to build or upload here at all — Composer packages
+# ARE git repositories; Packagist just reads composer.json + git tags
+# straight from GitHub. "Publish" means: tag a version, create a GitHub
+# Release for it, and (if the Packagist package isn't wired to the GitHub
+# App / webhook for auto-updates yet, or you want the update to land
+# immediately rather than waiting on the webhook) explicitly ping
+# Packagist's update-package API. No build step, no signing, no "trusted
+# publishing" equivalent applies — there's nothing to authenticate an
+# upload for.
+#
+# One-time setup, not part of this workflow:
+#   1. Submit https://github.com/Mid-D-Man/DixScript-Rust once at
+#      https://packagist.org/packages/submit (package name comes from
+#      mdix-php/composer.json: "midmanstudio/mdix") if it isn't listed yet.
+#   2. Either connect the official Packagist GitHub App to this repo
+#      (Packagist auto-updates on every push after that, no secrets
+#      needed), or generate a Packagist API token (packagist.org -> Profile
+#      -> Show API Token) and store it as the PACKAGIST_USERNAME /
+#      PACKAGIST_API_TOKEN repo secrets so this workflow's explicit
+#      update-package ping (below) works too.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to tag, e.g. 1.1.0 (no leading "v" — the tag becomes mdix-php-v<version>). Composer/Packagist versions come from git tags, not from any field in composer.json.'
+        required: true
+      confirm:
+        description: 'Type "publish" to confirm.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  confirm-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm manual trigger
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "publish" ]; then
+            echo "Confirmation text did not match 'publish' — aborting."
+            exit 1
+          fi
+          if ! [[ "${{ github.event.inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "version must look like 1.1.0 or 1.1.0-beta.1 — got '${{ github.event.inputs.version }}'"
+            exit 1
+          fi
+
+  # ── Run the full test suite one more time as a release gate ────────────
+  # Same steps php-ci.yml uses (build mdix-ffi, stage it into mdix-php/lib/,
+  # composer install, phpunit) — a version only gets tagged if this passes.
+  test:
+    needs: confirm-trigger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-php-publish-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-php-publish-
+
+      - name: Build mdix-ffi (generates libmdix_ffi.so)
+        run: cargo build -p mdix-ffi --release
+
+      - name: Stage native lib in mdix-php/lib/
+        run: |
+          mkdir -p mdix-php/lib
+          cp target/release/libmdix_ffi.so mdix-php/lib/libmdix_ffi.so
+
+      - name: Setup PHP 8.1
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: ffi
+          ini-values: ffi.enable=true
+          coverage: none
+
+      - name: Validate composer.json
+        working-directory: mdix-php
+        run: composer validate --strict
+
+      - name: Install Composer dependencies
+        working-directory: mdix-php
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run PHPUnit tests
+        working-directory: mdix-php
+        env:
+          MDIX_LIB_PATH: ${{ github.workspace }}/mdix-php/lib/libmdix_ffi.so
+        run: php vendor/bin/phpunit --testdox
+
+  # ── Tag, release, and (optionally) notify Packagist directly ───────────
+  publish:
+    needs: [confirm-trigger, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create and push tag
+        run: |
+          TAG="mdix-php-v${{ github.event.inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "mdix-php v${{ github.event.inputs.version }}"
+          git push origin "$TAG"
+          echo "TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: mdix-php v${{ github.event.inputs.version }}
+          body: |
+            Automated release of **mdix-php** v${{ github.event.inputs.version }}.
+
+            ```bash
+            composer require midmanstudio/mdix:^${{ github.event.inputs.version }}
+            ```
+
+            If Packagist doesn't pick this up within a few minutes (the
+            GitHub webhook usually fires immediately, but isn't guaranteed),
+            trigger a manual update at
+            https://packagist.org/packages/midmanstudio/mdix.
+
+      # Optional immediate sync — safe to leave the secrets unset if the
+      # Packagist GitHub App is already connected to this repo; this step
+      # is skipped entirely when they're absent rather than failing the
+      # release.
+      - name: Notify Packagist
+        if: ${{ env.PACKAGIST_USERNAME != '' && env.PACKAGIST_API_TOKEN != '' }}
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
+        run: |
+          curl -sSf -XPOST -H 'content-type:application/json' \
+            "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_API_TOKEN}" \
+            -d '{"repository":{"url":"https://github.com/Mid-D-Man/DixScript-Rust"}}'

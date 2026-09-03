@@ -16,11 +16,11 @@
 )
 
 @DATA(
-  database_name = "Periodic Table Database - 26 Elements (Historic Alchemical Set + Periodic Fill-In Batch 1)",
-  database_version = "1.2.0",
-  last_updated = 2026-09-02T00:00:00Z,
+  database_name = "Periodic Table Database - 30 Elements (Historic Alchemical Set + Periodic Fill-In Batches 1-2)",
+  database_version = "1.3.0",
+  last_updated = 2026-09-03T00:00:00Z,
   format_type = "DixScript Physics Simulation Ready",
-  total_elements = 26,
+  total_elements = 30,
   properties_per_element = 126,
   simulation_ready = true,
   speed_of_light_m_s = 299792458.0,
@@ -1203,6 +1203,297 @@
   elements.sulfur.physics_calculated:
     reactivity_index = physics.calculateReactivityIndex(999.6, 200.41, 2.58)
 
+
+  // ============================================================
+  // ELEMENT: Chlorine (Cl, Z=17)
+  // Reference form: solid orthorhombic Cl2, layered molecular crystal (lattice constants at the triple point). Real gas-phase LJ (Poling et al. 2001), not UFF -- see element_data.rs module docs.
+  // Completes the gameplay doc's procedural-root-table naming set alongside K/Ca below.
+  // ============================================================
+
+  elements.chlorine.identity:
+    core = builders.createIdentity("Chlorine", "Cl", 17, 35.45, enums.ElementGroup.HALOGEN, 3, enums.Block.P_BLOCK, enums.ElementGroup.HALOGEN, enums.Phase.GAS),
+    cas_registry = "7782-50-5"
+
+  elements.chlorine.nuclear:
+    properties = builders.createNuclearCore(17, 18, 1.5, 0.821874, -0.0817)
+
+  elements.chlorine.isotopes::
+    builders.createIsotope(35, 75.77, 0.0, enums.DecayMode.STABLE, 0.0, 44.1),
+    builders.createIsotope(37, 24.23, 0.0, enums.DecayMode.STABLE, 0.0, 0.433)
+
+  elements.chlorine.electronic:
+    configuration = builders.createElectronicConfig("[Ne] 3s2 3p5", 7, 348.6, 12.968, 4.6),
+    quantum = builders.createQuantumNumbers(3, 1, -1, 0.5),
+    electronegativity = builders.createElectronegativity(3.16, 2.87, 2.83, 3.48, 2.87)
+
+  elements.chlorine.ionization_energies_kj_mol:: 1251.2, 2298.0, 3822.0
+
+  elements.chlorine.oxidation_states:: -1
+
+  elements.chlorine.geometry:
+    radii = builders.createRadii(79.0, 102.0, 175.0),
+    molar_volume_cm3 = 22.69
+
+  elements.chlorine.ionic_radii::
+    builders.createIonicRadius(-1, 181.0, 6)
+
+  elements.chlorine.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.ORTHORHOMBIC, 6.308, 4.5583, 8.1549, 90.0, 90.0, 90.0),
+    space_group = "Cmca",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.chlorine.thermodynamics:
+    phases = builders.createPhasePoints(171.6, 239.11, 172.22, 1392.0, 416.9, 7991000.0),
+    thermal = builders.createThermalProps(6.406, 20.41, 478.829, 0.0089, 0.0, 115.0)
+
+  elements.chlorine.mechanical:
+    bulk = builders.createMechanicalProps(0.0032, 0.0, 0.0, 0.0, 0.0, 0.0, 206.0)
+
+  elements.chlorine.electrical:
+    props = builders.createElectricalProps(0.0, 10000000000.0, 0.0),
+    type = "insulator (gas)"
+
+  elements.chlorine.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -3.66e-09, 0.0)
+
+  elements.chlorine.optical:
+    refractive_index = 1.000773,
+    color = "pale yellow-green gas"
+
+  elements.chlorine.interaction:
+    lennard_jones = builders.createLennardJones(316.0, 4.217),
+    polarizability_angstrom3 = 2.18,
+    polarizability_tensor = builders.createPolarizabilityTensor(2.18, 0.0, 0.0, 0.0, 2.18, 0.0, 0.0, 0.0, 2.18),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.6)
+
+  elements.chlorine.abundance:
+    distribution = builders.createAbundance(145.0, 8.3, 19400.0, 1500.0)
+
+  elements.chlorine.discovery:
+    info = builders.createDiscovery(1774, "Carl Wilhelm Scheele", "Sweden", "Greek chloros (pale green)")
+
+  elements.chlorine.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(1251.2, 348.6, 3.16)
+
+
+  // ============================================================
+  // ELEMENT: Argon (Ar, Z=18)
+  // Noble gas -- no stable ion, ionic_radii entry below is a (0,0,0) placeholder, not a real charge state. Real gas-phase LJ (Poling et al. 2001), not UFF -- UFF.csv DOES carry an Ar row (3.446 A / 93.10 K), close to this real value by coincidence, but the real value took priority per this session's rule regardless.
+  // Electronegativity kept at 0 across all 5 scales for noble-gas-family consistency with He/Ne above, even though real Allred-Rochow (~3.20) and Mulliken-Jaffe (~3.19) values for Ar do exist in the literature (WebElements) -- a deliberate consistency call, not a data gap; flagged here in case a future pass wants to reconsider the noble-gas convention across the board.
+  // ============================================================
+
+  elements.argon.identity:
+    core = builders.createIdentity("Argon", "Ar", 18, 39.95, enums.ElementGroup.NOBLE_GAS, 3, enums.Block.P_BLOCK, enums.ElementGroup.NOBLE_GAS, enums.Phase.GAS),
+    cas_registry = "7440-37-1"
+
+  elements.argon.nuclear:
+    properties = builders.createNuclearCore(18, 22, 0.0, 0.0, 0.0)
+
+  elements.argon.isotopes::
+    builders.createIsotope(40, 99.6, 0.0, enums.DecayMode.STABLE, 0.0, 0.66),
+    builders.createIsotope(36, 0.334, 0.0, enums.DecayMode.STABLE, 0.0, 5.2),
+    builders.createIsotope(38, 0.063, 0.0, enums.DecayMode.STABLE, 0.0, 0.8)
+
+  elements.argon.electronic:
+    configuration = builders.createElectronicConfig("[Ne] 3s2 3p6", 8, 0.0, 15.76, 0.0),
+    quantum = builders.createQuantumNumbers(3, 1, 0, 0.5),
+    electronegativity = builders.createElectronegativity(0.0, 0.0, 0.0, 0.0, 0.0)
+
+  elements.argon.ionization_energies_kj_mol:: 1520.6, 2665.8, 3931.0
+
+  elements.argon.oxidation_states:: 0
+
+  elements.argon.geometry:
+    radii = builders.createRadii(71.0, 106.0, 188.0),
+    molar_volume_cm3 = 28.63
+
+  elements.argon.ionic_radii::
+    builders.createIonicRadius(0, 0.0, 0)
+
+  elements.argon.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 5.4691, 5.4691, 5.4691, 90.0, 90.0, 90.0),
+    space_group = "Fm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.argon.thermodynamics:
+    phases = builders.createPhasePoints(83.81, 87.302, 83.8058, 68890.0, 150.687, 4863000.0),
+    thermal = builders.createThermalProps(1.18, 6.53, 521.902, 0.01772, 0.0, 92.0)
+
+  elements.argon.mechanical:
+    bulk = builders.createMechanicalProps(0.001784, 0.0, 0.0, 0.0, 0.0, 0.0, 323.0)
+
+  elements.argon.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0),
+    type = "insulator (gas)"
+
+  elements.argon.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -8.75e-10, 0.0)
+
+  elements.argon.optical:
+    refractive_index = 1.000281,
+    color = "colorless gas (lilac/violet glow when electrically excited)"
+
+  elements.argon.interaction:
+    lennard_jones = builders.createLennardJones(93.3, 3.542),
+    polarizability_angstrom3 = 1.641,
+    polarizability_tensor = builders.createPolarizabilityTensor(1.641, 0.0, 0.0, 0.0, 1.641, 0.0, 0.0, 0.0, 1.641),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0)
+
+  elements.argon.abundance:
+    distribution = builders.createAbundance(1.2, 5500.0, 0.45, 0.0)
+
+  elements.argon.discovery:
+    info = builders.createDiscovery(1894, "Lord Rayleigh and William Ramsay", "England", "Greek argon (lazy/inactive)")
+
+  elements.argon.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(1520.6, 0.0, 0.0)
+
+
+  // ============================================================
+  // ELEMENT: Potassium (K, Z=19)
+  // UFF LJ -- see element_data.rs module docs. K-40 included as a trace natural radioisotope (same treatment as H-3/F-18) -- critically it's the basis of potassium-argon dating, not just a completeness footnote.
+  // Completes the gameplay doc's procedural-root-table naming set alongside Cl above and Ca below.
+  // ============================================================
+
+  elements.potassium.identity:
+    core = builders.createIdentity("Potassium", "K", 19, 39.098, enums.ElementGroup.ALKALI_METAL, 4, enums.Block.S_BLOCK, enums.ElementGroup.ALKALI_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-09-7"
+
+  elements.potassium.nuclear:
+    properties = builders.createNuclearCore(19, 20, 1.5, 0.39146, 0.0585)
+
+  elements.potassium.isotopes::
+    builders.createIsotope(39, 93.258, 0.0, enums.DecayMode.STABLE, 0.0, 2.1),
+    builders.createIsotope(40, 0.012, 3.938e+16, enums.DecayMode.BETA_MINUS, 1.31, 71.0),
+    builders.createIsotope(41, 6.73, 0.0, enums.DecayMode.STABLE, 0.0, 1.46)
+
+  elements.potassium.electronic:
+    configuration = builders.createElectronicConfig("[Ar] 4s1", 1, 48.4, 4.341, 2.29),
+    quantum = builders.createQuantumNumbers(4, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(0.82, 0.75, 0.91, 0.45, 0.73)
+
+  elements.potassium.ionization_energies_kj_mol:: 418.8, 3052.0, 4420.0
+
+  elements.potassium.oxidation_states:: 1
+
+  elements.potassium.geometry:
+    radii = builders.createRadii(227.0, 203.0, 275.0),
+    molar_volume_cm3 = 45.94
+
+  elements.potassium.ionic_radii::
+    builders.createIonicRadius(1, 138.0, 6)
+
+  elements.potassium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.BCC, 5.3269, 5.3269, 5.3269, 90.0, 90.0, 90.0),
+    space_group = "Im-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.potassium.thermodynamics:
+    phases = builders.createPhasePoints(336.7, 1030.793, 336.5, 0.0, 2223.0, 16000000.0),
+    thermal = builders.createThermalProps(2.33, 76.9, 757.072, 102.5, 7.737e-05, 91.0)
+
+  elements.potassium.mechanical:
+    bulk = builders.createMechanicalProps(0.859, 3.53, 1.3, 3.1, 0.35, 0.4, 2000.0)
+
+  elements.potassium.electrical:
+    props = builders.createElectricalProps(13890000.0, 7.2e-08, 0.0),
+    type = "conductor (metal)"
+
+  elements.potassium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 4.57e-07, 0.0)
+
+  elements.potassium.optical:
+    refractive_index = 0.03,
+    color = "silvery white"
+
+  elements.potassium.interaction:
+    lennard_jones = builders.createLennardJones(17.613, 3.396),
+    polarizability_angstrom3 = 43.4,
+    polarizability_tensor = builders.createPolarizabilityTensor(43.4, 0.0, 0.0, 0.0, 43.4, 0.0, 0.0, 0.0, 43.4),
+    surface = builders.createSurfaceProps(0.145, 0.0, 2.29)
+
+  elements.potassium.abundance:
+    distribution = builders.createAbundance(20900.0, 3.7, 399.0, 2000.0)
+
+  elements.potassium.discovery:
+    info = builders.createDiscovery(1807, "Humphry Davy", "England", "English potash / New Latin kalium")
+
+  elements.potassium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(418.8, 48.4, 0.82)
+
+
+  // ============================================================
+  // ELEMENT: Calcium (Ca, Z=20)
+  // UFF LJ -- see element_data.rs module docs. EA is a small measured POSITIVE value (2.37 kJ/mol), unlike Be/Mg/Zn/Hg's cleaner 0.0-unbound treatment for the same filled-4s2 pattern -- a real, if weak, bound state, not the same physical situation, so not force-fit to match those.
+  // Completes the gameplay doc's procedural-root-table naming set alongside Cl/K above; also isolates from CaF2/CaCO3 for future compound-name work.
+  // critical_point is a low-confidence extrapolated estimate (Ca's real critical point is not well established experimentally), flagged in-line.
+  // ============================================================
+
+  elements.calcium.identity:
+    core = builders.createIdentity("Calcium", "Ca", 20, 40.078, enums.ElementGroup.ALKALINE_EARTH, 4, enums.Block.S_BLOCK, enums.ElementGroup.ALKALINE_EARTH, enums.Phase.SOLID),
+    cas_registry = "7440-70-2"
+
+  elements.calcium.nuclear:
+    properties = builders.createNuclearCore(20, 20, 0.0, 0.0, 0.0)
+
+  elements.calcium.isotopes::
+    builders.createIsotope(40, 96.94, 0.0, enums.DecayMode.STABLE, 0.0, 0.43),
+    builders.createIsotope(44, 2.09, 0.0, enums.DecayMode.STABLE, 0.0, 0.88),
+    builders.createIsotope(48, 0.187, 0.0, enums.DecayMode.STABLE, 0.0, 1.09)
+
+  elements.calcium.electronic:
+    configuration = builders.createElectronicConfig("[Ar] 4s2", 2, 2.37, 6.113, 2.87),
+    quantum = builders.createQuantumNumbers(4, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(1.0, 1.03, 1.04, 0.95, 1.03)
+
+  elements.calcium.ionization_energies_kj_mol:: 589.8, 1145.4, 4912.4
+
+  elements.calcium.oxidation_states:: 2
+
+  elements.calcium.geometry:
+    radii = builders.createRadii(197.0, 176.0, 231.0),
+    molar_volume_cm3 = 26.26
+
+  elements.calcium.ionic_radii::
+    builders.createIonicRadius(2, 100.0, 6)
+
+  elements.calcium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 5.588, 5.588, 5.588, 90.0, 90.0, 90.0),
+    space_group = "Fm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.calcium.thermodynamics:
+    phases = builders.createPhasePoints(1115.0, 1757.0, 1115.0, 0.0, 3200.0, 100000000.0),
+    thermal = builders.createThermalProps(8.54, 154.7, 646.963, 201.0, 2.227e-05, 230.0)
+
+  elements.calcium.mechanical:
+    bulk = builders.createMechanicalProps(1.526, 20.0, 7.4, 17.0, 0.31, 1.75, 3810.0)
+
+  elements.calcium.electrical:
+    props = builders.createElectricalProps(29760000.0, 3.36e-08, 0.0),
+    type = "conductor (metal)"
+
+  elements.calcium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, 1.524e-06, 0.0)
+
+  elements.calcium.optical:
+    refractive_index = 0.6,
+    color = "dull gray, silvery with a pale yellow tint"
+
+  elements.calcium.interaction:
+    lennard_jones = builders.createLennardJones(119.766, 3.028),
+    polarizability_angstrom3 = 22.8,
+    polarizability_tensor = builders.createPolarizabilityTensor(22.8, 0.0, 0.0, 0.0, 22.8, 0.0, 0.0, 0.0, 22.8),
+    surface = builders.createSurfaceProps(0.49, 0.0, 2.87)
+
+  elements.calcium.abundance:
+    distribution = builders.createAbundance(41500.0, 490.0, 412.0, 14000.0)
+
+  elements.calcium.discovery:
+    info = builders.createDiscovery(1808, "Humphry Davy", "England", "Latin calx (lime)")
+
+  elements.calcium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(589.8, 2.37, 1.0)
 
   // ============================================================
   // ELEMENT: Iron (Fe, Z=26)

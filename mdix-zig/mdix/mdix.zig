@@ -582,8 +582,59 @@ pub const Builder = struct {
 
 pub const HotReload = @import("watch.zig").HotReload;
 
+// ── Typed convenience wrappers ─────────────────────────────────────────
+// HexColor/Blob/MdixRegex/MdixDate/MdixTimestamp + their get*() loaders,
+// and getEnumValue — see types.zig's file-level doc comment for the two
+// deliberate gaps versus mdix-odin/mdix/types.odin (no calendar-instant
+// conversion, no regex compile()).
+
+const types_mod = @import("types.zig");
+pub const HexColor = types_mod.HexColor;
+pub const parseHexColor = types_mod.parseHexColor;
+pub const getHexColor = types_mod.getHexColor;
+pub const Blob = types_mod.Blob;
+pub const getBlob = types_mod.getBlob;
+pub const MdixRegex = types_mod.MdixRegex;
+pub const getRegex = types_mod.getRegex;
+pub const MdixDate = types_mod.MdixDate;
+pub const parseMdixDate = types_mod.parseMdixDate;
+pub const getDate = types_mod.getDate;
+pub const MdixTimestamp = types_mod.MdixTimestamp;
+pub const parseMdixTimestamp = types_mod.parseMdixTimestamp;
+pub const getTimestamp = types_mod.getTimestamp;
+pub const getEnumValue = types_mod.getEnumValue;
+
+// ── Merge ───────────────────────────────────────────────────────────────
+
+const merge_mod = @import("merge.zig");
+pub const MergeStrategy = merge_mod.MergeStrategy;
+pub const ArrayMergeStrategy = merge_mod.ArrayMergeStrategy;
+pub const MergeConflict = merge_mod.MergeConflict;
+pub const MergeResult = merge_mod.MergeResult;
+pub const mergeSources = merge_mod.mergeSources;
+pub const mergeSourcesWeighted = merge_mod.mergeSourcesWeighted;
+pub const freeMergeConflicts = merge_mod.freeMergeConflicts;
+
+// ── Query ───────────────────────────────────────────────────────────────
+
+const query_mod = @import("query.zig");
+pub const Query = query_mod.Query;
+pub const GroupResult = query_mod.GroupResult;
+pub const freeGroups = query_mod.freeGroups;
+pub const queryLoad = query_mod.queryLoad;
+pub const queryMany = query_mod.queryMany;
+
+// ── Schema ──────────────────────────────────────────────────────────────
+
+const schema_mod = @import("schema.zig");
+pub const SchemaBuilder = schema_mod.SchemaBuilder;
+pub const ValidationError = schema_mod.ValidationError;
+pub const ValidationErrorKind = schema_mod.ValidationErrorKind;
+pub const ValidationReport = schema_mod.ValidationReport;
+pub const validationErrorToString = schema_mod.validationErrorToString;
+
 // ── Sanity tests ────────────────────────────────────────────────────────
-// Link-level coverage only — see mdix/tests/ (forthcoming) for the real
+// Link-level coverage only — see mdix/tests/ for the dedicated
 // behavioral suite, matching mdix-odin/mdix/tests/.
 
 test "Database.loadStr / getInt / getString / deinit round-trip" {
@@ -635,7 +686,7 @@ test "Builder set/get/toDatabase round-trip" {
 test "Database.getKeys / getAllKeys / freeKeys" {
     const allocator = std.testing.allocator;
     var db = try Database.loadStr(allocator,
-        \\@DATA( a = 1, b = 2, nested = @OBJECT( c = 3 ) )
+        \\@DATA( a = 1, b = 2, nested = { c = 3 } )
     );
     defer db.deinit();
 

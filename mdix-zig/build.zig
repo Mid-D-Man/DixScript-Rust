@@ -66,19 +66,39 @@ pub fn build(b: *std.Build) void {
     const mdix_tests = b.addTest(.{ .root_module = mdix_mod });
     const run_mdix_tests = b.addRunArtifact(mdix_tests);
 
-    // Separate named steps too (`test-ffi`, `test-mdix`), so CI can
-    // invoke and log-capture each suite independently for its report —
-    // `zig build test` alone interleaves both into one combined stream,
-    // which loses the per-suite split scripts/parse_zig_test_results.py
-    // wants (mirrors odin-ci.yml's per-package breakdown).
+    // Separate named steps too (`test-ffi`, `test-mdix`, `test-behavioral`),
+    // so CI can invoke and log-capture each suite independently for its
+    // report — `zig build test` alone interleaves all three into one
+    // combined stream, which loses the per-suite split
+    // scripts/parse_zig_test_results.py wants (mirrors odin-ci.yml's
+    // per-package breakdown).
     const test_ffi_step = b.step("test-ffi", "Run only the mdix_ffi test suite");
     test_ffi_step.dependOn(&run_ffi_tests.step);
-    const test_mdix_step = b.step("test-mdix", "Run only the mdix test suite");
+    const test_mdix_step = b.step("test-mdix", "Run only the mdix (inline) test suite");
     test_mdix_step.dependOn(&run_mdix_tests.step);
+
+    // mdix/tests/ — external-API behavioral suite, mirrors
+    // mdix-odin/mdix/tests/ (a separate test package there; here, a
+    // separate root file + test binary importing "mdix" like any other
+    // consumer would, rather than testing from inside mdix.zig itself).
+    const behavioral_tests_mod = b.createModule(.{
+        .root_source_file = b.path("mdix/tests/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "mdix", .module = mdix_mod },
+        },
+    });
+    linkMdixFfi(behavioral_tests_mod, mdix_lib_path);
+    const behavioral_tests = b.addTest(.{ .root_module = behavioral_tests_mod });
+    const run_behavioral_tests = b.addRunArtifact(behavioral_tests);
+    const test_behavioral_step = b.step("test-behavioral", "Run the mdix/tests/ external-API behavioral suite");
+    test_behavioral_step.dependOn(&run_behavioral_tests.step);
 
     const test_step = b.step("test", "Run the full mdix-zig test suite (needs libmdix_ffi — see -Dmdix-lib-path)");
     test_step.dependOn(&run_ffi_tests.step);
     test_step.dependOn(&run_mdix_tests.step);
+    test_step.dependOn(&run_behavioral_tests.step);
 
     // ── examples ─────────────────────────────────────────────────────────
     const hello_mod = b.createModule(.{

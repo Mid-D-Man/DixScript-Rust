@@ -48,8 +48,8 @@ MIXED_RE = re.compile(r"^(\d+) passed; (\d+) skipped; (\d+) failed\.$")
 
 # Suites this project currently defines a `zig build test-<key>` step
 # for — see mdix-zig/build.zig. Extend this alongside build.zig if a new
-# suite (merge/query/schema/types, once those land) gets its own step.
-SUITES = (("ffi", "mdix_ffi"), ("mdix", "mdix"))
+# suite gets its own step.
+SUITES = (("ffi", "mdix_ffi"), ("mdix", "mdix"), ("behavioral", "mdix_tests"))
 
 
 def parse_log(suite: str, logfile: str) -> None:

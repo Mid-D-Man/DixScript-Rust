@@ -10,8 +10,8 @@ wrappers.
 
 ## Status
 
-🚧 **In progress — core idiomatic layer landed, three modules still to
-come.** This is the newest wrapper in the ecosystem; it isn't in the
+🚧 **Code-complete, not yet published.** Every module `mdix-odin` has is
+now ported. This is the newest wrapper in the ecosystem; it isn't in the
 root README's publish table yet. Tracking against `mdix-odin` as the
 closest sibling (same "no built-in FFI convenience layer" situation
 Go/Python/C#/WASM don't have to deal with).
@@ -19,24 +19,26 @@ Go/Python/C#/WASM don't have to deal with).
 | Layer | Status |
 |---|---|
 | `mdix_ffi/mdix_ffi.zig` — raw `extern` bindings | ✅ Done — all 72 exported `mdix_*` symbols, verified 1:1 against `mdix-c/include/mdix.h` |
-| `build.zig` / `build.zig.zon` | ✅ Done — targets Zig 0.16 |
+| `build.zig` / `build.zig.zon` | ✅ Done — targets Zig 0.16, fingerprint filled in from a real `zig build` run (CI #1) |
 | `examples/hello.zig` | ✅ Done — raw-layer only (manual `mdix_free`/`mdix_free_string`) |
 | `mdix/mdix.zig` — `Database`, `Builder`, source-text utilities | ✅ Done — error-union getters (`!T`), full surface of `mdix-odin/mdix/mdix.odin` |
 | `mdix/watch.zig` — hot reload (`HotReload`, re-exported as `mdix.HotReload`) | ✅ Done — native `std.fs` stat polling, not the C `MdixWatcher` handle, same design choice as `watch.odin` |
+| `mdix/types.zig` — `HexColor`/`Blob`/`MdixRegex`/`MdixDate`/`MdixTimestamp` | ✅ Done — two deliberate gaps vs. Odin: no calendar-instant conversion, no regex `compile()` (see the file's doc comment) |
+| `mdix/merge.zig` — weighted AST merge | ✅ Done — `mergeSources`/`mergeSourcesWeighted`, JSON conflict-report decoding via `std.json` |
+| `mdix/schema.zig` — client-side schema validation | ✅ Done — `SchemaBuilder`, full report (doesn't stop at the first error) |
+| `mdix/query.zig` — `Query(T)` over JSON-decoded structs | ✅ Done — comptime-generic `Query(T)` / `GroupResult(K, T)`; `[]const u8` keys special-cased to `std.StringHashMap` for `distinct()`/`groupBy()` |
 | `examples/hello_mdix.zig` | ✅ Done — idiomatic-layer sibling to `hello.zig` |
-| CI (`zig-ci.yml`, `parse_zig_test_results.py`, `zig-test-template.html`) | ✅ Done — mirrors `odin-ci.yml`'s structure |
-| `mdix/types.zig` — `HexColor`/`Blob`/`MdixRegex`/`MdixDate`/`MdixTimestamp` | ⏳ Not started |
-| `mdix/merge.zig` — weighted AST merge | ⏳ Not started |
-| `mdix/query.zig` — `Query(T)` over JSON-decoded structs | ⏳ Not started |
-| `mdix/schema.zig` — client-side schema validation | ⏳ Not started |
-| `mdix/tests/` — dedicated behavioral suite (current coverage is link-level `test` blocks alongside the code) | ⏳ Not started |
+| `mdix/tests/` — dedicated external-API behavioral suite | ✅ Done — 7 files mirroring `mdix-odin/mdix/tests/`'s structure, `zig build test-behavioral` |
+| CI (`zig-ci.yml`, `parse_zig_test_results.py`, `zig-test-template.html`) | ✅ Done — mirrors `odin-ci.yml`'s structure, captures all three suites separately |
 
-**Not compile-verified.** No Zig toolchain is available in the
-environment this was authored in (see `mdix-c` execution-constraints
-notes) — every file here is hand-written against Zig 0.16's documented
-APIs and cross-checked against real-world 0.16 code where possible, but
-hasn't gone through an actual `zig build test`. Run it locally before
-relying on it; file/fix anything that doesn't compile as-is.
+**Compile status: unverified beyond CI run #1's `build.zig.zon`
+fingerprint error.** No Zig toolchain is available in the environment
+this was authored in (see `mdix-c` execution-constraints notes) — every
+file is hand-written against Zig 0.16's documented APIs, cross-checked
+against real 0.16 code and real DixScript `.mdix` fixtures in this repo
+where possible, but the bulk of it hasn't been through an actual
+`zig build test` yet. Run it locally / let the next CI run tell you what
+doesn't compile as-is.
 
 ---
 
@@ -47,23 +49,38 @@ mdix-zig/
 ├── build.zig
 ├── build.zig.zon
 ├── mdix_ffi/
-│   └── mdix_ffi.zig      # raw extern bindings (module "mdix_ffi")
-├── mdix/                 # idiomatic wrapper (module "mdix")
-│   ├── mdix.zig           # Database, Builder, source-text utilities
-│   └── watch.zig          # HotReload — re-exported as mdix.HotReload
+│   └── mdix_ffi.zig       # raw extern bindings (module "mdix_ffi")
+├── mdix/                  # idiomatic wrapper (module "mdix")
+│   ├── mdix.zig            # Database, Builder, source-text utilities; re-exports every sibling below
+│   ├── watch.zig            # HotReload
+│   ├── types.zig            # HexColor/Blob/MdixRegex/MdixDate/MdixTimestamp
+│   ├── merge.zig             # mergeSources / mergeSourcesWeighted
+│   ├── schema.zig             # SchemaBuilder / ValidationReport
+│   ├── query.zig               # Query(T) / GroupResult(K, T) / queryLoad / queryMany
+│   └── tests/                   # external-API behavioral suite (module "mdix" as any consumer would import it)
+│       ├── tests.zig              # aggregator — root of the test-behavioral binary
+│       ├── database_test.zig
+│       ├── builder_test.zig
+│       ├── merge_test.zig
+│       ├── query_test.zig
+│       ├── schema_test.zig
+│       ├── types_test.zig
+│       └── watch_test.zig
 └── examples/
-    ├── hello.zig          # raw-layer demo
-    └── hello_mdix.zig     # idiomatic-layer demo
+    ├── hello.zig           # raw-layer demo
+    └── hello_mdix.zig      # idiomatic-layer demo
 ```
 
 Mirrors `mdix-odin`'s two-package split — `mdix_ffi` (raw, hand-maintained
 against `mdix-ffi/src/lib.rs`) and `mdix` (idiomatic, built on top) — as
 two separate Zig modules rather than Odin packages. Within the `mdix`
-module, sibling files (`watch.zig`, and the forthcoming `merge.zig` /
-`query.zig` / `schema.zig` / `types.zig`) reach shared internals via
-`@import("mdix.zig")` and get re-exported at `mdix.zig`'s top level —
-the explicit-per-file equivalent of Odin's automatic flat per-directory
-package namespace.
+module, sibling files (`watch.zig`/`types.zig`/`merge.zig`/`schema.zig`/
+`query.zig`) reach shared internals via `@import("mdix.zig")` and get
+re-exported at `mdix.zig`'s top level — the explicit-per-file equivalent
+of Odin's automatic flat per-directory package namespace. `mdix/tests/`
+is its own thing: a separate test binary that imports "mdix" as a module
+(like any external consumer would), rather than reaching in via relative
+file imports the way the sibling files above do.
 
 ---
 
@@ -83,12 +100,13 @@ cargo build --release -p mdix-ffi
 holding the library you just built with `-Dmdix-lib-path`:
 
 ```bash
-zig build                    -Dmdix-lib-path=/path/to/DixScript-Rust/target/release
-zig build test                -Dmdix-lib-path=/path/to/target/release   # both suites
-zig build test-ffi             -Dmdix-lib-path=/path/to/target/release  # mdix_ffi only
-zig build test-mdix            -Dmdix-lib-path=/path/to/target/release  # mdix only
-zig build run-hello            -Dmdix-lib-path=/path/to/target/release  # raw-layer example
-zig build run-hello-mdix       -Dmdix-lib-path=/path/to/target/release  # idiomatic-layer example
+zig build                          -Dmdix-lib-path=/path/to/DixScript-Rust/target/release
+zig build test                      -Dmdix-lib-path=/path/to/target/release  # all three suites
+zig build test-ffi                   -Dmdix-lib-path=/path/to/target/release  # mdix_ffi only
+zig build test-mdix                   -Dmdix-lib-path=/path/to/target/release  # mdix inline tests only
+zig build test-behavioral              -Dmdix-lib-path=/path/to/target/release  # mdix/tests/ external-API suite only
+zig build run-hello                     -Dmdix-lib-path=/path/to/target/release  # raw-layer example
+zig build run-hello-mdix                 -Dmdix-lib-path=/path/to/target/release  # idiomatic-layer example
 ```
 
 On Linux/macOS this also sets an rpath on the produced binary, so it
@@ -148,9 +166,22 @@ convention (short path/key arguments use an internal stack buffer, no
 allocator needed to call in; arbitrary-length text and every owned
 return value take an explicit `std.mem.Allocator`).
 
-For hot-reloading a file-loaded `Database` in your own update loop, see
-`mdix.HotReload` (`mdix/watch.zig`) — deliberately not a background
-thread, same reasoning as `mdix-odin/mdix/watch.odin`.
+Beyond the core `Database`/`Builder` shown above:
+- **Hot reload** — `mdix.HotReload` (`mdix/watch.zig`), deliberately not
+  a background thread, same reasoning as `mdix-odin/mdix/watch.odin`.
+- **Typed convenience getters** — `mdix.getHexColor`/`getBlob`/
+  `getRegex`/`getDate`/`getTimestamp`/`getEnumValue` (`mdix/types.zig`)
+  for values whose canonical mdix-ffi representation is a plain string.
+- **Merging multiple sources** — `mdix.mergeSources`/
+  `mergeSourcesWeighted` (`mdix/merge.zig`) for AST-level (not JSON
+  round-trip) merges with a per-key conflict report.
+- **Schema validation** — `mdix.SchemaBuilder` (`mdix/schema.zig`) for
+  checking a loaded `Database` against a declared shape before you start
+  reading from it.
+- **Querying decoded arrays** — `mdix.queryLoad`/`queryMany` +
+  `mdix.Query(T)` (`mdix/query.zig`) for filter/sort/group/aggregate over
+  a JSON-decoded array — see that file's doc comment for the ownership
+  model (`std.json.Parsed([]T)`, not a `Query(T)`, is what you `deinit()`).
 
 ## Zig usage (raw layer)
 
@@ -186,24 +217,24 @@ pub fn main() !void {
 zig build test -Dmdix-lib-path=/path/to/target/release
 ```
 
-Two suites, matching `build.zig`'s two `addTest` targets (`zig build
-test` runs both; `test-ffi` / `test-mdix` run one at a time — see
-"Linking from Zig" above):
+Three suites, matching `build.zig`'s three `addTest` targets (`zig build
+test` runs all of them; `test-ffi` / `test-mdix` / `test-behavioral` run
+one at a time — see "Linking from Zig" above):
 
-- `mdix_ffi/mdix_ffi.zig` — three link-level smoke tests (version
-  string, load/valid/free round-trip, null-source failure path).
-- `mdix/mdix.zig` + `mdix/watch.zig` (pulled in transitively) — five
-  tests covering `Database`/`Builder` round-trips, a missing-path
-  failure, an invalid-source failure, key enumeration, and
-  `HotReload.check`'s reload-on-mtime-change behavior.
+- **`mdix_ffi`** (`mdix_ffi/mdix_ffi.zig`) — 3 link-level smoke tests.
+- **`mdix`** (`mdix/mdix.zig` + everything it re-exports, pulled in
+  transitively) — inline `test` blocks scattered through `mdix.zig`,
+  `watch.zig`, `types.zig`, `merge.zig`, `schema.zig`, `query.zig`;
+  exercises internals from inside their own file.
+- **`mdix_tests`** (`mdix/tests/`) — the dedicated external-API suite;
+  every test goes through `@import("mdix")`, the same surface an actual
+  consumer gets, complementing rather than duplicating the inline tests.
 
-Real dedicated behavioral coverage (`mdix/tests/`, matching
-`mdix-odin/mdix/tests/`'s separate-directory structure) is still
-pending — see the status table above. CI (`.github/workflows/zig-ci.yml`)
-runs both suites, parses the raw `zig test`-style output with
+CI (`.github/workflows/zig-ci.yml`) runs all three suites separately,
+parses each raw `zig test`-style output with
 `scripts/parse_zig_test_results.py` (a standalone script rather than the
 inline `python3 -&nbsp;<<&nbsp;PYEOF` block `odin-ci.yml`/`go-ci.yml`
-use, since this one covers two build stages), and publishes a report to
+use, since this covers multiple build stages), and publishes a report to
 `gh-pages` under `/zig/` using `.github/zig-test-template.html` — same
 pipeline shape as every other wrapper's CI, see `odin-ci.yml` for the
 closest reference.

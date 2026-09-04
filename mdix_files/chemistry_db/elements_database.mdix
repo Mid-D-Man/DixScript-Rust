@@ -16,11 +16,11 @@
 )
 
 @DATA(
-  database_name = "Periodic Table Database - 40 Elements (Historic Alchemical Set + Periodic Fill-In Batches 1-3)",
-  database_version = "1.4.0",
+  database_name = "Periodic Table Database - 50 Elements (Historic Alchemical Set + Periodic Fill-In Batches 1-4)",
+  database_version = "1.5.0",
   last_updated = 2026-09-03T00:00:00Z,
   format_type = "DixScript Physics Simulation Ready",
-  total_elements = 40,
+  total_elements = 50,
   properties_per_element = 126,
   simulation_ready = true,
   speed_of_light_m_s = 299792458.0,
@@ -2215,6 +2215,729 @@
 
   elements.selenium.physics_calculated:
     reactivity_index = physics.calculateReactivityIndex(941.0, 194.96, 2.55)
+
+
+  // ============================================================
+  // ELEMENT: Bromine (Br, Z=35)
+  // One of only two elements liquid at room temperature (with Hg). Real gas-phase LJ (Poling et al. 2001), not UFF -- see element_data.rs module docs. Crystal lattice describes solid Br2 at its triple point, same convention as Cl2/F2's solid forms above.
+  // First batch-4 element -- opens period 5's fill-in, following the same ascending-Z, real-spectroscopic-first, UFF-fallback rules as every prior batch.
+  // ============================================================
+
+  elements.bromine.identity:
+    core = builders.createIdentity("Bromine", "Br", 35, 79.904, enums.ElementGroup.HALOGEN, 4, enums.Block.P_BLOCK, enums.ElementGroup.HALOGEN, enums.Phase.LIQUID),
+    cas_registry = "7726-95-6"
+
+  elements.bromine.nuclear:
+    properties = builders.createNuclearCore(35, 44, 1.5, 2.10555, 0.313)
+
+  elements.bromine.isotopes::
+    builders.createIsotope(79, 50.69, 0.0, enums.DecayMode.STABLE, 0.0, 6.9),
+    builders.createIsotope(81, 49.31, 0.0, enums.DecayMode.STABLE, 0.0, 2.7)
+
+  elements.bromine.electronic:
+    configuration = builders.createElectronicConfig("[Ar] 3d10 4s2 4p5", 7, 324.6, 11.814, 4.8),
+    quantum = builders.createQuantumNumbers(4, 1, -1, 0.5),
+    electronegativity = builders.createElectronegativity(2.96, 2.74, 2.74, 3.36, 2.68)
+
+  elements.bromine.ionization_energies_kj_mol:: 1139.9, 2103.0, 3470.0
+
+  elements.bromine.oxidation_states:: -1
+
+  elements.bromine.geometry:
+    radii = builders.createRadii(120.0, 120.0, 185.0),
+    molar_volume_cm3 = 25.76
+
+  elements.bromine.ionic_radii::
+    builders.createIonicRadius(-1, 196.0, 6)
+
+  elements.bromine.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.ORTHORHOMBIC, 6.743, 4.6685, 8.7002, 90.0, 90.0, 90.0),
+    space_group = "Cmca",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.bromine.thermodynamics:
+    phases = builders.createPhasePoints(265.8, 332.0, 265.9, 5800.0, 588.0, 10340000.0),
+    thermal = builders.createThermalProps(10.571, 29.96, 473.631, 0.122, 0.0, 150.0)
+
+  elements.bromine.mechanical:
+    bulk = builders.createMechanicalProps(3.1028, 0.0, 0.0, 0.0, 0.0, 0.0, 206.0)
+
+  elements.bromine.electrical:
+    props = builders.createElectricalProps(0.0, 78000000000.0, 0.0),
+    type = "insulator (liquid)"
+
+  elements.bromine.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -2.191e-06, 0.0)
+
+  elements.bromine.optical:
+    refractive_index = 1.661,
+    color = "reddish-brown liquid"
+
+  elements.bromine.interaction:
+    lennard_jones = builders.createLennardJones(507.9, 4.296),
+    polarizability_angstrom3 = 3.05,
+    polarizability_tensor = builders.createPolarizabilityTensor(3.05, 0.0, 0.0, 0.0, 3.05, 0.0, 0.0, 0.0, 3.05),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.8)
+
+  elements.bromine.abundance:
+    distribution = builders.createAbundance(2.4, 0.7, 65.0, 2.9)
+
+  elements.bromine.discovery:
+    info = builders.createDiscovery(1825, "Antoine Jerome Balard and Carl Jacob Lowig", "France/Germany", "Greek bromos (stench)")
+
+  elements.bromine.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(1139.9, 324.6, 2.96)
+
+
+  // ============================================================
+  // ELEMENT: Krypton (Kr, Z=36)
+  // Noble gas -- no stable ion, ionic_radii is a (0,0,0) placeholder. Real gas-phase LJ (Poling et al. 2001) -- UFF.csv doesn't carry a Kr row, same situation as Ne. Electronegativity kept at 0 across all 5 scales for noble-gas-family consistency with He/Ne/Ar, same deliberate call flagged there.
+  // Kr-83 included as the NMR-active isotope (I=9/2), not just for abundance completeness.
+  // ============================================================
+
+  elements.krypton.identity:
+    core = builders.createIdentity("Krypton", "Kr", 36, 83.798, enums.ElementGroup.NOBLE_GAS, 4, enums.Block.P_BLOCK, enums.ElementGroup.NOBLE_GAS, enums.Phase.GAS),
+    cas_registry = "7439-90-9"
+
+  elements.krypton.nuclear:
+    properties = builders.createNuclearCore(36, 48, 0.0, 0.0, 0.0)
+
+  elements.krypton.isotopes::
+    builders.createIsotope(84, 57.0, 0.0, enums.DecayMode.STABLE, 0.0, 0.11),
+    builders.createIsotope(86, 17.3, 0.0, enums.DecayMode.STABLE, 0.0, 0.003),
+    builders.createIsotope(83, 11.5, 0.0, enums.DecayMode.STABLE, 0.0, 197.0)
+
+  elements.krypton.electronic:
+    configuration = builders.createElectronicConfig("[Ar] 3d10 4s2 4p6", 8, 0.0, 14.0, 0.0),
+    quantum = builders.createQuantumNumbers(4, 1, 0, 0.5),
+    electronegativity = builders.createElectronegativity(0.0, 0.0, 0.0, 0.0, 0.0)
+
+  elements.krypton.ionization_energies_kj_mol:: 1350.8, 2350.4, 3565.0
+
+  elements.krypton.oxidation_states:: 0
+
+  elements.krypton.geometry:
+    radii = builders.createRadii(88.0, 116.0, 202.0),
+    molar_volume_cm3 = 34.73
+
+  elements.krypton.ionic_radii::
+    builders.createIonicRadius(0, 0.0, 0)
+
+  elements.krypton.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 5.8357, 5.8357, 5.8357, 90.0, 90.0, 90.0),
+    space_group = "Fm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.krypton.thermodynamics:
+    phases = builders.createPhasePoints(115.78, 119.93, 115.775, 73530.0, 209.48, 5525000.0),
+    thermal = builders.createThermalProps(1.64, 9.08, 250.006, 0.00943, 0.0, 72.0)
+
+  elements.krypton.mechanical:
+    bulk = builders.createMechanicalProps(0.003749, 0.0, 0.0, 0.0, 0.0, 0.0, 221.0)
+
+  elements.krypton.electrical:
+    props = builders.createElectricalProps(0.0, 0.0, 0.0),
+    type = "insulator (gas)"
+
+  elements.krypton.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.DIAMAGNETIC, -1.289e-09, 0.0)
+
+  elements.krypton.optical:
+    refractive_index = 1.000427,
+    color = "colorless gas (whitish glow in an electric field)"
+
+  elements.krypton.interaction:
+    lennard_jones = builders.createLennardJones(178.9, 3.655),
+    polarizability_angstrom3 = 2.484,
+    polarizability_tensor = builders.createPolarizabilityTensor(2.484, 0.0, 0.0, 0.0, 2.484, 0.0, 0.0, 0.0, 2.484),
+    surface = builders.createSurfaceProps(0.0, 0.0, 0.0)
+
+  elements.krypton.abundance:
+    distribution = builders.createAbundance(0.0001, 2500.0, 0.00021, 0.0)
+
+  elements.krypton.discovery:
+    info = builders.createDiscovery(1898, "William Ramsay and Morris Travers", "England", "Greek kryptos (hidden)")
+
+  elements.krypton.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(1350.8, 0.0, 0.0)
+
+
+  // ============================================================
+  // ELEMENT: Rubidium (Rb, Z=37)
+  // UFF LJ. Rb-87 (27.83% natural abundance) is technically radioactive (t1/2=4.97e10y, over 3x the age of the universe) but treated as a natural stable-in-practice isotope, same convention as V-50/K-40/Ge-76/Zr-96 -- it's the basis of rubidium-strontium radiometric dating.
+  // Largest van der Waals radius of any element in this table so far (303 pm).
+  // ============================================================
+
+  elements.rubidium.identity:
+    core = builders.createIdentity("Rubidium", "Rb", 37, 85.4678, enums.ElementGroup.ALKALI_METAL, 5, enums.Block.S_BLOCK, enums.ElementGroup.ALKALI_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-17-7"
+
+  elements.rubidium.nuclear:
+    properties = builders.createNuclearCore(37, 48, 2.5, 1.3527, 0.276)
+
+  elements.rubidium.isotopes::
+    builders.createIsotope(85, 72.17, 0.0, enums.DecayMode.STABLE, 0.0, 0.48),
+    builders.createIsotope(87, 27.83, 1.568e+18, enums.DecayMode.BETA_MINUS, 0.283, 0.12)
+
+  elements.rubidium.electronic:
+    configuration = builders.createElectronicConfig("[Kr] 5s1", 1, 46.88, 4.177, 2.261),
+    quantum = builders.createQuantumNumbers(5, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(0.82, 0.71, 0.89, 0.31, 0.71)
+
+  elements.rubidium.ionization_energies_kj_mol:: 403.0, 2632.1, 3859.4
+
+  elements.rubidium.oxidation_states:: 1
+
+  elements.rubidium.geometry:
+    radii = builders.createRadii(235.0, 220.0, 303.0),
+    molar_volume_cm3 = 55.79
+
+  elements.rubidium.ionic_radii::
+    builders.createIonicRadius(1, 152.0, 6)
+
+  elements.rubidium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.BCC, 5.585, 5.585, 5.585, 90.0, 90.0, 90.0),
+    space_group = "Im-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.rubidium.thermodynamics:
+    phases = builders.createPhasePoints(312.45, 961.0, 312.41, 0.0, 2093.0, 16000000.0),
+    thermal = builders.createThermalProps(2.19, 69.0, 363.411, 58.2, 9e-05, 56.0)
+
+  elements.rubidium.mechanical:
+    bulk = builders.createMechanicalProps(1.532, 2.4, 0.9, 2.5, 0.35, 0.3, 1300.0)
+
+  elements.rubidium.electrical:
+    props = builders.createElectricalProps(7812500.0, 1.28e-07, 0.0),
+    type = "conductor (metal)"
+
+  elements.rubidium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 3.048e-07, 0.0)
+
+  elements.rubidium.optical:
+    refractive_index = 0.03,
+    color = "silvery white/grey"
+
+  elements.rubidium.interaction:
+    lennard_jones = builders.createLennardJones(20.12878801145489, 3.6651573264293558),
+    polarizability_angstrom3 = 47.3,
+    polarizability_tensor = builders.createPolarizabilityTensor(47.3, 0.0, 0.0, 0.0, 47.3, 0.0, 0.0, 0.0, 47.3),
+    surface = builders.createSurfaceProps(0.12, 0.0, 2.261)
+
+  elements.rubidium.abundance:
+    distribution = builders.createAbundance(90.0, 6.0, 120.0, 4.6)
+
+  elements.rubidium.discovery:
+    info = builders.createDiscovery(1861, "Robert Bunsen and Gustav Kirchhoff", "Germany", "Latin rubidus (deep red, from its spectral lines)")
+
+  elements.rubidium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(403.0, 46.88, 0.82)
+
+
+  // ============================================================
+  // ELEMENT: Strontium (Sr, Z=38)
+  // UFF LJ. magnetic.props.volume_susceptibility is negative (-2.71e-6) despite Wikipedia's own MagneticOrdering.PARAMAGNETIC label -- a real, sourced oddity, not a transcription error: solid Sr's core diamagnetism apparently outweighs its weak itinerant-electron paramagnetic contribution, and the source presents both values together without flagging a contradiction. Kept as-is rather than silently 'corrected' to match the expected sign.
+  // bulk_modulus_gpa, mohs_hardness, and speed_of_sound are estimates (not directly sourced this pass) -- flagged, following alkaline-earth-metal trend from Mg/Ca above.
+  // ============================================================
+
+  elements.strontium.identity:
+    core = builders.createIdentity("Strontium", "Sr", 38, 87.62, enums.ElementGroup.ALKALINE_EARTH, 5, enums.Block.S_BLOCK, enums.ElementGroup.ALKALINE_EARTH, enums.Phase.SOLID),
+    cas_registry = "7440-24-6"
+
+  elements.strontium.nuclear:
+    properties = builders.createNuclearCore(38, 50, 0.0, 0.0, 0.0)
+
+  elements.strontium.isotopes::
+    builders.createIsotope(88, 82.58, 0.0, enums.DecayMode.STABLE, 0.0, 0.058),
+    builders.createIsotope(86, 9.86, 0.0, enums.DecayMode.STABLE, 0.0, 1.04),
+    builders.createIsotope(87, 7.0, 0.0, enums.DecayMode.STABLE, 0.0, 16.0)
+
+  elements.strontium.electronic:
+    configuration = builders.createElectronicConfig("[Kr] 5s2", 2, 5.02, 5.695, 2.59),
+    quantum = builders.createQuantumNumbers(5, 0, 0, 0.5),
+    electronegativity = builders.createElectronegativity(0.95, 0.96, 0.99, 0.72, 0.96)
+
+  elements.strontium.ionization_energies_kj_mol:: 549.5, 1064.2, 4138.0
+
+  elements.strontium.oxidation_states:: 2
+
+  elements.strontium.geometry:
+    radii = builders.createRadii(215.0, 195.0, 249.0),
+    molar_volume_cm3 = 33.94
+
+  elements.strontium.ionic_radii::
+    builders.createIonicRadius(2, 118.0, 6)
+
+  elements.strontium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.FCC, 6.086, 6.086, 6.086, 90.0, 90.0, 90.0),
+    space_group = "Fm-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.strontium.thermodynamics:
+    phases = builders.createPhasePoints(1050.0, 1650.0, 1050.0, 0.0, 3135.0, 100000000.0),
+    thermal = builders.createThermalProps(7.43, 141.0, 301.301, 35.4, 2.255e-05, 147.0)
+
+  elements.strontium.mechanical:
+    bulk = builders.createMechanicalProps(2.582, 15.7, 6.03, 11.0, 0.28, 1.5, 2540.0)
+
+  elements.strontium.electrical:
+    props = builders.createElectricalProps(7576000.0, 1.32e-07, 0.0),
+    type = "conductor (metal)"
+
+  elements.strontium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, -2.71e-06, 0.0)
+
+  elements.strontium.optical:
+    refractive_index = 0.5,
+    color = "silvery white metallic, pale yellow tint"
+
+  elements.strontium.interaction:
+    lennard_jones = builders.createLennardJones(118.25662956729747, 3.2437622327489755),
+    polarizability_angstrom3 = 27.6,
+    polarizability_tensor = builders.createPolarizabilityTensor(27.6, 0.0, 0.0, 0.0, 27.6, 0.0, 0.0, 0.0, 27.6),
+    surface = builders.createSurfaceProps(0.42, 0.0, 2.59)
+
+  elements.strontium.abundance:
+    distribution = builders.createAbundance(333.0, 15.0, 7.9, 0.32)
+
+  elements.strontium.discovery:
+    info = builders.createDiscovery(1787, "William Cruickshank", "Scotland", "named after Strontian, Scotland")
+
+  elements.strontium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(549.5, 5.02, 0.95)
+
+
+  // ============================================================
+  // ELEMENT: Yttrium (Y, Z=39)
+  // UFF LJ. IE2/IE3 are estimates following the same-group Sc pattern -- not directly sourced this pass, flagged. vdW radius genuinely not commonly cited, same honesty call as Ti above.
+  // Opens period 5's d-block (Y-Ru this batch; the rest of period 5's transition-metal row continues in the next batch).
+  // ============================================================
+
+  elements.yttrium.identity:
+    core = builders.createIdentity("Yttrium", "Y", 39, 88.906, enums.ElementGroup.TRANSITION_METAL, 5, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-65-5"
+
+  elements.yttrium.nuclear:
+    properties = builders.createNuclearCore(39, 50, 0.5, -0.1374, 0.0)
+
+  elements.yttrium.isotopes::
+    builders.createIsotope(89, 100.0, 0.0, enums.DecayMode.STABLE, 0.0, 1.28)
+
+  elements.yttrium.electronic:
+    configuration = builders.createElectronicConfig("[Kr] 4d1 5s2", 3, 29.62, 6.217, 3.1),
+    quantum = builders.createQuantumNumbers(4, 2, -2, 0.5),
+    electronegativity = builders.createElectronegativity(1.22, 1.11, 1.11, 0.65, 1.12)
+
+  elements.yttrium.ionization_energies_kj_mol:: 600.0, 1180.0, 1980.0
+
+  elements.yttrium.oxidation_states:: 3
+
+  elements.yttrium.geometry:
+    radii = builders.createRadii(180.0, 190.0, 0.0),
+    molar_volume_cm3 = 19.88
+
+  elements.yttrium.ionic_radii::
+    builders.createIonicRadius(3, 90.0, 6)
+
+  elements.yttrium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 3.6483, 3.6483, 5.7317, 90.0, 90.0, 120.0),
+    space_group = "P63/mmc",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.yttrium.thermodynamics:
+    phases = builders.createPhasePoints(1799.0, 3609.0, 1799.0, 0.0, 6857.0, 100000000.0),
+    thermal = builders.createThermalProps(11.42, 363.0, 298.0, 17.2, 1.121e-05, 280.0)
+
+  elements.yttrium.mechanical:
+    bulk = builders.createMechanicalProps(4.472, 63.5, 25.6, 41.2, 0.243, 1.2, 3300.0)
+
+  elements.yttrium.electrical:
+    props = builders.createElectricalProps(1678000.0, 5.96e-07, 0.0),
+    type = "conductor (metal)"
+
+  elements.yttrium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 1.081e-07, 0.0)
+
+  elements.yttrium.optical:
+    refractive_index = 1.5,
+    color = "silvery metallic"
+
+  elements.yttrium.interaction:
+    lennard_jones = builders.createLennardJones(36.2318184206188, 2.980056212179435),
+    polarizability_angstrom3 = 22.7,
+    polarizability_tensor = builders.createPolarizabilityTensor(22.7, 0.0, 0.0, 0.0, 22.7, 0.0, 0.0, 0.0, 22.7),
+    surface = builders.createSurfaceProps(0.0, 0.0, 3.1)
+
+  elements.yttrium.abundance:
+    distribution = builders.createAbundance(33.0, 2.0, 1.3e-05, 0.0)
+
+  elements.yttrium.discovery:
+    info = builders.createDiscovery(1794, "Johan Gadolin", "Finland", "named after Ytterby, Sweden")
+
+  elements.yttrium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(600.0, 29.62, 1.22)
+
+
+  // ============================================================
+  // ELEMENT: Zirconium (Zr, Z=40)
+  // UFF LJ. vdW radius genuinely not commonly cited, same honesty call as Ti/Y above -- this is becoming a real pattern for heavier transition metals (vdW radii are mostly measured for elements that form molecular solids, not dense metallic ones).
+  // Zr-96 (natural, 2.8% abundance) is a double-beta-decay radioisotope with a half-life of 2.34e19 years -- same natural-trace-radioisotope category as Rb-87/V-50/Ge-76, not included in the isotopes list above (kept to the 3 most abundant per this table's convention) but worth naming.
+  // ============================================================
+
+  elements.zirconium.identity:
+    core = builders.createIdentity("Zirconium", "Zr", 40, 91.224, enums.ElementGroup.TRANSITION_METAL, 5, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-67-7"
+
+  elements.zirconium.nuclear:
+    properties = builders.createNuclearCore(40, 50, 0.0, 0.0, 0.0)
+
+  elements.zirconium.isotopes::
+    builders.createIsotope(90, 51.5, 0.0, enums.DecayMode.STABLE, 0.0, 0.011),
+    builders.createIsotope(94, 17.4, 0.0, enums.DecayMode.STABLE, 0.0, 0.049),
+    builders.createIsotope(91, 11.2, 0.0, enums.DecayMode.STABLE, 0.0, 1.17)
+
+  elements.zirconium.electronic:
+    configuration = builders.createElectronicConfig("[Kr] 4d2 5s2", 4, 41.1, 6.634, 4.05),
+    quantum = builders.createQuantumNumbers(4, 2, -1, 0.5),
+    electronegativity = builders.createElectronegativity(1.33, 1.32, 1.22, 0.9, 1.32)
+
+  elements.zirconium.ionization_energies_kj_mol:: 640.1, 1270.0, 2218.0
+
+  elements.zirconium.oxidation_states:: 2, 3, 4
+
+  elements.zirconium.geometry:
+    radii = builders.createRadii(160.0, 175.0, 0.0),
+    molar_volume_cm3 = 14.03
+
+  elements.zirconium.ionic_radii::
+    builders.createIonicRadius(4, 72.0, 6)
+
+  elements.zirconium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 3.2322, 3.2322, 5.1479, 90.0, 90.0, 120.0),
+    space_group = "P63/mmc",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.zirconium.thermodynamics:
+    phases = builders.createPhasePoints(2125.0, 4650.0, 2125.0, 0.0, 8835.0, 100000000.0),
+    thermal = builders.createThermalProps(14.0, 591.0, 277.997, 22.6, 5.69e-06, 291.0)
+
+  elements.zirconium.mechanical:
+    bulk = builders.createMechanicalProps(6.505, 88.0, 33.0, 91.1, 0.34, 5.0, 3800.0)
+
+  elements.zirconium.electrical:
+    props = builders.createElectricalProps(2375000.0, 4.21e-07, 0.0),
+    type = "conductor (metal)"
+
+  elements.zirconium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 1.2e-07, 0.0)
+
+  elements.zirconium.optical:
+    refractive_index = 1.5,
+    color = "silvery white"
+
+  elements.zirconium.interaction:
+    lennard_jones = builders.createLennardJones(34.72215931975969, 2.78316759547042),
+    polarizability_angstrom3 = 17.9,
+    polarizability_tensor = builders.createPolarizabilityTensor(17.9, 0.0, 0.0, 0.0, 17.9, 0.0, 0.0, 0.0, 17.9),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.05)
+
+  elements.zirconium.abundance:
+    distribution = builders.createAbundance(165.0, 11.0, 3e-05, 0.0)
+
+  elements.zirconium.discovery:
+    info = builders.createDiscovery(1789, "Martin Heinrich Klaproth", "Germany", "named after zircon / Persian zargun (gold-colored)")
+
+  elements.zirconium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(640.1, 41.1, 1.33)
+
+
+  // ============================================================
+  // ELEMENT: Niobium (Nb, Z=41)
+  // UFF LJ. IE2/IE3, heat_fusion, and heat_vaporization are estimates following the same-group/same-row Mo/V trend -- not directly sourced this pass, flagged. One of only three elemental Type-II superconductors (with V and Tc, both also in this table) -- Nb has the highest critical temperature of any elemental superconductor (9.3 K).
+  // vdW radius genuinely not commonly cited, same pattern as Ti/Y/Zr above.
+  // ============================================================
+
+  elements.niobium.identity:
+    core = builders.createIdentity("Niobium", "Nb", 41, 92.90638, enums.ElementGroup.TRANSITION_METAL, 5, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-03-1"
+
+  elements.niobium.nuclear:
+    properties = builders.createNuclearCore(41, 52, 4.5, 6.1705, -0.32)
+
+  elements.niobium.isotopes::
+    builders.createIsotope(93, 100.0, 0.0, enums.DecayMode.STABLE, 0.0, 1.15)
+
+  elements.niobium.electronic:
+    configuration = builders.createElectronicConfig("[Kr] 4d4 5s1", 5, 86.16, 6.759, 4.3),
+    quantum = builders.createQuantumNumbers(4, 2, 0, 0.5),
+    electronegativity = builders.createElectronegativity(1.6, 1.41, 1.23, 1.0, 1.41)
+
+  elements.niobium.ionization_energies_kj_mol:: 652.1, 1380.0, 2416.0
+
+  elements.niobium.oxidation_states:: 3, 5
+
+  elements.niobium.geometry:
+    radii = builders.createRadii(146.0, 164.0, 0.0),
+    molar_volume_cm3 = 10.84
+
+  elements.niobium.ionic_radii::
+    builders.createIonicRadius(5, 64.0, 6)
+
+  elements.niobium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.BCC, 3.3005, 3.3005, 3.3005, 90.0, 90.0, 90.0),
+    space_group = "Im-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.niobium.thermodynamics:
+    phases = builders.createPhasePoints(2750.0, 5017.0, 2750.0, 0.0, 9532.0, 100000000.0),
+    thermal = builders.createThermalProps(30.0, 697.0, 265.0, 53.7, 7.07e-06, 275.0)
+
+  elements.niobium.mechanical:
+    bulk = builders.createMechanicalProps(8.57, 105.0, 38.0, 170.0, 0.4, 6.0, 3480.0)
+
+  elements.niobium.electrical:
+    props = builders.createElectricalProps(6579000.0, 1.52e-07, 0.0),
+    type = "conductor (metal), superconductor below 9.3 K"
+
+  elements.niobium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 2.6e-07, 0.0)
+
+  elements.niobium.optical:
+    refractive_index = 1.5,
+    color = "grey metallic, resembles steel or platinum when polished"
+
+  elements.niobium.interaction:
+    lennard_jones = builders.createLennardJones(29.68996231689596, 2.819694442914174),
+    polarizability_angstrom3 = 18.1,
+    polarizability_tensor = builders.createPolarizabilityTensor(18.1, 0.0, 0.0, 0.0, 18.1, 0.0, 0.0, 0.0, 18.1),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.3)
+
+  elements.niobium.abundance:
+    distribution = builders.createAbundance(20.0, 0.7, 1e-05, 0.0)
+
+  elements.niobium.discovery:
+    info = builders.createDiscovery(1801, "Charles Hatchett", "England", "named after Niobe, daughter of Tantalus in Greek myth")
+
+  elements.niobium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(652.1, 86.16, 1.6)
+
+
+  // ============================================================
+  // ELEMENT: Molybdenum (Mo, Z=42)
+  // UFF LJ. Essential dietary trace element (molybdenum-dependent enzymes, e.g. xanthine oxidase) -- notably enriched in seawater relative to crust abundance, an unusual pattern for a transition metal.
+  // Mo-100 (natural, 9.74% abundance) is a double-beta-decay radioisotope with the shortest known half-life for that decay mode (7.07e18 years) -- same natural-trace-radioisotope category as Zr-96/Rb-87 above.
+  // ============================================================
+
+  elements.molybdenum.identity:
+    core = builders.createIdentity("Molybdenum", "Mo", 42, 95.95, enums.ElementGroup.TRANSITION_METAL, 5, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7439-98-7"
+
+  elements.molybdenum.nuclear:
+    properties = builders.createNuclearCore(42, 56, 0.0, 0.0, 0.0)
+
+  elements.molybdenum.isotopes::
+    builders.createIsotope(98, 24.29, 0.0, enums.DecayMode.STABLE, 0.0, 0.13),
+    builders.createIsotope(96, 16.67, 0.0, enums.DecayMode.STABLE, 0.0, 0.5),
+    builders.createIsotope(95, 15.87, 0.0, enums.DecayMode.STABLE, 0.0, 13.4)
+
+  elements.molybdenum.electronic:
+    configuration = builders.createElectronicConfig("[Kr] 4d5 5s1", 6, 72.09, 7.092, 4.6),
+    quantum = builders.createQuantumNumbers(4, 2, 1, 0.5),
+    electronegativity = builders.createElectronegativity(2.16, 1.47, 1.3, 1.15, 1.47)
+
+  elements.molybdenum.ionization_energies_kj_mol:: 684.3, 1560.0, 2618.0
+
+  elements.molybdenum.oxidation_states:: 4, 6
+
+  elements.molybdenum.geometry:
+    radii = builders.createRadii(139.0, 154.0, 0.0),
+    molar_volume_cm3 = 9.39
+
+  elements.molybdenum.ionic_radii::
+    builders.createIonicRadius(4, 65.0, 6)
+
+  elements.molybdenum.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.BCC, 3.1471, 3.1471, 3.1471, 90.0, 90.0, 90.0),
+    space_group = "Im-3m",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.molybdenum.thermodynamics:
+    phases = builders.createPhasePoints(2896.0, 4912.0, 2896.0, 0.0, 9333.0, 100000000.0),
+    thermal = builders.createThermalProps(37.48, 598.0, 250.756, 138.0, 5.1e-06, 450.0)
+
+  elements.molybdenum.mechanical:
+    bulk = builders.createMechanicalProps(10.223, 329.0, 126.0, 230.0, 0.31, 5.5, 5400.0)
+
+  elements.molybdenum.electrical:
+    props = builders.createElectricalProps(18730000.0, 5.34e-08, 0.0),
+    type = "conductor (metal)"
+
+  elements.molybdenum.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 9.483e-06, 0.0)
+
+  elements.molybdenum.optical:
+    refractive_index = 3.5,
+    color = "gray metallic"
+
+  elements.molybdenum.interaction:
+    lennard_jones = builders.createLennardJones(28.180303216036847, 2.7190228877643157),
+    polarizability_angstrom3 = 12.8,
+    polarizability_tensor = builders.createPolarizabilityTensor(12.8, 0.0, 0.0, 0.0, 12.8, 0.0, 0.0, 0.0, 12.8),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.6)
+
+  elements.molybdenum.abundance:
+    distribution = builders.createAbundance(1.1, 0.5, 0.01, 0.0021)
+
+  elements.molybdenum.discovery:
+    info = builders.createDiscovery(1781, "Carl Wilhelm Scheele", "Sweden", "Greek molybdos (lead), ores were confused with lead ores")
+
+  elements.molybdenum.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(684.3, 72.09, 2.16)
+
+
+  // ============================================================
+  // ELEMENT: Technetium (Tc, Z=43)
+  // THE FIRST ELEMENT IN THIS TABLE WITH NO STABLE ISOTOPES AT ALL -- every prior element's isotopes:: list used enums.DecayMode.STABLE for at least one natural entry; Tc genuinely has none, so both entries below use BETA_MINUS instead. nuclear.properties uses Tc-99's real, well-characterized spin/moment (I=9/2, well-documented via NMR) rather than Tc-98's (the technically-longest-lived isotope, but far less studied) -- a deliberate substitution, flagged rather than silent. abundance is (0,0,0,0) throughout -- not a missing-data placeholder the way it would be for a normal element, but the real physical situation: Tc barely exists in nature (ultra-trace spontaneous-fission product only, ~2.5e-13 g per gram of pitchblende) and this database's abundance fields are about natural terrestrial/cosmic distribution, which for Tc is genuinely near-zero.
+  // Several fields (crystal lattice constants, mechanical moduli, thermal properties) are estimates interpolated between neighbors Mo/Ru rather than directly sourced -- flagged throughout, since bulk single-crystal data for a synthetic, intensely radioactive element is genuinely scarce in the literature, not just hard to search for. specific_heat_j_kgk uses a Dulong-Petit estimate (255) rather than one found source's figure (63 J/(kg*K)), which looked internally inconsistent against Tc's own atomic mass. Real, notable fact: Tc's spectral signature has been detected in the atmospheres of some red giant stars, since its longest natural half-life (millions of years) is short on stellar-nucleosynthesis timescales -- direct evidence of ongoing stellar element production.
+  // ============================================================
+
+  elements.technetium.identity:
+    core = builders.createIdentity("Technetium", "Tc", 43, 98.0, enums.ElementGroup.TRANSITION_METAL, 5, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-26-8"
+
+  elements.technetium.nuclear:
+    properties = builders.createNuclearCore(43, 56, 4.5, 5.6847, -0.129)
+
+  elements.technetium.isotopes::
+    builders.createIsotope(98, 0.0, 132500000000000.0, enums.DecayMode.BETA_MINUS, 0.4, 0.0),
+    builders.createIsotope(99, 0.0, 6661000000000.0, enums.DecayMode.BETA_MINUS, 0.2975, 20.0)
+
+  elements.technetium.electronic:
+    configuration = builders.createElectronicConfig("[Kr] 4d5 5s2", 7, 53.07, 7.282, 4.4),
+    quantum = builders.createQuantumNumbers(4, 2, 2, 0.5),
+    electronegativity = builders.createElectronegativity(1.9, 1.51, 1.36, 1.3, 1.51)
+
+  elements.technetium.ionization_energies_kj_mol:: 702.4, 1470.0, 2850.0
+
+  elements.technetium.oxidation_states:: 4, 7
+
+  elements.technetium.geometry:
+    radii = builders.createRadii(136.0, 147.0, 0.0),
+    molar_volume_cm3 = 8.52
+
+  elements.technetium.ionic_radii::
+    builders.createIonicRadius(4, 64.5, 6)
+
+  elements.technetium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 2.735, 2.735, 4.388, 90.0, 90.0, 120.0),
+    space_group = "P63/mmc",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.technetium.thermodynamics:
+    phases = builders.createPhasePoints(2430.0, 4898.0, 2430.0, 0.0, 9306.0, 100000000.0),
+    thermal = builders.createThermalProps(33.0, 585.0, 255.0, 51.0, 8e-06, 453.0)
+
+  elements.technetium.mechanical:
+    bulk = builders.createMechanicalProps(11.5, 120.0, 46.0, 130.0, 0.3, 6.0, 5000.0)
+
+  elements.technetium.electrical:
+    props = builders.createElectricalProps(5000000.0, 2e-07, 0.0),
+    type = "conductor (metal), superconductor below 11 K"
+
+  elements.technetium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 1e-07, 0.0)
+
+  elements.technetium.optical:
+    refractive_index = 1.5,
+    color = "silvery-gray"
+
+  elements.technetium.interaction:
+    lennard_jones = builders.createLennardJones(24.154545613745867, 2.6709143569847376),
+    polarizability_angstrom3 = 9.6,
+    polarizability_tensor = builders.createPolarizabilityTensor(9.6, 0.0, 0.0, 0.0, 9.6, 0.0, 0.0, 0.0, 9.6),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.4)
+
+  elements.technetium.abundance:
+    distribution = builders.createAbundance(0.0, 0.0, 0.0, 0.0)
+
+  elements.technetium.discovery:
+    info = builders.createDiscovery(1937, "Carlo Perrier and Emilio Segre", "Italy", "Greek technetos (artificial) -- the first artificial element ever produced")
+
+  elements.technetium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(702.4, 53.07, 1.9)
+
+
+  // ============================================================
+  // ELEMENT: Ruthenium (Ru, Z=44)
+  // UFF LJ. Rarest of the platinum-group metals in Earth's crust. Closes out this batch's period-5 d-block run (Y-Ru); the rest of period 5 (Rh, Pd, In, Sb already present via Ag/Sn/Sb/etc, remaining gaps continue next batch).
+  // vdW radius genuinely not commonly cited, same pattern as the rest of this batch's heavier transition metals.
+  // ============================================================
+
+  elements.ruthenium.identity:
+    core = builders.createIdentity("Ruthenium", "Ru", 44, 101.07, enums.ElementGroup.TRANSITION_METAL, 5, enums.Block.D_BLOCK, enums.ElementGroup.TRANSITION_METAL, enums.Phase.SOLID),
+    cas_registry = "7440-18-8"
+
+  elements.ruthenium.nuclear:
+    properties = builders.createNuclearCore(44, 58, 0.0, 0.0, 0.0)
+
+  elements.ruthenium.isotopes::
+    builders.createIsotope(102, 31.6, 0.0, enums.DecayMode.STABLE, 0.0, 1.44),
+    builders.createIsotope(104, 18.87, 0.0, enums.DecayMode.STABLE, 0.0, 0.4),
+    builders.createIsotope(101, 17.02, 0.0, enums.DecayMode.STABLE, 0.0, 3.3)
+
+  elements.ruthenium.electronic:
+    configuration = builders.createElectronicConfig("[Kr] 4d7 5s1", 8, 100.96, 7.361, 4.71),
+    quantum = builders.createQuantumNumbers(4, 2, -2, 0.5),
+    electronegativity = builders.createElectronegativity(2.2, 1.54, 1.42, 1.4, 1.54)
+
+  elements.ruthenium.ionization_energies_kj_mol:: 710.2, 1620.0, 2747.0
+
+  elements.ruthenium.oxidation_states:: 3, 4
+
+  elements.ruthenium.geometry:
+    radii = builders.createRadii(134.0, 146.0, 0.0),
+    molar_volume_cm3 = 8.17
+
+  elements.ruthenium.ionic_radii::
+    builders.createIonicRadius(3, 68.0, 6)
+
+  elements.ruthenium.crystal:
+    lattice = builders.createCrystalLattice(enums.LatticeType.HCP, 2.7058, 2.7058, 4.2816, 90.0, 90.0, 120.0),
+    space_group = "P63/mmc",
+    symmetry = builders.createMatrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+  elements.ruthenium.thermodynamics:
+    phases = builders.createPhasePoints(2607.0, 4423.0, 2607.0, 0.0, 8404.0, 100000000.0),
+    thermal = builders.createThermalProps(38.59, 619.0, 238.053, 120.0, 6.78e-06, 600.0)
+
+  elements.ruthenium.mechanical:
+    bulk = builders.createMechanicalProps(12.364, 447.0, 173.0, 220.0, 0.3, 6.5, 5970.0)
+
+  elements.ruthenium.electrical:
+    props = builders.createElectricalProps(14000000.0, 7.1e-08, 0.0),
+    type = "conductor (metal)"
+
+  elements.ruthenium.magnetic:
+    props = builders.createMagneticProps(enums.MagneticOrdering.PARAMAGNETIC, 4.771e-06, 0.0)
+
+  elements.ruthenium.optical:
+    refractive_index = 2.5,
+    color = "silvery white metallic"
+
+  elements.ruthenium.interaction:
+    lennard_jones = builders.createLennardJones(28.180303216036847, 2.6397329018498255),
+    polarizability_angstrom3 = 14.0,
+    polarizability_tensor = builders.createPolarizabilityTensor(14.0, 0.0, 0.0, 0.0, 14.0, 0.0, 0.0, 0.0, 14.0),
+    surface = builders.createSurfaceProps(0.0, 0.0, 4.71)
+
+  elements.ruthenium.abundance:
+    distribution = builders.createAbundance(0.001, 0.6, 5e-07, 0.0)
+
+  elements.ruthenium.discovery:
+    info = builders.createDiscovery(1844, "Karl Ernst Claus", "Russia", "Latin Ruthenia (Russia)")
+
+  elements.ruthenium.physics_calculated:
+    reactivity_index = physics.calculateReactivityIndex(710.2, 100.96, 2.2)
 
   // ============================================================
   // ELEMENT: Iron (Fe, Z=26)

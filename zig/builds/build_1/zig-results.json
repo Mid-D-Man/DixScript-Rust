@@ -1,0 +1,34 @@
+{
+  "build": "1",
+  "branch": "master",
+  "commit": "dee42b16",
+  "date": "",
+  "zig_version": "0.16.0",
+  "package": "mdix-zig",
+  "tests": {
+    "status": "failed",
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "duration_s": 0,
+    "failed_names": []
+  },
+  "suites": [
+    {
+      "name": "mdix_ffi",
+      "package": "mdix_ffi",
+      "passed": 0,
+      "failed": 0,
+      "duration_s": 0,
+      "tests": []
+    },
+    {
+      "name": "mdix",
+      "package": "mdix",
+      "passed": 0,
+      "failed": 0,
+      "duration_s": 0,
+      "tests": []
+    }
+  ]
+}

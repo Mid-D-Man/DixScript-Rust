@@ -7,7 +7,7 @@
 
 DixScript is a data interchange format with compile-time functions, built-in
 AES-256 encryption, and optional compression. This crate is the CLI toolchain:
-validate, compile, convert, inspect, and manage key files.
+validate, compile, convert, merge, audit, inspect, and manage key files.
 
 ## Installation
 
@@ -57,6 +57,8 @@ mdix format --check game.mdix
 | `compile` | Run the full DLM pipeline (compression + encryption) |
 | `decrypt` | Decrypt a `.mdix.enc` file |
 | `convert` | Convert between `.mdix`, JSON, and TOML |
+| `merge` | Merge two or more `.mdix`/JSON/TOML sources into one file |
+| `diff` | Preview merge conflicts without writing output |
 | `create` | Scaffold a new file from a built-in template |
 | `format` | Canonically format a file in-place |
 | `compact` | Minify or strip comments |
@@ -64,7 +66,11 @@ mdix format --check game.mdix
 | `key generate` | Generate a new `.mdix.key` file |
 | `key validate` | Validate a key file |
 | `key info` | Show key algorithm, length, and mode |
+| `audit info` | Summarize a `.mdix.au` audit trail file |
+| `audit view` | List recorded compilation entries from an audit file |
+| `audit archives` | List rotated/archived audit files next to one |
 | `config` | Manage CLI preferences |
+| `completions` | Generate a shell completion script (bash, zsh, fish, powershell, elvish) |
 | `debug-tokens` | Dump the token stream (development) |
 | `debug-ast` | Dump the parsed AST (development) |
 | `debug-symbols` | Dump the symbol table (development) |

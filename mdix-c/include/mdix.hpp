@@ -190,6 +190,27 @@ public:
         return Result<Database>::ok(Database{h});
     }
 
+    /** Loads encrypted data already in memory rather than from a file on disk — the C++
+     *  counterpart to mdix_load_encrypted_bytes(). At least one of key_file_content or
+     *  password is required (matching the C function's contract); pass std::nullopt for
+     *  whichever mode you aren't using. */
+    static Result<Database> load_encrypted_bytes(
+        const std::vector<uint8_t>& encrypted_bytes,
+        std::optional<std::string_view> key_file_content = std::nullopt,
+        std::optional<std::string_view> password = std::nullopt)
+    {
+        ::mdix_clear_error();
+        std::string kfc = key_file_content ? std::string(*key_file_content) : std::string{};
+        std::string pw  = password         ? std::string(*password)         : std::string{};
+        void* h = ::mdix_load_encrypted_bytes(
+            encrypted_bytes.data(),
+            static_cast<int32_t>(encrypted_bytes.size()),
+            key_file_content ? kfc.c_str() : nullptr,
+            password         ? pw.c_str()  : nullptr);
+        if (!h) return Result<Database>::err(last_error("mdix_load_encrypted_bytes failed"));
+        return Result<Database>::ok(Database{h});
+    }
+
     /** Wraps a raw handle produced elsewhere (merge_sources(), Watcher::check_and_reload(), ...)
      *  in an owning Database. Passing a handle not produced by this library, or one already
      *  owned elsewhere, is undefined behavior — same contract as every mdix_free() caller. */

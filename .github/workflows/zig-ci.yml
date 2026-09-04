@@ -1,0 +1,254 @@
+name: DixScript — Zig Package CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Force run regardless of commit message'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+
+  # ── Step 1: decide whether this workflow should run ──────────────────────────
+  parse-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether to run Zig CI
+        id: decide
+        run: |
+          RUN=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN=true
+          else
+            MSG="${{ github.event.head_commit.message }}"
+            echo "$MSG" | grep -qiE '\-\-mdix-zig' && RUN=true || true
+          fi
+          echo "should_run=$RUN" >> $GITHUB_OUTPUT
+          echo "Zig CI triggered: $RUN"
+
+  # ── Step 2: build Rust FFI, install Zig, run both test suites ────────────────
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: parse-trigger
+    if: needs.parse-trigger.outputs.should_run == 'true'
+    outputs:
+      zig_ver:          ${{ steps.zigver.outputs.ver }}
+      ffi_status:       ${{ steps.parse-ffi.outputs.ffi_status }}
+      ffi_total:        ${{ steps.parse-ffi.outputs.ffi_total }}
+      ffi_passed:       ${{ steps.parse-ffi.outputs.ffi_passed }}
+      ffi_failed:       ${{ steps.parse-ffi.outputs.ffi_failed }}
+      ffi_duration_s:   ${{ steps.parse-ffi.outputs.ffi_duration_s }}
+      ffi_failed_names: ${{ steps.parse-ffi.outputs.ffi_failed_names }}
+      mdix_status:       ${{ steps.parse-mdix.outputs.mdix_status }}
+      mdix_total:        ${{ steps.parse-mdix.outputs.mdix_total }}
+      mdix_passed:       ${{ steps.parse-mdix.outputs.mdix_passed }}
+      mdix_failed:       ${{ steps.parse-mdix.outputs.mdix_failed }}
+      mdix_duration_s:   ${{ steps.parse-mdix.outputs.mdix_duration_s }}
+      mdix_failed_names: ${{ steps.parse-mdix.outputs.mdix_failed_names }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Rust toolchain — builds mdix-ffi, same as every other wrapper's CI ────
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-zig-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-latest-cargo-zig-
+
+      - name: Build mdix-ffi (generates mdix_ffi.h + libmdix_ffi.so)
+        run: |
+          cargo build -p mdix-ffi --release
+          ls -lh target/release/libmdix_ffi.so
+
+      # ── Zig toolchain ───────────────────────────────────────────────────────
+      # Zig ships its own self-contained linker (no separate clang/lld
+      # install needed, unlike Odin's CI). Official tarballs live at
+      # ziglang.org, not GitHub Releases — pin an exact stable version
+      # rather than "latest" so an upstream release can't silently
+      # change this CI's behavior; bump deliberately when there's a
+      # reason to.
+      - name: Install Zig
+        env:
+          ZIG_VERSION: "0.16.0"
+        run: |
+          curl -sL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" -o zig.tar.xz
+          mkdir -p /opt/zig
+          tar xf zig.tar.xz -C /opt/zig --strip-components=1
+          echo "/opt/zig" >> $GITHUB_PATH
+
+      - name: zig version
+        id: zigver
+        run: echo "ver=$(zig version)" >> $GITHUB_OUTPUT
+
+      # ── Run tests — native lib found via -Dmdix-lib-path, not a
+      #    system-wide install, so this doesn't touch anything outside
+      #    the checkout ──────────────────────────────────────────────────
+      - name: zig build test-ffi
+        id: test-ffi
+        continue-on-error: true
+        run: |
+          cd mdix-zig
+          START=$(date +%s)
+          zig build test-ffi --summary all -Dmdix-lib-path="${GITHUB_WORKSPACE}/target/release" \
+            2>&1 | tee zig-ffi-output.txt
+          TEST_EXIT=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "FFI_EXIT=$TEST_EXIT"          >> $GITHUB_ENV
+          echo "FFI_DURATION_S=$((END - START))" >> $GITHUB_ENV
+          exit 0
+
+      - name: Parse mdix_ffi results
+        id: parse-ffi
+        if: always()
+        run: python3 scripts/parse_zig_test_results.py parse-log ffi mdix-zig/zig-ffi-output.txt
+
+      - name: zig build test-mdix
+        id: test-mdix
+        continue-on-error: true
+        run: |
+          cd mdix-zig
+          START=$(date +%s)
+          zig build test-mdix --summary all -Dmdix-lib-path="${GITHUB_WORKSPACE}/target/release" \
+            2>&1 | tee zig-mdix-output.txt
+          TEST_EXIT=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "MDIX_EXIT=$TEST_EXIT"          >> $GITHUB_ENV
+          echo "MDIX_DURATION_S=$((END - START))" >> $GITHUB_ENV
+          exit 0
+
+      - name: Parse mdix results
+        id: parse-mdix
+        if: always()
+        run: python3 scripts/parse_zig_test_results.py parse-log mdix mdix-zig/zig-mdix-output.txt
+
+      - name: Upload raw results + logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zig-test-output-${{ github.run_number }}
+          path: |
+            mdix-zig/zig-ffi-output.txt
+            mdix-zig/zig-mdix-output.txt
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ── Step 3: build the report page, deploy to gh-pages ─────────────────────────
+  collect-and-deploy:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test]
+    if: |
+      always() &&
+      needs.parse-trigger.outputs.should_run == 'true' &&
+      needs.build-and-test.result != 'skipped'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate zig-results.json
+        env:
+          BUILD_NUM:  ${{ github.run_number }}
+          BRANCH:     ${{ github.ref_name }}
+          COMMIT:     ${{ github.sha }}
+          BUILD_DATE: ${{ github.event.head_commit.timestamp }}
+          ZIG_VER:    ${{ needs.build-and-test.outputs.zig_ver || 'unknown' }}
+          FFI_STATUS:       ${{ needs.build-and-test.outputs.ffi_status       || 'skipped' }}
+          FFI_TOTAL:        ${{ needs.build-and-test.outputs.ffi_total       || '0' }}
+          FFI_PASSED:       ${{ needs.build-and-test.outputs.ffi_passed      || '0' }}
+          FFI_FAILED:       ${{ needs.build-and-test.outputs.ffi_failed      || '0' }}
+          FFI_DURATION_S:   ${{ needs.build-and-test.outputs.ffi_duration_s  || '0' }}
+          FFI_FAILED_NAMES: ${{ needs.build-and-test.outputs.ffi_failed_names || '' }}
+          MDIX_STATUS:       ${{ needs.build-and-test.outputs.mdix_status       || 'skipped' }}
+          MDIX_TOTAL:        ${{ needs.build-and-test.outputs.mdix_total       || '0' }}
+          MDIX_PASSED:       ${{ needs.build-and-test.outputs.mdix_passed      || '0' }}
+          MDIX_FAILED:       ${{ needs.build-and-test.outputs.mdix_failed      || '0' }}
+          MDIX_DURATION_S:   ${{ needs.build-and-test.outputs.mdix_duration_s  || '0' }}
+          MDIX_FAILED_NAMES: ${{ needs.build-and-test.outputs.mdix_failed_names || '' }}
+        run: python3 scripts/parse_zig_test_results.py build-results
+
+      - name: Build HTML report
+        run: |
+          cp .github/zig-test-template.html zig-test-index.html
+          sed -i "s/BUILD_NUM_PLACEHOLDER/${{ github.run_number }}/g"  zig-test-index.html
+          sed -i "s/BRANCH_PLACEHOLDER/${{ github.ref_name }}/g"       zig-test-index.html
+          sed -i "s/COMMIT_PLACEHOLDER/${GITHUB_SHA:0:8}/g"            zig-test-index.html
+          sed -i "s|DATE_PLACEHOLDER|$(date -u)|g"                     zig-test-index.html
+          # zig-test-template.html is a direct copy of odin-test-template.html
+          # (itself copied from go-test-template.html) — its fetch() call
+          # still names the JSON file go-results.json literally; point it
+          # at this package's file, same as odin-ci.yml does for its own.
+          sed -i "s/go-results\.json/zig-results\.json/g"              zig-test-index.html
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.name  "DixScript CI"
+          git config --global user.email "ci@dixscript.dev"
+
+          BUILD_NUM=${{ github.run_number }}
+          WORK=$(mktemp -d)
+
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git worktree add "$WORK" gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$WORK"
+          fi
+
+          mkdir -p "$WORK/zig" "$WORK/zig/builds/build_${BUILD_NUM}"
+
+          cp zig-results.json "$WORK/zig/zig-results.json"
+          cp zig-results.json "$WORK/zig/builds/build_${BUILD_NUM}/zig-results.json"
+
+          cp zig-test-index.html "$WORK/zig/index.html"
+          cp zig-test-index.html "$WORK/zig/builds/build_${BUILD_NUM}/index.html"
+
+          cp .github/landing-index.html "$WORK/index.html"
+
+          cd "$WORK"
+          git add .
+          if git diff --staged --quiet; then
+            echo "Nothing new to deploy"
+            exit 0
+          fi
+          git commit -m "DixScript Zig CI — Build #${BUILD_NUM} [skip ci]"
+          git push \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages
+
+  # ── Step 4: print summary ─────────────────────────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: [parse-trigger, build-and-test, collect-and-deploy]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "======================================================="
+          echo "  DixScript — Zig Package CI Summary"
+          echo "======================================================="
+          echo "Build:        #${{ github.run_number }}"
+          echo "Branch:       ${{ github.ref_name }}"
+          echo "Zig:          ${{ needs.build-and-test.outputs.zig_ver || 'n/a' }}"
+          echo "mdix_ffi:     ${{ needs.build-and-test.outputs.ffi_status  || 'skipped' }} " \
+               "(${{ needs.build-and-test.outputs.ffi_passed  || 0 }}/${{ needs.build-and-test.outputs.ffi_total  || 0 }} passed)"
+          echo "mdix:         ${{ needs.build-and-test.outputs.mdix_status || 'skipped' }} " \
+               "(${{ needs.build-and-test.outputs.mdix_passed || 0 }}/${{ needs.build-and-test.outputs.mdix_total || 0 }} passed)"
+          echo "Deploy:       ${{ needs.collect-and-deploy.result || 'skipped' }}"
+          echo ""
+          echo "Zig results: https://mid-d-man.github.io/DixScript-Rust/zig/"

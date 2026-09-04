@@ -53,6 +53,12 @@ jobs:
       mdix_failed:       ${{ steps.parse-mdix.outputs.mdix_failed }}
       mdix_duration_s:   ${{ steps.parse-mdix.outputs.mdix_duration_s }}
       mdix_failed_names: ${{ steps.parse-mdix.outputs.mdix_failed_names }}
+      behavioral_status:       ${{ steps.parse-behavioral.outputs.behavioral_status }}
+      behavioral_total:        ${{ steps.parse-behavioral.outputs.behavioral_total }}
+      behavioral_passed:       ${{ steps.parse-behavioral.outputs.behavioral_passed }}
+      behavioral_failed:       ${{ steps.parse-behavioral.outputs.behavioral_failed }}
+      behavioral_duration_s:   ${{ steps.parse-behavioral.outputs.behavioral_duration_s }}
+      behavioral_failed_names: ${{ steps.parse-behavioral.outputs.behavioral_failed_names }}
 
     steps:
       - uses: actions/checkout@v4
@@ -139,6 +145,25 @@ jobs:
         if: always()
         run: python3 scripts/parse_zig_test_results.py parse-log mdix mdix-zig/zig-mdix-output.txt
 
+      - name: zig build test-behavioral
+        id: test-behavioral
+        continue-on-error: true
+        run: |
+          cd mdix-zig
+          START=$(date +%s)
+          zig build test-behavioral --summary all -Dmdix-lib-path="${GITHUB_WORKSPACE}/target/release" \
+            2>&1 | tee zig-behavioral-output.txt
+          TEST_EXIT=${PIPESTATUS[0]}
+          END=$(date +%s)
+          echo "BEHAVIORAL_EXIT=$TEST_EXIT"          >> $GITHUB_ENV
+          echo "BEHAVIORAL_DURATION_S=$((END - START))" >> $GITHUB_ENV
+          exit 0
+
+      - name: Parse mdix/tests behavioral results
+        id: parse-behavioral
+        if: always()
+        run: python3 scripts/parse_zig_test_results.py parse-log behavioral mdix-zig/zig-behavioral-output.txt
+
       - name: Upload raw results + logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -147,6 +172,7 @@ jobs:
           path: |
             mdix-zig/zig-ffi-output.txt
             mdix-zig/zig-mdix-output.txt
+            mdix-zig/zig-behavioral-output.txt
           retention-days: 30
           if-no-files-found: ignore
 
@@ -181,6 +207,12 @@ jobs:
           MDIX_FAILED:       ${{ needs.build-and-test.outputs.mdix_failed      || '0' }}
           MDIX_DURATION_S:   ${{ needs.build-and-test.outputs.mdix_duration_s  || '0' }}
           MDIX_FAILED_NAMES: ${{ needs.build-and-test.outputs.mdix_failed_names || '' }}
+          BEHAVIORAL_STATUS:       ${{ needs.build-and-test.outputs.behavioral_status       || 'skipped' }}
+          BEHAVIORAL_TOTAL:        ${{ needs.build-and-test.outputs.behavioral_total       || '0' }}
+          BEHAVIORAL_PASSED:       ${{ needs.build-and-test.outputs.behavioral_passed      || '0' }}
+          BEHAVIORAL_FAILED:       ${{ needs.build-and-test.outputs.behavioral_failed      || '0' }}
+          BEHAVIORAL_DURATION_S:   ${{ needs.build-and-test.outputs.behavioral_duration_s  || '0' }}
+          BEHAVIORAL_FAILED_NAMES: ${{ needs.build-and-test.outputs.behavioral_failed_names || '' }}
         run: python3 scripts/parse_zig_test_results.py build-results
 
       - name: Build HTML report
@@ -249,6 +281,8 @@ jobs:
                "(${{ needs.build-and-test.outputs.ffi_passed  || 0 }}/${{ needs.build-and-test.outputs.ffi_total  || 0 }} passed)"
           echo "mdix:         ${{ needs.build-and-test.outputs.mdix_status || 'skipped' }} " \
                "(${{ needs.build-and-test.outputs.mdix_passed || 0 }}/${{ needs.build-and-test.outputs.mdix_total || 0 }} passed)"
+          echo "mdix/tests:   ${{ needs.build-and-test.outputs.behavioral_status || 'skipped' }} " \
+               "(${{ needs.build-and-test.outputs.behavioral_passed || 0 }}/${{ needs.build-and-test.outputs.behavioral_total || 0 }} passed)"
           echo "Deploy:       ${{ needs.collect-and-deploy.result || 'skipped' }}"
           echo ""
           echo "Zig results: https://mid-d-man.github.io/DixScript-Rust/zig/"

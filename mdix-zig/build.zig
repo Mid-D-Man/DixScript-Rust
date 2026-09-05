@@ -152,7 +152,18 @@ pub fn build(b: *std.Build) void {
 /// `mdix_ffi.dll` on `PATH` or next to the executable at run time (import
 /// libraries don't carry rpath-equivalent metadata) — see mdix-c/README.md's
 /// platform notes, which this mirrors.
+///
+/// link_libc = true: CI run #2 segfaulted on every single FFI call,
+/// including mdix_version() (zero arguments, nothing to marshal) —
+/// pointing at the calling environment rather than any particular call.
+/// Without link_libc, Zig builds its own minimal startup/runtime instead
+/// of the standard C one; libmdix_ffi.so, like any normal Rust cdylib,
+/// implicitly assumes a full C runtime environment in its caller (TLS,
+/// threading/signal setup via libc). This is a well-known failure mode
+/// for "Zig calling into a real C-ABI shared library" and the standard
+/// fix — restores that environment.
 fn linkMdixFfi(module: *std.Build.Module, lib_path: ?[]const u8) void {
+    module.link_libc = true;
     module.linkSystemLibrary("mdix_ffi", .{});
     if (lib_path) |p| {
         module.addLibraryPath(.{ .cwd_relative = p });

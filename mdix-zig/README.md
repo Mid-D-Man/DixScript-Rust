@@ -22,7 +22,7 @@ Go/Python/C#/WASM don't have to deal with).
 | `build.zig` / `build.zig.zon` | ✅ Done — targets Zig 0.16, fingerprint filled in from a real `zig build` run (CI #1) |
 | `examples/hello.zig` | ✅ Done — raw-layer only (manual `mdix_free`/`mdix_free_string`) |
 | `mdix/mdix.zig` — `Database`, `Builder`, source-text utilities | ✅ Done — error-union getters (`!T`), full surface of `mdix-odin/mdix/mdix.odin` |
-| `mdix/watch.zig` — hot reload (`HotReload`, re-exported as `mdix.HotReload`) | ✅ Done — native `std.fs` stat polling, not the C `MdixWatcher` handle, same design choice as `watch.odin` |
+| `mdix/watch.zig` — hot reload (`HotReload`, re-exported as `mdix.HotReload`) | ✅ Done — native `std.Io.Dir` stat polling (explicit `io: std.Io` param, per Zig 0.16's std.fs→std.Io migration), not the C `MdixWatcher` handle, same design choice as `watch.odin` |
 | `mdix/types.zig` — `HexColor`/`Blob`/`MdixRegex`/`MdixDate`/`MdixTimestamp` | ✅ Done — two deliberate gaps vs. Odin: no calendar-instant conversion, no regex `compile()` (see the file's doc comment) |
 | `mdix/merge.zig` — weighted AST merge | ✅ Done — `mergeSources`/`mergeSourcesWeighted`, JSON conflict-report decoding via `std.json` |
 | `mdix/schema.zig` — client-side schema validation | ✅ Done — `SchemaBuilder`, full report (doesn't stop at the first error) |
@@ -169,6 +169,9 @@ return value take an explicit `std.mem.Allocator`).
 Beyond the core `Database`/`Builder` shown above:
 - **Hot reload** — `mdix.HotReload` (`mdix/watch.zig`), deliberately not
   a background thread, same reasoning as `mdix-odin/mdix/watch.odin`.
+  Takes an explicit `io: std.Io` (Zig 0.16 moved filesystem operations
+  behind an Io parameter) — get one from your own `main`'s
+  `std.process.Init.io` in a real program, or `std.testing.io` in a test.
 - **Typed convenience getters** — `mdix.getHexColor`/`getBlob`/
   `getRegex`/`getDate`/`getTimestamp`/`getEnumValue` (`mdix/types.zig`)
   for values whose canonical mdix-ffi representation is a plain string.

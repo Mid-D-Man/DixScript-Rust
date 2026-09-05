@@ -129,11 +129,15 @@ pub const Database = struct {
         defer allocator.free(ckey);
         const cpw: ?[:0]u8 = if (password) |pw| try allocator.dupeZ(u8, pw) else null;
         defer if (cpw) |p| allocator.free(p);
+        // .ptr on each: mdix_load_encrypted_bytes wants ?[*:0]const u8,
+        // and Zig doesn't implicitly coerce a slice ([:0]u8) to a
+        // many-item pointer — has to go through .ptr explicitly.
+        const cpw_ptr: ?[*:0]const u8 = if (cpw) |p| p.ptr else null;
         const h = mdix_ffi.mdix_load_encrypted_bytes(
             encrypted_bytes.ptr,
             @intCast(encrypted_bytes.len),
-            ckey,
-            cpw,
+            ckey.ptr,
+            cpw_ptr,
         );
         if (h == null) return error.MdixFailed;
         return .{ .handle = h };

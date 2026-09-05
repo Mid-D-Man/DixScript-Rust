@@ -112,7 +112,7 @@ pub fn Query(comptime T: type) type {
         // from.
 
         pub fn where(self: Self, allocator: std.mem.Allocator, predicate: *const fn (T) bool) !Self {
-            var out: std.ArrayListUnmanaged(T) = .{};
+            var out: std.ArrayListUnmanaged(T) = .empty;
             errdefer out.deinit(allocator);
             for (self.items) |item| {
                 if (predicate(item)) try out.append(allocator, item);
@@ -181,7 +181,7 @@ pub fn Query(comptime T: type) type {
             const HashMapT = if (T == []const u8) std.StringHashMap(void) else std.AutoHashMap(T, void);
             var seen = HashMapT.init(allocator);
             defer seen.deinit();
-            var out: std.ArrayListUnmanaged(T) = .{};
+            var out: std.ArrayListUnmanaged(T) = .empty;
             errdefer out.deinit(allocator);
             for (self.items) |item| {
                 const res = try seen.getOrPut(item);
@@ -201,8 +201,8 @@ pub fn Query(comptime T: type) type {
             var index = HashMapT.init(allocator);
             defer index.deinit();
 
-            var groups: std.ArrayListUnmanaged(std.ArrayListUnmanaged(T)) = .{};
-            var keys: std.ArrayListUnmanaged(K) = .{};
+            var groups: std.ArrayListUnmanaged(std.ArrayListUnmanaged(T)) = .empty;
+            var keys: std.ArrayListUnmanaged(K) = .empty;
             defer {
                 for (groups.items) |*g| g.deinit(allocator);
                 groups.deinit(allocator);
@@ -217,7 +217,7 @@ pub fn Query(comptime T: type) type {
                 } else {
                     res.value_ptr.* = groups.items.len;
                     try keys.append(allocator, k);
-                    var new_group: std.ArrayListUnmanaged(T) = .{};
+                    var new_group: std.ArrayListUnmanaged(T) = .empty;
                     try new_group.append(allocator, item);
                     try groups.append(allocator, new_group);
                 }

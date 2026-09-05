@@ -9,15 +9,22 @@
 //! and a mutex to protect Database.handle from it would add real
 //! complexity for something a one-line call already covers:
 //!
-//!   var hr = try mdix.HotReload.init(allocator, "config.mdix");
+//!   var hr = try mdix.HotReload.init(allocator, io, "config.mdix");
 //!   defer hr.deinit();
 //!
 //!   while (running) {
-//!       if (hr.check(&db)) {
+//!       if (hr.check(io, &db)) {
 //!           std.debug.print("config reloaded\n", .{});
 //!       }
 //!       // ... rest of frame
 //!   }
+//!
+//! `io: std.Io` — Zig 0.16 moved filesystem operations behind an
+//! explicit Io parameter (std.fs.Dir/File's old no-Io methods are gone).
+//! Get one from your own `main`'s `std.process.Init` (`init.io`) in a
+//! real program, or `std.testing.io` in a test — this package doesn't
+//! manufacture one internally, so you stay in control of the execution
+//! model, matching Zig 0.16's own design intent for Io.
 //!
 //! check() does the mtime stat + conditional reload + in-place handle
 //! swap every call — call it as often as you'd poll anything else in
@@ -45,8 +52,8 @@ pub const HotReload = struct {
     /// path doesn't exist / can't be stat'd; check() re-stats on every
     /// call anyway and will surface the same failure there for a file
     /// that goes missing later.
-    pub fn init(allocator: std.mem.Allocator, path: []const u8) !HotReload {
-        const stat = try std.fs.cwd().statFile(path);
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !HotReload {
+        const stat = try std.Io.Dir.cwd().statFile(io, path);
         return .{
             .path = try allocator.dupe(u8, path),
             .allocator = allocator,
@@ -73,10 +80,10 @@ pub const HotReload = struct {
     ///
     /// A no-op returning false if `self` wasn't initialized (init
     /// failed, or deinit already ran) or db.handle is null.
-    pub fn check(self: *HotReload, db: *root.Database) bool {
+    pub fn check(self: *HotReload, io: std.Io, db: *root.Database) bool {
         if (!self.valid or db.handle == null) return false;
 
-        const stat = std.fs.cwd().statFile(self.path) catch {
+        const stat = std.Io.Dir.cwd().statFile(io, self.path) catch {
             // File momentarily missing/unreadable (e.g. an editor
             // mid-rewrite deleted-then-recreated it) — try again next
             // check rather than treating this as a reload failure.
@@ -96,39 +103,43 @@ pub const HotReload = struct {
 };
 
 // ── Sanity tests ────────────────────────────────────────────────────────
+// std.testing.io supplies the Io value here — see the file-level doc
+// comment for where a real caller gets one instead.
 
 test "HotReload.init on a missing file fails" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     try std.testing.expectError(
         error.FileNotFound,
-        HotReload.init(allocator, "/nonexistent/path/mdix-zig-test/should-not-exist.mdix"),
+        HotReload.init(allocator, io, "/nonexistent/path/mdix-zig-test/should-not-exist.mdix"),
     );
 }
 
 test "HotReload.check reloads after the file's mtime advances" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.writeFile(.{ .sub_path = "config.mdix", .data = "@DATA( port = 8080 )" });
-    const path = try tmp.dir.realpathAlloc(allocator, "config.mdix");
+    try tmp.dir.writeFile(io, .{ .sub_path = "config.mdix", .data = "@DATA( port = 8080 )" });
+    const path = try tmp.dir.realpathAlloc(io, allocator, "config.mdix");
     defer allocator.free(path);
 
-    var hr = try HotReload.init(allocator, path);
+    var hr = try HotReload.init(allocator, io, path);
     defer hr.deinit();
 
     var db = try root.Database.load(path);
     defer db.deinit();
 
     // No change yet.
-    try std.testing.expect(!hr.check(&db));
+    try std.testing.expect(!hr.check(io, &db));
 
     // Bump the mtime forward explicitly — a same-tick rewrite can
     // otherwise land on an mtime with insufficient resolution to read
     // as "changed" within a fast test run.
     std.Thread.sleep(10 * std.time.ns_per_ms);
-    try tmp.dir.writeFile(.{ .sub_path = "config.mdix", .data = "@DATA( port = 9000 )" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "config.mdix", .data = "@DATA( port = 9000 )" });
 
-    try std.testing.expect(hr.check(&db));
+    try std.testing.expect(hr.check(io, &db));
     try std.testing.expectEqual(@as(i32, 9000), try db.getInt("port"));
 }

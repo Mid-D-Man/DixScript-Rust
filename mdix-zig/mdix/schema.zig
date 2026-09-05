@@ -87,7 +87,7 @@ const SchemaField = struct {
 /// number of databases.
 pub const SchemaBuilder = struct {
     allocator: std.mem.Allocator,
-    fields: std.ArrayListUnmanaged(SchemaField) = .{},
+    fields: std.ArrayListUnmanaged(SchemaField) = .empty,
 
     pub fn init(allocator: std.mem.Allocator) SchemaBuilder {
         return .{ .allocator = allocator };
@@ -162,7 +162,7 @@ pub const SchemaBuilder = struct {
     /// report — does not stop at the first failure. Safe to call on a db
     /// with handle == null; every field simply reports as missing.
     pub fn validate(self: SchemaBuilder, allocator: std.mem.Allocator, db: root.Database) !ValidationReport {
-        var errors: std.ArrayListUnmanaged(ValidationError) = .{};
+        var errors: std.ArrayListUnmanaged(ValidationError) = .empty;
         errdefer errors.deinit(allocator);
 
         for (self.fields.items) |f| {

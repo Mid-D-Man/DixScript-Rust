@@ -675,7 +675,9 @@ test "Builder set/get/toDatabase round-trip" {
     try std.testing.expect(b.setInt("port", 9000));
     try std.testing.expect(b.setBool("ssl", true));
 
-    try std.testing.expectEqualStrings("MyGame", try b.getString(allocator, "app"));
+    const app_name = try b.getString(allocator, "app");
+    defer allocator.free(app_name);
+    try std.testing.expectEqualStrings("MyGame", app_name);
     try std.testing.expectEqual(@as(i32, 9000), try b.getInt("port"));
 
     var db = try b.toDatabase();

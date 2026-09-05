@@ -53,7 +53,7 @@ pub const HotReload = struct {
     /// call anyway and will surface the same failure there for a file
     /// that goes missing later.
     pub fn init(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !HotReload {
-        const stat = try std.Io.Dir.cwd().statFile(io, path);
+        const stat = try std.Io.Dir.cwd().statFile(io, path, .{});
         return .{
             .path = try allocator.dupe(u8, path),
             .allocator = allocator,
@@ -83,7 +83,7 @@ pub const HotReload = struct {
     pub fn check(self: *HotReload, io: std.Io, db: *root.Database) bool {
         if (!self.valid or db.handle == null) return false;
 
-        const stat = std.Io.Dir.cwd().statFile(io, self.path) catch {
+        const stat = std.Io.Dir.cwd().statFile(io, self.path, .{}) catch {
             // File momentarily missing/unreadable (e.g. an editor
             // mid-rewrite deleted-then-recreated it) — try again next
             // check rather than treating this as a reload failure.
@@ -122,7 +122,7 @@ test "HotReload.check reloads after the file's mtime advances" {
     defer tmp.cleanup();
 
     try tmp.dir.writeFile(io, .{ .sub_path = "config.mdix", .data = "@DATA( port = 8080 )" });
-    const path = try tmp.dir.realPathFileAlloc(io, allocator, "config.mdix");
+    const path = try tmp.dir.realPathFileAlloc(io, "config.mdix", allocator);
     defer allocator.free(path);
 
     var hr = try HotReload.init(allocator, io, path);

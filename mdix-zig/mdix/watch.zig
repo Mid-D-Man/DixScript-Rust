@@ -44,7 +44,7 @@ const root = @import("mdix.zig");
 pub const HotReload = struct {
     path: []const u8, // owned clone
     allocator: std.mem.Allocator,
-    last_mtime: i128,
+    last_mtime: i128, // Io.Timestamp.nanoseconds — see init()/check() below
     valid: bool = false,
 
     /// Records path (cloned — the caller's slice doesn't need to
@@ -57,7 +57,7 @@ pub const HotReload = struct {
         return .{
             .path = try allocator.dupe(u8, path),
             .allocator = allocator,
-            .last_mtime = stat.mtime,
+            .last_mtime = stat.mtime.nanoseconds,
             .valid = true,
         };
     }
@@ -89,8 +89,8 @@ pub const HotReload = struct {
             // check rather than treating this as a reload failure.
             return false;
         };
-        if (stat.mtime <= self.last_mtime) return false;
-        self.last_mtime = stat.mtime;
+        if (stat.mtime.nanoseconds <= self.last_mtime) return false;
+        self.last_mtime = stat.mtime.nanoseconds;
 
         var buf: [root.PATH_BUF_LEN:0]u8 = undefined;
         const new_handle = mdix_ffi.mdix_load(root.cPath(&buf, self.path));

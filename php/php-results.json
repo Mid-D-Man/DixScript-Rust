@@ -1,0 +1,26 @@
+{
+  "build": "994",
+  "branch": "master",
+  "commit": "415279f1",
+  "date": "",
+  "php_version": "PHP 8.1.34 (cli) (built: Jul  4 2026 11:24:06) (NTS)",
+  "package": "midmanstudio/mdix",
+  "summary": {
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "duration_s": 0.045
+  },
+  "suites": [
+    {
+      "name": "/home/runner/work/DixScript-Rust/DixScript-Rust/mdix-php/phpunit.xml",
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 0.0446,
+      "tests": []
+    }
+  ]
+}

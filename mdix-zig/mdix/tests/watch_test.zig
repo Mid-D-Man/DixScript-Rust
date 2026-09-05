@@ -8,7 +8,7 @@ test "mdix.HotReload is reachable from the public module surface" {
     defer tmp.cleanup();
 
     try tmp.dir.writeFile(io, .{ .sub_path = "config.mdix", .data = "@DATA( port = 8080 )" });
-    const path = try tmp.dir.realpathAlloc(io, allocator, "config.mdix");
+    const path = try tmp.dir.realPathFileAlloc(io, allocator, "config.mdix");
     defer allocator.free(path);
 
     var hr = try mdix.HotReload.init(allocator, io, path);
